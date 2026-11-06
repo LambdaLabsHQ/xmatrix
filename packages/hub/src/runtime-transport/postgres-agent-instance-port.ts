@@ -5,6 +5,7 @@ import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { subscribeConversationToPullRequest } from "../github-pull-request-subscription";
 import { RuntimeAuthorityOperationError, RuntimeClientOperationError } from "./runtime-operation-failure";
+import type { InstanceRecordCache } from "./instance-record-cache";
 import type {
   AgentInstanceClientMessage,
   AgentInstanceConnectMessage,
@@ -31,6 +32,7 @@ import {
   isAgentUsageLimitLifecycle,
   isLiveAgentStatus,
   normalizeChannelActivity,
+  parseInstanceRecord,
   repoSummonReference,
   sha256Hex,
 } from "@xmatrix/protocol";
@@ -161,6 +163,8 @@ export interface PostgresAgentInstancePortDependencies {
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
   /** Tell the Channel's people its summon chips changed (publishChannelInvocationsChanged). */
   invocationsChanged?(channelId: string): Promise<void>;
+  /** Where each connection's last written Instance record is kept for its live reports. */
+  instanceRecords?: InstanceRecordCache;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -174,6 +178,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     runtimeSelf?: { cellName: () => string; fetch(request: Request): Promise<Response> };
     /** The Run and Instance facts the socket reads and changes; PostgreSQL by default. */
     runtime?: AgentInstanceRuntime;
+    instanceRecords?: InstanceRecordCache;
   }): PostgresAgentInstancePort {
     return new PostgresAgentInstancePort({
       authenticate: (token) => verifyAuthToken(token, input.env),
@@ -191,6 +196,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
             spaceId: String(command.spaceId), instanceId: String(command.instanceId),
             presentation: (command.presentation ?? null) as Record<string, unknown> | null,
             ...(typeof command.status === "string" ? { status: command.status } : {}),
+            ...(command.ordering ? { ordering: command.ordering as {
+              expectedVersion: number; runId: string; presenceSequence: number } } : {}),
             at: String(command.at) }).then(({ quotaWaitsReadyFor, ...recorded }) => {
             // The Instance's own reading cleared a refused summon's wait.
             if (quotaWaitsReadyFor) {
@@ -225,6 +232,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         env: input.env, stage, outcome, durationMs,
       }),
       invocationsChanged: (channelId) => publishChannelInvocationsChanged(input.env, channelId),
+      ...(input.instanceRecords ? { instanceRecords: input.instanceRecords } : {}),
       ...(input.env.RELAY_RUNTIME
         ? { runtimeCells: (ownerUserId: string) => relayRuntimeCellsForOwners(input.env, [ownerUserId]) }
         : {}),
@@ -418,8 +426,12 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // for persistence (and would deduplicate quota-only updates away).
     const canonical = sanitizeAgentInstancePresentation(presentation);
     const usage = canonical?.usage;
+    // A connection whose machine is unreachable is shown offline until a later
+    // checkpoint says the machine returned; its own status stays live.
+    const shownOffline = this.machineReachable && !this.machineReachable(session) ? "machine_offline" : undefined;
     const snapshot = {
       ...agentMessagePresentation(canonical),
+      ...(shownOffline ? { offlineReason: shownOffline } : {}),
       ...(canonical?.parameters !== undefined ? { parameters: canonical.parameters, parametersObservedAt: canonical.parametersObservedAt } : parametersReported ? { parameters: [] } : {}),
       // Routing needs the observed model/effort domain too. It is deliberately
       // absent from message headers, but must survive this durable projection.
@@ -432,7 +444,12 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const digest = JSON.stringify([liveStatus ?? null, snapshot]);
     if (this.persistedPresentationDigests.get(instanceId) === digest) return;
     const at = new Date().toISOString();
-    await this.dependencies.runtime.transition({
+    // The connection's revision orders this write; the row refuses a report a
+    // newer one, or a newer connection, has overtaken.
+    const { connectionVersion, presenceSequence, runId } = session.run;
+    const ordering = connectionVersion !== undefined && presenceSequence !== undefined
+      ? { expectedVersion: connectionVersion, runId, presenceSequence } : undefined;
+    const written = await this.dependencies.runtime.transition({
       commandId: runtimeCommandId("agent-instance-presentation", `${instanceId}:${at}`),
       kind: "instance_presentation",
       actorUserId: session.principal.ownerUserId,
@@ -441,9 +458,22 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       instanceId,
       presentation: snapshot,
       ...(liveStatus ? { status: liveStatus } : {}),
+      ...(ordering ? { ordering } : {}),
       at,
     });
-    this.persistedPresentationDigests.set(instanceId, digest);
+    // A refused report wrote nothing: the next one tries the same content again.
+    if (written.recorded !== false) this.persistedPresentationDigests.set(instanceId, digest);
+    if (written.record) this.dependencies.instanceRecords?.remember(parseInstanceRecord(written.record));
+  }
+
+  private machineReachable?: (session: Readonly<AgentInstanceRuntimeSession>) => boolean;
+
+  observeMachineReachability(reachable: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void {
+    this.machineReachable = reachable;
+  }
+
+  async reproject(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
+    await this.persistInstancePresentation(session, session.presentation, false, false, session.run.instanceStatus);
   }
 
   async disconnected(session: Readonly<AgentInstanceRuntimeSession>): Promise<void> {
@@ -616,6 +646,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       status: liveRunStatus(value.status),
       instanceStatus: liveInstanceStatus(instanceStatus),
       ...(connectionVersion !== undefined ? { connectionVersion } : {}),
+      // A refresh keeps its connection, and so its count of reports.
+      ...(refreshSession?.run.presenceSequence !== undefined &&
+          refreshSession.run.connectionVersion === connectionVersion
+        ? { presenceSequence: refreshSession.run.presenceSequence } : {}),
       ...(channelInstanceId ? { channelInstanceId } : {}),
       ...(cwd ? { cwd } : {}),
       ...(typeof metadata.remoteRepo === "string" && repoSummonReference(metadata.remoteRepo)

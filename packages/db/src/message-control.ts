@@ -9,7 +9,7 @@ import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections, messageSummons } from "./message-invocation-selections.js";
 import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { readChannelInstances, type AgentInstanceRecord } from "./channel-agent-presence.js";
 import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
@@ -2969,12 +2969,17 @@ export class PostgresMessageRepository {
     requestId: string;
     spaceId: string;
     channelId: string;
-  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence> }> {
+    /** Instances whose lifecycle just changed: each is answered exactly, ended ones included. */
+    instanceIds?: readonly string[];
+  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence>;
+    instanceRecords: AgentInstanceRecord[] }> {
     const { requestId, spaceId, channelId } = channelRequest(input);
-    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => ({
-      recipientUserIds: await liveRecipientUserIds(transaction, spaceId, channelId),
-      memberPresence: (await loadChannelAgentPresence(transaction, spaceId, [channelId])).get(channelId) ?? {},
-    }));
+    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => {
+      const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
+      const instances = await readChannelInstances(transaction, spaceId, [channelId], input.instanceIds);
+      return { recipientUserIds, memberPresence: instances.memberPresence.get(channelId) ?? {},
+        instanceRecords: instances.records.get(channelId) ?? [] };
+    });
   }
 
   /** The Channel's live audience as it stands now: who may read it, and whose cells hold its Instances. */

@@ -29,7 +29,7 @@ import {
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
-import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { SettingsCard } from "./settings-card";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
@@ -1724,12 +1724,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   const goal = (item: TimelineItem) =>
     goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
   const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
-  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
-    <span className={tagClass("app-sender-instance-stale-badge")}
-      title="This message came from an agent instance that is no longer live in this channel.">
-      instance offline
-    </span>
-  ) : null;
   const before = previous.senderStatusChips ?? [];
   const after = message.senderStatusChips ?? [];
   const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
@@ -1740,7 +1734,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   };
   return (
     <>
-      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
       {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
       {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
       {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
@@ -1884,7 +1877,10 @@ export const MessageRow = memo(function MessageRow({
   const avatarLongPressTriggeredRef = useRef(false);
   const rebornHoverTimerRef = useRef<number | null>(null);
   const rebornHoveringRef = useRef(false);
-  const canRebornSender = canRebornMessageSender(message);
+  const senderStatus = useMessageSenderStatus({ channelId: message.channelId,
+    instanceId: message.senderKind === "agent" ? message.senderInstanceId : undefined,
+    senderId: message.linkOrigin?.kind === "reply" ? undefined : message.senderId, name: message.author });
+  const canRebornSender = canRebornMessageSender(message, senderStatus);
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
@@ -2794,7 +2790,7 @@ export const MessageRow = memo(function MessageRow({
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          status={message.senderStatus}
+          status={senderStatus}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2809,7 +2805,7 @@ export const MessageRow = memo(function MessageRow({
                   instanceScoped: Boolean(message.senderInstanceId),
                   channelId: channel?.id,
                   name: message.author,
-                  status: message.senderStatus,
+                  status: senderStatus,
                   goal: message.senderGoal,
                   face: message.face,
                 })
@@ -2900,10 +2896,7 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
-          {message.retagged ? (
-            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
-          ) : (<>
-          {message.senderInstanceStale && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent && senderStatus === "offline" && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
               title="This message came from an agent instance that is no longer live in this channel."
@@ -2911,6 +2904,9 @@ export const MessageRow = memo(function MessageRow({
               instance offline
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderKind === "agent" && (
             <GoalStatusBadge goal={message.senderGoal} />
           )}

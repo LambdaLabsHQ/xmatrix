@@ -252,3 +252,19 @@ async function assertResolvedOnlineHuman() {
   assert.equal(payload.channels[0].memberPresence["user:online"].status, "online");
   return payload;
 }
+
+test("exact Instance reconciliation crosses the authorized catalog boundary, with bounded validated selectors", async () => {
+  resetOpenChannelResolve();
+  const post = (knownInstanceIds) => app.request("https://hub.test/api/channels/resolve", {
+    method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ spaceId: "space-1", channelIds: ["channel-1"], knownInstanceIds }),
+  }, {});
+  assert.equal((await post(["channel-1:1", "channel-1:1", "channel-1:99"])).status, 200);
+  assert.deepEqual(state.requests.find(request => request.kind === "resolve-channel-catalog").input.knownInstanceIds,
+    ["channel-1:1", "channel-1:99"]);
+  for (const invalid of ["channel-1:1", [null], [""], ["x".repeat(301)], Array(1_025).fill("channel-1:1")]) {
+    reset({});
+    assert.equal((await post(invalid)).status, 400);
+    assert.deepEqual(state.requests, [], "invalid selectors start neither Runtime nor database work");
+  }
+});

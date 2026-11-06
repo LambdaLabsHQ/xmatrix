@@ -1,6 +1,7 @@
 import { readOwnerRegistrationQuotaState, readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaReading } from "@xmatrix/db";
-import { decodeChannelSnapshot, encodeChannelSnapshot, presenceInstanceId, withRegistrationQuota } from "@xmatrix/protocol";
+import { decodeChannelSnapshot, encodeChannelSnapshot, parseInstanceRecord, presenceInstanceId, withRegistrationQuota,
+  type InstanceActivity, type InstanceRecord } from "@xmatrix/protocol";
 import type {
   AgentInstanceOfflineReason,
   AgentRegistrationKey,
@@ -39,6 +40,7 @@ import { AgentChannelHistory, type ReadAgentChannelHistory } from "./agent-chann
 import { PostgresHumanPort } from "./postgres-human-port";
 import type { AgentInstanceRuntime } from "./agent-instance-run-query";
 import { humanFanoutChannelReader, type HumanFanoutChannelReader } from "./human-presence-fanout";
+import { InstanceRecordCache } from "./instance-record-cache";
 import {
   channelForSharedPresenceFanout,
   humanMemberIdsForChannel,
@@ -60,6 +62,7 @@ import {
 } from "./runtime-principal-delivery";
 import { RuntimeClientOperationError, runtimeFailureOrigin } from "./runtime-operation-failure";
 import {
+  liveAgentSnapshotActivity,
   liveAgentSnapshotCard,
   loadLiveAgentPresenceFromRuntime,
   type LiveAgentSessionSnapshot,
@@ -125,6 +128,8 @@ export function createProductionRelayRuntimeProductPortFactory(
   const readHistory = options.readHistory ?? postgresAgentChannelHistory(env);
   const controlWaiters = new AgentInstanceControlResultWaiterRegistry();
   const liveAgentFanout = new LiveAgentInstanceFanout();
+  // Each live connection's last written Instance record, as the database answered it.
+  const instanceRecords = new InstanceRecordCache();
   const signalRouter = new AgentInstanceRuntimeSignalRouter(
     analytics,
     liveAgentFanout,
@@ -231,6 +236,7 @@ export function createProductionRelayRuntimeProductPortFactory(
         : {}),
       ...(options.runtimeSelf ? { runtimeSelf: options.runtimeSelf } : {}),
       ...(options.runtime ? { runtime: options.runtime } : {}),
+      instanceRecords,
     })),
     onRegistrationQuotaChange: async ({ ownerUserId, deliver }) => {
       // A reading with headroom may have made a refused summon's wait ready:
@@ -270,12 +276,17 @@ export function createProductionRelayRuntimeProductPortFactory(
           }));
         options.scheduleBackground?.(refresh);
       }
+      // The Channel's Instances as the database answers them, ahead of what their connections say.
+      const records = (payload.channel.instanceRecords ?? []).map(parseInstanceRecord);
+      if (records.length > 0) send({ type: "instance_records", records });
       const owners = new Set([...instances.values()].map((instance) => instance.registration.ownerUserId));
       // Each owner's cell is shown as it answers: one that is slow holds back no other's Agents.
       await Promise.all([...owners].map(async (owner) => {
         for (const snapshot of await liveChannelAgents(owner, channelId)) {
           // Only an Instance the Channel's read names is shown, as a live overlay shows only those.
           if (!instances.has(presenceInstanceId(snapshot.instanceId))) continue;
+          const activity = liveAgentSnapshotActivity(snapshot);
+          if (activity) send({ type: "instance_activity", activities: [activity] });
           send(liveAgentSnapshotCard(snapshot, channelInstanceQuota(payload.channel, snapshot.instanceId)));
         }
       }));
@@ -305,6 +316,15 @@ export function createProductionRelayRuntimeProductPortFactory(
         ? { status: reportedStatus, offlineReason: undefined }
         : shown(session, reportedStatus);
       const ownerUserId = session.principal.ownerUserId;
+      const instanceId = session.run.instanceId;
+      // What the Instance is, as the database last answered, then what it is
+      // doing now. Both go ahead of the legacy card: a modern reader places the
+      // Instance from the record and never from the card.
+      const activity = reason === "disconnect" ? undefined : instanceActivityOf(session);
+      const factsOf = (record: InstanceRecord | undefined): HumanServerMessage[] => [
+        ...(record ? [{ type: "instance_records" as const, records: [record] }] : []),
+        ...(activity ? [{ type: "instance_activity" as const, activities: [activity] }] : []),
+      ];
       const known = reason === "update" ? await audiences.audience(session.run.instanceId) : undefined;
       if (reason === "disconnect") await audiences.forget(session.run.instanceId);
       if (known && known.channelId === session.run.channelId && Date.now() - known.readAt < PRESENCE_AUDIENCE_TTL_MS) {
@@ -319,20 +339,33 @@ export function createProductionRelayRuntimeProductPortFactory(
         // A held reading went out when it was read; only a new read is news.
         if (read && known.registration) publishQuota(ownerUserId, known.registration, accountQuota, deliver);
         const card = humanEnhancedPresenceFrame(session, status, offlineReason, accountQuota);
+        const record = instanceRecords.get(instanceId);
+        const facts = factsOf(record);
         const recipients: ChannelAgentPresenceRecipient[] = [];
         for (const userId of new Set([ownerUserId, ...viewers])) {
+          for (const frame of facts) deliver(userId, frame);
           deliverAgentPresence(userId, session.run.channelId, card, undefined);
           recipients.push({ userId, digest: true, card: true, channel: false, immediate: [] });
         }
         scheduleAgentPresenceAcrossCells({
           env, scheduleBackground: options.scheduleBackground, runtimeSelf: options.runtimeSelf,
           channelId: session.run.channelId, reason, card: card.agent, recipients,
+          ...(record ? { records: [record] } : {}), ...(activity ? { activities: [activity] } : {}),
         });
         return;
       }
       const live = liveAgentFanout.sessions().filter(candidate => candidate.run.instanceId !== session.run.instanceId);
+      // The read answers for this Instance exactly, as it stands after the
+      // change that called: live, resting, or ended.
       const payload = await readChannel(session.run.channelId, session.principal.ownerUserId, "agent-presence",
-        session.principal.spaceId);
+        session.principal.spaceId, [instanceId]);
+      const answered = payload?.channel.instanceRecords?.find((entry) => entry.id === instanceId);
+      const read = answered ? parseInstanceRecord(answered) : undefined;
+      const record = reason === "disconnect" ? read
+        : read ? instanceRecords.remember(read) : instanceRecords.get(instanceId);
+      if (reason === "disconnect") instanceRecords.forget(instanceId);
+      const facts = factsOf(record);
+      for (const frame of facts) deliver(ownerUserId, frame);
       const accountQuota = payload ? channelInstanceQuota(payload.channel, session.run.instanceId) : undefined;
       const overlayLiveChannel = (channel: SerializedChannel, channelId: string) => {
         let snapshot = decodeChannelSnapshot(channel);
@@ -404,6 +437,7 @@ export function createProductionRelayRuntimeProductPortFactory(
           env, scheduleBackground: options.scheduleBackground, runtimeSelf: options.runtimeSelf,
           channelId: session.run.channelId, reason, card: enhancedPresence?.agent, channel,
           lifecycle, observable, recipients: remoteRecipients,
+          ...(record ? { records: [record] } : {}), ...(activity ? { activities: [activity] } : {}),
         });
       };
       if (!payload) {
@@ -434,6 +468,7 @@ export function createProductionRelayRuntimeProductPortFactory(
         // Owner already received enhanced_presence above; still send to other
         // channel human members so Agents chips stay live for everyone present.
         const card = enhancedPresence && userId !== ownerUserId ? enhancedPresence : undefined;
+        if (userId !== ownerUserId) for (const frame of facts) deliver(userId, frame);
         if (reason === "update") {
           deliverAgentPresence(userId, session.run.channelId, card, { type: "channel_updated", channel });
           remember({ userId, digest: true, card: Boolean(card), channel: true, immediate: [] });
@@ -459,6 +494,17 @@ const PRESENCE_QUOTA_TTL_MS = 60_000;
 /** How long a focused Channel waits on one owner's cell, response body included. */
 const FOCUSED_CHANNEL_AGENTS_READ_TIMEOUT_MS = 1_000;
 
+/**
+ * What a live connection says its Instance is doing now, at the connection's
+ * revision. Empty fields clear what an earlier report showed.
+ */
+function instanceActivityOf(session: Readonly<AgentInstanceRuntimeSession>): InstanceActivity | undefined {
+  const version = session.run.connectionVersion;
+  if (version === undefined) return undefined;
+  return liveAgentSnapshotActivity({ ...session.run, presentation: session.presentation,
+    revision: { version, sequence: session.run.presenceSequence ?? 0 } });
+}
+
 /** When the Instance's own provider reading was taken, if it reported one. */
 function reportedQuotaAt(session: Readonly<AgentInstanceRuntimeSession>): number {
   const at = Date.parse(session.presentation?.usage?.quotaObservedAt ?? "");
@@ -481,6 +527,8 @@ function scheduleAgentPresenceAcrossCells(input: {
   channel?: SerializedChannel;
   lifecycle?: HumanServerMessage;
   observable?: HumanServerMessage;
+  records?: InstanceRecord[];
+  activities?: InstanceActivity[];
   recipients: ChannelAgentPresenceRecipient[];
 }): void {
   if (!input.env.RELAY_RUNTIME || input.recipients.length === 0) return;
@@ -494,6 +542,8 @@ function scheduleAgentPresenceAcrossCells(input: {
       ...(input.channel ? { channel: input.channel } : {}),
       ...(input.lifecycle ? { lifecycle: input.lifecycle } : {}),
       ...(input.observable ? { observable: input.observable } : {}),
+      ...(input.records ? { records: input.records } : {}),
+      ...(input.activities ? { activities: input.activities } : {}),
       recipients: [recipient],
     });
     if (body) bodies.set(recipient.userId, body);

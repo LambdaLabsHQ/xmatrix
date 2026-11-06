@@ -249,8 +249,6 @@ export type TimelineItem = {
   senderMachineOwnerUserId?: string;
   senderInstanceId?: string;
   senderMention?: string;
-  senderStatus?: string;
-  senderInstanceStale?: boolean;
   /** Set when the message arrived over a cross-Channel link. */
   linkOrigin?: MessageLinkOrigin;
   senderGoal?: AgentGoalStatus;

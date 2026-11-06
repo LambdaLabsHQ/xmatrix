@@ -718,3 +718,51 @@ test("a daemon connect refused for another owner's cell advances no epoch and wa
   assert.equal(commands[0], "connect", "the admitted connect is the first command committed");
   assert.deepEqual(woken, ["machine-1"]);
 });
+
+test("Instance records negotiate per Human socket and preserve their capability across hibernation", async () => {
+  const records = { type: "instance_records", records: [] };
+  const work = { instanceId: "channel-1:1", channelId: "channel-1", revision: { version: 1, sequence: 1 }, intent: "First work" };
+  const activities = { type: "instance_activity", activities: [work] };
+  const human = new HumanRuntimeTransport(humanAuthority("reader"), { onChannelFocus: async ({ send }) => {
+    send(records); send(activities);
+  } });
+  const modern = new FakeSocket();
+  human.accept(modern);
+  await human.handleFrame(modern, JSON.stringify({ type: "human_connect", token: "token", device: {
+    client: "web", version: "1.8.0", protocolVersion: 2, capabilities: ["instance_records_v1", "presence_digest"],
+  } }));
+  const legacy = new FakeSocket();
+  const attachment = human.hibernationAttachment(modern);
+  assert.equal(attachment.session.instanceRecords, true);
+  const legacyAttachment = structuredClone(attachment);
+  delete legacyAttachment.session.instanceRecords;
+  assert.equal(human.rehydrate(legacy, legacyAttachment), true);
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  modern.sent.length = 0;
+  human.deliverToUser("reader", records);
+  human.deliverToUser("reader", activities);
+  assert.deepEqual(modern.sent, [records, activities]);
+  assert.deepEqual(legacy.sent, [], "old consumers receive only their negotiated wire shapes");
+  assert.equal(human.deliverToUser("another-reader", records), false);
+  const restored = new HumanRuntimeTransport(humanAuthority("reader"));
+  const restoredSocket = new FakeSocket();
+  assert.equal(restored.rehydrate(restoredSocket, attachment), true);
+  restored.deliverToUser("reader", records);
+  assert.deepEqual(restoredSocket.sent, [records]);
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: null }));
+  modern.sent.length = 0;
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  await human.handleFrame(legacy, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  assert.deepEqual(modern.sent.filter(frame => frame.type.startsWith("instance_")), [records, activities]);
+  assert.deepEqual(legacy.sent, [], "the focused-socket callback observes the same capability boundary");
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: null }));
+  modern.sent.length = 0;
+  human.deliverToUser("reader", records);
+  human.deliverToUser("reader", activities);
+  const latest = { ...work, revision: { version: 1, sequence: 2 }, intent: "Latest work" };
+  human.deliverToUser("reader", { type: "instance_activity", activities: [latest] });
+  assert.deepEqual(modern.sent, [records], "durable facts are immediate while background work waits");
+  await new Promise(resolve => setTimeout(resolve, 1_050));
+  assert.deepEqual(modern.sent, [records, { type: "instance_activity", activities: [latest] }]);
+  assert.deepEqual(legacy.sent, []);
+});

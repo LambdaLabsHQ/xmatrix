@@ -7,6 +7,7 @@ import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeError
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import type { QueryResultRow } from "pg";
 import { resumableChannelRun } from "./instance-rest-state.js";
+import { loadAgentInstanceRecordsById, type AgentInstanceRecord } from "./channel-agent-presence.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationMachineConstraint, readContinuationSource } from "./runtime-continuation-source.js";
@@ -723,16 +724,23 @@ export class PostgresRuntimeRepository {
    * transaction that authorizes the message, so the Worker serving the REST
    * send path never has to call the Runtime cell to learn them.
    *
-   * Presentation is display state, not a lifecycle transition: it is
-   * last-writer-wins, takes no expected version, bumps no instance version,
-   * writes no command replay and publishes no route. Racing it against a
-   * connect fence would be a bug, not a safeguard.
+   * Presentation is display state, not a lifecycle transition: it bumps no
+   * instance version, writes no command replay and publishes no route.
+   *
+   * A connection orders its own reports. With `expectedVersion` (the version
+   * its connect claimed), `runId` and `presenceSequence` (its report count),
+   * a report is written only while the row still holds that version and Run
+   * and no later report of the same version has been: a predecessor socket,
+   * or a report overtaken by a newer one, is refused (`recorded: false`). The
+   * row then carries `presenceVersion`/`presenceSequence`, so every read
+   * orders it against live reports by the same revision (version, sequence).
+   * Without the three fields a write is unordered: it stores no sequence, and
+   * is refused once an ordered report holds the row's current version, so a
+   * connection that cannot order its reports never overwrites one that does.
    *
    * `status` is the live phase (online, busy or idle) the Instance reported
-   * with this presentation. A catalog snapshot is ordered against live frames
-   * by `updated_at`, so the row must not advance that clock while still saying
-   * `online` for an Instance mid-turn. It only moves between live statuses:
-   * whether an Instance is live at all stays the lifecycle's to decide.
+   * with this presentation. It only moves between live statuses: whether an
+   * Instance is live at all stays the lifecycle's to decide.
    */
   async recordInstancePresentation(input: {
     requestId: string;
@@ -741,8 +749,12 @@ export class PostgresRuntimeRepository {
     instanceId: string;
     presentation: Record<string, unknown> | null;
     status?: string;
+    expectedVersion?: number;
+    runId?: string;
+    presenceSequence?: number;
     at: string;
-  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string } }> {
+  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string };
+    record?: AgentInstanceRecord }> {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const instanceId = text(input.instanceId, "instanceId", 300);
@@ -751,31 +763,61 @@ export class PostgresRuntimeRepository {
       "invalid_runtime_request", 400, "at is invalid");
     if (input.status !== undefined && !isLiveAgentStatus(input.status)) throw new RuntimeControlError(
       "invalid_runtime_request", 400, "status is invalid");
-    const presentation = input.presentation === null ||
+    const ordering = [input.expectedVersion, input.runId, input.presenceSequence];
+    if (ordering.some((value) => value !== undefined) && ordering.some((value) => value === undefined)) {
+      throw new RuntimeControlError("invalid_runtime_request", 400,
+        "An ordered presentation needs expectedVersion, runId and presenceSequence together");
+    }
+    const ordered = input.expectedVersion !== undefined ? {
+      version: integer(input.expectedVersion, "expectedVersion", 1),
+      runId: text(input.runId, "runId", 300),
+      sequence: integer(input.presenceSequence, "presenceSequence", 1),
+    } : undefined;
+    const reported = input.presentation === null ||
         input.presentation === undefined ||
         Object.keys(input.presentation).length === 0
       ? null
       : input.presentation;
+    // The ordering keys are the row's to stamp, never the reporter's.
+    const { presenceVersion: _version, presenceSequence: _sequence, ...rest } = reported ?? {};
+    const presentation = reported === null ? null : rest;
     const placement = await this.spaces.resolve(requestId, "runtime.instance.presentation", spaceId);
-    const rows = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, (tx) => tx.query<QueryResultRow>({
-      name: "runtime_instance_presentation_v4",
-      // Hibernation can omit the large model catalog from live presentation.
-      // Omission is not a withdrawal; only an explicit models field replaces
-      // the durable observation, including an empty list that clears it.
-      text: `UPDATE data.instances SET presentation_json=
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
-            THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
-              'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
-            THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
-              'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb),updated_at=$3,
-          status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
-        WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
-          WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
-        RETURNING instance_id,run_id`,
-      values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300)],
-      maxRows: 1,
-    }));
+    const written = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({
+        name: "runtime_instance_presentation_v5",
+        // Hibernation can omit the large model catalog from live presentation.
+        // Omission is not a withdrawal; only an explicit models field replaces
+        // the durable observation, including an empty list that clears it.
+        text: `UPDATE data.instances SET presentation_json=
+            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
+              THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
+                'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
+            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
+              THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
+                'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb) ||
+            CASE WHEN $6::bigint IS NULL THEN '{}'::jsonb
+              ELSE jsonb_build_object('presenceVersion',$6::bigint,'presenceSequence',$8::bigint) END,updated_at=$3,
+            status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
+          WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
+            WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
+            AND CASE WHEN $6::bigint IS NULL
+              THEN presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb(version)
+              ELSE version=$6::bigint AND run_id=$7::text
+                AND (presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb($6::bigint)
+                  OR COALESCE((presentation_json->>'presenceSequence')::bigint,0)<$8::bigint) END
+          RETURNING instance_id,run_id,channel_id`,
+        values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300),
+          ordered?.version ?? null, ordered?.runId ?? null, ordered?.sequence ?? null],
+        maxRows: 1,
+      });
+      // What this report made the Instance, read back by the one projection
+      // every read uses: whoever relays it shows exactly what a read would.
+      const record = rows[0] && ordered
+        ? (await loadAgentInstanceRecordsById(tx, spaceId, [String(rows[0].channel_id)], [instanceId])).records[0]
+        : undefined;
+      return { rows, record };
+    });
+    const { rows, record } = written;
     const binding = rows[0] && input.presentation?.usage ? await this.database.transaction({
       requestId, operation: "runtime.instance.quota-binding",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
@@ -785,7 +827,7 @@ export class PostgresRuntimeRepository {
     const key = binding[0];
     return { instanceId, recorded: rows.length > 0, ...(key ? { registration: {
       ownerUserId: String(key.owner_user_id), machineId: String(key.machine_id), harness: String(key.harness),
-    } } : {}) };
+    } } : {}), ...(record ? { record } : {}) };
   }
 
   private async transitionRun(tx: DatabaseTransaction, input: Record<string, unknown>, actorUserId: string,

@@ -8,7 +8,7 @@ import type {
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
-import { releaseNotesPath } from "@xmatrix/protocol";
+import { releaseNotesPath, isChannelResidentInstance } from "@xmatrix/protocol";
 
 import {
   accountQuotaUsageFromCandidates,
@@ -756,9 +756,10 @@ export function mergeChannelMemberReadSequences(
 /** Presence-only snapshots do not change the conversation catalog, reference
  * names, history audience or trace access. Every other field still does. */
 export function sameChannelCatalogState(left: ChannelSnapshot, right: ChannelSnapshot): boolean {
-  const { presence: _leftPresence, ...leftState } = left;
-  const { presence: _rightPresence, ...rightState } = right;
+  const { presence: _leftPresence, instanceRecords: leftRecords, missingInstanceIds: _leftMissing, ...leftState } = left;
+  const { presence: _rightPresence, instanceRecords: rightRecords, missingInstanceIds: _rightMissing, ...rightState } = right;
   if (!sameValue(leftState, rightState)) return false;
+  if (leftRecords || rightRecords || [...left.presence?.instances.values() ?? []].some(instance => "revision" in instance)) return true;
   const ids = (channel: ChannelSnapshot) => new Set(channel.presence?.instances.keys() ?? []);
   const before = ids(left);
   const after = ids(right);
@@ -1054,7 +1055,7 @@ export function channelsAfterAgentInstanceOffline(
 export function agentPresenceEndsWaits(prior: ChannelPresence | undefined, pushed: ChannelPresence): boolean {
   for (const [id, instance] of prior?.instances ?? []) {
     const next = pushed.instances.get(id);
-    if (!next) return true;
+    if (!next || isChannelResidentInstance(instance) && !isChannelResidentInstance(next)) return true;
     if (next.rest === "wake_failed" && instance.rest !== "wake_failed") return true;
   }
   for (const [id, instance] of pushed.instances) {

@@ -295,13 +295,16 @@ export async function channelSpaceId(env: SpacesEnv, channelId: string): Promise
  */
 export async function getChannel(env: SpacesEnv, input: {
   channelId: string; principal: Principal; spaceId?: string; purpose?: string;
+  /** Instance ids the reader holds for this Channel: each is answered exactly, ended ones included. */
+  knownInstanceIds?: readonly string[];
 }, dependencies: SpacesDependencies = {}) {
   const { repository, requestId } = spaces(env, dependencies);
   const suffix = input.purpose ? `.${input.purpose}` : "";
   const spaceId = input.spaceId ?? await repository.resolveChannelSpaceId({ requestId, channelId: input.channelId,
     operation: `channel.resolve-space${suffix}` });
   const result = await repository.getChannel({ requestId, spaceId, channelId: input.channelId,
-    principal: input.principal, operation: `channel.get${suffix}` });
+    principal: input.principal, operation: `channel.get${suffix}`,
+    ...(input.knownInstanceIds ? { knownInstanceIds: input.knownInstanceIds } : {}) });
   await projectQuota(env, dependencies, requestId, [result.channel as Record<string, unknown>]);
   return result;
 }
