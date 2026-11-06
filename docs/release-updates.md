@@ -73,7 +73,7 @@ a document without one, or whose first one is empty, still reads "Untitled".
 Rename rewrites that heading where it stands; the editor draws "Untitled" only
 for a document without one, and the byline and the published page stand under
 the title wherever it is. Hub and beta Web with expand migration 0238;
-`data.page_name` stays for the Hub this replaces until contract migration 0239
+`data.page_name` stays for the Hub this replaces until contract migration 0240
 drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
 
 ## Unreleased: A schedule says what its latest runs produced
