@@ -6,7 +6,7 @@ import type {
   HumanTraceAccessServerMessage,
   HumanWorkspaceResourceChangedMessage,
 } from "@xmatrix/protocol/connections/human";
-import { HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
+import { HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST } from "@xmatrix/protocol/connections/human";
 import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   HUMAN_AUTH_INVALID_FAILURE_CODE,
@@ -78,6 +78,8 @@ export interface HumanRuntimeSession {
   presenceDigest?: true;
   /** The client reads `presenceCoverage`, so it may be sent Channel snapshots that speak only for Agents. */
   presenceCoverage?: true;
+  /** Self-contained Instance facts and separate transient work frames. */
+  instanceRecords?: true;
 }
 
 /**
@@ -279,8 +281,14 @@ export class HumanRuntimeTransport {
   deliverToUser(userId: string, message: HumanServerMessage): boolean {
     let delivered = false;
     for (const [socket, session] of this.sockets.entries()) {
-      if (session.user.id !== userId) continue;
-      this.sockets.send(socket, message);
+      if (session.user.id !== userId || !humanSessionAcceptsFrame(session, message)) continue;
+      if (message.type === "instance_activity" && session.presenceDigest) {
+        const focused = message.activities.filter(activity => activity.channelId === session.focusedChannelId);
+        for (const activity of message.activities) {
+          if (activity.channelId !== session.focusedChannelId) this.presenceDigests.addActivity(socket, activity);
+        }
+        if (focused.length) this.sockets.send(socket, { type: "instance_activity", activities: focused });
+      } else this.sockets.send(socket, message);
       delivered = true;
     }
     return delivered;
@@ -340,6 +348,7 @@ export class HumanRuntimeTransport {
         device.capabilities.includes(HUMAN_CLIENT_PRESENCE_DIGEST);
       const presenceCoverage = Array.isArray(device.capabilities) &&
         device.capabilities.includes(HUMAN_CLIENT_PRESENCE_COVERAGE);
+      const instanceRecords = Array.isArray(device.capabilities) && device.capabilities.includes(HUMAN_CLIENT_INSTANCE_RECORDS);
       const session: HumanRuntimeSession = {
         user: authentication.user,
         connectedAt: now,
@@ -352,6 +361,7 @@ export class HumanRuntimeTransport {
         ...(Number.isSafeInteger(clientProtocolVersion) ? { clientProtocolVersion } : {}),
         ...(presenceDigest ? { presenceDigest: true as const } : {}),
         ...(presenceCoverage ? { presenceCoverage: true as const } : {}),
+        ...(instanceRecords ? { instanceRecords: true as const } : {}),
       };
       this.sockets.establish(ws, session, authentication.connected);
       // Pure-Authority does not host live agent_list inventory (that is REST/profile
@@ -432,7 +442,10 @@ export class HumanRuntimeTransport {
   private showChannelAgents(ws: WebSocket, focus: object, userId: string, channelId: string): void {
     if (!this.onChannelFocus) return;
     const current = () => this.focuses.get(ws) === focus && this.sockets.get(ws) !== undefined;
-    void this.onChannelFocus({ userId, channelId, send: (message) => { if (current()) this.sockets.send(ws, message); } })
+    void this.onChannelFocus({ userId, channelId, send: (message) => {
+      const session = this.sockets.get(ws);
+      if (current() && session && humanSessionAcceptsFrame(session, message)) this.sockets.send(ws, message);
+    } })
       .catch((error: unknown) => {
         console.warn("Agents of a focused Channel could not be shown", {
           errorCode: error instanceof Error ? error.name : "unknown",
@@ -572,4 +585,9 @@ function refusedClient(device: unknown): Record<string, string> {
     if (typeof value === "string" || typeof value === "number") fields[key] = String(value).slice(0, 64);
   }
   return fields;
+}
+
+/** Capability negotiation affects representation only, never audience grants. */
+function humanSessionAcceptsFrame(session: HumanRuntimeSession, message: HumanServerMessage): boolean {
+  return message.type !== "instance_records" && message.type !== "instance_activity" || session.instanceRecords === true;
 }
