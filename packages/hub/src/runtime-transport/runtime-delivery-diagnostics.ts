@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { isRelayRuntimeOwnerCell } from "./runtime-cell-locator";
 
-type RuntimeDeliveryIngress = "socket_message" | "socket_close" | "socket_error" |
+type RuntimeDeliveryIngress = "socket_message" | "socket_close" | "socket_error" | "alarm" |
   "fetch_presence" | "fetch_message" | "fetch_observable" | "fetch_committed" | "fetch_other";
 const ingress = new AsyncLocalStorage<RuntimeDeliveryIngress>();
 

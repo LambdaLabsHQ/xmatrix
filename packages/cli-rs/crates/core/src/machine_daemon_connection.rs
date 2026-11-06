@@ -28,11 +28,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Silence that makes the cheap protocol ping inconclusive, so liveness has to
 /// be settled by a reply this repository actually guarantees.
 const HEARTBEAT_PROBE_AFTER: Duration = Duration::from_secs(4);
-/// How long the Hub itself may stay silent while the edge keeps answering
-/// protocol pings. Those pongs never reach the Durable Object, so they must
-/// not postpone this probe: a dropped session would otherwise look healthy
-/// and the catalog would stay offline until the process was restarted.
-const HUB_SESSION_PROBE_AFTER: Duration = Duration::from_secs(60);
+/// How often the edge heartbeat is written however busy the socket is. The
+/// Relay Runtime auto-answers it without waking, and the platform records when
+/// it did: that timestamp is how the Hub tells a socket that vanished without a
+/// close from a live idle one, so it must keep moving even while other frames
+/// flow. Must equal the Hub's `MACHINE_DAEMON_EDGE_HEARTBEAT_MS`, which allows
+/// three misses before it closes the connection.
+const EDGE_HEARTBEAT_EVERY: Duration = Duration::from_secs(15);
+/// Tells the Hub this daemon writes the edge heartbeat, so its silence counts.
+pub const MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY: &str = "machine_daemon_edge_heartbeat_v1";
 /// A written probe gets the same response budget as connection admission.
 /// Four seconds mistook brief network/edge delays for a dead control socket.
 const HEARTBEAT_PROBE_TIMEOUT: Duration = CONNECT_TIMEOUT;
@@ -117,8 +121,11 @@ fn machine_report_at_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-/// A text frame is the Hub. Protocol ping and pong are the edge, which
-/// answers them without waking the Durable Object that owns this session.
+/// A text frame comes from the Durable Object that holds this socket, or from
+/// its auto-response to the edge heartbeat, which the platform only gives a
+/// socket that object still holds. Protocol ping and pong are the edge alone.
+/// The Hub never leaves a held socket offline in its catalog: every offline it
+/// writes for a live route closes that socket, so a held socket is a session.
 fn frame_proves_hub_session(message: &Message) -> bool {
     !message.is_ping() && !message.is_pong()
 }
@@ -129,25 +136,18 @@ fn machine_daemon_heartbeat_frame() -> Message {
     Message::Ping(Default::default())
 }
 
-/// Application-level liveness probe, sent only once the cheap protocol ping has
-/// left this connection silent past [`HEARTBEAT_PROBE_AFTER`].
+/// Application-level liveness probe: the edge heartbeat. It is written every
+/// [`EDGE_HEARTBEAT_EVERY`], and sooner once the cheap protocol ping has left
+/// this connection silent past [`HEARTBEAT_PROBE_AFTER`].
 ///
 /// Whether Cloudflare surfaces a protocol pong back to this client is not
 /// established anywhere in this repository, so protocol-ping silence alone
-/// cannot separate a dead socket from a healthy idle one. The Hub answers every
-/// `ping` with `pong` (see `machine-daemon-port.ts`), which makes silence after
-/// this frame real evidence. It does wake a hibernated Relay Runtime, so it
-/// stays off the steady-state path and only runs when liveness is already in
-/// doubt.
+/// cannot separate a dead socket from a healthy idle one. This frame always gets
+/// a text answer: the Relay Runtime's auto-response, or on a Hub without one its
+/// daemon port's `pong`. Silence after it is real evidence, and on a current Hub
+/// it never wakes the Durable Object.
 fn machine_daemon_liveness_probe_frame() -> Message {
-    Message::Text(
-        serde_json::json!({
-            "type": "ping",
-            "requestId": uuid::Uuid::new_v4().to_string(),
-        })
-        .to_string()
-        .into(),
-    )
+    Message::Text(crate::agent_instance_connection::EDGE_HEARTBEAT_FRAME.into())
 }
 
 /// Write-queue slots kept free for the heartbeat, so a burst of instructions
@@ -2364,7 +2364,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
         // inbound traffic proves the Hub is still there. Writes run on a dedicated
         // task so a hung send cannot stall that read/heartbeat select.
         let mut last_server_activity = Instant::now();
-        let mut last_hub_activity = Instant::now();
+        let mut last_edge_heartbeat = Instant::now();
         let mut pending_probe: Option<MachineDaemonProbe> = None;
         let mut pending_renews: HashMap<
             String,
@@ -2610,7 +2610,6 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                             // waiting on that session.
                             last_server_activity = Instant::now();
                             if frame_proves_hub_session(&message) {
-                                last_hub_activity = Instant::now();
                                 pending_probe = None;
                             }
                             if let Message::Close(frame) = &message
@@ -2687,7 +2686,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                     }
                     let silence = last_server_activity.elapsed();
                     let probe = silence >= HEARTBEAT_PROBE_AFTER
-                        || last_hub_activity.elapsed() >= HUB_SESSION_PROBE_AFTER;
+                        || last_edge_heartbeat.elapsed() >= EDGE_HEARTBEAT_EVERY;
                     let (frame, queued_probe) = if probe {
                         let (frame, queued) = MachineDaemonProbe::queued();
                         (frame, Some(queued))
@@ -2695,7 +2694,12 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                         (machine_daemon_heartbeat_frame().into(), None)
                     };
                     match enqueue_machine_daemon_heartbeat(&out_tx, frame) {
-                        Ok(true) => pending_probe = queued_probe,
+                        Ok(true) => {
+                            if queued_probe.is_some() {
+                                last_edge_heartbeat = Instant::now();
+                            }
+                            pending_probe = queued_probe;
+                        }
                         Ok(_) => {}
                         Err(error) => break format!("Machine Daemon heartbeat failed: {error}"),
                     }
@@ -3521,11 +3525,29 @@ mod tests {
     #[test]
     fn probe_escalation_stays_off_the_steady_state_path() {
         // A protocol ping that Cloudflare answers below the Durable Object keeps
-        // edge silence under the fast threshold. The Hub session has its own,
-        // slower probe: edge pongs are not that session.
+        // edge silence under the fast threshold. The edge heartbeat runs on its
+        // own slower clock, and the Hub closes a daemon after three misses.
         assert!(HEARTBEAT_PROBE_AFTER > HEARTBEAT_INTERVAL);
-        assert!(HUB_SESSION_PROBE_AFTER > HEARTBEAT_PROBE_AFTER);
-        assert_eq!(HUB_SESSION_PROBE_AFTER, Duration::from_secs(60));
+        assert!(EDGE_HEARTBEAT_EVERY > HEARTBEAT_PROBE_AFTER);
+        assert_eq!(EDGE_HEARTBEAT_EVERY, Duration::from_secs(15));
+        let hub = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../hub/src/runtime-transport/machine-daemon-port.ts"),
+        )
+        .unwrap();
+        assert!(hub.contains("MACHINE_DAEMON_EDGE_HEARTBEAT_MS = 15_000"));
+        assert!(hub.contains(&format!(
+            "MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY = \"{MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY}\""
+        )));
+    }
+
+    #[test]
+    fn the_liveness_probe_is_the_frame_the_relay_runtime_auto_answers() {
+        // Any other text frame would wake the Durable Object on every probe.
+        assert_eq!(
+            machine_daemon_liveness_probe_frame(),
+            Message::Text(crate::agent_instance_connection::EDGE_HEARTBEAT_FRAME.into())
+        );
     }
 
     #[test]

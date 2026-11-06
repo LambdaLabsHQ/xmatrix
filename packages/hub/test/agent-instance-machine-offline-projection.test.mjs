@@ -55,7 +55,7 @@ function silentAuthority(capabilities) {
  * One cell's Runtime product over these sockets, its presence reports
  * published as production publishes them. Records what each person is sent.
  */
-function product(sockets) {
+function product(sockets, heartbeatAt) {
   const presenceChanges = [];
   const frames = [];
   const published = [];
@@ -67,7 +67,8 @@ function product(sockets) {
     analytics: { writeDataPoint() {} },
     readHistory: async () => { throw Error("unexpected history"); },
   });
-  const runtime = adapter.createRelayRuntimeProductAdapter({ getWebSockets: () => sockets }, {
+  const runtime = adapter.createRelayRuntimeProductAdapter({ getWebSockets: () => sockets,
+    ...(heartbeatAt ? { getWebSocketAutoResponseTimestamp: heartbeatAt } : {}) }, {
     human: () => silentAuthority(human.HUMAN_AUTHORITY_REQUIRED_CAPABILITIES),
     agentInstance: () => ({ ...silentAuthority(agent.AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES), async execute() {} }),
     machineDaemon: () => silentAuthority(machine.MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES),
@@ -247,3 +248,42 @@ function catalogChannel() {
         connectedAt: session.connectedAt, lastSeenAt: session.lastSeenAt, status: "idle" }],
     } } };
 }
+
+test("a daemon whose edge heartbeat went silent is shown offline at the cell's next event", async () => {
+  const capabilities = [machine.MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY];
+  const connectedAt = new Date(Date.now() - 10 * 60_000).toISOString();
+  const daemonSocket = new AttachedSocket(daemonAttachment({ lastSeenAt: connectedAt, capabilities }));
+  let answeredAt = new Date();
+  const { runtime, presenceChanges, frames, report, settled } = product(
+    [new AttachedSocket(instanceAttachment()), daemonSocket], () => answeredAt);
+  await report("working");
+  // A live Run on an edge-heartbeat daemon is what keeps the cell watching.
+  assert.equal(runtime.machineDaemonRunNeedsWatch(), true);
+  assert.equal(runtime.evictSilentMachineDaemons(), 0);
+
+  answeredAt = new Date(Date.now() - machine.MACHINE_DAEMON_EDGE_SILENCE_MS - 1_000);
+  presenceChanges.length = 0;
+  assert.equal(runtime.evictSilentMachineDaemons(), 1);
+  await settled();
+
+  assert.deepEqual(daemonSocket.closed.map(({ code }) => code), [machine.MACHINE_DAEMON_ROUTE_CLOSE.silentHeartbeat.code]);
+  assert.deepEqual(presenceChanges, [{ reason: "update", reachable: false }]);
+  for (const userId of ["owner-1", "viewer"]) {
+    assert.deepEqual(shown(frames, userId), { status: "offline", offlineReason: "machine_offline" });
+  }
+  // Nothing left to watch: the cell's alarm is not renewed.
+  assert.equal(runtime.machineDaemonRunNeedsWatch(), false);
+});
+
+test("an idle edge-heartbeat daemon is watched by events alone", () => {
+  const capabilities = [machine.MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY];
+  const { runtime } = product([new AttachedSocket(daemonAttachment({ capabilities }))], () => new Date());
+  assert.equal(runtime.machineDaemonRunNeedsWatch(), false);
+});
+
+test("a daemon without the edge heartbeat never arms the Run watch", () => {
+  const { runtime } = product([new AttachedSocket(instanceAttachment()), new AttachedSocket(daemonAttachment())],
+    () => null);
+  assert.equal(runtime.machineDaemonRunNeedsWatch(), false);
+  assert.equal(runtime.evictSilentMachineDaemons(), 0);
+});

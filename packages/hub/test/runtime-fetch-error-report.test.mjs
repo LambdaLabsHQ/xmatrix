@@ -12,6 +12,8 @@ test("Runtime reports the receiving exception before RPC obscures it and preserv
   Object.assign(runtime, {
     ctx: { waitUntil: (task) => pending.push(task) },
     productAdapter: {
+      evictSilentMachineDaemons() { return 0; },
+      machineDaemonRunNeedsWatch() { return false; },
       deliverChannelAgentPresence() { attempts += 1; throw original; },
     },
   });

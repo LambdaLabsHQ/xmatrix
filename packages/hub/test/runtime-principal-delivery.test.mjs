@@ -56,7 +56,7 @@ function runtimeCell(human, agent) {
     { getWebSockets: () => [], acceptWebSocket() {} },
     human ?? new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES) }),
     agent ?? new AgentInstanceRuntimeTransport({ capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES) }),
-    {},
+    new MachineDaemonRuntimeTransport({ capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES) }),
   );
   return cell;
 }
