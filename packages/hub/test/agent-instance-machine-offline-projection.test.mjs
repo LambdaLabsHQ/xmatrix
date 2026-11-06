@@ -89,7 +89,13 @@ function product(sockets, heartbeatAt) {
   });
   // The Instance reports what it is doing, as it does over its socket.
   const report = (status) => runtime.webSocketMessage(sockets[0], socketFrame("presence_update", { status }));
-  return { runtime, presenceChanges, frames, report, settled: () => Promise.all(published) };
+  // A reachability change is each connection's next checkpoint, taken in its
+  // socket's own order: let those queues run before reading what was shown.
+  const settled = async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    return Promise.all(published);
+  };
+  return { runtime, presenceChanges, frames, report, settled };
 }
 
 /** How the last card a person was sent shows the Instance. */

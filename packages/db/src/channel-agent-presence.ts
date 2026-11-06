@@ -64,6 +64,8 @@ interface InstanceRecordRow extends QueryResultRow {
   run_metadata_json: Record<string, unknown> | null;
   agent_name: string;
   owner_email: string | null;
+  /** Why its live connection last reported it unreachable (machine offline), as a checkpoint of that connection. */
+  shown_offline_reason?: string | null;
   rest_state?: string | null;
   rest_reason?: string | null;
   waking?: boolean | null;
@@ -101,6 +103,7 @@ const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_mode
 const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
         i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
         i.presentation_json->'presenceSequence' AS presence_sequence,
+        i.presentation_json->>'offlineReason' AS shown_offline_reason,
         i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
         r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
@@ -167,7 +170,9 @@ export async function loadChannelInstanceRecords(
   }
   for (const row of live) {
     const record = instanceRecord(row);
-    if (!isLiveAgentStatus(record.status)) throw new DatabaseContractError("Agent presence status is invalid");
+    if (!isLiveAgentStatus(record.status) && !record.offlineReason) {
+      throw new DatabaseContractError("Agent presence status is invalid");
+    }
     placeRecord(byChannel, record);
   }
   // A resting Instance is offline but still the Channel's: the next message
@@ -438,10 +443,14 @@ function durableStatusChips(value: unknown): AgentStatusChip[] | undefined {
 function recordState(row: InstanceRecordRow): {
   status: SerializedAgentInstance["status"];
   rest?: AgentInstanceRest;
+  offlineReason?: SerializedAgentInstance["offlineReason"];
 } {
   if (isLiveAgentStatus(row.status)) {
-    return row.run_status === "running" || row.run_status === "stopping"
-      ? { status: row.status } : { status: "offline" };
+    if (row.run_status !== "running" && row.run_status !== "stopping") return { status: "offline" };
+    // Connected, but its machine is not: shown offline, and back as soon as
+    // the connection's next checkpoint says the machine returned.
+    return isAgentInstanceOfflineReason(row.shown_offline_reason)
+      ? { status: "offline", offlineReason: row.shown_offline_reason } : { status: row.status };
   }
   if (row.status !== "offline") throw new DatabaseContractError("Agent presence status is invalid");
   if (row.rest_state === "wake_failed") return { status: "offline", rest: "wake_failed" };
@@ -480,7 +489,7 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
   if (!Number.isSafeInteger(ordinal) || ordinal < 1) {
     throw new DatabaseContractError("Agent presence ordinal is invalid");
   }
-  const { status, rest } = recordState(row);
+  const { status, rest, offlineReason: shownOffline } = recordState(row);
   const runMetadata = row.run_metadata_json ?? {};
   const remoteRepo = metadataText(runMetadata, "remoteRepo");
   const repository = remoteRepo ? repoSummonReference(remoteRepo) : undefined;
@@ -502,6 +511,7 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
     // A message could not wake it: its machine is offline, and wakes it on reconnect.
     ...((rest === "sleeping" || rest === "interrupted") && isAgentInstanceOfflineReason(row.rest_reason)
       ? { offlineReason: row.rest_reason } : {}),
+    ...(shownOffline ? { offlineReason: shownOffline } : {}),
     ...(metadataText(runMetadata, "clientVersion")
       ? { clientVersion: metadataText(runMetadata, "clientVersion") }
       : {}),

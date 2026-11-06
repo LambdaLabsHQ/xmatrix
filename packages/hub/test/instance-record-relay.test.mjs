@@ -5,7 +5,8 @@ import {
   channelAgentPresenceDeliveryBody,
   parseChannelAgentPresenceDelivery,
 } from "../src/runtime-transport/channel-agent-presence-delivery.ts";
-import { agentInstanceAttachment, FakeSocket, productionAgentInstanceTransport } from "./support/runtime-transport.mjs";
+import { AgentInstanceRuntimeTransport } from "../src/runtime-transport/agent-instance-port.ts";
+import { agentInstanceAttachment, AttachedSocket, FakeSocket, productionAgentInstanceTransport } from "./support/runtime-transport.mjs";
 
 const channelId = "channel-1";
 const instanceId = "channel-1:1";
@@ -102,4 +103,36 @@ test("a cross-cell presence body carries records and work for its own Channel on
   // Temporary work never carries durable status.
   const { status: _status, ...withoutStatus } = record(2);
   assert.equal(parseChannelAgentPresenceDelivery({ ...JSON.parse(body), records: [withoutStatus] }), undefined);
+});
+
+test("a machine that becomes unreachable, or returns, is the connection's next checkpoint, in its socket's order", async () => {
+  const authority = recordingRuntime();
+  const { factory } = productionAgentInstanceTransport(authority.runtime);
+  const backend = factory.agentInstance();
+  let reachable = true;
+  backend.observeMachineReachability(() => reachable);
+  const shown = [];
+  const transport = new AgentInstanceRuntimeTransport(backend, undefined,
+    async ({ reason, session }) => { shown.push([reason, session.run.presenceSequence]); });
+  const attachment = agentInstanceAttachment({ run: { instanceId, connectionVersion: 3 } });
+  const socket = new AttachedSocket(attachment);
+  assert.equal(transport.rehydrate(socket, attachment), true);
+  await transport.handleFrame(socket, report({ status: "busy", model: "gpt" }));
+  // Anything after it on the socket runs after the checkpoint.
+  const settled = () => transport.handleFrame(socket, JSON.stringify({ type: "ping", requestId: "settle" }));
+  reachable = false;
+  transport.reprojectMachine(() => true);
+  await settled();
+  reachable = true;
+  transport.reprojectMachine(() => true);
+  await settled();
+  assert.deepEqual(authority.writes.map((write) => [write.ordering.presenceSequence, write.presentation.offlineReason,
+    write.status]), [[1, undefined, "busy"], [2, "machine_offline", "busy"], [3, undefined, "busy"]],
+  "its own status stays live; only what it is shown as changes");
+  assert.deepEqual(shown, [["update", 1], ["update", 2], ["update", 3]]);
+  assert.equal(socket.attachment.session.run.presenceSequence, 3, "the count survives hibernation");
+  // A connection on another machine is not touched.
+  transport.reprojectMachine(() => false);
+  await settled();
+  assert.equal(authority.writes.length, 3);
 });
