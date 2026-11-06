@@ -2256,7 +2256,7 @@ pub enum PageCommand {
 
 #[derive(Subcommand)]
 pub enum PageAutomationCommand {
-    /// List a page's schedules with their section, state and line
+    /// List a page's schedules with their section, state, line and what their latest runs produced
     #[command(alias = "ls")]
     List {
         /// Page ID

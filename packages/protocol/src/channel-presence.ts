@@ -1,5 +1,6 @@
 import { mergeAgentInstancePresence } from "./instance-presence-merge.js";
 import { sameValue } from "./same-value.js";
+import { isChannelResidentInstance } from "./authority-foundation.js";
 import type { SerializedAgentInstance } from "./authority-foundation.js";
 import { parseAgentRegistrationKey, sameAgentRegistration, type AgentRegistrationKey } from "./agent-registration.js";
 import type { ChannelHumanMemberPresence, LlmUsage, SerializedChannel } from "./authority-runtime.js";
@@ -128,7 +129,7 @@ export function reduceChannelPresence(state: ChannelPresence, change: ChannelPre
 export function channelPresenceInstances(presence: ChannelPresence | undefined): readonly AgentInstancePresence[] {
   return [...(presence?.instances.values() ?? [])].filter(instance => {
     const name = instance.agentName.trim().toLowerCase();
-    return name !== "xmatrix-daemon" && !name.startsWith("xmatrix-daemon-");
+    return isChannelResidentInstance(instance) && name !== "xmatrix-daemon" && !name.startsWith("xmatrix-daemon-");
   }).sort((left, right) => {
     const birth = Date.parse(left.connectedAt) - Date.parse(right.connectedAt);
     if (Number.isFinite(birth) && birth) return birth;

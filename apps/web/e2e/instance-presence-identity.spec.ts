@@ -133,3 +133,58 @@ test("an Instance that joins with its card and its Channel together is placed wi
   expect(await fixtureRequests(page, "join-reread")).toEqual([]);
   expect(warnings).toEqual([]);
 });
+
+test("versioned Instance reports alone drive dock, sender badge and Reborn through late windows and lifecycle replay", async ({ page }) => {
+  const { installRenderCounter } = await import("./render-counts");
+  await installRenderCounter(page);
+  const registration = { ownerUserId: "owner", machineId: "machine", harness: "codex" };
+  const channel = { ...E2E_CHANNEL, memberPresence: {}, instanceRecords: [], messageCount: 1, historyHeadSequence: 1 };
+  const instance = { id: `${channel.id}:1`, channelId: channel.id, channelInstanceId: "1", label: "codex:1",
+    agentName: "codex", registration, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy",
+    revision: { version: 2, sequence: 1 } };
+  const incoming = { messageId: "canonical-reply", channelId: channel.id, sequence: 1, sentAt: E2E_NOW,
+    body: "I am running before the directory catches up.", from: { kind: "agent", identityId: "agent:codex",
+      instanceId: instance.id, channelInstanceId: "1", instanceLabel: "codex:1", registration,
+      label: "codex:1", userId: "owner", email: "" } };
+  let send: ((frame: unknown) => void) | undefined;
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type === "human_connect") send = reply;
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+    if (frame.type === "user_focus_channel") reply({ type: "channel_history", requestId: frame.requestId,
+      channelId: channel.id, messages: [incoming], hasMore: false });
+  });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [channel] });
+  await fixtureJson(page, "canonical-history", "**/api/xmatrix/channels/channel-general/history**", { messages: [incoming], hasMore: false });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
+  const row = page.locator('[id="message:canonical-reply"]');
+  await expect(row.getByText(incoming.body, { exact: true })).toBeVisible();
+  await expect(row.getByText("instance offline", { exact: true })).toHaveCount(0);
+  await expect.poll(() => Boolean(send)).toBe(true);
+  // The connect snapshot never arrived: the report must introduce itself.
+  send!({ type: "instance_records", records: [instance] });
+  const dock = page.locator(".app-agent-work-dock");
+  await expect(dock.getByRole("button", { name: /Open codex/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: "codex:1 Agent busy", exact: true })).toHaveCount(1);
+  // The late/empty directory is a query window, never a roster removal.
+  send!({ type: "channel_updated", channel });
+  await expect(dock.getByRole("button", { name: /Open codex/ })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  await page.evaluate(() => { (window as unknown as { __renderCounts: { counting: boolean } }).__renderCounts.counting = true; });
+  for (let sequence = 2; sequence <= 20; sequence++) send!({ type: "instance_records", records: [
+    { ...instance, activity: `Working ${sequence}`, revision: { version: 2, sequence } },
+  ] });
+  await page.waitForTimeout(100);
+  expect(await page.evaluate(() => (window as unknown as { __renderCounts: { messageRows: number } }).__renderCounts.messageRows)).toBe(0);
+  // A stop wins even against a later-delivered old socket report with a future clock.
+  send!({ type: "instance_records", records: [{ ...instance, status: "offline", revision: { version: 3, sequence: 0 } }] });
+  send!({ type: "instance_records", records: [{ ...instance, lastSeenAt: "2099-01-01T00:00:00Z", revision: { version: 2, sequence: 999 } }] });
+  await expect(row.getByText("instance offline", { exact: true })).toBeVisible();
+  await expect(row.getByRole("button", { name: "codex:1 Agent offline", exact: true })).toHaveCount(1);
+  await expect(dock.getByRole("button", { name: /Open codex/ })).toHaveCount(0);
+  await row.locator(".identity-avatar").hover();
+  await expect(row.getByRole("button", { name: /Reborn/ })).toBeVisible();
+  send!({ type: "instance_records", records: [{ ...instance, status: "idle", revision: { version: 4, sequence: 1 } }] });
+  await expect(row.getByText("instance offline", { exact: true })).toHaveCount(0);
+  await expect(dock.getByRole("button", { name: /Open codex/ })).toBeVisible();
+  await expect(row.getByRole("button", { name: /Reborn/ })).toHaveCount(0);
+});

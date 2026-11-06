@@ -194,6 +194,7 @@ export {
   CHANNEL_AUTOMATION_WAKE_SQL,
 } from "./automation-control.js";
 export { automationName } from "./automation-commit.js";
+export { AUTOMATION_OUTCOME_BATCH, type AutomationOccurrenceFacts } from "./automation-outcome-facts.js";
 export {
   PostgresTraceAccessRepository,
   TraceAccessControlError,

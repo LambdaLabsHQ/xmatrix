@@ -29,7 +29,7 @@ import {
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
-import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { SettingsCard } from "./settings-card";
 import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
@@ -491,7 +491,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
-  foldsDiscussionHead = false,
+  inPageMargin = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -528,8 +528,10 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
-  foldsDiscussionHead?: boolean;
+  /** A comment thread in a page's margin: its head shows a page discussion's passage, so its first message need
+   * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
+   * would only cover what it says (user 2026-11-06). */
+  inPageMargin?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
@@ -1204,7 +1206,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
-                  foldsDiscussionHead={foldsDiscussionHead}
+                  foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1273,8 +1275,9 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
-      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
-        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
+      {!inPageMargin && <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id}
+        token={token} hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling}
+        onJump={stableOnJumpToMessage} />}
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (
@@ -1721,12 +1724,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   const goal = (item: TimelineItem) =>
     goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
   const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
-  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
-    <span className={tagClass("app-sender-instance-stale-badge")}
-      title="This message came from an agent instance that is no longer live in this channel.">
-      instance offline
-    </span>
-  ) : null;
   const before = previous.senderStatusChips ?? [];
   const after = message.senderStatusChips ?? [];
   const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
@@ -1737,7 +1734,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   };
   return (
     <>
-      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
       {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
       {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
       {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
@@ -1881,7 +1877,10 @@ export const MessageRow = memo(function MessageRow({
   const avatarLongPressTriggeredRef = useRef(false);
   const rebornHoverTimerRef = useRef<number | null>(null);
   const rebornHoveringRef = useRef(false);
-  const canRebornSender = canRebornMessageSender(message);
+  const senderStatus = useMessageSenderStatus({ channelId: message.channelId,
+    instanceId: message.senderKind === "agent" ? message.senderInstanceId : undefined,
+    senderId: message.linkOrigin?.kind === "reply" ? undefined : message.senderId, name: message.author });
+  const canRebornSender = canRebornMessageSender(message, senderStatus);
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
@@ -2791,7 +2790,7 @@ export const MessageRow = memo(function MessageRow({
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          status={message.senderStatus}
+          status={senderStatus}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2806,7 +2805,7 @@ export const MessageRow = memo(function MessageRow({
                   instanceScoped: Boolean(message.senderInstanceId),
                   channelId: channel?.id,
                   name: message.author,
-                  status: message.senderStatus,
+                  status: senderStatus,
                   goal: message.senderGoal,
                   face: message.face,
                 })
@@ -2897,10 +2896,7 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
-          {message.retagged ? (
-            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
-          ) : (<>
-          {message.senderInstanceStale && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent && senderStatus === "offline" && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
               title="This message came from an agent instance that is no longer live in this channel."
@@ -2908,6 +2904,9 @@ export const MessageRow = memo(function MessageRow({
               instance offline
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderKind === "agent" && (
             <GoalStatusBadge goal={message.senderGoal} />
           )}
@@ -3452,8 +3451,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onRebornAgentInstance,
   onHandoffAgentInstance,
   onOpenAgentTrace,
+  inPageMargin = false,
 }: {
   approvals?: ReactNode;
+  /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
+   * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
+  inPageMargin?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
@@ -3560,7 +3563,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
      the newest message, whose hover controls sit at its
      bottom edge. Publish the measured distance and let the padding read it. */
   useLayoutEffect(() => {
-    if (workItems.length === 0 && !approvals) {
+    // In flow, the dock covers nothing, so the timeline keeps no room for it.
+    if (inPageMargin || (workItems.length === 0 && !approvals)) {
       surfaceRef.current?.style.removeProperty("--app-agent-work-dock-clearance");
       return;
     }
@@ -3604,7 +3608,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
       window.removeEventListener("resize", publishClearance);
       surfaceElement.style.removeProperty("--app-agent-work-dock-clearance");
     };
-  }, [workItems.length, approvals]);
+  }, [workItems.length, approvals, inPageMargin]);
 
   if (workItems.length === 0 && !approvals) return null;
 

@@ -1,5 +1,29 @@
 # Release Updates
 
+## Unreleased: Instance status has one ordered source
+
+A newly running Agent could speak while its message said `instance offline`:
+bounded Channel windows replaced the whole roster, while live cards could
+only update an Instance already in it. Messages also cached a second live
+status. Self-contained Instance records now merge by lifecycle version and
+socket sequence; empty or late windows cannot remove a live record. Only an
+explicit ended record means offline, and exact reads reconcile held IDs after
+reconnect or focus. Message headers, avatars, Reborn and the work dock share
+the live state without rebuilding Markdown on activity. Hub, Web and shared
+protocol; capability-negotiated legacy compatibility, no schema migration.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: A page's comment thread no longer hides its own words
+
+An open thread in a page's margin floated the Conversations view's Agent
+disc (46px) and composer over its last lines, a "back to the last person"
+capsule over its first, and showed its Agent again as a chip in the head.
+The same glass disc and composer now stand in flow under the comments at
+the thread's scale (a 32px disc on the comments' avatar column, a 40px
+composer), the head names the conversation on the passage's column without
+the chip, comment avatars drop their status dot, the jump capsule is gone
+from the margin, and text fades at the scroll edges. The Conversations view
+is unchanged. Web only.
 ## Unreleased: page edit takes what page read printed, never its header alone
 
 Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
@@ -41,6 +65,24 @@ for a document without one, and the byline and the published page stand under
 the title wherever it is. Hub and beta Web with expand migration 0238;
 `data.page_name` stays for the Hub this replaces until a contract migration
 drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: A schedule says what its latest runs produced
+
+Learning which of a Space's schedules earn their cadence took a manual,
+hours-long audit of their conversations. Each page Automation listed by its
+page or its Space now carries `outcomes`: its ten latest occurrences that were
+not cancelled, newest first, each a pull request it opened, a page it changed,
+nothing, failed to start, or still running. The Hub reads them from each
+occurrence's own conversation (its launches, Runs, page revisions and activity
+entries) in one bounded statement per list; nothing new is stored and merges
+are not shown. `xmatrix page automation list` and `page read` print
+`last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and Schedules shows the
+summary in each row and every run, with its conversation, in its detail.
+Expand migration 0239 adds online indexes for those reads (a GIN index on page
+revision conversations and a partial index on activity entries and failure
+notices). Hub, Web, CLI and shared protocol; older clients ignore the additive
+field. Recovery is a CI-validated beta reverting the change; the indexes may
+stay.
 
 ## Unreleased: Phone conversation heads share state without inspecting the app tree
 

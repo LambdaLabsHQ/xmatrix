@@ -692,6 +692,14 @@ or joining one never leaves the page.
   passage again. Messages read as comments (a small avatar, name and time
   on one line, the text below) and a one-line reply box closes it; a thread
   with nothing said yet is just its head and that box, as a new comment is.
+  It reads top to bottom and nothing floats over what was said (asked by
+  Daniel 2026-11-06): the Agent work dock and the composer are the
+  Conversations view's own glass disc and capsule at the thread's scale (a
+  2rem disc on the comments' avatar column, its island's caption and words
+  on one line, a 2.5rem composer), standing in flow under the comments
+  instead of over them. The Agents are not repeated
+  in the head, and a comment's avatar carries no status. The thread has no
+  way back to a person's last message: it is short enough to scroll.
   The card's head carries resolve, *Open in Conversations* and close. The other
   cards stay beside the page and make room above and below it, and it
   scrolls with the document. One conversation is open at a time; closing it
@@ -701,7 +709,7 @@ or joining one never leaves the page.
   closes the conversation.
 - **The thread is the conversation, at comment size.** It is the product's
   one conversation surface, so mentions and summons, approvals and the Agent
-  work dock work there; per-message tags and actions, attachments and the
+  work dock (under the comments) work there; per-message tags and actions, attachments and the
   full header stay in *Open in Conversations*, which gives it the whole
   window.
 - **The conversation list.** The page toolbar's comment icon and total count,
@@ -808,7 +816,7 @@ Tasks writes a recurring or scheduled task (decided by Daniel 2026-10-31):
   written says why there instead (a cadence out of bounds, a time without its
   offset, an event in a repository the Space's GitHub connection does not
   cover), and `page edit` prints it. `page read` lists the page's schedules
-  under `automations:`.
+  under `automations:`, each with what its latest runs produced (§6.4).
 - **Each revision syncs its lines.** After a revision moves the page's head,
   the Hub makes the page's Automations what its lines say, as that revision's
   author (an Agent's author is its owner): a new line creates one, a changed
@@ -884,6 +892,9 @@ Access follows the page, for people and Agents alike:
   configuration, including repository names, follows the Page's visibility.
   An authorized author or Agent can also publish event content into Page prose;
   the automatic event projection does not restrict those explicit Page writes.
+  Its outcomes (§6.4) are read with it: each run's kind and the conversation
+  it ran in, never what was said there, which that conversation's own access
+  still governs.
 - **Create, edit, pause, resume, move, delete**: anyone who can edit the page,
   by editing its line. On a suggest-only page an Agent's edit is a
   suggestion, which changes nothing until a person accepts it.
@@ -923,6 +934,41 @@ change the line.
   migration 0235 rewrote each page Automation's `[name](xmatrix:automation/<id>)`
   reference into its line, after the line that held it, and wrote one with no
   reference paused at the end of its page.
+- **What its runs produced is read, never kept.** Whoever owns a schedule
+  decides to keep it, run it less often or delete it by what its runs
+  produce. Wherever a page's schedules are listed (`xmatrix page automation
+  list`, `page read`'s `automations:`, Schedules), each carries `outcomes`: its
+  ten latest occurrences that were not cancelled (within the thirty days
+  occurrences are kept), newest first, each the strongest of what its own
+  conversation records:
+  1. `pull_request`: an activity entry there is a pull request its Run opened
+     (conversation-activity.md §3.6);
+  2. `page`: a page revision other than a purge lists the conversation;
+  3. `running`: the occurrence is still being delivered, or an Agent launch
+     there is still starting, or a Run there is still active;
+  4. `none`: an Agent started there and changed nothing;
+  5. `failed_to_start`: no Agent started, and the occurrence was not
+     delivered, a launch failed, or the Hub posted a launch failure notice
+     there;
+  6. otherwise `running` for the newest occurrence of a line that names an
+     Agent, whose summon is still being routed, and `none` for anything else,
+     such as a reminder for a person.
+
+  Lists say it as `last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and
+  Schedules lists each run with its conversation. The conversation is the one
+  the scheduler addresses (migration 0200's SQL function), and every fact
+  comes from the record that owns it (the occurrence, the conversation's
+  launches and Runs, page revisions, activity entries and failure notices), so
+  nothing is stored for this and nothing can disagree with them. Each list
+  reads it in one bounded statement per two hundred page Automations on the
+  Space's shard: one probe of a GIN index on `page_revisions.conversation_ids`
+  for all occurrences, and index probes per conversation, its notices and
+  activity entries through a partial message index (migration 0239). The Hub
+  reads a conversation's ten newest activity entries through the message
+  codec. Whether a pull request merged is not said: no record holds it per
+  conversation (the author's own merge is not posted, and the subscription
+  ends when the pull request closes). Lists are read again on the existing
+  `automations` pushes and when Schedules opens; no timer reads them for it.
 
 ### 6.5 A GitHub file is embedded by reference
 
