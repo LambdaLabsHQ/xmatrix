@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: ↑ in an empty composer lists what was sent before
+
+The composer now keeps what the reader sent in each Space, on this device.
+↑ in an empty composer opens that history in the composer's own panel, newest
+beside the field; ↑/↓ move the highlight, Enter or Tab puts the entry back to
+edit or send, and Escape, typing or ↓ past the newest closes it. Picked pages
+and channels come back picked; Agents come back as their written `@name`.
+Beta Web only, no migration. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a read Gmail message opens in Gmail when its card is clicked
 
 Clicking the email card a Gmail read draws in a Channel now opens that

@@ -130,7 +130,10 @@ import {
 import {
   ComposerInputAuthority,
 } from "@/components/dashboard/composer-input";
-import type { ComposerField } from "@/components/dashboard/composer-editor";
+import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
+import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHistoryEntry } from "./composer-input-history";
+import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
+import { isImeKeyDown } from "@/lib/ime-keydown";
 
 import {
   type AgentTraceReplica,
@@ -355,6 +358,37 @@ export const Composer = memo(function Composer({
     },
     [onDraftChange]
   );
+  /** The input history while its list is open (composer-input-history.ts), with the highlighted entry. */
+  const [inputHistory, setInputHistory] = useState<{ entries: ComposerInputHistoryEntry[]; active: number } | null>(null);
+  const historySpaceId = channel?.spaceId ?? space?.id;
+  useEffect(() => {
+    if (localDraft) setInputHistory(null);
+  }, [localDraft]);
+  useEffect(() => setInputHistory(null), [invocationScope]);
+  function putInputHistoryEntry(entry: ComposerInputHistoryEntry) {
+    setInputHistory(null);
+    invocationDraftRef.current = { body: entry.body, bindings: structuredClone(entry.references) };
+    clearEmptyPasteAnchor();
+    setLocalDraft(entry.body);
+    onDraftChange(entry.body, invocationDraftRef.current);
+    setCursor(entry.body.length);
+    scheduleTextareaSelection(() => fieldRef.current, entry.body, { start: entry.body.length, end: entry.body.length });
+  }
+  /** ↑ in an empty composer shows what was sent before; true when the key was the history list's. */
+  function inputHistoryKeyDown(event: ComposerKeyEvent): boolean {
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || isImeKeyDown(event.nativeEvent)) return false;
+    const field = fieldRef.current;
+    if (!field || !writable) return false;
+    const entries = inputHistory?.entries
+      ?? (event.key === "ArrowUp" ? readInputHistory(window.localStorage, historySpaceId) : []);
+    const step = inputHistoryKey({ entries, active: inputHistory?.active ?? null, draft: localDraft,
+      collapsed: field.selectionStart === field.selectionEnd, key: event.key });
+    if (!step) return false;
+    event.preventDefault();
+    if (step.pick) putInputHistoryEntry(step.pick);
+    else setInputHistory(step.active === null ? null : { entries, active: step.active });
+    return true;
+  }
   /** The attachment a picture line of the draft names, after its upload landed or its quality changed. */
   const pictureAliasesRef = useRef(new Map<string, string>());
   const resolvePicture = useCallback((ref: string) => {
@@ -895,6 +929,8 @@ export const Composer = memo(function Composer({
     setPreparingSend(true);
     setAttachmentError(null);
     const sendScope = invocationScope;
+    const sentDraft = invocationDraftRef.current;
+    const sentText = localDraft;
     // Taken in the same render that enabled Send: a file that lands while the
     // send is prepared reaches the message, not a draft that is about to clear.
     const sentAttachments = attachments.map((attachment) => {
@@ -930,6 +966,7 @@ export const Composer = memo(function Composer({
         ...(uploads.length ? { uploads } : {}),
       });
       handedOver = true;
+      rememberInput(window.localStorage, channel?.spaceId ?? space?.id, sentDraft, sentText);
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
     } finally {
@@ -1437,6 +1474,7 @@ export const Composer = memo(function Composer({
             primeEmptyPasteAnchor(field);
           }}
           onFieldBlur={() => {
+            setInputHistory(null);
             if (localDraft.length === 0) {
               clearEmptyPasteAnchor();
             }
@@ -1466,6 +1504,11 @@ export const Composer = memo(function Composer({
           onFieldPaste={(event, field) => {
             void addPastedImages(event, field);
           }}
+          panel={inputHistory && (
+            <ComposerInputHistoryPanel entries={inputHistory.entries} active={inputHistory.active}
+              onPick={putInputHistoryEntry} />
+          )}
+          onKeyDownFirst={inputHistoryKeyDown}
           onKeyDownExtra={(event) => {
             if (
               (event.key === "Backspace" || event.key === "Delete") &&
