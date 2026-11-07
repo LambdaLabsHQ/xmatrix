@@ -23,11 +23,11 @@ test("candidate programs have no action transport or ambient Node capabilities",
         return null;
       });
     } }] });
-  const module = { exports: {} };
+  const sandboxModule = { exports: {} };
   const unavailable = () => { throw new Error("candidate attempted external I/O"); };
-  vm.runInNewContext(bundled.outputFiles[0].text,{ module,exports: module.exports,TextEncoder,structuredClone,
+  vm.runInNewContext(bundled.outputFiles[0].text,{ module: sandboxModule,exports: sandboxModule.exports,TextEncoder,structuredClone,
     fetch: unavailable,WebSocket: unavailable,require: unavailable },{ timeout: 1000 });
-  const evaluator = module.exports.nornShadowEvaluator;
+  const evaluator = sandboxModule.exports.nornShadowEvaluator;
   const { programs } = JSON.parse(readFileSync(new URL("./fixtures/norn-shadow-programs.json",import.meta.url),"utf8"));
   for (const name of ["run","message","judge"]) {
     const ast = programs[name].ast,initial = evaluator.create(ast,0);

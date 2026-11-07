@@ -14,11 +14,15 @@ for (const file of [...files, "LICENSE"]) {
   const source = execFileSync("git", ["-C", resolve(checkout), "show", `${revision}:${file === "LICENSE" ? file : `src/${file}`}`], { encoding: "utf8" });
   const destination = resolve(root, file);
   mkdirSync(dirname(destination), { recursive: true });
-  const portable = source.replaceAll(/(from\s+"[^"]+)\.ts"/gu, '$1.js"')
+  let portable = source.replaceAll(/(from\s+"[^"]+)\.ts"/gu, '$1.js"')
     .replace("values: Value[], env: string): void {", "values: Value[], _env: string): void {")
     .replace("function builtin(code: Code,", "function builtin(_code: Code,");
+  if (file === "runtime/std.ts") portable = portable.replace("const module: Statement", "const linkedModule: Statement")
+    .replace("[...types, module]", "[...types, linkedModule]");
+  // Template literals need no escaping for their ordinary quotation marks.
+  if (file === "runtime/value.ts") portable = portable.replaceAll(String.fromCharCode(92,34),String.fromCharCode(34));
   writeFileSync(destination, file === "LICENSE" ? source :
     `// Vendored from norn-lang/norn@${revision}; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.\n` +
       portable);
 }
-writeFileSync(resolve(root, "README.md"), `# Norn evaluator snapshot\n\nSource: https://github.com/norn-lang/norn/tree/${revision}\n\nApache-2.0; see LICENSE. Only the pure AST reader, compiler and evaluator are included.\nNo MemoryStore, SQLite, simulated host, dispatcher, transport or credentials are imported.\nRefresh with \`node scripts/vendor-norn-core.mjs <local-norn-checkout>\`.\nUpstream source is preserved except for relative import suffixes, provenance headers and two unused parameter names prefixed for the host compiler.\n`);
+writeFileSync(resolve(root, "README.md"), `# Norn evaluator snapshot\n\nSource: https://github.com/norn-lang/norn/tree/${revision}\n\nApache-2.0; see LICENSE. Only the pure AST reader, compiler and evaluator are included.\nNo MemoryStore, SQLite, simulated host, dispatcher, transport or credentials are imported.\nRefresh with \`node scripts/vendor-norn-core.mjs <local-norn-checkout>\`.\nUpstream source is preserved except for relative import suffixes, provenance headers, local binding/unused parameter names and redundant template escapes required by the host compiler and lint rules.\n`);

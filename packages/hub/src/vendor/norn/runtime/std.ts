@@ -34,11 +34,11 @@ export function linkStd(program: Program, std?: Program): Program {
     else throw new Error("Std must contain only type and binding declarations");
   }
   const span = library.span;
-  const module: Statement = { kind: "Let", pattern: { kind: "VarPattern", name: hidden, span }, value: {
+  const linkedModule: Statement = { kind: "Let", pattern: { kind: "VarPattern", name: hidden, span }, value: {
     kind: "Block", span, body: [...definitions, { kind: "RecordLiteral", spread: null, span,
       fields: [...exports].map(name => ({ kind: "RecordField", name, span, value: { kind: "Identifier", name, span } })) }],
   }, span };
-  const body: TopLevelItem[] = [...types, module];
+  const body: TopLevelItem[] = [...types, linkedModule];
   const last = main.body.findLastIndex(node => !["Open", "TypeDecl", "External"].includes(node.kind));
   main.body.forEach((node, index) => {
     if (node.kind !== "Open") { body.push(node); return; }

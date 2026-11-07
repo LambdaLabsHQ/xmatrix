@@ -55,7 +55,7 @@ export function show(value: Value): string {
       return `${ms}ms`;
     }
     case "participant": return `@${value.name}${value.instance === null ? "" : `:${value.instance}`}`;
-    case "ref": return `${value.kind}\"${value.value}\"`;
+    case "ref": return `${value.kind}"${value.value}"`;
     case "variant": return value.name + (value.args.length ? `(${value.args.map(show).join(", ")})` : "");
     case "list": return `[${value.values.map(show).join(", ")}]`;
     case "tuple": return `(${value.values.map(show).join(", ")})`;

@@ -41,7 +41,8 @@ The upstream core snapshot is Apache-2.0, with provenance and a regeneration
 script in `packages/hub/src/vendor/norn`. The duplicate scanner excludes this
 upstream snapshot because it must preserve upstream source, including upstream
 repetition; authored host code remains under the zero-clone gate. Import
-suffixes and two unused parameter names are the only source adaptations.
+suffixes, local binding/unused parameter names and redundant template escapes
+are the only source adaptations.
 
 ## Supported input mapping
 
