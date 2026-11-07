@@ -180,6 +180,11 @@ global execution singleton is unnecessary.
 
 ## Incremental migration
 
+The first stage is specified in [comparison without dispatch](norn-shadow-comparison.md):
+separate observation, candidate evaluation and comparison records, with no
+candidate action transport and explicit causal evidence/authority-time rules.
+It remains a design; no production observer or cohort is enabled.
+
 1. Compare a non-dispatching candidate against selected existing reminders or a
    release-verification chain. Only the existing path executes work during this
    comparison; the candidate records intended waits, wakes and outcomes.
