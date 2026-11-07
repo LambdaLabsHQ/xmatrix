@@ -21,8 +21,12 @@ const repository = { owner: "acme", repo: "app", url: "https://github.com/acme/a
 const pull = { number: 7, title: "Fix it", html_url: "https://github.com/acme/app/pull/7",
   user: { login: "Opener" } };
 
-function message(event, payload, verdict) {
+function said(event, payload, verdict) {
   return githubPullRequestEventMessage({ event, payload, repository, number: 7, ...(verdict ? { verdict } : {}) });
+}
+
+function message(event, payload, verdict) {
+  return said(event, payload, verdict)?.body;
 }
 
 test("an event names the pull requests it is about", () => {
@@ -78,6 +82,22 @@ test("CI speaks once, when every check has settled", () => {
   "CI failed on [acme/app#7](https://github.com/acme/app/pull/7) at abcdef1: [hub](https://github.com/acme/app/runs/1), web.");
   assert.equal(message("check_run", { action: "completed" }, { state: "passed", failed: [], settledAt: "t" }),
     undefined, "single checks are not news");
+});
+
+test("a verdict, merge or close carries its fact; people's reviews and comments do not", () => {
+  const ref = { repository: "acme/app", number: 7, url: "https://github.com/acme/app/pull/7" };
+  const payload = { action: "completed", check_suite: { head_sha: "abcdef1234567", pull_requests: [{ number: 7 }] } };
+  assert.deepEqual(said("check_suite", payload, { state: "passed", failed: [], settledAt: "t" }).fact,
+    { ...ref, event: "ci_passed", sha: "abcdef1" });
+  const failed = Array.from({ length: 12 }, (_, index) => ({ name: `check-${index}` }));
+  assert.deepEqual(said("check_suite", payload, { state: "failed", settledAt: "t", failed }).fact,
+    { ...ref, event: "ci_failed", sha: "abcdef1", failed: failed.slice(0, 10), more: 2 });
+  assert.deepEqual(said("pull_request", { action: "closed", pull_request: { ...pull, merged: true },
+    sender: { login: "xmatrix-connector[bot]" } }).fact, { ...ref, event: "merged", title: "Fix it" });
+  assert.deepEqual(said("pull_request", { action: "closed", pull_request: pull, sender: { login: "yiming" } }).fact,
+    { ...ref, event: "closed", title: "Fix it", actor: "yiming" });
+  assert.equal(said("issue_comment", { action: "created", issue: pull, sender: { login: "yiming" },
+    comment: { body: "Why?", user: { login: "yiming" } } }).fact, undefined);
 });
 
 function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "2026-10-08T22:00:00Z" },
@@ -172,6 +192,8 @@ test("a settled verdict reaches the pull request's conversation once and wakes i
   assert.deepEqual(h.verdicts[0], ["42", "acme", "app", "abcdef1234567", 7]);
   assert.equal(h.appended[0].body, "CI passed on [acme/app#7](https://github.com/acme/app/pull/7) at abcdef1.");
   assert.equal(h.appended[0].appAuthorId, "github");
+  assert.deepEqual(h.appended[0].residual, { appMetadata: { xmatrixGitHubPullRequest: { repository: "acme/app",
+    number: 7, url: "https://github.com/acme/app/pull/7", event: "ci_passed", sha: "abcdef1" } } });
   assert.equal(h.appended[0].messageId, h.appended[1].messageId,
     "two suites' deliveries of one settling are one message");
   assert.equal(h.woken[0].channelId, "channel-1");

@@ -469,3 +469,53 @@ test("the island's words and the face each show their own card above the item, i
   await item.locator(".app-agent-work-intent").hover();
   expect(await chrome('[data-mode="card"]')).toEqual(toolbarChrome);
 });
+
+const github = { kind: "app", identityId: "app:github", label: "GitHub", name: "GitHub", userId: "", email: "" };
+const pullUrl = "https://github.com/LambdaLabsHQ/NomadCafe/pull/121";
+const pullFact = { repository: "LambdaLabsHQ/NomadCafe", number: 121, url: pullUrl };
+
+function pullRequestLife() {
+  sequence = 0;
+  const opened = (minute: number, number: number) => entry(claude, minute,
+    `↗ Opened pull request LambdaLabsHQ/NomadCafe#${number}`, {
+      metadata: { xmatrixProvenance: "activity", xmatrixActivity: { kind: "pull_request",
+        repository: "LambdaLabsHQ/NomadCafe", number, url: `https://github.com/LambdaLabsHQ/NomadCafe/pull/${number}` } },
+    });
+  return [
+    entry(reviewer, 10, "Reload automatically when the network comes back."),
+    opened(18, 121),
+    entry(github, 19, `CI passed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 3ffa10b.`, {
+      metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_passed", sha: "3ffa10b" } } }),
+    entry(github, 20, `yiming reviewed [LambdaLabsHQ/NomadCafe#121](${pullUrl})\n\nCan the retry back off?`),
+    entry(github, 23, `CI failed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 9c41d2e: [web](https://github.com/LambdaLabsHQ/NomadCafe/runs/1), ios.`, {
+      metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_failed", sha: "9c41d2e",
+        failed: [{ name: "web", url: "https://github.com/LambdaLabsHQ/NomadCafe/runs/1" }, { name: "ios" }], more: 0 } } }),
+    opened(24, 122),
+    entry(github, 26, `Merged [LambdaLabsHQ/NomadCafe#121](${pullUrl}): Reload on reconnect`, {
+      metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "merged", title: "Reload on reconnect" } } }),
+  ];
+}
+
+test("GitHub's CI verdicts and merges read as the same line as the pull request they follow", async ({ page }) => {
+  const messages = pullRequestLife();
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: messages.length,
+    lastMessageSequence: messages.length, updatedAt: at(26) }, messages);
+
+  const facts = page.locator("[data-github-fact]");
+  await expect(facts).toHaveCount(3);
+  await expect(facts.nth(0)).toHaveText(/GitHub.*CI passed on LambdaLabsHQ\/NomadCafe#121 at 3ffa10b/u);
+  await expect(facts.nth(1)).toHaveText(/CI failed on LambdaLabsHQ\/NomadCafe#121 at 9c41d2e: web, ios/u);
+  await expect(facts.nth(1).getByRole("link", { name: "web" }))
+    .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/NomadCafe/runs/1");
+  await expect(facts.nth(2)).toHaveText(/Merged LambdaLabsHQ\/NomadCafe#121: Reload on reconnect/u);
+  // A fact sets in the same type and line as the "Opened" line above it.
+  const opened = page.locator(".app-activity-row:not([data-github-fact])").first();
+  const type = (row: Locator) => row.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return `${style.fontSize}/${style.lineHeight}/${style.paddingTop}/${style.paddingLeft}`;
+  });
+  expect(await type(facts.nth(0))).toBe(await type(opened));
+  // A person's review is their words: it stays a whole message.
+  await expect(page.getByText("Can the retry back off?")).toBeVisible();
+  await expect(page.locator("[data-github-fact]", { hasText: "reviewed" })).toHaveCount(0);
+});
