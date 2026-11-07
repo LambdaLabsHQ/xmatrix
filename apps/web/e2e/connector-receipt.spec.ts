@@ -164,6 +164,9 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   const reads = (await fixtureRequests(page, "gmail-original")).map(url => new URL(url).pathname);
   expect(reads.every(path => path.endsWith(`/messages/${encodeURIComponent(messages[0]!.messageId)}/connector-result`))).toBe(true);
   await receipt.screenshot({ path: test.info().outputPath("gmail-message-card.png") });
+  await card.getByText("482913", { exact: false }).hover();
+  await page.waitForTimeout(200);
+  await receipt.screenshot({ path: test.info().outputPath("gmail-message-card-hover.png") });
   // Clicking the email opens it in Gmail; the card's own links and toggles do only their own thing.
   await page.evaluate(() => {
     const opened: string[] = [];
