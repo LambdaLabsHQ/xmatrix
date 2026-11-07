@@ -1,7 +1,9 @@
 # Norn host: comparison without dispatch
 
-Status: design only. No observer, production cohort, database table, dispatcher
-or permission has been enabled. This specifies the first step of the
+Status: an [operator-driven PG journal](../architecture/norn-shadow-comparison.md)
+implements the first exact-execution-receipt mapping. Automatic observers,
+production cohorts, additional source mappings and dispatch remain disabled.
+This specifies the first step of the
 [host migration](coordination-language.md#incremental-migration), before any
 existing mechanism is replaced.
 
@@ -54,8 +56,9 @@ Intent recording does not produce a delivery acknowledgement. Inputs that would
 require a hypothetical recipient to answer remain unavailable unless the
 selected existing path really performed the corresponding interaction. Missing
 evidence is not a negative answer, `Done`, `Declined` or an authorization to
-retry. A candidate may consequently stay suspended even when the old path ends;
-that is a comparison result, not a reason to invent an input.
+retry. If the selected source ends while the candidate still needs an input,
+record an incomplete comparison and clear its private continuation. The missing
+input is a comparison result, not a reason to invent an answer.
 
 ## Observation identity and time
 
@@ -105,8 +108,8 @@ parser changes or current library contents cannot move saved node references.
 
 ## Proposed records and comparison receipts
 
-The PG schema and migrations remain implementation work. These are logical
-records, not claims that existing tables implement them:
+The first journal schema is implemented for the bounded execution-receipt
+mapping; broader source mappings remain work. The logical records are:
 
 - **Admission:** scope and owner references, source identity/generation,
   pinned code/dependencies and ABI, input mapping, starting fact/cursor cut,

@@ -13,10 +13,10 @@ async function hash(value: unknown): Promise<string> {
 /** The caller must authorize current Channel access in this same transaction. */
 export async function queryMessageExecutions(tx: DatabaseTransaction, input: {
   spaceId: string; channelId: string; messageIds: readonly string[]; limit: number;
-  position?: [string, string] | null; runId?: string; viewerUserId?: string;
+  position?: [string, string] | null; runId?: string; viewerUserId?: string; bindingId?: string;
 }): Promise<{ records: SerializedAgentMessageExecution[]; next: [string, string] | null }> {
   if (input.position === null) return { records: [], next: null };
-  const rows = await tx.query<QueryResultRow>({ name: "runtime_message_execution_query_v5", text: `SELECT report.*,
+  const rows = await tx.query<QueryResultRow>({ name: "runtime_message_execution_query_v6", text: `SELECT report.*,
       reply.message_id AS final_reply_message_id,reply.sent_at AS final_reply_at,run.owner_user_id,
       run.status AS run_status,COALESCE(source.invocation_input_version,source.entity_version) AS source_input_version,
       to_char(report.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
@@ -42,9 +42,10 @@ export async function queryMessageExecutions(tx: DatabaseTransaction, input: {
       AND report.expires_at>clock_timestamp()
       AND ($4::timestamptz IS NULL OR (report.created_at,report.binding_id)>($4::timestamptz,$5::text))
       AND ($7::text IS NULL OR report.run_id=$7)
+      AND ($8::text IS NULL OR report.binding_id=$8)
     ORDER BY report.created_at,report.binding_id LIMIT $6`, values: [input.spaceId, input.channelId,
       input.messageIds, input.position?.[0] ?? null, input.position?.[1] ?? null, input.limit + 1,
-      input.runId ?? null], maxRows: input.limit + 1 });
+      input.runId ?? null, input.bindingId ?? null], maxRows: input.limit + 1 });
   const page = rows.slice(0, input.limit);
   const last = page.at(-1);
   return { records: page.map(row => ({

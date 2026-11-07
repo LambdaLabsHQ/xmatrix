@@ -183,7 +183,9 @@ global execution singleton is unnecessary.
 The first stage is specified in [comparison without dispatch](norn-shadow-comparison.md):
 separate observation, candidate evaluation and comparison records, with no
 candidate action transport and explicit causal evidence/authority-time rules.
-It remains a design; no production observer or cohort is enabled.
+The first [operator-driven PG journal](../architecture/norn-shadow-comparison.md)
+supports an exact execution-receipt mapping. No automatic production observer
+or cohort is enabled.
 
 1. Compare a non-dispatching candidate against selected existing reminders or a
    release-verification chain. Only the existing path executes work during this

@@ -339,6 +339,9 @@ export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRouting
 export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
 
 export { PostgresMessageAskRepository, readMessageAsks } from "./message-asks.js";
+export { PostgresNornShadowRepository } from "./norn-shadow.js";
+export { NornShadowError } from "./norn-shadow-values.js";
+export type { NornShadowEvaluator, ShadowEvidence, ShadowSelection, ShadowTransition } from "./norn-shadow-values.js";
 export { PostgresQuotaRetryRepository, assertQuotaRetryAdmission, type QuotaRetryWork } from "./agent-quota-retry.js";
 
 export { PostgresStripeAccountRepository, type StripeAccountGrant,

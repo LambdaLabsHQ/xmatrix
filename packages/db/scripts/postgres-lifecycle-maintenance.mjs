@@ -4,6 +4,7 @@ import process from "node:process";
 import { Client } from "pg";
 
 import { runIfInvoked, withClient, withClientTransaction } from "./cli.mjs";
+import { nornShadowLifecycleSql } from "../dist/norn-shadow-lifecycle.js";
 
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -145,7 +146,9 @@ async function readSnapshot(client) {
 }
 
 async function deleteBatch(client, relation, limit) {
-  const statement = relation === "retained-outbox"
+  const statement = relation === "norn-shadow"
+    ? nornShadowLifecycleSql
+    : relation === "retained-outbox"
     ? `WITH retained AS MATERIALIZED (
         SELECT ctid FROM data.outbox WHERE status='pending' AND attempts=0 AND lease_until IS NULL
           AND available_at<now()-interval '35 days' AND created_at<now()-interval '35 days'
@@ -201,7 +204,7 @@ async function deleteBatch(client, relation, limit) {
   if (!statement) throw new Error("Unsupported lifecycle relation");
   // One statement is its own transaction. The runner is an ocean away from the
   // origin, so a BEGIN and COMMIT around it would triple each batch's round trips.
-  const result = await client.query(statement, [limit]);
+  const result = await client.query(statement, relation === "norn-shadow" ? [limit,null] : [limit]);
   return result.rowCount ?? result.rows.length;
 }
 
@@ -212,8 +215,8 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   await client.query("SET lock_timeout = '2s'");
   const before = await snapshot(client);
   const startedAt = monotonicNow();
-  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
-  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
+  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0, nornShadow: 0 };
+  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0, nornShadow: 0 };
   if (!options.dryRun) {
     let pending = [
       { relation: "idempotency", key: "idempotency" },
@@ -226,6 +229,8 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       { relation: "auth-session", key: "authSession" },
       // Every reader already ignores expired replays; this only frees their rows.
       { relation: "scoped-command-replay", key: "scopedCommandReplay" },
+      // Close ended sources; evidence expiry deletes their comparison journals.
+      { relation: "norn-shadow", key: "nornShadow" },
     ];
     // Each round gives every relation with rows left one batch, so the shared
     // budget is split between them: a relation that came last in a run-each-
@@ -259,6 +264,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
     deletedExpiredScopedCommandReplays: deleted.scopedCommandReplay,
     deletedRetainedOutboxRows: deleted.retainedOutbox,
     deletedExpiredAuthSessions: deleted.authSession,
+    maintainedNornComparisons: deleted.nornShadow,
     batches: Object.values(batches).reduce((sum, count) => sum + count, 0),
     batchesByRelation: batches,
     elapsedMs: Math.max(0, monotonicNow() - startedAt),

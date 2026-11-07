@@ -4,6 +4,7 @@
   "private": true,
   "license": "FSL-1.1-ALv2",
   "scripts": {
+    "vendor:norn": "node scripts/vendor-norn-core.mjs",
     "jev:evaluate": "pnpm --silent --filter @xmatrix/decision-model evaluate",
     "dev": "turbo dev",
     "dev:stack": "node scripts/dev-stack.mjs",

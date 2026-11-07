@@ -7,8 +7,8 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 
 export interface CiphertextEnvelope {
   algorithm: "AES-GCM";
-  /** What the ciphertext is bound to: an owner's catalog row, or a Space secret. */
-  keyId: "secret-authority:v1" | "space-secret:v1";
+  /** Domain-separated owner catalog, Space secret or private comparison state. */
+  keyId: "secret-authority:v1" | "space-secret:v1" | "norn-shadow:v1";
   iv: string;
   ciphertext: string;
 }
@@ -89,6 +89,17 @@ export async function decryptSecretValue(material: string, row: QueryResultRow):
 export async function encryptSpaceSecretValue(material: string, spaceId: string, secretRef: string,
   version: number, value: string): Promise<CiphertextEnvelope> {
   return encrypt(material, "space-secret:v1", spaceId, secretRef, version, value);
+}
+
+/** Private comparison state is domain-, Space-, admission- and revision-bound. */
+export async function sealNornComparison(material: string, spaceId: string, comparisonId: string,
+  revision: number, value: string): Promise<CiphertextEnvelope> {
+  return encrypt(material, "norn-shadow:v1", spaceId, comparisonId, revision, value);
+}
+
+export async function openNornComparison(material: string, row: QueryResultRow): Promise<string> {
+  return decrypt(material, envelopeOf(row, ["norn-shadow:v1"]), String(row.space_id),
+    String(row.comparison_id), Number(row.revision));
 }
 
 /** A row of data.space_secrets. One moved from an owner's catalog keeps its

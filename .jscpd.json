@@ -203,6 +203,7 @@
     "**/release/**",
     "**/coverage/**",
     "**/pnpm-lock.yaml",
+    "packages/hub/src/vendor/norn/**",
     "apps/android/app/src/main/assets/xmatrix-web/**",
     "packages/db/migrations/**",
     "apps/android/gradlew",
