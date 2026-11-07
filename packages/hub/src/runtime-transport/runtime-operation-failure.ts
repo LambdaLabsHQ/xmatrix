@@ -62,8 +62,19 @@ export class RuntimeAuthorityOperationError extends Error {
     const authorityReason = label(value.reason), commandType = label(value.commandType);
     (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status,
-        ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}) });
+        ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}),
+        ...leaseTimingDiagnostic(value) });
   }
+}
+
+/** Fixed durations only; never copy an authority's arbitrary diagnostic object. */
+function leaseTimingDiagnostic(value: Record<string, unknown>): Record<string, number> {
+  if (value.code !== "machine_command_stale_lease" || !value.leaseTiming || typeof value.leaseTiming !== "object") return {};
+  const timing = value.leaseTiming as Record<string, unknown>;
+  return Object.fromEntries(["leaseWindowMs", "leaseExpiredForMs", "commandAgeMs"].flatMap(key => {
+    const ms = timing[key], max = key === "leaseWindowMs" ? 60_000 : 86_400_000;
+    return typeof ms === "number" && Number.isInteger(ms) && ms >= 0 && ms <= max ? [[key, ms]] : [];
+  }));
 }
 
 /**
@@ -87,8 +98,9 @@ const rejections = new WeakMap<object, RuntimeAuthorityOperationError>();
 
 function authorityRejection(error: object): RuntimeAuthorityOperationError | undefined {
   if (error instanceof ControlError) {
-    const { reason, commandType } = error as ControlError & { reason?: unknown; commandType?: unknown };
-    const body = { code: error.code, retryable: error.retryable, reason, commandType };
+    const { reason, commandType, leaseTiming } = error as ControlError & {
+      reason?: unknown; commandType?: unknown; leaseTiming?: unknown };
+    const body = { code: error.code, retryable: error.retryable, reason, commandType, leaseTiming };
     return Object.hasOwn(APPROVAL_MESSAGES, error.code)
       ? new RuntimeApprovalOperationError(error.name, error.status, body)
       : new RuntimeAuthorityOperationError(error.name, error.status, body);

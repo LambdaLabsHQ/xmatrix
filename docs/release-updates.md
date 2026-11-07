@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Expired Machine leases retain their timing
+
+HUB-7F reports expired harness-action renewals, but the refusal alone could not
+separate delayed initial admission from a later heartbeat gap. The existing
+locked command read now supplies a database observation clock, and the single
+rejection log keeps the grant window, expiry lateness and command age as bounded
+millisecond durations. Raw timestamps, identities and payloads stay private;
+socket replies and all lease fences are unchanged. This adds missing evidence,
+not a confirmed fix of the underlying delay. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this diagnostic change.
+
+
 ## Unreleased: personal browser history stays with its signed-in user
 
 Input and search history used a Space-only browser key, so signing into the

@@ -1,6 +1,7 @@
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY } from "@xmatrix/protocol";
 import { PostgresMachineControlRepository, readHarnessActionStatus, readRecentHarnessActions } from "../dist/index.js";
 
 
@@ -38,8 +39,10 @@ integration("harness actions need the owner and a capable daemon, answer exactly
 
     const requestId = id();
     await issue(requestId);
+    const requestedAt = (await client.query("SELECT created_at FROM data.machine_daemon_commands WHERE command_id=$1",
+      [requestId])).rows[0].created_at.toISOString();
     assert.deepEqual(await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId: requestId }),
-      { controlId: requestId, presetId: "claude", action: "update", status: "queued" });
+      { controlId: requestId, presetId: "claude", action: "update", status: "queued", requestedAt });
     assert.equal((await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "intruder",
       controlId: requestId })).status, "missing");
 
@@ -47,6 +50,31 @@ integration("harness actions need the owner and a capable daemon, answer exactly
       principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
     assert.equal(claimed.commands.length, 1);
     assert.equal((await readHarnessActionStatus(session, { requestId: randomUUID(), ownerUserId: "owner", controlId: requestId })).status, "running");
+    // HUB-7F: distinguish delayed first admission from a gap after renewal,
+    // using the database clock even when the caller's clock is wrong.
+    for (const [windowMs, expiredMs] of [[10_000, 2_000], [60_000, 4_000]]) {
+      await client.query(`WITH stamp AS (SELECT clock_timestamp() AS at)
+        UPDATE data.machine_daemon_commands SET created_at=stamp.at-interval '120 seconds',
+          updated_at=stamp.at-(($2::integer+$3::integer)*interval '1 millisecond'),
+          lease_until=stamp.at-($3::integer*interval '1 millisecond')
+        FROM stamp WHERE command_id=$1`, [requestId, windowMs, expiredMs]);
+      await assert.rejects(controls.command({ ...machine, commandId: randomUUID(), action: "renew",
+        principal, connectionEpoch: connected.connectionEpoch, controlId: requestId,
+        relayLease: claimed.commands[0].payload.relayLease, payload: {},
+        at: "2099-01-01T00:00:00.000Z" }), error => {
+        assert.equal(error.code, "machine_command_stale_lease");
+        assert.equal(error.reason, "renew.expired");
+        assert.equal(error.commandType, "harness_action");
+        assert.equal(error.leaseTiming?.leaseWindowMs, windowMs);
+        assert.ok(error.leaseTiming.leaseExpiredForMs >= expiredMs && error.leaseTiming.leaseExpiredForMs < expiredMs+5_000);
+        assert.ok(error.leaseTiming.commandAgeMs >= 120_000 && error.leaseTiming.commandAgeMs < 125_000);
+        return true;
+      });
+      const refused = (await client.query(`SELECT status, lease_until<clock_timestamp() AS expired,
+        result_json FROM data.machine_daemon_commands WHERE command_id=$1`, [requestId])).rows[0];
+      assert.deepEqual(refused, { status: "leased", expired: true, result_json: null },
+        "diagnosis must not renew or complete expired work");
+    }
     const complete = result => controls.command({ ...machine, commandId: randomUUID(), action: "complete",
       principal, connectionEpoch: connected.connectionEpoch, controlId: requestId,
       eventType: "machine_harness_action_result", relayLease: claimed.commands[0].payload.relayLease,
@@ -63,7 +91,7 @@ integration("harness actions need the owner and a capable daemon, answer exactly
     const stored = (await client.query("SELECT metadata_json->'harnesses' AS h FROM data.machine_daemons WHERE daemon_id=$1",
       [machine.daemonId])).rows[0].h;
     assert.equal(stored.capturedAt, capturedAt);
-    assert.deepEqual(stored.items, [result.item, { id: "goose", installed: false, probeStatus: "missing" }]);
+    assert.deepEqual(stored.items, [{ ...result.item, observedAt: status.completedAt }, { id: "goose", installed: false, probeStatus: "missing" }]);
 
     // A failed action reports a bounded message and leaves the inventory alone.
     const failedId = id();
@@ -88,14 +116,14 @@ integration("harness actions need the owner and a capable daemon, answer exactly
     assert.equal(none.commands.length, 0);
 
     // A downgraded daemon cannot claim a Cursor update issued by a safe daemon.
-    await connect(["machine_harness_action_v1", "machine_harness_cursor_launcher_v2"]);
+    await connect(["machine_harness_action_v1", MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY]);
     const cursorId = id();
     await issue(cursorId, { presetId: "cursor" });
     const old = await connect(["machine_harness_action_v1"]);
     const blocked = await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
       principal, connectionEpoch: old.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
     assert.equal(blocked.commands.length, 0);
-    const safe = await connect(["machine_harness_action_v1", "machine_harness_cursor_launcher_v2"]);
+    const safe = await connect(["machine_harness_action_v1", MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY]);
     const allowed = await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
       principal, connectionEpoch: safe.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
     assert.equal(allowed.commands.length, 1);
@@ -103,12 +131,12 @@ integration("harness actions need the owner and a capable daemon, answer exactly
 
     // Likewise, a downgraded daemon never leases an uninstall it cannot parse.
     const uninstallId = id();
-    await connect(["machine_harness_action_v1", "machine_harness_uninstall_v2"]);
+    await connect(["machine_harness_action_v1", MACHINE_HARNESS_UNINSTALL_CAPABILITY]);
     await issue(uninstallId, { action: "uninstall" });
     const older = await connect(["machine_harness_action_v1"]);
     assert.equal((await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
       principal, connectionEpoch: older.connectionEpoch, commandTypes: ["harness_action"], payload: {} })).commands.length, 0);
-    const capable = await connect(["machine_harness_action_v1", "machine_harness_uninstall_v2"]);
+    const capable = await connect(["machine_harness_action_v1", MACHINE_HARNESS_UNINSTALL_CAPABILITY]);
     const leased = await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
       principal, connectionEpoch: capable.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
     assert.deepEqual(leased.commands.map(command => command.payload.requestId), [uninstallId]);

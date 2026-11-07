@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Expired Machine command leases report bounded grant-window, lateness and command-age
+durations from PostgreSQL's clock, distinguishing delayed admission from a later
+renewal gap without changing lease authority or socket replies. See
+[Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
 Norn has an operator-driven, non-dispatching PostgreSQL comparison journal for
 one explicitly selected Agent execution binding. It stores pinned encrypted
 candidate state and compares exact final receipts without changing the source

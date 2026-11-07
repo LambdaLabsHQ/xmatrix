@@ -112,6 +112,8 @@ try {
     "packages/db/test/client-postgres.test.mjs",
     // Machine advisory scopes and runtime heads need real live lock-wait evidence.
     "packages/db/test/machine-control-lock-postgres.test.mjs",
+    // Expired harness leases retain database-clock evidence without extending authority.
+    "packages/db/test/machine-harness-action-postgres.test.mjs",
     "packages/db/test/runtime-head-deadlock-postgres.test.mjs",
     // Lost-response regressions must execute their actual authorization SQL.
     "packages/db/test/catalog-read-recovery-postgres.test.mjs",

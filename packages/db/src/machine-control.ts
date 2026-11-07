@@ -92,7 +92,8 @@ export class MachineControlError extends ControlError {
 /** Which lease fence refused a daemon frame, and on what command type: static
  * labels only, logged with the rejection so a stale lease names its cause. */
 export class MachineStaleLeaseError extends MachineControlError {
-  constructor(message: string, readonly reason: string, readonly commandType?: string) {
+  constructor(message: string, readonly reason: string, readonly commandType?: string,
+    readonly leaseTiming?: { leaseWindowMs: number; leaseExpiredForMs: number; commandAgeMs: number }) {
     super("machine_command_stale_lease", 409, message);
   }
 }
@@ -1411,7 +1412,7 @@ export class PostgresMachineControlRepository {
     const leaseOwner = text(lease.leaseOwner, "relayLease.leaseOwner", 700);
     if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineStaleLeaseError(
       "Machine lease belongs to another Daemon epoch", `${action}.epoch`);
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *,
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *, clock_timestamp() AS lease_observed_at,
       lease_until>clock_timestamp() AND (command_type<>'quota_probe' OR expires_at>clock_timestamp()) AS lease_live
       FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2 AND machine_id=$3 FOR UPDATE`, values: [controlId, ownerUserId, machineId], maxRows: 1 });
     const command = rows[0];
@@ -1423,8 +1424,16 @@ export class PostgresMachineControlRepository {
           : Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ? "version"
             : fence === "live" && command.lease_live !== true ? "expired" : undefined;
     if (stale) {
+      const timestamps = [command.lease_until, command.updated_at, command.created_at, command.lease_observed_at]
+        .map(value => value instanceof Date ? value.getTime() : typeof value === "string" ? Date.parse(value) : NaN);
+      const [until, updated, created, observed] = timestamps as [number, number, number, number];
+      const bounded = (ms: number, max = 86_400_000) => Math.min(max, Math.max(0, Math.round(ms)));
+      const leaseTiming = stale === "expired" && timestamps.every(Number.isFinite) ? {
+        leaseWindowMs: bounded(until-updated, 60_000), leaseExpiredForMs: bounded(observed-until),
+        commandAgeMs: bounded(observed-created),
+      } : undefined;
       throw new MachineStaleLeaseError("Machine command lease is stale", `${action}.${stale}`,
-        String(command.command_type));
+        String(command.command_type), leaseTiming);
     }
     return { command, controlId, leaseOwner };
   }
