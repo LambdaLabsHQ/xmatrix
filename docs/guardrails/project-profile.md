@@ -30,6 +30,12 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Norn has an operator-driven, non-dispatching PostgreSQL comparison journal for
+one explicitly selected Agent execution binding. It stores pinned encrypted
+candidate state and compares exact final receipts without changing the source
+Run. No automatic production cohort or dispatch is enabled. See
+[comparison journal](../architecture/norn-shadow-comparison.md).
+
 Wherever a page's schedules are listed (`page automation list`, `page read`,
 Schedules), each says what its ten latest runs produced, as `last 10: 4 PR ·
 3 page · 2 none · 1 failed to start`. Each run's outcome is read from its own

@@ -1,0 +1,6 @@
+// xmatrix-shadow:1. Only references to an exact final declaration, never its
+// private message body or proof that the work was correct.
+type report = {receipt: string, run: string, execution: string, declaration: string}
+
+// No external facts or streams are admitted by this first mapping.
+// Unsupported built-in effects remain incomplete at the host boundary.

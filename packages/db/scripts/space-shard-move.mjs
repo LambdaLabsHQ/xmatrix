@@ -14,6 +14,7 @@ const VERIFY_PHASES = new Set(["caught_up", "final_copied"]);
 // Every table in data must be deliberately classified. A newly added table makes
 // the classification test fail until its shard semantics are decided.
 export const MOVABLE_SPACE_TABLES = Object.freeze([
+  "norn_shadow_comparisons", "norn_shadow_observations", "norn_shadow_transitions",
   "agent_message_executions",
   "blob_upload_intents",
   "channel_access",
