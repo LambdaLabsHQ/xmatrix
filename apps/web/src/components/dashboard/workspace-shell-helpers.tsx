@@ -1,5 +1,5 @@
 "use client";
-import { attachmentKind, decodeChannelSnapshot, extensionForMediaType, mediaTypeForName } from "@xmatrix/protocol";
+import { attachmentKind, channelPresenceInstances, decodeChannelSnapshot, extensionForMediaType, mediaTypeForName } from "@xmatrix/protocol";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, glideTimelineLanding, timelineLayoutMoved } from "./timeline-send-rise";
@@ -38,10 +38,9 @@ import {
 } from "./pointer-activation-guard";
 
 import {
-  channelMembersByPresence,
+  isChannelResidentPresence,
   isOlderThan,
   latestAgentWorkEvent,
-  memberPresence,
   presenceStatusLabel,
   relativeTime,
 } from "./workspace-shell-presence";
@@ -560,11 +559,11 @@ export function restoreTimelineScrollTop(scrollContainer: HTMLDivElement | null,
   scrollContainer.scrollTop = Math.min(scrollTop, scrollContainer.scrollHeight);
 }
 
+/** Whether the work dock draws an Agent over this Channel's tail: the same
+ * resident Instances buildAgentWorkItems lists. Read it from the live Channel
+ * (useRealtimeChannelValue): the catalog's copy carries no Instances. */
 export function channelHasAgentMembers(channel: ChannelSnapshot | null): boolean {
-  if (!channel) return false;
-  return channelMembersByPresence(channel).some(
-    (member) => memberPresence(channel, member).kind === "agent"
-  );
+  return channelPresenceInstances(channel?.presence).some(isChannelResidentPresence);
 }
 
 export function isTimelineNearBottom(scrollContainer: HTMLDivElement): boolean {
