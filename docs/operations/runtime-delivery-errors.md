@@ -186,3 +186,18 @@ PostgreSQL supplied no usable detail. For a repeated deadlock, compare the
 named query, waiting relation and wait cycle before changing lock order;
 the HTTP response remains a retryable `transaction_conflict` and no transaction
 or unknown commit is automatically replayed.
+
+HUB-7F expired Machine command leases retain three integer millisecond durations
+on the existing authority rejection: `leaseWindowMs`, `leaseExpiredForMs`, and
+`commandAgeMs`. The exact locked command read supplies the PostgreSQL observation
+clock; caller and Worker clocks are not used. The grant window is the difference
+between the lease deadline and its last update (approximately 10 seconds at
+modern admission, 30 seconds at legacy admission, 60 seconds after renewal).
+The window is capped at 60 seconds and the other durations at 24 hours; missing
+timestamps omit all three. This distinguishes delayed admission from a later
+heartbeat gap without storing a new renewal counter. No timestamps, identities,
+command payloads or arbitrary diagnostic fields are reported, and durations stay
+out of socket replies. On recurrence, compare the window, lateness and command
+age with the static refusal reason and command type. These observations do not
+identify the underlying scheduler or transport delay. Expired leases remain
+refused, and command replay and completion fencing are unchanged.

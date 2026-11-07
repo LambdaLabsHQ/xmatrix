@@ -123,6 +123,28 @@ test("XMATRIX-HUB-7F: a stale lease logs which fence refused it and on what comm
   assert.equal(plain.commandType, undefined);
 });
 
+test("HUB-7F lease timing is logged once, bounded and absent from the socket reply", async () => {
+  const leaseTiming = { leaseWindowMs: 10_000, leaseExpiredForMs: 2_000, commandAgeMs: 120_000 };
+  const { frame, logged } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+    { reason: "renew.expired", commandType: "harness_action", leaseTiming }));
+  assert.equal(logged.error.length, 1);
+  assert.deepEqual(logged.error[0][1], { ...frame.failure, authorityCode: "machine_command_stale_lease",
+    operation: "Error", status: 409, authorityReason: "renew.expired", commandType: "harness_action", ...leaseTiming });
+  assert.doesNotMatch(JSON.stringify(frame), /leaseWindow|leaseExpired|commandAge/);
+  for (const [unsafe, expected] of [["private", {}], [null, {}],
+    [{ ...leaseTiming, leaseWindowMs: "10000", secret: "private" }, { leaseExpiredForMs: 2_000, commandAgeMs: 120_000 }],
+    [{ leaseWindowMs: -1, leaseExpiredForMs: Infinity, commandAgeMs: NaN }, {}],
+    [{ leaseWindowMs: 60_001, leaseExpiredForMs: 86_400_001, commandAgeMs: 1.5 }, {}]]) {
+    const { logged: rejected } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+      { leaseTiming: unsafe }));
+    const detail = rejected.error[0][1];
+    assert.equal(detail.leaseWindowMs, expected.leaseWindowMs);
+    assert.equal(detail.leaseExpiredForMs, expected.leaseExpiredForMs);
+    assert.equal(detail.commandAgeMs, expected.commandAgeMs);
+    assert.doesNotMatch(JSON.stringify(rejected.error), /private|secret/);
+  }
+});
+
 test("a permanent authority rejection never becomes automatically retryable", async () => {
   const failure = new RuntimeAuthorityOperationError("append-message", 403, {
     code: "agent_run_forbidden", retryable: true, diagnosticId: "Bearer private-token",
