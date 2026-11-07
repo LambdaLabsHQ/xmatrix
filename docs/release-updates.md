@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: the last message scrolls clear of the Agents at work again
+
+Since Instances became records of their own, the Conversations view asked a
+Channel list that no longer holds them whether an Agent was in the Channel,
+always heard no, and kept no room under the last message: the floating Agent
+card covered it and it could not be scrolled out from under it. The timeline
+now asks the same live Instance store the card is drawn from. Beta Web only,
+no migration. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: ↑ in an empty composer lists what was sent before
 
 The composer now keeps what the reader sent in each Space, on this device.

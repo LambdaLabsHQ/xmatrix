@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { FaceSpaceContext } from "./face";
 import { realtimeCollectionAny } from "./realtime-collection";
-import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
+import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelValue } from "./realtime-channels";
 import { PresentedChannelTailContext } from "./presented-channel-tail";
 import { channelReferences, MessageReferenceCatalogProvider, type ChannelReference, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
@@ -932,6 +932,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     token, canUseSelectedChannel && Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
       ["owner", "admin"].includes(transferSpaceRole(space, model.authenticatedUserId ?? "") || ""))));
 
+  // The dock reads Instances from the live store; the timeline keeps room for
+  // it from the same store, or the dock covers the last message.
+  const channelHasDockedAgents = useRealtimeChannelValue(selectedChannel, channelHasAgentMembers,
+    model.realtimeChannels);
+
   /* The timeline, the work dock and the composer are memoized, and this shell
      renders for every message and read: handlers that stay the same let those
      renders pass them by. */
@@ -1255,7 +1260,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         )}
         highlightMessageId={highlightedMessageId ?? undefined}
         timeline={timeline}
-        hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
+        hasWorkDock={channelHasDockedAgents || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
         hasChannels={channels.length > 0 || !channelsLoaded}
         hasOlderMessages={historyRenderAuthorized && hasOlderMessages}
         olderLoading={olderLoading}
