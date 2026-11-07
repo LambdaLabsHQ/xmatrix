@@ -105,6 +105,49 @@ test.describe("desktop channel selection", () => {
     await expectDraft(textarea, "third");
   });
 
+  test("↑ in an empty composer lists what was sent before, and Enter puts the highlighted one back", async ({ page }) => {
+    const textarea = await openTwoChannelWorkspace(page);
+    await fixtureJson(page, "send-message", new RegExp(`/api/xmatrix/channels/${E2E_CHANNEL.id}/messages$`, "u"),
+      { message: { messageId: "m-1" } }, { method: "POST" });
+
+    await textarea.focus();
+    for (const text of ["first", "second"]) {
+      await textarea.pressSequentially(text);
+      await page.keyboard.press("Enter");
+      await expectDraft(textarea, /^\u200B?$/u);
+    }
+
+    const history = page.getByTestId("composer-input-history");
+    const highlighted = history.locator('[role="option"][aria-selected="true"]');
+    await page.keyboard.press("ArrowUp");
+    await expect(history.getByRole("option")).toHaveText(["first", "second"]);
+    await expect(highlighted).toHaveText("second");
+    await page.keyboard.press("ArrowUp");
+    await expect(highlighted).toHaveText("first");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowDown");
+    await expect(history).toHaveCount(0);
+    await expectDraft(textarea, /^\u200B?$/u);
+
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("Enter");
+    await expect(history).toHaveCount(0);
+    await expectDraft(textarea, "first");
+    await expect.poll(async () => (await draftSelection(textarea)).selectionStart).toBe("first".length);
+
+    // A draft being written keeps its arrows.
+    await page.keyboard.press("ArrowUp");
+    await expect(history).toHaveCount(0);
+
+    await page.keyboard.press("Enter");
+    await expectDraft(textarea, /^\u200B?$/u);
+    await page.keyboard.press("ArrowUp");
+    await expect(highlighted).toHaveText("first");
+    await page.keyboard.press("Escape");
+    await expect(history).toHaveCount(0);
+  });
+
   test("draws a soft caret on one middle line with the hint chip and the attach button", async ({ page }) => {
     const textarea = await openTwoChannelWorkspace(page);
     await textarea.focus();

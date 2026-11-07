@@ -52,6 +52,10 @@ export type ComposerInputAuthorityProps = ComposerContextFields & {
   inputTrailing?: ReactNode;
   /** Controls after the send button (thread cancel). */
   afterSend?: ReactNode;
+  /** A list the composer shows in place of completion (input history); it takes the box's open panel shape. */
+  panel?: ReactNode;
+  /** Key handling before completion and Enter-to-send, for the `panel`'s own keys; true when it took the key. */
+  onKeyDownFirst?: (event: ComposerKeyEvent) => boolean;
   /** Extra key handling after shared completion/enter (e.g. attachment backspace). */
   onKeyDownExtra?: (event: ComposerKeyEvent) => void;
   boxClassName?: string;
@@ -117,6 +121,8 @@ function ComposerInputSurface({
   inputLeading,
   inputTrailing,
   afterSend,
+  panel,
+  onKeyDownFirst,
   onKeyDownExtra,
   boxClassName,
   onBoxPointerDown,
@@ -234,7 +240,7 @@ function ComposerInputSurface({
         fill
         className={cn(
           "app-composer-box app-material-liquid-pill relative min-w-0 flex-1 border border-input bg-card shadow-sm transition-all duration-200 focus-within:border-ring",
-          completion.isCompletionOpen && "app-composer-box-mentions-open",
+          (completion.isCompletionOpen || panel) && "app-composer-box-mentions-open",
           boxClassName
         )}
         onPointerDown={onBoxPointerDown}
@@ -262,6 +268,7 @@ function ComposerInputSurface({
           </div>
         )}
         {completion.renderOverlays()}
+        {panel}
         {/* One capsule: attach, text, actions and send share the glass. When
             the text wraps or a header shows, the same surface grows into a
             panel and the controls stay on its bottom edge. */}
@@ -293,6 +300,7 @@ function ComposerInputSurface({
             onPaste={onFieldPaste}
             disabled={disabled || !enabled}
             onKeyDown={(event) => {
+              if (onKeyDownFirst?.(event)) return;
               if (
                 handleComposerTextareaKeyDown(event, {
                   handleCompletionKeyDown: completion.handleCompletionKeyDown,
