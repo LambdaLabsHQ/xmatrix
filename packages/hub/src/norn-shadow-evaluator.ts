@@ -145,7 +145,10 @@ export const nornShadowEvaluator: NornShadowEvaluator = {
       advance(code,state.machine,1000);
       const control = state.machine.control;
       if (control.kind === "done") return result("outcome","candidate_completed","completed",state.coverage === "observed" ? "equivalent" : "incomplete");
-      if (control.kind === "failed") return result("outcome","candidate_failed","failed","unexpected");
+      if (control.kind === "failed") {
+        const expected = control.outcome.type === "variant" && ["TimedOut","Cancelled","Revoked"].includes(control.outcome.name);
+        return result("outcome","candidate_failed","failed",expected ? "intentional_difference" : "unexpected");
+      }
       if (control.kind === "report") {
         intent = { operation: "execution.handler_failed",digest: sha256(JSON.stringify(control.outcome)) };
         resume(state.machine,unit,now);

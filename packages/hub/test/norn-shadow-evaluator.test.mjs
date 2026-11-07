@@ -32,7 +32,9 @@ test("exclusive deadline wins at equality; an earlier recorded answer wins",() =
   late.step();
   const timeout = late.step(3600000,evidence);
   assert.equal(timeout.kind,"timeout"); assert.equal(timeout.disposition,"late");
-  assert.equal(late.step(3600001).state,"failed");
+  const final = late.step(3600001);
+  assert.equal(final.state,"failed");
+  assert.equal(final.classification,"intentional_difference","propagating the declared timeout is expected policy, not a runtime bug");
   const early = session("deadline"); early.step();
   assert.equal(early.step(3599999,evidence).kind,"wake");
   assert.equal(early.step(3600001).state,"completed");
