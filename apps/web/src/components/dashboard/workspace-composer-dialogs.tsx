@@ -134,6 +134,7 @@ import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/com
 import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHistoryEntry } from "./composer-input-history";
 import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
 import { isImeKeyDown } from "@/lib/ime-keydown";
+import { useAuth } from "@/lib/auth-context";
 
 import {
   type AgentTraceReplica,
@@ -359,12 +360,18 @@ export const Composer = memo(function Composer({
     [onDraftChange]
   );
   /** The input history while its list is open (composer-input-history.ts), with the highlighted entry. */
-  const [inputHistory, setInputHistory] = useState<{ entries: ComposerInputHistoryEntry[]; active: number } | null>(null);
+  const { user } = useAuth();
+  const userId = user?.id;
   const historySpaceId = channel?.spaceId ?? space?.id;
+  const [openedInputHistory, setInputHistory] = useState<{
+    userId: string | undefined; spaceId: string | undefined; entries: ComposerInputHistoryEntry[]; active: number;
+  } | null>(null);
+  const inputHistory = openedInputHistory?.userId === userId && openedInputHistory?.spaceId === historySpaceId
+    ? openedInputHistory : null;
   useEffect(() => {
     if (localDraft) setInputHistory(null);
   }, [localDraft]);
-  useEffect(() => setInputHistory(null), [invocationScope]);
+  useEffect(() => setInputHistory(null), [invocationScope, userId, historySpaceId]);
   function putInputHistoryEntry(entry: ComposerInputHistoryEntry) {
     setInputHistory(null);
     invocationDraftRef.current = { body: entry.body, bindings: structuredClone(entry.references) };
@@ -380,13 +387,13 @@ export const Composer = memo(function Composer({
     const field = fieldRef.current;
     if (!field || !writable) return false;
     const entries = inputHistory?.entries
-      ?? (event.key === "ArrowUp" ? readInputHistory(window.localStorage, historySpaceId) : []);
+      ?? (event.key === "ArrowUp" ? readInputHistory({ userId, spaceId: historySpaceId }) : []);
     const step = inputHistoryKey({ entries, active: inputHistory?.active ?? null, draft: localDraft,
       collapsed: field.selectionStart === field.selectionEnd, key: event.key });
     if (!step) return false;
     event.preventDefault();
     if (step.pick) putInputHistoryEntry(step.pick);
-    else setInputHistory(step.active === null ? null : { entries, active: step.active });
+    else setInputHistory(step.active === null ? null : { userId, spaceId: historySpaceId, entries, active: step.active });
     return true;
   }
   /** The attachment a picture line of the draft names, after its upload landed or its quality changed. */
@@ -966,7 +973,7 @@ export const Composer = memo(function Composer({
         ...(uploads.length ? { uploads } : {}),
       });
       handedOver = true;
-      rememberInput(window.localStorage, channel?.spaceId ?? space?.id, sentDraft, sentText);
+      rememberInput({ userId, spaceId: historySpaceId }, sentDraft, sentText);
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
     } finally {

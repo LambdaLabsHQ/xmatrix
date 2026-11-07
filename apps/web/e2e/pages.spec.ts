@@ -540,7 +540,7 @@ test("an `@` calling a live Instance names its conversation, since Instance name
   await browser.screenshot({ path: test.info().outputPath("instance-called.png") });
 
   // Someone else reading the page, or this reader elsewhere, sees the same chip, with whether the Instance is free.
-  await browser.evaluate(() => window.localStorage.removeItem("xmatrix.page-summons"));
+  await browser.evaluate(() => window.localStorage.clear());
   await browser.reload({ waitUntil: "domcontentloaded" });
   await browser.getByRole("button", { name: "Pages", exact: true }).first().click();
   const read = editor.getByTestId("page-instance-chip");
@@ -634,7 +634,8 @@ test.describe("on a phone", () => {
     await expect(browser.getByRole("status")).toHaveText(/codex is starting/u);
     await browser.screenshot({ path: test.info().outputPath("co-writing-phone.png") });
     // The one picked is the one the button offers next time.
-    expect(await browser.evaluate(() => window.localStorage.getItem("xmatrix.page-writer.space-personal"))).toBe("codex");
+    await browser.reload({ waitUntil: "domcontentloaded" });
+    await expect(browser.getByRole("button", { name: "Write with codex" })).toBeVisible();
   });
 
   test("an empty page being co-written asks for its first line and names who writes the next", async ({ page: browser }) => {

@@ -1,7 +1,7 @@
 import { expect, test } from "./fixtures";
 import type { Locator, Page } from "@playwright/test";
-import { fixtureJson } from "./in-page-api-fixtures";
-import { E2E_CHANNEL, E2E_SPACE, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { fixtureJson, fixtureRequests } from "./in-page-api-fixtures";
+import { E2E_CHANNEL, E2E_SPACE, installWorkspaceStubs, openWorkspaceWithStubs } from "./workspace-fixtures";
 import { draftSelection, expectDraft } from "./composer-draft";
 
 const EMPTY_COMPOSER_PASTE_SENTINEL = "\u200B";
@@ -33,6 +33,58 @@ async function openTwoChannelWorkspace(page: Page) {
   await expect(textarea).toBeVisible();
   return textarea;
 }
+
+// Space-only history has no provable author after an account switch.
+test("an empty composer never offers history with no recorded owner", async ({ page }) => {
+  await page.addInitScript(({ spaceId }) => {
+    localStorage.setItem(`xmatrix:input-history:${spaceId}`, JSON.stringify([
+      { body: "previous account private message", references: [] },
+    ]));
+  }, { spaceId: E2E_SPACE.id });
+  const textarea = await openTwoChannelWorkspace(page);
+  await textarea.focus();
+  await page.keyboard.press("ArrowUp");
+  await expect(page.getByTestId("composer-input-history")).toHaveCount(0);
+});
+
+test("changing accounts in the same Space hides the open history and restores only that reader's inputs", async ({ page }) => {
+  await page.addInitScript(() => { (window as unknown as Record<string, unknown>).__xmatrixDisableMockAuth = true; });
+  await installWorkspaceStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const signIn = (id: string) => fixtureJson(page, `history-reader-${id}`, "**/api/auth/get-session**", {
+    session: { token: id, expiresAt: new Date(Date.now() + 60_000).toISOString() },
+    user: { name: id, email: `${id}@xmatrix.test`, id },
+  }, { headers: { "set-auth-jwt": "test-jwt" } });
+  await signIn("e2e-user");
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  await fixtureJson(page, "history-send", new RegExp(`/api/xmatrix/channels/${E2E_CHANNEL.id}/messages$`, "u"),
+    { message: { messageId: "history-message" } }, { method: "POST" });
+  const field = page.locator(".composer-textarea").first();
+  const history = page.getByTestId("composer-input-history");
+  const send = async (text: string) => {
+    await field.fill(text);
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await expectDraft(field, /^\u200B?$/u);
+    await field.focus();
+    await page.keyboard.press("ArrowUp");
+    await expect(history.getByRole("option")).toHaveText([text]);
+  };
+  await send("Alice private input");
+  for (const id of ["other-reader", "e2e-user"]) {
+    const reads = (await fixtureRequests(page, "channel-catalog")).length;
+    await signIn(id);
+    await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await expect.poll(async () => (await fixtureRequests(page, "channel-catalog")).length).toBeGreaterThan(reads);
+    await expect(history).toHaveCount(0);
+    await field.focus();
+    await page.keyboard.press("ArrowUp");
+    if (id === "other-reader") {
+      await expect(history).toHaveCount(0);
+      await send("Bob input");
+    } else {
+      await expect(history.getByRole("option")).toHaveText(["Alice private input"]);
+    }
+  }
+});
 
 test("first tap on an empty composer shell shows a collapsed caret instead of selecting the paste sentinel", async ({
   page,

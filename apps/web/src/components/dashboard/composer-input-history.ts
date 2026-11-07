@@ -11,43 +11,31 @@ import {
   type ComposerReferenceBinding,
 } from "./composer-invocation-bindings";
 import { draftPictures } from "./inline-attachments";
+import { userSpaceLocalState, type UserSpaceLocalScope } from "@/lib/user-space-local-state";
 
 /** A sent draft as the composer shows it again: its text and the channels and pages picked in it. */
 export type ComposerInputHistoryEntry = { body: string; references: ComposerReferenceBinding[] };
 
-type HistoryStore = Pick<Storage, "getItem" | "setItem">;
-
-const INPUT_HISTORY_PREFIX = "xmatrix:input-history:";
 export const INPUT_HISTORY_LIMIT = 50;
+const history = userSpaceLocalState<ComposerInputHistoryEntry[]>("input-history", (stored) =>
+  Array.isArray(stored) ? stored.filter(isEntry).slice(0, INPUT_HISTORY_LIMIT) : undefined);
 
-export function readInputHistory(store: HistoryStore | null, spaceId: string | null | undefined):
+export function readInputHistory(scope: UserSpaceLocalScope):
   ComposerInputHistoryEntry[] {
-  if (!store || !spaceId) return [];
-  try {
-    const stored = JSON.parse(store.getItem(`${INPUT_HISTORY_PREFIX}${spaceId}`) ?? "[]");
-    if (!Array.isArray(stored)) return [];
-    return stored.filter(isEntry);
-  } catch {
-    return [];
-  }
+  return history.read(scope) ?? [];
 }
 
 /**
  * Remembers a sent draft. Its pictures are left out, since their files went with the message; an Agent picked in
  * it is kept as the written `@name`, resolved again when it is sent, never bound to an Instance that may be gone.
  */
-export function rememberInput(store: HistoryStore | null, spaceId: string | null | undefined,
+export function rememberInput(scope: UserSpaceLocalScope,
   draft: ComposerInvocationDraft | undefined, body: string): void {
-  if (!store || !spaceId) return;
   const entry = historyEntryOf(draft, body);
   if (!entry) return;
-  const next = [entry, ...readInputHistory(store, spaceId).filter((item) => item.body !== entry.body)]
+  const next = [entry, ...readInputHistory(scope).filter((item) => item.body !== entry.body)]
     .slice(0, INPUT_HISTORY_LIMIT);
-  try {
-    store.setItem(`${INPUT_HISTORY_PREFIX}${spaceId}`, JSON.stringify(next));
-  } catch {
-    // A full or blocked store only loses the history, never the send.
-  }
+  history.write(scope, next);
 }
 
 export function historyEntryOf(draft: ComposerInvocationDraft | undefined, body: string):

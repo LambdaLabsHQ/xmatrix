@@ -4,6 +4,7 @@
  * the searches a reader ran recently. Pure; no React.
  */
 import type { AppView } from "./workspace-shell-navigation";
+import { userSpaceLocalState, type UserSpaceLocalScope } from "@/lib/user-space-local-state";
 
 /** Who wrote it: a person by user id, an Agent by name (its Instances share no author id). */
 export type SearchAuthor =
@@ -78,30 +79,23 @@ export function searchRequestLabel(request: SearchRequest): string {
   ].filter(Boolean).join(" ");
 }
 
-const RECENT_SEARCHES_PREFIX = "xmatrix:recent-searches:";
 const RECENT_SEARCHES_LIMIT = 6;
+const recentSearches = userSpaceLocalState<string[]>("recent-searches", (stored) =>
+  Array.isArray(stored) ? stored.filter((item): item is string => typeof item === "string")
+    .slice(0, RECENT_SEARCHES_LIMIT) : undefined);
 
 /** The reader's recent searches in this Space, newest first. Kept on this device only. */
-export function readRecentSearches(spaceId: string | null): SearchRequest[] {
-  if (!spaceId || typeof window === "undefined") return [];
-  try {
-    const stored = JSON.parse(window.localStorage.getItem(`${RECENT_SEARCHES_PREFIX}${spaceId}`) ?? "[]");
-    if (!Array.isArray(stored)) return [];
-    return stored
-      .filter((item): item is string => typeof item === "string")
-      .map((item) => searchRequestFromParams(new URLSearchParams(item)))
-      .filter(searchIsRunnable);
-  } catch {
-    return [];
-  }
+export function readRecentSearches(scope: UserSpaceLocalScope): SearchRequest[] {
+  return (recentSearches.read(scope) ?? [])
+    .map((item) => searchRequestFromParams(new URLSearchParams(item))).filter(searchIsRunnable);
 }
 
-export function rememberRecentSearch(spaceId: string | null, request: SearchRequest): void {
-  if (!spaceId || typeof window === "undefined" || !searchIsRunnable(request)) return;
+export function rememberRecentSearch(scope: UserSpaceLocalScope, request: SearchRequest): void {
+  if (!searchIsRunnable(request)) return;
   const key = searchRequestKey(request);
-  const next = [key, ...readRecentSearches(spaceId).map(searchRequestKey).filter((item) => item !== key)]
+  const next = [key, ...readRecentSearches(scope).map(searchRequestKey).filter((item) => item !== key)]
     .slice(0, RECENT_SEARCHES_LIMIT);
-  window.localStorage.setItem(`${RECENT_SEARCHES_PREFIX}${spaceId}`, JSON.stringify(next));
+  recentSearches.write(scope, next);
 }
 
 /**
