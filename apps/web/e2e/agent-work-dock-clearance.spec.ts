@@ -111,6 +111,12 @@ async function tailGeometry(page: Page) {
   });
 }
 
+/** How far the dock starts below the last message; negative when it covers it. */
+async function dockMargin(page: Page) {
+  const geometry = await tailGeometry(page);
+  return (geometry.dockTop ?? Number.NEGATIVE_INFINITY) - geometry.lastRowBottom;
+}
+
 // One agent leaves a narrow strip; several widen it past the whole button.
 for (const agentCount of [1, 3]) {
   test(`the work dock stays clear of the last message with ${agentCount} online agent(s)`, async ({
@@ -166,12 +172,7 @@ for (const agentCount of [1, 3]) {
    scrolled out from under it. */
 test("the work dock stays clear of the last message when its Instances arrive as records", async ({ page }) => {
   await openChannelWithAgents(page, 1, [], { asRecords: true });
-  await expect
-    .poll(async () => {
-      const geometry = await tailGeometry(page);
-      return (geometry.dockTop ?? Number.NEGATIVE_INFINITY) - geometry.lastRowBottom;
-    })
-    .toBeGreaterThan(0);
+  await expect.poll(() => dockMargin(page)).toBeGreaterThan(0);
 });
 
 test("a composer that grows pushes the dock up and the timeline tail with it", async ({ page }) => {
@@ -203,12 +204,7 @@ test("a composer that grows pushes the dock up and the timeline tail with it", a
      the tail has to have followed. Poll the margin rather than a single sample
      so a mid-relayout frame cannot decide the verdict either way. Without the
      fix this margin sits at -91px and never converges. */
-  await expect
-    .poll(async () => {
-      const geometry = await tailGeometry(page);
-      return (geometry.dockTop ?? Number.NEGATIVE_INFINITY) - geometry.lastRowBottom;
-    })
-    .toBeGreaterThan(0);
+  await expect.poll(() => dockMargin(page)).toBeGreaterThan(0);
 
   const lastRow = page.locator(".app-message-row").last();
   await lastRow.hover();
