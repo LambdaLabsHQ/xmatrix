@@ -56,8 +56,9 @@ Intent recording does not produce a delivery acknowledgement. Inputs that would
 require a hypothetical recipient to answer remain unavailable unless the
 selected existing path really performed the corresponding interaction. Missing
 evidence is not a negative answer, `Done`, `Declined` or an authorization to
-retry. A candidate may consequently stay suspended even when the old path ends;
-that is a comparison result, not a reason to invent an input.
+retry. If the selected source ends while the candidate still needs an input,
+record an incomplete comparison and clear its private continuation. The missing
+input is a comparison result, not a reason to invent an answer.
 
 ## Observation identity and time
 

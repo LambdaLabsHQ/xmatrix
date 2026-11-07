@@ -4,6 +4,7 @@ import process from "node:process";
 import { Client } from "pg";
 
 import { runIfInvoked, withClient, withClientTransaction } from "./cli.mjs";
+import { nornShadowLifecycleSql } from "../dist/norn-shadow-lifecycle.js";
 
 const DEFAULT_BATCH_SIZE = 1_000;
 const DEFAULT_MAX_ROWS = 10_000;
@@ -146,11 +147,7 @@ async function readSnapshot(client) {
 
 async function deleteBatch(client, relation, limit) {
   const statement = relation === "norn-shadow"
-    ? `WITH expired AS MATERIALIZED (
-        SELECT space_id,comparison_id FROM data.norn_shadow_comparisons WHERE expires_at<=clock_timestamp()
-        ORDER BY expires_at,space_id,comparison_id LIMIT $1 FOR UPDATE SKIP LOCKED
-      ) DELETE FROM data.norn_shadow_comparisons target USING expired
-        WHERE target.space_id=expired.space_id AND target.comparison_id=expired.comparison_id RETURNING 1`
+    ? nornShadowLifecycleSql
     : relation === "retained-outbox"
     ? `WITH retained AS MATERIALIZED (
         SELECT ctid FROM data.outbox WHERE status='pending' AND attempts=0 AND lease_until IS NULL
@@ -207,7 +204,7 @@ async function deleteBatch(client, relation, limit) {
   if (!statement) throw new Error("Unsupported lifecycle relation");
   // One statement is its own transaction. The runner is an ocean away from the
   // origin, so a BEGIN and COMMIT around it would triple each batch's round trips.
-  const result = await client.query(statement, [limit]);
+  const result = await client.query(statement, relation === "norn-shadow" ? [limit,null] : [limit]);
   return result.rowCount ?? result.rows.length;
 }
 
@@ -232,7 +229,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       { relation: "auth-session", key: "authSession" },
       // Every reader already ignores expired replays; this only frees their rows.
       { relation: "scoped-command-replay", key: "scopedCommandReplay" },
-      // Parent deletion cascades bounded comparison journals, never source work.
+      // Close ended sources; evidence expiry deletes their comparison journals.
       { relation: "norn-shadow", key: "nornShadow" },
     ];
     // Each round gives every relation with rows left one batch, so the shared
@@ -245,7 +242,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
           next.push(target);
           continue;
         }
-        const limit = Math.min(options.batchSize, options.maxRows - deleted[target.key],target.relation === "norn-shadow" ? 32 : 1000);
+        const limit = Math.min(options.batchSize, options.maxRows - deleted[target.key]);
         const count = await deleteBatch(client, target.relation, limit);
         deleted[target.key] += count;
         batches[target.key] += 1;
@@ -267,7 +264,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
     deletedExpiredScopedCommandReplays: deleted.scopedCommandReplay,
     deletedRetainedOutboxRows: deleted.retainedOutbox,
     deletedExpiredAuthSessions: deleted.authSession,
-    deletedExpiredNornComparisons: deleted.nornShadow,
+    maintainedNornComparisons: deleted.nornShadow,
     batches: Object.values(batches).reduce((sum, count) => sum + count, 0),
     batchesByRelation: batches,
     elapsedMs: Math.max(0, monotonicNow() - startedAt),

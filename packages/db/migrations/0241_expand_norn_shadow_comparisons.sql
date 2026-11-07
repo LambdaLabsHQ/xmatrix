@@ -23,14 +23,12 @@ CREATE TABLE data.norn_shadow_comparisons (
   next_due_at TIMESTAMPTZ,
   encrypted_value_json JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp(),
-  expires_at TIMESTAMPTZ NOT NULL DEFAULT statement_timestamp()+interval '24 hours',
   updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY(space_id,comparison_id),
-  CHECK (revision >= 0 AND placement_epoch > 0),
-  CHECK (expires_at > created_at AND expires_at <= created_at+interval '24 hours')
+  CHECK (revision >= 0 AND placement_epoch > 0)
 );
 CREATE INDEX norn_shadow_comparisons_channel_idx ON data.norn_shadow_comparisons(space_id,channel_id,comparison_id);
-CREATE INDEX norn_shadow_comparisons_expiry_idx ON data.norn_shadow_comparisons(expires_at,space_id,comparison_id);
+CREATE INDEX norn_shadow_comparisons_source_idx ON data.norn_shadow_comparisons(source_binding_id,space_id,comparison_id);
 CREATE TABLE data.norn_shadow_observations (
   space_id TEXT NOT NULL,
   comparison_id UUID NOT NULL,

@@ -3,8 +3,9 @@ import type { DatabasePlacementContext } from "./context.js";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { openNornComparison, sealNornComparison } from "./secret-value-control.js";
 import { nornShadowSource } from "./norn-shadow-source.js";
+import { nornShadowLifecycleSql } from "./norn-shadow-lifecycle.js";
 import { comparisonId, comparisonJson, NORN_SHADOW_HOST, NORN_SHADOW_MAPPING, NornShadowError,
-  shadowFields as field, type NornShadowEvaluator, type ShadowSelection } from "./norn-shadow-values.js";
+  shadowFields as field, type NornShadowEvaluator, type ShadowSelection, type ShadowTransition } from "./norn-shadow-values.js";
 import type { QueryResultRow } from "pg";
 import { commandDigest } from "./command-digest.js";
 
@@ -14,8 +15,7 @@ const terminal = new Set(["completed","failed","incomplete","revoked"]);
 function view(row: QueryResultRow) {
   return { comparisonId: String(row.comparison_id),revision: Number(row.revision),state: String(row.state),
     reason: String(row.reason),codeId: String(row.code_id),hostVersion: String(row.host_version),
-    mappingVersion: String(row.mapping_version),nextDueAt: row.next_due_at ? new Date(row.next_due_at).toISOString() : null,
-    expiresAt: new Date(row.expires_at).toISOString() };
+    mappingVersion: String(row.mapping_version),nextDueAt: row.next_due_at ? new Date(row.next_due_at).toISOString() : null };
 }
 
 /** @dormant Opt-in operator API. No route, source hook, scheduler or dispatcher constructs it. */
@@ -59,9 +59,9 @@ export class PostgresNornShadowRepository {
     return this.transaction(input,"admit",async tx => {
       const generation = await this.authorize(tx,input);
       if (!generation) throw denied();
-      // Same-Space admission serialization bounds capacity without a global lock.
+      // Serialize only admission replay for this id; unrelated trials do not contend.
       await tx.query({ name: "norn_shadow_admission_lock_v1",text: "SELECT pg_advisory_xact_lock(hashtextextended($1,0))",
-        values: [`norn-shadow:${this.placement.spaceId}`],maxRows: 1 });
+        values: [`norn-shadow:${this.placement.spaceId}:${input.comparisonId}`],maxRows: 1 });
       const now = await this.now(tx), initial = this.evaluator.create(ast,now);
       const admissionDigest = await commandDigest([initial.codeId,bindingId,participant,input.channelId,input.actorUserId]);
       const existing = await tx.query({ name: "norn_shadow_admission_replay_v1",text: `SELECT * FROM data.norn_shadow_comparisons
@@ -78,9 +78,6 @@ export class PostgresNornShadowRepository {
           participant !== `@${source.source.agentName}:${source.source.channelInstanceId}`) {
         throw new NornShadowError("norn_source_participant_mismatch",409,"The selected binding does not name this participant");
       }
-      const capacity = await tx.query({ name: "norn_shadow_capacity_v1",text: `SELECT 1 FROM data.norn_shadow_comparisons
-        WHERE space_id=$1 LIMIT 32`,values: [this.placement.spaceId],maxRows: 32 });
-      if (capacity.length >= 32) throw new NornShadowError("norn_comparison_capacity",503,"Expire old comparisons before admitting another");
       const selection: ShadowSelection = { bindingId,participant,sourceRef: `execution:${bindingId}` };
       const encrypted = await sealNornComparison(this.material,this.placement.spaceId,input.comparisonId,0,
         comparisonJson({ ast,snapshot: initial.snapshot,selection }));
@@ -99,7 +96,16 @@ export class PostgresNornShadowRepository {
     const [ended] = await tx.query({ name: "norn_shadow_end_v1",text: `UPDATE data.norn_shadow_comparisons
       SET state=$3,reason=$4,revision=revision+1,encrypted_value_json=NULL,next_due_at=NULL,updated_at=clock_timestamp()
       WHERE space_id=$1 AND comparison_id=$2::uuid RETURNING *`,values: [this.placement.spaceId,row.comparison_id,state,reason],maxRows: 1 });
+    await this.recordTransition(tx,ended,{ state,snapshot: null,due: null,kind: "end",classification: "incomplete",reason },null);
     return view(ended);
+  }
+  private recordTransition(tx: DatabaseTransaction,row: QueryResultRow,change: ShadowTransition,observationId: string | null) {
+    return tx.query({ name: "norn_shadow_transition_v1",text: `INSERT INTO data.norn_shadow_transitions
+      (space_id,comparison_id,channel_id,revision,kind,classification,reason,observation_id,outcome_tag,operation,intent_digest,due_at)
+      VALUES ($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+      values: [this.placement.spaceId,row.comparison_id,row.channel_id,row.revision,change.kind,change.classification,change.reason,
+        observationId,change.outcomeTag ?? null,change.intent?.operation ?? null,change.intent?.digest ?? null,
+        change.due === null ? null : new Date(change.due).toISOString()],maxRows: 0 });
   }
   async step(input: Request & { expectedRevision: number }) {
     field.integer(input.expectedRevision,"expectedRevision");
@@ -112,19 +118,15 @@ export class PostgresNornShadowRepository {
       if (row.state === "revoked") return view(row);
       const now = await this.now(tx);
       if (terminal.has(String(row.state))) {
-        if (new Date(row.expires_at).getTime() <= now) return view(row);
         // Preserve terminal outcomes while retaining later losing evidence.
         const late = await nornShadowSource(tx,{ spaceId: this.placement.spaceId,channelId: input.channelId },String(row.source_binding_id));
-        const retained = await tx.query({ name: "norn_shadow_terminal_capacity_v1",text: `SELECT 1 FROM data.norn_shadow_observations
-          WHERE space_id=$1 AND comparison_id=$2::uuid LIMIT 256`,values: [this.placement.spaceId,input.comparisonId],maxRows: 256 });
-        if (retained.length < 256 && late && late.generation === row.source_generation && late.evidence.finalReplyId) await tx.query({
+        if (late && late.generation === row.source_generation && late.evidence.finalReplyId) await tx.query({
           name: "norn_shadow_terminal_evidence_v1",text: `INSERT INTO data.norn_shadow_observations
             (space_id,comparison_id,channel_id,observation_id,disposition)
             VALUES ($1,$2::uuid,$3,$4,'late') ON CONFLICT DO NOTHING`,
           values: [this.placement.spaceId,input.comparisonId,input.channelId,late.evidence.id],maxRows: 0 });
         return view(row);
       }
-      if (new Date(row.expires_at).getTime() <= now) return this.end(tx,row,"incomplete","observation_window_ended");
       if (row.machine_abi !== this.evaluator.abi || row.host_version !== NORN_SHADOW_HOST || row.mapping_version !== NORN_SHADOW_MAPPING) {
         return this.end(tx,row,"incomplete","unsupported_version");
       }
@@ -133,12 +135,6 @@ export class PostgresNornShadowRepository {
       const current = JSON.parse(await openNornComparison(this.material,row));
       // The immutable definition is still the one named at admission.
       if (this.evaluator.create(current.ast,now).codeId !== row.code_id) return this.end(tx,row,"incomplete","definition_mismatch");
-      const counts = await tx.query({ name: "norn_shadow_transition_capacity_v1",text: `SELECT 1 FROM data.norn_shadow_transitions
-        WHERE space_id=$1 AND comparison_id=$2::uuid LIMIT 256`,values: [this.placement.spaceId,input.comparisonId],maxRows: 256 });
-      if (counts.length >= 256) return this.end(tx,row,"incomplete","comparison_storage_budget");
-      const inputs = await tx.query({ name: "norn_shadow_input_capacity_v1",text: `SELECT observation_id FROM data.norn_shadow_observations
-        WHERE space_id=$1 AND comparison_id=$2::uuid LIMIT 256`,values: [this.placement.spaceId,input.comparisonId],maxRows: 256 });
-      if (inputs.length >= 256 && !inputs.some(item => item.observation_id === source.evidence.id)) return this.end(tx,row,"incomplete","comparison_storage_budget");
       await tx.query({ name: "norn_shadow_observe_v1",text: `INSERT INTO data.norn_shadow_observations
         (space_id,comparison_id,channel_id,observation_id,disposition) VALUES ($1,$2::uuid,$3,$4,'observed') ON CONFLICT DO NOTHING`,
         values: [this.placement.spaceId,input.comparisonId,input.channelId,source.evidence.id],maxRows: 0 });
@@ -147,23 +143,37 @@ export class PostgresNornShadowRepository {
       // Read after inbox insertion: the input's PG time cannot be later than
       // this evaluation cut merely because statements took a few milliseconds.
       const evaluationTime = await this.now(tx);
-      if (new Date(row.expires_at).getTime() <= evaluationTime) return this.end(tx,row,"incomplete","observation_window_ended");
-      const change = this.evaluator.advance(current.ast,current.snapshot,current.selection,
-        observation.disposition === "observed" ? { ...source.evidence,observedAt: new Date(observation.observed_at).getTime() } : null,evaluationTime);
+      const evidence = observation.disposition === "observed" ? { ...source.evidence,observedAt: new Date(observation.observed_at).getTime() } : null;
+      const advance = (snapshot: unknown,input = evidence) => this.evaluator.advance(current.ast,snapshot,current.selection,input,evaluationTime);
+      let change = advance(current.snapshot);
+      const changes = change.kind === "idle" ? [] : [change];
+      if (["completed","failed","interrupted","unknown"].includes(source.evidence.declaration)) {
+        // Observe a preexisting mapped result (or an already due timer), then
+        // evaluate its pure continuation in this transaction's normal quantum.
+        // A finished source cannot authorize holding state for another event.
+        if (change.state === "waiting" && (change.due !== null && change.due <= evaluationTime ||
+            change.reason === "mapped_request_wait" && evidence?.finalReplyId && evidence.declaration === "completed")) {
+          change = advance(change.snapshot); if (change.kind !== "idle") changes.push(change);
+        }
+        if (change.state === "ready" && change.kind !== "yield") {
+          change = advance(change.snapshot,null); if (change.kind !== "idle") changes.push(change);
+        }
+        if (!terminal.has(change.state)) {
+          change = { snapshot: null,state: "incomplete",due: null,kind: "end",classification: "incomplete",reason: "source_ended" };
+          changes.push(change);
+        }
+      }
       // An idle recheck is not a new checkpoint or history entry.
-      if (change.kind === "idle") return view(row);
-      const revision = Number(row.revision)+1;
+      if (!changes.length) return view(row);
+      const revision = Number(row.revision)+changes.length;
       const encrypted = terminal.has(change.state) ? null : await sealNornComparison(this.material,this.placement.spaceId,input.comparisonId,
         revision,comparisonJson({ ...current,snapshot: change.snapshot }));
-      if (change.disposition) await tx.query({ name: "norn_shadow_observation_consume_v1",text: `UPDATE data.norn_shadow_observations
-        SET disposition=$4 WHERE space_id=$1 AND comparison_id=$2::uuid AND observation_id=$3 AND disposition='observed'`,
-        values: [this.placement.spaceId,input.comparisonId,source.evidence.id,change.disposition],maxRows: 0 });
-      await tx.query({ name: "norn_shadow_transition_v1",text: `INSERT INTO data.norn_shadow_transitions
-        (space_id,comparison_id,channel_id,revision,kind,classification,reason,observation_id,outcome_tag,operation,intent_digest,due_at)
-        VALUES ($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
-        values: [this.placement.spaceId,input.comparisonId,input.channelId,revision,change.kind,change.classification,change.reason,
-          source.evidence.id,change.outcomeTag ?? null,change.intent?.operation ?? null,change.intent?.digest ?? null,
-          change.due === null ? null : new Date(change.due).toISOString()],maxRows: 0 });
+      for (const [index,transition] of changes.entries()) {
+        if (transition.disposition) await tx.query({ name: "norn_shadow_observation_consume_v1",text: `UPDATE data.norn_shadow_observations
+          SET disposition=$4 WHERE space_id=$1 AND comparison_id=$2::uuid AND observation_id=$3 AND disposition='observed'`,
+          values: [this.placement.spaceId,input.comparisonId,source.evidence.id,transition.disposition],maxRows: 0 });
+        await this.recordTransition(tx,{ ...row,revision: Number(row.revision)+index+1 },transition,source.evidence.id);
+      }
       const [committed] = await tx.query({ name: "norn_shadow_checkpoint_v1",text: `UPDATE data.norn_shadow_comparisons SET
         revision=$3,state=$4,reason=$5,encrypted_value_json=$6::jsonb,next_due_at=$7,updated_at=clock_timestamp()
         WHERE space_id=$1 AND comparison_id=$2::uuid AND revision=$8 RETURNING *`,
@@ -173,14 +183,16 @@ export class PostgresNornShadowRepository {
       return view(committed);
     });
   }
-  async report(input: Request) {
+  async report(input: Request & { afterRevision?: number }) {
+    const after = input.afterRevision ?? 0; field.integer(after,"afterRevision");
     return this.transaction(input,"report",async tx => {
       if (!await this.authorize(tx,input)) throw denied();
       const row = await this.lock(tx,input);
-      const transitions = await tx.query({ name: "norn_shadow_report_v1",text: `SELECT revision,kind,classification,reason,observation_id,outcome_tag,operation,intent_digest,due_at,recorded_at
-        FROM data.norn_shadow_transitions WHERE space_id=$1 AND comparison_id=$2::uuid ORDER BY revision LIMIT 256`,
-        values: [this.placement.spaceId,input.comparisonId],maxRows: 256 });
-      return { ...view(row),transitions };
+      const rows = await tx.query({ name: "norn_shadow_report_v2",text: `SELECT revision,kind,classification,reason,observation_id,outcome_tag,operation,intent_digest,due_at,recorded_at
+        FROM data.norn_shadow_transitions WHERE space_id=$1 AND comparison_id=$2::uuid AND revision>$3 ORDER BY revision LIMIT 1001`,
+        values: [this.placement.spaceId,input.comparisonId,after],maxRows: 1001 });
+      const transitions = rows.slice(0,1000);
+      return { ...view(row),transitions,nextAfterRevision: rows.length > transitions.length ? Number(transitions.at(-1)!.revision) : null };
     });
   }
   async revoke(input: Request & { expectedRevision: number }) {
@@ -191,12 +203,9 @@ export class PostgresNornShadowRepository {
       return terminal.has(String(row.state)) ? view(row) : this.end(tx,row,"revoked","operator_ended");
     });
   }
-  /** Scoped bounded deletion; child journals cascade, never legacy records. */
+  /** Scoped lifecycle pass with the same page size as global maintenance. */
   async maintain(requestId: string) {
     return this.database.transaction({ requestId,operation: "norn-shadow.expire",placement: this.placement },tx => tx.query({
-      name: "norn_shadow_expire_v1",text: `WITH expired AS (SELECT comparison_id FROM data.norn_shadow_comparisons
-        WHERE space_id=$1 AND expires_at<=clock_timestamp() ORDER BY expires_at,comparison_id LIMIT 32 FOR UPDATE SKIP LOCKED)
-        DELETE FROM data.norn_shadow_comparisons c USING expired e WHERE c.space_id=$1 AND c.comparison_id=e.comparison_id RETURNING c.comparison_id`,
-      values: [this.placement.spaceId],maxRows: 32 }));
+      name: "norn_shadow_maintain_v2",text: nornShadowLifecycleSql,values: [1000,this.placement.spaceId],maxRows: 1000 }));
   }
 }

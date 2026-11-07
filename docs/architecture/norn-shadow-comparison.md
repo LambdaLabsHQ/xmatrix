@@ -109,21 +109,35 @@ revision, using the existing catalog encryption material. Source-message and
 answer payloads are never copied: only their existing causal references are
 observed. Reports expose fixed reason codes, identities, revision and timestamps,
 not code, prompts, answers, envelopes or arbitrary evaluator errors. Terminal
-checkpoints clear the envelope.
+checkpoints clear the envelope. Observation of the selected execution's terminal
+report also closes the trial: the pending mapped receipt or already due timer
+can finish its current evaluation quantum first. If the candidate still needs
+another event or further computation, the trial ends as `incomplete/source_ended`
+and clears its private state. This is the end of the selected observation, not a
+Norn execution failure or a claim about the unobserved continuation. A Run's
+exit alone remains insufficient to infer an execution outcome.
 
 Transition receipts retain the closed operation kind, an intent digest, wait
 deadline and a closed outcome tag. This lets a reviewer distinguish proposed
 work and results without retaining or publishing private effect arguments.
 
-Initial admission policy allows at most 32 retained comparisons per Space,
-256 transitions/observations per comparison, 256 KiB per private checkpoint and
-a 24-hour observation window. These are bounded operator-cohort storage budgets,
-not language step limits. Pure computation yields after an evaluation slice;
-budget exhaustion is an incomplete comparison, not a language failure.
+There is no independent comparison duration, count, checkpoint-size or journal
+quota. An active source and the program's own waits and deadlines govern its
+lifetime; explicit operator revocation can end it at any time. Actual
+serialization, memory or database failures roll back the command rather than
+inventing a language or comparison limit. Pure computation still yields after
+an evaluation slice.
 
-The existing lifecycle maintenance expires comparison parents in batches of at
-most 32; journals cascade with them. The explicit `expire` command is also
-Space-scoped and bounded. Channel and Space deletion, and Space shard moves,
+The existing lifecycle runner closes private state for ended sources even if
+the operator no longer steps the trial. Classification and transition metadata
+remain available until the selected execution evidence expires or is removed;
+then comparison parents and their child journals are deleted together. This
+uses the source's existing evidence-retention policy, not a second timer that
+can truncate a week-long wait. Maintenance uses the same configurable batch,
+row and wall-time limits as the other lifecycle tables. The explicit `expire`
+command runs one Space-scoped page with the shared default page size. Report
+pages expose `nextAfterRevision`; pass it back as `afterRevision` to read the
+remaining history without truncating it. Channel and Space deletion, and Space shard moves,
 include all three tables. Moving a comparison does not renew its observation
 grant: its pinned placement epoch still fences continuation.
 
@@ -154,7 +168,8 @@ deploying this change.
 
 4. Use `operation: "step"` and `expectedRevision` from the prior receipt for one
    bounded pass. `report` reads metadata/history; `revoke` ends this admission;
-   `expire` deletes expired comparison records in that Space. Stop on an unknown,
+   `expire` closes ended sources and removes comparisons whose source evidence
+   has expired or disappeared. Stop on an unknown,
    conflict, revoked grant or unsupported version and inspect the private record.
    Do not start a retrying background loop or dispatch an intent from the report.
 5. Record evidence/coverage and close the bounded trial. The legacy Run and
@@ -162,3 +177,8 @@ deploying this change.
 
 A production observer, private alarm, additional source mappings, real dispatch,
 and an atomic ownership cutover remain separate work.
+
+The pinned core snapshot is transitional. Once Norn publishes a versioned
+`@norn-lang/norn` package, replace the copied core with that exact package and
+retain code/ABI compatibility checks; package publication and npm organization
+setup are not part of this comparison implementation.

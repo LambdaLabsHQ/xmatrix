@@ -28,7 +28,10 @@ database = createAuthorityDatabase({ connectionString: process.env.POSTGRES_RUNT
   if (input.operation === "admit") result = await repository.admit({ ...request,ast: await readFile(input.astFile,"utf8") });
   else if (input.operation === "step") result = await repository.step(request);
   else if (input.operation === "revoke") result = await repository.revoke(request);
-  else if (input.operation === "expire") result = { removed: (await repository.maintain(request.requestId)).length };
+  else if (input.operation === "expire") {
+    const rows = await repository.maintain(request.requestId);
+    result = { closed: rows.filter(row => row.action === "closed").length,removed: rows.filter(row => row.action === "deleted").length };
+  }
   else result = await repository.report(request);
   process.stdout.write(JSON.stringify(result,null,2)+"\n");
 } catch (error) {

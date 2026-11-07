@@ -1,6 +1,5 @@
 import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
-import { utf8ByteLength } from "@xmatrix/protocol";
 
 export class NornShadowError extends ControlError {}
 export const shadowFields = commandFields(field => new NornShadowError("invalid_norn_comparison",400,`${field} is invalid`));
@@ -46,11 +45,9 @@ export function comparisonId(value: unknown): string {
   }
   return id;
 }
-/** Admission policy, not a language limit. No raw captured messages are stored. */
+/** Actual serialization/storage failures propagate; no synthetic size quota. */
 export function comparisonJson(value: unknown): string {
   const result = JSON.stringify(value);
-  if (!result || utf8ByteLength(result) > 256 * 1024) {
-    throw new NornShadowError("norn_comparison_capacity",413,"Comparison checkpoint exceeds its storage budget");
-  }
+  if (!result) throw new NornShadowError("invalid_norn_comparison",400,"Comparison state cannot be serialized");
   return result;
 }
