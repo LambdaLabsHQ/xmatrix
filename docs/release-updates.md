@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: personal browser history stays with its signed-in user
+
+Input and search history used a Space-only browser key, so signing into the
+same Space as another person on that device could offer the previous person's
+inputs and searches. Page summon markers and the preferred writer also lacked
+a reader boundary. All four now share storage addressed by the current user
+and Space, and in-memory choices follow the same scope. Old ownerless records
+are left unused because their author cannot be recovered. A blocked or full
+store never interrupts sending, searching or calling an Agent. Beta Web only;
+no Hub, schema or client protocol migration. Recovery requires a forward beta
+that preserves this ownership boundary.
+
 ## Unreleased: the last message scrolls clear of the Agents at work again
 
 Since Instances became records of their own, the Conversations view asked a

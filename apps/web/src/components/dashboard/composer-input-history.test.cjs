@@ -6,38 +6,45 @@ const { readInputHistory, rememberInput, inputHistoryKey, historyEntryOf, INPUT_
   require("./composer-input-history.ts");
 const { selectComposerReference, selectComposerInvocation } = require("./composer-invocation-bindings.ts");
 
+const scope = (spaceId) => ({ userId: "alice", spaceId });
+test.afterEach(() => { delete globalThis.window; });
+
 function memoryStore() {
   const map = new Map();
-  return { getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, String(value)), map };
+  const store = { getItem: (key) => map.get(key) ?? null, setItem: (key, value) => map.set(key, String(value)), map };
+  globalThis.window = { localStorage: store };
+  return store;
 }
 
-test("sent drafts are remembered per Space, newest first, without repeats", () => {
-  const store = memoryStore();
-  rememberInput(store, "space-a", undefined, "first");
-  rememberInput(store, "space-a", undefined, "second");
-  rememberInput(store, "space-a", undefined, "first");
-  rememberInput(store, "space-b", undefined, "elsewhere");
-  assert.deepEqual(readInputHistory(store, "space-a").map((entry) => entry.body), ["first", "second"]);
-  assert.deepEqual(readInputHistory(store, "space-b").map((entry) => entry.body), ["elsewhere"]);
-  assert.deepEqual(readInputHistory(store, null), []);
+test("sent drafts are remembered per reader and Space, newest first, without repeats", () => {
+  memoryStore();
+  rememberInput(scope("space-a"), undefined, "first");
+  rememberInput(scope("space-a"), undefined, "second");
+  rememberInput(scope("space-a"), undefined, "first");
+  rememberInput(scope("space-b"), undefined, "elsewhere");
+  assert.deepEqual(readInputHistory(scope("space-a")).map((entry) => entry.body), ["first", "second"]);
+  assert.deepEqual(readInputHistory(scope("space-b")).map((entry) => entry.body), ["elsewhere"]);
+  assert.deepEqual(readInputHistory(scope(null)), []);
 });
 
 test("history keeps the latest entries up to its limit and ignores empty sends", () => {
-  const store = memoryStore();
-  for (let i = 0; i < INPUT_HISTORY_LIMIT + 5; i += 1) rememberInput(store, "s", undefined, `m${i}`);
-  rememberInput(store, "s", undefined, "   ");
-  const entries = readInputHistory(store, "s");
+  memoryStore();
+  for (let i = 0; i < INPUT_HISTORY_LIMIT + 5; i += 1) rememberInput(scope("s"), undefined, `m${i}`);
+  rememberInput(scope("s"), undefined, "   ");
+  const entries = readInputHistory(scope("s"));
   assert.equal(entries.length, INPUT_HISTORY_LIMIT);
   assert.equal(entries[0].body, `m${INPUT_HISTORY_LIMIT + 4}`);
 });
 
 test("a damaged store reads as no history", () => {
   const store = memoryStore();
-  store.setItem("xmatrix:input-history:s", "{not json");
-  assert.deepEqual(readInputHistory(store, "s"), []);
-  store.setItem("xmatrix:input-history:s", JSON.stringify([{ body: "ok", references: [] }, { body: 3 },
+  rememberInput(scope("s"), undefined, "initial");
+  const [address] = store.map.keys();
+  store.setItem(address, "{not json");
+  assert.deepEqual(readInputHistory(scope("s")), []);
+  store.setItem(address, JSON.stringify([{ body: "ok", references: [] }, { body: 3 },
     { body: "x", references: [{ start: 0, end: 4, text: "nope", reference: "page:1" }] }]));
-  assert.deepEqual(readInputHistory(store, "s"), [{ body: "ok", references: [] }]);
+  assert.deepEqual(readInputHistory(scope("s")), [{ body: "ok", references: [] }]);
 });
 
 test("picked pages stay picked, Agents go back to their written name, and pictures are left out", () => {

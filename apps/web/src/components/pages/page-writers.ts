@@ -3,8 +3,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { useAgentRegistrationCatalog } from "@/components/dashboard/agent-capability-select";
 import type { WriteAgent } from "./page-write-with";
+import { useAuth } from "@/lib/auth-context";
+import { userSpaceLocalState } from "@/lib/user-space-local-state";
 
-const storageKey = (spaceId: string) => `xmatrix.page-writer.${spaceId}`;
+const writer = userSpaceLocalState<string>("page-writer", (value) => typeof value === "string" ? value : undefined);
 
 /**
  * The Agents a person can call to write a page with them: each runtime the Space can start now, by its
@@ -12,9 +14,12 @@ const storageKey = (spaceId: string) => `xmatrix.page-writer.${spaceId}`;
  * not a fact anyone else reads.
  */
 export function usePageWriters(spaceId: string | null, token: string, enabled: boolean) {
+  const { user } = useAuth();
+  const userId = user?.id;
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token, enabled && Boolean(spaceId && token));
-  const [favourite, setFavourite] = useState<string | null>(() =>
-    spaceId && typeof window !== "undefined" ? window.localStorage.getItem(storageKey(spaceId)) : null);
+  const stored = useMemo(() => writer.read({ userId, spaceId }), [userId, spaceId]);
+  const [chosen, setChosen] = useState<{ userId: string | undefined; spaceId: string | null; harness: string } | null>(null);
+  const favourite = chosen?.userId === userId && chosen?.spaceId === spaceId ? chosen?.harness : stored;
   const agents = useMemo<WriteAgent[]>(() => {
     const harnesses = new Set<string>();
     for (const registration of catalog.data?.registrations ?? []) {
@@ -24,8 +29,8 @@ export function usePageWriters(spaceId: string | null, token: string, enabled: b
       .sort((a, b) => Number(b.harness === favourite) - Number(a.harness === favourite));
   }, [catalog.data, favourite]);
   const choose = useCallback((harness: string) => {
-    setFavourite(harness);
-    if (spaceId) window.localStorage.setItem(storageKey(spaceId), harness);
-  }, [spaceId]);
+    setChosen({ userId, spaceId, harness });
+    writer.write({ userId, spaceId }, harness);
+  }, [spaceId, userId]);
   return { agents, favourite: agents[0]?.harness ?? null, choose };
 }

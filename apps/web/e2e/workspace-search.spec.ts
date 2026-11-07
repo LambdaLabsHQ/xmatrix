@@ -15,6 +15,24 @@ test.use(E2E_DESKTOP_CONTEXT);
 
 const RELEASE = { ...E2E_CHANNEL, id: "channel-release", name: "release-train", updatedAt: "2026-06-30T00:00:00.000Z" };
 
+test("recent searches ignore ownerless device history and keep the current reader's choices", async ({ page }) => {
+  await page.addInitScript(({ spaceId }) => {
+    localStorage.setItem(`xmatrix:recent-searches:${spaceId}`, JSON.stringify(["q=previous-account-private-search"]));
+  }, { spaceId: E2E_SPACE.id });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
+  const open = () => page.getByRole("button", { name: "Search", exact: true }).filter({ visible: true }).click();
+  await open();
+  const dialog = page.getByRole("dialog", { name: "Search workspace" });
+  await expect(dialog.getByText(/previous-account-private-search/u)).toHaveCount(0);
+  await page.keyboard.type("Pages");
+  await dialog.getByRole("button", { name: "Pages Open", exact: true }).click();
+  await expect(dialog).toBeHidden();
+  await page.reload({ waitUntil: "domcontentloaded" });
+  await open();
+  await expect(dialog.getByText("“Pages”", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/previous-account-private-search/u)).toHaveCount(0);
+});
+
 function hit(index: number, channelId: string) {
   return {
     kind: "message", entityId: `m-${index}`, entityVersion: 1, matchTier: "verified_substring", field: "body",

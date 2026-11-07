@@ -1241,7 +1241,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   const coWriteRef = useRef<((harness: string, blockId: string | null, summon?: PageSummon) => Promise<void>) | null>(null);
   const callInstanceRef = useRef<((instance: PageInstance, blockId: string | null, summon: PageSummon) => Promise<void>) | null>(null);
   // The `@`s this reader called Agents with on the page, each showing how its call goes.
-  const { summons, add: addSummon, update: updateSummon } = usePageSummons();
+  const { summons, add: addSummon, update: updateSummon } = usePageSummons(spaceId);
   const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token,
     conversationName: (id) => referenceActions.current.conversation(id)?.name ?? null,
     instanceStatus: (id, name) => liveOnPage.find((agent) => agent.conversationId === id && agent.name === name)?.status ?? null,
