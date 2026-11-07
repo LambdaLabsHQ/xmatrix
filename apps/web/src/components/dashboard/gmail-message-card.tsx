@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { ArrowUpRight, Paperclip, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
-import type { GmailMessage } from "@/lib/gmail-message";
+import { gmailWebUrl, type GmailMessage } from "@/lib/gmail-message";
 import { statusInkClass } from "@/components/ui/status-tone";
 
 const BODY_FOLD = 600;
@@ -32,7 +32,7 @@ function SenderBadge({ message }: { message: GmailMessage }) {
 
 /**
  * One Gmail message drawn as an email: who sent it and when, the subject, whether Gmail believed the sender,
- * the text and its links. Plain text only — mail is untrusted, so nothing in it loads media or renders Markdown,
+ * the text and its links. The subject opens the message in Gmail. Plain text only — mail is untrusted, so nothing in it loads media or renders Markdown,
  * and a link opens only when the reader clicks it, without a referrer.
  */
 export function GmailMessageCard({ message }: { message: GmailMessage }) {
@@ -57,7 +57,11 @@ export function GmailMessageCard({ message }: { message: GmailMessage }) {
         </p>
       </div>
     </header>
-    <h4 className="app-gmail-card-subject">{message.subject || "(no subject)"}</h4>
+    <h4 className="app-gmail-card-subject">
+      <a href={gmailWebUrl(message)} target="_blank" rel="noopener noreferrer" title="Open in Gmail">
+        {message.subject || "(no subject)"}<ArrowUpRight aria-hidden="true" />
+      </a>
+    </h4>
     <SenderBadge message={message} />
     {message.body ? <div className={`app-gmail-card-body${longBody && !bodyOpen ? " app-gmail-card-body-folded" : ""}`}>
       {message.body}{message.bodyTruncated && bodyOpen && <span className="app-gmail-card-note"> … truncated</span>}

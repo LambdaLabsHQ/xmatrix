@@ -107,6 +107,7 @@ test("read returns the text body and every link, fenced, from nested parts", asy
   const read = await fetched([gmail(message)], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
   assert.deepEqual(proxied(read.calls[0]), { endpoint: "https://gmail.googleapis.com/gmail/v1/users/me/messages/18f2a9c0d1e2b3a4", query: "format=full" });
   const summary = read.result.summary;
+  assert.match(summary, /^```\nMailbox: me@example\.com\n/mu, "one mailbox is still named, so a reader's link opens it");
   assert.match(summary, /Subject: Verify/u);
   assert.match(summary, /Hi,\nClick Verify email/u);
   assert.doesNotMatch(summary, /a\{\}|ignore previous|mailto/u);

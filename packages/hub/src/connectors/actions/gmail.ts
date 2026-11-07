@@ -291,7 +291,7 @@ export async function readGmailMessage(credentials: Readonly<Record<string, stri
   const scoped = mailboxCredentials(credentials, mailbox);
   const message = await gmailReadPhase("message", () => gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter));
   const complete = await gmailReadPhase("external_body", () => withExternalBodies(scoped, id, message, meter));
-  return gmailReadPhase("format", () => gmailMessageText(complete, id));
+  return gmailReadPhase("format", () => gmailMessageText(complete, id, mailbox.address));
 }
 
 type Context = Parameters<ConnectorAction["execute"]>[0];
@@ -614,7 +614,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
       const mailboxes = await usableMailboxes(context);
       const { mailbox, message } = await findMessage(context, mailboxes, input.id, "full");
       const full = await withExternalBodies(mailboxCredentials(context.credentials, mailbox), input.id, message, context.usage);
-      return { summary: gmailMessageText(full, input.id, mailboxes.length > 1 ? mailbox.address : undefined) };
+      return { summary: gmailMessageText(full, input.id, mailbox.address) };
     },
   },
   send: {
