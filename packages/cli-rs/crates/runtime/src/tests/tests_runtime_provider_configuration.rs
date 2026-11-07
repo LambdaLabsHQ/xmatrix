@@ -235,7 +235,7 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
             "ordinary bootstrap with history",
         );
     }
-    let rules = grok_acp_trusted_rules(Some("channel-1")).expect("trusted rules");
+    let rules = acp_trusted_rules(Some("channel-1")).expect("trusted rules");
     unsafe {
         std::env::remove_var("XMATRIX_AGENT_ROLE_INITIAL_PROMPT");
         std::env::remove_var("XMATRIX_INITIAL_MESSAGE");
@@ -245,16 +245,28 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     assert!(rules.contains("xmatrix send channel-1"));
     assert!(!rules.contains("ordinary"));
     assert!(!rules.contains("ignore rules"));
-    let params = acp_session_new_params("/workspace", Some(&rules));
+    let params = acp_session_new_params("/workspace", Some(&rules), Some(AcpTrustedRules::MetaRules));
     assert_eq!(params["cwd"], "/workspace");
     assert_eq!(params["mcpServers"], serde_json::json!([]));
     let native_rules = params["_meta"]["rules"].as_str().expect("native ACP rules");
     assert!(native_rules.contains("registered instructions"));
     assert!(params.get("prompt").is_none());
     assert!(params.get("message").is_none());
+    // Antigravity CLI appends them to its own system prompt.
+    let antigravity = acp_session_new_params(
+        "/workspace",
+        Some(&rules),
+        Some(AcpTrustedRules::AntigravitySystemPrompt),
+    );
+    assert_eq!(
+        antigravity["_meta"],
+        serde_json::json!({ "antigravity": { "systemPrompt": { "append": rules.trim() } } })
+    );
 
-    let base = acp_session_new_params("/workspace", None);
+    let base = acp_session_new_params("/workspace", None, Some(AcpTrustedRules::MetaRules));
     assert!(base.get("_meta").is_none());
+    let no_channel = acp_session_new_params("/workspace", Some(&rules), None);
+    assert!(no_channel.get("_meta").is_none(), "a vendor without a system channel gets none");
 }
 
 #[test]
@@ -337,7 +349,11 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
     assert_eq!(config.presentation_adapter.runtime(), "kimi");
     assert_eq!(config.presentation_adapter.source(), "kimi_acp");
     assert!(config.authenticate.is_none());
-    assert!(!config.session_new_meta_rules);
+    assert!(config.trusted_rules.is_none());
+    assert_eq!(
+        AcpVendorConfig::generic("agy").trusted_rules,
+        Some(AcpTrustedRules::AntigravitySystemPrompt)
+    );
     assert!(config.permission_fallback_option_id.is_none());
     assert!(config.goal_turn_input.is_none());
     assert!(config.goal_status_from_update.is_none());
@@ -553,7 +569,7 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
     assert_eq!(grok.presentation_adapter.runtime(), "grok");
     assert_eq!(grok.presentation_adapter.source(), "grok_acp");
     assert!(grok.authenticate.is_some());
-    assert!(grok.session_new_meta_rules);
+    assert_eq!(grok.trusted_rules, Some(AcpTrustedRules::MetaRules));
     assert!(grok.goal_turn_input.is_some());
     assert!(grok.quota_usage.is_some());
 
