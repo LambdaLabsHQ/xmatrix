@@ -147,8 +147,9 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   await expect(card).toBeVisible({ timeout: 20_000 });
   await expect(card.locator(".app-gmail-card-avatar")).toHaveText("E");
   await expect(card).toContainText("Example Accounts");
-  await expect(card.getByRole("link", { name: "Confirm your email address" })).toHaveAttribute("href",
-    "https://mail.google.com/mail/?authuser=daniel%40example.com#all/1a18e3b6b6fd4110");
+  await expect(card).toContainText("Confirm your email address");
+  const gmailUrl = "https://mail.google.com/mail/?authuser=daniel%40example.com#all/1a18e3b6b6fd4110";
+  await expect(card.getByRole("link", { name: "Open in Gmail" })).toHaveAttribute("href", gmailUrl);
   await expect(card).toContainText("Verified sender");
   await expect(card).toContainText("482913");
   await expect(card.getByRole("link", { name: /Confirm email/u })).toHaveAttribute("rel", "noopener noreferrer nofollow");
@@ -163,4 +164,16 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   const reads = (await fixtureRequests(page, "gmail-original")).map(url => new URL(url).pathname);
   expect(reads.every(path => path.endsWith(`/messages/${encodeURIComponent(messages[0]!.messageId)}/connector-result`))).toBe(true);
   await receipt.screenshot({ path: test.info().outputPath("gmail-message-card.png") });
+  // Clicking the email opens it in Gmail; the card's own links and toggles do only their own thing.
+  await page.evaluate(() => {
+    const opened: string[] = [];
+    (window as unknown as { opened: string[] }).opened = opened;
+    window.open = (url?: string | URL) => { opened.push(String(url)); return null; };
+  });
+  const opened = () => page.evaluate(() => (window as unknown as { opened: string[] }).opened);
+  await card.getByText("482913", { exact: false }).click();
+  expect(await opened()).toEqual([gmailUrl]);
+  await card.locator(".app-gmail-card-link").first().evaluate(link => link.addEventListener("click", event => event.preventDefault()));
+  await card.locator(".app-gmail-card-link").first().click();
+  expect(await opened()).toEqual([gmailUrl]);
 });
