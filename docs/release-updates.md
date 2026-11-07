@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a read Gmail message opens in Gmail when its card is clicked
+
+Clicking the email card a Gmail read draws in a Channel now opens that
+message in Gmail's web app, in the signed-in Google account that holds its
+mailbox (`authuser`). The card tints slightly on hover; its own links,
+toggles and text selection keep their meaning. The Hub now names the mailbox
+on every read and notification read, not only when several are connected.
+Hub and beta Web, no migration. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: Transfer proposal lists recover a lost database response
 
 HUB-BW lost its connection at BEGIN while listing Channel transfer proposals.

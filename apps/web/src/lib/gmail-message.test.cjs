@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { parseGmailMessage, splitMailbox } = require("./gmail-message.ts");
+const { gmailWebUrl, parseGmailMessage, splitMailbox } = require("./gmail-message.ts");
 
 // The shape packages/hub/src/connectors/actions/gmail.ts gmailMessageText writes.
 const read = (lines, fence = "```") =>
@@ -45,6 +45,12 @@ test("a forged sender, a missing body and the Hub's own notes read as such", () 
   assert.equal(truncated.body, "text");
   assert.equal(truncated.bodyTruncated, true);
   assert.equal(truncated.sender, "unknown");
+});
+
+test("the message opens in Gmail, in the account that holds its mailbox", () => {
+  assert.equal(gmailWebUrl({ id: "19c4866cd5f43bd9", mailbox: "a+b@example.com" }),
+    "https://mail.google.com/mail/?authuser=a%2Bb%40example.com#all/19c4866cd5f43bd9");
+  assert.equal(gmailWebUrl({ id: "19c4866cd5f43bd9" }), "https://mail.google.com/mail/#all/19c4866cd5f43bd9");
 });
 
 test("anything else stays plain text", () => {

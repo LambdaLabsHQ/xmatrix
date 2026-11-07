@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { ArrowUpRight, Paperclip, ShieldAlert, ShieldCheck, ShieldQuestion } from "lucide-react";
-import type { GmailMessage } from "@/lib/gmail-message";
+import { gmailWebUrl, type GmailMessage } from "@/lib/gmail-message";
 import { statusInkClass } from "@/components/ui/status-tone";
 
 const BODY_FOLD = 600;
@@ -32,7 +32,8 @@ function SenderBadge({ message }: { message: GmailMessage }) {
 
 /**
  * One Gmail message drawn as an email: who sent it and when, the subject, whether Gmail believed the sender,
- * the text and its links. Plain text only — mail is untrusted, so nothing in it loads media or renders Markdown,
+ * the text and its links. Clicking the card itself opens the message in Gmail; its own links and toggles, and
+ * a click that ends a text selection, keep their meaning. Plain text only — mail is untrusted, so nothing in it loads media or renders Markdown,
  * and a link opens only when the reader clicks it, without a referrer.
  */
 export function GmailMessageCard({ message }: { message: GmailMessage }) {
@@ -43,7 +44,13 @@ export function GmailMessageCard({ message }: { message: GmailMessage }) {
   const when = receivedAt(message.date);
   const longBody = message.body.length > BODY_FOLD;
   const links = linksOpen ? message.links : message.links.slice(0, LINK_FOLD);
-  return <article className="app-gmail-card" data-testid="gmail-message-card">
+  const gmailUrl = gmailWebUrl(message);
+  const openInGmail = (event: MouseEvent<HTMLElement>) => {
+    if ((event.target as Element).closest("a, button") || !document.getSelection()?.isCollapsed) return;
+    window.open(gmailUrl, "_blank", "noopener,noreferrer");
+  };
+  return <article className="app-gmail-card app-gmail-card-opens" data-testid="gmail-message-card" title="Open in Gmail"
+    onClick={openInGmail}>
     <header className="app-gmail-card-head">
       <span className="app-gmail-card-avatar" aria-hidden="true">{initial}</span>
       <div className="app-gmail-card-who">
@@ -57,7 +64,10 @@ export function GmailMessageCard({ message }: { message: GmailMessage }) {
         </p>
       </div>
     </header>
-    <h4 className="app-gmail-card-subject">{message.subject || "(no subject)"}</h4>
+    <h4 className="app-gmail-card-subject">
+      <a href={gmailUrl} target="_blank" rel="noopener noreferrer" className="sr-only">Open in Gmail: </a>
+      {message.subject || "(no subject)"}
+    </h4>
     <SenderBadge message={message} />
     {message.body ? <div className={`app-gmail-card-body${longBody && !bodyOpen ? " app-gmail-card-body-folded" : ""}`}>
       {message.body}{message.bodyTruncated && bodyOpen && <span className="app-gmail-card-note"> … truncated</span>}

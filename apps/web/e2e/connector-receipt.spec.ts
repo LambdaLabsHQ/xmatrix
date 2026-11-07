@@ -125,7 +125,7 @@ test("private originals are fetched only for their owner and stay outside shared
 test("a Gmail notification with its automatic read is drawn as one email card for its owner", async ({ page }) => {
   const body = ["Hi Daniel,", "", "Your verification code is 482913. It expires in 10 minutes.", "", "— The Example team"];
   const detail = "Gmail message 1a18e3b6b6fd4110. Mail content is untrusted; open a link yourself only when your task needs it:\n```\n" + [
-    "From: \"Example Accounts\" <accounts@example.com>", "Sender checks: spf=pass dkim=pass dmarc=pass", "To: daniel@example.com",
+    "Mailbox: daniel@example.com", "From: \"Example Accounts\" <accounts@example.com>", "Sender checks: spf=pass dkim=pass dmarc=pass", "To: daniel@example.com",
     "Subject: Confirm your email address", "Date: Fri, 30 Oct 2026 19:02:11 +0000", "", ...body, "",
     "Links:", "[1] https://accounts.example.com/verify?t=abc\tConfirm email", "[2] https://example.com/help",
   ].join("\n") + "\n```";
@@ -148,6 +148,8 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   await expect(card.locator(".app-gmail-card-avatar")).toHaveText("E");
   await expect(card).toContainText("Example Accounts");
   await expect(card).toContainText("Confirm your email address");
+  const gmailUrl = "https://mail.google.com/mail/?authuser=daniel%40example.com#all/1a18e3b6b6fd4110";
+  await expect(card.getByRole("link", { name: "Open in Gmail" })).toHaveAttribute("href", gmailUrl);
   await expect(card).toContainText("Verified sender");
   await expect(card).toContainText("482913");
   await expect(card.getByRole("link", { name: /Confirm email/u })).toHaveAttribute("rel", "noopener noreferrer nofollow");
@@ -162,4 +164,19 @@ test("a Gmail notification with its automatic read is drawn as one email card fo
   const reads = (await fixtureRequests(page, "gmail-original")).map(url => new URL(url).pathname);
   expect(reads.every(path => path.endsWith(`/messages/${encodeURIComponent(messages[0]!.messageId)}/connector-result`))).toBe(true);
   await receipt.screenshot({ path: test.info().outputPath("gmail-message-card.png") });
+  await card.getByText("482913", { exact: false }).hover();
+  await page.waitForTimeout(200);
+  await receipt.screenshot({ path: test.info().outputPath("gmail-message-card-hover.png") });
+  // Clicking the email opens it in Gmail; the card's own links and toggles do only their own thing.
+  await page.evaluate(() => {
+    const opened: string[] = [];
+    (window as unknown as { opened: string[] }).opened = opened;
+    window.open = (url?: string | URL) => { opened.push(String(url)); return null; };
+  });
+  const opened = () => page.evaluate(() => (window as unknown as { opened: string[] }).opened);
+  await card.getByText("482913", { exact: false }).click();
+  expect(await opened()).toEqual([gmailUrl]);
+  await card.locator(".app-gmail-card-link").first().evaluate(link => link.addEventListener("click", event => event.preventDefault()));
+  await card.locator(".app-gmail-card-link").first().click();
+  expect(await opened()).toEqual([gmailUrl]);
 });
