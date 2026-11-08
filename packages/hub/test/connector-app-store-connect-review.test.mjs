@@ -44,6 +44,22 @@ test("App Review attachments are linked to their app and thread; lists omit sign
   await assert.rejects(run("review_attachment", { thread: thread.id, id: "unrelated-file" }, provider), /absent or ambiguous/u);
 });
 
+test("attachments Apple links under another type name or leaves out of included are still listed and downloadable", async () => {
+  const file = { ...attachment("crash-1"), type: "reviewRejectionAttachments" };
+  const provider = { ...routes(), [`GET ${messagePath}`]: { data: [{ type: "resolutionCenterMessages", id: "message-1",
+    relationships: { resolutionCenterMessageAttachments: { data: [{ type: "resolutionCenterMessageAttachments", id: "shot-1" }] } } }] },
+    [`GET ${root}/reviewRejections`]: { data: [{ type: "reviewRejections", id: "rejection-1",
+      relationships: { rejectionAttachments: { data: [{ type: file.type, id: file.id }] } } }] },
+    [`GET ${root}/reviewRejectionAttachments/crash-1`]: { data: file } };
+  const listed = await run("review_attachments", {}, provider);
+  assert.match(listed.value.summary, /crash-1/u);
+  assert.match(listed.value.summary, /shot-1/u);
+  const downloaded = await run("review_attachment", { thread: thread.id, id: file.id }, provider);
+  assert.equal(downloaded.value.url, file.attributes.downloadUrl);
+  await assert.rejects(run("review_attachment", { thread: thread.id, id: "shot-1" }, { ...provider,
+    [`GET ${root}/resolutionCenterMessageAttachments/shot-1`]: { data: attachment("someone-else") } }), /allowed download URL/u);
+});
+
 test("attachment capabilities reject foreign origins, credentials, unsafe ports and URL lookalikes", async () => {
   for (const url of ["http://apple.com/log", "https://evil.test/log", "https://apple.com.evil.test/log", "https://user:secret@apple.com/log",
     "https://localhost/log", "https://apple.com:8443/log", "https://apple.com/log#fragment"]) {
