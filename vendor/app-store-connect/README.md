@@ -24,3 +24,13 @@ The generated declarations are excluded from dead-export and duplicate-code
 scanners: they preserve the whole provider schema, including structurally
 repeated types, and are verified from this one source instead. Handwritten
 connector code remains subject to those gates. The Hub adds no runtime SDK.
+
+The read-only **App Store Connect specification audit** workflow compares Apple's
+current official archive on relevant pull requests or manual dispatch. It reports
+operation additions/removals and newly deprecated schema nodes in the job summary.
+Archive/JSON/node/depth bounds and a timeout limit untrusted upstream input; only
+the named JSON member is read, and no archive path is extracted. Python 3 is used
+for bounded ZIP decoding on the Ubuntu audit runner. No credential is needed.
+A changed upstream document warns for review; it never rewrites the pinned source
+or generated release artifacts. Run `node scripts/app-store-connect-upstream.mjs`
+locally for the same audit. No recurring schedule is installed.
