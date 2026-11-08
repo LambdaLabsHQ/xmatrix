@@ -92,11 +92,11 @@ async function inheritReviewDetail(api: AppStoreConnectApi, version: AppleResour
     } catch (error) {
       /* The version exists either way; a refused copy must not read as a failed create. */
       if (!(error instanceof ProviderRequestError)) throw error;
-      return " Its App Review contact details could not be copied; enter them in App Store Connect before submitting.";
+      return " Its App Review contact details could not be copied; configure private reviewSetup Credentials and run set_review_setup before submitting.";
     }
     return ` App Review contact and sign-in details were copied from ${text(source.attributes.versionString)}.`;
   }
-  return " No earlier version has App Review contact details; enter them once in App Store Connect before submitting.";
+  return " No earlier version has App Review contact details; configure private reviewSetup Credentials and run set_review_setup before submitting.";
 }
 
 /** Submit or cancel a review submission; answers the state Apple reports afterwards. */
