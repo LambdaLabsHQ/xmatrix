@@ -151,6 +151,16 @@ before that reconnect succeeds. D1 is unchanged and stays read-only.
 
 ### App Store Connect
 
+The fixed official API catalog also supports resources without dedicated
+business commands: `api_operations` searches, `api_schema` describes,
+`api_read` performs a catalog GET, and `api_plan`/`api_write` bind a mutation to
+an exact request and current resource digest. It covers subscription and IAP
+configuration, TestFlight management, pricing/offers, notifications, team,
+signing, assets and reporting through the provider's schemas. Secrets cannot
+enter invocation JSON; review credentials are removed from generic results.
+Use private reads for personal/financial data. See the complete
+[operation and recovery contract](../connectors/app-store-connect-api.md).
+
 App Store Connect connects with an API key from Users and Access →
 Integrations → App Store Connect API: save its Key ID, the Issuer ID shown
 above the team keys (leave it empty for an individual key) and the contents of
@@ -226,7 +236,9 @@ sizes are exact: read them with `screenshot_specs` before exporting images.
 `create_certificate` spends one of the team's few distribution certificates
 on every call. Use `signing` first to see whether one already exists whose
 private key the build machine still has; revoke unused ones in the Apple
-Developer portal, which this connector never does.
+Developer portal. The dedicated signing workflow never revokes certificates;
+the explicit catalog mutation can do so only through a checked write plan and
+the Channel's current write policy.
 
 ### Outbound Actions And Policy
 
@@ -246,7 +258,7 @@ section, and none is ever shown again.
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
 | Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>`, `list_zones:<account id>\|*`, `list_dns:[<account id>/]<zone>`, `list_domains:<account id>\|*`, `check_domain:[<account id>/]<domain>`, `list_workers:<account id>\|*` (reads), `rollback:[<account id>/]<worker> [version id] [reason]`, `create_zone:[<account id>/]<domain>`, `put_dns:[<account id>/]<zone> <TYPE> <name> <content>`, `register_domain:[<account id>/]<domain>`, `attach_domain:[<account id>/]<hostname> <worker>` |
-| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `sales:<bundle id>\|* [vendor=<vendor number>, kept after the first time] [by=day\|month] [days=…] [months=…]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `subscriptions:<bundle id>`, `in_app_purchases:<bundle id>` (read), `submit_subscriptions:<bundle id> [product id …]`, `submit_in_app_purchases:<bundle id> [<product id> …]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
+| App Store Connect | `api_operations:* [resource]`, `api_schema:<operation/schema> [field path]`, `api_read:<operation> {json}`, `api_plan:<operation> {json}` (reads), `api_write:<operation> {json}` (write); `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `sales:<bundle id>\|* [vendor=<vendor number>, kept after the first time] [by=day\|month] [days=…] [months=…]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `subscriptions:<bundle id>`, `in_app_purchases:<bundle id>` (read), `submit_subscriptions:<bundle id> [product id …]`, `submit_in_app_purchases:<bundle id> [<product id> …]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |

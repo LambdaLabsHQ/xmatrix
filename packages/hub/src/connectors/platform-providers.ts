@@ -1,6 +1,7 @@
 import type { ConnectorAction, ConnectorDelivery, ConnectorDeliveryResult, ConnectorProvider } from "./provider";
 import { DINGTALK_ACTIONS, GOOGLE_CHAT_ACTIONS, TEAMS_ACTIONS, TELEGRAM_ACTIONS, WECOM_ACTIONS, verifyTelegram } from "./actions/chat-webhooks";
 import { APP_STORE_CONNECT_READ_ACTIONS } from "./actions/app-store-connect";
+import { APP_STORE_CONNECT_OPERATION_ACTIONS } from "./actions/app-store-connect-operations";
 import { APP_STORE_CONNECT_LISTING_ACTIONS } from "./actions/app-store-connect-listing";
 import { APP_STORE_CONNECT_MEDIA_ACTIONS } from "./actions/app-store-connect-media";
 import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
@@ -87,7 +88,7 @@ const PROVIDERS: Record<string, {
     actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS, ...APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS,
       ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
       ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_SALES_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_REVIEW_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS,
-      ...APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS },
+      ...APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS, ...APP_STORE_CONNECT_OPERATION_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
