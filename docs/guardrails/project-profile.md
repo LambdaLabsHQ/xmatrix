@@ -30,6 +30,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Sentry recovery claims reconcile an unknown COMMIT through their preassigned
+per-job lease nonces, without repeating the claim. Current grant checks use
+lock-free read recovery. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 Expired Machine command leases report bounded grant-window, lateness and command-age
 durations from PostgreSQL's clock, distinguishing delayed admission from a later
 renewal gap without changing lease authority or socket replies. See

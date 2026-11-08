@@ -72,12 +72,19 @@ for (const [name, run] of Object.entries(operations)) {
   test(`${name} never replays an unknown COMMIT, answered SQL rejection or open breaker`, async () => {
     for (const message of ["Query read timeout", "Connection terminated due to connection timeout"]) {
       const { database, pools } = fixture("commit", [new Error(message)]);
-      await assert.rejects(run(database), error => {
-        assert.ok(error instanceof DatabaseCommitUnknownError);
-        assert.equal(databaseFailureEvidence(error).at(-1)?.phase, "commit");
-        return true;
-      });
-      assert.equal(pools.length, 1);
+      if (name === "Sentry claim") {
+        assert.deepEqual(await run(database), []);
+        assert.equal(pools.length, 2);
+        assert.equal(pools[1].queries.length, 1, "only a reconciliation read follows the unknown commit");
+        assert.ok(pools[1].queries[0].startsWith("SELECT"));
+      } else {
+        await assert.rejects(run(database), error => {
+          assert.ok(error instanceof DatabaseCommitUnknownError);
+          assert.equal(databaseFailureEvidence(error).at(-1)?.phase, "commit");
+          return true;
+        });
+        assert.equal(pools.length, 1);
+      }
       assert.deepEqual(pools[0].releases, [true]);
     }
     const answered = Object.assign(new Error("deadlock detected"), { code: "40P01" });
@@ -107,11 +114,18 @@ test("Gmail completion retries only before COMMIT", async () => {
   }
 });
 
-test("Gmail pending IDs recover a lost read without opening a transaction", async () => {
-  const { database, pools } = fixture("sql", [new Error("Query read timeout")]);
-  assert.deepEqual(await new PostgresGmailRoutingRepository(database, "fixture-key").pending({ id: "route" }), []);
-  assert.equal(pools.length, 1, "a single-read retry replaces the checkout within its session");
-  assert.equal(pools[0].queries.length, 2);
-  assert.ok(pools[0].queries.every(sql => !/^(?:BEGIN|COMMIT|ROLLBACK)\b/u.test(sql)));
-  assert.equal(pools[0].ended, true);
-});
+for (const [name, run, expected] of [
+  ["Gmail pending IDs", database => new PostgresGmailRoutingRepository(database, "fixture-key").pending({ id: "route" }), []],
+  ["Sentry current grant", database => new PostgresSentryEventRepository(database).current({ requestId: "current", appClientId: "client",
+    appUuid: "00000000-0000-4000-8000-000000000001", installationId: "00000000-0000-4000-8000-000000000002",
+    deliveryDigest: "a".repeat(64), connectionId: "connection", spaceId: "space", grantGeneration: crypto.randomUUID(), leaseId: crypto.randomUUID() }), null],
+]) {
+  test(`${name} recover a lost read without opening a transaction`, async () => {
+    const { database, pools } = fixture("sql", [new Error("Query read timeout")]);
+    assert.deepEqual(await run(database), expected);
+    assert.equal(pools.length, 1, "a single-read retry replaces the checkout within its session");
+    assert.equal(pools[0].queries.length, 2);
+    assert.ok(pools[0].queries.every(sql => !/^(?:BEGIN|COMMIT|ROLLBACK)\b/u.test(sql)));
+    assert.equal(pools[0].ended, true);
+  });
+}

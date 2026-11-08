@@ -2,6 +2,8 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { AppControlError, appRequestFields } from "./app-control.js";
 import { lockSentryInstallation, sentryInstallationKey } from "./sentry-installation-lifecycle.js";
+import { DatabaseCommitUnknownError } from "./errors.js";
+import { linkDatabaseFailures } from "./database-failure-evidence.js";
 import { retryBeforeCommit } from "./transaction-recovery.js";
 
 /** Narrow provider references only; no title, URL, actor, exception, request or token. */
@@ -133,49 +135,66 @@ export class PostgresSentryEventRepository {
   async claim(input: { requestId: string; appClientId: string; appUuid: string }): Promise<SentryEventJob[]> {
     const values = sentryInstallationKey({ appClientId: input.appClientId, eventScopeId: input.appUuid,
       installationId: "00000000-0000-0000-0000-000000000000" }).slice(0, 2);
-    // Claim/cleanup has no effect outside this transaction. A lost pre-COMMIT
-    // connection gets one fresh session; unknown commits retain lease recovery.
-    return retryBeforeCommit(() => this.database.transaction({ requestId: request(input), operation: "app.sentry-event.claim" }, async tx => {
-      // Webhook admission and overlapping recovery passes share this capacity
-      // fence. A busy app already has an owner; leave its durable work for the
-      // next minute instead of waiting behind that owner's database round trips.
-      const lock = await tx.query<{ acquired: boolean }>({ name: "sentry_event_capacity_try_lock_v1",
-        text: "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
-        values: [JSON.stringify(["sentry-events", ...values])], maxRows: 1 });
-      if (!lock[0]!.acquired) return [];
-      await this.cleanup(tx, values);
-      const active = await tx.query<QueryResultRow>({ name: "sentry_event_active_leases_v1", text: `SELECT count(*) AS count
-        FROM (SELECT 1 FROM data.app_sentry_event_jobs WHERE app_client_id=$1 AND app_uuid=$2::uuid
-          AND state='leased' AND lease_until>statement_timestamp() LIMIT 9) bounded`, values, maxRows: 1 });
-      const slots = Math.max(0, Math.min(4, 8-Number(active[0]!.count)));
-      if (!slots) return [];
-      // Expired leases are reclaimable after a crash; every claim gets a new fenced nonce.
-      const rows = await tx.query<QueryResultRow>({ name: "sentry_event_claim_v1", text: `WITH due AS
-        (SELECT j.app_client_id,j.app_uuid,j.installation_uuid,j.delivery_digest,j.connection_id
-         FROM data.app_sentry_event_jobs j WHERE j.app_client_id=$1 AND j.app_uuid=$2::uuid AND j.attempts<8
-          AND EXISTS (SELECT 1 FROM data.app_sentry_event_receipts r WHERE r.app_client_id=j.app_client_id
-            AND r.app_uuid=j.app_uuid AND r.installation_uuid=j.installation_uuid AND r.delivery_digest=j.delivery_digest
-            AND r.expires_at>statement_timestamp())
-          AND ((j.state='pending' AND j.available_at<=statement_timestamp()) OR
-            (j.state='leased' AND j.lease_until<=statement_timestamp()))
-         ORDER BY j.available_at,j.delivery_digest,j.connection_id LIMIT $3 FOR UPDATE SKIP LOCKED), claimed AS
-        (UPDATE data.app_sentry_event_jobs j SET state='leased',attempts=attempts+1,lease_id=gen_random_uuid(),
-          lease_until=statement_timestamp()+interval '5 minutes',updated_at=statement_timestamp()
-         FROM due d WHERE j.app_client_id=d.app_client_id AND j.app_uuid=d.app_uuid
-          AND j.installation_uuid=d.installation_uuid AND j.delivery_digest=d.delivery_digest AND j.connection_id=d.connection_id
-         RETURNING j.*)
-        SELECT j.*,r.identity_json FROM claimed j JOIN data.app_sentry_event_receipts r
-          USING (app_client_id,app_uuid,installation_uuid,delivery_digest)`, values: [...values, slots], maxRows: 4 });
-      return rows.map(row => ({ appClientId: String(row.app_client_id), appUuid: String(row.app_uuid),
-        installationId: String(row.installation_uuid), deliveryDigest: String(row.delivery_digest),
-        connectionId: String(row.connection_id), spaceId: String(row.space_id), grantGeneration: String(row.grant_generation),
-        leaseId: String(row.lease_id), identity: validateSentryEventIdentity(row.identity_json as SentryEventIdentity) }));
-    }));
+    // Nonces survive the one pre-COMMIT replay and identify only this invocation.
+    const leases = Array.from({ length: 4 }, () => crypto.randomUUID());
+    let rows: readonly QueryResultRow[];
+    try {
+      rows = await retryBeforeCommit(() => this.database.transaction({ requestId: request(input), operation: "app.sentry-event.claim" }, async tx => {
+        // Webhook admission and overlapping recovery passes share this capacity
+        // fence. A busy app already has an owner; leave its durable work for the
+        // next minute instead of waiting behind that owner's database round trips.
+        const lock = await tx.query<{ acquired: boolean }>({ name: "sentry_event_capacity_try_lock_v1",
+          text: "SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)) AS acquired",
+          values: [JSON.stringify(["sentry-events", ...values])], maxRows: 1 });
+        if (!lock[0]!.acquired) return [];
+        await this.cleanup(tx, values);
+        const active = await tx.query<QueryResultRow>({ name: "sentry_event_active_leases_v1", text: `SELECT count(*) AS count
+          FROM (SELECT 1 FROM data.app_sentry_event_jobs WHERE app_client_id=$1 AND app_uuid=$2::uuid
+            AND state='leased' AND lease_until>statement_timestamp() LIMIT 9) bounded`, values, maxRows: 1 });
+        const slots = Math.max(0, Math.min(4, 8-Number(active[0]!.count)));
+        if (!slots) return [];
+        // Expired leases are reclaimable after a crash; every claim gets a new fenced nonce.
+        return tx.query<QueryResultRow>({ name: "sentry_event_claim_v1", text: `WITH due AS
+          (SELECT j.app_client_id,j.app_uuid,j.installation_uuid,j.delivery_digest,j.connection_id
+           FROM data.app_sentry_event_jobs j WHERE j.app_client_id=$1 AND j.app_uuid=$2::uuid AND j.attempts<8
+            AND EXISTS (SELECT 1 FROM data.app_sentry_event_receipts r WHERE r.app_client_id=j.app_client_id
+              AND r.app_uuid=j.app_uuid AND r.installation_uuid=j.installation_uuid AND r.delivery_digest=j.delivery_digest
+              AND r.expires_at>statement_timestamp())
+            AND ((j.state='pending' AND j.available_at<=statement_timestamp()) OR
+              (j.state='leased' AND j.lease_until<=statement_timestamp()))
+           ORDER BY j.available_at,j.delivery_digest,j.connection_id LIMIT $3 FOR UPDATE SKIP LOCKED), numbered AS
+          (SELECT due.*,row_number() OVER () AS slot FROM due), claimed AS
+          (UPDATE data.app_sentry_event_jobs j SET state='leased',attempts=attempts+1,lease_id=($4::uuid[])[d.slot::int],
+            lease_until=statement_timestamp()+interval '5 minutes',updated_at=statement_timestamp()
+           FROM numbered d WHERE j.app_client_id=d.app_client_id AND j.app_uuid=d.app_uuid
+            AND j.installation_uuid=d.installation_uuid AND j.delivery_digest=d.delivery_digest AND j.connection_id=d.connection_id
+           RETURNING j.*)
+          SELECT j.*,r.identity_json FROM claimed j JOIN data.app_sentry_event_receipts r
+            USING (app_client_id,app_uuid,installation_uuid,delivery_digest)`, values: [...values, slots, leases], maxRows: 4 });
+      }));
+    } catch (error) {
+      if (!(error instanceof DatabaseCommitUnknownError)) throw error;
+      // Never claim again after an uncertain COMMIT. Read only live leases
+      // carrying our nonces; absent rows leave minute/expiry recovery in charge.
+      try {
+        rows = await this.database.transaction({ requestId: request(input), operation: "app.sentry-event.reconcile",
+          statement: "single_read" }, tx => tx.query<QueryResultRow>({ name: "sentry_event_reconcile_v1", text: `SELECT j.*,r.identity_json
+          FROM data.app_sentry_event_jobs j JOIN data.app_sentry_event_receipts r
+            USING (app_client_id,app_uuid,installation_uuid,delivery_digest)
+          WHERE j.app_client_id=$1 AND j.app_uuid=$2::uuid AND j.state='leased'
+            AND j.lease_id=ANY($3::uuid[]) AND j.lease_until>statement_timestamp()
+            AND r.expires_at>statement_timestamp() LIMIT 4`, values: [...values, leases], maxRows: 4 }));
+      } catch (reconcileError) { linkDatabaseFailures(reconcileError, error); throw reconcileError; }
+    }
+    return rows.map(row => ({ appClientId: String(row.app_client_id), appUuid: String(row.app_uuid),
+      installationId: String(row.installation_uuid), deliveryDigest: String(row.delivery_digest),
+      connectionId: String(row.connection_id), spaceId: String(row.space_id), grantGeneration: String(row.grant_generation),
+      leaseId: String(row.lease_id), identity: validateSentryEventIdentity(row.identity_json as SentryEventIdentity) }));
   }
 
   /** A refresh retains grant_generation; a Human replacement or uninstall cannot revive accepted work. */
   async current(input: SentryEventJob & { requestId: string }): Promise<{ credentialVersion: number } | null> {
-    return this.database.transaction({ requestId: request(input), operation: "app.sentry-event.current" }, async tx => {
+    return this.database.transaction({ requestId: request(input), operation: "app.sentry-event.current", statement: "single_read" }, async tx => {
       const rows = await tx.query<QueryResultRow>({ name: "sentry_event_current_v1", text: `SELECT i.credential_version
         ${ACTIVE_BINDING} AND i.connection_id=$4 AND i.space_id=$5 AND i.grant_generation=$6::uuid
         AND EXISTS (SELECT 1 FROM data.app_sentry_event_jobs j WHERE j.app_client_id=$1 AND j.app_uuid=$2::uuid

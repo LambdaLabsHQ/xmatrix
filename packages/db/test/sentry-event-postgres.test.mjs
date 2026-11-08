@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { connectorDatabase, integration } from "./postgres-database.fixture.mjs";
-import { PostgresSentryEventRepository, PostgresAppCredentialRepository, PostgresAppRepository } from "../dist/index.js";
+import { PostgresSentryEventRepository, PostgresAppCredentialRepository, PostgresAppRepository, DatabaseCommitUnknownError } from "../dist/index.js";
 
 const at = new Date().toISOString();
 const issue = { kind: "issue", action: "created", objectId: "42", projectId: "123", projectSlug: "test" };
@@ -201,5 +201,77 @@ integration("Sentry overlapping recovery wakes never exceed eight active leases 
     assert.equal(jobs.length, 8, "later passes fill remaining capacity after contention");
     assert.equal(new Set(jobs.map(job => job.leaseId)).size, 8);
     assert.equal((await claim()).length, 0);
+  });
+});
+
+
+// Real committed/rolled-back rows prove the reconciliation result independently
+// of the transport fault. Existing wire tests own checkout and pre-COMMIT replay.
+function uncertainClaim(database, afterClaim, { rollback = false, readFailure } = {}) {
+  const unknown = new DatabaseCommitUnknownError("CONNECTION_TERMINATED");
+  const contexts = [];
+  const repo = new PostgresSentryEventRepository({ cacheMode: "disabled", async transaction(context, callback) {
+    contexts.push(context);
+    if (context.operation === "app.sentry-event.claim") {
+      if (rollback) {
+        await assert.rejects(database.transaction(context, async tx => { await callback(tx); throw unknown; }), error => error === unknown);
+      } else await database.transaction(context, callback);
+      await afterClaim?.();
+      throw unknown;
+    }
+    if (readFailure) throw readFailure;
+    return database.transaction(context, callback);
+  } });
+  return { contexts, run: key => repo.claim({ ...key, requestId: crypto.randomUUID() }) };
+}
+integration("Sentry unknown claim COMMIT recovers only its committed leases without claiming another batch (HUB-BY)", async () => {
+  await fixture(async ({ sql, database, key, accept, claim, current }) => {
+    for (let n = 1; n <= 9; n++) await accept(n.toString(16).padStart(64, "0"));
+    const other = await claim();
+    const recovery = uncertainClaim(database);
+    const jobs = await recovery.run(key);
+    assert.equal(jobs.length, 4);
+    assert.equal(new Set([...other, ...jobs].map(job => job.leaseId)).size, 8);
+    for (const job of jobs) assert.deepEqual(await current(job), { credentialVersion: 1 });
+    const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+    assert.equal(rows.filter(row => row.state === "pending" && row.attempts === 0).length, 1);
+    assert.equal(rows.filter(row => row.state === "leased" && row.attempts === 1).length, 8);
+    assert.equal(recovery.contexts.length, 2);
+    assert.equal(recovery.contexts[1].statement, "single_read");
+  });
+});
+integration("Sentry uncertain rollback or expired/replaced lease returns no jobs and leaves recovery in charge", async () => {
+  for (const outcome of ["rollback", "expired", "replaced", "receipt-expired"]) {
+    await fixture(async ({ sql, database, key, accept, claim, current }) => {
+      await accept();
+      let successor;
+      const recovery = uncertainClaim(database, async () => {
+        if (outcome === "expired" || outcome === "replaced") {
+          await sql("UPDATE data.app_sentry_event_jobs SET lease_until=now()-interval '1 second' WHERE app_client_id=$1", [key.appClientId]);
+          if (outcome === "replaced") [successor] = await claim();
+        } else if (outcome === "receipt-expired") {
+          await sql("UPDATE data.app_sentry_event_receipts SET expires_at=now()-interval '1 second' WHERE app_client_id=$1", [key.appClientId]);
+        }
+      }, { rollback: outcome === "rollback" });
+      assert.deepEqual(await recovery.run(key), [], outcome);
+      assert.equal(recovery.contexts.length, 2, "no claim replay after unknown COMMIT");
+      if (successor) assert.deepEqual(await current(successor), { credentialVersion: 1 });
+      if (outcome === "rollback") {
+        const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+        assert.deepEqual(rows, [{ state: "pending", attempts: 0 }]);
+        assert.equal((await claim()).length, 1, "a later wake claims rolled-back work");
+      }
+    });
+  }
+});
+integration("Sentry failed reconciliation surfaces its error and does not mutate the committed claim", async () => {
+  await fixture(async ({ sql, database, key, accept }) => {
+    await accept();
+    const readFailure = new Error("reconciliation unavailable");
+    const recovery = uncertainClaim(database, undefined, { readFailure });
+    await assert.rejects(recovery.run(key), error => error === readFailure);
+    assert.equal(recovery.contexts.length, 2);
+    const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+    assert.deepEqual(rows, [{ state: "leased", attempts: 1 }]);
   });
 });
