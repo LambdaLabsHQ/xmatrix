@@ -392,7 +392,7 @@ use super::protocol::{
     MessageSender, SerializedAgent,
 };
 use super::{
-    AcpSession, AcpVendorConfig, AgentPresentationAdapter,
+    AcpSession, AcpTrustedRules, AcpVendorConfig, AgentPresentationAdapter,
     AgentPresentationFacts, AgentRuntimeStateTracker, CodexAppSession, CodexThreadActivity,
     CodexThreadActivityEvent, CodexTransportKind, CodexTransportRecoveryState,
     DAEMON_COMMAND_ADMISSION_REQUEST_TIMEOUT_SECS, DAEMON_COMMAND_LEASE_RENEW_FAILURE_WINDOW_SECS,
@@ -490,7 +490,7 @@ use crate::runtime_trusted_role_prompt::claude_goal_turn_input;
 use crate::runtime_trusted_role_prompt::claude_stream_extra_args;
 use crate::runtime_trusted_role_prompt::claude_stream_user_message;
 use crate::runtime_trusted_role_prompt::ensure_runtime_supports_trusted_role;
-use crate::runtime_trusted_role_prompt::grok_acp_trusted_rules;
+use crate::runtime_trusted_role_prompt::acp_trusted_rules;
 use crate::runtime_trusted_role_prompt::grok_goal_turn_input;
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt;
 use base64::Engine as _;

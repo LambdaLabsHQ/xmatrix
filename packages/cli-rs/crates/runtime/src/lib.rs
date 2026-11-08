@@ -142,9 +142,8 @@ use runtime_codex_turn_errors::{
 use runtime_headless_runs::{run_claude_print_external, run_headless_external};
 use runtime_presence_updates::{TurnTrace, send_llm_trace, send_llm_trace_with_source};
 use runtime_trusted_role_prompt::{
-    ImageBlockShape, ensure_runtime_supports_trusted_role, grok_acp_trusted_rules,
-    grok_goal_turn_input, prompt_content_blocks, selected_runtime_supports_trusted_role,
-    trusted_role_is_active,
+    ImageBlockShape, acp_trusted_rules, ensure_runtime_supports_trusted_role, grok_goal_turn_input,
+    prompt_content_blocks, selected_runtime_supports_trusted_role, trusted_role_is_active,
 };
 use runtime_turn_failure::{
     AGENT_SIGNED_OUT_LIFECYCLE_REASON, clear_pending_turn_failure, harness_signed_out_error,
