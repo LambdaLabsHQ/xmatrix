@@ -41,6 +41,8 @@ digests and one-shot sends protect the review workflow; resubmission remains
 a separate decision. See [App Review actions](../connectors/app-store-connect-review.md).
 Rating resets require an editable version and current digest; new Sandbox testers
 read their private profile from Credentials and preserve existing accounts.
+App Review contacts and demo login details likewise come from a bundle-bound
+private reviewSetup profile, with credential-version checks and Apple readback.
 See [website management](../connectors/app-store-connect-web-management.md).
 Commerce notifications use an opt-in five-minute poll, with primary App authority
 leases, current subscription/grant checks and a durable deduplicated outbox.

@@ -1,4 +1,5 @@
 import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
+import { appReviewSetupCapability } from "./app-store-connect-review-setup";
 import { appleCommerceStatusCapability } from "./app-store-connect-commerce";
 import { agentRegistrationOf } from "./agent-caller";
 import { teamsActionCapability } from "./teams-native";
@@ -15,7 +16,7 @@ import { connectionCredentialGrant, credentialRenewal } from "./connection-crede
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
-import { connectorPermissionRepository, connectorActionRequestRepository } from "./credentials";
+import { connectorPermissionRepository, connectorActionRequestRepository, connectorCredentialRepository } from "./credentials";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { notifyWorkspaceResource } from "../workspace-resource-notification";
 import type { Env } from "../types";
@@ -348,7 +349,9 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
   const appleCommerce = providerId === "appstoreconnect" && actionId === "commerce_status"
     ? appleCommerceStatusCapability(input.env,{spaceId,channelId:input.channelId,userId:input.actorUserId}) : undefined;
-  const native = appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
+  const appReviewSetup = providerId === "appstoreconnect" && actionId === "set_review_setup"
+    ? appReviewSetupCapability(()=>connectorCredentialRepository(input.env).resolve({requestId:crypto.randomUUID(),spaceId,providerId}),authorizeWrite):undefined;
+  const native = appReviewSetup || appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
   const grant = native ? undefined : await connectionCredentialGrant(input.env, spaceId, providerId);
   const credentials = grant?.values ?? {};
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
@@ -367,7 +370,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
   const mailSnapshot = providerId === "gmail" && actionId === "send_draft" && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL
     ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
-  return { credentials, caller, authorizeWrite, usage, ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }
