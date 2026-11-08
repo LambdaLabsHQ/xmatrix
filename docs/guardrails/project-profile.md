@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Sentry event admission and installation retirement share complete binding
+iteration. Events atomically admit every current target that fits the existing
+pending-job backpressure, including targets beyond the former 50-binding read.
+See [resource counts](../operations/resource-counts.md).
+
 Sentry recovery claims reconcile an unknown COMMIT through their preassigned
 per-job lease nonces, without repeating the claim. Current grant checks use
 lock-free read recovery. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).

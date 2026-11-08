@@ -5,6 +5,7 @@ import { lockSentryInstallation, sentryInstallationKey } from "./sentry-installa
 import { DatabaseCommitUnknownError } from "./errors.js";
 import { linkDatabaseFailures } from "./database-failure-evidence.js";
 import { retryBeforeCommit } from "./transaction-recovery.js";
+import { resourcePages, RESOURCE_PAGE_SIZE } from "./resource-pages.js";
 
 /** Narrow provider references only; no title, URL, actor, exception, request or token. */
 export interface SentryEventIdentity {
@@ -88,25 +89,32 @@ export class PostgresSentryEventRepository {
       values: values.slice(0, 2), maxRows: 1 });
       if (Number((receipts[0] as QueryResultRow).count) >= 10000) throw new AppControlError("sentry_event_backlog_full", 503,
         "Sentry receipt retention capacity reached", true);
-      const targets = await tx.query<QueryResultRow>({ name: "sentry_event_targets_v1",
+      const read = (after: string | null) => tx.query<QueryResultRow>({ name: "sentry_event_targets_v2",
         text: `SELECT i.connection_id,i.space_id,i.grant_generation ${ACTIVE_BINDING}
-          ORDER BY i.connection_id LIMIT 51`, values: values.slice(0, 3), maxRows: 51 });
-      if (!targets.length || targets.length > 50) throw new AppControlError("sentry_event_unavailable", 503,
-        "Sentry event bindings are unavailable", true);
+          AND ($4::text IS NULL OR i.connection_id>$4) ORDER BY i.connection_id LIMIT $5`,
+        values: [...values.slice(0, 3), after, RESOURCE_PAGE_SIZE], maxRows: RESOURCE_PAGE_SIZE });
       const backlog = await tx.query({ name: "sentry_event_backlog_v1", text: `SELECT count(*) AS count FROM (SELECT 1
         FROM data.app_sentry_event_jobs WHERE app_client_id=$1 AND app_uuid=$2::uuid AND state IN ('pending','leased')
         LIMIT 1001) bounded`, values: values.slice(0, 2), maxRows: 1 });
-      if (Number((backlog[0] as QueryResultRow).count) + targets.length > 1000) throw new AppControlError("sentry_event_backlog_full", 503,
-        "Sentry event backlog is full", true);
       await tx.query({ name: "sentry_event_receipt_write_v1", text: `INSERT INTO data.app_sentry_event_receipts
         (app_client_id,app_uuid,installation_uuid,delivery_digest,identity_json) VALUES ($1,$2::uuid,$3::uuid,$4,$5::jsonb)`,
       values: [...values, JSON.stringify(identity)], maxRows: 0 });
-      await tx.query({ name: "sentry_event_jobs_write_v1", text: `INSERT INTO data.app_sentry_event_jobs
-        (app_client_id,app_uuid,installation_uuid,delivery_digest,connection_id,space_id,grant_generation)
-        SELECT $1,$2::uuid,$3::uuid,$4,t.connection_id,t.space_id,t.grant_generation::uuid FROM
-          jsonb_to_recordset($5::jsonb) AS t(connection_id text,space_id text,grant_generation text)`,
-      values: [...values, JSON.stringify(targets)], maxRows: 0 });
-      return { accepted: true, retired: false, reused: false, jobs: targets.length };
+      let jobs = 0;
+      // Binding cardinality is not a quota. Batch the complete authorized set;
+      // the existing pending-work budget admits the whole receipt or rolls it back.
+      for await (const targets of resourcePages(read, row => String(row.connection_id))) {
+        if (Number((backlog[0] as QueryResultRow).count) + jobs + targets.length > 1000) {
+          throw new AppControlError("sentry_event_backlog_full", 503, "Sentry event backlog is full", true);
+        }
+        await tx.query({ name: "sentry_event_jobs_write_v1", text: `INSERT INTO data.app_sentry_event_jobs
+          (app_client_id,app_uuid,installation_uuid,delivery_digest,connection_id,space_id,grant_generation)
+          SELECT $1,$2::uuid,$3::uuid,$4,t.connection_id,t.space_id,t.grant_generation::uuid FROM
+            jsonb_to_recordset($5::jsonb) AS t(connection_id text,space_id text,grant_generation text)`,
+        values: [...values, JSON.stringify(targets)], maxRows: 0 });
+        jobs += targets.length;
+      }
+      if (!jobs) throw new AppControlError("sentry_event_unavailable", 503, "Sentry event bindings are unavailable", true);
+      return { accepted: true, retired: false, reused: false, jobs };
     });
   }
 
@@ -123,7 +131,7 @@ export class PostgresSentryEventRepository {
           WHERE app_client_id=$1 AND app_uuid=$2::uuid AND state='leased' AND attempts>=8
             AND lease_until<=statement_timestamp() ORDER BY lease_until LIMIT 4 FOR UPDATE SKIP LOCKED)`,
     values: values.slice(0, 2), maxRows: 0 });
-    // Each receipt has at most 50 children. Two receipts => at most 100 job deletions.
+    // Admission gives each receipt at most 1,000 children. Two receipts => at most 2,000 job deletions.
     await tx.query({ name: "sentry_event_cleanup_v1", text: `DELETE FROM data.app_sentry_event_receipts
       WHERE (app_client_id,app_uuid,installation_uuid,delivery_digest) IN
         (SELECT app_client_id,app_uuid,installation_uuid,delivery_digest FROM data.app_sentry_event_receipts
