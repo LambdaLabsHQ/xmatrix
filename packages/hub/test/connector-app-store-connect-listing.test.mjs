@@ -53,7 +53,7 @@ test("listing statements are validated to Apple's vocabulary before any request"
     `set_review_contact:${BUNDLE} {"contactEmail":"a@example.com"}`, `set_review_contact:${BUNDLE} 1.0 {}`]) {
     assert.equal(typeof statement(`@appstoreconnect:${bad}`), "string", bad);
   }
-  assert.match(statement(`@appstoreconnect:set_review_contact:${BUNDLE} 1.0 {"demoAccountPassword":"hunter2"}`), /never here/u);
+  assert.match(statement(`@appstoreconnect:set_review_contact:${BUNDLE} 1.0 {"demoAccountPassword":"hunter2"}`), /private reviewSetup Credentials.*set_review_setup.*never paste/u);
 });
 
 test("set_app_info writes to the app info that is not live", async () => {
@@ -99,7 +99,7 @@ test("set_review_contact updates or creates the details and keeps their values o
   const contact = { contactFirstName: "Ada", contactEmail: "ada@example.com", contactPhone: "+1 555 0100", demoAccountRequired: true, demoAccountName: "demo" };
   const created = await run({ ...open, "POST /v1/appStoreReviewDetails": { data: {} } }, `@appstoreconnect:set_review_contact:${BUNDLE} 1.0.0 ${JSON.stringify(contact)}`);
   assert.deepEqual(created.calls.at(-1).body, { type: "appStoreReviewDetails", attributes: contact, relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "v1" } } } });
-  assert.match(created.value.summary, /Set the App Review contactFirstName, contactEmail, contactPhone, demoAccountRequired, demoAccountName .* Enter the sign-in password in App Store Connect/u);
+  assert.match(created.value.summary, /Set the App Review contactFirstName, contactEmail, contactPhone, demoAccountRequired, demoAccountName .* private reviewSetup Credentials.*set_review_setup/u);
   assert.doesNotMatch(created.value.summary, /Ada|ada@example\.com|555/u);
 
   const patched = await run({ ...open, "GET /v1/appStoreVersions/v1/appStoreReviewDetail": { data: { type: "appStoreReviewDetails", id: "rd-1", attributes: {} } },
