@@ -1,5 +1,6 @@
 import { readBoundedStream } from "@xmatrix/protocol";
 import { pemPrivateKeyBytes } from "../push/apns";
+import { requestAppleOperation } from "./app-store-connect-schema";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
 import { connectorIngressUrl } from "./credentials";
 import { oneLine, record, text } from "./event-format";
@@ -47,11 +48,11 @@ export interface AppStoreConnectApi {
   /** One JSON:API call; `data` and `included` (resources created inline) become the request's members. A 204 answers `{}`. */
   request(path: string, init?: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; data?: unknown; included?: unknown[];
     /** Keep Apple's error text out of the receipt: the call carries review contact or sign-in details. */
-    quiet?: boolean }): Promise<Record<string, unknown>>;
+    quiet?: boolean; accept?: string }): Promise<Record<string, unknown>>;
   /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
   list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[] }>;
   /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
-  report(path: string, query: Record<string, string>): Promise<string | undefined>;
+  report(path: string, query: Record<string, string>, accept?: string): Promise<string | undefined>;
 }
 
 export function appleResource(value: unknown): AppleResource | undefined {
@@ -131,7 +132,7 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
     let problem: string | undefined;
     try {
       return await providerJson(apiUrl(path, init.query), { method: init.method ?? "GET", maxBytes: MAX_LIST_BYTES,
-        headers: { authorization: await authorization },
+        headers: { authorization: await authorization, ...(init.accept ? { accept: init.accept } : {}) },
         ...(init.data === undefined ? {} : { json: { data: init.data, ...(init.included ? { included: init.included } : {}) } }),
         describeError: (payload) => problem = appleProblem(payload, init.quiet === true) });
     } catch (error) {
@@ -144,11 +145,11 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
   };
   return {
     request,
-    async report(path, query) {
+    async report(path, query, accept = "application/a-gzip") {
       authorization ??= bearer(credentials, Math.floor(now() / 1_000));
       const signal = AbortSignal.timeout(REPORT_TIMEOUT_MS);
       const response = await fetch(apiUrl(path, query), { redirect: "manual", signal,
-        headers: { authorization: await authorization, accept: "application/a-gzip", "user-agent": "xMatrix-Connectors" } });
+        headers: { authorization: await authorization, accept, "user-agent": "xMatrix-Connectors" } });
       const bytes = await readBoundedStream(response.body, MAX_REPORT_BYTES,
         () => new ProviderRequestError(502, "App Store Connect report is too large"), signal);
       if (response.status === 404) return undefined;
@@ -198,7 +199,7 @@ export async function appleApp(api: AppStoreConnectApi, bundleId: string): Promi
 
 /** Check: the key signs a token Apple accepts. No app is needed yet. */
 export async function verifyAppStoreConnect(credentials: Credentials): Promise<void> {
-  const response = await appStoreConnect(credentials).request("/v1/apps", { query: { "fields[apps]": "bundleId", limit: "1" } });
+  const response = await requestAppleOperation(appStoreConnect(credentials), "apps_getCollection", { query: { "fields[apps]": ["bundleId"], limit: 1 } });
   if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return an app list");
 }
 

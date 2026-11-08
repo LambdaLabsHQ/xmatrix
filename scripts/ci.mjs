@@ -360,6 +360,13 @@ const nodeTestLanes = [
 ];
 const nodeStaticStages = [
   {
+    label: "Check pinned Apple API types and operation catalog",
+    command: process.execPath,
+    args: ["scripts/app-store-connect-openapi.mjs", "--check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "apple-api-check",
+  },
+  {
     label: "Check synchronized versions",
     command: process.execPath,
     args: ["scripts/version.mjs", "check"],
