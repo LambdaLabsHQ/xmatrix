@@ -18,6 +18,7 @@ export interface AppleOperation {
 const catalog = generated as unknown as { version: string; sha256: string; operations: Record<string, AppleOperation>; schemas: Record<string, AppleSchema> };
 export const APPLE_OPERATIONS = catalog.operations;
 export const APPLE_SPEC_VERSION = catalog.version;
+export const APPLE_SPEC_SHA = catalog.sha256;
 
 export function resolveAppleSchema(schema: AppleSchema): AppleSchema {
   if (!schema.$ref) return schema;

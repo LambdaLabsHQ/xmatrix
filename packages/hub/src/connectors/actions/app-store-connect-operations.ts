@@ -1,6 +1,6 @@
 import { canonicalJsonStringify, sha256Hex } from "@xmatrix/protocol";
 import { appStoreConnect, type AppStoreConnectApi } from "../app-store-connect-api";
-import { APPLE_OPERATIONS, APPLE_SPEC_VERSION, appleOperationRequest, resolveAppleSchema, type AppleOperationInput } from "../app-store-connect-schema";
+import { APPLE_OPERATIONS, APPLE_SPEC_SHA, APPLE_SPEC_VERSION, appleOperationRequest, resolveAppleSchema, type AppleOperationInput } from "../app-store-connect-schema";
 import { record, text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionStatement } from "../provider";
@@ -9,7 +9,7 @@ import { quoteRetrievedText } from "./common";
 
 const MAX_OUTPUT = 12_000;
 const MAX_INPUT = 16_000;
-const SECRET = /password|privatekey|authorization|cookie|(?:^|_)secret(?:$|_)|^apikey$/iu;
+const SECRET = /password|privatekey|authorization|cookie|secret|apikey/iu;
 const SAFE_OBJECT = (value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value);
 const problem = (message: string): never => { throw new ProviderRequestError(400, message); };
 const has = (object: object, key: string) => Object.hasOwn(object, key);
@@ -31,7 +31,7 @@ function visible(value: unknown, depth = 0): unknown {
   if (Array.isArray(value)) return value.map(item => visible(item, depth + 1));
   if (!value || typeof value !== "object") return value;
   const row = record(value), review = /^(?:appStore|betaApp)ReviewDetails$/u.test(text(row.type));
-  return Object.fromEntries(Object.entries(row).filter(([key]) => !SECRET.test(key) && key !== "demoAccountName" && key !== "demoAccountPassword")
+  return Object.fromEntries(Object.entries(row).filter(([key]) => !SECRET.test(key) && key !== "demoAccountName" && key !== "demoAccountPassword" && key !== "reviewNote")
     .map(([key, child]) => [key, review && key === "attributes" ? visible(Object.fromEntries(Object.entries(record(child))
       .filter(([name]) => name !== "notes" && !/^contact/u.test(name))), depth + 1) : visible(child, depth + 1)]));
 }
@@ -103,7 +103,7 @@ async function plan(api: AppStoreConnectApi, input: Record<string, string>) {
   } else if (call.snapshot !== undefined) {
     problem("A create does not accept an existing-resource snapshot");
   }
-  const digest = await sha256Hex(canonicalJsonStringify({ version: APPLE_SPEC_VERSION, operation: input.operation, path: call.path,
+  const digest = await sha256Hex(canonicalJsonStringify({ specification: APPLE_SPEC_SHA, operation: input.operation, path: call.path,
     method: call.operation.method, query: call.query, body: call.body, before }));
   return { call, before, digest };
 }

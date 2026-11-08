@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+App Store Connect pins Apple's official OpenAPI and derives its public operation
+catalog, request validation and zero-runtime types from that source. Generic
+reads and snapshot-checked writes cover additional resources while existing
+business workflows keep their domain checks. See [API operations](../connectors/app-store-connect-api.md).
+
 App Store Connect reads review attachments and prepares/verifies App Review
 draft replies through its saved web session. App/thread ownership, exact draft
 digests and one-shot sends protect the review workflow; resubmission remains
