@@ -74,8 +74,8 @@ event name. The stamp proof is the same release-commit check the gate runs
 before checkout.
 Public Snapshot CI stays unrecorded.
 
-Protocol Markdown round-trip coverage keeps the complete repository documentation
-corpus and the focused syntax cases. Each input and its canonical form are parsed
+Protocol Markdown round-trip coverage keeps every Markdown file under `docs/`
+and the focused syntax cases. Each input and its canonical form are parsed
 once; the same two document objects prove serializer idempotence and document
 equivalence. Other focused tests exercise the canonicalization convenience API.
 This avoids repeating the parser solely to reconstruct values for assertions.
