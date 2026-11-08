@@ -41,7 +41,10 @@ integration("commerce watches baseline once and retain deduplicated outbox work 
     assert.equal(status.products,1);assert.equal(status.pending,0);assert.ok(status.observedAt.endsWith("Z"));
     assert.equal(await repo.status({...scope,userId:"outsider"}),null);
     assert.equal(await repo.status({...scope,channelId:"other"}),null);
-    await repo.finish(first,false);await due();
+    await repo.finish(first,false);
+    const cadence=(await sql("SELECT extract(epoch FROM available_at)::numeric % 300=0 AS next_cron_boundary, available_at<=now()+interval '5 minutes' AS within_one_pass FROM data.app_apple_commerce_watches WHERE relation_id=$1",[relation])).rows[0];
+    assert.equal(cadence.next_cron_boundary,true);assert.equal(cadence.within_one_pass,true);
+    await due();
     const [second]=await repo.claim();
     const change=await repo.stage(second,reviewed);
     assert.deepEqual(change,[{kind:"subscription",id:"s1",state:"IN_REVIEW",previous:"WAITING_FOR_REVIEW",sequence:"1"}]);
