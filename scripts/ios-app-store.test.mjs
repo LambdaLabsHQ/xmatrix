@@ -29,7 +29,13 @@ function fixture(options = {}) {
       }
       if (url.pathname === "/v1/apps/app/appStoreVersions") return options.versions ?? [version];
       if (url.pathname === "/v1/reviewSubmissions") return submission ? [submission] : [];
-      if (url.pathname.endsWith("/items")) return submission?.attributes.state === "COMPLETE" ? [] : options.items ?? [];
+      if (url.pathname.endsWith("/items")) {
+        // Apple's default document omits relationship linkage. Its include
+        // request projects only the named related resources into each item.
+        const included = (url.searchParams.get("include") ?? "").split(",");
+        return submission?.attributes.state === "COMPLETE" ? [] : (options.items ?? []).map(item => ({ ...item,
+          relationships: Object.fromEntries(Object.entries(item.relationships ?? {}).filter(([key]) => included.includes(key))) }));
+      }
       if (url.pathname === "/v1/apps/app/subscriptionGroups") return [{ type: "subscriptionGroups", id: "group" }];
       if (url.pathname === "/v1/apps/app/inAppPurchasesV2") return [{ type: "inAppPurchases", id: "purchase" }];
       if (url.pathname.endsWith("/appStoreVersionLocalizations")) return [{ id: "en", attributes: { locale: "en-US" } }, { id: "fr", attributes: { locale: "fr-FR" } }];
