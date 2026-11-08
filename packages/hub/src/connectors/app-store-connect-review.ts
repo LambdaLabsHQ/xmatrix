@@ -12,6 +12,8 @@ import type { ConnectorAction, ConnectorActionStatement } from "./provider";
 // Contract evidence: rorkai/App-Store-Connect-CLI internal/web/review.go. No SDK runs here.
 const THREAD_TYPES = "REJECTION_BINARY,REJECTION_METADATA,REJECTION_REVIEW_SUBMISSION,APP_MESSAGE_ARC,APP_MESSAGE_ARB,APP_MESSAGE_COMM,APP_MESSAGE_INFORMATIONAL";
 const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
+// Attachment resources only; the exact name is Apple's and need not match the relationship name.
+const TYPE = /^[a-z][A-Za-z]{0,52}Attachments$/u;
 const DIGEST = /^[a-f0-9]{64}$/u;
 const MAX_OUTPUT = 12_000;
 const ROOT = "/iris/v1/";
@@ -79,9 +81,11 @@ async function details(session: WebSession, thread: AppleResource) {
       const data = record(row.relationships[name]).data;
       if (!Array.isArray(data)) throw new ProviderRequestError(502, "App Store Connect returned malformed review attachments");
       for (const ref of data) {
-        const link = record(ref), key = `${text(link.type)}:${text(link.id)}`, attachment = available.get(key);
-        if (link.type !== name || !attachment || !ID.test(attachment.id)) throw new ProviderRequestError(502, "App Store Connect did not include the linked review attachment");
-        attachments.set(key, attachment);
+        // Apple names the resource type independently of the relationship and may leave a linked file out of `included`;
+        // keep the reference so the file is still listed, and read its details by id when it is downloaded.
+        const link = record(ref), type = text(link.type), id = text(link.id), key = `${type}:${id}`;
+        if (!TYPE.test(type) || !ID.test(id)) throw new ProviderRequestError(502, "App Store Connect returned malformed review attachments");
+        attachments.set(key, available.get(key) ?? { type, id, attributes: {}, relationships: {} });
       }
     }
   }
@@ -204,10 +208,16 @@ export const APP_STORE_CONNECT_REVIEW_ACTIONS: Record<string, ConnectorAction> =
     const thread = await requiredThread(session, app, input), { attachments } = await details(session, thread);
     const matches = attachments.filter(row => row.id === input.id);
     if (matches.length !== 1) throw new ProviderRequestError(404, "The attachment is absent or ambiguous in this app's review thread");
-    const url = downloadUrl(matches[0]!);
+    let match = matches[0]!;
+    if (!Object.keys(match.attributes).length) {
+      // The thread linked this file without its details; the reference came from the owned thread, so read it by id.
+      const fetched = appleResource((await session.read(`${ROOT}${match.type}/${encodeURIComponent(match.id)}`)).data);
+      if (fetched?.id === match.id && fetched.type === match.type) match = fetched;
+    }
+    const url = downloadUrl(match);
     if (!url) throw new ProviderRequestError(409, "Apple has not provided an allowed download URL for this attachment");
     return { summary: `App Review attachment of ${input.app}; a signed, expiring single-file URL, fetched without credentials:\n` +
-      quoteRetrievedText(`${attachmentLine(matches[0]!)}\n${url}`, MAX_OUTPUT), url };
+      quoteRetrievedText(`${attachmentLine(match)}\n${url}`, MAX_OUTPUT), url };
   }),
   review_draft: appWebAction("read", statement => ids(statement, 1), async (session, app, input) => {
     const current = await draft(session, await requiredThread(session, app, input));
