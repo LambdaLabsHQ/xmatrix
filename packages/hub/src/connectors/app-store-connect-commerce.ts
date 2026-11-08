@@ -3,9 +3,11 @@ import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { fireConnectorAutomationTriggers } from "../automation-triggers";
 import { appStoreConnect, appleApp, appleResource, type AppStoreConnectApi, type AppleResource } from "./app-store-connect-api";
-import { appleCommerceRepository, connectorAppRepository, connectorCredentialRepository } from "./credentials";
+import { appleCommerceRepository, connectorCredentialRepository } from "./credentials";
 import { appendToRoutes } from "./event-ingress";
 import { connectorEvent, record, text } from "./event-format";
+import { appOnly } from "./app-store-connect-web";
+import type { ConnectorAction } from "./provider";
 import { ProviderRequestError } from "./http";
 
 /** A complete bounded collection, never the truncated result of a page cap. */
@@ -58,7 +60,7 @@ export async function readAppleCommerceStates(api: AppStoreConnectApi, appId: st
 }
 function event(job: AppleCommerceJob, change: AppleCommerceChange) {
   const bundle = job.sourceRef.slice("appstoreconnect:".length);
-  return connectorEvent({ eventId: `commerce:${job.relationId}:${change.sequence}`, sourceRef: job.sourceRef,
+  return connectorEvent({ eventId: `commerce:${job.watchId}:${change.sequence}`, sourceRef: job.sourceRef,
     feature: "commerce", summary: `${bundle}: ${change.kind} ${change.id} ${change.previous} → ${change.state}`,
     provider: `App Store Connect · ${bundle}`, title: `${change.kind} review state ${change.previous} → ${change.state}`,
     details: [`Apple product id: ${change.id}. Read subscriptions or in_app_purchases for product names.`] });
@@ -75,12 +77,10 @@ async function process(env: Env, job: AppleCommerceJob) {
   }
   for (const change of pending.slice(0, 10)) {
     if (!await repository.current(job)) return;
-    const routes = (await connectorAppRepository(env).connectorEventRoutes({ requestId: crypto.randomUUID(),
-      connectionId: job.connectionId, sourceRef: job.sourceRef, limit: 100 })).filter(route =>
-      route.channelId === job.channelId && route.authorityRootUserId === job.userId && route.features.includes("commerce"));
-    if (routes.length !== 1) return;
+    const route = await repository.route(job);
+    if (!route) return;
     const notice = event(job,change);
-    await appendToRoutes(env,dispatchProductMessageAppend,"appstoreconnect",notice,routes);
+    await appendToRoutes(env,dispatchProductMessageAppend,"appstoreconnect",notice,[route]);
     if (!await repository.current(job)) return;
     await fireConnectorAutomationTriggers(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
     await repository.delivered(job,change.sequence);
@@ -91,9 +91,29 @@ async function process(env: Env, job: AppleCommerceJob) {
 /** Independent cron invocation keeps provider polling out of the maintenance invocation's connection budget. */
 export async function drainAppleCommerce(env: Env) {
   const repository = appleCommerceRepository(env), jobs = await repository.claim();
-  for (let offset = 0; offset < jobs.length; offset += 4) await Promise.all(jobs.slice(offset,offset+4).map(async job => {
-    let retry = true;
-    try { retry = Boolean(await process(env,job)); }
-    finally { await repository.finish(job,retry); }
-  }));
+  let failures = 0;
+  for (let offset = 0; offset < jobs.length; offset += 4) {
+    const results = await Promise.allSettled(jobs.slice(offset,offset+4).map(async job => {
+      let retry = true;
+      try { retry = Boolean(await process(env,job)); }
+      finally { await repository.finish(job,retry); }
+    }));
+    failures += results.filter(result => result.status === "rejected").length;
+  }
+  if (failures) throw new ProviderRequestError(503,`${failures} Apple commerce watches will retry; no snapshot or pending event was discarded`);
 }
+
+export function appleCommerceStatusCapability(env:Env,scope:{spaceId:string;channelId:string;userId:string}) {
+  return { async status(bundleId:string) {
+    const state=await appleCommerceRepository(env).status({...scope,sourceRef:`appstoreconnect:${bundleId.toLowerCase()}`});
+    if(!state)return `${bundleId}: commerce notifications are not active in this Channel. Subscribe with the commerce feature to enable them.`;
+    return `${bundleId}: commerce notifications enabled; ${state.observedAt ? `last observed ${state.observedAt}, ${state.products} products` : "initial baseline pending"}; `+
+      `${state.pending} pending changes${state.retrying ? "; retry/work pending":""}. Next eligible observation ${state.nextPollAt ?? "next scheduled pass"}; backlog can delay it.`;
+  } };
+}
+export const APP_STORE_CONNECT_COMMERCE_ACTIONS:Record<string,ConnectorAction>={
+  commerce_status:{effect:"read",requires:[],parse:appOnly,async execute(context,input){
+    if(!context.appleCommerce)throw new ProviderRequestError(503,"Commerce notification status is unavailable");
+    return {summary:await context.appleCommerce.status(input.app!)};
+  }},
+};

@@ -1,4 +1,5 @@
 import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
+import { appleCommerceStatusCapability } from "./app-store-connect-commerce";
 import { agentRegistrationOf } from "./agent-caller";
 import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
@@ -345,7 +346,9 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
     attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
-  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
+  const appleCommerce = providerId === "appstoreconnect" && actionId === "commerce_status"
+    ? appleCommerceStatusCapability(input.env,{spaceId,channelId:input.channelId,userId:input.actorUserId}) : undefined;
+  const native = appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
   const grant = native ? undefined : await connectionCredentialGrant(input.env, spaceId, providerId);
   const credentials = grant?.values ?? {};
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
@@ -364,7 +367,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
   const mailSnapshot = providerId === "gmail" && actionId === "send_draft" && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL
     ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
-  return { credentials, caller, authorizeWrite, usage, ...(mailSnapshot ? { mailSnapshot } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  return { credentials, caller, authorizeWrite, usage, ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

@@ -6,7 +6,7 @@ import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 export interface AppleCommerceState { kind: "subscription" | "inAppPurchase"; id: string; state: string }
 export interface AppleCommerceChange extends AppleCommerceState { previous: string; sequence: string }
 export interface AppleCommerceJob {
-  relationId: string; relationVersion: number; spaceId: string; channelId: string; connectionId: string;
+  watchId: string; relationId: string; relationVersion: number; spaceId: string; channelId: string; connectionId: string;
   generation: string; credentialVersion: number; userId: string; sourceRef: string; leaseId: string;
   snapshot: AppleCommerceState[] | null; pending: AppleCommerceChange[]; sequence: string;
 }
@@ -31,7 +31,7 @@ function snapshot(value: AppleCommerceState[]): AppleCommerceState[] {
   return value.map(row => ({ kind: row.kind, id: row.id, state: row.state }));
 }
 function job(row: QueryResultRow): AppleCommerceJob {
-  return { relationId: String(row.relation_id), relationVersion: Number(row.relation_version),
+  return { watchId:String(row.watch_id), relationId: String(row.relation_id), relationVersion: Number(row.relation_version),
     spaceId: String(row.space_id), channelId: String(row.channel_id), connectionId: String(row.connection_id),
     generation: String(row.connection_generation), credentialVersion: Number(row.credential_version),
     userId: String(row.created_by), sourceRef: String(row.source_ref), leaseId: String(row.lease_id),
@@ -46,6 +46,24 @@ export class PostgresAppleCommerceRepository {
   }
   private transaction<T>(operation: string, work: (tx: DatabaseTransaction) => Promise<T>) {
     return this.database.transaction({ requestId: crypto.randomUUID(), operation: `app.apple-commerce.${operation}` }, work);
+  }
+  async status(input: { spaceId:string; channelId:string; userId:string; sourceRef:string }) {
+    return this.transaction("status",async tx => {
+      const rows=await tx.query<QueryResultRow>({ name:"apple_commerce_status_v1",text:`SELECT r.version,c.search_rank_sequence,k.version AS current_credential_version,
+        w.relation_version,w.connection_generation,w.credential_version,w.observed_at,w.available_at,w.retrying,
+        COALESCE(jsonb_array_length(w.snapshot_json),0) AS products,COALESCE(jsonb_array_length(w.pending_json),0) AS pending
+        ${JOIN} LEFT JOIN data.app_apple_commerce_watches w ON w.relation_id=r.relation_id
+        WHERE ${LIVE} AND r.space_id=$1 AND r.channel_id=$2 AND lower(r.source_ref)=$4
+        AND ${channelCapabilityPredicate({capability:"app_new_work",channelAlias:"channel",principalKindSql:"'user'",principalIdSql:"$3"})}
+        LIMIT 1`, values:[input.spaceId,input.channelId,input.userId,input.sourceRef],maxRows:1 });
+      const row=rows[0];
+      if(!row)return null;
+      const current=row.relation_version===row.version && row.connection_generation===row.search_rank_sequence &&
+        row.credential_version===row.current_credential_version;
+      return { observedAt:current && row.observed_at ? new Date(row.observed_at as Date).toISOString():null,
+        nextPollAt:row.available_at ? new Date(row.available_at as Date).toISOString():null,
+        products:current ? Number(row.products):0,pending:current ? Number(row.pending):0,retrying:current && row.retrying===true };
+    });
   }
   async claim(): Promise<AppleCommerceJob[]> {
     return this.transaction("claim", async tx => {
@@ -71,15 +89,20 @@ export class PostgresAppleCommerceRepository {
             pending_json=CASE WHEN app_apple_commerce_watches.relation_version=EXCLUDED.relation_version
               AND app_apple_commerce_watches.connection_generation=EXCLUDED.connection_generation
               AND app_apple_commerce_watches.credential_version=EXCLUDED.credential_version THEN app_apple_commerce_watches.pending_json ELSE '[]'::jsonb END,
-            lease_id=EXCLUDED.lease_id,lease_until=EXCLUDED.lease_until RETURNING snapshot_json,pending_json,sequence`,
+            observed_at=CASE WHEN app_apple_commerce_watches.relation_version=EXCLUDED.relation_version
+              AND app_apple_commerce_watches.connection_generation=EXCLUDED.connection_generation
+              AND app_apple_commerce_watches.credential_version=EXCLUDED.credential_version THEN app_apple_commerce_watches.observed_at END,
+            retrying=false,lease_id=EXCLUDED.lease_id,lease_until=EXCLUDED.lease_until
+            WHERE app_apple_commerce_watches.lease_until IS NULL OR app_apple_commerce_watches.lease_until<=now()
+          RETURNING watch_id,snapshot_json,pending_json,sequence`,
           values: [row.relation_id, row.relation_version, row.connection_generation, row.credential_version, lease], maxRows: 1 });
-        jobs.push(job({ ...row, ...fresh[0], lease_id: lease }));
+        if (fresh.length) jobs.push(job({ ...row, ...fresh[0], lease_id: lease }));
       }
       return jobs;
     });
   }
   private async locked(tx: DatabaseTransaction, input: AppleCommerceJob) {
-    const rows = await tx.query<QueryResultRow>({ name: "apple_commerce_current_v1", text: `SELECT w.snapshot_json,w.pending_json,w.sequence
+    const rows = await tx.query<QueryResultRow>({ name: "apple_commerce_current_v1", text: `SELECT w.snapshot_json,w.pending_json,w.sequence,r.space_id,r.channel_id,r.created_by
       ${JOIN} JOIN data.app_apple_commerce_watches w ON w.relation_id=r.relation_id
       WHERE ${LIVE} AND w.relation_id=$1 AND w.lease_id=$2::uuid AND w.lease_until>now()
         AND r.version=$3 AND c.search_rank_sequence=$4 AND k.version=$5
@@ -88,6 +111,12 @@ export class PostgresAppleCommerceRepository {
     return rows[0];
   }
   async current(input: AppleCommerceJob) { return this.transaction("current", async tx => Boolean(await this.locked(tx, input))); }
+  async route(input: AppleCommerceJob) {
+    return this.transaction("route",async tx => {
+      const row = await this.locked(tx,input);
+      return row ? { spaceId:String(row.space_id),channelId:String(row.channel_id),authorityRootUserId:String(row.created_by),features:["commerce"] } : null;
+    });
+  }
   async stage(input: AppleCommerceJob, states: AppleCommerceState[]): Promise<AppleCommerceChange[]> {
     const next = snapshot(states);
     return this.transaction("stage", async tx => {
@@ -104,7 +133,7 @@ export class PostgresAppleCommerceRepository {
         if (old && old.state !== state.state) changes.push({ ...state, previous: old.state, sequence: String(++sequence) });
       }
       await tx.query({ name: "apple_commerce_stage_v1", text: `UPDATE data.app_apple_commerce_watches
-        SET snapshot_json=$3::jsonb,pending_json=$4::jsonb,sequence=$5 WHERE relation_id=$1 AND lease_id=$2::uuid`,
+        SET snapshot_json=$3::jsonb,pending_json=$4::jsonb,sequence=$5,observed_at=now() WHERE relation_id=$1 AND lease_id=$2::uuid`,
         values: [input.relationId,input.leaseId,JSON.stringify(next),JSON.stringify(changes),String(sequence)], maxRows: 0 });
       return changes;
     });
@@ -121,7 +150,7 @@ export class PostgresAppleCommerceRepository {
   async finish(input: AppleCommerceJob, retry: boolean) {
     return this.transaction("finish",async tx => {
       await tx.query({ name: "apple_commerce_finish_v1", text: `UPDATE data.app_apple_commerce_watches SET lease_id=NULL,lease_until=NULL,
-        available_at=now()+CASE WHEN $3 THEN interval '1 minute' ELSE interval '5 minutes' END
+        retrying=$3,available_at=now()+CASE WHEN $3 THEN interval '1 minute' ELSE interval '5 minutes' END
         WHERE relation_id=$1 AND lease_id=$2::uuid`, values: [input.relationId,input.leaseId,retry], maxRows: 0 });
     });
   }

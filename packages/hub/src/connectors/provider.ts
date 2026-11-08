@@ -48,6 +48,8 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** X accounts scoped to this caller; grants remain inside the Hub. */
   x?: XActionCapability;
+  /** Read only commerce notification status scoped by the server to this Channel and caller. */
+  appleCommerce?: { status(bundleId:string):Promise<string> };
   /** Channel attachment access and account-bound X video upload receipts. */
   xMedia?: XMediaCapability;
   /** Short-lived Hub URLs that let Composio fetch an approved Gmail draft snapshot too large to send inline. */

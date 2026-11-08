@@ -91,8 +91,7 @@ This does not supply private website endpoints: creating App records, App
 Privacy and [review replies](app-store-connect-review.md) keep their dedicated
 web-session capabilities. Rating reset and new sandbox testers use [dedicated web-session actions](app-store-connect-web-management.md).
 Review reply attachment upload still requires its private upload contract. Apple provides
-no IAP/subscription review webhook; event polling is separate from reading
-their API states. Agreements, banking, tax and Apple sign-in remain with the
+no IAP/subscription review webhook; opt into the [commerce poller](app-store-connect-commerce.md) for observed state changes. Agreements, banking, tax and Apple sign-in remain with the
 account owner.
 
 ## Maintenance and recovery

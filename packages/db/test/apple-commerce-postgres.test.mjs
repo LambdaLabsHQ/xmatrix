@@ -15,10 +15,11 @@ async function fixture(work) {
       VALUES($1,$2,1,'appstoreconnect','Apple','configured','api-token','[]','[]','[]','[]','owner',$1,now(),now())`,[space,connection]);
     await sql(`INSERT INTO data.app_connector_credentials(connection_id,space_id,field_names_json,encrypted_value_json,version,updated_by,created_at,updated_at)
       VALUES($1,$2,'[]','{}',1,'owner',now(),now())`,[connection,space]);
-    await sql(`INSERT INTO data.app_source_relations(relation_id,connection_id,space_id,channel_id,source_kind,source_ref,features_json,version,created_by,created_at,updated_at)
+    const subscribe=()=>sql(`INSERT INTO data.app_source_relations(relation_id,connection_id,space_id,channel_id,source_kind,source_ref,features_json,version,created_by,created_at,updated_at)
       VALUES($1,$2,$3,$3,'repository','appstoreconnect:com.example.app','["commerce"]',1,'owner',now(),now())`,[relation,connection,space]);
+    await subscribe();
     const due=()=>sql("UPDATE data.app_apple_commerce_watches SET available_at=now()-interval '1 minute' WHERE relation_id=$1",[relation]);
-    await work({repo,sql,space,connection,relation,due});
+    await work({repo,sql,space,connection,relation,due,subscribe});
   } finally {
     for (const table of ["app_source_relations","channels","app_connector_credentials","app_connector_connections","space_members"])
       await sql(`DELETE FROM data.${table} WHERE space_id=$1`,[space]);
@@ -33,12 +34,19 @@ integration("commerce watches baseline once and retain deduplicated outbox work 
     const claims=await Promise.all([repo.claim(),repo.claim()]);
     assert.equal(claims.flat().length,1);
     const first=claims.flat()[0];
+    assert.deepEqual(await repo.route(first),{spaceId:first.spaceId,channelId:first.channelId,authorityRootUserId:"owner",features:["commerce"]});
     assert.deepEqual(await repo.stage(first,waiting),[]);
+    const scope={spaceId:first.spaceId,channelId:first.channelId,userId:"owner",sourceRef:first.sourceRef};
+    const status=await repo.status(scope);
+    assert.equal(status.products,1);assert.equal(status.pending,0);assert.ok(status.observedAt.endsWith("Z"));
+    assert.equal(await repo.status({...scope,userId:"outsider"}),null);
+    assert.equal(await repo.status({...scope,channelId:"other"}),null);
     await repo.finish(first,false);await due();
     const [second]=await repo.claim();
     const change=await repo.stage(second,reviewed);
     assert.deepEqual(change,[{kind:"subscription",id:"s1",state:"IN_REVIEW",previous:"WAITING_FOR_REVIEW",sequence:"1"}]);
     assert.deepEqual(await repo.stage(second,reviewed),change);
+    assert.equal((await repo.status(scope)).pending,1);
     await sql("UPDATE data.app_apple_commerce_watches SET lease_until=now()-interval '1 second' WHERE relation_id=$1",[relation]);
     assert.equal(await repo.current(second),false);
     const [recovery]=await repo.claim();
@@ -59,14 +67,30 @@ integration("commerce grants, subscription edits and credential replacements fen
     if(change==="credential")await sql("UPDATE data.app_connector_credentials SET version=version+1 WHERE connection_id=$1",[connection]);
     if(change==="disconnect")await sql("UPDATE data.app_connector_connections SET status='disconnected' WHERE connection_id=$1",[connection]);
     assert.equal(await repo.current(first),false);
+    assert.equal(await repo.route(first),null);
     await assert.rejects(repo.stage(first,reviewed),/access changed/);
     await repo.finish(first,true);await due();
     const next=await repo.claim();
     if(change==="subscription" || change==="credential") {
       assert.equal(next.length,1);assert.equal(next[0].snapshot,null);assert.deepEqual(next[0].pending,[]);
+      assert.equal((await repo.status({spaceId:space,channelId:space,userId:"owner",sourceRef:first.sourceRef})).observedAt,null);
       assert.deepEqual(await repo.stage(next[0],reviewed),[]);
     }else assert.deepEqual(next,[]);
     await sql("DELETE FROM data.app_source_relations WHERE relation_id=$1",[relation]);
     assert.equal((await sql("SELECT * FROM data.app_apple_commerce_watches WHERE relation_id=$1",[relation])).rows.length,0);
+  });
+});
+
+integration("resubscribing the same source starts a new event identity epoch",async()=>{
+  await fixture(async({repo,sql,relation,subscribe})=>{
+    const [before]=await repo.claim();
+    await repo.stage(before,waiting);await repo.stage(before,reviewed);
+    await sql("DELETE FROM data.app_source_relations WHERE relation_id=$1",[relation]);
+    await subscribe();
+    const [after]=await repo.claim();
+    assert.notEqual(after.watchId,before.watchId);
+    assert.equal(await repo.current(before),false);
+    assert.deepEqual(await repo.stage(after,waiting),[]);
+    assert.equal((await repo.stage(after,reviewed))[0].sequence,"1");
   });
 });
