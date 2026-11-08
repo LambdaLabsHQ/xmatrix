@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+App Store Connect reads review attachments and prepares/verifies App Review
+draft replies through its saved web session. App/thread ownership, exact draft
+digests and one-shot sends protect the review workflow; resubmission remains
+a separate decision. See [App Review actions](../connectors/app-store-connect-review.md).
+
 The iOS app declares camera and microphone use for user-initiated video
 attachments. Public support lives at `/support`, linked from the guide and
 site footer; App Store metadata uses that contact page. See

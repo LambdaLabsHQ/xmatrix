@@ -108,7 +108,7 @@ async function patchSubmission(api: AppStoreConnectApi, submission: AppleResourc
 /**
  * A submission App Review rejected: its rejected items are marked resolved and it goes back to review, which is
  * what "Resubmit to App Review" does once the version has been edited. Apple takes no new items on such a
- * submission, and replying to the reviewer has no API.
+ * submission. Replies use the separate web-session draft and send actions.
  */
 async function resubmit(api: AppStoreConnectApi, submission: AppleResource, items: AppleResource[], what: string): Promise<string> {
   const rejected = items.filter(item => text(item.attributes.state) === "REJECTED");
@@ -119,7 +119,7 @@ async function resubmit(api: AppStoreConnectApi, submission: AppleResource, item
     }
     const sent = await patchSubmission(api, submission, { submitted: true });
     return `Resubmitted ${what} to App Review with ${rejected.length} rejected item(s) marked resolved; the submission is ${sent || "accepted"}. ` +
-      "If App Review asked a question, answer it in App Store Connect: replies have no API.";
+      "If App Review asked a question, answer through review_draft and send_review_draft (web session required), or in App Store Connect.";
   } catch (error) {
     if (!(error instanceof ProviderRequestError)) throw error;
     throw new ProviderRequestError(error.status, `${error.message}. To start over instead, run cancel_submission and then submit`);

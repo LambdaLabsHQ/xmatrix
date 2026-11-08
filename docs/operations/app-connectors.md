@@ -178,10 +178,11 @@ Apple's event id, so an Automation can use
 `--on appstoreconnect:version:com.example.app`.
 
 Apple gives no API for creating the app record, answering App Privacy,
-accepting agreements, or replying to App Review. The first two, and reading
-App Review's messages, go through the App Store Connect website with the
+accepting agreements, or replying to App Review. App records, privacy and
+App Review's messages, attachments and draft replies use the website with the
 optional Web session credential (`create_app`, `set_privacy` and `privacy`,
-`review_messages`); accepting agreements and replying to App Review stay in
+`review_messages`, `review_attachments`, `review_attachment`, `review_draft`,
+`edit_review_draft`, `send_review_draft`). Accepting agreements stays in
 App Store Connect, as does the App Review sign-in password. The Web session is
 saved like this. In the xMatrix desktop app, Sign in
 to App Store Connect under Credentials opens Apple's own sign-in page in a
@@ -194,6 +195,25 @@ lapsed. Renewing from the desktop app is usually one click, since its window
 stays signed in longer than the copy the Hub holds. `read_app`
 shows what a new app still lacks. A first version's App Review contact is set
 with `set_review_contact`; later versions inherit it through `create_version`.
+
+Review actions prove the thread belongs to the named app before reading a
+message, attachment or draft. Reads follow at most five pages of each fixed
+relationship; malformed or incomplete ownership data cannot authorize a write.
+Attachment lists omit signed URLs. `review_attachment` returns one expiring
+single-file URL from Apple's CDN; download it without a Cookie or API JWT.
+Existing `review_messages:<bundle id>` calls still select the newest thread;
+optional thread and message IDs select older threads or longer message text.
+
+Draft creation refuses an existing draft. Update, delete and send require the
+current draft ID and digest from `review_draft`; the digest includes the body
+and attachment identities, checksums and processing states. A changed draft
+stops before mutation. Send requires processed attachments, performs one POST,
+then verifies the returned message ID and body in that same thread. A timeout
+or failed verification remains uncertain and is never blindly retried. Each
+web mutation rechecks the current connection write grant immediately before
+fetch. Apple offers no conditional draft update, so this is a pre-write
+snapshot check, not a provider-side transaction. See the
+[App Review workflow](../connectors/app-store-connect-review.md).
 
 Uploads are reserve, send, commit. `upload_build` and `upload_screenshot`
 answer with the parts to send: each has a method, a URL at Apple's storage, a
