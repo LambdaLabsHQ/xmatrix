@@ -3501,3 +3501,17 @@ verification retain their existing gates. Qualification is a complete beta
 with both native CLI version probes and publication verified. Historical tags
 retain their original workflow; recovery is a CI-validated forward release
 restoring the Intel build host if needed. No client or schema migration.
+
+
+## Unreleased: Sentry event claims reconcile an unknown COMMIT
+
+HUB-BY lost the response to a Sentry recovery claim's COMMIT, leaving its jobs
+leased until expiry. Claims now assign independent lease nonces before their
+transaction. After an unknown COMMIT, one lock-free read returns only this
+invocation's committed, unexpired leases and live receipts. It never repeats
+the claim; absent results retain minute/expiry recovery, and read failures
+remain visible with the original commit evidence. Current grant checks also
+recover one lost read on a fresh connection. Capacity, grant and lease fences,
+and delivery idempotency stay intact. Hub only, no migration or client change;
+recovery is a CI-validated beta Hub release reverting this change. This repairs
+the recovery gap without attributing the underlying connection termination.

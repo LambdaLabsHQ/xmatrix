@@ -256,6 +256,15 @@ without changing attempts, leases or receipt cleanup; the minute recovery wake
 tries again. Successful claims still serialize the eight-active-lease bound.
 Webhook admission retains its waiting lock to enforce receipt and backlog bounds;
 database failures other than a busy try-lock still propagate normally.
+For an unknown claim COMMIT (HUB-BY), four independent lease nonces are created
+before the transaction and retained across its bounded pre-COMMIT replay.
+A fresh `single_read` reconciles only committed, unexpired leases with those
+nonces and a live receipt; it never claims another batch. No matching rows do
+not prove rollback: minute recovery and lease expiry still own any late commit.
+A failed reconciliation retains both database failures. Each delivery continues
+to recheck the current grant and lease; that lock-free check also uses
+`single_read` recovery. The eight-active-lease bound, per-job fencing and
+provider effect idempotency remain unchanged.
 
 Gmail pending notification IDs use one lock-free `single_read`; retrying a
 completion never reruns provider calls or delivery. Its lease ID and expiry
