@@ -33,7 +33,7 @@ function visible(value: unknown, depth = 0): unknown {
   const row = record(value), review = /^(?:appStore|betaApp)ReviewDetails$/u.test(text(row.type));
   return Object.fromEntries(Object.entries(row).filter(([key]) => !SECRET.test(key) && key !== "demoAccountName" && key !== "demoAccountPassword" && key !== "reviewNote")
     .map(([key, child]) => [key, review && key === "attributes" ? visible(Object.fromEntries(Object.entries(record(child))
-      .filter(([name]) => name !== "notes" && !/^contact/u.test(name))), depth + 1) : visible(child, depth + 1)]));
+      .filter(([name]) => name !== "notes" && !name.startsWith("contact"))), depth + 1) : visible(child, depth + 1)]));
 }
 
 const output = (value: unknown) => {
