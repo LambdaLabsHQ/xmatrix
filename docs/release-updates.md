@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: preserve app-owned product items during iOS review updates
+
+The iOS release script accepts an app version alongside subscription, group and
+in-app purchase versions in the same review submission. Before refreshing an
+editable version or withdrawing a queued submission, it verifies each product's
+parent against the app's collections. Unknown, foreign, duplicate or ambiguous
+items stop the release before mutation. A queued replacement carries all three
+product version kinds forward. An unresolved rejection still requires a factual
+review response and explicit resubmission; updating the exact build does not
+resolve review issues automatically.
+
 ## Unreleased: App Review attachments and draft replies use the saved web session
 
 Review reads now expose thread/message IDs and linked attachment metadata,

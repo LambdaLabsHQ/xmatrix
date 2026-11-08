@@ -29,12 +29,25 @@ function fixture(options = {}) {
       }
       if (url.pathname === "/v1/apps/app/appStoreVersions") return options.versions ?? [version];
       if (url.pathname === "/v1/reviewSubmissions") return submission ? [submission] : [];
-      if (url.pathname.endsWith("/items")) return options.items ?? [];
+      if (url.pathname.endsWith("/items")) return submission?.attributes.state === "COMPLETE" ? [] : options.items ?? [];
+      if (url.pathname === "/v1/apps/app/subscriptionGroups") return [{ type: "subscriptionGroups", id: "group" }];
+      if (url.pathname === "/v1/apps/app/inAppPurchasesV2") return [{ type: "inAppPurchases", id: "purchase" }];
       if (url.pathname.endsWith("/appStoreVersionLocalizations")) return [{ id: "en", attributes: { locale: "en-US" } }, { id: "fr", attributes: { locale: "fr-FR" } }];
       throw new Error(`Unexpected list ${path}`);
     },
     async request(path, method = "GET", data) {
       if (method !== "GET") writes.push({ path, method, data });
+      const product = new URL(path, "https://api.appstoreconnect.apple.com").pathname;
+      const parents = {
+        "/v1/subscriptionVersions/monthly-version": ["subscriptionVersions", "monthly-version", "subscription", "subscriptions", "monthly"],
+        "/v1/subscriptions/monthly": ["subscriptions", "monthly", "group", "subscriptionGroups", options.productGroup ?? "group"],
+        "/v1/subscriptionGroupVersions/group-version": ["subscriptionGroupVersions", "group-version", "subscriptionGroup", "subscriptionGroups", "group"],
+        "/v1/inAppPurchaseVersions/purchase-version": ["inAppPurchaseVersions", "purchase-version", "inAppPurchase", "inAppPurchases", options.purchaseParent ?? "purchase"],
+      };
+      if (parents[product]) {
+        const [type, id, key, parentType, parentId] = parents[product];
+        return { data: { type, id, relationships: { [key]: { data: { type: parentType, id: parentId } } } } };
+      }
       if (path.endsWith("/appStoreReviewDetail")) return { data: review };
       if (path === "/v1/appStoreVersions/version" && method === "PATCH") {
         assert.equal(data.relationships.build.data.id, "exact-build"); selected = true; return { data: version };
@@ -107,9 +120,10 @@ test("an app's first version omits What's New, which Apple refuses before anythi
 test("an older version still queued for App Review is withdrawn and this release takes its place", async () => {
   const { api, writes } = fixture({ version: { appVersionState: "WAITING_FOR_REVIEW" },
     submission: { id: "submission", attributes: { state: "WAITING_FOR_REVIEW" } },
-    items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } },
-      { relationships: { subscriptionGroupVersion: { data: { id: "group-version" } } } },
-      { relationships: { subscriptionVersion: { data: { id: "monthly-version" } } } }] });
+    items: [{ relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } } },
+      { relationships: { subscriptionGroupVersion: { data: { type: "subscriptionGroupVersions", id: "group-version" } } } },
+      { relationships: { subscriptionVersion: { data: { type: "subscriptionVersions", id: "monthly-version" } } } },
+      { relationships: { inAppPurchaseVersion: { data: { type: "inAppPurchaseVersions", id: "purchase-version" } } } }] });
   assert.deepEqual(await submitRelease(api, args),
     { outcome: "submitted", version: "1.0.200", buildNumber: "12345", state: "WAITING_FOR_REVIEW", replaced: "1.0.199" });
   assert.deepEqual(writes[0].data.attributes, { canceled: true });
@@ -121,6 +135,7 @@ test("an older version still queued for App Review is withdrawn and this release
     { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } },
     { subscriptionGroupVersion: { data: { type: "subscriptionGroupVersions", id: "group-version" } } },
     { subscriptionVersion: { data: { type: "subscriptionVersions", id: "monthly-version" } } },
+    { inAppPurchaseVersion: { data: { type: "inAppPurchaseVersions", id: "purchase-version" } } },
   ]);
   const submitted = writes.findIndex((row) => row.data?.attributes?.submitted);
   assert.ok(submitted > writes.findLastIndex((row) => row.path === "/v1/reviewSubmissionItems"));
@@ -137,10 +152,39 @@ test("a version Apple is reviewing or approved stays untouched; a rejected draft
     assert.equal((await submitRelease(api, args)).outcome, "deferred-existing-review");
     assert.deepEqual(writes, []);
   }
-  const { api, writes } = fixture({ version: { appVersionState: "REJECTED" }, submission: { id: "submission", attributes: { state: "UNRESOLVED_ISSUES" } }, items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } }] });
+  const { api, writes } = fixture({ version: { appVersionState: "REJECTED" }, submission: { id: "submission", attributes: { state: "UNRESOLVED_ISSUES" } }, items: [{ relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } } }] });
   assert.equal((await submitRelease(api, args)).outcome, "deferred-review-response-required");
   assert.ok(writes.some((row) => row.path === "/v1/appStoreVersions/version"));
   assert.equal(writes.some((row) => row.path.startsWith("/v1/reviewSubmission")), false);
+});
+
+// This guards the release/provider boundary: a legitimate multi-item rejection
+// must refresh the exact build, while a foreign product must block all writes.
+test("retains app-owned review products and rejects foreign or ambiguous items before any mutation", async () => {
+  const item = (key, type, id) => ({ relationships: { [key]: { data: { type, id } } } });
+  const items = [item("appStoreVersion", "appStoreVersions", "version"),
+    item("subscriptionGroupVersion", "subscriptionGroupVersions", "group-version"),
+    item("subscriptionVersion", "subscriptionVersions", "monthly-version"),
+    item("inAppPurchaseVersion", "inAppPurchaseVersions", "purchase-version")];
+  const submission = { id: "submission", attributes: { state: "UNRESOLVED_ISSUES" } };
+  const valid = fixture({ version: { appVersionState: "REJECTED" }, submission, items });
+  assert.equal((await submitRelease(valid.api, args)).outcome, "deferred-review-response-required");
+  assert.ok(valid.writes.some(row => row.path === "/v1/appStoreVersions/version"));
+  assert.equal(valid.writes.some(row => row.path.startsWith("/v1/reviewSubmission")), false);
+  for (const options of [{ productGroup: "foreign" }, { purchaseParent: "foreign" },
+    { items: [...items, items[1]] }, { items: [...items, item("appEvent", "appEvents", "foreign")] },
+    { items: [item("subscriptionVersion", "appStoreVersions", "monthly-version")] }]) {
+    for (const queued of [false, true]) {
+      const blocked = fixture({ items, ...options,
+        version: { appVersionState: queued ? "WAITING_FOR_REVIEW" : "REJECTED" },
+        submission: { id: "submission", attributes: { state: queued ? "WAITING_FOR_REVIEW" : "UNRESOLVED_ISSUES" } } });
+      await assert.rejects(submitRelease(blocked.api, args));
+      assert.deepEqual(blocked.writes, [], "ownership must be proven before cancel or metadata update");
+    }
+  }
+  const onlyProducts = fixture({ submission: { id: "submission", attributes: { state: "READY_FOR_REVIEW" } }, items: items.slice(1) });
+  assert.equal((await submitRelease(onlyProducts.api, args)).outcome, "submitted");
+  assert.deepEqual(onlyProducts.writes.filter(row => row.path === "/v1/reviewSubmissionItems").map(row => row.data.relationships.appStoreVersion.data.id), ["version"]);
 });
 
 test("refuses unrelated submission items, downgrades and incomplete review credentials before mutation", async () => {
@@ -241,7 +285,7 @@ test("existing private review instructions are preserved when no secret override
 
 
 test("ready submission with the version already attached is resumed without duplicate items", async () => {
-  const { api, writes } = fixture({ submission: { id: "submission", attributes: { state: "READY_FOR_REVIEW" } }, items: [{ relationships: { appStoreVersion: { data: { id: "version" } } } }] });
+  const { api, writes } = fixture({ submission: { id: "submission", attributes: { state: "READY_FOR_REVIEW" } }, items: [{ relationships: { appStoreVersion: { data: { type: "appStoreVersions", id: "version" } } } }] });
   assert.equal((await submitRelease(api, args)).outcome, "submitted");
   assert.equal(writes.some((row) => row.path === "/v1/reviewSubmissionItems" || row.path === "/v1/reviewSubmissions"), false);
 });
