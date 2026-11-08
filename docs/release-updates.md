@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Sentry events follow all current installation bindings
+
+Installation binding storage already accepts more than 50 Spaces, but Sentry
+event admission still rejected the entire event at binding 51. Admission now
+shares the complete resource-page iterator used by installation retirement and
+writes jobs in bounded pages inside one transaction. Current grants and
+credential versions are checked on every page; replay, delivery fencing and
+the 1,000-pending-job backpressure remain. A failed later page rolls back all
+new jobs and the receipt. Cleanup still takes at most two expired receipts,
+now at most 2,000 child jobs under the existing transaction deadline. Hub only,
+no schema or client migration; recovery is a CI-validated beta Hub build that
+retains complete reads for already-saved bindings. Events already acknowledged
+by the provider are not recreated; rejected deliveries depend on its retries.
+
 ## Unreleased: CLI release feeds are read before the cron opens its other connections
 
 HUB-BX lost the dev CLI feed twice while waiting for response headers. The
