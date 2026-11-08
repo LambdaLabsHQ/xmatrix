@@ -477,6 +477,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       { id: "build", label: "Build upload", description: "An uploaded build finished processing or failed." },
       { id: "beta", label: "TestFlight review", description: "A build's external TestFlight state changed." },
       { id: "feedback", label: "TestFlight feedback", description: "A tester sent screenshot or crash feedback." },
+      { id: "commerce", label: "Subscription and IAP review", description: "Poll current subscription and in-app purchase states every five minutes; announce observed changes after the initial baseline." },
     ],
     defaultFeatures: ["version", "build"],
     actions: [

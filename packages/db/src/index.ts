@@ -346,3 +346,5 @@ export { PostgresQuotaRetryRepository, assertQuotaRetryAdmission, type QuotaRetr
 
 export { PostgresStripeAccountRepository, type StripeAccountGrant,
   type StripeAccountSnapshot, type StripeRefreshClaim } from "./stripe-account-control.js";
+
+export { PostgresAppleCommerceRepository, type AppleCommerceJob, type AppleCommerceState, type AppleCommerceChange } from "./apple-commerce-control.js";
