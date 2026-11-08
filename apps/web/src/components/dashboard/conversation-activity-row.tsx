@@ -1,14 +1,18 @@
 "use client";
 
 import { Fragment, memo, type ReactNode } from "react";
-import { ChevronRight, CircleCheck, CircleDashed, GitPullRequest, LoaderCircle } from "lucide-react";
+import {
+  ChevronRight, CircleCheck, CircleDashed, CircleX, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
+  type LucideIcon,
+} from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { formatMessageDateTime, formatMessageTimestamp } from "./channel-history";
 import { MESSAGE_HEADER_TIMESTAMP_CLASS_NAME } from "./row-frames";
-import { foldSummary, timelineItemActivity } from "./conversation-activity-rows";
+import { foldSummary, timelineItemActivity, timelineItemGitHubFact } from "./conversation-activity-rows";
 import type { TimelineItem } from "./workspace-shell-message-model";
+import type { GitHubPullRequestFact } from "@xmatrix/protocol";
 
 /**
  * One folded run of an Instance's activity
@@ -68,18 +72,22 @@ function FoldedEntry({ item }: { item: TimelineItem }) {
   );
 }
 
-/** A pull request reads as the same underlined reference the GitHub App's own messages carry. */
+function ExternalLink({ url, children }: { url: string; children: ReactNode }) {
+  return (
+    <a href={url} target="_blank" rel="noreferrer" className="font-medium text-foreground underline underline-offset-2">
+      {children}
+    </a>
+  );
+}
+
+/** A pull request reads as the same underlined reference GitHub's facts below it carry. */
 function PullRequestLink({ repository, number, url, icon = true }: {
   repository: string; number: number; url: string; icon?: boolean;
 }) {
   return (
     <span>
       {icon && <GitPullRequest className="mr-1 inline size-3.5 align-[-2px]" aria-hidden="true" />}
-      Opened{" "}
-      <a href={url} target="_blank" rel="noreferrer"
-        className="font-medium text-foreground underline underline-offset-2">
-        {repository}#{number}
-      </a>
+      Opened <ExternalLink url={url}>{repository}#{number}</ExternalLink>
     </span>
   );
 }
@@ -173,6 +181,69 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
             ))}
         </ol>
       )}
+    </div>
+  );
+});
+
+const GITHUB_FACT_MARK: Record<GitHubPullRequestFact["event"], { icon: LucideIcon; className?: string }> = {
+  ci_passed: { icon: CircleCheck },
+  ci_failed: { icon: CircleX, className: statusInkClass("alert") },
+  merged: { icon: GitMerge },
+  closed: { icon: GitPullRequestClosed },
+};
+
+/** What GitHub reported, in the words of its message, with the same links. */
+function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
+  const pull = <ExternalLink url={fact.url}>{fact.repository}#{fact.number}</ExternalLink>;
+  if (fact.event === "ci_passed") return <>CI passed on {pull} at {fact.sha}</>;
+  if (fact.event === "ci_failed") {
+    return (
+      <>
+        CI failed on {pull} at {fact.sha}:{" "}
+        {fact.failed.map((check, index) => (
+          <Fragment key={`${index}:${check.name}`}>
+            {index > 0 && ", "}
+            {check.url ? <ExternalLink url={check.url}>{check.name}</ExternalLink> : check.name}
+          </Fragment>
+        ))}
+        {fact.more > 0 && `, and ${fact.more} more`}
+      </>
+    );
+  }
+  const verb = fact.event === "merged" ? "merged" : "closed";
+  return (
+    <>
+      {fact.actor ? `${fact.actor} ${verb} ` : `${verb === "merged" ? "Merged" : "Closed"} `}
+      {pull}
+      {fact.title && <span>: {fact.title}</span>}
+    </>
+  );
+}
+
+/**
+ * A fact GitHub reported about a subscribed pull request (CI verdict, merge,
+ * close), drawn as the same line as the "Opened" entry it follows: its mark in
+ * the avatar column, then sender, time and what happened
+ * (docs/design/conversation-activity.md §4.1).
+ */
+export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: TimelineItem }) {
+  const fact = timelineItemGitHubFact(row);
+  if (!fact) return null;
+  const mark = GITHUB_FACT_MARK[fact.event];
+  const Icon = mark.icon;
+  return (
+    <div className="app-activity-row px-5 py-0.5 text-[13px] text-muted-foreground"
+      data-activity-row="" data-github-fact={fact.event}>
+      <div className="flex w-full min-w-0 items-start gap-(--app-message-avatar-gap)">
+        <span className="flex h-[1lh] w-(--app-message-avatar-size) shrink-0 items-center justify-center" aria-hidden="true">
+          <Icon className={cn("size-3.5 shrink-0", mark.className)} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="mr-1.5 font-bold text-foreground/80">{row.author}</span>
+          <Time value={row.sentAt} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "mr-2.5 whitespace-nowrap")} />
+          <GitHubFactText fact={fact} />
+        </span>
+      </div>
     </div>
   );
 });

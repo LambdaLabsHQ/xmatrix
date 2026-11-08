@@ -140,12 +140,13 @@ import {
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
-import { FoldedActivityRow } from "./conversation-activity-row";
+import { FoldedActivityRow, GitHubFactRow } from "./conversation-activity-row";
 import { HumanAboveViewJump, TIMELINE_ROW_ID_ATTRIBUTE } from "./timeline-human-above";
 import {
   buildConversationRows,
   sinceDigest,
   sinceDigestLine,
+  timelineItemGitHubFact,
   type SinceDigest,
 } from "./conversation-activity-rows";
 import { AgentWorkIntent, AgentWorkIntentCard, agentWaitingPhrase, useIntentSince, useNow } from "./agent-work-intent";
@@ -1181,6 +1182,8 @@ export const MessageTimeline = memo(function MessageTimeline({
                     expanded={openFolds.has(message.id)}
                     onToggle={toggleFold}
                   />
+                ) : timelineItemGitHubFact(message) ? (
+                  <GitHubFactRow row={message} />
                 ) : (
                 <MessageRow
                   message={message}
