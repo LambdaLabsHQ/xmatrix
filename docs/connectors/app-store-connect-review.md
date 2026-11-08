@@ -51,6 +51,25 @@ never retries a send, overwrites an unknown draft, or treats malformed data as
 proof that no draft exists. File reservation/upload into a reply is not part of
 these actions; already-attached files are preserved and covered by its digest.
 
+## Private review contact and demo login
+
+Save the optional **App Review setup** JSON in App Store Connect Credentials,
+then invoke `@appstoreconnect:set_review_setup:<bundle id> <version>` with no
+profile or password in the command. The profile contains `bundleId`,
+`contactFirstName`, `contactLastName`, `contactEmail`, `contactPhone`, and the
+boolean `demoAccountRequired`. When sign-in is required, include
+`demoAccountName` and `demoAccountPassword`; otherwise omit both. `notes` is
+optional. This action uses the public API key, not the Apple web session.
+
+The named app must match the private profile and the version must be editable.
+Approval records contain the credential version and connection generation,
+never demo credentials or a password digest. Credential rotation or lost write
+permission invalidates preparation. The action updates only the configured
+review fields, sends a single create or update, then reads them back. Matching
+fields require no mutation. Provider errors cannot echo private submitted
+values. An uncertain result requires inspecting Apple before retrying. This
+configures review information; it does not send a reply or submit the version.
+
 ## Provider contract and recovery
 
 Resolution Center is absent from Apple's public OpenAPI. The website uses

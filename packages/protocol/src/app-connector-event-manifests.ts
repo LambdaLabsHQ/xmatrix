@@ -467,6 +467,8 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         description: "Only for sales: Payments and Financial Reports shows it at the top left, under the legal entity name. Apple's API never returns it. With the web session saved, sales reads it from the Payments page itself; otherwise the first sales command that names vendor=<number> saves it here." },
       { id: "webSession", label: "Web session (App Review messages, new apps, App Privacy)", signIn: "appstoreconnect", verify: "web_session",
         description: "For App Review messages, attachments and draft replies, create_app, App Privacy, and finding the vendor number for sales. In the xMatrix Mac or Windows app, Sign in to App Store Connect saves it: you sign in on Apple's own page and the password never reaches xMatrix. Elsewhere, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it a day to a month; sign in again when it lapses." },
+      { id: "reviewSetup", label: "Private App Review setup (JSON)",
+        description: "Optional for set_review_setup. Save bundleId, contactFirstName, contactLastName, contactEmail, contactPhone, demoAccountRequired; when true include demoAccountName and demoAccountPassword, when false omit them. Optional notes. Private values stay in Credentials and Apple." },
       { id: "sandboxTester", label: "Sandbox tester setup (private JSON)",
         description: "Optional, only for create_sandbox_tester. Save firstName, lastName, email, password, secretQuestion, secretAnswer, birthDate (YYYY-MM-DD), appStoreTerritory (Apple territory ID) as JSON here. The command takes only the matching email; private fields never belong in a Channel." },
     ],
@@ -482,6 +484,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     defaultFeatures: ["version", "build"],
     actions: [
       readAction("list_apps", "List apps", "List the apps the API key can see, with their bundle IDs.", "*"),
+      writeAction("set_review_setup", "Set private App Review setup", "Apply the named app’s private reviewSetup credential to an editable version and verify it, without posting credentials or submitting.", "<com.example.app> <1.2.0>"),
       readAction("commerce_status", "Commerce notifications", "Read this Channel’s current commerce notification baseline, latest observation and pending work.", "<com.example.app>"),
       readAction("status", "App status", "One app's versions and their states, review submissions in progress and newest builds.", "<com.example.app>"),
       readAction("builds", "List builds", "The newest uploaded builds and whether Apple finished processing them, optionally of one version.", "<com.example.app> [<1.2.0>]"),

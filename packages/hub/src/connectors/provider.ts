@@ -48,6 +48,8 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** X accounts scoped to this caller; grants remain inside the Hub. */
   x?: XActionCapability;
+  /** Private App Review setup; the capability keeps credentials in the Hub. */
+  appReviewSetup?:import("./app-store-connect-review-setup").ReviewSetupCapability;
   /** Read only commerce notification status scoped by the server to this Channel and caller. */
   appleCommerce?: { status(bundleId:string):Promise<string> };
   /** Channel attachment access and account-bound X video upload receipts. */
