@@ -1,5 +1,6 @@
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
+import { drainAppleCommerce } from "./connectors/app-store-connect-commerce";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { maintainChannelDeletions } from "./channel-deletion-maintenance";
@@ -173,6 +174,10 @@ export default {
     }
   }),
   scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(async () => {
+    if (event.cron === "*/5 * * * *") {
+      executionCtx.waitUntil(drainAppleCommerce(env).catch(error => scheduledTaskFailed("Apple commerce recovery",error)).finally(sendErrorReports));
+      return;
+    }
     // Feeds first: the passes below each open a Hyperdrive connection, and six
     // header-waits is the invocation's whole budget (HUB-BX).
     const latest = await readCliReleaseFeeds();

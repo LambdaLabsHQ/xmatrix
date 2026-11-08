@@ -477,10 +477,12 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       { id: "build", label: "Build upload", description: "An uploaded build finished processing or failed." },
       { id: "beta", label: "TestFlight review", description: "A build's external TestFlight state changed." },
       { id: "feedback", label: "TestFlight feedback", description: "A tester sent screenshot or crash feedback." },
+      { id: "commerce", label: "Subscription and IAP review", description: "Poll current subscription and in-app purchase states every five minutes; announce observed changes after the initial baseline." },
     ],
     defaultFeatures: ["version", "build"],
     actions: [
       readAction("list_apps", "List apps", "List the apps the API key can see, with their bundle IDs.", "*"),
+      readAction("commerce_status", "Commerce notifications", "Read this Channel’s current commerce notification baseline, latest observation and pending work.", "<com.example.app>"),
       readAction("status", "App status", "One app's versions and their states, review submissions in progress and newest builds.", "<com.example.app>"),
       readAction("builds", "List builds", "The newest uploaded builds and whether Apple finished processing them, optionally of one version.", "<com.example.app> [<1.2.0>]"),
       readAction("read_version", "Read version", "A version's state, build, App Review readiness and listing text per language.", "<com.example.app> <1.2.0>"),

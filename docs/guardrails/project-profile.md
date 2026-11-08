@@ -42,6 +42,9 @@ a separate decision. See [App Review actions](../connectors/app-store-connect-re
 Rating resets require an editable version and current digest; new Sandbox testers
 read their private profile from Credentials and preserve existing accounts.
 See [website management](../connectors/app-store-connect-web-management.md).
+Commerce notifications use an opt-in five-minute poll, with primary App authority
+leases, current subscription/grant checks and a durable deduplicated outbox.
+See [commerce events](../connectors/app-store-connect-commerce.md).
 
 The iOS app declares camera and microphone use for user-initiated video
 attachments. Public support lives at `/support`, linked from the guide and

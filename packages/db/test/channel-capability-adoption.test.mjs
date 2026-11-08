@@ -17,6 +17,8 @@ const migratedAuthorities = [
   "runtime-control.ts",
   "space-secret-control.ts",
   "app-control.ts",
+  // Commerce claims/delivery and scoped status all use current app_new_work.
+  "apple-commerce-control.ts",
   "automation-control.ts",
   "trace-access-control.ts",
   "cross-space-read-control.ts",
