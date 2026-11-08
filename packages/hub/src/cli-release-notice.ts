@@ -20,6 +20,28 @@ export const CLI_RELEASE_FEEDS: Readonly<Record<CliReleaseChannel, string>> = {
 const FETCH_TIMEOUT_MS = 5_000;
 const MAX_BODY_BYTES = 64 * 1024;
 
+/**
+ * Both channel feeds, settled before the caller continues.
+ *
+ * One invocation may have six connections waiting on headers, and each
+ * scheduled pass opens its own Hyperdrive connection. A feed fetch started
+ * among them sits in that queue, and its five-second abort is not observed
+ * until a slot frees — Hyperdrive's connect wait is 15 seconds (HUB-BX).
+ * Reading both feeds here, with no other header-wait open, keeps a lost
+ * response inside the deadline.
+ */
+export async function readCliReleaseFeeds(fetcher: typeof fetch = fetch):
+  Promise<(channel: CliReleaseChannel) => Promise<string>> {
+  const versions = new Map<CliReleaseChannel, Promise<string>>(
+    (["stable", "dev"] as const).map(channel => [channel, fetchCliChannelVersion(channel, fetcher)]));
+  await Promise.all([...versions.values()].map(version => version.catch(() => undefined)));
+  return channel => {
+    const version = versions.get(channel);
+    if (!version) throw new Error(`CLI ${channel} release feed was not read`);
+    return version;
+  };
+}
+
 /** The newest release a channel's feed names; a feed that names none of that channel is an error. */
 export async function fetchCliChannelVersion(channel: CliReleaseChannel, fetcher: typeof fetch = fetch): Promise<string> {
   const failures: CliReleaseNoticeFailure[] = [];
