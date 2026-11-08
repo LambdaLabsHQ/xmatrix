@@ -149,8 +149,9 @@ export class PostgresAppleCommerceRepository {
   }
   async finish(input: AppleCommerceJob, retry: boolean) {
     return this.transaction("finish",async tx => {
-      await tx.query({ name: "apple_commerce_finish_v1", text: `UPDATE data.app_apple_commerce_watches SET lease_id=NULL,lease_until=NULL,
-        retrying=$3,available_at=now()+CASE WHEN $3 THEN interval '1 minute' ELSE interval '5 minutes' END
+      await tx.query({ name: "apple_commerce_finish_v2", text: `UPDATE data.app_apple_commerce_watches SET lease_id=NULL,lease_until=NULL,
+        retrying=$3,available_at=CASE WHEN $3 THEN now()+interval '1 minute'
+          ELSE date_bin(interval '5 minutes',now(),timestamptz '1970-01-01')+interval '5 minutes' END
         WHERE relation_id=$1 AND lease_id=$2::uuid`, values: [input.relationId,input.leaseId,retry], maxRows: 0 });
     });
   }

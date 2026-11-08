@@ -19,6 +19,8 @@ keeping its provider calls separate from general maintenance's connection
 budget. The primary PostgreSQL App authority derives work from live source
 relations; no local monitor or credential field acts as polling authority.
 Eight due subscriptions are leased per pass, with four processed concurrently.
+Successful reads become eligible at the next five-minute cron boundary, rather
+than five minutes after completion (which would skip the following pass).
 Under backlog, observation can be later than five minutes. A complete snapshot
 is bounded to 20 groups, 500 products and three pages per collection. Malformed,
 incomplete or escaped pages fail without advancing it. These are workload
