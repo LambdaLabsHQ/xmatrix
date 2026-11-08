@@ -120,3 +120,9 @@ xmatrix codex
 ```
 
 The session runs in your terminal and receives conversation messages as input.
+
+## Get help
+
+Visit [xMatrix Support](https://xmatrix.sh/support) to ask a question, report a
+problem or get help with your account or subscription. You can email
+[hello@xmatrix.sh](mailto:hello@xmatrix.sh) without signing in.

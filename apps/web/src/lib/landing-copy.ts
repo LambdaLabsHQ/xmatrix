@@ -46,7 +46,7 @@ export interface LandingCopy {
   faq: { title: string; questions: readonly Pair[] };
   footer: {
     tagline: string; product: string; legal: string; agents: string;
-    links: Record<"app" | "download" | "pricing" | "docs" | "console" | "signIn", string>;
+    links: Record<"app" | "download" | "pricing" | "docs" | "support" | "console" | "signIn", string>;
     legalLinks: Record<"privacy" | "terms" | "cookies" | "subprocessors", string>;
     askAi: string; rights: string; motto: string;
   };
@@ -131,7 +131,7 @@ const en: LandingCopy = {
   footer: {
     tagline: "Talk with your team and AI agents in one Space. Keep decisions, open work and next steps in living pages as the work changes.",
     product: "Product", legal: "Legal", agents: "Agents",
-    links: { app: "Online App", download: "Download", pricing: "Pricing", docs: "Docs", console: "Console", signIn: "Sign In" },
+    links: { app: "Online App", download: "Download", pricing: "Pricing", docs: "Docs", support: "Support", console: "Console", signIn: "Sign In" },
     legalLinks: { privacy: "Privacy Policy", terms: "Terms of Service", cookies: "Cookies and Storage", subprocessors: "Subprocessors" },
     askAi: "See what ChatGPT, Claude, Perplexity, Gemini or Grok say about xMatrix.",
     rights: "xMatrix and its related marks are reserved.",
@@ -220,7 +220,7 @@ const zh: LandingCopy = {
   footer: {
     tagline: "在一个 Space 里和团队、AI 智能体对话。决定、待办和下一步写在随工作更新的活页面里。",
     product: "产品", legal: "法律", agents: "Agents",
-    links: { app: "在线应用", download: "下载", pricing: "价格", docs: "文档（英文）", console: "控制台", signIn: "登录" },
+    links: { app: "在线应用", download: "下载", pricing: "价格", docs: "文档（英文）", support: "支持（英文）", console: "控制台", signIn: "登录" },
     legalLinks: { privacy: "隐私政策", terms: "服务条款", cookies: "Cookie 与存储", subprocessors: "子处理方" },
     askAi: "看看 ChatGPT、Claude、Perplexity、Gemini 或 Grok 怎么介绍 xMatrix。",
     rights: "xMatrix 及相关标识保留所有权利。",

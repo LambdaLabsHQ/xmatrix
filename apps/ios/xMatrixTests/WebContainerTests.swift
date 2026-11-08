@@ -6,6 +6,15 @@ import AuthenticationServices
 
 @MainActor
 final class WebContainerTests: XCTestCase {
+    // The system camera can record a video from the Web attachment picker.
+    // iOS terminates the host app if either capture purpose is missing.
+    func testVideoAttachmentsHaveBundledCapturePurposeStrings() throws {
+        for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"] {
+            let purpose = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: key) as? String, key)
+            XCTAssertFalse(purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, key)
+        }
+    }
+
     final class RecordingWebView: WKWebView {
         var requests: [URLRequest] = []
         override func load(_ request: URLRequest) -> WKNavigation? {

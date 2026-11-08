@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+The iOS app declares camera and microphone use for user-initiated video
+attachments. Public support lives at `/support`, linked from the guide and
+site footer; App Store metadata uses that contact page. See
+[iOS delivery](../operations/ios-app-store-cd.md#version-and-retry-behavior).
+
 Sentry event admission and installation retirement share complete binding
 iteration. Events atomically admit every current target that fits the existing
 pending-job backpressure, including targets beyond the former 50-binding read.
