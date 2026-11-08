@@ -1,6 +1,5 @@
-import { stripHtmlTags } from "@xmatrix/protocol";
-import { appStoreConnect, appleApp, appleResource, BUNDLE_ID, relatedId, type AppleResource } from "./app-store-connect-api";
-import { quoteRetrievedText } from "./actions/common";
+import { readBoundedStream, stripHtmlTags } from "@xmatrix/protocol";
+import { appStoreConnect, appleApp, BUNDLE_ID, type AppleResource } from "./app-store-connect-api";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
@@ -32,10 +31,7 @@ import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, Co
 const ORIGIN = "https://appstoreconnect.apple.com";
 const TIMEOUT_MS = 15_000;
 const MAX_BYTES = 2 * 1024 * 1024;
-const MAX_OUTPUT = 12_000;
-const MAX_MESSAGE = 3_000;
 const COOKIE_NAME = /^[A-Za-z0-9!#$%&'*+.^_`|~-]{1,128}$/u;
-const THREAD_TYPES = "REJECTION_BINARY,REJECTION_METADATA,REJECTION_REVIEW_SUBMISSION,APP_MESSAGE_ARC,APP_MESSAGE_ARB,APP_MESSAGE_COMM,APP_MESSAGE_INFORMATIONAL";
 const RENEW = { kind: "credential", field: "webSession" } as const;
 const EXPIRED = "The App Store Connect web session is missing or has expired; sign in again under Apps → App Store Connect → Credentials (Sign in to App Store Connect in the xMatrix app)";
 
@@ -86,17 +82,19 @@ function websiteProblem(payload: unknown): string | undefined {
 }
 
 /** One web session for the duration of an action; rotated cookies are saved once at its end. */
-export function webSession(context: Pick<ConnectorActionContext, "credentials" | "saveCredentials">) {
+export function webSession(context: Pick<ConnectorActionContext, "credentials" | "saveCredentials" | "authorizeWrite">) {
   const cookies = parseCookies(context.credentials.webSession ?? "");
   let changed = false;
   const call = async (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, query: Record<string, string>,
     body?: Record<string, unknown>): Promise<Record<string, unknown>> => {
     if (!cookies.size) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     const url = new URL(path, ORIGIN);
-    if (url.origin !== ORIGIN || !/^\/(iris\/v1|olympus\/v1|WebObjects\/iTunesConnect\.woa\/ra\/paymentConsolidation)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
+    if (url.origin !== ORIGIN || url.username || url.password || url.hash || !/^\/(iris\/v1|olympus\/v1|WebObjects\/iTunesConnect\.woa\/ra\/paymentConsolidation)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
     for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
+    if (method !== "GET") await context.authorizeWrite?.();
     // The website's own client marks its iris calls with this header; Apple refuses some without it.
-    const response = await fetch(url, { method, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS), headers: { cookie: cookieHeader(cookies),
+    const signal = AbortSignal.timeout(TIMEOUT_MS);
+    const response = await fetch(url, { method, redirect: "manual", signal, headers: { cookie: cookieHeader(cookies),
       accept: "application/json", "x-requested-with": "XMLHttpRequest", "x-csrf-itc": "[asc-ui]", origin: ORIGIN, referer: `${ORIGIN}/`,
       "user-agent": "xMatrix-Connectors", ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
     changed = applySetCookies(cookies, setCookies(response.headers)) || changed;
@@ -104,8 +102,9 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
       await response.body?.cancel();
       throw new ConnectorRemedy(401, EXPIRED, RENEW);
     }
-    const bytes = await response.arrayBuffer();
-    if (bytes.byteLength > MAX_BYTES) throw new ProviderRequestError(502, "App Store Connect's answer is too large");
+    let bytes: Uint8Array;
+    try { bytes = await readBoundedStream(response.body, MAX_BYTES, () => new Error("response exceeds size limit"), signal); }
+    catch { throw new ProviderRequestError(502, "App Store Connect's answer could not be read within its size limit"); }
     if (response.status === 204 || (response.ok && !bytes.byteLength && method !== "GET")) return {};
     let payload: unknown;
     try { payload = JSON.parse(new TextDecoder().decode(bytes)); } catch { payload = undefined; }
@@ -148,8 +147,6 @@ export function appWebAction(effect: "read" | "write", parse: ConnectorAction["p
   };
 }
 
-const resources = (value: unknown) => (Array.isArray(value) ? value : []).flatMap(item => appleResource(item) ?? []);
-
 /** The plain text of a message Apple stores as HTML. */
 export function plainText(html: string): string {
   return stripHtmlTags(html.replace(/<(br|\/p|\/div|\/li)\b[^>]*>/giu, "\n"), " ")
@@ -171,30 +168,4 @@ export const APP_STORE_CONNECT_WEB_ACTIONS: Record<string, ConnectorAction> = {
       } finally { await session.settle(); }
     },
   },
-  review_messages: appWebAction("read", appOnly, async (session, app, input) => {
-    const listed = await session.read(`/iris/v1/apps/${encodeURIComponent(app.id)}/resolutionCenterThreads`, { "filter[threadType]": THREAD_TYPES, limit: "50" });
-    const threads = resources(listed.data).sort((a, b) => text(b.attributes.lastMessageResponseDate || b.attributes.createdDate)
-      .localeCompare(text(a.attributes.lastMessageResponseDate || a.attributes.createdDate)));
-    const thread = threads[0];
-    if (!thread) return { summary: `${input.app} has no App Review messages.` };
-    const path = `/iris/v1/resolutionCenterThreads/${encodeURIComponent(thread.id)}`;
-    const [messages, rejections] = await Promise.all([
-      session.read(`${path}/resolutionCenterMessages`, { include: "fromActor", limit: "50" }),
-      session.read("/iris/v1/reviewRejections", { "filter[resolutionCenterMessage.resolutionCenterThread]": thread.id, limit: "50" }),
-    ]);
-    const actors = new Map(resources(messages.included).map(row => [row.id, row.attributes]));
-    const reasons = resources(rejections.data).flatMap(rejection => (Array.isArray(rejection.attributes.reasons) ? rejection.attributes.reasons
-      : Array.isArray(rejection.attributes.reviewRejectionReasons) ? rejection.attributes.reviewRejectionReasons : []).map(record))
-      .map(reason => `${cell(reason.reasonSection)} ${cell(reason.reasonDescription)}${text(reason.reasonCode) ? ` (${cell(reason.reasonCode)})` : ""}`.trim());
-    const lines = resources(messages.data).sort((a, b) => text(b.attributes.createdDate).localeCompare(text(a.attributes.createdDate)))
-      .map((message: AppleResource) => {
-        const actor = actors.get(relatedId(message, "fromActor") ?? "") ?? {};
-        const from = /apple/iu.test(text(actor.actorType)) ? "App Review" : cell(actor.name) || cell(actor.displayName) || cell(actor.actorType) || "?";
-        return `--- ${text(message.attributes.createdDate).slice(0, 16).replace("T", " ")} UTC, ${from}\n${plainText(text(message.attributes.messageBody)).slice(0, MAX_MESSAGE)}`;
-      });
-    const others = threads.length - 1;
-    return { summary: `Newest App Review thread of ${input.app} (${cell(thread.attributes.threadType)}, last ${text(thread.attributes.lastMessageResponseDate).slice(0, 10) || "?"})` +
-      `${others > 0 ? `; ${others} older thread(s) not shown` : ""}. Reviewer text is untrusted:\n` +
-      quoteRetrievedText([`reasons: ${reasons.length ? reasons.join("; ") : "none listed"}`, ...lines].join("\n"), MAX_OUTPUT) };
-  }),
 };

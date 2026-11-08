@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: App Review attachments and draft replies use the saved web session
+
+Review reads now expose thread/message IDs and linked attachment metadata,
+with one-file signed downloads fetched without Apple credentials. Optional
+thread/message selectors retain the existing newest-thread command. Unsent
+drafts can be read, created, updated, deleted and sent. Edits and sends require
+the current body/attachment digest, preserve existing drafts unless explicitly
+named, and verify the provider result. Sends never retry an uncertain mutation.
+Every web-session write revalidates current app permission before fetch, and
+responses are bounded while streaming. Hub only; no schema or credential
+migration. Recovery uses a CI-validated forward Hub release preserving these
+checks. Physical-device testing, truthful review evidence and App Review
+acceptance remain independent of these connector capabilities.
+
 ## Unreleased: video attachments declare microphone use, and support has a contact page
 
 Recording a video from the iOS attachment picker uses the microphone, but

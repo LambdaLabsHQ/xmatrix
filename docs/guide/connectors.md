@@ -96,7 +96,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `quote` (ask by default). Explicit account selection; quote posting requires X Enterprise API access |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `sales`, `review_messages`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `subscriptions`, `submit_subscriptions`, `in_app_purchases`, `submit_in_app_purchases`, `release`, `pause_phased_release`, `resume_phased_release`, `complete_phased_release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `sales`, `review_messages`, `review_attachments`, `review_attachment`, `review_draft`, `edit_review_draft`, `send_review_draft`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `subscriptions`, `submit_subscriptions`, `in_app_purchases`, `submit_in_app_purchases`, `release`, `pause_phased_release`, `resume_phased_release`, `complete_phased_release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -203,6 +203,12 @@ The record then needs a few things once before its first submission. `@appstorec
 ```
 
 The age rating answers are your statements to Apple about the app, so nothing is filled in for you: give every answer the questionnaire asks, and `read_app` lists the ones still unanswered as `null`.
+
+### Answering App Review
+
+`review_messages` reads the newest review thread, including its thread and message IDs and attachment metadata. Add a thread ID to read an older thread, and a message ID for its longer text. With the saved Web session, `review_attachments` lists files and `review_attachment` returns one signed, expiring download URL; fetch that file without Apple cookies or an API key.
+
+`review_draft` reads an unsent reply and its current digest. `edit_review_draft` creates a draft, or updates/deletes a named draft with its digest. `send_review_draft` sends that exact draft and verifies Apple's resulting message. Drafts remain unsent until that separate action; sending a reply does not resubmit the app. Inspect the thread before retrying an uncertain send. See the [review workflow](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/app-store-connect-review.md) for the command arguments and limits.
 
 ### Uploading files
 
