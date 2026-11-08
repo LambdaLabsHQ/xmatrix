@@ -1,5 +1,5 @@
 import { readBoundedStream, stripHtmlTags } from "@xmatrix/protocol";
-import { appStoreConnect, appleApp, BUNDLE_ID, type AppleResource } from "./app-store-connect-api";
+import { appStoreConnect, appleApp, BUNDLE_ID, type AppleResource, type AppStoreConnectApi } from "./app-store-connect-api";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
@@ -86,7 +86,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
   const cookies = parseCookies(context.credentials.webSession ?? "");
   let changed = false;
   const call = async (method: "GET" | "POST" | "PATCH" | "DELETE", path: string, query: Record<string, string>,
-    body?: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    body?: Record<string, unknown>, quiet = false): Promise<Record<string, unknown>> => {
     if (!cookies.size) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     const url = new URL(path, ORIGIN);
     if (url.origin !== ORIGIN || url.username || url.password || url.hash || !/^\/(iris\/v1|olympus\/v1|WebObjects\/iTunesConnect\.woa\/ra\/paymentConsolidation)\//u.test(url.pathname)) throw new ProviderRequestError(502, "App Store Connect returned a link outside its website API");
@@ -113,7 +113,7 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     if (response.status === 403 && !problem) throw new ConnectorRemedy(401, EXPIRED, RENEW);
     if (!response.ok || !payload || typeof payload !== "object") {
       throw new ProviderRequestError(response.ok ? 502 : response.status, response.ok ? "App Store Connect did not answer with JSON; the website may have changed"
-        : `App Store Connect's website returned ${response.status}${problem ? `: ${problem}` : ""}`);
+        : `App Store Connect's website returned ${response.status}${problem && !quiet ? `: ${problem}` : ""}`);
     }
     return payload as Record<string, unknown>;
   };
@@ -121,6 +121,8 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     read: (path: string, query: Record<string, string> = {}) => call("GET", path, query),
     /** A change, sent once: nothing here retries a write. */
     send: (method: "POST" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>) => call(method, path, {}, body),
+    /** A credential-bearing request: provider error text may echo private fields, so never include it in a receipt. */
+    sendPrivate: (method: "POST" | "PATCH" | "DELETE", path: string, body: Record<string, unknown>) => call(method, path, {}, body, true),
     /** Save the rotated cookies, if any; a failed save must not hide what was read. */
     async settle(): Promise<void> {
       if (changed && cookies.size && context.saveCredentials) await context.saveCredentials({ webSession: cookieHeader(cookies) }).catch(() => undefined);
@@ -136,13 +138,13 @@ export const appOnly = (statement: ConnectorActionStatement) => BUNDLE_ID.test(s
 
 /** An action about one app: the API key finds it, the web session does the rest, and rotated cookies are saved at the end. */
 export function appWebAction(effect: "read" | "write", parse: ConnectorAction["parse"],
-  run: (session: WebSession, app: AppleResource, input: Record<string, string>) => Promise<ConnectorActionResult>): ConnectorAction {
+  run: (session: WebSession, app: AppleResource, input: Record<string, string>, api: AppStoreConnectApi) => Promise<ConnectorActionResult>): ConnectorAction {
   return {
     effect, requires: ["webSession", "keyId", "privateKey"], parse,
     async execute(context, input) {
-      const app = await appleApp(appStoreConnect(context.credentials), input.app!);
+      const api = appStoreConnect(context.credentials), app = await appleApp(api, input.app!);
       const session = webSession(context);
-      try { return await run(session, app, input); } finally { await session.settle(); }
+      try { return await run(session, app, input, api); } finally { await session.settle(); }
     },
   };
 }

@@ -14,6 +14,7 @@ import { APP_STORE_CONNECT_UPLOAD_ACTIONS } from "./actions/app-store-connect-up
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
 import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
 import { APP_STORE_CONNECT_WEB_ACTIONS } from "./app-store-connect-web";
+import { APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS } from "./app-store-connect-web-management";
 import { APP_STORE_CONNECT_REVIEW_ACTIONS } from "./app-store-connect-review";
 import { APP_STORE_CONNECT_WEB_RECORD_ACTIONS } from "./app-store-connect-web-records";
 import { BITBUCKET_ACTIONS, verifyBitbucket } from "./actions/bitbucket";
@@ -87,7 +88,7 @@ const PROVIDERS: Record<string, {
     actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS, ...APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS,
       ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
       ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_SALES_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_REVIEW_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS,
-      ...APP_STORE_CONNECT_OPERATION_ACTIONS },
+      ...APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS, ...APP_STORE_CONNECT_OPERATION_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },

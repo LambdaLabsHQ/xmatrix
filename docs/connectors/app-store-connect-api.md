@@ -89,8 +89,8 @@ operations; a catalog entry does not grant a broader key role.
 
 This does not supply private website endpoints: creating App records, App
 Privacy and [review replies](app-store-connect-review.md) keep their dedicated
-web-session capabilities. Review reply attachment upload, rating reset and new
-sandbox testers require separately observed private contracts. Apple provides
+web-session capabilities. Rating reset and new sandbox testers use [dedicated web-session actions](app-store-connect-web-management.md).
+Review reply attachment upload still requires its private upload contract. Apple provides
 no IAP/subscription review webhook; event polling is separate from reading
 their API states. Agreements, banking, tax and Apple sign-in remain with the
 account owner.
