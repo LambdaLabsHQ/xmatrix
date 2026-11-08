@@ -207,3 +207,12 @@ test("Hub instructions to one Agent Instance are recognized; notices people read
   assert.equal(isAgentInstruction({ xmatrixPageCoWrite: { version: 1 } }), false);
   assert.equal(isAgentInstruction(undefined), false);
 });
+
+// The real App Store catalog crossed 64 commands. Its tail must remain routable,
+// while an oversized descriptor must fail instead of silently dropping commands.
+test("connector catalogs retain actions beyond 64 and reject overflow explicitly", () => {
+  const ids = Array.from({ length: 80 }, (_, index) => `action_${index}`);
+  const target = connectorInteractionTarget("store", ids);
+  assert.equal(new MessageInteractionRegistry([target]).resolve("store", "action_79").status, "resolved");
+  assert.throws(() => connectorInteractionTarget("store", Array.from({ length: 257 }, (_, index) => `action_${index}`)), /catalog exceeds its limit/u);
+});

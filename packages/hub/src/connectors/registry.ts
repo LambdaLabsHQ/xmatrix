@@ -11,8 +11,7 @@ const CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = [githubConnectorProvid
  * store. Policy and credentials are rechecked by the selected executor. */
 export function connectorInteractionRegistry(): MessageInteractionRegistry {
   return new MessageInteractionRegistry(CONNECTOR_PROVIDERS.filter(provider => provider.commands).map(provider => {
-    /* The registry keeps a bounded number of operations per target. The ones that control a connector come
-       first, so no number of actions can push a Space admin's `policy` out of reach. */
+    // Project the complete executor-backed catalog; overflow must never hide actions.
     return connectorInteractionTarget(provider.id, connectorOperationIds(getAppConnectorProvider(provider.id)));
   }));
 }
