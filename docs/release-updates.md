@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: CLI release feeds are read before the cron opens its other connections
+
+HUB-BX lost the dev CLI feed twice while waiting for response headers. The
+waits were 15s and 7s, past the five-second abort, while the stable feed in
+the same minute succeeded and both public feeds answer within a couple of
+seconds on their own. A minute cron may keep only six connections waiting on
+headers. Each other pass opens a Hyperdrive connection, which counts, so a
+feed fetch queued behind them does not see its abort until a slot frees.
+Hyperdrive's connect wait is 15 seconds. Both feeds are now read, including
+one retry of a lost response, before any other pass opens a connection. Owner
+queries and socket delivery are unchanged and still are not replayed. Hub
+only, no schema or client change. Recovery is a CI-validated beta Hub
+reverting this change.
+
 ## Unreleased: Expired Machine leases retain their timing
 
 HUB-7F reports expired harness-action renewals, but the refusal alone could not

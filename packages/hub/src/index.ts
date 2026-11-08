@@ -6,7 +6,7 @@ import { maintainChannelDeletions } from "./channel-deletion-maintenance";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
-import { noticeCliReleases } from "./cli-release-notice";
+import { noticeCliReleases, readCliReleaseFeeds } from "./cli-release-notice";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
@@ -172,7 +172,10 @@ export default {
       executionCtx.waitUntil(sendErrorReports());
     }
   }),
-  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(() => {
+  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(async () => {
+    // Feeds first: the passes below each open a Hyperdrive connection, and six
+    // header-waits is the invocation's whole budget (HUB-BX).
+    const latest = await readCliReleaseFeeds();
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
@@ -180,7 +183,7 @@ export default {
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
     run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
-    run("CLI release notice", () => noticeCliReleases(env));
+    run("CLI release notice", () => noticeCliReleases(env, { latest }));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     run("Admin activity rollup", () => rollUpAdminActivityOnSchedule(env, event.scheduledTime));
     // Delivers again quota waits a reading already made ready; never asks a provider.
