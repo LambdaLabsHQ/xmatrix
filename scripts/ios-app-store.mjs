@@ -98,6 +98,9 @@ const CARRIED = { subscriptionVersion: "subscriptionVersions", subscriptionGroup
 const ITEM_TYPES = { appStoreVersion: "appStoreVersions", ...CARRIED };
 const resourceId = (value) => typeof value === "string" && /^[A-Za-z0-9-]{1,100}$/.test(value);
 
+const REVIEW_ITEM_QUERY = query({ include: Object.keys(ITEM_TYPES).join(","), limit: "200" });
+const reviewItems = (api, id) => api.list(`/v1/reviewSubmissions/${id}/items?${REVIEW_ITEM_QUERY}`);
+
 // A review may contain the app and its first products together. Prove each
 // product's parent belongs to this app before changing or canceling anything.
 async function checkedReviewItems(api, appId, versionId, items) {
@@ -153,7 +156,7 @@ async function withdrawQueuedReview(api, appId, versionId, waitFor, attempts = 2
     .filter((row) => row.attributes.state !== "COMPLETE");
   if (open.length !== 1 || open[0].attributes.state !== "WAITING_FOR_REVIEW") throw new Error("The queued App Review submission is ambiguous; reconcile it at Apple.");
   const path = `/v1/reviewSubmissions/${open[0].id}`;
-  const items = await api.list(`${path}/items?limit=200`);
+  const items = await reviewItems(api, open[0].id);
   const carried = (await checkedReviewItems(api, appId, versionId, items)).filter(item => item.key !== "appStoreVersion");
   await api.request(path, "PATCH", { type: "reviewSubmissions", id: open[0].id, attributes: { canceled: true } });
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -202,7 +205,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   if (submission && !["READY_FOR_REVIEW", "UNRESOLVED_ISSUES"].includes(submission.attributes.state)) {
     return { outcome: "deferred-existing-review", version, buildNumber };
   }
-  const items = submission ? await api.list(`/v1/reviewSubmissions/${submission.id}/items?limit=200`) : [];
+  const items = submission ? await reviewItems(api, submission.id) : [];
   const checkedItems = await checkedReviewItems(api, appId, target?.id, items);
   // Contact/login facts stay at Apple. Never read them from public metadata.
   // New-version creation requires an existing review configuration to inherit.
