@@ -4,7 +4,7 @@ test("public HTML declares its language and each shared URL before scripts run",
   const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
   const page = await context.newPage();
   try {
-    for (const path of ["/zh", "/", "/download", "/terms", "/privacy", "/subprocessors", "/cookies", "/releases/3.0.0"]) {
+    for (const path of ["/zh", "/", "/download", "/support", "/terms", "/privacy", "/subprocessors", "/cookies", "/releases/3.0.0"]) {
       await page.goto(path, { waitUntil: "domcontentloaded" });
       await expect(page.locator("html")).toHaveAttribute("lang", path === "/zh" ? "zh-CN" : "en");
       const canonical = (await page.locator('head link[rel="canonical"]').getAttribute("href"))!;
@@ -17,6 +17,24 @@ test("public HTML declares its language and each shared URL before scripts run",
           .toHaveAttribute("href", canonical);
       }
     }
+  } finally {
+    await context.close();
+  }
+});
+
+test("support is reachable without an account and offers a direct way to ask for help", async ({ browser, baseURL }) => {
+  const context = await browser.newContext({ baseURL, javaScriptEnabled: false });
+  const page = await context.newPage();
+  try {
+    await page.goto("/docs");
+    await page.getByRole("contentinfo").getByRole("link", { name: "Support", exact: true }).click();
+    await expect(page).toHaveURL(/\/support$/);
+    const article = page.getByRole("article");
+    await expect(article.getByRole("heading", { level: 1, name: "Support" })).toBeVisible();
+    await expect(article.getByRole("link", { name: "hello@xmatrix.sh" })).toHaveAttribute(
+      "href", "mailto:hello@xmatrix.sh?subject=xMatrix%20support",
+    );
+    await expect(article.getByRole("link", { name: "user guide" })).toHaveAttribute("href", "/docs");
   } finally {
     await context.close();
   }

@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: video attachments declare microphone use, and support has a contact page
+
+Recording a video from the iOS attachment picker uses the microphone, but
+the app declared only camera use. iOS terminates an app that accesses the
+microphone without its purpose string. The app now declares sound capture
+for user-initiated video attachments and describes both camera modes;
+a hosted test checks the actual built app's capture purpose strings.
+Physical-device video capture remains a separate validation step.
+The App Store support address now names `/support`, an unauthenticated page
+with an email contact and account, purchase and troubleshooting guidance,
+reachable from the guide and footer. iOS and Web, no data or API migration.
+The new binary and support page require a verified beta followed by stable
+before App Review can use them; the old binary is unchanged by a Web deploy.
+Recovery is a CI-validated forward release preserving both capture declarations.
+
 ## Unreleased: Sentry events follow all current installation bindings
 
 Installation binding storage already accepts more than 50 Spaces, but Sentry

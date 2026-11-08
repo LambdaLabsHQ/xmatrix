@@ -37,6 +37,15 @@ browser-session release path.
 
 ## Version and retry behavior
 
+The Web attachment picker can open the system camera for a photo or video.
+The shipped app must include nonempty camera and microphone purpose strings;
+video capture uses both, and iOS terminates an app that accesses a protected
+resource without its purpose string. The hosted simulator test checks the
+built app's Info.plist. Camera recording still needs a physical-device check;
+simulator tests do not establish that capture works on an iPad or iPhone.
+The public support URL is `https://xmatrix.sh/support`, which provides direct
+contact information without requiring an account; the user guide is separate.
+
 Apple's store version is the release's `X.Y.Z`: a beta `X.Y.Z-beta.N` and the
 stable `X.Y.Z` it precedes upload under the same store version, told apart by
 build number. The archive carries the channel in the Web it loads, set from the
