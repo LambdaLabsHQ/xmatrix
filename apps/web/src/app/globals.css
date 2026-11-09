@@ -2908,6 +2908,30 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .message-reply-citation .message-citation-source { display: block; margin-top: 2px; }
 .xmatrix-app .message-citation-composer .message-citation-source + .message-citation-source { margin-top: 0; }
+/* Every slip opens with a large quotation mark in the slip's own wood, deepened, so a quote reads as one at a
+   glance before its words do (Daniel 2026-11-09: 引用前面加个比较大的引用号). The words keep their column. */
+.xmatrix-app .rich-message .message-citation,
+.xmatrix-app .message-reply-citation,
+.xmatrix-app .message-citation-composer {
+  position: relative;
+  padding-left: 46px;
+}
+.xmatrix-app .rich-message .message-citation::before,
+.xmatrix-app .message-reply-citation::before,
+.xmatrix-app .message-citation-composer::before {
+  content: "\201C";
+  position: absolute;
+  left: 11px;
+  top: 5px;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 48px;
+  font-weight: 700;
+  line-height: 1;
+  color: color-mix(in oklch, var(--app-quote-wood) 55%, var(--foreground));
+  pointer-events: none;
+}
+.xmatrix-app .message-citation-composer { padding-left: 40px; }
+.xmatrix-app .message-citation-composer::before { left: 9px; top: 3px; font-size: 38px; }
 ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
 }
