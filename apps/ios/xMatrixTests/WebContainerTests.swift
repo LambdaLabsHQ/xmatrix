@@ -473,6 +473,21 @@ final class WebContainerTests: XCTestCase {
         XCTAssertEqual(policy, .download)
     }
 
+    /// A web view without these panels answers window.confirm with false and shows nothing.
+    func testThePageCanAlertConfirmAndPrompt() {
+        let (coordinator, container) = makeCoordinator()
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertEqual(container.subviews.count, 1)
+        let delegate = page(coordinator).uiDelegate as! NSObject
+        for selector in [
+            "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:",
+            "webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:",
+            "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",
+        ] {
+            XCTAssertTrue(delegate.responds(to: NSSelectorFromString(selector)), selector)
+        }
+    }
+
     func testDownloadedMediaGoesToPhotosAndEverythingElseToFiles() {
         func destination(_ name: String) -> WebContainerView.PageCoordinator.DownloadDestination {
             WebContainerView.PageCoordinator.destination(for: URL(fileURLWithPath: "/tmp/\(name)"))
