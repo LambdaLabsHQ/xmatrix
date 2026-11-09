@@ -1636,7 +1636,7 @@ function summarySourceLine(source: ChannelSummarySource, historyHeadSequence: nu
 }
 
 export const ChannelDetails = memo(function ChannelDetails({
-  channel,
+  channel: catalogChannel,
   space,
   workspaces,
   token,
@@ -1671,6 +1671,8 @@ export const ChannelDetails = memo(function ChannelDetails({
   mobileOverlayOpen?: boolean;
   onCloseMobileOverlay?: () => void;
 }) {
+  // The catalog's copy carries no Instances; the Agents list reads the live store.
+  const channel = useRealtimeChannel(catalogChannel);
   const machineCatalog = useAgentRegistrationCatalog(space?.id ?? "", token ?? "", Boolean(space?.id && token));
   const [aboutSummaryBusy, setAboutSummaryBusy] = useState(false);
   const [aboutSummaryError, setAboutSummaryError] = useState<string | null>(null);
