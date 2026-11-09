@@ -57,6 +57,16 @@ const QUOTA_PROBE_WINDOW_MS = 15_000;
  * is evidence the "online" route is not responding.
  */
 const UNANSWERED_AFTER_MS = 60_000;
+/**
+ * The modern admission lease is 10s, and the renew that extends it is judged
+ * on the database clock after that read round trip. A same-generation renew
+ * that missed by less than this is still the holder: production saw a harness
+ * admission 317ms late, with the command only as old as the 10s window.
+ * Claim waits out the same interval before taking the row. A longer quiet gap
+ * stays refused so another claim can have the command. Quota probes keep the
+ * hard result window and do not get this slack.
+ */
+const LEASE_RENEW_SKEW_MS = 1_000;
 /** Only recent work counts, so one command that can never be claimed does not
  * mark a working machine as not responding for its whole lifetime. */
 const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
@@ -1336,7 +1346,7 @@ export class PostgresMachineControlRepository {
       WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
         AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
     values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v9", text: `SELECT
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v10", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1350,7 +1360,7 @@ export class PostgresMachineControlRepository {
       LEFT JOIN data.agent_launches launch ON launch.control_id=command.command_id
       WHERE command.owner_user_id=$1 AND command.machine_id=$2
         AND (command.status='pending' OR
-          (command.status='leased' AND command.lease_until<=clock_timestamp()))
+          (command.status='leased' AND command.lease_until+($14::integer*interval '1 millisecond')<=clock_timestamp()))
         AND COALESCE(command.available_at,command.created_at)<=clock_timestamp()
         AND (command.expires_at IS NULL OR command.expires_at>clock_timestamp())
         AND (cardinality($3::text[])=0 OR command.command_type=ANY($3::text[]))
@@ -1365,7 +1375,7 @@ export class PostgresMachineControlRepository {
         AND (command.command_type<>'text_task' OR $12::boolean)
         AND (command.command_type<>'sleep' OR $13::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY), LEASE_RENEW_SKEW_MS],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
@@ -1418,11 +1428,19 @@ export class PostgresMachineControlRepository {
     const command = rows[0];
     if (!command) throw new MachineControlError("machine_command_not_found", 404,
       "Machine command not found");
-    const stale = command.status !== "leased" ? "status"
+    let stale = command.status !== "leased" ? "status"
       : command.lease_owner !== leaseOwner ? "owner"
         : Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ? "generation"
           : Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ? "version"
             : fence === "live" && command.lease_live !== true ? "expired" : undefined;
+    if (stale === "expired" && command.command_type !== "quota_probe") {
+      const millis = (value: unknown) => value instanceof Date ? value.getTime()
+        : typeof value === "string" ? Date.parse(value) : NaN;
+      const late = millis(command.lease_observed_at) - millis(command.lease_until);
+      // Same generation still holds the row. One read round trip past the
+      // admission deadline is not a new holder.
+      if (late >= 0 && late < LEASE_RENEW_SKEW_MS) stale = undefined;
+    }
     if (stale) {
       const timestamps = [command.lease_until, command.updated_at, command.created_at, command.lease_observed_at]
         .map(value => value instanceof Date ? value.getTime() : typeof value === "string" ? Date.parse(value) : NaN);
