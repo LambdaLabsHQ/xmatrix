@@ -13,7 +13,7 @@ import {
 import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
 import { ListSectionHeading, RECENT_SECTION, type ListSectionMark } from "./list-section-heading";
-import { markAllDoneAction, NEEDS_YOU_SECTION_LABEL } from "./needs-you-mark-all";
+import { markAllDoneAction, NEEDS_YOU_SECTION_LABEL, useMarkAllDoneArmed } from "./needs-you-mark-all";
 
 import {
   CHANNEL_CHAT_ROW_CLASS_NAME,
@@ -870,6 +870,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   onMarkDone?: (channelId: string) => void;
 }) {
   const sections = useMemo(() => channelListSections(channels, pinnedChannelIds), [channels, pinnedChannelIds]);
+  const [markAllArmed, setMarkAllArmed] = useMarkAllDoneArmed();
   const listRefs = useRef(new Map<string, VirtuosoHandle>());
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
@@ -890,7 +891,7 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   return sections.map((section) => (
     <Fragment key={section.label}>
       <ListSectionHeading label={section.label} count={section.count} mark={section.mark}
-        action={markAllDoneAction(section, onMarkDone)} />
+        action={markAllDoneAction(section, onMarkDone, markAllArmed, setMarkAllArmed)} />
       <Virtuoso
         ref={(handle) => {
           if (handle) listRefs.current.set(section.label, handle);
