@@ -79,6 +79,12 @@ and the focused syntax cases. Each input and its canonical form are parsed
 once; the same two document objects prove serializer idempotence and document
 equivalence. Other focused tests exercise the canonicalization convenience API.
 This avoids repeating the parser solely to reconstruct values for assertions.
+Canonicalizing a page drops an escape of punctuation that cannot start markup
+without parsing that line, and keeps a backslash that is itself text,
+including one inside inline code. An escape that can start markup is checked
+inside its own run of lines. The resulting page is compared with the document
+already in hand, so a long page is not parsed again to decide that its escapes
+were safe.
 
 ## Hosted runners
 
