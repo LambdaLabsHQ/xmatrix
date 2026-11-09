@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: Every quote opens with a large quotation mark
+
+A quote above a reply, a passage quoted in a message, and the reply or quote
+slip in the composer were a plain yellow slip that read like any other card.
+Each now opens with a large curly quotation mark in the slip's own wood, drawn
+as a vector so it is the same light mark on every system. Beta Web only;
+recovery is a CI-validated Web release reverting the style.
+
 ## Unreleased: the details rail lists a conversation's Agents again
 
 Since Instances became records of their own, the right-hand details rail read
