@@ -55,6 +55,7 @@ import {
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
 import { connectedAppsSpawnFields } from "./connected-apps-spawn.js";
 import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
@@ -1020,7 +1021,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       offlineOnly: boolean }> {
     catalog?.catch(() => undefined); // awaited below, after the registrations are read
     const rows = await this.database.transaction({ requestId: `registration-candidates:${target.harness ?? "auto"}`,
-      operation: "registration.launch.candidates", placement: this.placement }, tx => tx.query({
+      operation: "registration.launch.candidates", placement: this.placement, statement: "single_read" }, tx => tx.query({
       name: "registration_launch_candidates_v3", text: `SELECT r.owner_user_id,r.machine_id,r.harness,r.configuration_json,
         a.grant_limits,a.policy_limits,p.description AS profile_description FROM data.space_agent_registrations r
         JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
@@ -1053,8 +1054,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         description: typeof row.profile_description === "string" ? row.profile_description : "",
         models, workspaceReferences }];
     });
-    const [observed, latencies] = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
-      operation: "registration.launch.model-catalog", placement: this.placement }, async tx => [await tx.query({
+    const modelReads = singleReadStatements(this.database, { requestId: `registration-models:${target.harness ?? "auto"}`,
+      operation: "registration.launch.model-catalog", placement: this.placement });
+    const observed = await modelReads.query({
       name: "registration_launch_model_catalog_v4", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
@@ -1092,22 +1094,21 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.updated_at>=statement_timestamp()-interval '${SIGNED_OUT_FAILURE_WINDOW_HOURS} hours') signed_out ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
-        [...RUN_PHASES_BEFORE_READY]], maxRows: 100 }),
-      // How long each harness takes to answer is the harness's own, measured
-      // over every launch: a new Space has none of its own to go on.
-      await tx.query({ name: "registration_launch_response_latency_v1", text: `SELECT
+        [...RUN_PHASES_BEFORE_READY]], maxRows: 100 });
+    // How long each harness takes to answer is the harness's own, measured
+    // over every launch: a new Space has none of its own to go on.
+    const latencies = await modelReads.query({ name: "registration_launch_response_latency_v1", text: `SELECT
           spawn_payload_json->'registration'->'key'->>'harness' AS harness,
           percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_reply_at-connected_at)*1000) AS p50_ms
         FROM data.agent_launches
         WHERE created_at>=statement_timestamp()-interval '${RESPONSE_LATENCY_WINDOW_DAYS} days' AND first_reply_at>=connected_at
           AND spawn_payload_json->'registration'->'key'->>'harness'=ANY($1::text[])
         GROUP BY 1 HAVING count(*)>=${RESPONSE_LATENCY_MIN_SAMPLES}`,
-        values: [[...new Set(candidates.map(candidate => candidate.key.harness))]], maxRows: 100 })] as const);
+        values: [[...new Set(candidates.map(candidate => candidate.key.harness))]], maxRows: 100 });
     const responseLatency = new Map(latencies.map(row => [String(row.harness), Math.round(Number(row.p50_ms))]));
     // Resolve only references explicitly granted to this registration. Directory
     // metadata is factual context, never a source of new launch permissions.
-    return this.directory.transaction({ requestId: `registration-workspaces:${target.harness ?? "auto"}`,
-      operation: "registration.launch.workspace-catalog" }, async tx => {
+    const workspaceCatalog = async (tx: DatabaseTransaction) => {
       const offered: RegistrationLaunchCandidate[] = [];
       const blocked: LaunchMachineBlock[] = [];
       /** Offered through a daemon in the reconnect grace. */
@@ -1239,7 +1240,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       }
       return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
         blocked.every(block => block.reason === "daemon_offline") };
-    });
+    };
+    return workspaceCatalog(singleReadStatements(this.directory, {
+      requestId: `registration-workspaces:${target.harness ?? "auto"}`, operation: "registration.launch.workspace-catalog" }));
   }
 
 }

@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Launch candidate reads recover a lost response
+
+HUB-BZ lost the model catalog's PostgreSQL response before an Agent could be
+selected. Candidate grants, model/parameter observations, response latencies
+and directory enrichment now use independent lock-free reads, each recovering
+one lost response on a fresh connection. A repeated loss or explicit SQL error
+still fails; placed reads recheck the fence and a retried candidate read sees
+revoked grants. Preparation, launch writes and unknown-COMMIT reconciliation
+keep their existing boundaries. Hub only, no schema or client migration;
+recovery is a CI-validated beta Hub release reverting this change. The
+underlying database stall remains unattributed.
+
 ## Unreleased: A signed-in desktop App with no CLI session hands it one
 
 The desktop App installs its CLI only with a CLI session, and the Web asked

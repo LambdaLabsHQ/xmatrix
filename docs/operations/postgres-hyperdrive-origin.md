@@ -47,6 +47,13 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Launch candidate selection uses independent `single_read` statements for its
+registration grants, model/parameter observations, response latencies and
+directory enrichment (HUB-BZ). Each lost response retries once on a fresh
+connection, with the placed reads checking their fence again. Selection remains
+advisory: preparation and commit recheck current admission under their existing
+locks, and unknown launch commits retain their existing reconciliation.
+
 Channel transfer proposal lists combine the current Human admin check and the
 bounded queue in one placed `single_read` (HUB-BW). A lost response retries once
 on a fresh connection and rechecks both membership and placement; repeated loss
