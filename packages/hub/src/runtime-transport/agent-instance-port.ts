@@ -1012,21 +1012,32 @@ function sameTraceHostSession(
 function assertRunBinding(message: AgentInstanceConnectMessage, authentication: AgentInstanceAuthorityAuthentication): void {
   const { principal, run } = authentication;
   const context = message.runContext ?? {};
-  if (!message.token.trim() || message.identityId !== principal.agentId || message.name.trim() !== principal.agentName ||
-      context.runId !== principal.runId || context.executionKey !== principal.executionKey ||
-      context.autoJoinChannelId !== principal.channelId || run.runId !== principal.runId ||
-      context.machineId !== principal.machineId ||
-      run.agentId !== principal.agentId || run.executionKey !== principal.executionKey ||
-      run.channelId !== principal.channelId || run.machineId !== principal.machineId ||
-      !run.instanceId ||
-      !["starting", "running"].includes(run.status) || !isLiveAgentStatus(run.instanceStatus)) {
-    throw new RuntimeClientOperationError("agent_run_binding_mismatch");
-  }
+  const checks = [
+    ["connect_message", "token", !!message.token.trim()],
+    ["connect_message", "agentId", message.identityId === principal.agentId],
+    ["connect_message", "agentName", message.name.trim() === principal.agentName],
+    ["connect_message", "runId", context.runId === principal.runId],
+    ["connect_message", "executionKey", context.executionKey === principal.executionKey],
+    ["connect_message", "channelId", context.autoJoinChannelId === principal.channelId],
+    ["connect_message", "machineId", context.machineId === principal.machineId],
+    ["authority_binding", "runId", run.runId === principal.runId],
+    ["authority_binding", "agentId", run.agentId === principal.agentId],
+    ["authority_binding", "executionKey", run.executionKey === principal.executionKey],
+    ["authority_binding", "channelId", run.channelId === principal.channelId],
+    ["authority_binding", "machineId", run.machineId === principal.machineId],
+    ["authority_binding", "instanceId", !!run.instanceId],
+    ["authority_binding", "status", ["starting", "running"].includes(run.status)],
+    ["authority_binding", "instanceStatus", isLiveAgentStatus(run.instanceStatus)],
+  ] as const;
+  const mismatch = checks.find(([, , matches]) => !matches);
+  if (mismatch) throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+    source: mismatch[0], field: mismatch[1] });
 }
 
 function assertSamePrincipal(expected: AgentInstanceRunPrincipal, actual: AgentInstanceRunPrincipal): void {
   for (const key of ["ownerUserId", "agentId", "agentName", "spaceId", "runId", "executionKey", "channelId", "machineId"] as const) {
-    if (actual[key] !== expected[key]) throw new RuntimeClientOperationError("agent_run_binding_mismatch");
+    if (actual[key] !== expected[key]) throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+      source: "refresh_principal", field: key });
   }
 }
 

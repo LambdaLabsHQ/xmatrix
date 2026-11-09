@@ -7,6 +7,7 @@ import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONF
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
 import { reportRuntimeDatabaseFailure } from "./runtime-database-failure";
 import { reportMachineRegistryCausalityFailure } from "./machine-registry-causality";
+import { reportAgentBindingFailure, type AgentBindingFailure } from "./agent-binding-failure";
 
 import type { RuntimeOperationFailure } from "@xmatrix/protocol";
 export type { RuntimeOperationFailure } from "@xmatrix/protocol";
@@ -121,7 +122,7 @@ function authorityRejection(error: object): RuntimeAuthorityOperationError | und
 
 /** Whether a socket failure's original already owns its report, so a stage log only warns. */
 export function runtimeFailureReported(error: unknown): boolean {
-  return authorityOperationError(error)?.reported === true;
+  return error instanceof RuntimeClientOperationError || authorityOperationError(error)?.reported === true;
 }
 
 /** The authority fenced this frame because a newer connect replaced its connection. */
@@ -204,13 +205,15 @@ export class RuntimeClientOperationError extends Error {
   readonly publicMessage: string;
   /** The client's ordinary state: logged, never reported as a Hub error. */
   readonly ordinary: boolean;
-  constructor(code: keyof typeof CLIENT_FAILURES) {
+  constructor(code: keyof typeof CLIENT_FAILURES, binding?: AgentBindingFailure) {
     const [message, stage] = CLIENT_FAILURES[code];
     super(message);
     this.publicMessage = message;
     this.failure = { code, stage, diagnosticId: `diag_${crypto.randomUUID()}`, retryable: false };
     this.ordinary = ORDINARY_CLIENT_FAILURES.has(code);
-    (this.ordinary ? console.warn : console.error)("xMatrix runtime product rejection", this.failure);
+    const bindingReported = code === "agent_run_binding_mismatch" && binding !== undefined;
+    if (bindingReported) reportAgentBindingFailure(this, this.failure.diagnosticId, binding);
+    (this.ordinary || bindingReported ? console.warn : console.error)("xMatrix runtime product rejection", this.failure);
   }
 }
 

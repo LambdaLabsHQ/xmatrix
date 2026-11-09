@@ -30,6 +30,10 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Agent binding refusals report one fixed comparison source and field, readable
+through Sentry without compared credentials or identity values. Strict binding
+and connection fencing remain enforced. See [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
 Agent launch candidate selection recovers one lost response per lock-free
 registration, observation and directory read on a fresh connection. Placed
 reads recheck their fence; preparation and commit retain current admission

@@ -3669,3 +3669,14 @@ recover one lost read on a fresh connection. Capacity, grant and lease fences,
 and delivery idempotency stay intact. Hub only, no migration or client change;
 recovery is a CI-validated beta Hub release reverting this change. This repairs
 the recovery gap without attributing the underlying connection termination.
+
+## Unreleased: Agent binding refusals identify the failed comparison
+
+HUB-C1/C2 duplicated one handshake refusal without identifying which binding
+comparison failed. The Hub now reports one event with a fixed comparison source
+and field, available through the Sentry issue reader and correlated with the
+socket's diagnostic reference. Credentials, names, routing ids and compared
+values are excluded. This supplies missing diagnosis, without attributing the
+original mismatch. Existing refusal codes, retry policy, failed-handshake close,
+connection claims and strict authority checks remain unchanged. Hub only; no
+schema or native change. Recovery is a CI-validated beta Hub reverting the change.
