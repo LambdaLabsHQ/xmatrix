@@ -3148,6 +3148,9 @@ struct AcpSession {
     loaded_goal: Option<protocol::AgentGoalStatus>,
     /// `authMethods` ids the agent advertised in its initialize result.
     auth_method_ids: Vec<String>,
+    /// `promptCapabilities.image` from the initialize result. An agent that
+    /// did not advertise it rejects image blocks with -32602.
+    prompt_images: bool,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.

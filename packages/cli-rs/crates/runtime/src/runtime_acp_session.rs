@@ -49,6 +49,7 @@ impl AcpSession {
             session_id: None,
             loaded_goal: None,
             auth_method_ids: Vec::new(),
+            prompt_images: false,
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
@@ -251,6 +252,7 @@ impl AcpSession {
             .request_with_login_retry("initialize", acp_initialize_params())
             .await?;
         self.auth_method_ids = acp_auth_method_ids(&initialized);
+        self.prompt_images = acp_prompt_images(&initialized);
         self.notify("notifications/initialized", None).await?;
 
         if let Some(authenticate) = self.config.authenticate.clone() {
@@ -548,7 +550,7 @@ impl AcpSession {
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id.clone(),
-                "prompt": content_blocks,
+                "prompt": acp_prompt_blocks(content_blocks, self.prompt_images),
             },
         });
         self.write_message(&request).await?;
@@ -899,6 +901,24 @@ mod session_notice_tests {
     use super::*;
 
     #[test]
+    fn image_blocks_reach_only_an_agent_that_advertised_them() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "see local copy" }),
+            serde_json::json!({ "type": "image", "mimeType": "image/png", "data": "AA==" }),
+        ];
+        let advertised = serde_json::json!({
+            "agentCapabilities": { "promptCapabilities": { "image": true } }
+        });
+        assert!(acp_prompt_images(&advertised));
+        assert_eq!(acp_prompt_blocks(blocks.clone(), true).len(), 2);
+        assert!(!acp_prompt_images(&serde_json::json!({ "agentCapabilities": {} })));
+        assert_eq!(
+            acp_prompt_blocks(blocks, false),
+            vec![serde_json::json!({ "type": "text", "text": "see local copy" })]
+        );
+    }
+
+    #[test]
     fn capability_is_advertised_only_with_the_notice_decoder() {
         assert_eq!(acp_initialize_params()["clientCapabilities"]["session"]["notices"], serde_json::json!({}));
     }
@@ -1230,6 +1250,27 @@ fn redact_data_urls_value(value: &Value) -> Value {
     reason = "each #[tokio::test] runs on its own thread; the guard only serializes process-global env across test threads"
 )]
 mod tests;
+
+/// Whether the agent accepts inline image blocks in `session/prompt`.
+fn acp_prompt_images(initialize_result: &Value) -> bool {
+    initialize_result
+        .pointer("/agentCapabilities/promptCapabilities/image")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// The prompt an agent can take. Without the image capability, image blocks
+/// are left out: the text already names each image's local copy, which the
+/// agent can open with its own tools.
+fn acp_prompt_blocks(blocks: Vec<Value>, images: bool) -> Vec<Value> {
+    if images {
+        return blocks;
+    }
+    blocks
+        .into_iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) != Some("image"))
+        .collect()
+}
 
 fn acp_auth_method_ids(initialize_result: &Value) -> Vec<String> {
     initialize_result
