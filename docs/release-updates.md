@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: A signed-in desktop App with no CLI session hands it one
+
+The desktop App installs its CLI only with a CLI session, and the Web asked
+for one only when the daemon reported a sign-in error. An App signed in by a
+path that did not hand its session over found no CLI, reported the daemon
+`missing` (not an error), and showed the setup command with nothing failing
+and nothing reported. A new user on 11-08 stopped there. When the App can
+install its own CLI and finds none, the Web now exchanges a CLI session,
+saves it and starts the daemon, as after the App's own sign-in. Beta Web
+only; recovery is a CI-validated Web release reverting the effect.
+
 ## Unreleased: preserve app-owned product items during iOS review updates
 
 The iOS release script accepts an app version alongside subscription, group and
