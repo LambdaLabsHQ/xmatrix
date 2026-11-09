@@ -330,17 +330,25 @@ test("binding failures retain their source and field once, without compared valu
           return binding;
         };
       }]),
+    ["refresh_principal", "ownerUserId", f => { f.principal.ownerUserId = "PRIVATE_SENTINEL"; }, true],
   ];
   let count = 0;
-  for (const [source, field, corrupt] of cases) {
-    const f = fixture(); corrupt(f);
+  for (const [source, field, corrupt, refresh = false] of cases) {
+    const f = fixture();
+    if (!refresh) corrupt(f);
     const transport = new AgentInstanceRuntimeTransport(f.port);
     const socket = new Socket(); transport.accept(socket);
     await transport.handleFrame(socket, JSON.stringify(f.message));
-    assert.equal(socket.readyState, 3);
-    assert.equal(transport.session(socket), undefined);
-    assert.equal(socket.sent.length, 1);
-    const response = socket.sent[0];
+    if (refresh) {
+      corrupt(f);
+      await transport.handleFrame(socket, JSON.stringify({ type: "refresh_auth", token: "test-token" }));
+      assert.equal(transport.session(socket).principal.ownerUserId, "owner", "refused refresh cannot replace the principal");
+    } else {
+      assert.equal(socket.readyState, 3);
+      assert.equal(transport.session(socket), undefined);
+    }
+    assert.equal(socket.sent.length, refresh ? 2 : 1);
+    const response = socket.sent.at(-1);
     assert.equal(response.failure.code, "agent_run_binding_mismatch");
     assert.equal(response.failure.retryable, false);
     assert.equal(response.message, "Agent credential does not match the live Authority run");
@@ -355,18 +363,6 @@ test("binding failures retain their source and field once, without compared valu
     assert.ok(metadata.includes(`Agent binding failure: ${source} · ${field}`));
     assert.doesNotMatch(JSON.stringify(event), /PRIVATE_SENTINEL|test-token|owner@example/u);
   }
-  const f = fixture();
-  const transport = new AgentInstanceRuntimeTransport(f.port);
-  const socket = new Socket(); transport.accept(socket);
-  await transport.handleFrame(socket, JSON.stringify(f.message));
-  f.principal.ownerUserId = "PRIVATE_SENTINEL";
-  await transport.handleFrame(socket, JSON.stringify({ type: "refresh_auth", token: "test-token" }));
-  assert.equal(socket.sent.at(-1).failure.code, "agent_run_binding_mismatch");
-  await sendErrorReports();
-  const events = exceptionEvents(envelopes);
-  assert.equal(events.length, ++count);
-  assert.deepEqual(events.at(-1).fingerprint, ["agent-run-binding", "refresh_principal", "ownerUserId"]);
-  assert.doesNotMatch(JSON.stringify(events), /PRIVATE_SENTINEL|test-token|owner@example/u);
   for (const extra of [{ agent_binding_source: "PRIVATE_SENTINEL", agent_binding_field: "agentId" },
     { agent_binding_source: "connect_message", agent_binding_field: "PRIVATE_SENTINEL" }]) {
     assert.deepEqual(sentryEventMetadata({ context: extra }), []);
