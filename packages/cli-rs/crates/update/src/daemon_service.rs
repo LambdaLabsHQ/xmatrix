@@ -433,8 +433,48 @@ fn run_windows_setup_script(body: &str) -> error::Result<Result<(), String>> {
         .to_string()))
 }
 
+/// Windows' own switch for Win32 paths past MAX_PATH (260). Without it no
+/// process can open them, whatever its manifest says; Git, Node and every
+/// harness an Agent runs read it when they start.
+pub const WINDOWS_LONG_PATHS_KEY: &str = r"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem";
+
+/// The administrator command that turns Windows long paths on.
+pub fn windows_long_paths_enable_command() -> String {
+    format!(
+        "New-ItemProperty -Path '{WINDOWS_LONG_PATHS_KEY}' -Name LongPathsEnabled -Value 1 -PropertyType DWord -Force"
+    )
+}
+
+/// Turns Windows long paths on when they are off. Setting a machine-wide
+/// value needs an administrator, so a standard user approves one UAC prompt;
+/// an already-enabled machine is left alone without one.
+pub fn windows_long_paths_script() -> String {
+    let key = powershell_single_quoted(WINDOWS_LONG_PATHS_KEY);
+    let enable = powershell_single_quoted(&windows_long_paths_enable_command());
+    format!(
+        r#"$key = {key}
+function Test-LongPaths {{
+  (Get-ItemProperty -Path $key -Name LongPathsEnabled -ErrorAction SilentlyContinue).LongPathsEnabled -eq 1
+}}
+if (-not (Test-LongPaths)) {{
+  Start-Process -FilePath powershell -Verb RunAs -Wait -WindowStyle Hidden `
+    -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', {enable})
+  if (-not (Test-LongPaths)) {{
+    throw 'LongPathsEnabled is still 0 after the administrator command ran'
+  }}
+}}"#
+    )
+}
+
 #[cfg(windows)]
 fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonServiceInstall> {
+    // Before the daemon starts: a process reads the switch once, at start.
+    if let Err(detail) = run_windows_setup_script(&windows_long_paths_script())? {
+        eprintln!(
+            "Windows long paths are off ({WINDOWS_LONG_PATHS_KEY}\\LongPathsEnabled is not 1), so Agents cannot use paths longer than 260 characters. Turning them on needs an administrator: {detail}\nRun this in an administrator PowerShell, then restart the xMatrix daemon:\n  {}",
+            windows_long_paths_enable_command()
+        );
+    }
     let script = windows_daemon_scheduled_task_script(binary, std::process::id());
     if let Err(detail) = run_windows_setup_script(&script)? {
         return Err(CliError::Launch(format!(
@@ -462,6 +502,18 @@ mod tests {
 
     fn home() -> PathBuf {
         PathBuf::from("/Users/tester")
+    }
+
+    #[test]
+    fn windows_setup_turns_long_paths_on_through_one_elevated_command() {
+        let script = windows_long_paths_script();
+        assert!(script.starts_with(r"$key = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'"));
+        assert!(script.contains("-Verb RunAs"));
+        // The elevated child receives the exact command, single-quoted once.
+        assert!(script.contains(
+            r"'New-ItemProperty -Path ''HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'' -Name LongPathsEnabled -Value 1 -PropertyType DWord -Force'"
+        ));
+        assert!(script.contains("throw 'LongPathsEnabled is still 0"));
     }
 
     #[test]
