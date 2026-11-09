@@ -2908,30 +2908,34 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .message-reply-citation .message-citation-source { display: block; margin-top: 2px; }
 .xmatrix-app .message-citation-composer .message-citation-source + .message-citation-source { margin-top: 0; }
-/* Every slip opens with a large quotation mark in the slip's own wood, deepened, so a quote reads as one at a
-   glance before its words do (Daniel 2026-11-09: 引用前面加个比较大的引用号). The words keep their column. */
+/* Every slip opens with a large curly quotation mark in the slip's own wood, so a quote reads as one at a glance
+   before its words do (Daniel 2026-11-09: 引用前面加个比较大的引用号). It is drawn, not a font's glyph, so it is
+   the same light mark on every system; a bold fallback glyph read as a dark blot (有点丑). The words keep their
+   column to its right. */
 .xmatrix-app .rich-message .message-citation,
 .xmatrix-app .message-reply-citation,
 .xmatrix-app .message-citation-composer {
+  --app-quote-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 14'%3E%3Cpath d='M0.5 9.5C0.5 4.8 3.8 1.2 9 0.5L9.5 2.3C7 3 5.4 4 5 5A4.5 4.5 0 1 1 0.5 9.5Z'/%3E%3Cpath transform='translate(12 0)' d='M0.5 9.5C0.5 4.8 3.8 1.2 9 0.5L9.5 2.3C7 3 5.4 4 5 5A4.5 4.5 0 1 1 0.5 9.5Z'/%3E%3C/svg%3E");
   position: relative;
-  padding-left: 46px;
+  padding-left: 50px;
 }
 .xmatrix-app .rich-message .message-citation::before,
 .xmatrix-app .message-reply-citation::before,
 .xmatrix-app .message-citation-composer::before {
-  content: "\201C";
+  content: "";
   position: absolute;
-  left: 11px;
-  top: 5px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 48px;
-  font-weight: 700;
-  line-height: 1;
-  color: color-mix(in oklch, var(--app-quote-wood) 55%, var(--foreground));
+  left: 14px;
+  top: 11px;
+  width: 26px;
+  height: 16.5px;
+  background: color-mix(in oklch, var(--app-quote-wood) 75%, var(--foreground));
+  opacity: 0.6;
+  -webkit-mask: var(--app-quote-mark) no-repeat center / contain;
+  mask: var(--app-quote-mark) no-repeat center / contain;
   pointer-events: none;
 }
-.xmatrix-app .message-citation-composer { padding-left: 40px; }
-.xmatrix-app .message-citation-composer::before { left: 9px; top: 3px; font-size: 38px; }
+.xmatrix-app .message-citation-composer { padding-left: 44px; }
+.xmatrix-app .message-citation-composer::before { left: 12px; top: 10px; width: 22px; height: 14px; }
 ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
 }
