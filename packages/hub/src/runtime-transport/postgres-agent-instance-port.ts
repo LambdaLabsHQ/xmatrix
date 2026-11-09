@@ -60,7 +60,7 @@ import {
 } from "./runtime-messages";
 import { agentInstanceUnregisterIsTerminal } from "./agent-instance-unregister";
 import { productAgentSystemNoticeSenderSnapshot } from "../product-agent-mention-authority-adapter";
-import { LIVE_RUN_ROUTED_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "../live-run-admission";
+import { LIVE_RUN_ROUTED_FIELDS, liveRunAdmissionMismatches, snapshotLiveRunFromProductGateway } from "../live-run-admission";
 import {
   agentMessagePresentation,
   agentSummaryPresentation,
@@ -557,8 +557,12 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const value = recordValue(response.run, "run");
     const metadata = recordValue(value.metadata, "run.metadata");
     liveRunStatus(value.status);
-    if (!liveRunIsAdmitted(snapshotLiveRunFromProductGateway(value), principal, LIVE_RUN_ROUTED_FIELDS)) {
-      throw new RuntimeClientOperationError("agent_run_binding_mismatch");
+    const snapshotMismatch = liveRunAdmissionMismatches(snapshotLiveRunFromProductGateway(value), principal,
+      LIVE_RUN_ROUTED_FIELDS)[0];
+    if (snapshotMismatch) {
+      // liveRunStatus already rejected status; all remaining labels are fixed fields.
+      throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+        source: "authority_snapshot", field: snapshotMismatch as typeof LIVE_RUN_ROUTED_FIELDS[number] });
     }
     // Every PostgreSQL handshake claims its own version before becoming live,
     // including a reconnect that races the predecessor's offline write.
@@ -655,9 +659,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       ...(typeof metadata.remoteRepo === "string" && repoSummonReference(metadata.remoteRepo)
         ? { repository: repoSummonReference(metadata.remoteRepo) } : {}),
     };
-    if (run.runId !== principal.runId ||
-        !liveRunIsAdmitted(run, principal, LIVE_RUN_ROUTED_FIELDS)) {
-      throw new RuntimeClientOperationError("agent_run_binding_mismatch");
+    const bindingMismatch = run.runId !== principal.runId ? "runId"
+      : liveRunAdmissionMismatches(run, principal, LIVE_RUN_ROUTED_FIELDS)[0];
+    if (bindingMismatch) {
+      throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+        source: "authority_binding", field: bindingMismatch as "runId" | typeof LIVE_RUN_ROUTED_FIELDS[number] });
     }
     const presentation = connectMessage
       ? initialAgentInstancePresentation({

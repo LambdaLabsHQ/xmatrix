@@ -205,3 +205,16 @@ claim waits out that same second before taking the row: the 10 second admission
 lease otherwise loses to one read round trip while the generation fence still
 shows the original holder. Quota probes do not get that slack. A longer gap
 stays refused. Command replay and completion fencing are unchanged.
+
+HUB-C1/C2 were two reports of the same Agent handshake binding refusal. The
+original event did not identify the failed comparison. Binding failures now
+retain a fixed source (`connect_message`, `authority_snapshot`,
+`authority_binding`, or `refresh_principal`) and field name in one Sentry event,
+grouped by that pair. The issue reader exposes this projection and the same
+opaque diagnostic reference returned to the socket. Compared values, credentials,
+identity labels and routing ids are never recorded. On recurrence, read the
+source and field before attributing the refusal to stale context, changed
+presentation or authority state. This adds diagnostic coverage; it does not
+establish the underlying cause. Strict comparison, non-retryable refusal,
+failed-handshake close and connection fencing remain unchanged. The stage log
+warns when a typed client rejection already owns its report.
