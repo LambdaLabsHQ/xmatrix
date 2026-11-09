@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: ACP Agents without image support still read a message with a picture
+
+A message with an image sent every ACP Agent an inline image block, and an
+Agent whose initialize result did not advertise `promptCapabilities.image`
+(DeepSeek Harness among them) rejected the whole turn with -32602. Such an
+Agent now gets the message text alone, which already names each image's local
+copy for its own tools to open. CLI only; no Hub, schema or protocol change.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Apple commerce watch failures keep their phase
 
 HUB-C0 reported only that a commerce watch would retry. The pass still retries
