@@ -475,8 +475,9 @@ final class WebContainerTests: XCTestCase {
 
     /// A web view without these panels answers window.confirm with false and shows nothing.
     func testThePageCanAlertConfirmAndPrompt() {
-        let (coordinator, _) = makeCoordinator()
+        let (coordinator, container) = makeCoordinator()
         coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertEqual(container.subviews.count, 1)
         let delegate = page(coordinator).uiDelegate as! NSObject
         for selector in [
             "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:",
