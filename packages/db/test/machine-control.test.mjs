@@ -312,44 +312,39 @@ test("Machine renew preserves exact lease entity version across repeated heartbe
   ]);
 });
 
-test("HUB-7F: a same-generation harness renew one read trip late still extends", async () => {
+function harnessRenewFixture(lateMs, renewLeaseUntil) {
   const leaseOwner = "machine-daemon:user-1:machine-1:host-1:epoch:1";
   const observed = new Date("2026-11-08T13:29:35.686Z");
-  const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
-    ? [daemon]
-    : query.name === "machine_control_lease_lock_v3"
-      ? [leasedSpawnRow(leaseOwner, {
-        command_id: "harness-1", command_type: "harness_action", lease_live: false,
-        lease_until: new Date(observed.getTime() - 317), lease_observed_at: observed,
-        updated_at: new Date(observed.getTime() - 10_317), created_at: new Date(observed.getTime() - 10_570),
-      })]
-      : query.name === "machine_control_renew_v2"
-        ? [{ version: 2, lease_until: new Date("2026-11-08T13:30:35.686Z") }]
-        : []);
-  const renewed = await new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, {
-    commandId: "renew-harness-skew", action: "renew", controlId: "harness-1",
+  const db = database((query) => {
+    if (query.name.startsWith("machine_control_daemon_lock_")) return [daemon];
+    if (query.name === "machine_control_lease_lock_v3") return [leasedSpawnRow(leaseOwner, {
+      command_id: "harness-1", command_type: "harness_action", lease_live: false,
+      lease_until: new Date(observed.getTime() - lateMs), lease_observed_at: observed,
+      updated_at: new Date(observed.getTime() - lateMs - 10_000),
+      created_at: new Date(observed.getTime() - lateMs - 10_253),
+    })];
+    if (query.name === "machine_control_renew_v2" && renewLeaseUntil) {
+      return [{ version: 2, lease_until: new Date(renewLeaseUntil) }];
+    }
+    return [];
+  });
+  const renew = (commandId) => new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, {
+    commandId, action: "renew", controlId: "harness-1",
   }));
-  assert.equal(renewed.leaseUntil, "2026-11-08T13:30:35.686Z");
+  return { db, renew };
+}
+
+test("HUB-7F: a same-generation harness renew one read trip late still extends", async () => {
+  const { db, renew } = harnessRenewFixture(317, "2026-11-08T13:30:35.686Z");
+  assert.equal((await renew("renew-harness-skew")).leaseUntil, "2026-11-08T13:30:35.686Z");
   assert.equal(db.calls.filter((call) => call.name === "machine_control_renew_v2").length, 1);
 });
 
 test("HUB-7F: a harness renew two seconds late stays refused", async () => {
-  const leaseOwner = "machine-daemon:user-1:machine-1:host-1:epoch:1";
-  const observed = new Date("2026-11-08T13:29:35.686Z");
-  const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
-    ? [daemon]
-    : query.name === "machine_control_lease_lock_v3"
-      ? [leasedSpawnRow(leaseOwner, {
-        command_id: "harness-1", command_type: "harness_action", lease_live: false,
-        lease_until: new Date(observed.getTime() - 2_000), lease_observed_at: observed,
-        updated_at: new Date(observed.getTime() - 12_000), created_at: new Date(observed.getTime() - 120_000),
-      })]
-      : []);
-  await assert.rejects(new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, {
-    commandId: "renew-harness-gap", action: "renew", controlId: "harness-1",
-  })), (error) => error instanceof MachineControlError && error.code === "machine_command_stale_lease" &&
-    error.reason === "renew.expired" && error.commandType === "harness_action" &&
-    error.leaseTiming?.leaseExpiredForMs === 2_000);
+  const { db, renew } = harnessRenewFixture(2_000);
+  await assert.rejects(renew("renew-harness-gap"), (error) => error instanceof MachineControlError &&
+    error.code === "machine_command_stale_lease" && error.reason === "renew.expired" &&
+    error.commandType === "harness_action" && error.leaseTiming?.leaseExpiredForMs === 2_000);
   assert.equal(db.calls.some((call) => call.name === "machine_control_renew_v2"), false);
 });
 
