@@ -99,6 +99,8 @@ test("any page markdown converts once to canonical form and then stays put", () 
 });
 
 test("canonical form keeps readable markdown", () => {
+  assert.equal(canonicalPageMarkdown("See `C:\\\\Users\\\\<user>\\\\.local\\\\bin\\\\xmatrix.exe` and a note \\(about\\) ~1.\n"),
+    "See `C:\\\\Users\\\\<user>\\\\.local\\\\bin\\\\xmatrix.exe` and a note (about) ~1.\n");
   assert.equal(canonicalPageMarkdown("RELAY_POSTGRES_CACHED and RelayPostgres*Coordinator ~1,100\n"),
     "RELAY_POSTGRES_CACHED and RelayPostgres*Coordinator ~1,100\n");
   assert.equal(canonicalPageMarkdown("#2737 split the suite\n"), "#2737 split the suite\n");
