@@ -5,8 +5,8 @@
 A repo pool created before the compact layout (`<64hex>/slots/<32hex>`) kept
 taking every new session on that machine, so each checkout was 88 characters
 longer than the compact `<8hex>/<6hex>` path. On Windows that put deep
-dependency trees past MAX_PATH (260), where a nested executable such as
-agent-router's `workerd.exe` could not start. A legacy pool now keeps only the
+dependency trees past MAX_PATH (260), where a nested executable, such as a
+test runtime installed under `node_modules`, could not start. A legacy pool now keeps only the
 sessions, handoff predecessors and slots it already holds; new sessions start
 in the compact pool, and the sweep keeps no warm spares in a legacy pool, so it
 drains as its sessions end. Nothing is moved or deleted. The desktop App's git
