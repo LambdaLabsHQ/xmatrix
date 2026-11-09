@@ -175,6 +175,15 @@ test("the work dock stays clear of the last message when its Instances arrive as
   await expect.poll(() => dockMargin(page)).toBeGreaterThan(0);
 });
 
+/* The details rail read its Agents from the same Channel list, so since
+   Instances became records it listed none and its Agents block vanished. */
+test("the details rail lists the Agents whose Instances arrive as records", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await openChannelWithAgents(page, 2, [], { asRecords: true });
+  await expect(page.getByRole("button", { name: "Open @codex:1 instance details" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open @codex:2 instance details" })).toBeVisible();
+});
+
 test("a composer that grows pushes the dock up and the timeline tail with it", async ({ page }) => {
   await openChannelWithAgents(page, 3);
 

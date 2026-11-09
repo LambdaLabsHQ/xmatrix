@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: the details rail lists a conversation's Agents again
+
+Since Instances became records of their own, the right-hand details rail read
+its Agents from a Channel list that no longer holds them, listed none and hid
+its Agents block: only the Summary was left. The rail now reads the same live
+Instance store as the Agents-at-work dock. Beta Web only, no migration.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Launch candidate reads recover a lost response
 
 HUB-BZ lost the model catalog's PostgreSQL response before an Agent could be
