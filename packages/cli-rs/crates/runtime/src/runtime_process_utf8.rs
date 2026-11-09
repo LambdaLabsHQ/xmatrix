@@ -127,8 +127,48 @@ fn apply_windows_utf8_env(command: &mut std::process::Command) -> error::Result<
             .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
             .and_then(|(_, value)| value.map(std::ffi::OsStr::to_os_string));
         command.envs(runtime_utf8_shell::child_env(path.as_deref()).map_err(CliError::Launch)?);
+        let explicit = |key: &str| {
+            command
+                .get_envs()
+                .find(|(name, _)| name.to_string_lossy().eq_ignore_ascii_case(key))
+                .map(|(_, value)| value.map(|value| value.to_string_lossy().into_owned()))
+        };
+        let env = windows_git_long_paths_env(|key| {
+            explicit(key).unwrap_or_else(|| std::env::var(key).ok())
+        });
+        command.envs(env);
     }
     Ok(())
+}
+
+/// Git run by an Agent, or by any tool under it, reads and writes paths past
+/// MAX_PATH (260): Git for Windows refuses them unless `core.longpaths` is on,
+/// and a deep dependency tree in a checkout crosses that limit. Added as one
+/// more `GIT_CONFIG_COUNT` entry, so configuration the environment already
+/// carries keeps its entries; one that already sets `core.longpaths` is left
+/// as it is.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn windows_git_long_paths_env(read: impl Fn(&str) -> Option<String>) -> Vec<(String, String)> {
+    let count = match read("GIT_CONFIG_COUNT") {
+        None => 0,
+        Some(raw) => match raw.trim().parse::<usize>() {
+            Ok(count) => count,
+            // Git itself rejects a malformed count; adding to it would not help.
+            Err(_) => return Vec::new(),
+        },
+    };
+    let already = (0..count).any(|index| {
+        read(&format!("GIT_CONFIG_KEY_{index}"))
+            .is_some_and(|key| key.trim().eq_ignore_ascii_case("core.longpaths"))
+    });
+    if already {
+        return Vec::new();
+    }
+    vec![
+        (format!("GIT_CONFIG_KEY_{count}"), "core.longpaths".to_string()),
+        (format!("GIT_CONFIG_VALUE_{count}"), "true".to_string()),
+        ("GIT_CONFIG_COUNT".to_string(), (count + 1).to_string()),
+    ]
 }
 
 fn apply_windows_utf8_env_tokio(command: &mut tokio::process::Command) -> error::Result<()> {
@@ -1852,4 +1892,46 @@ async fn ensure_setup_machine_name(hub_url: &str, name: Option<&str>) -> error::
         xmatrix_cli_core::machine_naming::ensure_machine_name(&session, name, Some(&hostname)).await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod windows_git_long_paths_tests {
+    use super::windows_git_long_paths_env;
+    use std::collections::BTreeMap;
+
+    fn env_for(existing: &[(&str, &str)]) -> BTreeMap<String, String> {
+        let existing: BTreeMap<String, String> = existing
+            .iter()
+            .map(|(key, value)| (key.to_string(), value.to_string()))
+            .collect();
+        windows_git_long_paths_env(|key| existing.get(key).cloned())
+            .into_iter()
+            .collect()
+    }
+
+    #[test]
+    fn git_under_an_agent_takes_long_paths_as_its_first_entry() {
+        let env = env_for(&[]);
+        assert_eq!(env["GIT_CONFIG_COUNT"], "1");
+        assert_eq!(env["GIT_CONFIG_KEY_0"], "core.longpaths");
+        assert_eq!(env["GIT_CONFIG_VALUE_0"], "true");
+    }
+
+    #[test]
+    fn inherited_git_config_entries_are_kept() {
+        let env = env_for(&[
+            ("GIT_CONFIG_COUNT", "2"),
+            ("GIT_CONFIG_KEY_0", "credential.helper"),
+            ("GIT_CONFIG_KEY_1", "safe.directory"),
+        ]);
+        assert_eq!(env["GIT_CONFIG_COUNT"], "3");
+        assert_eq!(env["GIT_CONFIG_KEY_2"], "core.longpaths");
+        assert!(!env.contains_key("GIT_CONFIG_KEY_0"));
+    }
+
+    #[test]
+    fn an_explicit_long_paths_setting_or_a_malformed_count_is_left_alone() {
+        assert!(env_for(&[("GIT_CONFIG_COUNT", "1"), ("GIT_CONFIG_KEY_0", "Core.LongPaths")]).is_empty());
+        assert!(env_for(&[("GIT_CONFIG_COUNT", "x")]).is_empty());
+    }
 }
