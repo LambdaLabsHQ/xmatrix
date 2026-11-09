@@ -53,7 +53,8 @@ and read their Space's secrets when they need them with `xmatrix secret exec`
 New local repo pools use 8-hex repo directories and 6-hex slot directories,
 with an exclusive full-key claim, bounded slot collision retries, and manifest
 version 2. Existing 64-hex pool directories and version 1 manifests stay in place
-for live/retained worktree compatibility. Authority fields remain unchanged. See
+for the live/retained/resting sessions they hold; new sessions always start in
+the compact pool, and a legacy pool keeps no warm spares. Authority fields remain unchanged. See
 `docs/worktree-v2-design.md` for layout, collision handling, and downgrade limits.
 
 Discord's company installation also exposes a dedicated Ed25519-authenticated

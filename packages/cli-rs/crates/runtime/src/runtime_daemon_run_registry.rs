@@ -1796,7 +1796,8 @@ async fn return_repo_pool_without_live_registry(
     }
     let pools_root = repo_pool::default_repo_pools_root()
         .map_err(|error| CliError::Launch(format!("repo pool root unavailable ({error})")))?;
-    let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, key_raw)
+    let layout =
+        repo_pool::RepoPoolLayout::from_persisted_lease(&pools_root, key_raw, Some(session_key), slot_raw)
         .map_err(|error| CliError::Launch(format!("invalid abandon repo pool layout ({error})")))?;
     let authority = repo_pool::BindingAuthority {
         session_key: session_key.to_string(),
@@ -2233,7 +2234,12 @@ async fn retained_handoff_export_source_at(
         execution_key: exact_stop_value("executionKey", authority.execution_key)?.to_string(),
         slot_id: exact_stop_value("slotId", authority.slot_id)?.to_string(),
     };
-    let layout = repo_pool::RepoPoolLayout::from_persisted(pools_root, key)
+    let layout = repo_pool::RepoPoolLayout::from_persisted_lease(
+        pools_root,
+        key,
+        Some(&exact.session_key),
+        &exact.slot_id,
+    )
         .map_err(|error| CliError::Launch(format!("invalid handoff pool layout ({error})")))?;
     let retained = repo_pool::retained_handoff_source_at(&layout, &exact)
         .await

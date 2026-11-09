@@ -349,7 +349,12 @@ async fn handle_daemon_spawn_request(
         if reclaim_first {
             reclaim_worktree_storage_for_registry(run_registry).await;
         }
-        let layout = repo_pool::RepoPoolLayout::create(&pools_root, repo_key.clone())
+        // A session (and a handoff's predecessor) stays in the pool that holds
+        // it; a new one starts in the compact pool, never in a legacy one.
+        let pool_sessions: Vec<&str> = std::iter::once(session_key)
+            .chain(intent.handoff_source_resume_session_key.as_deref())
+            .collect();
+        let layout = repo_pool::RepoPoolLayout::for_session(&pools_root, repo_key.clone(), &pool_sessions)
             .map_err(|error| CliError::Launch(format!("repo pool layout unavailable ({error})")))?;
         // The child later receives a Space-scoped GitHub token. Issue that
         // grant now so the required origin fetch can use it; otherwise the
@@ -995,7 +1000,7 @@ async fn record_daemon_spawn_result(
             let metadata = (!metadata.is_empty()).then_some(Value::Object(metadata));
             let warning_receipt = child.repo_pool_binding.as_ref()
                 .filter(|binding| binding.baseline.as_ref().is_some_and(|baseline| baseline.warn_agent))
-                .and_then(|binding| Some((binding.repo_key_id.clone(), repo_pool::LeaseRequest {
+                .and_then(|binding| Some((binding.repo_key_id.clone(), binding.slot_id.clone(), repo_pool::LeaseRequest {
                     session_key: child.resume_session_key.clone()?,
                     instance_id: child.instance_id.clone()?,
                     run_id: child.run_id.clone()?,
@@ -1017,10 +1022,15 @@ async fn record_daemon_spawn_result(
                     metadata,
                 };
             }
-            if let Some((repo_key, request)) = warning_receipt {
+            if let Some((repo_key, slot_id, request)) = warning_receipt {
                 let receipt = async {
                     let pools_root = repo_pool::default_repo_pools_root()?;
-                    let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, &repo_key)?;
+                    let layout = repo_pool::RepoPoolLayout::from_persisted_lease(
+                        &pools_root,
+                        &repo_key,
+                        Some(&request.session_key),
+                        &slot_id,
+                    )?;
                     repo_pool::acknowledge_baseline_warning_at(&layout, &request).await
                 }.await;
                 if let Err(error) = receipt {
