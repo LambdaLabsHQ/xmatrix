@@ -2541,6 +2541,10 @@ async fn spawn_headless_agent(
             if let Some(sidecar) = provisional_sidecar.as_ref() {
                 let _ = remove_daemon_run_sidecar(sidecar);
             }
+            if let Some(reason) = windows_working_directory_too_long(&err, &workspace.canonical_cwd)
+            {
+                return Err(CliError::Launch(reason));
+            }
             return Err(CliError::Launch(format!(
                 "Failed to spawn headless agent: {err}"
             )));
@@ -2657,4 +2661,46 @@ async fn reclaim_worktree_storage_for_registry(run_registry: &DaemonRunRegistry)
     run_worktree::log_gc_outcome(
         &run_worktree::reclaim_worktree_storage_if_needed(&live_cwds, &pool_liveness).await,
     );
+}
+
+/// Windows starts no program in a working directory past MAX_PATH (260),
+/// whatever LongPathsEnabled, the program's manifest or `core.longpaths` say;
+/// CreateProcess then answers only "The directory name is invalid" (267).
+/// Name the directory and its length instead.
+fn windows_working_directory_too_long(error: &std::io::Error, cwd: &str) -> Option<String> {
+    const ERROR_DIRECTORY: i32 = 267;
+    // CreateProcess needs room for a trailing separator and the terminator.
+    const MAX_WORKING_DIRECTORY_CHARS: usize = 258;
+    let chars = cwd.encode_utf16().count();
+    (cfg!(windows)
+        && error.raw_os_error() == Some(ERROR_DIRECTORY)
+        && chars > MAX_WORKING_DIRECTORY_CHARS)
+        .then(|| {
+            format!(
+                "Windows cannot start the Agent in {cwd}: the folder path is {chars} characters, and Windows starts no program in a folder longer than {MAX_WORKING_DIRECTORY_CHARS} (MAX_PATH). Register a Workspace at a shorter path."
+            )
+        })
+}
+
+#[cfg(test)]
+mod windows_working_directory_tests {
+    use super::windows_working_directory_too_long;
+
+    #[test]
+    fn a_too_long_folder_is_named_with_its_length_on_windows_only() {
+        let cwd = format!(r"C:\{}", "a".repeat(300));
+        let invalid = std::io::Error::from_raw_os_error(267);
+        let named = windows_working_directory_too_long(&invalid, &cwd);
+        if cfg!(windows) {
+            let reason = named.expect("named");
+            assert!(reason.contains("303 characters"), "{reason}");
+            assert!(reason.contains("longer than 258"), "{reason}");
+        } else {
+            assert!(named.is_none());
+        }
+        // A short folder or another error keeps the original cause.
+        assert!(windows_working_directory_too_long(&invalid, r"C:\repo").is_none());
+        let missing = std::io::Error::from_raw_os_error(2);
+        assert!(windows_working_directory_too_long(&missing, &cwd).is_none());
+    }
 }

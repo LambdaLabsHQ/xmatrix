@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Windows Agents work with files past 260 characters
+
+`xmatrix setup daemon` now turns on Windows' LongPathsEnabled switch before it
+starts the daemon (one administrator prompt; without one it prints the exact
+administrator command), Git run by an Agent or any tool under it has
+`core.longpaths` on, and xmatrix.exe declares itself long-path aware. Together
+they let a checkout hold files deeper than 260 characters. Windows still starts
+no program from a folder or an executable path past 260, whatever these
+settings say: the short pool path keeps checkouts within it, and an Agent whose
+Workspace folder is too long now fails naming the folder and its length
+instead of "The directory name is invalid". CLI only; no Hub, schema or
+protocol change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: New sessions get the short pool path on Windows
 
 A repo pool created before the compact layout (`<64hex>/slots/<32hex>`) kept
