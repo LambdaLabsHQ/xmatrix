@@ -37,6 +37,10 @@ Read its returned ID and digest before choosing to send it. To edit or discard
 it, use `operation: "update"` with `message`, or `operation: "delete"` without a
 message; both require `id` and `digest`. The digest covers the current body and
 attached file metadata. Changes made in Apple's website invalidate it.
+The attachment relationship must be complete before a digest is issued or
+accepted. A next-page link, inconsistent paging total or ambiguous linkage
+stops draft edits, deletion and sending before mutation. Inspect the complete
+draft in Apple's website when its bounded attachment response is incomplete.
 
 Sending checks the exact draft and processed attachments, sends once, and
 verifies Apple's new message in the named thread. It does not resolve rejection

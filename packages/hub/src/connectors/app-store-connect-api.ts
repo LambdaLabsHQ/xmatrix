@@ -74,6 +74,32 @@ export function relatedIds(row: AppleResource, name: string): string[] {
 
 export const relation = (type: string, id: string) => ({ data: { type, id } });
 
+/** A digest may authorize a write only from complete, unambiguous JSON:API linkage.
+ * Both public API relationship documents and embedded web relationships use this boundary.
+ * A next page or a larger provider total is evidence of a partial snapshot, never an empty remainder.
+ */
+export function appleRelationshipSnapshot(value: unknown): unknown {
+  const relationship = record(value), data = relationship.data;
+  const incomplete = () => new ProviderRequestError(502,
+    "Apple did not return a complete, unambiguous relationship snapshot; inspect the full relationship before planning a write");
+  const object = (value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if ([relationship.links, relationship.meta, record(relationship.meta).paging].some(value => value !== undefined && !object(value))) throw incomplete();
+  if (!Object.hasOwn(relationship, "data") || record(relationship.links).next != null) throw incomplete();
+  const rows = data === null ? [] : Array.isArray(data) ? data : [data];
+  const total = record(record(relationship.meta).paging).total;
+  if (total !== undefined && (typeof total !== "number" || !Number.isSafeInteger(total) || total !== rows.length)) throw incomplete();
+  const seen = new Set<string>();
+  for (const item of rows) {
+    const row = record(item);
+    if (typeof row.type !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,99}$/u.test(row.type) ||
+        typeof row.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$/u.test(row.id)) throw incomplete();
+    const key = `${row.type}:${row.id}`;
+    if (seen.has(key)) throw incomplete();
+    seen.add(key);
+  }
+  return data;
+}
+
 /** PKCS#8 bytes from the `.p8` file as pasted: with or without line breaks, or the whole file in base64. */
 function privateKeyBytes(value: string): ArrayBuffer {
   let bytes = pemPrivateKeyBytes(value);

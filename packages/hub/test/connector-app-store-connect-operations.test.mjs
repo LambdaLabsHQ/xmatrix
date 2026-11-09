@@ -140,3 +140,66 @@ test("the official subscription create contract preserves nullable attributes an
     headers: { "content-type": "text/csv" } }) }, command("api_read", "subscriptionOfferCodeOneTimeUseCodes_values_getToOneRelated", { path: { id: "codes-1" } }));
   assert.match(csv.value.summary, /CODE-1/u);
 });
+
+test("relationship POSTs bind current membership just like replacements and refuse a stale plan", async () => {
+  const operation = "betaGroups_betaTesters_createToManyRelationship";
+  const path = "/v1/betaGroups/group-1/relationships/betaTesters";
+  const request = { path: { id: "group-1" }, body: { data: [{ type: "betaTesters", id: "tester-new" }] } };
+  let data = [{ type: "betaTesters", id: "tester-old" }];
+  const routes = { [`GET ${path}`]: () => ({ data }), [`POST ${path}`]: null };
+  const preview = await run(routes, command("api_plan", operation, request));
+  assert.deepEqual(preview.calls.map(call => `${call.method} ${call.path}`), [`GET ${path}`]);
+  const input = statement(command("api_write", operation, { ...request, digest: digestOf(preview) }));
+  data = [{ type: "betaTesters", id: "someone-else" }];
+  const stale = await withApple(routes, () => assert.rejects(ACTIONS.api_write.execute({ credentials }, input), /resource changed/u));
+  assert.deepEqual(writes(stale.calls), []);
+  data = [{ type: "betaTesters", id: "tester-old" }];
+  const accepted = await execute("api_write", input, routes);
+  assert.deepEqual(writes(accepted.calls), [`POST ${path}`]);
+});
+
+test("a relationship plan requires complete, unambiguous linkage for direct and catalog snapshots", async () => {
+  const direct = { operation: "appScreenshotSets_appScreenshots_replaceToManyRelationship", path: "/v1/appScreenshotSets/set-1/relationships/appScreenshots",
+    request: { path: { id: "set-1" }, body: { data: [{ type: "appScreenshots", id: "shot-1" }] } } };
+  const indirect = { operation: "builds_betaGroups_deleteToManyRelationship", path: "/v1/builds/build-1/relationships/betaGroups",
+    request: { path: { id: "build-1" }, body: { data: [{ type: "betaGroups", id: "group-1" }] },
+      snapshot: { operation: "builds_getInstance", path: { id: "build-1" }, query: { include: ["betaGroups"] } } } };
+  for (const sample of [direct, indirect]) {
+    const rows = sample.request.body.data;
+    for (const relationship of [
+      { data: rows, links: { next: "https://api.appstoreconnect.apple.com/next" } },
+      { data: rows, meta: { paging: { total: 2 } } },
+      { data: rows, meta: { paging: { total: "unknown" } } },
+      { data: rows, links: "malformed" },
+      { data: rows, meta: { paging: null } },
+      { data: [...rows, ...rows] },
+      { data: [{}] },
+    ]) {
+      const routes = sample === direct ? { [`GET ${sample.path}`]: relationship }
+        : { "GET /v1/builds/build-1": { data: { type: "builds", id: "build-1", attributes: {}, relationships: { betaGroups: relationship } } } };
+      const input = statement(command("api_plan", sample.operation, sample.request));
+      assert.equal(typeof input, "object", "the provider schema admits the request");
+      const refused = await withApple(routes, async () => {
+        for (const action of ["api_plan", "api_write"]) {
+          await assert.rejects(ACTIONS[action].execute({ credentials }, input), /complete.*relationship/u);
+        }
+      });
+      assert.deepEqual(writes(refused.calls), []);
+    }
+  }
+});
+
+test("empty and null complete relationships remain usable snapshots", async () => {
+  for (const [operation, path, body, data] of [
+    ["appScreenshotSets_appScreenshots_replaceToManyRelationship", "/v1/appScreenshotSets/set-1/relationships/appScreenshots",
+      { data: [] }, []],
+    ["appStoreVersions_build_updateToOneRelationship", "/v1/appStoreVersions/set-1/relationships/build",
+      { data: { type: "builds", id: "build-new" } }, null],
+  ]) {
+    const request = { path: { id: "set-1" }, body };
+    const routes = { [`GET ${path}`]: { data, links: { next: null }, meta: { paging: { total: 0 } } }, [`PATCH ${path}`]: {} };
+    const preview = await run(routes, command("api_plan", operation, request));
+    const accepted = await run(routes, command("api_write", operation, { ...request, digest: digestOf(preview) }));
+    assert.deepEqual(writes(accepted.calls), [`PATCH ${path}`]);
+  }
+});

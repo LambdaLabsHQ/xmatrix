@@ -1,5 +1,5 @@
 import { sha256Hex } from "@xmatrix/protocol";
-import { appleResource, BUNDLE_ID, relatedId, relation, type AppleResource } from "./app-store-connect-api";
+import { appleResource, appleRelationshipSnapshot, BUNDLE_ID, relatedId, relation, type AppleResource } from "./app-store-connect-api";
 import { appWebAction, plainText, type WebSession } from "./app-store-connect-web";
 import { jsonFields } from "./actions/app-store-connect";
 import { quoteRetrievedText } from "./actions/common";
@@ -130,7 +130,7 @@ async function draft(session: WebSession, thread: AppleResource): Promise<Review
   if (relatedId(row, "resolutionCenterThread") && relatedId(row, "resolutionCenterThread") !== thread.id) {
     throw new ProviderRequestError(502, "App Store Connect returned a draft from another thread");
   }
-  const refs = record(row.relationships.resolutionCenterMessageAttachments).data;
+  const refs = appleRelationshipSnapshot(row.relationships.resolutionCenterMessageAttachments);
   if (!Array.isArray(refs)) throw new ProviderRequestError(502, "App Store Connect returned malformed draft attachments");
   const available = resources(payload.included), attachments: AppleResource[] = [];
   for (const ref of refs.map(record)) {
