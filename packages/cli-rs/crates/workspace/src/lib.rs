@@ -70,11 +70,21 @@ fn paths_overlap(left: &Path, right: &Path) -> bool {
     }
 }
 
+/// Directories xMatrix owns. A Workspace is a directory the owner works in, so
+/// none of these can be one: `~/.xmatrix` holds each Run's execution worktree
+/// and the managed repository mirrors, which come and go with Runs.
 fn app_owned_storage_roots() -> Vec<PathBuf> {
     let mut roots = vec![config::config_dir()];
     if let Some(home) = dirs::home_dir() {
+        roots.push(home.join(".xmatrix"));
         roots.push(home.join(".xmatrix-management"));
         roots.push(home.join(".xmatrix-management-quarantine"));
+    }
+    // The daemon's run-worktree root may be moved off `~/.xmatrix`.
+    if let Ok(dir) = std::env::var("XMATRIX_RUN_WORKTREES_DIR")
+        && !dir.trim().is_empty()
+    {
+        roots.push(PathBuf::from(dir.trim()));
     }
     roots
 }
@@ -93,7 +103,7 @@ pub fn workspace_path_overlaps_app_owned_storage(path: &Path) -> error::Result<b
 fn validate_workspace_path_isolated(path: &Path) -> error::Result<()> {
     if workspace_path_overlaps_app_owned_storage(path)? {
         return Err(CliError::Launch(format!(
-            "Workspace '{}' overlaps xMatrix-owned configuration or management storage; register a project directory instead of a home or xMatrix data directory",
+            "Workspace '{}' overlaps xMatrix-owned configuration or management storage; register a project directory instead of a home, xMatrix data or Run worktree directory",
             path.display()
         )));
     }
@@ -482,7 +492,7 @@ pub async fn cmd_workspace(
 mod tests {
     use super::{
         CliError, is_retryable_workspace_list_error, normalize_workspace_path_string_for_storage,
-        paths_overlap, workspace_list_retry_delay,
+        paths_overlap, workspace_list_retry_delay, workspace_path_overlaps_app_owned_storage,
     };
     use std::path::Path;
     use std::time::Duration;
@@ -512,6 +522,30 @@ mod tests {
             Path::new("/home/dev/Projects/xmatrix"),
             owned
         ));
+    }
+
+    #[test]
+    fn run_worktrees_and_repo_mirrors_are_not_workspaces() {
+        // A Run's worktree once registered itself and then appeared as a
+        // `pwd:` launch target long after the Run was gone.
+        let xmatrix = dirs::home_dir().expect("home").join(".xmatrix");
+        for path in [
+            xmatrix
+                .join("worktrees")
+                .join("0a477c3b-1319-44a8-bf25-9d28342e743c"),
+            xmatrix.join("repos").join("mirror"),
+        ] {
+            assert!(
+                workspace_path_overlaps_app_owned_storage(&path).unwrap(),
+                "{}",
+                path.display()
+            );
+        }
+        let project = dirs::home_dir()
+            .expect("home")
+            .join("Projects")
+            .join("xmatrix");
+        assert!(!workspace_path_overlaps_app_owned_storage(&project).unwrap());
     }
 
     #[test]
