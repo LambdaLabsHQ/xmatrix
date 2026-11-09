@@ -5,6 +5,13 @@ inputs:
     description: When true, run pnpm install --frozen-lockfile
     required: false
     default: "true"
+  electron-binary:
+    description: >-
+      When false, skip the Electron binary download in Electron's postinstall.
+      Only the desktop jobs run Electron; the others need its package, not the
+      GitHub release download it fetches, which can time out (504).
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -121,10 +128,35 @@ runs:
       shell: bash
       env:
         HOSTED: ${{ runner.environment == 'github-hosted' }}
+        ELECTRON_BINARY: ${{ inputs.electron-binary }}
       run: |
-        if [ "$HOSTED" = true ]; then
-          pnpm install --frozen-lockfile --prefer-offline
-        else
-          echo "Using persistent runner-local PNPM store: $(pnpm store path --silent)"
-          pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4
-        fi
+        if [ "$ELECTRON_BINARY" != true ]; then export ELECTRON_SKIP_BINARY_DOWNLOAD=1; fi
+        set -o pipefail
+        log=$(mktemp)
+        trap 'rm -f "$log"' EXIT
+        # Electron's downloader reports a GitHub gateway timeout as its own
+        # HTTPError, not an npm error code, so the bootstrap retry never sees
+        # it. A hosted job can fail that way while the same install passes
+        # beside it. Retry only that class; a lockfile or build failure still
+        # stops on the first attempt.
+        install_deps() {
+          if [ "$HOSTED" = true ]; then
+            pnpm install --frozen-lockfile --prefer-offline
+          else
+            echo "Using persistent runner-local PNPM store: $(pnpm store path --silent)"
+            pnpm install --frozen-lockfile --child-concurrency=1 --network-concurrency=4
+          fi
+        }
+        for attempt in 1 2 3; do
+          if install_deps 2>&1 | tee "$log"; then
+            break
+          else
+            status=$?
+          fi
+          if [ "$attempt" -eq 3 ] || ! grep -Eq \
+              'HTTPError: Response code (408|429|500|502|503|504)|ECONNRESET|ETIMEDOUT|ESOCKETTIMEDOUT|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH' "$log"; then
+            exit "$status"
+          fi
+          echo "Transient dependency install failure; retry $attempt/2 in $((attempt * 5)) seconds." >&2
+          sleep "$((attempt * 5))"
+        done

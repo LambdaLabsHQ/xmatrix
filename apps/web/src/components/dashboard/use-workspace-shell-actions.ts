@@ -115,6 +115,7 @@ import {
   clearBrowserHash,
   copyTextToClipboard,
   daemonStatusNeedsSessionSync,
+  desktopDaemonNeedsFirstSession,
   defaultAgentName,
   parseConfigList,
   deleteWorkspace,
@@ -961,11 +962,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   useEffect(() => {
     const desktopBridge = s.desktopBridge;
+    // An App that can install its own CLI but finds none has never handed this
+    // computer a session: the App's own sign-in did not reach it. Without that
+    // session it cannot install the CLI, and nothing else asks for one.
+    const firstSession = desktopDaemonNeedsFirstSession(s.desktopDaemonStatus, Boolean(desktopBridge?.installCli));
     if (
       !desktopBridge?.saveCliSession ||
       !desktopBridge.startDaemon ||
       !s.token ||
-      !daemonStatusNeedsSessionSync(s.desktopDaemonStatus)
+      !(firstSession || daemonStatusNeedsSessionSync(s.desktopDaemonStatus))
     ) {
       return;
     }
@@ -979,6 +984,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void exchangeDesktopCliSession(s.token)
       .then((cliSession) => desktopBridge.saveCliSession?.(cliSession))
       .then(async () => {
+        // As after the App's own sign-in: installing names the machine itself.
+        if (firstSession) return desktopBridge.startDaemon?.();
         const context = await desktopBridge.getContext();
         if (cancelled) return undefined;
         setDesktopContext(context);
