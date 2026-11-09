@@ -1,4 +1,5 @@
 import type { AppleCommerceState, AppleCommerceJob, AppleCommerceChange } from "@xmatrix/db";
+import { linkDatabaseFailures } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { fireConnectorAutomationTriggers } from "../automation-triggers";
@@ -9,6 +10,8 @@ import { connectorEvent, record, text } from "./event-format";
 import { appOnly } from "./app-store-connect-web";
 import type { ConnectorAction } from "./provider";
 import { ProviderRequestError } from "./http";
+import { appleCommerceWatchPhase, classifyAppleCommerceWatchFailure, markAppleCommerceWatchPhase,
+  recordAppleCommerceWatchFailure, type AppleCommerceWatchEvidence } from "./apple-commerce-watch-failure";
 
 /** A complete bounded collection, never the truncated result of a page cap. */
 async function collection(api: AppStoreConnectApi, path: string, type: string) {
@@ -67,40 +70,78 @@ function event(job: AppleCommerceJob, change: AppleCommerceChange) {
 }
 async function process(env: Env, job: AppleCommerceJob) {
   const repository = appleCommerceRepository(env);
-  if (!await repository.current(job)) return;
-  const grant = await connectorCredentialRepository(env).resolve({ requestId: crypto.randomUUID(), spaceId: job.spaceId, providerId: "appstoreconnect" });
-  if (!grant || grant.version !== job.credentialVersion || grant.connectionGeneration !== job.generation) return;
-  let pending = job.pending;
-  if (!pending.length) {
-    const api = appStoreConnect(grant.values), app = await appleApp(api, job.sourceRef.slice("appstoreconnect:".length));
-    pending = await repository.stage(job, await readAppleCommerceStates(api, app.id));
-  }
-  for (const change of pending.slice(0, 10)) {
+  let phase: AppleCommerceWatchEvidence["phase"] = "current";
+  try {
     if (!await repository.current(job)) return;
-    const route = await repository.route(job);
-    if (!route) return;
-    const notice = event(job,change);
-    await appendToRoutes(env,dispatchProductMessageAppend,"appstoreconnect",notice,[route]);
-    if (!await repository.current(job)) return;
-    await fireConnectorAutomationTriggers(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
-    await repository.delivered(job,change.sequence);
+    phase = "grant";
+    const grant = await connectorCredentialRepository(env).resolve({ requestId: crypto.randomUUID(), spaceId: job.spaceId, providerId: "appstoreconnect" });
+    if (!grant || grant.version !== job.credentialVersion || grant.connectionGeneration !== job.generation) return;
+    let pending = job.pending;
+    if (!pending.length) {
+      phase = "app";
+      const api = appStoreConnect(grant.values), app = await appleApp(api, job.sourceRef.slice("appstoreconnect:".length));
+      phase = "snapshot";
+      const states = await readAppleCommerceStates(api, app.id);
+      phase = "stage";
+      pending = await repository.stage(job, states);
+    }
+    for (const change of pending.slice(0, 10)) {
+      phase = "current";
+      if (!await repository.current(job)) return;
+      phase = "route";
+      const route = await repository.route(job);
+      if (!route) return;
+      phase = "deliver";
+      const notice = event(job,change);
+      await appendToRoutes(env,dispatchProductMessageAppend,"appstoreconnect",notice,[route]);
+      phase = "current";
+      if (!await repository.current(job)) return;
+      phase = "automation";
+      await fireConnectorAutomationTriggers(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
+      phase = "delivered";
+      await repository.delivered(job,change.sequence);
+    }
+    return pending.length > 10;
+  } catch (error) {
+    markAppleCommerceWatchPhase(error, phase);
+    throw error;
   }
-  return pending.length > 10;
 }
 
 /** Independent cron invocation keeps provider polling out of the maintenance invocation's connection budget. */
 export async function drainAppleCommerce(env: Env) {
   const repository = appleCommerceRepository(env), jobs = await repository.claim();
+  const captured: { error: unknown; phase: AppleCommerceWatchEvidence["phase"]; retryRecorded: boolean }[] = [];
   let failures = 0;
   for (let offset = 0; offset < jobs.length; offset += 4) {
     const results = await Promise.allSettled(jobs.slice(offset,offset+4).map(async job => {
-      let retry = true;
+      let retry = true, failure: unknown;
       try { retry = Boolean(await process(env,job)); }
-      finally { await repository.finish(job,retry); }
+      catch (error) { failure = error; }
+      let finishError: unknown;
+      try { await repository.finish(job,retry); }
+      catch (error) { finishError = error; }
+      return { failure, finishError };
     }));
-    failures += results.filter(result => result.status === "rejected").length;
+    for (const result of results) {
+      if (result.status === "rejected") {
+        failures += 1;
+        captured.push({ error: result.reason, phase: "unknown", retryRecorded: false });
+        continue;
+      }
+      const { failure, finishError } = result.value;
+      if (!failure && finishError === undefined) continue;
+      failures += 1;
+      if (failure) captured.push({ error: failure, phase: appleCommerceWatchPhase(failure), retryRecorded: finishError === undefined });
+      if (finishError !== undefined) captured.push({ error: finishError, phase: "finish", retryRecorded: false });
+    }
   }
-  if (failures) throw new ProviderRequestError(503,`${failures} Apple commerce watches will retry; no snapshot or pending event was discarded`);
+  if (!failures) return;
+  const reported = new ProviderRequestError(503,`${failures} Apple commerce watches will retry; no snapshot or pending event was discarded`);
+  recordAppleCommerceWatchFailure(reported, captured.slice(0, 8).map(row =>
+    classifyAppleCommerceWatchFailure(row.error, row.phase, row.retryRecorded)));
+  linkDatabaseFailures(reported, new AggregateError(captured.map(row => row.error)));
+  throw reported;
 }
 
 export function appleCommerceStatusCapability(env:Env,scope:{spaceId:string;channelId:string;userId:string}) {
