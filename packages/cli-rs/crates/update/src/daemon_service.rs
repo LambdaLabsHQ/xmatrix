@@ -436,9 +436,11 @@ fn run_windows_setup_script(body: &str) -> error::Result<Result<(), String>> {
 /// Windows' own switch for Win32 paths past MAX_PATH (260). Without it no
 /// process can open them, whatever its manifest says; Git, Node and every
 /// harness an Agent runs read it when they start.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub const WINDOWS_LONG_PATHS_KEY: &str = r"HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem";
 
 /// The administrator command that turns Windows long paths on.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn windows_long_paths_enable_command() -> String {
     format!(
         "New-ItemProperty -Path '{WINDOWS_LONG_PATHS_KEY}' -Name LongPathsEnabled -Value 1 -PropertyType DWord -Force"
@@ -448,6 +450,7 @@ pub fn windows_long_paths_enable_command() -> String {
 /// Turns Windows long paths on when they are off. Setting a machine-wide
 /// value needs an administrator, so a standard user approves one UAC prompt;
 /// an already-enabled machine is left alone without one.
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn windows_long_paths_script() -> String {
     let key = powershell_single_quoted(WINDOWS_LONG_PATHS_KEY);
     let enable = powershell_single_quoted(&windows_long_paths_enable_command());
