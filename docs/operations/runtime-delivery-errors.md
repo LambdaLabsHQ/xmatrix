@@ -199,5 +199,9 @@ heartbeat gap without storing a new renewal counter. No timestamps, identities,
 command payloads or arbitrary diagnostic fields are reported, and durations stay
 out of socket replies. On recurrence, compare the window, lateness and command
 age with the static refusal reason and command type. These observations do not
-identify the underlying scheduler or transport delay. Expired leases remain
-refused, and command replay and completion fencing are unchanged.
+identify the underlying scheduler or transport delay. A same-generation renew
+whose database-clock lateness is under one second still extends the lease, and
+claim waits out that same second before taking the row: the 10 second admission
+lease otherwise loses to one read round trip while the generation fence still
+shows the original holder. Quota probes do not get that slack. A longer gap
+stays refused. Command replay and completion fencing are unchanged.

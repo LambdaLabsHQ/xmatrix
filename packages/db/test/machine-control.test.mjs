@@ -253,7 +253,7 @@ test("Machine list says since when an online daemon left work unanswered", async
 test("Machine claim leases queued PostgreSQL commands with exact epoch evidence", async () => {
   const db = database((query) => query.name.startsWith("machine_control_daemon_lock_")
     ? [daemon]
-    : query.name === "machine_control_claim_candidates_v9"
+    : query.name === "machine_control_claim_candidates_v10"
       ? [{ command_id: "spawn-1", command_type: "spawn", version: 1, lease_generation: null,
           payload_json: { type: "machine_spawn_agent", requestId: "spawn-1",
             spaceId: "space-1", channelId: "channel-1" } }]
@@ -275,7 +275,9 @@ test("Machine claim leases queued PostgreSQL commands with exact epoch evidence"
   });
   assert.equal(value.commands[0].payload.spaceId, "space-1");
   assert.equal(value.commands[0].leaseUntil, "2099-08-30T00:01:00.000Z");
-  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v9");
+  const candidates = db.calls.find((call) => call.name === "machine_control_claim_candidates_v10");
+  assert.equal(candidates.values.at(-1), 1_000);
+  assert.match(candidates.text, /lease_until\+\(\$14::integer\*interval '1 millisecond'\)<=clock_timestamp\(\)/u);
   assert.match(candidates.text, /LEFT JOIN data\.agent_launches launch/u);
   assert.match(candidates.text, /'spaceId',launch\.space_id/u);
   const claim = db.calls.find((call) => call.name === "machine_control_claim_v3");
@@ -308,6 +310,42 @@ test("Machine renew preserves exact lease entity version across repeated heartbe
     [60_000, "spawn-1", 2, leaseOwner],
     [60_000, "spawn-1", 2, leaseOwner],
   ]);
+});
+
+function harnessRenewFixture(lateMs, renewLeaseUntil) {
+  const leaseOwner = "machine-daemon:user-1:machine-1:host-1:epoch:1";
+  const observed = new Date("2026-11-08T13:29:35.686Z");
+  const db = database((query) => {
+    if (query.name.startsWith("machine_control_daemon_lock_")) return [daemon];
+    if (query.name === "machine_control_lease_lock_v3") return [leasedSpawnRow(leaseOwner, {
+      command_id: "harness-1", command_type: "harness_action", lease_live: false,
+      lease_until: new Date(observed.getTime() - lateMs), lease_observed_at: observed,
+      updated_at: new Date(observed.getTime() - lateMs - 10_000),
+      created_at: new Date(observed.getTime() - lateMs - 10_253),
+    })];
+    if (query.name === "machine_control_renew_v2" && renewLeaseUntil) {
+      return [{ version: 2, lease_until: new Date(renewLeaseUntil) }];
+    }
+    return [];
+  });
+  const renew = (commandId) => new PostgresMachineControlRepository(db).command(relayCommandRequest(leaseOwner, {
+    commandId, action: "renew", controlId: "harness-1",
+  }));
+  return { db, renew };
+}
+
+test("HUB-7F: a same-generation harness renew one read trip late still extends", async () => {
+  const { db, renew } = harnessRenewFixture(317, "2026-11-08T13:30:35.686Z");
+  assert.equal((await renew("renew-harness-skew")).leaseUntil, "2026-11-08T13:30:35.686Z");
+  assert.equal(db.calls.filter((call) => call.name === "machine_control_renew_v2").length, 1);
+});
+
+test("HUB-7F: a harness renew two seconds late stays refused", async () => {
+  const { db, renew } = harnessRenewFixture(2_000);
+  await assert.rejects(renew("renew-harness-gap"), (error) => error instanceof MachineControlError &&
+    error.code === "machine_command_stale_lease" && error.reason === "renew.expired" &&
+    error.commandType === "harness_action" && error.leaseTiming?.leaseExpiredForMs === 2_000);
+  assert.equal(db.calls.some((call) => call.name === "machine_control_renew_v2"), false);
 });
 
 test("Machine lease liveness is decided by PostgreSQL clock evidence", async () => {
