@@ -54,8 +54,14 @@ an introductory offer can snapshot
 `subscriptions_introductoryOffers_getToManyRelated` with its subscription ID.
 The result must include exactly that resource type/ID and complete attributes;
 sparse fields, foreign resources, missing or incomplete relationships refuse
-the write. Snapshot fields must be identical in plan and execution. Creates
-do not take existing-resource snapshots.
+the write. Snapshot fields must be identical in plan and execution. Resource
+creates do not take existing-resource snapshots. A POST to an existing
+`/relationships/` endpoint changes that relationship and requires its current
+snapshot, just like PATCH and DELETE. Direct and embedded relationship
+snapshots share the same completeness check: next-page links, inconsistent
+paging totals, malformed linkage and duplicate identities refuse the plan and
+write. Inspect the full relationship in Apple when a bounded snapshot is
+incomplete; a first page cannot authorize replacing the whole relationship.
 
 A successful HTTP result means Apple accepted the operation. Read the resource
 to confirm the desired state before the next workflow step. A timeout or

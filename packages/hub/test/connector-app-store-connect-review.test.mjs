@@ -23,6 +23,24 @@ const readDraft = async (row, included = []) => {
   return read.value.summary.match(/digest ([a-f0-9]{64})/u)[1];
 };
 
+test("draft digests and mutations require the complete attachment relationship", async () => {
+  const file = attachment("file-1"), current = draft("Ready", [file]);
+  const digest = await readDraft(current, [file]);
+  for (const evidence of [{ links: { next: "https://appstoreconnect.apple.com/more" } },
+    { meta: { paging: { total: 2 } } }, { meta: { paging: { total: "invalid" } } }]) {
+    const partial = structuredClone(current);
+    Object.assign(partial.relationships.resolutionCenterMessageAttachments, evidence);
+    const provider = { ...routes(), [`GET ${draftPath}`]: { data: partial, included: [file] } };
+    const refused = await withApple(provider, async () => {
+      for (const [action, input] of [["review_draft", {}], ["edit_review_draft", { operation: "delete" }], ["send_review_draft", {}]]) {
+        await assert.rejects(ACTIONS[action].execute({ credentials: keys }, { app: BUNDLE, thread: thread.id, id: current.id, digest, ...input }),
+          /complete.*relationship/u);
+      }
+    });
+    assert.deepEqual(writes(refused.calls), []);
+  }
+});
+
 test("App Review attachments are linked to their app and thread; lists omit signed URLs and asset tokens", async () => {
   const file = attachment("file-1"), rejection = { ...attachment("file-2"), type: "rejectionAttachments" };
   const provider = { ...routes(), [`GET ${messagePath}`]: { data: [{ type: "resolutionCenterMessages", id: "message-1",

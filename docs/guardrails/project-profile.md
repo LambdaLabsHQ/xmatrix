@@ -1,5 +1,10 @@
 # Project Profile
 
+App Store Connect generic relationship writes and App Review draft attachments
+share one complete JSON:API linkage boundary. Relationship POSTs bind current
+membership as updates do; partial or ambiguous snapshots cannot authorize a
+mutation. See [official API operations](../connectors/app-store-connect-api.md).
+
 This file is a descriptive snapshot, not policy. The only canonical project rules are the ten P0/P1/P2 guardrails in `project-guardrails.md`; statements here and in the linked snapshots document the current implementation and cannot add or override a guardrail.
 
 ## Overview

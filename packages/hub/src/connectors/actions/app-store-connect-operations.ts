@@ -1,5 +1,5 @@
 import { canonicalJsonStringify, sha256Hex } from "@xmatrix/protocol";
-import { appStoreConnect, type AppStoreConnectApi } from "../app-store-connect-api";
+import { appStoreConnect, appleRelationshipSnapshot, type AppStoreConnectApi } from "../app-store-connect-api";
 import { APPLE_OPERATIONS, APPLE_SPEC_SHA, APPLE_SPEC_VERSION, appleOperationRequest, resolveAppleSchema, type AppleOperationInput } from "../app-store-connect-schema";
 import { record, text } from "../event-format";
 import { ProviderRequestError } from "../http";
@@ -64,13 +64,15 @@ async function plan(api: AppStoreConnectApi, input: Record<string, string>) {
   const call = request(input);
   if (call.operation.method === "GET") problem("Use api_read for a read operation");
   let before: unknown = null;
-  if (call.operation.method !== "POST") {
+  const relationship = call.path.includes("/relationships/");
+  if (call.operation.method !== "POST" || relationship) {
     const read = Object.values(APPLE_OPERATIONS).find(operation => operation.method === "GET" && operation.path === call.operation.path);
     if (read) {
       if (call.snapshot !== undefined) problem("This operation already has a direct snapshot; omit snapshot");
       const response = await api.request(call.path, { quiet: true });
       if (!has(response, "data")) throw new ProviderRequestError(502, "Apple did not return a resource snapshot");
-      if (!call.path.includes("/relationships/")) {
+      if (relationship) appleRelationshipSnapshot(response);
+      else {
         const [, , type, id] = call.path.split("/").map(part => decodeURIComponent(part));
         if (record(response.data).type !== type || record(response.data).id !== id || !SAFE_OBJECT(record(response.data).attributes)) {
           throw new ProviderRequestError(502, "Apple did not return the expected complete resource snapshot");
@@ -88,17 +90,12 @@ async function plan(api: AppStoreConnectApi, input: Record<string, string>) {
       const snapshot = appleOperationRequest(text(source.operation), source as AppleOperationInput);
       if (snapshot.operation.method !== "GET") problem("A snapshot must be a catalog GET");
       const response = await api.request(snapshot.path, { query: snapshot.query, quiet: true });
-      const [, , type, id, relationship, name] = call.path.split("/").map(part => decodeURIComponent(part));
+      const [, , type, id, , name] = call.path.split("/").map(part => decodeURIComponent(part));
       const candidates = [...(Array.isArray(response.data) ? response.data : [response.data]),
         ...(Array.isArray(response.included) ? response.included : [])].map(record).filter(row => row.type === type && row.id === id);
       if (candidates.length !== 1 || !SAFE_OBJECT(candidates[0]!.attributes)) problem("The snapshot did not return exactly one complete target resource");
       before = candidates[0];
-      if (relationship === "relationships") {
-        const relation = record(record(candidates[0]!.relationships)[name!]);
-        if (!has(relation, "data") || (Array.isArray(relation.data) && Number(record(record(relation.meta).paging).total ?? relation.data.length) > relation.data.length)) {
-          problem("The snapshot must include the complete target relationship");
-        }
-      }
+      if (relationship) appleRelationshipSnapshot(record(candidates[0]!.relationships)[name!]);
     }
   } else if (call.snapshot !== undefined) {
     problem("A create does not accept an existing-resource snapshot");

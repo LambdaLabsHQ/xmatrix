@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Apple relationship writes require a complete current snapshot
+
+Generic App Store API plans treated every POST as a resource creation, so
+adding members to an existing relationship did not bind its current state.
+Direct relationship reads and App Review draft attachments could also bind
+only a partial response. These paths now share one completeness check, and
+relationship POSTs bind current membership before approval and execution.
+Pagination, inconsistent totals, malformed linkage and duplicate identities
+refuse the plan or draft mutation before any provider write. Inspect the full
+relationship at Apple when its bounded response is incomplete. Existing
+resource-create plans remain valid; relationship POST plans must be refreshed.
+Hub only, no schema or client migration. Recovery is a CI-validated forward
+Hub release retaining complete snapshot checks; uncertain Apple writes still
+require inspection before retrying.
+
 ## Unreleased: ACP Agents without image support still read a message with a picture
 
 A message with an image sent every ACP Agent an inline image block, and an
