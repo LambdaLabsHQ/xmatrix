@@ -13,6 +13,7 @@ import {
 import { CountPill } from "./count-pill";
 import { ListCreate, type CreateAction } from "./list-create";
 import { ListSectionHeading, RECENT_SECTION, type ListSectionMark } from "./list-section-heading";
+import { markAllDoneAction, NEEDS_YOU_SECTION_LABEL } from "./needs-you-mark-all";
 
 import {
   CHANNEL_CHAT_ROW_CLASS_NAME,
@@ -434,6 +435,7 @@ export const ChannelSidebar = memo(function ChannelSidebar({
             scrollToChannelRef={scrollToConversationRef}
             channels={visibleChannels}
             pinnedChannelIds={channelPinLookup.pinnedChannelIds}
+            onMarkDone={onMarkDone}
             row={(channel) => {
               const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
               const hasUnreadMention = channelHasUnreadMention(
@@ -823,7 +825,7 @@ export function channelListSections(
     label: string; count?: number; channels: ChannelSnapshot[];
     mark: ListSectionMark;
   }> = [
-    { label: "Needs you", count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
+    { label: NEEDS_YOU_SECTION_LABEL, count: needsYou.length, channels: needsYou, mark: { icon: Bell, tone: "attention" } },
     { label: "Pinned", channels: pinned, mark: { icon: Pin, tone: "primary" } },
     { ...RECENT_SECTION, channels: recent },
   ];
@@ -857,13 +859,15 @@ function ChannelSectionRows({ channels, row }: {
  * (user 2026-10-17). Rows are one height, so a section's positions all hold
  * the same size whichever conversations fill them.
  */
-function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinnedChannelIds, row }: {
+function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinnedChannelIds, row, onMarkDone }: {
   scrollRoot: HTMLElement | null;
   /** Receives a function that brings a conversation's row into view. */
   scrollToChannelRef?: MutableRefObject<((channelId: string) => void) | null>;
   channels: readonly ChannelSnapshot[];
   pinnedChannelIds: ReadonlySet<string>;
   row: (channel: ChannelSnapshot) => ReactNode;
+  /** Marks one conversation done; given, "Needs you" offers to mark all of its conversations done. */
+  onMarkDone?: (channelId: string) => void;
 }) {
   const sections = useMemo(() => channelListSections(channels, pinnedChannelIds), [channels, pinnedChannelIds]);
   const listRefs = useRef(new Map<string, VirtuosoHandle>());
@@ -885,7 +889,8 @@ function VirtualChannelSections({ scrollRoot, scrollToChannelRef, channels, pinn
   if (!scrollRoot) return null;
   return sections.map((section) => (
     <Fragment key={section.label}>
-      <ListSectionHeading label={section.label} count={section.count} mark={section.mark} />
+      <ListSectionHeading label={section.label} count={section.count} mark={section.mark}
+        action={markAllDoneAction(section, onMarkDone)} />
       <Virtuoso
         ref={(handle) => {
           if (handle) listRefs.current.set(section.label, handle);
@@ -1500,6 +1505,7 @@ export function MobileChannelChatList({
               scrollRoot={listScrollRoot}
               channels={conversations}
               pinnedChannelIds={pinnedChannelIds}
+              onMarkDone={onMarkDone}
               row={(channel) => {
                 const unreadCount = channelUnreadCount(channel, readCounts, readCountsBaselineReady);
                 const hasMention = channelHasUnreadMention(

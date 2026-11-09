@@ -343,7 +343,7 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"]`)).toBeVisible();
   const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
     nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
-  expect(order).toEqual(["Needs you1", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
+  expect(order).toEqual(["Needs you1Mark all done", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
   await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"] .app-channel-row-preview`))
     .toHaveText("claude:3: which one ships?");
   // Each section's name is a paper label in its own ink, flat on the list.
@@ -363,6 +363,37 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect.poll(() => fixtureRequestBodies(page, "channel-done")).toEqual([{ sequence: 5, responded: true }]);
   await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Done with #design" })).toHaveCount(0);
+});
+
+test("Mark all done clears every conversation under Needs you once the reader confirms", async ({ page }) => {
+  const waitingOn = (id: string, name: string) => ({
+    ...E2E_CHANNEL, id, name, messageCount: 4, historyHeadSequence: 4, readSequence: 0,
+    attention: {
+      channelId: id, unreadAttentionCount: 1, lastMessageId: `${id}-mention`, lastMessageSequence: 4,
+      primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: E2E_CHANNEL.updatedAt,
+    },
+  });
+  const first = waitingOn("channel-waiting-a", "design");
+  const second = waitingOn("channel-waiting-b", "launch");
+  const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [first, second, other] });
+  await fixtureJson(page, "done-a", `**/api/xmatrix/channels/${first.id}/read`, { ok: true, readSequence: 4 });
+  await fixtureJson(page, "done-b", `**/api/xmatrix/channels/${second.id}/read`, { ok: true, readSequence: 4 });
+  const sidebar = page.locator(".app-workspace-panel > .app-sidebar");
+  await expect(sidebar.getByText("Needs you2")).toBeVisible();
+
+  const dialogs: string[] = [];
+  page.once("dialog", (dialog) => { dialogs.push(dialog.message()); void dialog.dismiss(); });
+  await sidebar.getByRole("button", { name: "Mark all done" }).click();
+  await expect.poll(() => dialogs).toEqual(["Mark 2 conversations done?"]);
+  expect(await fixtureRequestBodies(page, "done-a")).toEqual([]);
+
+  page.once("dialog", (dialog) => void dialog.accept());
+  await sidebar.getByRole("button", { name: "Mark all done" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "done-a")).toEqual([{ sequence: 4, responded: true }]);
+  await expect.poll(() => fixtureRequestBodies(page, "done-b")).toEqual([{ sequence: 4, responded: true }]);
+  await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
+  await expect(sidebar.getByRole("button", { name: "Mark all done" })).toHaveCount(0);
 });
 
 /* The account under an open shell can change without a navigation: a session
