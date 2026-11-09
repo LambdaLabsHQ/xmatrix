@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: New sessions get the short pool path on Windows
+
+A repo pool created before the compact layout (`<64hex>/slots/<32hex>`) kept
+taking every new session on that machine, so each checkout was 88 characters
+longer than the compact `<8hex>/<6hex>` path. On Windows that put deep
+dependency trees past MAX_PATH (260), where a nested executable such as
+agent-router's `workerd.exe` could not start. A legacy pool now keeps only the
+sessions, handoff predecessors and slots it already holds; new sessions start
+in the compact pool, and the sweep keeps no warm spares in a legacy pool, so it
+drains as its sessions end. Nothing is moved or deleted. The desktop App's git
+probes name the workspace with `-C` instead of starting git inside it, so a
+deep workspace no longer shows a blank repository, remote and branch. CLI and
+desktop App; no Hub, schema or protocol change. Recovery is a CI-validated
+beta reverting #1498.
+
 ## Unreleased: Every quote opens with a large quotation mark
 
 A quote above a reply, a passage quoted in a message, and the reply or quote
