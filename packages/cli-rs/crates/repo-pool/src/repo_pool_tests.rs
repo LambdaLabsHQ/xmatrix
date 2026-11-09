@@ -440,6 +440,81 @@ mod tests {
         let _ = std::fs::remove_dir_all(remote);
     }
 
+    #[tokio::test]
+    async fn new_sessions_leave_a_legacy_pool_to_the_sessions_it_holds() {
+        if !git_available() {
+            return;
+        }
+        let identity_url = "https://github.com/acme/legacy-drain.git";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("ldr");
+        let key = repo_key_id(&canonical_repo_identity(identity_url).unwrap());
+        std::fs::create_dir_all(pools.join(key.as_str())).unwrap();
+        let legacy = RepoPoolLayout::create(&pools, key.clone()).unwrap();
+        let held = lease_available_or_create_at(&legacy, &base, identity_url, &req("held"))
+            .await
+            .unwrap();
+
+        // The session the legacy pool holds keeps its tree there.
+        let same = RepoPoolLayout::for_session(&pools, key.clone(), &["held"]).unwrap();
+        assert_eq!(same.pool_root(), legacy.pool_root());
+        let handoff = RepoPoolLayout::for_session(&pools, key.clone(), &["next", "held"]).unwrap();
+        assert_eq!(handoff.pool_root(), legacy.pool_root());
+        let by_slot = RepoPoolLayout::from_persisted_lease(
+            &pools,
+            key.as_str(),
+            None,
+            held.slot_id.as_str(),
+        )
+        .unwrap();
+        assert_eq!(by_slot.pool_root(), legacy.pool_root());
+
+        // A new session gets the 88-character-shorter compact tree.
+        let fresh = RepoPoolLayout::for_session(&pools, key.clone(), &["fresh"]).unwrap();
+        assert!(fresh.is_compact());
+        let lease = lease_available_or_create_at(&fresh, &base, identity_url, &req("fresh"))
+            .await
+            .unwrap();
+        assert_eq!(
+            lease.worktree_path,
+            pools
+                .join(&key.as_str()[..POOL_DIR_KEY_CHARS])
+                .join(&lease.slot_id.as_str()[..SLOT_DIR_CHARS])
+        );
+        assert!(RepoPoolLayout::for_new_sessions(&pools, key.clone()).unwrap().is_compact());
+        assert_eq!(
+            RepoPoolLayout::from_persisted_lease(&pools, key.as_str(), Some("fresh"), lease.slot_id.as_str())
+                .unwrap()
+                .pool_root(),
+            fresh.pool_root()
+        );
+
+        // Both pools are swept, each in its own directory.
+        let mut swept: Vec<PathBuf> = pool_layouts_at(&pools)
+            .iter()
+            .map(|layout| layout.pool_root().to_path_buf())
+            .collect();
+        swept.sort();
+        let mut expected = vec![legacy.pool_root().to_path_buf(), fresh.pool_root().to_path_buf()];
+        expected.sort();
+        assert_eq!(swept, expected);
+        let _ = std::fs::remove_dir_all(pools);
+        let _ = std::fs::remove_dir_all(base);
+        let _ = std::fs::remove_dir_all(remote);
+    }
+
+    #[test]
+    fn an_unreadable_legacy_pool_keeps_every_session() {
+        let pools = unique_temp("lur");
+        let key = repo_key_id(&canonical_repo_identity("acme/widget").unwrap());
+        let legacy = pools.join(key.as_str());
+        std::fs::create_dir_all(legacy.join(SLOTS_DIR)).unwrap();
+        std::fs::write(legacy.join(MANIFEST_FILE), b"not json").unwrap();
+        let layout = RepoPoolLayout::for_session(&pools, key.clone(), &["any"]).unwrap();
+        assert_eq!(layout.pool_root(), legacy);
+        let _ = std::fs::remove_dir_all(pools);
+    }
+
     #[test]
     fn k1_token_url_and_clean_url_same_key() {
         let a = canonical_repo_identity("https://user:token@github.com/Acme/Widget.git?foo=1#frag")
@@ -2393,6 +2468,34 @@ mod tests {
                 std::env::remove_var(REPO_POOL_RESTING_EVICT_SECS_ENV);
             }
         }
+    }
+
+    #[tokio::test]
+    async fn sweep_drains_a_legacy_pools_unbound_trees_inside_the_warm_budget() {
+        if !git_available() {
+            return;
+        }
+        let _floors = NoIdleFloors::enter();
+        let identity_url = "https://github.com/acme/legacy-spares";
+        let (base, remote) = setup_base_with_local_fetch(identity_url);
+        let pools = unique_temp("lsp");
+        let key = repo_key_id(&canonical_repo_identity(identity_url).unwrap());
+        std::fs::create_dir_all(pools.join(key.as_str())).unwrap();
+        let layout = RepoPoolLayout::create(&pools, key).unwrap();
+        let lease = lease_available_or_create_at(&layout, &base, identity_url, &req("ls1"))
+            .await
+            .unwrap();
+        return_abandoned_slot_at(&layout, &base, &req("ls1"))
+            .await
+            .unwrap();
+        // A compact pool would keep this tree warm under a budget of 8; no new
+        // session starts in a legacy pool, so it goes.
+        let outcome = reclaim_pool_slots_at(&pools, &PoolLiveness::default(), 8).await;
+        assert_eq!(outcome.evicted, vec![lease.slot_id.as_str().to_string()]);
+        assert!(!lease.worktree_path.exists());
+        let _ = std::fs::remove_dir_all(pools);
+        let _ = std::fs::remove_dir_all(base);
+        let _ = std::fs::remove_dir_all(remote);
     }
 
     #[tokio::test]

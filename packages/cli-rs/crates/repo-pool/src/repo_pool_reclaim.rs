@@ -189,7 +189,14 @@ fn pool_layouts_at(pools_root: &Path) -> Vec<RepoPoolLayout> {
             };
             key
         };
-        let Ok(layout) = RepoPoolLayout::from_persisted(pools_root, key.as_str()) else {
+        // The directory names the layout: a compact pool must still be swept
+        // while a legacy pool for the same repository exists beside it.
+        let layout = if name.len() == POOL_DIR_KEY_CHARS {
+            RepoPoolLayout::for_new_sessions(pools_root, key)
+        } else {
+            RepoPoolLayout::create(pools_root, key)
+        };
+        let Ok(layout) = layout else {
             continue;
         };
         if layout.pool_root().file_name() != Some(entry.file_name().as_os_str()) {
@@ -343,6 +350,7 @@ fn eviction_candidates(
     // session wakeable (docs/instance-sleep.md §6).
     let resting_floor = resting_evict_min_idle(keep_idle);
     let mut resting: Vec<String> = Vec::new();
+    let mut legacy_spares: Vec<(String, String)> = Vec::new();
     for (id, slot) in &manifest.slots {
         let Ok(path) = layout.slot_path_for_id(id) else {
             continue;
@@ -363,6 +371,11 @@ fn eviction_candidates(
             {
                 resting.push(id.clone())
             }
+            // New sessions start in the compact pool, so a legacy pool's
+            // unbound trees are kept warm for nobody: drain them.
+            SlotState::Available if !bound && !layout.is_compact() => {
+                legacy_spares.push((id.clone(), slot.updated_at.clone()))
+            }
             SlotState::Available | SlotState::Retained => {
                 idle.push((id.clone(), slot.updated_at.clone()))
             }
@@ -376,6 +389,7 @@ fn eviction_candidates(
     };
     sort_oldest_first(&mut quarantined);
     sort_oldest_first(&mut idle);
+    sort_oldest_first(&mut legacy_spares);
     // The budget is applied to the whole reusable set, then activity vetoes
     // individual removals. Doing it the other way round would let a pool full
     // of busy slots spend the budget on the few that happen to be quiet.
@@ -383,6 +397,7 @@ fn eviction_candidates(
     let min_idle = evict_min_idle();
     let budgeted: Vec<String> = quarantined
         .into_iter()
+        .chain(legacy_spares)
         .chain(idle.into_iter().take(surplus))
         .map(|(id, _)| id)
         .filter(|id| {

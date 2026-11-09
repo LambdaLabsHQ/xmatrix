@@ -2607,7 +2607,14 @@ function execFileText(
 }
 
 async function gitOutput(cwd: string, args: string[]): Promise<string | undefined> {
-  const output = await execFileText("git", args, { cwd, timeout: 2_000 });
+  // Name the directory with -C instead of starting git inside it: Windows
+  // cannot start a process whose working directory passes MAX_PATH (260),
+  // while git itself reads long paths once core.longpaths is on.
+  const output = await execFileText(
+    "git",
+    ["-c", "core.longpaths=true", "-C", cwd, ...args],
+    { timeout: 2_000 }
+  );
   return output || undefined;
 }
 

@@ -254,7 +254,16 @@ pub struct RepoPoolLayout {
 impl RepoPoolLayout {
     /// Create trusted root (if needed), canonicalize it, then create
     /// repo component with per-level reparse checks before any lock.
+    /// An existing legacy pool directory takes precedence.
     pub fn create(trusted_pools_root: &Path, repo_key: RepoKeyId) -> Result<Self, PoolError> {
+        Self::resolve(trusted_pools_root, repo_key, LegacyPoolUse::WhenPresent)
+    }
+
+    fn resolve(
+        trusted_pools_root: &Path,
+        repo_key: RepoKeyId,
+        legacy_use: LegacyPoolUse<'_>,
+    ) -> Result<Self, PoolError> {
         if !trusted_pools_root.is_absolute() {
             return Err(PoolError::new(
                 PoolErrorCode::PathEscape,
@@ -277,11 +286,18 @@ impl RepoPoolLayout {
         // Preserve existing worktree paths, including retained/live slots.
         // Only the directory spelling is shortened; authority keeps the full key.
         let legacy = trusted.join(repo_key.as_str());
+        let compact = trusted.join(&repo_key.as_str()[..POOL_DIR_KEY_CHARS]);
         let pool_root = match std::fs::symlink_metadata(&legacy) {
-            Ok(_) => legacy,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                trusted.join(&repo_key.as_str()[..POOL_DIR_KEY_CHARS])
-            }
+            Ok(_) => match legacy_use {
+                LegacyPoolUse::WhenPresent => legacy,
+                LegacyPoolUse::Holding { sessions, slot }
+                    if legacy_pool_holds(&trusted, &repo_key, &legacy, sessions, slot) =>
+                {
+                    legacy
+                }
+                LegacyPoolUse::Holding { .. } | LegacyPoolUse::Never => compact,
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => compact,
             Err(_) => {
                 return Err(PoolError::new(
                     PoolErrorCode::Io,
@@ -1577,7 +1593,7 @@ pub async fn retained_binding_for_unissued_reborn_at(
     if !pooled {
         return Ok(None);
     }
-    let layout = RepoPoolLayout::create(trusted_pools_root, repo_key.clone())?;
+    let layout = RepoPoolLayout::for_session(trusted_pools_root, repo_key.clone(), &[session_key])?;
     {
         let _guard = acquire_pool_guard(&layout).await?;
         let Some(manifest) = load_for_update(&layout)? else {

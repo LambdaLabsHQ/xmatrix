@@ -1216,8 +1216,13 @@ fn daemon_repo_pool_layout(
     }
     let pools_root = repo_pool::default_repo_pools_root()
         .map_err(|error| CliError::Launch(format!("repo pool root unavailable ({error})")))?;
-    repo_pool::RepoPoolLayout::from_persisted(&pools_root, &binding.repo_key_id)
-        .map_err(|error| CliError::Launch(format!("persisted repo pool layout invalid ({error})")))
+    repo_pool::RepoPoolLayout::from_persisted_lease(
+        &pools_root,
+        &binding.repo_key_id,
+        None,
+        &binding.slot_id,
+    )
+    .map_err(|error| CliError::Launch(format!("persisted repo pool layout invalid ({error})")))
 }
 
 fn daemon_repo_pool_request(managed: &DaemonRunChild) -> error::Result<repo_pool::LeaseRequest> {
