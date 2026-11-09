@@ -30,6 +30,11 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Agent launch candidate selection recovers one lost response per lock-free
+registration, observation and directory read on a fresh connection. Placed
+reads recheck their fence; preparation and commit retain current admission
+and unknown-commit reconciliation. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
 App Store Connect pins Apple's official OpenAPI and derives its public operation
 catalog, request validation and zero-runtime types from that source. Generic
 reads and snapshot-checked writes cover additional resources while existing
