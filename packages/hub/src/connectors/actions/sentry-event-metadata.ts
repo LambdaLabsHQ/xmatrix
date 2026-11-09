@@ -3,6 +3,7 @@ import { clientDefectAction } from "@xmatrix/protocol";
 import { machineDaemonCredentialFailureMetadata } from "../../connections/machine-daemon/credential-failure";
 import { parseHarnessReleaseWatchEvidence } from "../../harness-release-watch-failure";
 import { parseCliReleaseNoticeEvidence } from "../../cli-release-notice-failure";
+import { parseAppleCommerceWatchEvidence } from "../apple-commerce-watch-failure";
 import { postgresConflictMetadata } from "../../postgres-conflict-diagnostic";
 import { messageSearchFailureMetadata } from "../../postgres-request-failure";
 import { safeServerDiagnosticId } from "../../server-error-diagnostic";
@@ -52,7 +53,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
         lines.push(`Capture operation: ${tag.value}`);
       }
       if (tag.key === "operation" && typeof tag.value === "string" &&
-          /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|CLI release notice|Machine load history maintenance|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
+          /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|CLI release notice|Machine load history maintenance|Apple commerce recovery|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
         lines.push(`Scheduled task: ${tag.value.slice("scheduled: ".length)}`);
       }
       // The browser defect endpoint sets this prefix. Only fixed application copy is readable.
@@ -78,6 +79,16 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...durableObjectFailureMetadata((extra as Record<string, unknown>).durable_object_failure));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
     if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);
+  }
+  const commerce = extra && typeof extra === "object" ? (extra as Record<string, unknown>).apple_commerce_watch_failure : undefined;
+  if (typeof commerce === "string" && commerce.length <= 8192) {
+    try {
+      for (const evidence of parseAppleCommerceWatchEvidence(JSON.parse(commerce))) {
+        lines.push(`Apple commerce watch failure: ${evidence.phase} · ${evidence.kind} · ` +
+          `${evidence.status ? `HTTP ${evidence.status}` : "no status"} · ${evidence.code} · ` +
+          `retry ${evidence.retryRecorded ? "recorded" : "not recorded"}`);
+      }
+    } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }
   const harness = extra && typeof extra === "object" ? (extra as Record<string, unknown>).harness_release_watch_failure : undefined;
   const cliRelease = extra && typeof extra === "object" ? (extra as Record<string, unknown>).cli_release_notice_failure : undefined;

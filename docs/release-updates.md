@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Apple commerce watch failures keep their phase
+
+HUB-C0 reported only that a commerce watch would retry. The pass still retries
+that watch and does not discard its snapshot or pending events. The report now
+names the failed phase, a fixed failure kind and code, and whether the retry
+was recorded, and keeps a database failure's existing attempt evidence.
+Provider response text, bundle ids and credentials stay out of the event. Hub
+only, no schema or client migration; recovery is a CI-validated beta Hub
+release reverting this change.
+
 ## Unreleased: Windows Agents work with files past 260 characters
 
 `xmatrix setup daemon` now turns on Windows' LongPathsEnabled switch before it

@@ -336,7 +336,7 @@ export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
   type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
 export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
 
-export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
+export { databaseFailureEvidence, linkDatabaseFailures, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
 
 export { PostgresMessageAskRepository, readMessageAsks } from "./message-asks.js";
 export { PostgresNornShadowRepository } from "./norn-shadow.js";
