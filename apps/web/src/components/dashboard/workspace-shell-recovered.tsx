@@ -5,7 +5,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
+import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon, type LiveChannel } from "@xmatrix/protocol";
 import { formatLocalClock, formatZonedDateTime } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -781,7 +781,7 @@ export function appendOutgoingTimelineItems(
 
 export function buildTimeline(
   history: ChannelMessage[],
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   channels: ChannelSnapshot[],
   currentUser?: { id: string; email: string; name?: string } | null,
   channelReadCounts: Record<string, number> = {},
@@ -1497,7 +1497,7 @@ export function formatMember(
 /* moved to workspace-shell-presence (1) */
 
 export function buildAgentWorkItems(
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   events: ObservabilityEvent[],
   launches: readonly SerializedAgentLaunch[] = [],
 ): AgentWorkItem[] {
@@ -1884,7 +1884,7 @@ export function channelFocusedHumanMembers(channel: ChannelSnapshot): string[] {
     .sort((left, right) => formatMember(channel, left).localeCompare(formatMember(channel, right)));
 }
 
-export function channelOnlineAgentAvatarItems(channel: ChannelSnapshot | null): ChannelAgentAvatarItem[] {
+export function channelOnlineAgentAvatarItems(channel: LiveChannel | null): ChannelAgentAvatarItem[] {
   if (!channel) return [];
 
   const items: ChannelAgentAvatarItem[] = [];

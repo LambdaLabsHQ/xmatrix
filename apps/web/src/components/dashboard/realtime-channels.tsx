@@ -96,26 +96,29 @@ export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
 
-/** The live Channels for a set of ids, read again when one of them changes. */
-export function useRealtimeChannelsById(ids: readonly string[]): (id: string) => LiveChannel | undefined {
+/**
+ * What select reads from each of a set of live Channels. A report reaches the
+ * reader only when it changes a selection, so select should keep to what is
+ * drawn (an Agent's status, not its activity).
+ */
+export function useRealtimeChannelsSelection<T>(ids: readonly string[],
+  select: (channel: LiveChannel | undefined) => T): (id: string) => T | undefined {
   const store = useContext(RealtimeChannelsContext);
   const key = [...new Set(ids)].sort().join("\n");
-  const held = useRef<{ key: string; channels: readonly (LiveChannel | undefined)[];
-    read: (id: string) => LiveChannel | undefined } | null>(null);
+  const held = useRef<{ key: string; select: typeof select; values: ReadonlyMap<string, T>;
+    read: (id: string) => T | undefined } | null>(null);
   const subscribe = useCallback((notify: () => void) => {
     if (!store || !key) return noSubscription();
     const offs = key.split("\n").map(id => store.subscribeKey(id, notify));
     return () => { for (const off of offs) off(); };
   }, [store, key]);
   const snapshot = useCallback(() => {
-    const keys = key ? key.split("\n") : [];
-    const channels = keys.map(id => store?.get(id));
+    const values = new Map((key ? key.split("\n") : []).map(id => [id, select(store?.get(id))]));
     const prior = held.current;
-    if (prior && prior.key === key && prior.channels.every((channel, index) => channel === channels[index])) return prior.read;
-    const byId = new Map(keys.map((id, index) => [id, channels[index]]));
-    const read = (id: string) => byId.get(id);
-    held.current = { key, channels, read };
+    if (prior && prior.key === key && prior.select === select && sameValue(prior.values, values)) return prior.read;
+    const read = (id: string) => values.get(id);
+    held.current = { key, select, values, read };
     return read;
-  }, [store, key]);
+  }, [store, key, select]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }

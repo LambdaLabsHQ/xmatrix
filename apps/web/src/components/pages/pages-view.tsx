@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
-  type FaceOf, type ChannelSnapshot, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
+  type FaceOf, type ChannelSnapshot, type LiveChannel, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
   Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
@@ -29,6 +29,7 @@ import { CountPill } from "@/components/dashboard/count-pill";
 import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { useMessageReferenceCatalog } from "@/components/dashboard/message-reference-catalog";
+import { useRealtimeChannelsSelection } from "@/components/dashboard/realtime-channels";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type {
@@ -523,8 +524,8 @@ function useTicking(active: boolean): number {
   return now;
 }
 
-function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
-  if (!channel.presence) return undefined;
+function liveAgents(channel: LiveChannel | undefined): LiveConversation["agents"] {
+  if (!channel?.presence) return undefined;
   return channelPresenceInstances(channel.presence).flatMap(instance => {
     if (!isLiveAgentStatus(instance.status)) return [];
     const name = instance.label || instance.agentName;
@@ -1020,6 +1021,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (wasBeside.current && !activeConversationId) void refetchLinks();
     wasBeside.current = activeConversationId;
   }, [activeConversationId, refetchLinks]);
+  // Each card's Agents come from the live Channel: a list copy holds none.
+  // Only a change to who is live there, or their status, redraws the cards.
+  const linkedIds = useMemo(() => linkedKey.split(",").filter(Boolean), [linkedKey]);
+  const liveAgentsOf = useRealtimeChannelsSelection(linkedIds, liveAgents);
   const liveConversation = useCallback((conversationId: string): LiveConversation | null => {
     const channel = conversation(conversationId);
     if (!channel) return null;
@@ -1028,11 +1033,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       name: channel.name ?? null,
       lastMessage: last ? { face: faceOfSender(last.from), label: last.from.label, bodyPreview: last.bodyPreview,
         sentAt: last.sentAt } : null,
-      agents: liveAgents(channel),
+      agents: liveAgentsOf(conversationId),
       ...(channel.historyHeadSequence !== undefined ? { headSequence: channel.historyHeadSequence } : {}),
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
     };
-  }, [conversation]);
+  }, [conversation, liveAgentsOf]);
   const conversations = useMemo(() => marginConversations({ links: linkList, conversations: listedConversations,
     live: liveConversation, now: Date.now() }), [linkList, listedConversations, liveConversation]);
   const conversationName = useCallback((conversationId: string) =>
