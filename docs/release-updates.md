@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Gmail send and reply carry the files attached to the command
+
+`@gmail:send` and `@gmail:reply` could only send a plain-text email; a file
+attached to the command message was ignored, so the email went out without it.
+The files on the command message itself (`xmatrix send --file`, or a file
+attached in the composer) now go as email attachments: at most 20 files and
+25 MiB. Each is read as the Human the command runs for, through the same
+Channel attachment authority as a download. The approval card lists every
+file's name and size; the send rereads each one and refuses a file whose
+content, type or version changed after approval. A message with attachments
+goes to Gmail's upload endpoint through the short-lived Hub staging that
+`send_draft` uses. No new scope, no reconnect. Hub and protocol only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: a missing harness is refused by name before its Run starts
 
 When npm left `opencode` off a Mac daemon's PATH, xMatrix still listed

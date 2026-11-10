@@ -56,6 +56,8 @@ export interface ConnectorActionContext {
   xMedia?: XMediaCapability;
   /** Short-lived Hub URLs that let Composio fetch an approved Gmail draft snapshot too large to send inline. */
   mailSnapshot?: import("./mail-snapshot-link").MailSnapshotLinks;
+  /** The files on a Gmail send or reply command, read as its Human through the Channel attachment authority. */
+  mailAttachments?: import("./gmail-attachments").MailAttachments;
   /** Revalidates current app permission immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
@@ -113,6 +115,8 @@ export interface ConnectorCommandInput {
   /** The original command for a later attempt; null publishes an unthreaded decision with no retained message reference. */
   commandMessageId?: string | null;
   body: string;
+  /** The files on the command message, as committed. */
+  attachments?: readonly { id: string }[];
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */
   senderKind?: "user" | "agent";
