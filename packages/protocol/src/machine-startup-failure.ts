@@ -12,6 +12,11 @@ export interface PublicMachineStartupFailure {
  * GitHub refuses the clone or fetch. No launch pre-check stands in for it. */
 export const REPOSITORY_ACCESS_UNAVAILABLE = "repository_access_unavailable";
 
+/** The code a Run fails with when its machine's daemon cannot find the
+ * harness's launcher on the PATH the Run would get; the detail names the
+ * program and its install. */
+const HARNESS_MISSING = "harness_missing";
+
 const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
 
 /** The refusal text the Hub's repository-token mint answers with; the daemon
@@ -28,6 +33,8 @@ export function publicMachineStartupFailure(detail: unknown): PublicMachineStart
   const text = detail.toLowerCase();
   let code = "startup_failed";
   if (/\brepository_access_unavailable\b/u.test(text)) code = REPOSITORY_ACCESS_UNAVAILABLE;
+  // The daemon found the harness's launcher missing before starting anything.
+  else if (/\bharness_missing\b/u.test(text)) code = HARNESS_MISSING;
   else if (/\bbase_ref_unresolved\b/u.test(text) || text.includes("could not resolve origin default branch")) code = "repository_base_unresolved";
   else if (/\bdisk_exhausted\b/u.test(text) || text.includes("no space left on device")) code = "machine_disk_full";
   else if (/\bfetch_required_failed\b/u.test(text)) code = "repository_fetch_failed";

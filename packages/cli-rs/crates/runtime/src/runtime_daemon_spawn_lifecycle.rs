@@ -2066,6 +2066,53 @@ struct HeadlessAgentSpawn<'a> {
     daemon_epoch: u64,
 }
 
+/// What a missing launcher's refusal starts with; Hub reads it as the code.
+pub(crate) const HARNESS_MISSING: &str = "harness_missing";
+
+/// A preset's own launcher must be on the PATH the Run will get before the
+/// wrapper starts: otherwise the wrapper dies on `No such file or directory`
+/// naming nothing. A custom command is the registration's own and is not
+/// judged here.
+fn harness_launcher_preflight(
+    agent_preset_id: Option<&str>,
+    runtime: &str,
+    profile_path: Option<&str>,
+) -> error::Result<()> {
+    let Some(preset) = agent_preset_id.and_then(xmatrix_cli_agent::agent_preset_by_id) else {
+        return Ok(());
+    };
+    let stem = xmatrix_cli_agent::launcher_stem(runtime);
+    let own_launcher = xmatrix_cli_agent::launcher_stem(&preset.runtime) == stem
+        || preset
+            .launcher_names
+            .iter()
+            .any(|name| xmatrix_cli_agent::launcher_stem(name) == stem);
+    if !own_launcher
+        || crate::runtime_daemon_harness_inventory::resolve_launcher_on(preset, profile_path)
+            .is_some()
+    {
+        return Ok(());
+    }
+    if let Some(path) = xmatrix_cli_agent::agent_spawn_path(profile_path) {
+        eprintln!(
+            "{HARNESS_MISSING}: {} ({runtime}) not found on {}",
+            preset.display_name,
+            path.to_string_lossy()
+        );
+    }
+    let install = preset
+        .install_hint
+        .as_deref()
+        .filter(|hint| !hint.trim().is_empty())
+        .map(|hint| format!("Install it with `{hint}`"))
+        .unwrap_or_else(|| "Install it".to_string());
+    Err(CliError::Launch(format!(
+        "{HARNESS_MISSING}: {} (`{runtime}`) is not installed where xMatrix starts Agents on this machine. \
+         {install}, or link it into ~/.local/bin, then send the message again.",
+        preset.display_name
+    )))
+}
+
 async fn spawn_headless_agent(
     spawn: HeadlessAgentSpawn<'_>,
 ) -> error::Result<SpawnedHeadlessAgent> {
@@ -2156,6 +2203,19 @@ async fn spawn_headless_agent(
             admitted_secrets: Some(registration.resources.secrets.clone()),
         })
     });
+    if let Err(error) = harness_launcher_preflight(
+        agent_preset_id,
+        runtime,
+        local_env.get("PATH").map(String::as_str),
+    ) {
+        // Hub still believes this harness is installed here: tell it now, so
+        // the next summon is refused by name instead of failing again.
+        let relay = daemon_relay.clone();
+        tokio::spawn(async move {
+            crate::runtime_daemon_harness_inventory::report_inventory(&relay).await;
+        });
+        return Err(error);
+    }
     // An external Unix update may atomically replace the installed CLI while
     // an older daemon still owns work. Linux keeps that running image
     // executable through /proc/self/exe even when current_exe points at the
@@ -2715,5 +2775,70 @@ mod windows_working_directory_tests {
         assert!(windows_working_directory_too_long(&invalid, r"C:\repo").is_none());
         let missing = std::io::Error::from_raw_os_error(2);
         assert!(windows_working_directory_too_long(&missing, &cwd).is_none());
+    }
+}
+
+#[cfg(test)]
+mod harness_launcher_preflight_tests {
+    use super::{HARNESS_MISSING, harness_launcher_preflight};
+
+    /// A launcher name no machine running these tests has installed.
+    fn absent_preset() -> &'static xmatrix_cli_agent::AgentPreset {
+        xmatrix_cli_agent::agent_presets()
+            .iter()
+            .find(|preset| {
+                preset.install_hint.is_some()
+                    && which::which_in(
+                        &preset.runtime,
+                        xmatrix_cli_agent::agent_spawn_path(Some("")),
+                        std::env::temp_dir(),
+                    )
+                    .is_err()
+                    && xmatrix_cli_agent::native_launcher_dirs(&preset.id).is_empty()
+            })
+            .expect("a preset whose launcher is not installed here")
+    }
+
+    #[test]
+    fn a_missing_launcher_is_refused_by_name_before_the_wrapper_starts() {
+        let preset = absent_preset();
+        let root = std::env::temp_dir().join(format!("xmatrix-preflight-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let profile = root.to_string_lossy().into_owned();
+
+        let refusal = harness_launcher_preflight(Some(&preset.id), &preset.runtime, Some(&profile))
+            .expect_err("missing launcher")
+            .to_string();
+        assert!(refusal.starts_with(HARNESS_MISSING), "{refusal}");
+        assert!(refusal.contains(&preset.display_name), "{refusal}");
+        assert!(refusal.contains(preset.install_hint.as_deref().unwrap()), "{refusal}");
+
+        // The same launcher on the Run's PATH starts.
+        let suffix = if cfg!(windows) { ".cmd" } else { "" };
+        let launcher = root.join(format!("{}{suffix}", preset.runtime));
+        std::fs::write(&launcher, b"fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        harness_launcher_preflight(Some(&preset.id), &preset.runtime, Some(&profile))
+            .expect("launcher on the Run's PATH");
+
+        // A registration's own command, or no preset, is not judged.
+        harness_launcher_preflight(Some(&preset.id), "my-wrapper-xyz", Some(&profile)).unwrap();
+        harness_launcher_preflight(None, &preset.runtime, Some("")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installer_directories_are_on_every_run_path() {
+        let path = xmatrix_cli_agent::agent_spawn_path(Some("")).expect("spawn path");
+        let dirs: Vec<_> = std::env::split_paths(&path).collect();
+        for id in ["opencode", "kimi"] {
+            for dir in xmatrix_cli_agent::native_launcher_dirs(id) {
+                assert!(dirs.contains(&dir), "{id}: {}", dir.display());
+            }
+        }
     }
 }
