@@ -655,7 +655,7 @@ export async function recallChannelMessage(
   return requireMessageResponse(res);
 }
 
-export function replaceChannel(channels: ChannelSnapshot[], channel: ChannelSnapshot | SerializedChannel): ChannelSnapshot[] {
+export function replaceChannel(channels: readonly ChannelSnapshot[], channel: LiveChannel | SerializedChannel): ChannelSnapshot[] {
   const index = channels.findIndex((current) => current.id === channel.id);
   const merged = mergeChannelListHydratedFields(index >= 0 ? channels[index] : undefined, channel);
   if (index < 0) return sortChannels([...channels, merged]);
@@ -663,7 +663,7 @@ export function replaceChannel(channels: ChannelSnapshot[], channel: ChannelSnap
 }
 
 /** `channels` with the one at `index` replaced, and moved to where it now sorts when it left its place. */
-export function placeChannel(channels: ChannelSnapshot[], index: number, channel: ChannelSnapshot): ChannelSnapshot[] {
+export function placeChannel<C extends ChannelSnapshot>(channels: readonly C[], index: number, channel: C): C[] {
   const next = channels.slice();
   next[index] = channel;
   // Most replacements (presence, read state, topic) leave a Channel where it

@@ -296,7 +296,7 @@ export function sortAutomations(automations: SerializedAutomation[]): Serialized
   });
 }
 
-export function sortChannels(channels: ChannelSnapshot[]): ChannelSnapshot[] {
+export function sortChannels<C extends ChannelSnapshot>(channels: readonly C[]): C[] {
   return [...channels].sort(compareChannelsForSidebar);
 }
 

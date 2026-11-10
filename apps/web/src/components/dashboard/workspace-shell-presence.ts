@@ -13,7 +13,6 @@ import type {
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
-  ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 export type PresentedChannelMemberPresence = ChannelMemberPresence |

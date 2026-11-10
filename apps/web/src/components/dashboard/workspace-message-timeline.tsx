@@ -3499,7 +3499,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   // supplies an operation; readLatest always rebuilds from the current store.
   useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
   const readLatest = useCallback((key: string) => {
-    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    // Only the live Channel holds Instances to act on.
+    const channel = realtimeChannels?.get(channelId);
     if (!channel) return undefined;
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);

@@ -306,7 +306,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const accessTokenRef = useRef<string | undefined>(token);
   const channelReadStateUserIdRef = useRef<string | null>(null);
   const desktopBridgeRef = useRef<DesktopBridge | null>(desktopBridge);
-  const channelsRef = useRef<ChannelSnapshot[]>([]);
+  const channelsRef = useRef<LiveChannel[]>([]);
   const spacesRef = useRef<SerializedSpace[]>([]);
 
   const routeSpaceIdRef = useRef<string | null>(null);
