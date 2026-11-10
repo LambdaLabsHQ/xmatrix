@@ -10,16 +10,17 @@ Shared command grammar lives in `packages/protocol/src/index.ts`:
 
 - `MENTION_COMMAND_COMPLETION_SCHEMA` declares the `@` entry point and its dynamic
   target source.
-- Data-driven runtime catalogs live in `packages/protocol/src/agent-command-catalogs/*.json`
-  (codex/claude/grok/zcode), each pointing at a stable vendor docs `sourceUrl`. Runtimes
-  load the matching JSON and advertise `commands[]` on presence. Composer completes from
-  that list (passthrough by default, typed when `mode` is set).
+- Runtimes advertise `commands[]` on presence. Native enumeration, including an
+  empty result, is authoritative; reviewed source-backed catalogs in
+  `packages/protocol/src/agent-command-catalogs/*.json` supplement runtimes only
+  where native enumeration is unavailable. Composer completes from that derived
+  list (passthrough by default, typed when `mode` is set).
 - Refresh catalogs with the `refresh-agent-command-catalogs` skill or
   `node scripts/refresh-agent-command-catalogs.mjs --check` (data PR, not generated
-  business code). Optional runtime overlays merge additively: Claude
-  `system/init.slash_commands`, Grok local skills dirs, ZCode `~/.zcode/commands`.
-- `AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA` is only a fallback when a live instance has
-  not advertised a command catalog.
+  business code). Native command observations replace prior observations; see
+  [provider capability ownership](operations/provider-capability-audit.md).
+- `AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA` owns fixed xMatrix controls,
+  offered only when the Instance's catalogs and capabilities support them.
 - Connector action definitions live in `APP_CONNECTOR_PROVIDER_MANIFESTS`; their
   completion metadata is part of the same provider action definition used by the
   product.
@@ -27,6 +28,19 @@ Shared command grammar lives in `packages/protocol/src/index.ts`:
 Each schema node owns its token, label, description, action, next-segment delimiter,
 and either static children or a named dynamic source. Consumers must not duplicate
 those values in UI-specific completion tables.
+
+The runtime's commands, capabilities, models, parameters and workspace presentation
+are persisted on its Instance row and returned by the same versioned
+`InstanceRecord` projection on reports, cold Channel windows and exact reads.
+`AgentInstancePresentation` owns the field types. The internal
+`AgentInstanceDurablePresentation` requires every durable key, with `undefined`
+for an unobserved value; both its normalizer and field registry are exhaustive
+at compile time. PostgreSQL derives its selected JSON fields from that registry,
+and its reader and the runtime writer use the same normalization. The narrow
+`AgentMessagePresentation` cannot satisfy the durable checkpoint type. Empty
+catalogs remain explicit withdrawals. Modern clients derive their view from those records;
+legacy Agent cards cannot fill missing fields. Temporary activity, intent, files
+and runtime state travel separately and never become durable catalog fields.
 
 ## Resolution stages
 
@@ -74,7 +88,8 @@ label and only the candidates valid at that stage:
    present (including vendor passthrough commands). Typed `/model ` and `/effort `
    still resolve dynamic arguments from the instance model/effort catalogs; `/goal `
    resolves schema-declared controls while still allowing free-form goal text.
-   When `commands[]` is empty, the shared fallback schema is used.
+   An empty `commands[]` withdraws native commands; supported fixed xMatrix
+   controls retain their separate capability contract.
 5. `@<connector>:` resolves that connector's manifest actions. Selecting an action
    inserts the delimiter declared by the action. Schema-declared dynamic arguments
    continue one segment at a time before handing remaining arguments to free-form input.

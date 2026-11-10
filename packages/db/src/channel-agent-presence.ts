@@ -2,13 +2,12 @@ import { checkedStoredIso } from "./stored-values.js";
 import {
   LIVE_AGENT_STATUS_SQL,
   localLlmUsage,
-  type LlmUsage,
+  AGENT_INSTANCE_DURABLE_KEYS,
+  definedAgentInstanceDurablePresentation,
   agentFaceUrl,
   isLiveAgentStatus,
   isAgentInstanceOfflineReason,
-  type AgentGoalStatus,
   type AgentInstanceRest,
-  type AgentStatusChip,
   repoSummonReference,
   type ChannelMemberPresence,
   type InstanceRecord,
@@ -48,12 +47,7 @@ interface InstanceRecordRow extends QueryResultRow {
   instance_version: string | number;
   presence_version?: unknown;
   presence_sequence?: unknown;
-  instance_usage?: LlmUsage | null;
-  instance_model?: string | null;
-  instance_effort?: string | null;
-  instance_status_chips?: unknown;
-  instance_goal?: unknown;
-  instance_git_branch?: string | null;
+  instance_presentation?: unknown;
   registration_space?: string | null;
   registration_display_name?: string | null;
   registration_version?: string | number | null;
@@ -104,17 +98,14 @@ const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESEN
  * connection persisted with the report its revision names. Activity, files,
  * intent and runtimeState are temporary work and stay off this read.
  */
-const DURABLE_PRESENTATION_SQL = `i.presentation_json->>'model' AS instance_model,
-        i.presentation_json->>'effort' AS instance_effort,
-        i.presentation_json->'statusChips' AS instance_status_chips,
-        i.presentation_json->'goal' AS instance_goal,
-        i.presentation_json->>'gitBranch' AS instance_git_branch`;
+const DURABLE_PRESENTATION_SQL = `jsonb_strip_nulls(jsonb_build_object(${AGENT_INSTANCE_DURABLE_KEYS
+  .map(key => `'${key}',i.presentation_json->'${key}'`).join(",")})) AS instance_presentation`;
 /** What every Instance record is made of, whichever read selects it. */
 const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
         i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
         i.presentation_json->'presenceSequence' AS presence_sequence,
         i.presentation_json->>'offlineReason' AS shown_offline_reason,
-        i.created_at,i.updated_at,i.presentation_json->'usage' AS instance_usage,${DURABLE_PRESENTATION_SQL},
+        i.created_at,i.updated_at,${DURABLE_PRESENTATION_SQL},
         r.workspace_machine_id,
         r.workspace_canonical_cwd,${PRESENCE_RUN_METADATA_SQL} AS run_metadata_json,
         COALESCE(s.display_name,r.metadata_json->>'agentName','Agent') AS agent_name,
@@ -165,7 +156,7 @@ export async function loadChannelInstanceRecords(
   const byChannel = new Map<string, AgentInstanceRecord[]>(selected.map((channelId) => [channelId, []]));
   if (selected.length === 0) return byChannel;
   const live = await transaction.query<InstanceRecordRow>({
-    name: "channel_agent_presence_v11",
+    name: "channel_agent_presence_v12",
     text: `SELECT ${RECORD_COLUMNS_SQL}
       ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[])
@@ -190,7 +181,7 @@ export async function loadChannelInstanceRecords(
   // wakes it (docs/instance-sleep.md §5). Newest first, a bounded few per
   // Channel; unlike live Instances, a Channel with more simply shows fewer.
   const resting = await transaction.query<InstanceRecordRow>({
-    name: "channel_agent_resting_presence_v7",
+    name: "channel_agent_resting_presence_v8",
     text: `SELECT * FROM (SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL},
         row_number() OVER (PARTITION BY i.channel_id ORDER BY i.updated_at DESC,i.instance_id) AS rest_rank
       ${recordFromSql("$1")}
@@ -237,7 +228,7 @@ export async function loadAgentInstanceRecordsById(
   const channels = selectedChannels(channelIds);
   if (requested.length === 0 || channels.length === 0) return { records: [], missingInstanceIds: requested };
   const rows = await transaction.query<InstanceRecordRow>({
-    name: "agent_instance_records_by_id_v1",
+    name: "agent_instance_records_by_id_v2",
     text: `SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL}
       ${recordFromSql("$1")}
       WHERE i.instance_id=ANY($2::text[]) AND i.channel_id=ANY($3::text[])
@@ -390,85 +381,6 @@ export async function loadVisibleLiveAgentPresence(
   return loadChannelAgentPresence(transaction, spaceId, channels.map((row) => row.channel_id));
 }
 
-/** Model, effort and chips stored on the Instance. A value this read cannot show is omitted. */
-function durableInstancePresentation(row: InstanceRecordRow): Pick<
-  SerializedAgentInstance, "model" | "effort" | "statusChips" | "goal"
-> {
-  const model = boundedPresentationText(row.instance_model, 128);
-  const effort = boundedPresentationText(row.instance_effort, 64);
-  const statusChips = durableStatusChips(row.instance_status_chips);
-  const goal = durableGoal(row.instance_goal);
-  return {
-    ...(model ? { model } : {}),
-    ...(effort ? { effort } : {}),
-    ...(statusChips ? { statusChips } : {}),
-    ...(goal ? { goal } : {}),
-  };
-}
-
-const GOAL_TEXT_LIMITS = { objective: 1_024, status: 128, updatedAt: 64, reason: 512, nextAction: 512 } as const;
-const GOAL_COUNTERS = ["tokensUsed", "timeUsedSeconds", "iterationCount", "contextUsed", "toolCallCount"] as const;
-
-/** The goal the connection persisted, as far as this read can show it; anything else is left out. */
-function durableGoal(value: unknown): AgentGoalStatus | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const source = value as Record<string, unknown>;
-  const goal: AgentGoalStatus = typeof source.active === "boolean" ? { active: source.active } : {};
-  for (const [key, limit] of Object.entries(GOAL_TEXT_LIMITS) as [keyof typeof GOAL_TEXT_LIMITS, number][]) {
-    const text = boundedPresentationText(source[key], limit);
-    if (text) goal[key] = text;
-  }
-  for (const key of GOAL_COUNTERS) {
-    const number = source[key];
-    if (typeof number === "number" && Number.isFinite(number) && number >= 0) goal[key] = number;
-  }
-  return Object.keys(goal).length > 0 ? goal : undefined;
-}
-
-function boundedPresentationText(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== "string") return undefined;
-  const text = value.trim();
-  return text && text.length <= maxLength ? text : undefined;
-}
-
-function durableStatusChips(value: unknown): AgentStatusChip[] | undefined {
-  if (!Array.isArray(value) || value.length === 0 || value.length > 16) return undefined;
-  const chips: AgentStatusChip[] = [];
-  for (const item of value) {
-    if (!item || typeof item !== "object" || Array.isArray(item)) return undefined;
-    const chip = item as Record<string, unknown>;
-    const id = boundedPresentationText(chip.id, 64);
-    const label = boundedPresentationText(chip.label, 64);
-    if (!id || !label) return undefined;
-    const next: AgentStatusChip = { id, label };
-    if (chip.value !== undefined) {
-      const shown = boundedPresentationText(chip.value, 128);
-      if (!shown) return undefined;
-      next.value = shown;
-    }
-    if (chip.percent !== undefined) {
-      if (typeof chip.percent !== "number" || chip.percent < 0 || chip.percent > 100) return undefined;
-      next.percent = chip.percent;
-    }
-    if (chip.source !== undefined) {
-      const source = boundedPresentationText(chip.source, 64);
-      if (!source) return undefined;
-      next.source = source;
-    }
-    if (chip.resetAt !== undefined) {
-      const resetAt = boundedPresentationText(chip.resetAt, 40);
-      if (!resetAt) return undefined;
-      next.resetAt = resetAt;
-    }
-    if (chip.parameterKind !== undefined) {
-      if (chip.parameterKind !== "boolean" && chip.parameterKind !== "enum") return undefined;
-      next.parameterKind = chip.parameterKind;
-    }
-    chips.push(next);
-  }
-  return chips;
-}
-
 /**
  * How a row stands. A live row whose Run has ended, and an offline one with
  * no rest and no first launch in flight, have left the Channel; both windows
@@ -529,7 +441,8 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
   const repository = remoteRepo ? repoSummonReference(remoteRepo) : undefined;
   const label = row.agent_name;
   const channelInstanceId = String(ordinal);
-  const usage = localLlmUsage(row.instance_usage ?? undefined);
+  const { usage: storedUsage, ...presentation } = definedAgentInstanceDurablePresentation(row.instance_presentation);
+  const usage = localLlmUsage(storedUsage);
   return {
     id: row.instance_id,
     channelInstanceId,
@@ -570,10 +483,10 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
       ? { workspaceName: metadataText(runMetadata, "workspaceName") }
       : {}),
     // The branch the connection last reported, else the one its Run started on.
-    ...(boundedPresentationText(row.instance_git_branch, 256) || metadataText(runMetadata, "gitBranch")
-      ? { gitBranch: boundedPresentationText(row.instance_git_branch, 256) || metadataText(runMetadata, "gitBranch") }
+    ...(presentation.gitBranch || metadataText(runMetadata, "gitBranch")
+      ? { gitBranch: presentation.gitBranch || metadataText(runMetadata, "gitBranch") }
       : {}),
-    ...durableInstancePresentation(row),
+    ...presentation,
     agentName: label,
     registration: { ownerUserId: row.registration_owner, machineId: row.registration_machine,
       harness: row.registration_harness },
@@ -591,8 +504,8 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
 function registrationPresentationOf(row: InstanceRecordRow): Pick<AgentInstanceRecord, "registrationPresentation"> {
   if (row.registration_version === null || row.registration_version === undefined) return {};
   const version = Number(row.registration_version);
-  const displayName = boundedPresentationText(row.registration_display_name, 300);
-  if (!Number.isSafeInteger(version) || version < 1 || !displayName || !row.registration_space) {
+  const displayName = typeof row.registration_display_name === "string" ? row.registration_display_name.trim() : undefined;
+  if (!Number.isSafeInteger(version) || version < 1 || !displayName || displayName.length > 300 || !row.registration_space) {
     throw new DatabaseContractError("Agent registration presentation is invalid");
   }
   return { registrationPresentation: {

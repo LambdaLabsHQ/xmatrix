@@ -405,8 +405,8 @@ test("a historical instance reborn mention reuses its durable session key after 
     const restoredInstance = restoredPresence.instances.find(
       (instance) => instance.id === resumed.resumeInstanceId,
     );
-    // GET /api/channels shares the persisted branch and goal with live frames;
-    // model catalogs and commands remain connection-owned. Quota is the registration reading.
+    // Cold reads retain the same runtime catalogs as live reports. Quota is
+    // still the registration reading, independent of the Instance counters.
     assert.equal(restoredPresence.usage.totalTokens, 180);
     assert.equal(restoredInstance.model, "gpt-5.6-sol");
     assert.equal(restoredInstance.effort, "xhigh");
@@ -418,8 +418,8 @@ test("a historical instance reborn mention reuses its durable session key after 
     assert.deepEqual(restoredInstance.goal, {
       active: true, objective: "Verify safe Reborn migration", status: "active", tokensUsed: 180,
     });
-    assert.equal(restoredInstance.models, undefined);
-    assert.equal(restoredInstance.commands, undefined);
+    assert.deepEqual(restoredInstance.models, presentation.models);
+    assert.deepEqual(restoredInstance.commands, presentation.commands);
 
     const clientMessageId = randomUUID();
     const body = "Reborn presentation restored through the real Agent HTTP sender.";
