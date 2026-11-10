@@ -24,7 +24,7 @@ file's name and size; the send rereads each one and refuses a file whose
 content, type or version changed after approval. A message with attachments
 goes to Gmail's upload endpoint through the short-lived Hub staging that
 `send_draft` uses. An approved send reads the files its card froze; the first beta
-refused them as unreadable and sent nothing (#1520). No new scope, no reconnect. Hub and protocol only, no schema
+refused them as unreadable and sent nothing (#1521). No new scope, no reconnect. Hub and protocol only, no schema
 or client migration. Recovery is a CI-validated beta Hub reverting this change.
 
 ## Unreleased: a missing harness is refused by name before its Run starts
