@@ -120,11 +120,28 @@ Harness selection lists each harness's declared models. The parameter decision t
 offers the real model/effort domain of the chosen harness's environments, including
 owner-declared versus observed provenance and observation time. Model names and harness names are unrelated values: no code
 compares, filters, aliases or derives one from the other, and no `models` list
-carries a harness name. An empty declared model list allows no model override,
-so Jev skips model/effort selection and the launch leaves the runtime defaults
-untouched. No synthetic default option or model tag is emitted. A non-empty
-list is the complete set of allowed models, compared literally; without a
-matching observed catalog entry, the declared models themselves are offered.
+carries a harness name. An empty declared model list allows no model override
+or model resource: the launch runs on the runtime-default authority. On a daemon
+that advertises `registration_native_model_v1`, its runtime's own fresh model
+catalog (at most 24 hours old) is then the model choice, the same set a live
+`/model` can already switch that runtime to. Jev's question offers the runtime's
+default first and the catalog's other entries after it, and keeps the default
+unless the author or the discussion names or asks for another model; keeping it
+selects no model (`registration-parameters-v12` records a model choice without a
+selected model). A written `model:` matches an entry by the runtime's model id or
+any name the catalog gives it (Claude's `sonnet`, a display name), ignoring case;
+nothing maps one model's name to another. The stored catalog keeps one entry per
+model and records the runtime's other selectors for it as `aliases` (Claude lists
+`default` and `opus` for the same model), so those stay nameable here and in a
+live `/model`. A chosen entry rides on the launch as
+`preferredModel`: no grant or model resource changes, the spawn context carries
+`preferredModel`, and the daemon requests it of the runtime exactly as it does an
+admitted model, so a runtime that does not accept it fails to start instead of
+running its default. A reborn of that Instance starts on the same model. Without
+such a daemon or catalog there is no model decision and a written `model:` is
+refused with `registration_model_unavailable`. A non-empty list is the complete
+set of allowed models, compared literally; without a matching observed catalog
+entry, the declared models themselves are offered.
 An explicit `model:` or `effort:` tag still requires a matching allowed option.
 An explicit effort is a feasibility constraint before fit or headroom ranking:
 the daemon must support forwarding it and a fresh runtime model catalog must
@@ -192,7 +209,8 @@ field is additive; existing consumers may omit it.
 Jev never sees machine load, provider quota or allocation counts. Explicit
 machine, workspace and parameter constraints still narrow the candidates first,
 and a measured exhausted quota still excludes an environment. When the chosen
-environment declares models, Jev chooses its model and effort. If one harness
+environment declares models, or offers its runtime's own catalog as above, Jev
+chooses its model and effort. If one harness
 remains and all its environments offer the same models, it chooses them in the
 first call, because the location changes nothing about the options. Otherwise a
 second call chooses them for the environment that runs the work.
@@ -201,7 +219,7 @@ A question with one option is answered by that option. A call in which every
 question has one option is not made, so it costs no model round trip and stores
 no decision evidence. Typical cases are a `launch:force` summon of one harness
 into a single location, using the runtime's own model or a model the message
-names. From `registration-parameters-v11`, such a choice is recorded `only`: its
+names. From `registration-parameters-v11` (and in v12), such a choice is recorded `only`: its
 answer, with certainty 1, as a fact rather than a reading. A launch for which
 Jev read nothing records its decision as `deterministic`.
 

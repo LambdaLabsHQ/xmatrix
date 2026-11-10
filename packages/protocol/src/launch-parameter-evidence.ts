@@ -148,8 +148,10 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       !row.selections || typeof row.selections !== "object" || Array.isArray(row.selections) ||
       !Array.isArray(row.choices) || row.choices.length < 1 || row.choices.length > 3) return undefined;
   const selected = row.selections as Record<string, unknown>;
-  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11"]
-    .includes(row.rubricVersion) && selected.model === undefined;
+  // From v12 a model choice may keep the runtime's default, so it selects no model.
+  const keepsDefault = row.rubricVersion === "registration-parameters-v12";
+  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11",
+    "registration-parameters-v12"].includes(row.rubricVersion) && selected.model === undefined;
   if ((!skipsModel && !text(selected.model, 160)) ||
       selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
@@ -163,12 +165,13 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       : key === "workspace" ? /^workspace_\d{1,3}$/u : /^placement_(?:any|stationary)$/u, choice);
     if (!parsed) return undefined;
     // The only option is certain by itself, not by anyone's reading.
-    if (only !== undefined && (only !== true || row.rubricVersion !== "registration-parameters-v11" ||
+    if (only !== undefined && (only !== true || !["registration-parameters-v11", "registration-parameters-v12"].includes(String(row.rubricVersion)) ||
         Object.keys(parsed).length !== 1 || parsed[choice as string] !== 1)) return undefined;
     choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed,
       ...(only ? { only: true as const } : {}) });
   }
-  if (choices.some(item => item.key === "modelEffort") === skipsModel || !choices.some(item => item.key === "workspace")) return undefined;
+  const modelChosen = choices.some(item => item.key === "modelEffort");
+  if ((keepsDefault ? !skipsModel && !modelChosen : modelChosen === skipsModel) || !choices.some(item => item.key === "workspace")) return undefined;
   const harness = stage(row.harness, HARNESS);
   const environment = stage(row.environment, /^candidate_\d{1,3}$/u);
   if (harness === null || environment === null) return undefined;

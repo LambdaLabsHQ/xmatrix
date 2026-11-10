@@ -7,10 +7,12 @@ import {
   machineMentionValue,
   machineTagSelects,
   parseAutoLaunchMentions,
+  routingModelOptionNamed,
   type AutoLaunchField,
   type AutoLaunchMention,
   type AutoLaunchTags,
   type AgentRegistrationSummary,
+  type RoutingModelOption,
   type SpaceLaunchTargetsResponse,
 } from "@xmatrix/protocol";
 import type { ActiveMention, MentionCandidate } from "./mention-complete";
@@ -122,13 +124,17 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
     if (registration.state !== "enabled" || !registration.routingReady ||
         selected.machine && !machineTagSelects(selected.machine, machineId, registration.machineName) ||
         selected.harness && selected.harness !== harness) continue;
-    // Allowed models are the complete list; an empty list allows only the
-    // runtime default, so no model is offered for it, only that model's efforts.
+    // Allowed models are the complete list. An empty list runs the runtime
+    // default, so only that model's efforts are offered, unless its daemon
+    // switches the runtime to a model from the runtime's own catalog.
     const allowed = registration.models;
+    const native = !allowed.length && registration.nativeModels === true;
+    const named = (model: RoutingModelOption) => !selected.model || (native
+      ? routingModelOptionNamed(model, selected.model) : selected.model === model.model);
     const observed = (registration.modelCatalog ?? []).filter(model => model.model && (allowed.length
-      ? allowed.includes(model.model) : model.model === registration.parameterModel));
-    const reported = allowed.length ? observed.map(model => model.model) : [];
-    if (selected.model && !allowed.includes(selected.model)) continue;
+      ? allowed.includes(model.model) : native || model.model === registration.parameterModel));
+    const reported = allowed.length || native ? observed.map(model => model.model) : [];
+    if (selected.model && (native ? !observed.some(named) : !allowed.includes(selected.model))) continue;
     const spoken = machineMentionValue(machineId, registration.machineName);
     add("machine", spoken, spoken === machineId ? machineLaunchTagValue(machineId) : registration.machineName,
       {}, offlineMachines.has(machineId) ? "Offline" : undefined);
@@ -147,7 +153,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
     }
     for (const model of reported.length ? reported : allowed) add("model", model);
     for (const model of observed) {
-      if (selected.model && selected.model !== model.model) continue;
+      if (!named(model) || native && !selected.model && model.model !== registration.parameterModel) continue;
       for (const effort of model.efforts) add("effort", effort.value);
     }
   }

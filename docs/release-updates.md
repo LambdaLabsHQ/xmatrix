@@ -16,6 +16,25 @@ reads an Instance-identity view that changes only when who is there changes,
 so activity reports still do not rebuild message rows. Web only; recovery is a
 CI-validated beta Web release reverting this change.
 
+## Unreleased: Summons infer and apply a model from the runtime's own catalog
+
+A summon could choose a model only from a list its Agent's owner declared, and
+no registration declares one, so `@claude model:sonnet` was refused and Jev
+never chose a model. With no declared list, a summon now chooses from the
+runtime's fresh native model catalog, the same set a live `/model` offers. Jev
+keeps the runtime's default unless the author or the discussion names or asks
+for another model; a written `model:` matches the runtime's model id or any
+selector or display name it lists (Claude's `opus`, `Sonnet 5.5`). The launch
+stays on the runtime-default authority, with no grant or model resource change,
+and carries the choice as `preferredModel`; the daemon requests it of the
+runtime as it does an admitted model, so a runtime that rejects it fails to
+start rather than running its default. A reborn restarts on the same model.
+Stored catalogs keep a collapsed selector as an alias, so live `/model opus`
+works too. Needs the Hub and daemons advertising
+`registration_native_model_v1`; on older daemons a written model is still
+refused. Evidence uses `registration-parameters-v12`. Recovery is a beta Hub
+release reverting this change; daemons ignore the field without the Hub.
+
 ## Unreleased: Instance command and parameter menus retain their runtime catalogs
 
 Modern clients read versioned Instance records, but their durable projection

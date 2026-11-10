@@ -30,8 +30,12 @@ export interface AgentRegistrationSummary {
   /** `disabled`: a Space owner/admin disabled it in this Space. */
   state: "unshared" | "revoked" | "disabled" | "enabled";
   models: string[];
-  /** Recent provider options, restricted to models authorized for this registration. */
+  /** Recent provider options, restricted to models authorized for this registration.
+   * With `nativeModels`, every model the runtime's own catalog lists. */
   modelCatalog?: RoutingModelOption[];
+  /** No models are declared and its online daemon switches the runtime to a
+   * model from the runtime's own catalog, so a summon may name any of them. */
+  nativeModels?: true;
   routingReady: boolean;
   routingBlocker?: "owner_environment_missing" | "owner_environment_disabled" | "model_unavailable" | "space_setup";
   canManageOwnerGrant: boolean;

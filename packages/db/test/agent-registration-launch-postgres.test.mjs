@@ -1090,6 +1090,41 @@ integration("launch survives a hostname change with stale Workspace metadata and
       const replay = await launches.dispatchFromMessage(request, async () => assert.fail('replay must not choose a second cwd'));
       assert.equal(replay.prepared[0].runId, launch.runId);
     }
+    // With no declared models, a summon may start the runtime on a model from
+    // its own fresh catalog: on the runtime-default authority, through a daemon
+    // that applies it, and only as the model the author wrote.
+    await sql(`UPDATE data.instances SET presentation_json=jsonb_build_object('models',$2::jsonb,'modelsObservedAt',$3::text)
+      WHERE instance_id=$1`, [managedLaunches[0].instanceId, JSON.stringify([
+      { id: 'default', model: 'codex-large', displayName: 'Default', isDefault: true },
+      { id: 'sonnet', model: 'codex-sonnet', displayName: 'Sonnet' }]), new Date().toISOString()]);
+    const prefer = (model, check = () => {}) => async ({ candidates }) => {
+      const candidate = candidates.find(candidate => candidate.key.harness === 'codex');
+      check(candidate);
+      return { key: candidate.key, model: '', useRuntimeDefaultModel: true, preferredModel: model };
+    };
+    const unapplied = await launches.dispatchFromMessage(await managedMessage('native-incapable', '@codex', target, ' model:sonnet'),
+      prefer('codex-sonnet', candidate => assert.equal(candidate.supportsNativeModel, undefined)));
+    assert.deepEqual(unapplied.rejected.map(item => item.code), ['registration_selection_invalid'],
+      'a daemon that cannot apply a native model is never asked to');
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_native_model_v1"]'::jsonb`);
+    const native = await launches.dispatchFromMessage(await managedMessage('native-model', '@codex', target, ' model:Sonnet'),
+      prefer('codex-sonnet', candidate => {
+        assert.equal(candidate.supportsNativeModel, true);
+        assert.deepEqual(candidate.modelCatalog.map(option => option.model), ['codex-large', 'codex-sonnet']);
+      }));
+    assert.deepEqual(native.rejected, []);
+    const nativeRun = (await sql(`SELECT l.spawn_payload_json,r.metadata_json FROM data.agent_launches l
+      JOIN data.runs r ON r.run_id=l.run_id WHERE l.launch_id=$1`, [native.prepared[0].launchId])).rows[0];
+    const { preferredModel, requestedModel } = nativeRun.spawn_payload_json.context;
+    assert.deepEqual({ preferredModel, requestedModel }, { preferredModel: 'codex-sonnet', requestedModel: undefined });
+    assert.deepEqual(nativeRun.spawn_payload_json.registration.resources.models, [], 'no model resource is admitted');
+    assert.equal(nativeRun.metadata_json.useRuntimeDefaultModel, true);
+    assert.equal(nativeRun.metadata_json.preferredRuntimeModel, 'codex-sonnet');
+    for (const [id, condition, model] of [['native-unlisted', '', 'codex-unlisted'], ['native-other-name', ' model:opus', 'codex-sonnet']]) {
+      const refused = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition), prefer(model));
+      assert.equal(refused.prepared.length, 0, id);
+      assert.equal(refused.rejected.length, 1, id);
+    }
     for (const [id, condition] of [['managed-explicit-pwd', ' pwd:"/not-authorized"'], ['managed-explicit-repo', ' repo:other/private']]) {
       const refusal = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition),
         async () => assert.fail('an explicit unauthorized target must not fall back to a private cwd'));
