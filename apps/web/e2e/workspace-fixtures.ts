@@ -107,9 +107,11 @@ export async function routeHumanSocket(
   onFrame: (frame: HumanSocketFrame, reply: (message: unknown) => void, connection: number) => void,
 ) {
   let connections = 0;
+  let latestReply: ((message: unknown) => void) | undefined;
   await page.routeWebSocket("**/ws/humans*", (socket) => {
     const connection = ++connections;
     const reply = (message: unknown) => socket.send(JSON.stringify(message));
+    latestReply = reply;
     socket.onMessage((raw) => {
       const frame = JSON.parse(String(raw)) as HumanSocketFrame;
       if (frame.type === "human_connect") reply({
@@ -119,7 +121,10 @@ export async function routeHumanSocket(
       onFrame(frame, reply, connection);
     });
   });
-  return { connections: () => connections };
+  return { connections: () => connections, send(message: unknown) {
+    if (!latestReply) throw new Error("Human socket is not connected");
+    latestReply(message);
+  } };
 }
 
 /**

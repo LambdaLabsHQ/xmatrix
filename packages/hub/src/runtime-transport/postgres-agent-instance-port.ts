@@ -13,6 +13,8 @@ import type {
 } from "@xmatrix/protocol/connections/agent-instance";
 import type { HarnessSignedOut, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
 import {
+  normalizeAgentInstanceDurablePresentation,
+  type AgentInstanceDurablePresentation,
   AGENT_SIGNED_OUT_LIFECYCLE_REASON,
   AGENT_TURN_FAILURE_LIFECYCLE_LAYER,
   AGENT_TURN_FAILURE_LIFECYCLE_REASON,
@@ -387,15 +389,16 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   }
 
   /**
-   * Give the send-time presentation a durable home on the Instance row.
+   * Give Instance presentation and runtime catalogs a durable home on its row.
    *
    * This exists because the two Agent send paths are not symmetric. A message
    * sent over this WebSocket stamps its header from `session.presentation` for
    * free, because it runs inside the cell that holds the session. The REST send
    * path runs in the Worker, holds no session, and could only learn the same
    * facts by calling this single global cell on every message. Writing the row
-   * here -- on the edge, when the header's own five fields change -- lets the
-   * append transaction read them from a row it already locks.
+   * here lets the append transaction read its header from a row it already
+   * locks. The modern Instance record also reads this row, so its runtime
+   * commands, capabilities and workspace must survive alongside the header.
    *
    * `presence_update` is the only trigger. Registration is a fenced critical
    * path that reports its own failing phase, so a display-state write must not
@@ -425,21 +428,20 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // headers intentionally omit usage, so their projection is insufficient
     // for persistence (and would deduplicate quota-only updates away).
     const canonical = sanitizeAgentInstancePresentation(presentation);
-    const usage = canonical?.usage;
     // A connection whose machine is unreachable is shown offline until a later
     // checkpoint says the machine returned; its own status stays live.
     const shownOffline = this.machineReachable && !this.machineReachable(session) ? "machine_offline" : undefined;
-    const snapshot = {
-      ...agentMessagePresentation(canonical),
+    const snapshot: AgentInstanceDurablePresentation & { offlineReason?: "machine_offline" } = {
+      ...normalizeAgentInstanceDurablePresentation(canonical),
       ...(shownOffline ? { offlineReason: shownOffline } : {}),
-      ...(canonical?.parameters !== undefined ? { parameters: canonical.parameters, parametersObservedAt: canonical.parametersObservedAt } : parametersReported ? { parameters: [] } : {}),
-      // Routing needs the observed model/effort domain too. It is deliberately
-      // absent from message headers, but must survive this durable projection.
-      ...(canonical?.models?.length && canonical.modelsObservedAt ? {
-        models: canonical.models, modelsObservedAt: canonical.modelsObservedAt,
-      } : catalogReported ? { models: [] } : {}),
-      ...(usage ? { usage } : {}),
     };
+    if (parametersReported && snapshot.parameters === undefined) snapshot.parameters = [];
+    // Compact hibernation omits large catalogs; preserve their stored reading
+    // unless this update explicitly reports a withdrawal.
+    if (!canonical?.models?.length || !canonical.modelsObservedAt) {
+      snapshot.models = catalogReported ? [] : undefined;
+      snapshot.modelsObservedAt = undefined;
+    }
     const liveStatus = isLiveAgentStatus(status) ? status : undefined;
     const digest = JSON.stringify([liveStatus ?? null, snapshot]);
     if (this.persistedPresentationDigests.get(instanceId) === digest) return;
