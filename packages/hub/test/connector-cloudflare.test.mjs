@@ -598,7 +598,7 @@ test("a login without DNS access does not hide another login that reaches the sa
   api = refusing("token-c");
   try {
     await assert.rejects(run(sameAccount, "@cloudflare:list_dns:xmatrix.page"),
-      /Reconnect Cloudflare in Apps to grant zone, DNS and registrar access on Acme \(none of the 2 connected logins that reach it holds it\)/u);
+      /Reconnect Cloudflare in Apps to grant zone, DNS and registrar access on Acme \(none of the 2 connected logins that reach it \(connected 2026-10-17; connected 2026-10-17\) holds it\): sign in as a Cloudflare user of that account/u);
   } finally {
     api.restore();
   }

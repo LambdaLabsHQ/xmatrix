@@ -112,8 +112,11 @@ others reach. When several logins reach one account, a zone, DNS, registrar or
 D1 call that one login's grant refuses (a grant from before that scope was
 offered) is retried with the next; a refused call changed nothing, so writes
 retry too. When every login reaching the account refuses, the error names the
-account and how many logins reach it, so the admin knows to connect again as a
-user of that account. `put_dns` adds A, AAAA and CNAME records DNS-only unless
+account and each login that reaches it by the date Apps → Cloudflare lists it
+under, and says what to do: connect again as a Cloudflare user of that account,
+select it with full access on the consent page, and check the account allows
+public OAuth apps. Connecting as a different Cloudflare user adds or replaces a
+different login and leaves the refused one in place. `put_dns` adds A, AAAA and CNAME records DNS-only unless
 the command ends in `proxied` (a Pages branch hostname needs the proxy).
 
 Nothing is configured in the Cloudflare dashboard. The Space's subscriptions
