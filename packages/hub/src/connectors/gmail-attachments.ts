@@ -1,4 +1,4 @@
-import { utf8ByteLength } from "@xmatrix/protocol";
+import { lowercaseHex, utf8ByteLength } from "@xmatrix/protocol";
 import { handleRelayV2MessageAttachmentProductMedia, type RelayR2MessageAttachmentAuthority } from "../relay-r2-private-api";
 import { ProviderRequestError } from "./http";
 
@@ -46,9 +46,9 @@ function sameFile(left: MailAttachment, right: MailAttachment): boolean {
     left.mimeType === right.mimeType && left.size === right.size && left.hash === right.hash && left.version === right.version;
 }
 
+/* Hashed in place: a 25 MB file is not copied first. */
 async function sha256(bytes: Uint8Array<ArrayBuffer>): Promise<string> {
-  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
-  return Array.from(digest, byte => byte.toString(16).padStart(2, "0")).join("");
+  return lowercaseHex(await crypto.subtle.digest("SHA-256", bytes));
 }
 
 export function createMailAttachments(input: {
