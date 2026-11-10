@@ -1,6 +1,8 @@
 import { lowercaseHex, utf8ByteLength } from "@xmatrix/protocol";
 import { handleRelayV2MessageAttachmentProductMedia, type RelayR2MessageAttachmentAuthority } from "../relay-r2-private-api";
+import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
 import { ProviderRequestError } from "./http";
+import type { ConnectorCommandInput } from "./provider";
 
 /*
  * The files a Gmail send or reply carries: those attached to the command message itself. The caller names no
@@ -106,4 +108,17 @@ export function createMailAttachments(input: {
       return bytes;
     },
   };
+}
+
+/**
+ * The attachment reader of a Gmail send or reply: the command's own files when it first runs, and, for a run an
+ * admin approved later (which carries no files of its own), the reader of the files the approval froze. It exists
+ * whenever the action can carry files, so a file is never dropped silently; without storage, reading one fails.
+ */
+export function commandMailAttachments(actionId: string,
+  input: Pick<ConnectorCommandInput, "env" | "channelId" | "messageId" | "actorUserId" | "attachments">): MailAttachments | undefined {
+  if (actionId !== "send" && actionId !== "reply") return undefined;
+  return createMailAttachments({ channelId: input.channelId, actorUserId: input.actorUserId, bucket: input.env.RELAY_PAYLOAD_BUCKET,
+    sources: (input.attachments ?? []).map(attachment => ({ messageId: input.messageId, attachmentId: attachment.id })),
+    attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) });
 }
