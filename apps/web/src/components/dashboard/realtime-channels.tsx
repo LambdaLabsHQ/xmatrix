@@ -66,12 +66,23 @@ export function useRealtimeChannelSelection<T>(
 /** Who an Instance is and where it runs, without what it is doing now. Only
  * leaving or going offline changes its status here; busy and idle read as
  * online. Rest and offlineReason stay, so residency reads as before. */
-function instanceIdentity(instance: AgentInstancePresence, withStatus: boolean): AgentInstancePresence {
+function instanceIdentity(instance: AgentInstancePresence): AgentInstancePresence {
   const { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest,
     offlineReason, hostName, hostId, hostname, machineId, cwd, workspaceName, repository } = instance;
   return { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest, offlineReason,
     hostName, hostId, hostname, machineId, cwd, workspaceName, repository,
-    lastSeenAt: connectedAt, status: withStatus && instance.status === "offline" ? "offline" : "online" };
+    lastSeenAt: connectedAt, status: instance.status === "offline" ? "offline" : "online" };
+}
+
+/** Who wrote a message: name, registration and machine only. Nothing here
+ * moves with a rest, an absence or a reconnect; the first sighting's time
+ * stands in for the required timestamps. */
+function senderIdentity(instance: AgentInstancePresence, seenAt: string): AgentInstancePresence {
+  const { id, channelId, channelInstanceId, label, agentName, registration, email,
+    hostName, hostId, hostname, machineId, cwd, workspaceName, repository } = instance;
+  return { id, channelId, channelInstanceId, label, agentName, registration, email,
+    hostName, hostId, hostname, machineId, cwd, workspaceName, repository,
+    connectedAt: seenAt, lastSeenAt: seenAt, status: "online" };
 }
 
 type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
@@ -96,7 +107,7 @@ function useIdentityView(channel: ChannelSnapshot | null, source: LiveChannelSou
 }
 
 const currentIdentities = (live: LiveChannel | null) => new Map([...live?.presence?.instances ?? []]
-  .map(([id, instance]) => [id, instanceIdentity(instance, true)]));
+  .map(([id, instance]) => [id, instanceIdentity(instance)]));
 
 /**
  * A list copy with its Instances' identities: who they are, where they run,
@@ -110,16 +121,20 @@ export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null
 }
 
 const senderIdentities = (live: LiveChannel | null, prior: IdentityView | null) => {
-  const next = new Map(prior?.instances);
-  for (const [id, instance] of live?.presence?.instances ?? []) next.set(id, instanceIdentity(instance, false));
+  // Present Instances first: a sender matched by email or label alone resolves
+  // to one still here before one that has left.
+  const present = live?.presence?.instances ?? new Map<PresenceInstanceId, AgentInstancePresence>();
+  const next = new Map([...present].map(([id, instance]) =>
+    [id, senderIdentity(instance, prior?.instances.get(id)?.connectedAt ?? instance.connectedAt)]));
+  for (const [id, identity] of prior?.instances ?? []) if (!next.has(id)) next.set(id, identity);
   return next;
 };
 
 /**
  * Who has written in this Channel, for the rows that name them: every
  * Instance seen while it is open, kept after it leaves (its messages still
- * name it), without status. Only a new Instance or a moved one changes it,
- * so a report, a rest or a brief absence never rebuilds the rows.
+ * name it), without status, rest or connection time. Only a new Instance or a moved one changes it,
+ * so a report, a rest, a reconnect or a brief absence never rebuilds the rows.
  */
 export function useChannelSenderIdentities(channel: ChannelSnapshot | null,
   source?: LiveChannelSource): LiveChannel | null {

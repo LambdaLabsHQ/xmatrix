@@ -409,8 +409,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // History and author identity build the rows. Live sender status subscribes
   // at the visible affordance, so activity never rebuilds Markdown models.
   // The list copy holds no Instances: rows read who each sender is from the
-  // Channel's sender identities, which activity, status and a brief absence
-  // never change, so this shell-level read does not re-render the shell.
+  // Channel's sender identities (name, registration, machine), which activity,
+  // status, a rest, a reconnect or a brief absence never change, so this
+  // shell-level read does not re-render the shell.
   const timelineChannel = useChannelSenderIdentities(s.selectedChannel, s.realtimeChannels);
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
