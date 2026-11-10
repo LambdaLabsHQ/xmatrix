@@ -1,6 +1,6 @@
 import { isLiveChannel, parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
   accountQuotaUsageFromCandidates, withRegistrationQuota, mergeRegistrationPresentation,
-  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type LiveChannel, type AgentInstancePresence } from "@xmatrix/protocol";
+  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type LiveChannel, type AgentInstancePresence, type PresenceInstanceId } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
 
 /** Session-owned Instance facts. Channel lists are only metadata and query
@@ -175,8 +175,10 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
     const records = modern ? instances.getChannel(channel.id) : undefined;
     const held = views.get(channel.id);
     if (held?.channel === channel && held.records === records) return held.view;
-    const map = new Map([...records?.values() ?? []].map(record => [presenceInstanceId(record.id),
-      record as unknown as AgentInstancePresence]));
+    const map = new Map([...records?.values() ?? []].map((record): [PresenceInstanceId, AgentInstancePresence] => {
+      const id = presenceInstanceId(record.id);
+      return [id, { ...record, id }];
+    }));
     const next: LiveChannel = { ...channel, presence: { channelId: channel.id,
       humans: channel.presence?.humans ?? new Map(), instances: map,
       ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } };

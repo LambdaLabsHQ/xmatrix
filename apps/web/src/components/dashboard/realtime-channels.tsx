@@ -63,14 +63,15 @@ export function useRealtimeChannelSelection<T>(
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
 
-/** Who an Instance is and where it runs, without what it is doing now. Only
- * going offline changes its status here; busy and idle read as online. */
+/** Who an Instance is and where it runs, without what it is doing now. It
+ * reads offline only when its machine is unreachable, the one status a
+ * mention explains; busy, idle and a passing offline read as online. */
 function instanceIdentity(instance: AgentInstancePresence): AgentInstancePresence {
   const { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest,
     offlineReason, hostName, hostId, hostname, machineId, cwd, workspaceName, repository } = instance;
   return { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest, offlineReason,
     hostName, hostId, hostname, machineId, cwd, workspaceName, repository,
-    lastSeenAt: connectedAt, status: instance.status === "offline" ? "offline" : "online" };
+    lastSeenAt: connectedAt, status: instance.status === "offline" && offlineReason ? "offline" : "online" };
 }
 
 type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
