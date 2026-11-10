@@ -2203,6 +2203,26 @@ fn registration_spawn_uses_the_hub_registration_preset_and_bound_model() {
     assert_eq!(defaults.requested_model, None);
     // The effort the author asked for applies to the runtime's own default model.
     assert_eq!(defaults.requested_effort.as_deref(), Some("high"));
+    // On the runtime default, a model from the runtime's own catalog is requested
+    // so the runtime starts on it; it never displaces an admitted binding.
+    let mut preferred = wire.clone();
+    preferred["context"] = serde_json::json!({"preferredModel":"sonnet"});
+    preferred["registration"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runtimeModel");
+    preferred["registration"]["resources"]["models"] = serde_json::json!([]);
+    let preferred =
+        super::DaemonSpawnRequest::from_command(serde_json::from_value(preferred).unwrap())
+            .unwrap();
+    let preferred = super::resolve_registration_spawn(&preferred, "machine").unwrap();
+    assert_eq!(preferred.requested_model.as_deref(), Some("sonnet"));
+    let mut bound = wire.clone();
+    bound["context"] = serde_json::json!({"requestedModel":"x","preferredModel":"sonnet"});
+    let bound =
+        super::DaemonSpawnRequest::from_command(serde_json::from_value(bound).unwrap()).unwrap();
+    let bound = super::resolve_registration_spawn(&bound, "machine").unwrap();
+    assert_eq!(bound.requested_model.as_deref(), Some("provider/model"));
     assert!(super::resolve_registration_spawn(&intent, "other-machine").is_err());
     // Every Run is a Run of a registration: an unbound spawn is refused.
     let mut unbound = wire.clone();

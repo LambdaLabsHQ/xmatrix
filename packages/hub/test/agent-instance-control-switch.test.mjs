@@ -168,6 +168,22 @@ test("a value outside the catalog is refused before the socket is asked", async 
   assert.deepEqual(socket.sent, []);
 });
 
+test("a model is switched to by any selector its runtime lists for it", async () => {
+  let asked;
+  const { transport, socket } = liveTransport({
+    presentation: { model: "claude-sonnet-5-5", models: [
+      { id: "default", model: "claude-opus-5-5", displayName: "Default (recommended)", aliases: ["opus", "Opus 5.5"], isDefault: true },
+      { id: "sonnet", model: "claude-sonnet-5-5", displayName: "Sonnet 5.5" }] },
+    awaitControlResult: () => Promise.resolve({ value: "claude-opus-5-5" }),
+  });
+  const outcome = await transport.switchInstanceControl({
+    channelId: "channel-1", target: "claude:1", kind: "model", value: "Opus",
+  });
+  asked = socket.sent[0]?.model;
+  assert.deepEqual(outcome, { status: "switched", selected: "claude-opus-5-5" });
+  assert.equal(asked, "claude-opus-5-5");
+});
+
 test("an instance that confirms a different value is a failure, not a switch", async () => {
   const { transport } = liveTransport({
     awaitControlResult: () => Promise.resolve({ value: "opus" }),

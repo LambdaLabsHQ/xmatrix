@@ -408,16 +408,16 @@ export class PostgresAgentRegistrationRepository {
           parseRegistrationResourceLimits(row.grant_limits), parseRegistrationResourceLimits(row.policy_limits)) : null;
         const models = [...new Set([...(configuration.model ? [configuration.model] : []), ...(configuration.routing?.models ?? [])])]
           .filter(model => allowed?.models.includes(model)).sort();
-        // An empty model list allows only the runtime default, so no observed
-        // model is offered for it. No fresh observation stays absent.
+        // An empty model list allows the runtime default; the environment pass
+        // below offers the runtime's whole catalog where its daemon applies one.
+        // No fresh observation stays absent.
         const parameterObservation = harnessParameterObservation(row.catalog_parameters, row.parameters_observed_at,
           row.parameter_model, models, Date.now());
         return { ...parameterObservation,
           key, displayName: String(row.display_name), version: Number(row.version),
-          // With no declared models the runtime's default model runs, so its
-          // entry (and the efforts it reports) stays; the environment pass below narrows it.
+          // With no declared models the runtime's catalog stays whole; the environment pass below narrows it.
           modelCatalog: routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value
-            .filter(model => models.length ? models.includes(model.model) : model.model === parameterObservation?.parameterModel),
+            .filter(model => !models.length || models.includes(model.model)),
           ownerName: String(row.owner_name || "Space member"), machineName: "Registered machine", models,
           routingReady: row.current_owner !== null && row.grant_state === "active" && row.policy_state === "enabled" &&
             configuration.routing?.enabled === true && (configuration.routing.models.length === 0 ||
@@ -440,9 +440,9 @@ export class PostgresAgentRegistrationRepository {
     // while it is current.
     const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels",
       statement: "single_read" },
-      tx => tx.query({ name: "registration_catalog_machine_labels_v10", text: `SELECT
+      tx => tx.query({ name: "registration_catalog_machine_labels_v11", text: `SELECT
         requested.owner,requested.machine,requested.harness,machine.name,
-        e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,
+        e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,daemon.native_models,
         quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=requested.owner
@@ -454,7 +454,9 @@ export class PostgresAgentRegistrationRepository {
             AND metadata_json->'machineResources'->>'connectionEpoch'=connection_epoch::text))[1] AS resources,
           -- The OS the machine's daemon last reported, shown with its row.
           (array_agg(metadata_json->>'platform' ORDER BY updated_at DESC)
-            FILTER (WHERE metadata_json->>'platform' IS NOT NULL))[1] AS platform
+            FILTER (WHERE metadata_json->>'platform' IS NOT NULL))[1] AS platform,
+          -- Whether its online daemon starts a runtime on a model from the runtime's own catalog.
+          bool_or(status='online' AND capabilities_json ? 'registration_native_model_v1') AS native_models
           FROM data.machine_daemons WHERE owner_user_id=requested.owner AND machine_id=requested.machine) daemon ON TRUE
         ${currentRegistrationQuotaJoin("quota")}`,
       values: [JSON.stringify(page.registrations.map(row => ({ owner: row.key.ownerUserId,
@@ -464,9 +466,11 @@ export class PostgresAgentRegistrationRepository {
       const environment = label?.declaration_json ? parseAgentRegistrationEnvironment(label.declaration_json) : null;
       // The physical environment bounds the Space's models exactly as a launch does.
       const models = row.models.filter(model => environment?.models.includes(model));
-      // With no declared models the runtime's default model is the one that runs; its efforts stay selectable.
+      // With no declared models the runtime's default model is the one that runs and its efforts stay
+      // selectable; a daemon that switches the runtime to a catalog model offers the whole catalog.
+      const nativeModels = !row.models.length && label?.native_models === true && Boolean(row.modelCatalog?.length);
       const reported = row.modelCatalog?.filter(model => row.models.length ? models.includes(model.model)
-        : model.model === row.parameterModel);
+        : nativeModels || model.model === row.parameterModel);
       const blocker: AgentRegistrationSummary["routingBlocker"] = !environment ? "owner_environment_missing"
         : !environment.enabled ? "owner_environment_disabled" : !row.routingReady ? "space_setup"
           : row.models.length && !models.length ? "model_unavailable" : undefined;
@@ -479,7 +483,7 @@ export class PostgresAgentRegistrationRepository {
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
       const quota = (row.canConfigureSpace || row.canManageOwnerGrant) && reading
         ? { ...reading, ...(windows.length ? { windows } : {}), ...(account ? { account } : {}) } : undefined;
-      return { ...row, models, modelCatalog: reported, routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
+      return { ...row, models, modelCatalog: reported, ...(nativeModels ? { nativeModels: true as const } : {}), routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
         machineName: String(label?.name || row.machineName),
         live: { machine: { online: label?.online === true, ...(lastSeenAt ? { lastSeenAt } : {}),
           ...(resources ? { resources } : {}), ...(platform ? { platform } : {}) },

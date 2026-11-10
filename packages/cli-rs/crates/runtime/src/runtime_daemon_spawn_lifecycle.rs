@@ -99,6 +99,19 @@ fn resolve_registration_spawn(
         .requested_model
         .as_ref()
         .and_then(|_| binding.runtime_model.clone());
+    // On the runtime default, a preferred model from the runtime's own catalog
+    // is requested the same way: each runtime applies it through its native
+    // model switch and refuses to start when the runtime does not accept it.
+    if intent.requested_model.is_none() && binding.runtime_model.is_none() {
+        resolved.requested_model = intent
+            .preferred_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| {
+                !model.is_empty() && model.len() <= 160 && !model.chars().any(char::is_control)
+            })
+            .map(str::to_owned);
+    }
     if resolved.agent_acp_args.is_empty() {
         resolved.agent_acp_args = harness.acp_args.clone().unwrap_or_default();
     }

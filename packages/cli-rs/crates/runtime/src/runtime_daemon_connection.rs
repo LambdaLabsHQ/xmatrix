@@ -2241,6 +2241,8 @@ async fn run_daemon_connection(
             "registration_optional_model_v1",
             // A requested effort applies to the runtime's default model too.
             "registration_default_effort_v1",
+            // The runtime may start on a model from its own catalog instead of its default.
+            "registration_native_model_v1",
             // A registered launch may run in a private managed directory.
             "registration_managed_v1",
             "reply_recovery_v1",

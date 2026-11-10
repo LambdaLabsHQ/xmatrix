@@ -254,6 +254,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       spawnControlId: `reborn:1-spawn:${suffix}`, resumeInstanceId: input.sourceInstanceId, identityKind: "instance",
       agentName: displayName, summonedByUserId: input.actorUserId,
       sourceMessageId: input.sourceMessageId, useRuntimeDefaultModel: !model, requestedRuntimeModel: model || null, modelResource: modelResource ?? null,
+      // The runtime catalog model the predecessor started on comes back with it.
+      ...(!model && source.preferredRuntimeModel ? { preferredRuntimeModel: source.preferredRuntimeModel } : {}),
       ...(source.handedOff ? { resumeAfterHandoff: true } : {}),
       ...(source.managedWorkspaceKey ? { managedWorkspaceKey: source.managedWorkspaceKey } : {}),
       ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}) };
@@ -277,7 +279,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       // the initial message id drops the copy as a summon echo.
       agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId,
       resumeWorktreeBootstrap: true,
-      context: model ? { requestedModel: model } : {},
+      context: model ? { requestedModel: model } : source.preferredRuntimeModel ? { preferredModel: source.preferredRuntimeModel } : {},
       ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
     return { source, successor: { run, instance, spawn } };
   }
@@ -735,6 +737,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       canonicalCwd: row.workspace_canonical_cwd ? String(row.workspace_canonical_cwd) : undefined,
       useRuntimeDefaultModel: metadata.useRuntimeDefaultModel === true,
       requestedRuntimeModel: typeof metadata.requestedRuntimeModel === "string" ? metadata.requestedRuntimeModel : undefined,
+      preferredRuntimeModel: metadata.useRuntimeDefaultModel === true && typeof metadata.preferredRuntimeModel === "string"
+        ? metadata.preferredRuntimeModel : undefined,
       modelResource: typeof metadata.modelResource === "string" ? metadata.modelResource : undefined,
       hostname: typeof metadata.hostname === "string" ? metadata.hostname : undefined,
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : undefined,

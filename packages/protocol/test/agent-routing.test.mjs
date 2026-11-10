@@ -147,6 +147,25 @@ test('model catalogs retain real effort options and exclude private or invented 
   }
 });
 
+test("a model stays nameable by every selector its runtime lists, through storage and routing", async () => {
+  const { cleanAgentModelCatalog } = await import('../dist/agent-instance-catalogs.js');
+  const { routingModelOptionNamed } = await import('../dist/agent-routing.js');
+  // Claude Code's initialize lists `default` and `opus` for the same model.
+  const stored = cleanAgentModelCatalog([
+    { id: 'default', model: 'claude-opus-5-5', displayName: 'Default (recommended)', isDefault: true },
+    { id: 'opus', model: 'claude-opus-5-5', displayName: 'Opus 5.5' },
+    { id: 'sonnet', model: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5' }]);
+  assert.deepEqual(stored.map(entry => [entry.id, entry.aliases]), [['default', ['opus', 'Opus 5.5']], ['sonnet', undefined]]);
+  const options = routingModelCatalogObservation(stored, new Date(now - 1000).toISOString(), now).value;
+  const named = written => options.filter(option => routingModelOptionNamed(option, written)).map(option => option.model);
+  assert.deepEqual(named('OPUS'), ['claude-opus-5-5']);
+  assert.deepEqual(named('Sonnet 5.5'), ['claude-sonnet-5-5']);
+  assert.deepEqual(named('claude-sonnet-5-5'), ['claude-sonnet-5-5']);
+  // Only the runtime's own names: no family or version is inferred.
+  assert.deepEqual(named('sonnet-5'), []);
+  assert.equal(options[0].isDefault, true);
+});
+
 test('shared presentation preserves failed-decision observations and bounds private input', () => {
   const rows = Array.from({ length: 30 }, () => ({
     harness: 'codex', machineId: 'machine', activeRuns: 3,

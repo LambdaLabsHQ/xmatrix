@@ -1366,6 +1366,9 @@ export interface AgentModelReasoningEffort {
 export interface AgentModelInfo {
   id: string;
   model: string;
+  /** Other selectors and display names the runtime lists for this same model
+   * (Claude's `opus` beside `default`), kept when the catalog collapses them. */
+  aliases?: string[];
   displayName?: string;
   description?: string;
   hidden?: boolean;

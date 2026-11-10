@@ -367,6 +367,7 @@ struct DaemonSpawnRequest {
     source_message_id: Option<String>,
     initial_message_source: Option<protocol::AgentRuntimeMessageSource>,
     requested_model: Option<String>,
+    preferred_model: Option<String>,
     requested_effort: Option<String>,
     requested_parameters: Option<BTreeMap<String, String>>,
     prompt: String,
@@ -469,6 +470,9 @@ impl DaemonSpawnRequest {
             requested_model: context
                 .as_ref()
                 .and_then(|value| value.requested_model.clone()),
+            preferred_model: context
+                .as_ref()
+                .and_then(|value| value.preferred_model.clone()),
             requested_parameters: context
                 .as_ref()
                 .and_then(|value| value.requested_parameters.clone()),

@@ -534,7 +534,9 @@ export class AgentInstanceRuntimeTransport {
       };
     }
 
-    const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase());
+    // A model is also named by any selector or display name its runtime lists for it (Claude's `opus`).
+    const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase()) ??
+      (input.kind === "model" ? agentInstanceModelNamed(session, input.value) : undefined);
     if (!selected) {
       return {
         status: "error",
@@ -975,6 +977,14 @@ function agentInstanceModelOptions(
     if (value) seen.add(value);
   }
   return [...seen];
+}
+
+/** The model whose runtime selector, alias or display name is `written`, ignoring case. */
+function agentInstanceModelNamed(session: Readonly<AgentInstanceRuntimeSession>, written: string): string | undefined {
+  const wanted = written.trim().toLowerCase();
+  const named = (session.presentation?.models ?? []).find((model) =>
+    [model.id, model.displayName, ...model.aliases ?? []].some((name) => name?.trim().toLowerCase() === wanted));
+  return named?.model?.trim() || named?.id?.trim() || undefined;
 }
 
 /**
