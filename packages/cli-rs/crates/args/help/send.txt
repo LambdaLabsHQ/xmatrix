@@ -10,8 +10,10 @@ Channel command text (sent visibly, then interpreted by the Hub):
   /stop all [reason]                        Stop every live Instance in this Channel
 
 A summon (@auto, @<agent>, @<agent> repo:/pwd:/machine:) starts an Agent only
-when the send says --launch; without it the Agent is just mentioned, and the
-reply lists what was not started. Stop, reborn and handoff need no --launch.
+when the send says --launch. Without it, use @<agent>:<instance> to address an
+existing Instance; a summon without an Instance number is refused before the
+message is sent. Text such as launch:force does not replace --launch. Stop,
+reborn and handoff need no --launch. Put mention examples in code or quotes.
 
 Lifecycle actions use current Channel/Run permissions. The Hub decides access
 and routing; message text cannot grant either. Before naming a machine or
@@ -22,6 +24,7 @@ online and its quota. Repositories and directories are in
 
 Examples:
   xmatrix send <channel> --launch "@codex repo:owner/repo fix the failing test"
+  xmatrix send <channel> "@codex:1 Please review the result"
   xmatrix send <channel> --reply-to <message-id> "Result"
   xmatrix send <channel> --wait "@Daniel Need the missing decision: ..."
   xmatrix send <channel> --final-for <execution-uuid> "Finished"

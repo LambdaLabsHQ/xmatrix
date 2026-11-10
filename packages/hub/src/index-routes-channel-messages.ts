@@ -133,8 +133,14 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       // The web composer asks every send to start the Agents it mentions. One
       // from before `launch` sent Jev's draft readings instead, only with a summon.
       const launch = body.launch === true || body.summonIntents !== undefined;
-      const notLaunched = launch || typeof body.body !== "string" ? []
-        : summonMentions(body.body).filter(mention => !mention.force).map(mention => mention.text);
+      // A bare Agent name cannot identify a live Instance. Refuse before any
+      // publication rather than report success for a message that cannot route;
+      // launch:force in public text does not replace an explicit launch request.
+      const unaddressed = launch || typeof body.body !== "string" ? [] : summonMentions(body.body);
+      if (unaddressed.length) return c.json({
+        error: "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.",
+        code: "agent_instance_required",
+      }, 400);
       if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
         return c.json({ error: "awaitsResponse must be a boolean" }, 400);
       }
@@ -481,8 +487,6 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             metadata: body.metadata,
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
           },
-          // Summons this send did not ask to start: they stay mentions, and the sender is told.
-          ...(!launch && notLaunched.length ? { mentionsNotLaunched: notLaunched } : {}),
         });
     } catch (error) {
       return requestErrorResponse(c, error);

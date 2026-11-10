@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Agent sends require an Instance or an explicit launch
+
+A CLI or MCP send without an Instance number returned success even though
+its Agent summon could not route to an existing Instance. The Hub now refuses
+that send before publication with `agent_instance_required`. Use
+`@<agent>:<instance>` to address an existing Instance, or `--launch` (MCP
+`launch: true`) to start one; message text `launch:force` is insufficient.
+Human mentions and code/quoted examples remain valid. The Web composer already
+requests launch. Older CLIs receive the Hub refusal too; updated CLI help
+explains the contract. No schema migration. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: Apple relationship writes require a complete current snapshot
 
 Generic App Store API plans treated every POST as a resource creation, so
