@@ -67,11 +67,17 @@ integration("Instance records retain the runtime catalogs on report, cold window
     session.presentation = compactAgentInstancePresentationForHibernation(session.presentation);
     const omitted = await report(3, {});
     checkCatalogs(omitted, changed);
+    // An attachment past its byte bound restores with no presentation at all.
+    session.presentation = undefined;
+    const runtimeCatalogs = { capabilities: changed.capabilities, models: changed.models,
+      commands: changed.commands, parameters: changed.parameters };
+    checkCatalogs(await report(4, { activity: "after restore" }), runtimeCatalogs);
+    checkCatalogs(await read(), runtimeCatalogs);
     const empty = { capabilities: [], models: [], commands: [], parameters: [] };
-    checkCatalogs(await report(4, empty), empty);
+    checkCatalogs(await report(5, empty), empty);
     checkCatalogs(await read(), empty);
     checkCatalogs(await read([f.ids.instance]), empty);
-    await report(3, { commands: catalogs.commands });
+    await report(4, { commands: catalogs.commands });
     checkCatalogs(await read(), empty);
   } finally { await f.close(); }
 });

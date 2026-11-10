@@ -57,7 +57,6 @@ pub(crate) fn choice(
 ) -> Option<protocol::HarnessParameter> {
     if !parameter_id(id)
         || options.is_empty()
-        || options.len() > 100
         || options.iter().any(|v| {
             v.is_empty() || v.len() > 160 || v.trim() != v || v.chars().any(char::is_control)
         })
@@ -173,7 +172,6 @@ pub fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
     let mut seen = std::collections::HashSet::new();
     options
         .iter()
-        .take(64)
         .filter_map(|option| {
             let kind = option
                 .get("type")
@@ -205,7 +203,6 @@ pub fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
                         .map(|v| v.as_slice())
                         .unwrap_or_else(|| std::slice::from_ref(entry))
                 })
-                .take(101)
                 .cloned()
                 .collect();
             let (values, current) = if kind == "boolean" {
@@ -658,7 +655,7 @@ pub(crate) fn parameter_control_result(
         current: entry.and_then(|entry| entry.current_value.clone()),
         pending,
         choices: entry
-            .map(|entry| entry.options.iter().take(100).cloned().collect())
+            .map(|entry| entry.options.clone())
             .unwrap_or_default(),
         notice: entry.and_then(|entry| entry.notice.clone()),
         error,

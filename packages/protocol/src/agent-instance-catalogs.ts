@@ -1,33 +1,36 @@
 import type { AgentInstanceCommand, AgentModelInfo } from "./authority-foundation.js";
 import { plainRecord } from "./plain-record.js";
 
-// The runtime writer and durable Instance reader use the same bounded catalogs.
+// The runtime writer and durable Instance reader use the same catalogs.
 // Only declared presentation fields survive; an observed empty catalog stays empty.
+// Lists keep every entry the runtime reports: a count cap silently hid the tail
+// of a Claude command list (skills, plugins) from the menu. The presence body's
+// byte bound is the only size limit.
 export function cleanAgentCapabilities(value: unknown): string[] | undefined {
-  return Array.isArray(value) ? cleanAgentPresentationTextList(value, 64, 128) ?? [] : undefined;
+  return Array.isArray(value) ? cleanAgentPresentationTextList(value, 128) ?? [] : undefined;
 }
 
 export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const seen = new Map<string, AgentModelInfo>();
   const models: AgentModelInfo[] = [];
-  for (const candidate of value.slice(0, 100)) {
+  for (const candidate of value) {
     if (!record(candidate)) continue;
     const id = cleanAgentPresentationText(candidate.id, 128);
     const model = cleanAgentPresentationText(candidate.model, 128) || id;
     if (!id || !model) continue;
     // One entry per model; another selector for it is kept as that entry's alias.
-    const names = [id, cleanAgentPresentationText(candidate.displayName, 128), ...cleanAgentPresentationTextList(candidate.aliases, 8, 128) ?? []]
+    const names = [id, cleanAgentPresentationText(candidate.displayName, 128), ...cleanAgentPresentationTextList(candidate.aliases, 128) ?? []]
       .filter((name): name is string => Boolean(name));
     const known = seen.get(model.toLowerCase());
     if (known) {
       const aliases = [...new Set([...known.aliases ?? [], ...names])]
-        .filter(name => name !== known.id && name !== known.model && name !== known.displayName).slice(0, 8);
+        .filter(name => name !== known.id && name !== known.model && name !== known.displayName);
       if (aliases.length) known.aliases = aliases;
       continue;
     }
     const efforts = Array.isArray(candidate.supportedReasoningEfforts)
-      ? candidate.supportedReasoningEfforts.slice(0, 16).flatMap((effort) => {
+      ? candidate.supportedReasoningEfforts.flatMap((effort) => {
           if (!record(effort)) return [];
           const reasoningEffort = cleanAgentPresentationText(effort.reasoningEffort, 64);
           return reasoningEffort
@@ -40,7 +43,7 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
             : [];
         })
       : undefined;
-    const aliases = cleanAgentPresentationTextList(candidate.aliases, 8, 128);
+    const aliases = cleanAgentPresentationTextList(candidate.aliases, 128);
     const entry: AgentModelInfo = {
       id,
       model,
@@ -57,8 +60,8 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
         ? { defaultReasoningEffort: cleanAgentPresentationText(candidate.defaultReasoningEffort, 64) }
         : {}),
       ...(efforts?.length ? { supportedReasoningEfforts: efforts } : {}),
-      ...(cleanAgentPresentationTextList(candidate.inputModalities, 8, 32)
-        ? { inputModalities: cleanAgentPresentationTextList(candidate.inputModalities, 8, 32) }
+      ...(cleanAgentPresentationTextList(candidate.inputModalities, 32)
+        ? { inputModalities: cleanAgentPresentationTextList(candidate.inputModalities, 32) }
         : {}),
       ...(typeof candidate.supportsPersonality === "boolean"
         ? { supportsPersonality: candidate.supportsPersonality }
@@ -75,7 +78,7 @@ export function cleanAgentCommands(value: unknown): AgentInstanceCommand[] | und
   if (!Array.isArray(value)) return undefined;
   const seen = new Set<string>();
   const commands: AgentInstanceCommand[] = [];
-  for (const candidate of value.slice(0, 64)) {
+  for (const candidate of value) {
     if (!record(candidate)) continue;
     const rawToken = cleanAgentPresentationText(candidate.token, 64);
     if (!rawToken) continue;
@@ -110,10 +113,9 @@ export function cleanAgentPresentationText(value: unknown, maxLength: number): s
   return clean ? clean.slice(0, maxLength) : undefined;
 }
 
-export function cleanAgentPresentationTextList(value: unknown, maxItems: number, maxLength: number): string[] | undefined {
+export function cleanAgentPresentationTextList(value: unknown, maxLength: number): string[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const clean = value
-    .slice(0, maxItems)
     .map((item) => cleanAgentPresentationText(item, maxLength))
     .filter((item): item is string => Boolean(item));
   return clean.length > 0 ? [...new Set(clean)] : undefined;
