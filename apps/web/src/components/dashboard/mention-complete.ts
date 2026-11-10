@@ -11,6 +11,7 @@ import type {
   SerializedAgent,
   SerializedAgentInstance,
   ChannelSnapshot,
+  LiveChannel,
   SerializedMachineDaemon,
   SerializedSpace,
   FaceOf,
@@ -229,7 +230,7 @@ export function connectorCompletionRecovery(message: string): ConnectorCompletio
  * identity: owner, machine and harness come from there, never from a separate
  * Agent record.
  */
-export function channelAgents(channel: ChannelSnapshot): SerializedAgent[] {
+export function channelAgents(channel: LiveChannel): SerializedAgent[] {
   const agents: SerializedAgent[] = [];
   for (const instance of channelPresenceInstances(channel.presence)) {
     agents.push({ id: instance.id, instanceId: instance.id, userId: instance.registration.ownerUserId,
@@ -1170,7 +1171,7 @@ function findMentionAgent(
 }
 
 export function channelAgentInstances(
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   agent: SerializedAgent,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
 ): SerializedAgentInstance[] {

@@ -8,7 +8,7 @@ import type {
 
 import { WORKING_SPACE_KV_KEY } from "./workspace-shell-constants";
 import { useLatestComponentRelease, type ReleaseComponent } from "./latest-component-releases";
-import { releaseNotesPath, isChannelResidentInstance } from "@xmatrix/protocol";
+import { releaseNotesPath, isChannelResidentInstance, isLiveChannel } from "@xmatrix/protocol";
 
 import {
   accountQuotaUsageFromCandidates,
@@ -80,7 +80,7 @@ import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResp
 import { hubReadResponse } from "@/lib/query/hub-read";
 
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
-import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type SerializedChannel } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, emptyChannelPresence, HUB_ROUTES, presenceInstanceId, reduceChannelPresence, WEB_PROXY_ROUTES, type AgentInstancePresence, type ChannelPresence, type LiveChannel, type SerializedChannel } from "@xmatrix/protocol";
 
 import type {
   ChannelAttentionSnapshot,
@@ -694,8 +694,8 @@ export function placeChannel(channels: ChannelSnapshot[], index: number, channel
 
 export function mergeChannelListSnapshot(
   current: ChannelSnapshot[],
-  incoming: (ChannelSnapshot | SerializedChannel)[],
-): ChannelSnapshot[] {
+  incoming: (LiveChannel | SerializedChannel)[],
+): LiveChannel[] {
   const currentById = new Map(current.map((channel) => [channel.id, channel]));
   return sortChannels(incoming.map((channel) =>
     mergeChannelListHydratedFields(
@@ -708,9 +708,9 @@ export function mergeChannelListSnapshot(
 
 export function mergeChannelListHydratedFields(
   prior: ChannelSnapshot | undefined,
-  incoming: ChannelSnapshot | SerializedChannel,
+  incoming: LiveChannel | SerializedChannel,
   viewerStateAuthority: ChannelViewerStateAuthority = "partial",
-): ChannelSnapshot {
+): LiveChannel {
   const channel = decodeChannelSnapshot(incoming);
   if (!prior) return channel;
   /* partial and realtime payloads omit list-hydrated fields — keep what we knew */
@@ -735,7 +735,8 @@ export function mergeChannelListHydratedFields(
     // channel_updated can briefly re-serialize token-only usage; keep
     // subscription quota meters from the previous snapshot until hub
     // reports a real quota update again.
-    presence: mergeChannelPresence(prior.presence, channel.presence),
+    // A list copy holds no Instances: only a live prior has any to keep.
+    presence: isLiveChannel(prior) ? mergeChannelPresence(prior.presence, channel.presence) : channel.presence,
   };
 }
 
@@ -759,8 +760,10 @@ export function sameChannelCatalogState(left: ChannelSnapshot, right: ChannelSna
   const { presence: _leftPresence, instanceRecords: leftRecords, missingInstanceIds: _leftMissing, ...leftState } = left;
   const { presence: _rightPresence, instanceRecords: rightRecords, missingInstanceIds: _rightMissing, ...rightState } = right;
   if (!sameValue(leftState, rightState)) return false;
-  if (leftRecords || rightRecords || [...left.presence?.instances.values() ?? []].some(instance => "revision" in instance)) return true;
-  const ids = (channel: ChannelSnapshot) => new Set(channel.presence?.instances.keys() ?? []);
+  // A list copy carries no Instances; a legacy card carries them on the Channel.
+  const instancesOf = (channel: ChannelSnapshot) => isLiveChannel(channel) ? channel.presence?.instances : undefined;
+  if (leftRecords || rightRecords || [...instancesOf(left)?.values() ?? []].some(instance => "revision" in instance)) return true;
+  const ids = (channel: ChannelSnapshot) => new Set(instancesOf(channel)?.keys() ?? []);
   const before = ids(left);
   const after = ids(right);
   return before.size === after.size && [...after].every(id => before.has(id));
@@ -783,7 +786,7 @@ type ChannelPresenceRouting = {
 /** Apply ordered presence and partial snapshots in one state-frame run. The
  * Channel table and routing indices are built once, rather than once per
  * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
-export function createChannelPresenceBatch(channels: ChannelSnapshot[], routing?: ChannelPresenceRouting) {
+export function createChannelPresenceBatch(channels: LiveChannel[], routing?: ChannelPresenceRouting) {
   const positionsFor = (items: ChannelSnapshot[]) => {
     const positions = new Map<string, number>();
     items.forEach((channel, index) => positions.set(channel.id, index));
@@ -816,7 +819,7 @@ export function createChannelPresenceBatch(channels: ChannelSnapshot[], routing?
   let outputOrdered = inputOrdered;
   const reordered = new Set<string>();
   let appendedOnly = false;
-  const routes = (channel: ChannelSnapshot) => ({ instances: [...(channel.presence?.instances.keys() ?? [])] });
+  const routes = (channel: LiveChannel) => ({ instances: [...(channel.presence?.instances.keys() ?? [])] });
   const route = (id: string, keys: ReturnType<typeof routes>, add: boolean) => {
     const update = (index: Map<string, Set<string>>, key: string) => {
       if (add) {
@@ -986,8 +989,8 @@ export function createChannelPresenceBatch(channels: ChannelSnapshot[], routing?
   };
 }
 
-export function patchChannelAgentPresenceFromAgent(channel: ChannelSnapshot,
-  agent: SerializedAgent): ChannelSnapshot {
+export function patchChannelAgentPresenceFromAgent(channel: LiveChannel,
+  agent: SerializedAgent): LiveChannel {
   let presence = channel.presence ?? emptyChannelPresence(channel.id);
   const knownActor = presence.instances.get(presenceInstanceId(agent.instanceId || agent.id));
   const reports = agent.instances?.length ? agent.instances : knownActor ? [knownActor] : [];
@@ -1007,8 +1010,8 @@ export function patchChannelAgentPresenceFromAgent(channel: ChannelSnapshot,
 }
 
 /** A message is evidence of activity, never evidence of Channel residency. */
-export function patchChannelAgentPresenceFromMessage(channel: ChannelSnapshot,
-  entry: ChannelMessage): ChannelSnapshot {
+export function patchChannelAgentPresenceFromMessage(channel: LiveChannel,
+  entry: ChannelMessage): LiveChannel {
   if (entry.from.kind !== "agent" || !entry.from.instanceId ||
       (entry.from.originChannelId && entry.from.originChannelId !== channel.id)) return channel;
   const id = presenceInstanceId(entry.from.instanceId);
@@ -1022,14 +1025,14 @@ export function patchChannelAgentPresenceFromMessage(channel: ChannelSnapshot,
 }
 
 export function channelsAfterAgentInstanceOffline(
-  channels: ChannelSnapshot[],
+  channels: LiveChannel[],
   input: {
     channelId?: string;
     agentId?: string;
     instanceId?: string;
     channelInstanceId?: string;
   }
-): ChannelSnapshot[] {
+): LiveChannel[] {
   if (!input.channelId || !input.instanceId) return channels;
   const target = { instanceId: input.instanceId };
   let changed = false;
@@ -1066,10 +1069,10 @@ export function agentPresenceEndsWaits(prior: ChannelPresence | undefined, pushe
 
 /** How a Channel's Agents stand, as a lifecycle push carries them, merged as a read of that Channel would be. */
 export function channelsWithAgentPresence(
-  channels: ChannelSnapshot[],
+  channels: LiveChannel[],
   channelId: string,
   agents: ChannelPresence,
-): ChannelSnapshot[] {
+): LiveChannel[] {
   let changed = false;
   const next = channels.map((channel) => {
     if (channel.id !== channelId) return channel;
@@ -1082,11 +1085,11 @@ export function channelsWithAgentPresence(
 }
 
 export function removeChannelAgentInstancePresence(
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   input: {
     instanceId: string;
   }
-): ChannelSnapshot {
+): LiveChannel {
   if (!input.instanceId) throw new TypeError("An exact Instance identity is required for removal");
   if (!channel.presence) return channel;
   const presence = reduceChannelPresence(channel.presence,

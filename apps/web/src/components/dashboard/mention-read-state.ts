@@ -18,6 +18,7 @@ import type {
   FaceOf,
   SerializedAgentLaunch,
   ChannelSnapshot,
+  LiveChannel,
 } from "@xmatrix/protocol";
 import { MENTION_BROADCAST_NAMES, isChannelResidentInstance, isOperationalMentionStart, mentionAddressTokens, nonOperationalMentionRanges, parseAutoLaunchMentions,
   parseHarnessCapabilityMentions, scanMentionAddresses } from "@xmatrix/protocol";
@@ -191,7 +192,7 @@ export function mentionReadResolution(input: {
  * Agent off this set. Presence only: it says why a mention stays unread.
  */
 export function machineOfflineMentionSubjects(
-  channel: Pick<ChannelSnapshot, "presence"> | null | undefined,
+  channel: Pick<LiveChannel, "presence"> | null | undefined,
 ): ReadonlySet<string> {
   const subjects = new Set<string>();
   for (const instance of channelPresenceInstances(channel?.presence)) {

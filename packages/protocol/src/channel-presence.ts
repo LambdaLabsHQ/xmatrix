@@ -157,6 +157,6 @@ export function channelPresenceInstances(presence: ChannelPresence | undefined):
   });
 }
 
-export type ChannelSnapshotCatalogPageRow = Omit<import("./authority-runtime.js").ChannelCatalogPageRow, "channel"> & { channel: LiveChannel };
+export type ChannelSnapshotCatalogPageRow = Omit<import("./authority-runtime.js").ChannelCatalogPageRow, "channel"> & { channel: ChannelSnapshot };
 export type ChannelSnapshotCatalogPage = Omit<import("./authority-runtime.js").ChannelCatalogPage, "rows"> & { rows: ChannelSnapshotCatalogPageRow[] };
-export type ChannelSnapshotCatalogResolveResult = Omit<import("./authority-runtime.js").ChannelCatalogResolveResult, "channels"> & { channels: LiveChannel[] };
+export type ChannelSnapshotCatalogResolveResult = Omit<import("./authority-runtime.js").ChannelCatalogResolveResult, "channels"> & { channels: ChannelSnapshot[] };
