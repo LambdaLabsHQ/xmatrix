@@ -118,9 +118,13 @@ requests push the cache account over its egress limit, the transfer sits at
 install is within a few seconds of a successful store restore. Each hosted
 job still carries PNPM's lockfile supply-chain verification record
 (`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
-workspace policy files and the PNPM version. PNPM itself skips its per-entry
-registry check only for a lockfile with the same content hash verified under a
-policy at least as strict; any other lockfile or policy is checked in full.
+workspace policy files and the PNPM version pinned in `setup-pnpm-node`. The
+key does not include `package.json`: a release commit rewrites that file's
+version, and a pull request restores the default branch's cache, so hashing
+the version made every hosted install miss and repeat the registry check.
+PNPM itself skips its per-entry registry check only for a lockfile with the
+same content hash verified under a policy at least as strict; any other
+lockfile or policy is checked in full.
 Only a job that runs `next build` restores the Next.js build cache. The unit
 tests and the lint/typecheck job do not, so they do not compete with the
 compile for that egress.

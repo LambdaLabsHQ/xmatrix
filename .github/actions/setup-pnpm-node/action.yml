@@ -96,6 +96,13 @@ runs:
     # policy at least as strict as today's. Carry that record between hosted
     # jobs, so one job per lockfile and policy pays for the check; any other
     # lockfile, policy or PNPM version misses and is checked in full.
+    # The Actions key is that lockfile, the workspace policy files, and the
+    # PNPM version pinned in this action. It does not hash package.json: a
+    # release commit rewrites that file's version, the record is saved on
+    # main, and a pull request restores the default branch's cache. Hashing
+    # the version meant the saved key never matched the tree a pull request
+    # installs, so every hosted job repeated the registry check. A record for
+    # a different lockfile cannot satisfy PNPM's content-hash check.
     # Persistent runners keep their cache directory and already reuse it.
     - name: Locate the PNPM lockfile verification record on a GitHub-hosted runner
       id: hosted-verified
@@ -115,7 +122,7 @@ runs:
       uses: actions/cache@v6
       with:
         path: ${{ steps.hosted-verified.outputs.path }}
-        key: pnpm-lockfile-verified-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc', 'package.json') }}
+        key: pnpm-lockfile-verified-${{ runner.os }}-pnpm-11.3.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc') }}
 
     # Supported product jobs use persistent self-hosted runners. PNPM's
     # content-addressed store lives outside each checkout, so clean worktrees
