@@ -165,7 +165,7 @@ import {
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
 import { sameValue, shareByKey } from "../../lib/same-value";
-import { createSenderDirectory } from "./realtime-channels";
+import { createSenderDirectory, useRealtimeChannelValue } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
@@ -410,12 +410,22 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // at the visible affordance, so activity never rebuilds Markdown models.
   // The list copy holds no Instances: rows read who each sender is from the
   // Channel's sender directory (name, registration, machine) as they are
-  // built. It is not subscribed, so no Instance report re-renders the shell.
+  // built. The shell watches only one thing: an Instance that wrote a loaded
+  // message arriving after the rows named it unknown. That string is empty
+  // otherwise, so no Instance report re-renders the shell.
   const [senderDirectory] = useState(createSenderDirectory);
+  const agentSenderIds = useMemo(() => [...new Set(s.renderableHistory.flatMap((message) =>
+    message.from.kind === "agent" && message.from.instanceId ? [message.from.instanceId] : []))], [s.renderableHistory]);
+  const selectedChannelId = s.selectedChannel?.id;
+  const lateSenders = useRealtimeChannelValue(s.selectedChannel, useCallback((live) => !live || !selectedChannelId ? ""
+    : agentSenderIds.filter((id) => live.presence?.instances.has(presenceInstanceId(id)) &&
+      !senderDirectory.knows(selectedChannelId, id)).join("\n"), [agentSenderIds, selectedChannelId, senderDirectory]),
+    s.realtimeChannels);
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
-      const timelineChannel = senderDirectory(s.selectedChannel,
+      void lateSenders;
+      const timelineChannel = senderDirectory.read(s.selectedChannel,
         s.selectedChannel ? s.realtimeChannels.get(s.selectedChannel.id) : undefined);
       const shared = shareByKey(previousTimelineRef.current, appendOutgoingTimelineItems(
         buildTimeline(
@@ -443,6 +453,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       renderableHistoryCache,
       renderableOutgoingMessages,
       senderDirectory,
+      lateSenders,
       s.selectedChannel,
       s.realtimeChannels,
       s.renderableHistory,
@@ -471,7 +482,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
     const parentCatalog = s.channels.find((item) => item.id === parentChannelId);
     const parentChannel = parentCatalog
-      ? threadSenderDirectory(parentCatalog, s.realtimeChannels.get(parentChannelId)) ?? undefined : undefined;
+      ? threadSenderDirectory.read(parentCatalog, s.realtimeChannels.get(parentChannelId)) ?? undefined : undefined;
     const rootMessage = renderableHistoryCache.get(parentChannelId)?.messages
       .find((item) => item.messageId === rootMessageId);
     if (!parentChannel || !rootMessage) return null;

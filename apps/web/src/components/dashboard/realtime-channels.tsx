@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, useSyncExternalStore } from "react";
-import { isLiveChannel, sameValue, type AgentInstancePresence, type ObservabilityEvent, type ChannelSnapshot, type LiveChannel,
+import { isLiveChannel, presenceInstanceId, sameValue, type AgentInstancePresence, type ObservabilityEvent, type ChannelSnapshot, type LiveChannel,
   type PresenceInstanceId } from "@xmatrix/protocol";
 import type { RealtimeCollection } from "./realtime-collection";
 
@@ -140,10 +140,16 @@ const senderIdentities: Identities = (live, prior) => {
  */
 export function createSenderDirectory() {
   let held: IdentityView | null = null;
-  return (channel: ChannelSnapshot | null, live: LiveChannel | undefined): LiveChannel | null => {
-    if (!channel) return null;
-    held = identityView(channel, live ?? null, held, senderIdentities);
-    return held.view;
+  return {
+    read(channel: ChannelSnapshot | null, live: LiveChannel | undefined): LiveChannel | null {
+      if (!channel) return null;
+      held = identityView(channel, live ?? null, held, senderIdentities);
+      return held.view;
+    },
+    /** Whether the last read named this Instance in this Channel. */
+    knows(channelId: string, instanceId: string): boolean {
+      return held?.channel.id === channelId && held.instances.has(presenceInstanceId(instanceId));
+    },
   };
 }
 
