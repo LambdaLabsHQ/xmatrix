@@ -440,6 +440,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       renderableHistoryCache,
       renderableOutgoingMessages,
       timelineChannel,
+      s.selectedChannel?.id,
       s.renderableHistory,
       s.user, s.outboundPreviewByClientIdRef, s.outboundClientIdsByMessageIdRef,
     ]

@@ -3504,7 +3504,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     if (!channel) return undefined;
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
-  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  }, [realtimeChannels, realtimeEvents, channelId, events, launches]);
   const openTrace = useStableCallback((key: string) => {
     const item = readLatest(key);
     if (item) onOpenAgentTrace(item.target);

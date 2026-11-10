@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, useSyncExternalStore } from "react";
-import { sameValue, type AgentInstancePresence, type ObservabilityEvent, type ChannelSnapshot, type LiveChannel,
+import { isLiveChannel, sameValue, type AgentInstancePresence, type ObservabilityEvent, type ChannelSnapshot, type LiveChannel,
   type PresenceInstanceId } from "@xmatrix/protocol";
 import type { RealtimeCollection } from "./realtime-collection";
 
@@ -17,8 +17,10 @@ const noChannels = () => NO_CHANNELS;
 const wholeChannel = (channel: LiveChannel | null) => channel;
 
 const unplacedViews = new WeakMap<ChannelSnapshot, LiveChannel>();
-/** A list copy the live store does not hold: none of its Instances is known here. */
+/** A Channel the live store does not hold. A decoded Channel (a preview, a
+ * test) keeps its Instances; of a list copy none is known here. */
 function withoutInstances(channel: ChannelSnapshot): LiveChannel {
+  if (isLiveChannel(channel)) return channel;
   let view = unplacedViews.get(channel);
   if (!view) {
     view = { ...channel, presence: channel.presence ? { ...channel.presence, instances: new Map() } : undefined };

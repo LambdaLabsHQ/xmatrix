@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: a conversation's list copy can no longer stand in for its live Agents
+
+Since Instances became records of their own, a Channel held by a list carries
+no Agent Instances, yet its type still said it did: code that read Instances
+from a list copy compiled and found none. `ChannelSnapshot` now describes what
+lists hold (metadata and people) and `LiveChannel` the Channel with its
+Instances; only live reads return a `LiveChannel`, and every Instance reader
+takes one. The places this surfaced read live again: mentions in the message
+timeline resolve their Instance and show why a mention waits for an offline
+machine, a message from an Agent names its machine rather than its id, the
+cards beside a Page show which Agents are live in each linked conversation,
+and Status counts work in hand while a conversation is open. The timeline
+reads an Instance-identity view that changes only when who is there changes,
+so activity reports still do not rebuild message rows. Web only; recovery is a
+CI-validated beta Web release reverting this change.
+
 ## Unreleased: Instance command and parameter menus retain their runtime catalogs
 
 Modern clients read versioned Instance records, but their durable projection
