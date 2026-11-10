@@ -1,6 +1,6 @@
 import { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
   accountQuotaUsageFromCandidates, withRegistrationQuota, mergeRegistrationPresentation,
-  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type AgentInstancePresence } from "@xmatrix/protocol";
+  type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type LiveChannel, type AgentInstancePresence } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
 
 /** Session-owned Instance facts. Channel lists are only metadata and query
@@ -145,13 +145,22 @@ export function createInstanceStore() {
 
 export type InstanceStore = ReturnType<typeof createInstanceStore>;
 
-/** Compatibility view for existing Channel selectors. Its Instance map is
- * derived from the one store, never copied back into the Channel catalog. */
-export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
-  const metadata = createRealtimeCollection<ChannelSnapshot>();
+/** The session's Channels. Live reads (get, getSnapshot, subscribe) are
+ * LiveChannels: each carries its Instances, derived from the one Instance store.
+ * Catalog reads are what lists hold, typed ChannelSnapshot, which has no
+ * Instances, so a list copy cannot be handed to code that reads them. */
+export type RealtimeChannels = Omit<RealtimeCollection<LiveChannel>, "getCatalogSnapshot" | "getCatalog"> & {
+  instances: InstanceStore;
+  getCatalogSnapshot: () => ChannelSnapshot[];
+  getCatalog: (id: string) => ChannelSnapshot | undefined;
+};
+
+/** Its Instance map is derived from the one store, never copied back into the Channel catalog. */
+export function createRealtimeChannels(initial: LiveChannel[] = []) {
+  const metadata = createRealtimeCollection<LiveChannel>();
   const instances = createInstanceStore();
-  const views = new Map<string, { channel: ChannelSnapshot; records: ReturnType<InstanceStore["getChannel"]>; view: ChannelSnapshot }>();
-  const view = (channel: ChannelSnapshot | undefined) => {
+  const views = new Map<string, { channel: LiveChannel; records: ReturnType<InstanceStore["getChannel"]>; view: LiveChannel }>();
+  const view = (channel: LiveChannel | undefined) => {
     if (!channel || !instances.hasChannel(channel.id)) return channel;
     const records = instances.getChannel(channel.id);
     const held = views.get(channel.id);
@@ -164,7 +173,7 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
     views.set(channel.id, { channel, records, view: next });
     return next;
   };
-  const ingest = (channel: ChannelSnapshot): ChannelSnapshot => {
+  const ingest = (channel: LiveChannel): LiveChannel => {
     const held = views.get(channel.id);
     if (held?.view === channel) return held.channel;
     const { instanceRecords, ...rest } = channel;
@@ -179,8 +188,8 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
     if (!instances.hasChannel(channel.id)) return channel;
     return { ...rest, presence: rest.presence ? { ...rest.presence, instances: new Map() } : undefined };
   };
-  let basis: ChannelSnapshot[] | undefined;
-  let snapshot: ChannelSnapshot[] = [];
+  let basis: LiveChannel[] | undefined;
+  let snapshot: LiveChannel[] = [];
   const getSnapshot = () => {
     const current = metadata.getSnapshot();
     const next = current.map(channel => view(channel)!);
@@ -188,7 +197,7 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
     basis = current;
     return snapshot = next;
   };
-  const store: RealtimeCollection<ChannelSnapshot> & { instances: InstanceStore } = {
+  const store: RealtimeChannels = {
     ...metadata,
     instances,
     get: id => view(metadata.get(id)),
@@ -223,7 +232,7 @@ export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
       const before = getSnapshot();
       metadata.receive(incoming.map(ingest), () => capture?.(getSnapshot(), before));
     },
-    commit(commit: RealtimeCollectionCommit<ChannelSnapshot>, kind = "catalog") {
+    commit(commit: RealtimeCollectionCommit<LiveChannel>, kind = "catalog") {
       const items = commit.items.map(ingest);
       metadata.commit({ ...commit, items, byId: new Map(items.map(channel => [channel.id, channel])) }, kind);
     },
