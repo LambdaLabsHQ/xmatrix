@@ -165,7 +165,7 @@ import {
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
 import { sameValue, shareByKey } from "../../lib/same-value";
-import { useChannelWithInstanceIdentities } from "./realtime-channels";
+import { useChannelSenderIdentities } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
@@ -409,10 +409,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // History and author identity build the rows. Live sender status subscribes
   // at the visible affordance, so activity never rebuilds Markdown models.
   // The list copy holds no Instances: rows read who each sender is from the
-  // identities. Rows never draw status (the affordances subscribe to it), so
-  // this shell-level read leaves it out: only an Instance joining, leaving or
-  // moving machine rebuilds them.
-  const timelineChannel = useChannelWithInstanceIdentities(s.selectedChannel, s.realtimeChannels, { status: false });
+  // Channel's sender identities, which activity, status and a brief absence
+  // never change, so this shell-level read does not re-render the shell.
+  const timelineChannel = useChannelSenderIdentities(s.selectedChannel, s.realtimeChannels);
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
@@ -453,8 +452,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const threadRootRef = useRef<TimelineItem | undefined>(undefined);
   const threadParentId = s.selectedChannel && isThreadChannel(s.selectedChannel)
     ? metadataString(s.selectedChannel.metadata, "threadRootChannelId") : undefined;
-  const threadParent = useChannelWithInstanceIdentities(
-    (threadParentId && s.channels.find((item) => item.id === threadParentId)) || null, s.realtimeChannels, { status: false });
+  const threadParent = useChannelSenderIdentities(
+    (threadParentId && s.channels.find((item) => item.id === threadParentId)) || null, s.realtimeChannels);
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");

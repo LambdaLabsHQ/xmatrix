@@ -77,20 +77,13 @@ function instanceIdentity(instance: AgentInstancePresence, withStatus: boolean):
 type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
   view: LiveChannel };
 
-/**
- * A list copy with its Instances' identities: who they are, where they run,
- * whether they are offline. It changes when one of those does, never on what
- * an Instance is doing, so rows built from it are not rebuilt per report.
- * Live work (activity, busy, usage) subscribes where it is drawn.
- */
-export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null,
-  source?: LiveChannelSource, options: { status?: boolean } = {}): LiveChannel | null {
-  const withStatus = options.status ?? true;
+function useIdentityView(channel: ChannelSnapshot | null, source: LiveChannelSource | undefined,
+  identities: (live: LiveChannel | null, prior: IdentityView | null) => Map<PresenceInstanceId, AgentInstancePresence>) {
   const held = useRef<IdentityView | null>(null);
   const select = useCallback((live: LiveChannel | null): LiveChannel | null => {
     if (!channel) return null;
-    const next = new Map([...live?.presence?.instances ?? []].map(([id, instance]) => [id, instanceIdentity(instance, withStatus)]));
-    const prior = held.current;
+    const prior = held.current?.channel.id === channel.id ? held.current : null;
+    const next = identities(live, prior);
     const instances = prior && sameValue(prior.instances, next) ? prior.instances : next;
     if (prior && prior.channel === channel && prior.instances === instances) return prior.view;
     const view: LiveChannel = { ...channel, presence: { channelId: channel.id,
@@ -98,8 +91,39 @@ export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null
       ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } };
     held.current = { channel, instances, view };
     return view;
-  }, [channel, withStatus]);
+  }, [channel, identities]);
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
+}
+
+const currentIdentities = (live: LiveChannel | null) => new Map([...live?.presence?.instances ?? []]
+  .map(([id, instance]) => [id, instanceIdentity(instance, true)]));
+
+/**
+ * A list copy with its Instances' identities: who they are, where they run,
+ * whether they are offline. It changes when one of those does, never on what
+ * an Instance is doing. Live work (activity, busy, usage) subscribes where it
+ * is drawn.
+ */
+export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null,
+  source?: LiveChannelSource): LiveChannel | null {
+  return useIdentityView(channel, source, currentIdentities);
+}
+
+const senderIdentities = (live: LiveChannel | null, prior: IdentityView | null) => {
+  const next = new Map(prior?.instances);
+  for (const [id, instance] of live?.presence?.instances ?? []) next.set(id, instanceIdentity(instance, false));
+  return next;
+};
+
+/**
+ * Who has written in this Channel, for the rows that name them: every
+ * Instance seen while it is open, kept after it leaves (its messages still
+ * name it), without status. Only a new Instance or a moved one changes it,
+ * so a report, a rest or a brief absence never rebuilds the rows.
+ */
+export function useChannelSenderIdentities(channel: ChannelSnapshot | null,
+  source?: LiveChannelSource): LiveChannel | null {
+  return useIdentityView(channel, source, senderIdentities);
 }
 
 /**
