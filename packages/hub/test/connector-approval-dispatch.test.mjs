@@ -8,6 +8,7 @@ import { commandResult } from "../src/connectors/command-support.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { AppControlError } from "../../db/src/app-control.ts";
 import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
+import { commandMailAttachments } from "../src/connectors/gmail-attachments.ts";
 
 async function dispatcher({ providerId, spaceId, mode, repository, publish = async () => {}, imports = {} }) {
   const dependencies = {
@@ -21,6 +22,7 @@ async function dispatcher({ providerId, spaceId, mode, repository, publish = asy
     "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
     "./actions/gmail": { gmailPreview },
+    "./gmail-attachments": { commandMailAttachments },
     ...imports,
   };
   return loadCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url), name => dependencies[name] ?? {});
