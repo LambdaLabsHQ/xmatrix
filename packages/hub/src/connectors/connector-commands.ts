@@ -31,7 +31,7 @@ import { enqueueXUpload } from "./x-upload-executor-do";
 import { X_ACTIONS } from "./actions/x";
 import { gmailPreview } from "./actions/gmail";
 import { mailSnapshotLinks } from "./mail-snapshot-link";
-import { createMailAttachments } from "./gmail-attachments";
+import { commandMailAttachments } from "./gmail-attachments";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
@@ -371,11 +371,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
   const mailSnapshot = providerId === "gmail" && ["send_draft", "send", "reply"].includes(actionId)
     && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
-  /* Files on the command are never dropped silently: without storage, reading them fails the request. */
-  const mailAttachments = providerId === "gmail" && ["send", "reply"].includes(actionId) && input.attachments?.length
-    ? createMailAttachments({ channelId: input.channelId, actorUserId: input.actorUserId, bucket: input.env.RELAY_PAYLOAD_BUCKET,
-      sources: (input.attachments ?? []).map(attachment => ({ messageId: input.messageId, attachmentId: attachment.id })),
-      attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
+  const mailAttachments = providerId === "gmail" ? commandMailAttachments(actionId, input) : undefined;
   return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };

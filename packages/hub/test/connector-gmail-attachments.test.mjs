@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { GMAIL_ACTIONS as ACTIONS, gmailPreview } from "../src/connectors/actions/gmail.ts";
-import { createMailAttachments } from "../src/connectors/gmail-attachments.ts";
+import { commandMailAttachments, createMailAttachments } from "../src/connectors/gmail-attachments.ts";
 
 const mailbox = { account: "ca_mailbox1", address: "me@example.com", owner: "user:user-1" };
 const token = { mailboxes: JSON.stringify([mailbox]), composioApiKey: "composio-project-key" };
@@ -155,4 +155,25 @@ test("a send refuses more files or bytes than Gmail carries before any approval,
     sources: [{ messageId: "command-1", attachmentId: "file-1" }], attachmentAuthority: async () => Response.json({}), bucket: undefined });
   await assert.rejects(ACTIONS.send.prepare(ctx(noStorage), input), /cannot read Channel attachments/u,
     "a file on the command is never dropped silently");
+});
+
+test("an approved run, which carries no files of its own, still gets a reader for the files its approval froze", async () => {
+  const approved = { env: {}, channelId: "channel-1", messageId: "command-1:approved", actorUserId: "user-1" };
+  for (const action of ["send", "reply"]) {
+    const reader = commandMailAttachments(action, approved);
+    assert.ok(reader, `${action} always has a reader`);
+    assert.deepEqual(reader.sources, [], "the approved run adds no file the card did not list");
+  }
+  assert.deepEqual(commandMailAttachments("send", { ...approved, messageId: "command-1", attachments: [{ id: "file-1" }] }).sources,
+    [{ messageId: "command-1", attachmentId: "file-1" }]);
+  assert.equal(commandMailAttachments("send_draft", approved), undefined);
+  assert.equal(commandMailAttachments("search", approved), undefined);
+  /* What failed live: the frozen file must be read, not refused as unreadable, when the run has a reader. */
+  const { attachments } = channelFiles([pdf]);
+  const ctx = { credentials: token, caller: { userId: "user-1" }, mailAttachments: attachments };
+  const frozen = await ACTIONS.send.prepare(ctx, { to: "ops@example.com", from: "", subject: "Quarterly", body: "See attached." });
+  const { mailSnapshot } = staging();
+  const later = { ...ctx, mailAttachments: { ...attachments, sources: [] }, mailSnapshot };
+  const sent = await fetched([gmail({ id: "19a0b1c2d3e4f5a6" })], () => ACTIONS.send.execute(later, frozen));
+  assert.match(sent.result.summary, /with attachments 1: report\.pdf/u);
 });
