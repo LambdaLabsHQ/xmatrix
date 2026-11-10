@@ -37,6 +37,7 @@ integration("composite registration commands preserve identity, configuration an
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN status text DEFAULT 'online'`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN connection_epoch bigint DEFAULT 3`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN metadata_json jsonb DEFAULT '{}'`);
+    await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN capabilities_json jsonb DEFAULT '[]'`);
     await client.query(`CREATE TABLE ${schema}.machines (owner_user_id text,machine_id text,name text)`);
     await client.query(`CREATE TABLE ${schema}.workspaces (workspace_id text,owner_user_id text,machine_id text,canonical_cwd text)`);
     const placement = { spaceId: "a", shardId: "test", placementEpoch: 1 };
