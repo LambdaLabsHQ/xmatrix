@@ -39,7 +39,9 @@ test("a Channel message with trailing whitespace launches from its exact source"
   }
 });
 
-test("a summon its send did not ask to start stays a mention, and the sender is told", async () => {
+// Protect the public send contract: an unaddressed Agent must fail before
+// publication, rather than return success for a message nobody can route.
+test("a send without an Instance refuses summons until launch is explicitly requested", async () => {
   const userId = `mention-unlaunched-${randomUUID()}`;
   const worker = await startPgHubWorker({ vars: {
     XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN,
@@ -51,31 +53,40 @@ test("a summon its send did not ask to start stays a mention, and the sender is 
   try {
     const scenario = await createPgSpawnableScenario(worker, { agentName: `codex-unlaunched-${randomUUID()}` });
     daemon = scenario.daemon;
+    const url = `/api/channels/${encodeURIComponent(scenario.channelId)}/messages`;
+    const post = payload => worker.fetch(url, { method: "POST",
+      headers: { ...scenario.auth, "content-type": "application/json" }, body: JSON.stringify(payload) });
+    const clientMessageId = randomUUID();
     const mention = `@auto harness:codex pwd:"${scenario.canonicalCwd}"`;
-    const message = `Done: ${mention} reviewed the draft yesterday.`;
-    const sent = await json(await worker.fetch(`/api/channels/${encodeURIComponent(scenario.channelId)}/messages`, {
-      method: "POST", headers: { ...scenario.auth, "content-type": "application/json" },
-      body: JSON.stringify({ body: message }),
-    }));
-    assert.deepEqual(sent.mentionsNotLaunched, [mention]);
-    let result;
-    for (let attempt = 0; attempt < 100; attempt++) {
-      result = await json(await worker.fetch(`/api/channels/${encodeURIComponent(scenario.channelId)}/agent-launches/query`, {
-        method: "POST", headers: { ...scenario.auth, "content-type": "application/json" },
-        body: JSON.stringify({ sourceMessageIds: [sent.message.messageId], pageSize: 20 }) }));
-      if (result.rejections?.length) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
+    const message = `${mention} review the draft`;
+    for (const body of [message, "@codex review the draft", "@codex launch:force review the draft",
+      "@codex:1 please ask @claude to review", "@repo:LambdaLabsHQ/xmatrix review"]) {
+      const refused = await post({ body, clientMessageId });
+      assert.equal(refused.status, 400, await refused.clone().text());
+      const result = await refused.json();
+      assert.equal(result.code, "agent_instance_required");
+      assert.match(result.error, /Instance/);
+      assert.match(result.error, /--launch/);
     }
-    assert.deepEqual(result.launches, []);
-    assert.deepEqual(result.rejections.map((rejection) => [rejection.code, rejection.sourceMention]),
-      [["launch_not_requested", mention]]);
-    await assert.rejects(daemon.inbox.waitFor((command) => command.type === "machine_spawn_agent", "a spawn", 500),
+    assert.equal((await post({ body: message, launch: false })).status, 400);
+    const history = await json(await worker.fetch(
+      `/api/channels/${encodeURIComponent(scenario.channelId)}/history?limit=20`, { headers: scenario.auth }));
+    assert.ok(!history.messages.some(entry => entry.messageId === clientMessageId), "refusal publishes nothing");
+    await assert.rejects(daemon.inbox.waitFor(command => command.type === "machine_spawn_agent", "a spawn", 500),
       /waiting for a spawn/);
-    // The author can still start it from the mention's card.
-    const started = await worker.fetch(`/api/channels/${encodeURIComponent(scenario.channelId)}/messages/${encodeURIComponent(sent.message.messageId)}/launch-anyway`, {
-      method: "POST", headers: { ...scenario.auth, "content-type": "application/json" },
-      body: JSON.stringify({ body: message, sourceMention: mention }) });
-    assert.equal(started.status, 200, await started.clone().text());
+    // Instance addresses, Human mentions, and quoted examples need no launch request.
+    for (const body of ["@codex:1 review the draft", "@Daniel review the draft", "Example: `@codex review`",
+      "> @codex review", "```text\n@auto review\n```", "@codex:1:stop done"]) {
+      const response = await post({ body });
+      assert.equal(response.status, 200, await response.clone().text());
+    }
+    // The refused id is reusable: there was no successful send to recover.
+    const spawn = daemon.inbox.waitFor(command => command.type === "machine_spawn_agent" &&
+      command.channelId === scenario.channelId, "explicit launch");
+    const launched = await post({ body: message, clientMessageId, launch: true });
+    assert.equal(launched.status, 200, await launched.clone().text());
+    assert.equal((await launched.json()).message.messageId, clientMessageId);
+    assert.equal((await spawn).sourceMessageId, clientMessageId);
   } finally {
     daemon?.ws.close();
     await worker.stop();

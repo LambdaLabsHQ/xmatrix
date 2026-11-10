@@ -104,7 +104,7 @@ const WRITE_TOOLS: McpTool[] = [
   {
     name: "send_message", title: "Send a message", annotations: { ...WRITES, destructiveHint: true },
     description: "Post a message in a channel, as you. A summon (@agent, @auto) starts that Agent only with " +
-      "launch: true; without it the Agent is just mentioned.",
+      "launch: true. Without it, address an existing Instance as @agent:instance; a bare summon is refused.",
     inputSchema: { type: "object", properties: { channelId: id("The channel, from list_channels."),
       body: { type: "string", minLength: 1, maxLength: 20_000 },
       replyToMessageId: id("A message to reply to."),
@@ -245,8 +245,7 @@ export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Reque
         ...(typeof args.replyToMessageId === "string" ? { replyToMessageId: args.replyToMessageId } : {}),
         ...(args.launch === true ? { launch: true } : {}),
       });
-      return text({ ...pick(sent.message, ["messageId", "channelId", "sentAt"]),
-        ...(Array.isArray(sent.mentionsNotLaunched) ? { mentionsNotLaunched: sent.mentionsNotLaunched } : {}) });
+      return text(pick(sent.message, ["messageId", "channelId", "sentAt"]));
     },
   };
   calls.show_page = calls.read_page!;

@@ -450,14 +450,19 @@ headroom ranking above replaces their deterministic ranking. Historical passing 
 
 A launch mention starts an Agent only when its send asked to: the message
 request carries `launch: true` (`xmatrix send --launch`, the MCP `send_message`
-tool's `launch`), or the mention's text says `launch:force`. The web composer,
-the CLI's interactive chat and a Page schedule line always ask. An Agent's live
+tool's `launch`). The public HTTP send endpoint refuses an operational summon
+without that request, with HTTP 400 `agent_instance_required`, before publishing
+the message. Address an existing Instance as `@<agent>:<instance>` instead, or
+resend with `--launch` to start one. `launch:force` in public message text does
+not substitute for the launch request. Code and quoted examples remain text.
+The web composer, the CLI's interactive chat and a Page schedule line always ask. An Agent's live
 reply over the Runtime WebSocket never does, so an Agent naming another in a
 report starts nothing. The request is stored with the message (in
 `agent_invocation_targets_json.launch`, only on a message that summons someone),
-so a quota retry or recovery reads the same answer. A summon its send did not
-ask to start is recorded as the rejection `launch_not_requested`; the Channel is
-not told, and the mention's card offers its author Start.
+so a quota retry or recovery reads the same answer. Historical messages and
+internal runtime replies that did not ask to start retain the rejection
+`launch_not_requested`; the mention's card offers its author Start. Trusted
+internal first-message summons retain their existing `launch:force` path.
 
 Jev no longer reads whether a mention is a request (the 2026-09-26 intent
 question and the composer's draft reading were removed): it chooses only the

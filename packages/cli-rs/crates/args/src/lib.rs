@@ -2605,7 +2605,7 @@ pub struct SendArgs {
     /// Declare that you are waiting on the people and Agents this message mentions. It stays with them until they answer.
     #[arg(long)]
     pub wait: bool,
-    /// Start the Agents this message summons (`@<agent>`, `@auto`, `@repo:…`). Without it they are only mentioned.
+    /// Start the Agents this message summons (`@<agent>`, `@auto`, `@repo:…`). Without it an Agent address requires an Instance number.
     #[arg(long)]
     pub launch: bool,
     /// Recover a saved send by checking its receipt before retrying the same message
