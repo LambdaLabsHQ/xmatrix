@@ -253,6 +253,27 @@ test("usage heartbeats retire stale mirrored quota and context chips", () => {
   assert.equal(heartbeat.statusChips.find((chip) => chip.id === "mode").value, "full access");
 });
 
+test("runtime catalogs keep every entry and stay out of the hibernation attachment", () => {
+  // A Claude build with many skills reports far more than 64 commands; none may be dropped.
+  const commands = Array.from({ length: 200 }, (_, index) => ({
+    token: `/skill-${index}`, label: `skill-${index}`, description: "Discovered from local runtime overlay.",
+    mode: "passthrough", freeform: true }));
+  const parameters = Array.from({ length: 80 }, (_, index) => ({ id: `option${index}`, label: `Option ${index}`,
+    options: Array.from({ length: 120 }, (_, value) => `v${value}`), currentValue: "v0" }));
+  const presentation = mergeAgentInstancePresentation(fullPresentation(), { type: "presence_update", commands,
+    capabilities: Array.from({ length: 100 }, (_, index) => `capability-${index}`), parameters });
+  assert.equal(presentation.commands.length, 200);
+  assert.equal(presentation.capabilities.length, 100);
+  assert.equal(presentation.parameters.length, 80);
+  assert.equal(presentation.parameters[79].options.length, 120);
+  const serialized = serializeAgentInstanceHibernationAttachment(runtimeSession(presentation));
+  const restored = parseAgentInstanceHibernationAttachment(serialized).session.presentation;
+  // The Instance row keeps the catalogs; the attachment keeps the rest of the presentation.
+  assert.equal(restored.commands, undefined);
+  assert.equal(restored.capabilities, undefined);
+  assert.equal(restored.gitBranch, "fix/restore-agent-migration-labels");
+});
+
 test("Agent presentation survives bounded hibernation with its required authority route", () => {
   const session = runtimeSession(fullPresentation());
   session.run.repository = "LambdaLabsHQ/xmatrix";

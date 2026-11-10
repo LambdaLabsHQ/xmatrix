@@ -39,6 +39,10 @@ import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/** Runtime catalogs an Instance report keeps from the row when it omits them, each with its observation stamp. */
+const RETAINED_INSTANCE_CATALOGS: readonly (readonly [string, string?])[] = [
+  ["models", "modelsObservedAt"], ["parameters", "parametersObservedAt"], ["commands"], ["capabilities"],
+];
 type InstanceStatus = AgentStatus;
 
 export class RuntimeControlError extends ControlError {
@@ -784,17 +788,14 @@ export class PostgresRuntimeRepository {
     const placement = await this.spaces.resolve(requestId, "runtime.instance.presentation", spaceId);
     const written = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, async (tx) => {
       const rows = await tx.query<QueryResultRow>({
-        name: "runtime_instance_presentation_v5",
-        // Hibernation can omit the large model catalog from live presentation.
-        // Omission is not a withdrawal; only an explicit models field replaces
+        name: "runtime_instance_presentation_v6",
+        // Hibernation omits the runtime catalogs from live presentation.
+        // Omission is not a withdrawal; only an explicit catalog field replaces
         // the durable observation, including an empty list that clears it.
-        text: `UPDATE data.instances SET presentation_json=
-            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
-              THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
-                'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
-            CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
-              THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
-                'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb) ||
+        text: `UPDATE data.instances SET presentation_json=${RETAINED_INSTANCE_CATALOGS.map(([key, observedAt]) =>
+            `CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? '${key}')
+              THEN jsonb_strip_nulls(jsonb_build_object('${key}',presentation_json->'${key}'${observedAt
+                ? `,'${observedAt}',presentation_json->'${observedAt}'` : ""})) ELSE '{}'::jsonb END || `).join("")}COALESCE($2::jsonb,'{}'::jsonb) ||
             CASE WHEN $6::bigint IS NULL THEN '{}'::jsonb
               ELSE jsonb_build_object('presenceVersion',$6::bigint,'presenceSequence',$8::bigint) END,updated_at=$3,
             status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
