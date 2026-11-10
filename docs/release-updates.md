@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Instance command and parameter menus retain their runtime catalogs
+
+Modern clients read versioned Instance records, but their durable projection
+omitted commands and capabilities on write and omitted models and parameters
+on read. The command palette, model choices and harness configuration therefore
+lost the runtime's advertised choices. Both boundaries now retain those catalogs,
+workspace and worktree-base presentation. A complete typed checkpoint and
+exhaustive normalizer share one field registry with the SQL reader; adding a
+presentation field without its durable mapping fails compilation. Explicit
+empty catalogs remain withdrawals, including after hibernation. Message headers keep their own smaller
+projection; temporary work stays on its live activity stream. Hub only, no
+schema or client migration. Existing connections repopulate the missing fields
+on their next presence update or ordinary reconnect. Recovery is a CI-validated
+beta Hub release reverting this change.
+
 ## Unreleased: Agent sends require an Instance or an explicit launch
 
 A CLI or MCP send without an Instance number returned success even though

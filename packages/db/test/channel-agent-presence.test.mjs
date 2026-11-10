@@ -30,7 +30,7 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
   let query;
   const transaction = {
     async query(input) {
-      if (input.name === "channel_agent_resting_presence_v7") return [];
+      if (input.name === "channel_agent_resting_presence_v8") return [];
       query = input;
       return [
         row({ run_metadata_json: { machineId: "machine-runtime", hostname: "current-computer" } }),
@@ -70,7 +70,7 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
 test("an Instance is labelled by its registration, whatever its Run was routed as", async () => {
   const transaction = {
     async query(input) {
-      if (input.name === "channel_agent_resting_presence_v7") return [];
+      if (input.name === "channel_agent_resting_presence_v8") return [];
       return [row({
         run_metadata_json: { routedAs: "management_assistant_mention", managementSpaceId: "space-1" },
       })];
@@ -86,9 +86,9 @@ test("an Instance is labelled by its registration, whatever its Run was routed a
 test("live and sleeping repo Instances project the Run repository without checkout or credential leakage", async () => {
   const presence = (await loadChannelAgentPresence({ async query(input) {
     return [row({
-      instance_id: input.name === "channel_agent_presence_v11" ? "live" : "sleeping",
-      status: input.name === "channel_agent_presence_v11" ? "online" : "offline",
-      rest_state: input.name === "channel_agent_presence_v11" ? undefined : "sleeping",
+      instance_id: input.name === "channel_agent_presence_v12" ? "live" : "sleeping",
+      status: input.name === "channel_agent_presence_v12" ? "online" : "offline",
+      rest_state: input.name === "channel_agent_presence_v12" ? undefined : "sleeping",
       workspace_canonical_cwd: ".xmatrix-management/registration-123",
       run_metadata_json: { remoteRepo: "https://token:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden" },
     })];
@@ -115,7 +115,7 @@ test("a resting Instance stays in its Channel's Presence as offline with its res
   const transaction = {
     async query(input) {
       queries.push(input);
-      if (input.name === "channel_agent_presence_v11") return [row()];
+      if (input.name === "channel_agent_presence_v12") return [row()];
       return [
         row({ instance_id: "instance-2", channel_instance_id: 7, status: "offline", rest_state: "sleeping",
           waking: false }),
@@ -141,14 +141,14 @@ test("a resting Instance stays in its Channel's Presence as offline with its res
     { status: "offline", rest: "waking", restReason: undefined },
     { status: "offline", rest: "wake_failed", restReason: "reborn_spawn_failed: slot reclaimed" },
   ]);
-  const resting = queries.find((query) => query.name === "channel_agent_resting_presence_v7");
+  const resting = queries.find((query) => query.name === "channel_agent_resting_presence_v8");
   // Bounded per Channel.
   assert.deepEqual(resting.values, ["space-1", ["channel-1"], 12]);
 });
 
 test("a launched Instance that has not connected yet is waking from the summon onwards", async () => {
   const presence = await loadChannelAgentPresence({ async query(input) {
-    return input.name === "channel_agent_resting_presence_v7"
+    return input.name === "channel_agent_resting_presence_v8"
       ? [row({ instance_id: "launching", status: "offline", run_status: "starting", rest_state: null, waking: true,
         launch_in_flight: true })] : [];
   } }, "space-1", ["channel-1"]);
@@ -161,7 +161,7 @@ test("a launched Instance that has not connected yet is waking from the summon o
 test("a resting Presence row with a live or stopped state fails closed", async () => {
   for (const bad of [{ status: "online", rest_state: "sleeping" }, { status: "offline", rest_state: "stopped" }]) {
     const transaction = { async query(input) {
-      return input.name === "channel_agent_resting_presence_v7" ? [row(bad)] : [];
+      return input.name === "channel_agent_resting_presence_v8" ? [row(bad)] : [];
     } };
     await assert.rejects(loadChannelAgentPresence(transaction, "space-1", ["channel-1"]),
       (error) => error instanceof DatabaseContractError &&
@@ -173,8 +173,8 @@ test("sleeping and live catalogs keep Instance counters while discarding a legac
   const usage = { totalTokens: 7, contextUsedTokens: 3, quotaSource: "provider_api", quotaObservedAt: "2026-09-05T00:00:00Z",
     quotaUsages: [{ label: "5h", percent: 99 }] };
   const result = await loadChannelAgentPresence({ async query(input) {
-    return input.name === "channel_agent_presence_v11" ? [row({ instance_usage: usage })]
-      : [row({ instance_id: "sleeping", status: "offline", rest_state: "sleeping", instance_usage: usage })];
+    return input.name === "channel_agent_presence_v12" ? [row({ instance_presentation: { usage } })]
+      : [row({ instance_id: "sleeping", status: "offline", rest_state: "sleeping", instance_presentation: { usage } })];
   } }, "space-1", ["channel-1"]);
   for (const presence of Object.values(result.get("channel-1"))) {
     assert.deepEqual(presence.instances[0].usage, { totalTokens: 7, contextUsedTokens: 3 });
@@ -185,16 +185,16 @@ test("sleeping and live catalogs keep Instance counters while discarding a legac
 test("durable presentation projects model, effort and chips, and drops a chip it cannot show", async () => {
   const chips = [{ id: "model", label: "Model", value: "gpt-5.4", source: "codex", parameterKind: "enum" }];
   const result = await loadChannelAgentPresence({ async query(input) {
-    if (input.name === "channel_agent_resting_presence_v7") return [];
+    if (input.name === "channel_agent_resting_presence_v8") return [];
     return [
-      row({ instance_model: "gpt-5.4", instance_effort: "high", instance_status_chips: chips }),
-      row({ instance_id: "instance-2", channel_instance_id: 7, instance_status_chips: [{ id: "quota", label: "5h", percent: 120 }] }),
+      row({ instance_presentation: { model: "gpt-5.4", effort: "high", statusChips: chips } }),
+      row({ instance_id: "instance-2", channel_instance_id: 7, instance_presentation: { statusChips: [{ id: "quota", label: "", percent: 120 }] } }),
     ];
   } }, "space-1", ["channel-1"]);
   const presence = result.get("channel-1");
   assert.equal(presence["instance-1"].instances[0].model, "gpt-5.4");
   assert.equal(presence["instance-1"].instances[0].effort, "high");
-  assert.deepEqual(presence["instance-1"].instances[0].statusChips, chips);
+  assert.deepEqual(presence["instance-1"].instances[0].statusChips, [...chips, { id: "effort", label: "Effort", value: "high" }]);
   assert.equal(presence["instance-2"].instances[0].model, undefined);
   assert.equal(presence["instance-2"].instances[0].statusChips, undefined);
 });
@@ -207,13 +207,13 @@ test("visible live agents are the channels this principal may read", async () =>
       assert.deepEqual(input.values, ["space-1", "agent", "agent-1"]);
       return [{ channel_id: "channel-1" }];
     }
-    if (input.name === "channel_agent_resting_presence_v7") return [];
+    if (input.name === "channel_agent_resting_presence_v8") return [];
     return [row()];
   } }, "space-1", { kind: "agent", id: "agent-1" });
   assert.deepEqual(names, [
     "visible_live_agent_channels_v2",
-    "channel_agent_presence_v11",
-    "channel_agent_resting_presence_v7",
+    "channel_agent_presence_v12",
+    "channel_agent_resting_presence_v8",
   ]);
   assert.equal(found.get("channel-1")["instance-1"].instances[0].id, "instance-1");
 });

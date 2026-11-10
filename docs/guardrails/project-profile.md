@@ -35,6 +35,13 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Versioned Instance records retain runtime commands, capabilities, model and
+parameter catalogs, workspace and worktree-base presentation across persistence
+and every read path. The complete typed checkpoint and shared normalizer require
+every durable field; SQL derives its selection from that exhaustive registry.
+Explicit empty catalogs remain withdrawals; legacy Agent
+cards do not supply missing modern fields. See [command completion](../command-completion.md).
+
 Agent binding refusals report one fixed comparison source and field, readable
 through Sentry without compared credentials or identity values. Strict binding
 and connection fencing remain enforced. See [Runtime delivery errors](../operations/runtime-delivery-errors.md).
