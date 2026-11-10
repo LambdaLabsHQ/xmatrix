@@ -686,7 +686,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     : {}, [selectedChannel, view, workspaceSearchHere]);
   const pageCreation = usePageCreation(currentSpaceId, token ?? "", openPage);
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
-  // An edit card opens it showing what changed since, with the way back to its message.
+  // An edit card opens it with the way back to its message.
   const [pageSectionRequest, setPageSectionRequest] =
     useState<{ pageId: string; blockId: string; seq: number; opening?: PageEditOpening } | null>(null);
   const openPageAt = useStableCallback((pageId: string, blockId?: string | null, opening?: PageEditOpening) => {

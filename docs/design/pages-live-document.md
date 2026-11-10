@@ -95,7 +95,7 @@ Each block's awareness has three layers.
 |---|---|---|
 | Facts | Is this still true? | Revision attribution (who, which conversation, when); resolved live references |
 | Presence | Who is here, doing what? | Editor awareness of people and Agents; live Runs in linked conversations with their invocation state; each Agent's intent line |
-| Change | What changed since I looked? | Revisions after the reader's last read (people: last visit; Agents: last `page read` in this Run) |
+| Change | What changed since I looked? | Revisions after the reader's last read (people: last visit, shown in History; Agents: last `page read` in this Run) |
 
 Revision attribution reads the authorized head and bounded revision history
 before releasing its database transaction. What each revision changed against
@@ -180,7 +180,9 @@ fact is about.
   the editor's own h1; clicking it starts that heading. There is no ⋯
   menu: each setting sits where it acts (§7). As Google Docs does with its
   clock icon, hovering History says who changed the page last and when, and
-  a dot on it means the page changed since this person last read it.
+  a brass dot beside it means the page changed since this person's last
+  visit. In History the header is History's own: the way back to the page,
+  and putting the chosen version back (§4.2).
 - **Byline** (decided by Daniel 2026-10-23): under the title, wherever the
   title stands, as a column names its writers, each author of the page by face
   and name, a hairline
@@ -263,34 +265,25 @@ fact is about.
   anchored in the document. Unread conversations have red marks; the current
   viewport is outlined. Each mark is a keyboard-accessible button that scrolls
   to its document anchor, independently of displaced margin cards.
-- **What changed since this person last read the page** is offered to them,
-  not shown: the page always opens as it is now, and the first card in the
-  margin, a card of paper, (above the page where there is no margin) says how many changes there
-  are since they last read it and offers *Show changes*, which shows them as a
-  diff, in place. Read means seen: what has been on their screen a moment
-  (1.5 s, tab in front) is read as it was then, and nothing else is. So what
-  an Agent writes while they watch is read as it arrives, marked only by the
-  Agent's own ink, and what it writes out of view or while they are away is
-  not. How far each person has read each page is theirs and kept by the Hub
+- **The page has two states, now and History** (decided by Daniel
+  2026-11-10): the page is always as it is now, and nothing about what
+  changed is ever marked over its text or laid beside it. What changed is
+  History's (§4.2), one click away and one click back. Only what is
+  happening now shows on the page: an Agent's ink as it writes, and a
+  suggestion waiting to be taken or left.
+- **Read means visited.** How far each person has read each page is the
+  newest version they have had open, theirs and kept by the Hub
   (`data.page_reads`, `GET`/`PUT /api/spaces/:spaceId/pages/:pageId/read`),
-  so it follows them across devices: the newest revision they have seen whole,
-  which moves only forward, and, when they have seen only part of the page
-  past it, the page as they saw it (`seen_body`): each top-level block that
-  was on screen as it was then, each other block as they had last seen it
-  (`pageSeenDoc`). Opening the page diffs what they saw against the document
-  now, block by block and then word by word inside changed blocks. It is
-  marked as a proofreader marks paper, in the app's one accent ink and never
-  in a tinted box: each stretch of changed lines barred once in the left
-  margin, on one line beside the text and never over a list's markers, with
-  changed lines next to each other one bar and empty lines left out; inside a
-  line that changed in part, new words underlined in brass and text taken out
-  struck through in faint ink where it stood. Nothing is animated and nothing
-  fades: once opened, the diff stays until its reader clicks *Hide changes*,
-  which keeps offering it, or *Done*, which reads all of it and
-  shows the page as it is, or writes on the page, which only stops marking it.
-  On a phone the opened diff is walked from the right edge instead: a mark
-  beside the change in front of the reader counts the changes, steps to the
-  next and says *Viewed*. A first visit shows nothing as changed. Agents have no read state.
+  so it follows them across devices and only moves forward. Having the page
+  on screen in a visible tab reads it; nothing times how long a block was in
+  view and nothing keeps a copy of what they saw. Coming to a page that
+  moved past what they had read, or back to its tab, what it became
+  meanwhile is new to them for that visit (`page-visit.ts`): History's
+  button carries the dot until they open History, and History shows *Since
+  your last visit* first for as long as they stay. What changes while they
+  watch is read as it arrives and is not new. The list of pages stops
+  counting a page's changes once it is read. A first visit has nothing new.
+  Agents have no read state.
 - **Opening a page draws it as the editor will.** Until the live session has
   synced, the page shows its prefetched document rendered from the same
   document schema and list item view as the editor, with the margin's room
@@ -624,12 +617,37 @@ fact is about.
   change is taken or left, the suggestions stop waiting (`POST
   …/suggestions/review`, a person's, recorded as the page's
   `suggestions_reviewed_through`). History still has every suggestion.
-- **History**, as Google Docs' version history: versions grouped by day,
-  each with its time and its editors beside a dot in their colour; the
-  newest opens first, and the open one shows its additions highlighted in
-  its author's colour and its removals struck through, with its conversation
-  and restore. One colour per person or Agent everywhere: caret, avatar ring
-  and History.
+- **History** is the page's other state, as Google Docs' version history:
+  the same page, in the same column and the same type, at a version, with
+  what that version changed marked in its text, and its versions listed in
+  the margin (folded to the chosen one, above the page, on a phone or
+  without room for a margin). The header becomes *Back to the page* and,
+  for a version that is not the page already, *Restore this version*;
+  Escape goes back too.
+  - **What is listed.** *Since your last visit* first, when the page moved
+    past what this reader had read (§3.2): everything since, across however
+    many versions, as one comparison, and the first thing History shows.
+    Then every version by day, each with its time and its editors beside a
+    dot in their colour (one colour per person or Agent everywhere: caret,
+    avatar ring and History); versions new to the reader carry the brass
+    dot. Without anything new the newest version opens first. The chosen
+    one names the conversation it came from and the sections it changed,
+    each a way to that change, and History opens on the first of them.
+  - **How a change is drawn** (`pageDocDiff`, `page-doc-diff.ts`): the two
+    versions as one document, in the page's schema, so it is drawn by what
+    draws a page. It is marked as a proofreader marks paper, in the app's
+    one accent ink and never in a tinted box. Each stretch of changed lines
+    is barred once in the left margin, lines next to each other one bar. A
+    block that kept most of its words has the new ones underlined in brass
+    and the ones taken out struck through in faint ink where they stood; a
+    few words two versions share by chance inside a rewritten phrase are
+    part of the rewrite. A block rewritten past recognition is the old one
+    struck out and the new one, each whole, never their words interleaved.
+    A table stays a table: a row taken out stays a struck-out row, rows are
+    matched by their first column, and a cell rewritten past recognition
+    holds its old words over its new ones. Code is compared whole.
+  - *Show changes* off shows the version as it read, to decide whether to
+    put it back.
 - **Outline** of the page's headings in the left rail under the tree; share,
   publish and access in a dialog from the header.
 
@@ -1076,7 +1094,7 @@ There is no side panel. What its tabs held is shown where it acts:
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
 | Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
 | Attached: connectors | A conversation linked to its section, a card like any other |
-| History | A mode of the page: the margin lists revisions, and the document shows the chosen one's changes colored by author, with restore |
+| History | The page's other state: the margin lists its versions, what is new since the reader's last visit first, and the document shows the chosen one's changes marked in its text, with restore (§4.2) |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
 | Settings: project governance | Open participation on the Space in Team; the governance page in Share ("Space rules": only owners and admins edit it, every Agent follows it), both for Space owners and admins |
 | The move to pages | A notice on the page while an Agent's draft waits for an owner or admin |
@@ -1135,6 +1153,6 @@ Open:
 - Automation timing moved off each Automation's timer conversation onto its
   page (§6.4).
 - Change events pushed to a Run when a block it read or edited changes
-  (§3.1), and "changes since your last visit" for people.
+  (§3.1).
 - Live references for GitHub issues and pull requests (§2.4).
 - Images.

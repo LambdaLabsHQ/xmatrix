@@ -2,11 +2,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useQuery } from "@tanstack/react-query";
-import { pageAuthorColor, type ClientDefectAction, pageAuthorLabel, pageLineDiff, type FaceOf, type PageLineDiff } from "@xmatrix/protocol";
+import type { ClientDefectAction, FaceOf } from "@xmatrix/protocol";
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
-  ArrowLeft, Bot, Check, ChevronDown, ChevronUp, Globe, Link2, Lock, ShieldCheck, Users, type LucideIcon,
+  Bot, Check, ChevronDown, ChevronUp, Globe, Link2, Lock, ShieldCheck, Users, type LucideIcon,
 } from "lucide-react";
 import {
   CenteredDialogShell, DialogButton, DialogPanelFooter, DialogPanelHeader,
@@ -18,9 +17,6 @@ import { Button } from "@/components/ui/button";
 import { LiquidGlassCard, LiquidGlassPill } from "@/components/ui/material-surfaces";
 import { Switch } from "@/components/ui/switch";
 import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
-import { useAuth } from "@/lib/auth-context";
-import { xmatrixQueryKeys } from "@/lib/query/query-keys";
-import { pageApi, type PageRevision } from "@/lib/pages/page-client";
 import { cn } from "@/lib/utils";
 import { agentState } from "./page-margin";
 import { PenContent } from "./page-pen";
@@ -411,164 +407,6 @@ export function ConversationList({ conversations, blocks, onOpen, focusBlockId =
           </section>
         );
       })}
-    </div>
-  );
-}
-
-/**
- * The page's history as a mode of the page (§7): its revisions, and what the
- * chosen one changed, colored by kind, with the conversation it came from
- * and restore.
- */
-const VERSION_KIND: Record<PageRevision["kind"], string> = {
-  edit: "", suggestion: "Suggestion", accepted: "Accepted suggestion", restore: "Restored", purge: "Redacted",
-};
-
-/** A version's time: the hour within its day's group, the full date at the top of the open version. */
-function versionTime(createdAt: string, full: boolean): string {
-  const date = new Date(createdAt);
-  return full ? date.toLocaleString(undefined, { month: "long", day: "numeric", year: "numeric", hour: "numeric",
-    minute: "2-digit" }) : date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-}
-
-/** Versions grouped by day, newest first: Today, Yesterday, then dates. */
-function versionGroups(revisions: readonly PageRevision[]): Array<[string, PageRevision[]]> {
-  const groups = new Map<string, PageRevision[]>();
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 86_400_000);
-  for (const revision of revisions) {
-    const date = new Date(revision.createdAt);
-    const day = date.toDateString() === today.toDateString() ? "Today"
-      : date.toDateString() === yesterday.toDateString() ? "Yesterday"
-        : date.toLocaleDateString(undefined, { month: "long", day: "numeric",
-          ...(date.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) });
-    groups.set(day, [...(groups.get(day) ?? []), revision]);
-  }
-  return [...groups];
-}
-
-export function PageHistory({ spaceId, pageId, token, headRevision, canEdit, conversationName, onOpenConversation,
-  onPromoted, onClose }: {
-  spaceId: string; pageId: string; token: string; headRevision: number; canEdit: boolean;
-  conversationName: (conversationId: string) => string | null;
-  onOpenConversation: (conversationId: string) => void;
-  onPromoted: () => void;
-  onClose: () => void;
-}) {
-  const { user } = useAuth();
-  const history = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-history", [spaceId, pageId, headRevision]),
-    queryFn: ({ signal }) => pageApi.history(spaceId, pageId, token, signal).then((result) => result.revisions),
-  });
-  const [preview, setPreview] = useState<{ revision: PageRevision; diff: PageLineDiff } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  // A revision reads as what it changed from the one it was based on.
-  const open = async (revision: PageRevision) => {
-    const previous = revision.basedOnRevision ?? (revision.revision > 1 ? revision.revision - 1 : null);
-    const [{ page }, before] = await Promise.all([
-      pageApi.read(spaceId, pageId, token, revision.revision),
-      previous ? pageApi.read(spaceId, pageId, token, previous).then((result) => result.page.body) : Promise.resolve(""),
-    ]);
-    setPreview({ revision, diff: pageLineDiff(before, page.body) });
-  };
-  const promote = async (revision: PageRevision) => {
-    setError(null);
-    try {
-      await pageApi.promote(spaceId, pageId, token, revision.revision, headRevision);
-      setPreview(null);
-      onPromoted();
-    } catch (cause) {
-      setError(userErrorMessage(cause, "Couldn't apply this revision"));
-    }
-  };
-  // As in Google Docs, the newest version is open when History opens.
-  const newest = history.data?.[0];
-  useEffect(() => {
-    if (newest && !preview) void open(newest);
-    // Only the first load picks a version; choosing another is the reader's.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [newest?.revision]);
-  const colorOf = (revision: PageRevision) => revision.authors[0] ? pageAuthorColor(revision.authors[0]) : "var(--primary)";
-  return (
-    <div className="space-y-3" data-testid="page-history">
-      <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={onClose}><ArrowLeft /> Back to the page</Button>
-        <span className="text-sm font-semibold">Version history</span>
-      </div>
-      {error && <p className={noticeClass("alert", "rounded-md px-3 py-2 text-xs")}>{error}</p>}
-      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_17rem]">
-        {preview ? (
-          <div className="min-w-0 rounded-md border p-4 md:order-first">
-            <div className="mb-3 flex items-center justify-between gap-2 text-sm">
-              <span className="font-semibold">{versionTime(preview.revision.createdAt, true)}</span>
-              {canEdit && preview.revision.revision !== headRevision && (
-                <Button size="xs" onClick={() => void promote(preview.revision)}>
-                  {preview.revision.kind === "suggestion" ? "Accept suggestion" : "Restore this version"}
-                </Button>
-              )}
-            </div>
-            <div className="text-[13px] leading-relaxed" data-testid="page-revision-diff">
-              {preview.diff.map((part, index) => part.kind === "same" ? (
-                // Unchanged runs keep a line of context on each side.
-                <p key={index} className="whitespace-pre-wrap text-muted-foreground">{
-                  part.lines.length > 3 ? `${part.lines[0]}\n…\n${part.lines.at(-1)}` : part.lines.join("\n")}</p>
-              ) : part.kind === "added" ? (
-                // What the version added, in its author's colour, as Google Docs highlights it.
-                <p key={index} className="whitespace-pre-wrap rounded-sm" data-change="added"
-                  style={{ backgroundColor: `color-mix(in oklab, ${colorOf(preview.revision)} 18%, transparent)`,
-                    boxShadow: `inset 2px 0 0 ${colorOf(preview.revision)}` }}>{part.lines.join("\n")}</p>
-              ) : (
-                <p key={index} className="whitespace-pre-wrap text-muted-foreground line-through" data-change="removed"
-                  style={{ textDecorationColor: colorOf(preview.revision) }}>{part.lines.join("\n")}</p>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-muted-foreground md:order-first">Choose a version to see what it changed.</p>
-        )}
-        <div className="space-y-3" data-testid="page-versions">
-          {versionGroups(history.data ?? []).map(([day, revisions]) => (
-            <section key={day}>
-              <h3 className="px-2 pb-1 text-xs font-semibold text-muted-foreground">{day}</h3>
-              <ul className="space-y-0.5">
-                {revisions.map((revision) => (
-                  <li key={revision.revision}>
-                    <button type="button" onClick={() => void open(revision)}
-                      aria-label={`${versionTime(revision.createdAt, false)} by ${
-                        revision.authors.map(pageAuthorLabel).join(", ")}`}
-                      className={cn("w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent",
-                        preview?.revision.revision === revision.revision && "bg-accent")}>
-                      <span className="font-semibold">{versionTime(revision.createdAt, false)}</span>
-                      {revision.revision === headRevision && (
-                        <span className="block text-xs italic text-muted-foreground">Current version</span>
-                      )}
-                      {revision.kind !== "edit" && (
-                        <span className={cn("block text-xs", revision.kind === "suggestion" ? statusInkClass("attention")
-                          : "text-muted-foreground")}>{VERSION_KIND[revision.kind]}</span>
-                      )}
-                      {revision.authors.map((author) => (
-                        <span key={`${author.kind}:${author.id}`} className="mt-0.5 flex items-center gap-1.5 text-xs">
-                          <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: pageAuthorColor(author) }} />
-                          <span className="truncate" title={author.application ? "OAuth application name supplied by its registration" : undefined}>
-                            {pageAuthorLabel(author)}
-                          </span>
-                        </span>
-                      ))}
-                    </button>
-                    {preview?.revision.revision === revision.revision && revision.conversationIds.map((conversationId) =>
-                      conversationName(conversationId) && (
-                        <button key={conversationId} type="button" onClick={() => onOpenConversation(conversationId)}
-                          className="block px-2 pb-1 text-left text-xs text-muted-foreground hover:underline">
-                          in {conversationName(conversationId)}
-                        </button>
-                      ))}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          ))}
-        </div>
-      </div>
     </div>
   );
 }

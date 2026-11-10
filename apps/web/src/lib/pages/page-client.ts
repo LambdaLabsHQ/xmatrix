@@ -61,16 +61,13 @@ export const pageApi = {
   publish: (spaceId: string, pageId: string, token: string, published: boolean) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/publication`,
       token, method: "PUT", body: { published } }),
-  /**
-   * How far this person has read the page: the newest revision they have had on screen whole, and the page
-   * as they have seen it when they saw part of it past that (null when it is that revision's text).
-   */
+  /** How far this person has read the page: the newest version they have had open; null before their first visit. */
   readState: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixHubRead<{ revision: number | null; seen?: string | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
+    xmatrixHubRead<{ revision: number | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
       webUrl: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
-  markRead: (spaceId: string, pageId: string, token: string, revision: number, seen: string | null) =>
+  markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      method: "PUT", body: { revision, seen } }),
+      method: "PUT", body: { revision } }),
   /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
   /** Where the page's reader reads an image or video pasted into it; the session cookie authorizes it. */
   mediaUrl: (spaceId: string, pageId: string, file: string) =>

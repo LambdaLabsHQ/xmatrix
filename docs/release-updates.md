@@ -1,5 +1,30 @@
 # Release Updates
 
+## Unreleased: a page is always as it is now, and History shows what changed
+
+A page could be in a state its reader had not chosen and could not name: what
+changed since they last read it, or since an Agent's edit when they came from
+a message's edit card, marked word by word over the text until they found the
+card that hid it, and back again each time they returned. A rewritten table
+was unreadable that way. A page now has two states. The page is always its
+newest version with nothing marked in it; History is the same page, where it
+stood, at a version, with that version's changes marked in its text and the
+versions listed in the margin. *Since your last visit* is History's first
+entry, across however many versions that took, and what History opens on; a
+brass dot beside History says there is one (the old dot was drawn in a colour
+that did not show on paper). A changed block keeps its words marked one by one
+only while most of them stayed; rewritten past recognition, the old block is
+struck out and the new one stands whole, and a table keeps its rows and
+columns. A message's edit card opens the page as it is now at the change.
+
+Read now means visited: the newest version a person has had open. The Web no
+longer times which blocks were on screen or sends the page as its reader saw
+it, and the Hub no longer reads or writes `data.page_reads.seen_body`; a
+contract migration drops the column once this Hub is verified. Web, Hub and
+protocol, no expand migration; an older Web keeps working against this Hub and
+this Web against an older Hub. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a missing harness is refused by name before its Run starts
 
 When npm left `opencode` off a Mac daemon's PATH, xMatrix still listed

@@ -308,12 +308,13 @@ it belongs in the repository.**
   Instance changed from that conversation since its previous message there,
   as a tool call carries its result. It is not a chat message of its own. The
   card names the page (and the section when all changes are in one), counts
-  the changed lines, and shows up to three of them as the page marks what
-  changed since it was read: a margin bar, new words underlined, words taken
+  the changed lines, and shows up to three of them as History marks what a
+  version changed: a margin bar, new words underlined, words taken
   out struck through, a whole new or removed line labelled. No code diff, no
-  markdown syntax. Opening the card opens the page at the first change with
-  everything since that edit's base marked over the text, and a back control
-  that returns to the message. The Hub answers the cards for the Agent
+  markdown syntax. Opening the card opens the page as it is now at the first
+  change, with a back control that returns to the message; the card itself
+  unfolds to every change, and the page's History has them in place. The
+  Hub answers the cards for the Agent
   messages a reader has on screen (`POST /api/channels/:id/page-edits/query`),
   from revision authorship and the conversation the revision names; only
   pages the reader can open are named.

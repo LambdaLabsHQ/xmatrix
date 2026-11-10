@@ -455,16 +455,15 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     })) };
   }));
 
-  // How far the caller has read the page: what changed after it is shown as a
-  // change when they open the page again (pages-live-document.md §3.1).
+  // How far the caller has read the page: History shows first what changed
+  // after it when they come to the page again (pages-live-document.md §3.2).
   app.get(`${base}/:pageId/read`, async (c) => run(c, async () => repository(c.env).readState({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));
   app.put(`${base}/:pageId/read`, async (c) => run(c, async () => {
     const body = await json(c);
     return repository(c.env).markRead({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision),
-      seen: typeof body.seen === "string" ? body.seen : null });
+      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
   }));
 
   // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
