@@ -735,7 +735,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       readAction("list_zones", "List zones", "List the zones in an account.", "<account id>|*"),
       writeAction("create_zone", "Create zone", "Create a full zone for a domain this account does not already have.", "[<account id>/]<domain>"),
       readAction("list_dns", "List DNS", "List a zone's DNS records.", "[<account id>/]<zone>"),
-      writeAction("put_dns", "Add DNS record", "Add one DNS record when that type, name and content are not already present. It does not replace a different value.", "[<account id>/]<zone> <TYPE> <name> <content>"),
+      writeAction("put_dns", "Add DNS record", "Add one DNS record when that type, name and content are not already present. It does not replace a different value. An A, AAAA or CNAME record ending in proxied goes through Cloudflare's proxy.", "[<account id>/]<zone> <TYPE> <name> <content> [proxied]"),
       readAction("list_domains", "List registered domains", "List domains this account registered at Cloudflare.", "<account id>|*"),
       readAction("check_domain", "Check domain", "Check whether a domain can be registered now, and its price.", "[<account id>/]<domain>"),
       writeAction("register_domain", "Register domain", "Register a standard domain on this account, with auto-renew on. Premium names are refused. This charges the account.", "[<account id>/]<domain>"),

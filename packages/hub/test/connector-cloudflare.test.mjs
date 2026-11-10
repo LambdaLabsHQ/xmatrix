@@ -547,3 +547,71 @@ test("zones, DNS, registrar and Worker hostnames are named reads and writes", as
   await expectReconnect(() => CLOUDFLARE_ACTIONS.list_zones.execute({ credentials: { oauthToken: "old-grant" } }, {}),
     /Reconnect Cloudflare in Apps to grant zone, DNS and registrar access/u);
 });
+
+test("a login without DNS access does not hide another login that reaches the same account", async () => {
+  /* token-a was granted before DNS scopes existed; token-b, connected later, holds them. */
+  const sameAccount = { webhookSecret: "cf-secret", ingressKey: "ingress-key", accountId: ACCOUNT,
+    logins: JSON.stringify([storedLogin(LOGIN_A, "token-a", [{ id: ACCOUNT, name: "Acme" }]),
+      storedLogin(LOGIN_B, "token-b", [{ id: ACCOUNT, name: "Acme" }])]) };
+  const dnsByToken = (allowed) => (call) => call.authorization === `Bearer ${allowed}`
+    ? [{ type: "A", name: "xmatrix.page", content: "192.0.2.1" }] : undefined;
+  const refusing = (allowed) => {
+    const original = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (url, init = {}) => {
+      const method = init.method ?? "GET";
+      const path = new URL(String(url)).pathname.replace("/client/v4/", "");
+      const authorization = new Headers(init.headers).get("authorization");
+      calls.push({ method, path, authorization, body: init.body ? JSON.parse(init.body) : undefined });
+      if (path === "accounts") return Response.json({ success: true, result: [{ id: ACCOUNT, name: "Acme" }] });
+      if (allowed && authorization !== `Bearer ${allowed}`) {
+        return Response.json({ success: false, errors: [{ code: 10000, message: "Authentication error" }] }, { status: 403 });
+      }
+      if (path === "zones") return Response.json({ success: true, result: [{ id: ZONE, name: "xmatrix.page", status: "active" }] });
+      if (method === "GET" && path === `zones/${ZONE}/dns_records`) return Response.json({ success: true, result: dnsByToken(allowed)({ authorization }) ?? [] });
+      if (method === "POST" && path === `zones/${ZONE}/dns_records`) return Response.json({ success: true, result: { id: "rec" } });
+      return Response.json({ success: false, errors: [{ code: 7003, message: "no route" }] }, { status: 404 });
+    };
+    return { calls, restore: () => { globalThis.fetch = original; } };
+  };
+  const run = async (credentialsValue, body) => {
+    const parsed = parseActionCommand("cloudflare", body);
+    const action = CLOUDFLARE_ACTIONS[parsed.actionId];
+    return action.execute({ credentials: credentialsValue }, action.parse(parsed.statement));
+  };
+
+  let api = refusing("token-b");
+  try {
+    const listed = await run(sameAccount, "@cloudflare:list_dns:xmatrix.page");
+    assert.match(listed.summary, /xmatrix\.page: 1 DNS records/u);
+    const added = await run(sameAccount, "@cloudflare:put_dns:xmatrix.page CNAME beta beta.example.pages.dev proxied");
+    assert.match(added.summary, /Added CNAME beta\.xmatrix\.page \(proxied\)/u);
+    const posts = api.calls.filter((call) => call.method === "POST");
+    assert.deepEqual(posts.map((call) => call.authorization), ["Bearer token-a", "Bearer token-b"],
+      "the refused write changed nothing, so it is retried with the login that holds DNS access");
+    const post = posts.at(-1);
+    assert.deepEqual(post.body, { type: "CNAME", name: "beta.xmatrix.page", content: "beta.example.pages.dev", ttl: 1, proxied: true });
+  } finally {
+    api.restore();
+  }
+
+  api = refusing("token-c");
+  try {
+    await assert.rejects(run(sameAccount, "@cloudflare:list_dns:xmatrix.page"),
+      /Reconnect Cloudflare in Apps to grant zone, DNS and registrar access on Acme \(none of the 2 connected logins that reach it holds it\)/u);
+  } finally {
+    api.restore();
+  }
+});
+
+test("put_dns proxies only A, AAAA and CNAME records, and only when asked", () => {
+  const parse = (body) => {
+    const parsed = parseActionCommand("cloudflare", body);
+    return CLOUDFLARE_ACTIONS.put_dns.parse(parsed.statement);
+  };
+  assert.equal(parse("@cloudflare:put_dns:xmatrix.page CNAME beta beta.example.pages.dev proxied").proxied, "1");
+  assert.equal(parse("@cloudflare:put_dns:xmatrix.page CNAME beta beta.example.pages.dev").proxied, undefined);
+  assert.equal(parse("@cloudflare:put_dns:xmatrix.page TXT www says proxied").content, "says proxied",
+    "a TXT record keeps the word as content");
+  assert.equal(typeof parse("@cloudflare:put_dns:xmatrix.page CNAME beta two words"), "string");
+});

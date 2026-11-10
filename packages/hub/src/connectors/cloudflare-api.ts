@@ -30,6 +30,7 @@ const DOMAIN = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$/u;
 const DNS_TYPE = /^(?:A|AAAA|CNAME|TXT|MX|NS|CAA)$/u;
 const DNS_LABEL = /^(?:@|\*|[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?(?:\.[a-z0-9_](?:[a-z0-9_-]{0,62}[a-z0-9_])?)*)$/u;
 const DNS_CONTENT = 2_048;
+const PROXIABLE = new Set(["A", "AAAA", "CNAME"]);
 const DATABASE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/u;
 const DATABASE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
 const VERSION = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u;
@@ -46,7 +47,11 @@ type Credentials = Readonly<Record<string, string>>;
 /** One way into Cloudflare: a stored OAuth login, or a pasted API token. */
 interface Login { token: string }
 /** An account and the login that reaches it. */
-export interface CloudflareTarget { account: string; name: string; token: string }
+/**
+ * An account and the logins that reach it: `token` is the first, `tokens`
+ * every one in connection order, for calls whose scope an older grant lacks.
+ */
+export interface CloudflareTarget { account: string; name: string; token: string; tokens: string[] }
 
 function logins(credentials: Credentials): Login[] {
   const list: Login[] = parseCloudflareLogins(credentials.logins).map((login) => ({ token: login.accessToken }));
@@ -112,7 +117,9 @@ async function reach(credentials: Credentials): Promise<{ targets: CloudflareTar
       return [];
     });
     for (const account of accounts) {
-      if (!found.has(account.id)) found.set(account.id, { account: account.id, name: account.name, token: login.token });
+      const known = found.get(account.id);
+      if (known) known.tokens.push(login.token);
+      else found.set(account.id, { account: account.id, name: account.name, token: login.token, tokens: [login.token] });
     }
   }
   return { targets: [...found.values()], ...(refused ? { refused } : {}) };
@@ -359,9 +366,9 @@ export function readOnlySql(sql: string): string | undefined {
   return undefined;
 }
 
-async function databaseId(target: CloudflareTarget, database: string): Promise<{ id: string; name: string }> {
+async function databaseId(target: CloudflareTarget, token: string, database: string): Promise<{ id: string; name: string }> {
   if (DATABASE_ID.test(database)) return { id: database, name: database };
-  const listed = await cloudflare(target.token, `accounts/${target.account}/d1/database?name=${encodeURIComponent(database)}&per_page=10`);
+  const listed = await cloudflare(token, `accounts/${target.account}/d1/database?name=${encodeURIComponent(database)}&per_page=10`);
   const found = (Array.isArray(listed) ? listed : []).map(record).find((item) => text(item.name) === database);
   if (!found || !DATABASE_ID.test(text(found.uuid))) {
     throw new ProviderRequestError(404, `Account ${target.account} has no D1 database named ${database}`);
@@ -370,15 +377,35 @@ async function databaseId(target: CloudflareTarget, database: string): Promise<{
 }
 
 /* A grant from before a scope was offered answers with an authorization error. */
-function grantRefusal(error: unknown, grant: string): never {
-  if (error instanceof ProviderRequestError && /authenticat|authoriz|permission|10000/iu.test(error.message)) {
-    throw new ProviderRequestError(403, `${error.message}. Reconnect Cloudflare in Apps to grant ${grant}`);
-  }
-  throw error;
+function isGrantRefusal(error: unknown): error is ProviderRequestError {
+  return error instanceof ProviderRequestError && /authenticat|authoriz|permission|10000/iu.test(error.message);
 }
 
-const d1Refusal = (error: unknown): never => grantRefusal(error, "D1 read access");
-const accessRefusal = (error: unknown): never => grantRefusal(error, "zone, DNS and registrar access");
+const D1_GRANT = "D1 read access";
+const ACCESS_GRANT = "zone, DNS and registrar access";
+
+/*
+ * One call that needs a scope a login may lack. Each login that reaches the
+ * account is tried in turn, so a login granted before the scope existed does
+ * not hide another login that holds it; a refused call changed nothing, so a
+ * write may be retried. When every login refuses, the error says how many
+ * reach the account, so the person knows which login to connect again.
+ */
+async function granted<T>(target: CloudflareTarget, grant: string, call: (token: string) => Promise<T>): Promise<T> {
+  let refusal: ProviderRequestError | undefined;
+  for (const token of target.tokens) {
+    try {
+      return await call(token);
+    } catch (error) {
+      if (!isGrantRefusal(error)) throw error;
+      refusal ??= error;
+    }
+  }
+  const reaching = target.tokens.length === 1 ? "the 1 connected login that reaches it lacks it"
+    : `none of the ${target.tokens.length} connected logins that reach it holds it`;
+  throw new ProviderRequestError(403, `${refusal?.message ?? "Cloudflare refused the request"}. ` +
+    `Reconnect Cloudflare in Apps to grant ${grant} on ${oneLine(target.name, 80) || target.account} (${reaching})`);
+}
 
 function namedAccount(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
   if (statement.text.trim()) return usage;
@@ -394,7 +421,7 @@ function namedDomain(statement: { target: string; text: string }, usage: string)
 }
 
 async function zonesNamed(target: CloudflareTarget, name: string): Promise<Record<string, unknown>[]> {
-  return cloudflareList(target.token, `zones?account.id=${target.account}&name=${encodeURIComponent(name)}`, 20).catch(accessRefusal);
+  return granted(target, ACCESS_GRANT, (token) => cloudflareList(token, `zones?account.id=${target.account}&name=${encodeURIComponent(name)}`, 20));
 }
 
 /* The zone is the hostname or the longest suffix of it that this account holds. */
@@ -426,7 +453,7 @@ async function registrarDomains(target: CloudflareTarget): Promise<Record<string
   let cursor = "";
   for (let page = 0; page < 20; page++) {
     const query = cursor ? `?per_page=50&cursor=${encodeURIComponent(cursor)}` : "?per_page=50";
-    const payload = await cloudflarePayload(target.token, `accounts/${target.account}/registrar/registrations${query}`).catch(accessRefusal);
+    const payload = await granted(target, ACCESS_GRANT, (token) => cloudflarePayload(token, `accounts/${target.account}/registrar/registrations${query}`));
     const result = Array.isArray(payload.result) ? payload.result.map(record) : [];
     items.push(...result);
     const info = record(payload.result_info);
@@ -438,8 +465,8 @@ async function registrarDomains(target: CloudflareTarget): Promise<Record<string
 }
 
 async function domainCheck(target: CloudflareTarget, domain: string): Promise<Record<string, unknown>> {
-  const checked = record(await cloudflare(target.token, `accounts/${target.account}/registrar/domain-check`,
-    { method: "POST", json: { domains: [domain] }, timeoutMs: 20_000 }).catch(accessRefusal));
+  const checked = record(await granted(target, ACCESS_GRANT, (token) => cloudflare(token, `accounts/${target.account}/registrar/domain-check`,
+    { method: "POST", json: { domains: [domain] }, timeoutMs: 20_000 })));
   return record((Array.isArray(checked.domains) ? checked.domains : [])[0]);
 }
 
@@ -546,7 +573,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const target = await cloudflareTarget(credentials, input.account);
-      const databases = await cloudflareList(target.token, `accounts/${target.account}/d1/database`, 100).catch(d1Refusal);
+      const databases = await granted(target, D1_GRANT, (token) => cloudflareList(token, `accounts/${target.account}/d1/database`, 100));
       /* The list endpoint reports num_tables as 0 for every database, so only the size is shown. */
       const lines = databases.map((database) => `${oneLine(text(database.name), 64)}  ${text(database.uuid)}` +
         `${Number(database.file_size) > 0 ? `  ${(Number(database.file_size) / 1_048_576).toFixed(1)} MiB` : ""}`);
@@ -567,9 +594,11 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const target = await cloudflareTarget(credentials, input.account);
-      const database = await databaseId(target, input.database!).catch(d1Refusal);
-      const result = await cloudflare(target.token, `accounts/${target.account}/d1/database/${database.id}/query`,
-        { method: "POST", json: { sql: input.sql } }).catch(d1Refusal);
+      const { database, result } = await granted(target, D1_GRANT, async (token) => {
+        const found = await databaseId(target, token, input.database!);
+        return { database: found, result: await cloudflare(token, `accounts/${target.account}/d1/database/${found.id}/query`,
+          { method: "POST", json: { sql: input.sql } }) };
+      });
       const first = record(Array.isArray(result) ? result[0] : undefined);
       const rows = (Array.isArray(first.results) ? first.results : []).map(record);
       const columns = [...new Set(rows.flatMap((row) => Object.keys(row)))];
@@ -589,7 +618,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     parse: (statement) => namedAccount(statement, "name an account: @cloudflare:list_zones:<account id>|*"),
     async execute({ credentials }, input) {
       const target = await cloudflareTarget(credentials, input.account);
-      const zones = await cloudflareList(target.token, `zones?account.id=${target.account}`, 100).catch(accessRefusal);
+      const zones = await granted(target, ACCESS_GRANT, (token) => cloudflareList(token, `zones?account.id=${target.account}`, 100));
       const lines = zones.slice(0, 50).map((zone) => `${text(zone.name)}  ${text(zone.id)}  ${text(zone.status)}`);
       return { summary: `${oneLine(target.name, 80)}: ${zones.length} zones` +
         (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
@@ -605,8 +634,8 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       const existing = (await zonesNamed(target, input.domain!)).find((zone) => text(zone.name).toLowerCase() === input.domain);
       if (existing) return { summary: `${input.domain} already has zone ${text(existing.id)}`,
         url: `https://dash.cloudflare.com/${target.account}/${text(existing.id)}` };
-      const created = record(await cloudflare(target.token, "zones", { method: "POST", json: {
-        name: input.domain, account: { id: target.account }, type: "full" } }).catch(accessRefusal));
+      const created = record(await granted(target, ACCESS_GRANT, (token) => cloudflare(token, "zones", { method: "POST", json: {
+        name: input.domain, account: { id: target.account }, type: "full" } })));
       return { summary: `Created zone ${text(created.name) || input.domain} ${text(created.id)}`,
         url: `https://dash.cloudflare.com/${target.account}/${text(created.id)}` };
     },
@@ -617,7 +646,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     parse: (statement) => namedDomain(statement, "name a zone: @cloudflare:list_dns:[<account id>/]<zone>"),
     async execute({ credentials }, input) {
       const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
-      const records = await cloudflareList(target.token, `zones/${zone.id}/dns_records`, 100).catch(accessRefusal);
+      const records = await granted(target, ACCESS_GRANT, (token) => cloudflareList(token, `zones/${zone.id}/dns_records`, 100));
       const lines = records.slice(0, 50).map((item) => `${text(item.type)}  ${text(item.name)}  ${oneLine(text(item.content), 180)}`);
       return { summary: `${zone.name}: ${records.length} DNS records` +
         (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
@@ -628,31 +657,34 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     effect: "write",
     requires: ["logins|oauthToken|apiToken"],
     parse(statement) {
-      const usage = "name a record: @cloudflare:put_dns:[<account id>/]<zone> <TYPE> <name> <content>";
+      const usage = "name a record: @cloudflare:put_dns:[<account id>/]<zone> <TYPE> <name> <content> [proxied]";
       const { account, rest } = splitAccount(statement.target.trim().toLowerCase());
       const parts = statement.text.trim().match(/^([A-Za-z]+)\s+(\S+)\s+(\S[\s\S]*)$/u);
       if (!DOMAIN.test(rest) || !parts) return usage;
       const type = parts[1]!.toUpperCase();
       const name = parts[2]!.toLowerCase();
-      const content = parts[3]!.trim();
+      /* An A, AAAA or CNAME record may go through Cloudflare's proxy; a Pages branch hostname needs it. */
+      const proxiedWord = PROXIABLE.has(type) ? parts[3]!.trim().match(/^(\S+)\s+proxied$/iu) : null;
+      const content = proxiedWord ? proxiedWord[1]! : parts[3]!.trim();
       if (!DNS_TYPE.test(type) || !DNS_LABEL.test(name) || content.length > DNS_CONTENT || /[\r\n]/u.test(content)) return usage;
-      return { domain: rest, type, name, content, ...(account ? { account } : {}) };
+      if (PROXIABLE.has(type) && /\s/u.test(content)) return usage;
+      return { domain: rest, type, name, content, ...(proxiedWord ? { proxied: "1" } : {}), ...(account ? { account } : {}) };
     },
     async execute({ credentials }, input) {
       const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
       const fqdn = recordName(zone.name, input.name!);
       const written = dnsContent(input.type!, input.content!);
-      const listed = await cloudflareList(target.token,
-        `zones/${zone.id}/dns_records?type=${input.type}&name=${encodeURIComponent(fqdn)}`, 100).catch(accessRefusal);
+      const listed = await granted(target, ACCESS_GRANT, (token) => cloudflareList(token,
+        `zones/${zone.id}/dns_records?type=${input.type}&name=${encodeURIComponent(fqdn)}`, 100));
       if (listed.some((item) => text(item.content) === written.content && (written.priority === undefined || Number(item.priority) === written.priority))) {
         return { summary: `${input.type} ${fqdn} already has that content`,
           url: `https://dash.cloudflare.com/${target.account}/${zone.id}/dns/records` };
       }
-      await cloudflare(target.token, `zones/${zone.id}/dns_records`, { method: "POST", json: {
+      await granted(target, ACCESS_GRANT, (token) => cloudflare(token, `zones/${zone.id}/dns_records`, { method: "POST", json: {
         type: input.type, name: fqdn, content: written.content, ttl: 1,
         ...(written.priority === undefined ? {} : { priority: written.priority }),
-        ...(input.type === "A" || input.type === "AAAA" || input.type === "CNAME" ? { proxied: false } : {}) } }).catch(accessRefusal);
-      return { summary: `Added ${input.type} ${fqdn}`,
+        ...(PROXIABLE.has(input.type!) ? { proxied: input.proxied === "1" } : {}) } }));
+      return { summary: `Added ${input.type} ${fqdn}${input.proxied === "1" ? " (proxied)" : ""}`,
         url: `https://dash.cloudflare.com/${target.account}/${zone.id}/dns/records` };
     },
   },
@@ -699,8 +731,8 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
       }
       if (text(row.tier) === "premium") throw new ProviderRequestError(409, `${input.domain} is premium; this command registers standard domains only`);
       const { cost, renewal, currency } = domainPrice(row);
-      const created = record(await cloudflare(target.token, `accounts/${target.account}/registrar/registrations`,
-        { method: "POST", json: { domain_name: input.domain, auto_renew: true }, timeoutMs: 25_000 }).catch(accessRefusal));
+      const created = record(await granted(target, ACCESS_GRANT, (token) => cloudflare(token, `accounts/${target.account}/registrar/registrations`,
+        { method: "POST", json: { domain_name: input.domain, auto_renew: true }, timeoutMs: 25_000 })));
       const failure = record(created.error);
       const state = text(created.state) || "submitted";
       if (state === "failed" || state === "action_required" || state === "blocked") {
@@ -718,7 +750,7 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     parse: (statement) => namedAccount(statement, "name an account: @cloudflare:list_workers:<account id>|*"),
     async execute({ credentials }, input) {
       const target = await cloudflareTarget(credentials, input.account);
-      const scripts = await cloudflareList(target.token, `accounts/${target.account}/workers/scripts`, 100).catch(accessRefusal);
+      const scripts = await granted(target, ACCESS_GRANT, (token) => cloudflareList(token, `accounts/${target.account}/workers/scripts`, 100));
       const lines = scripts.slice(0, 50).map((script) => text(script.id));
       return { summary: `${oneLine(target.name, 80)}: ${scripts.length} Workers` +
         (lines.length ? `\n${quoteRetrievedText(lines.join("\n"))}` : ""),
@@ -739,9 +771,8 @@ export const CLOUDFLARE_ACTIONS: Record<string, ConnectorAction> = {
     },
     async execute({ credentials }, input) {
       const { target, zone } = await hostedZone(credentials, input.account, input.domain!);
-      const attached = record(await cloudflare(target.token, `accounts/${target.account}/workers/domains`,
-        { method: "PUT", json: { hostname: input.domain, service: input.worker, environment: "production", enabled: true, zone_id: zone.id, zone_name: zone.name } })
-        .catch(accessRefusal));
+      const attached = record(await granted(target, ACCESS_GRANT, (token) => cloudflare(token, `accounts/${target.account}/workers/domains`,
+        { method: "PUT", json: { hostname: input.domain, service: input.worker, environment: "production", enabled: true, zone_id: zone.id, zone_name: zone.name } })));
       return { summary: `Attached ${text(attached.hostname) || input.domain} to ${text(attached.service) || input.worker}`,
         url: `https://dash.cloudflare.com/${target.account}/workers/services/view/${input.worker}/production/domains` };
     },
