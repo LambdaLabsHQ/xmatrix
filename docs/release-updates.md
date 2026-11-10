@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Instance runtime catalogs keep every entry
+
+Runtime catalogs were cut at fixed counts, so a Claude Instance with many
+skills lost the tail of its slash menu (production showed exactly 64 stored
+commands), and a runtime with more than 64 parameters had its whole catalog
+rejected. Commands, capabilities, models, parameters and options now keep every
+entry; per-string length and the presence body's byte bound remain. The compact
+hibernation attachment leaves out commands and capabilities, and the Instance
+row keeps any runtime catalog a report omits (an explicit empty list still
+clears it), so a long list can neither overflow the 16 KB attachment nor be
+wiped after a restore. No schema migration. The Hub carries the fix; the CLI
+change only lifts the ACP parameter count. Recovery is a CI-validated beta Hub
+release reverting this change.
+
 ## Unreleased: Summons infer and apply a model from the runtime's own catalog
 
 A summon could choose a model only from a list its Agent's owner declared, and

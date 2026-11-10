@@ -77,7 +77,7 @@ export function mergeAgentInstancePresentation(
   };
 
   if (hasOwn(update, "activity")) set("activity", cleanText(update.activity, 512));
-  if (hasOwn(update, "files")) set("files", cleanTextList(update.files, 64, 512));
+  if (hasOwn(update, "files")) set("files", cleanTextList(leading(update.files, 64), 512));
   if (hasOwn(update, "intent")) set("intent", cleanText(update.intent, 512));
   if (hasOwn(update, "gitBranch")) set("gitBranch", cleanText(update.gitBranch, 256));
   if (hasOwn(update, "runtimeState")) {
@@ -191,7 +191,7 @@ export function sanitizeAgentInstancePresentation(value: unknown): AgentInstance
   const result = Object.fromEntries(Object.entries({
     ...normalizeAgentInstanceDurablePresentation(value),
     activity: cleanText(value.activity, 512),
-    files: cleanTextList(value.files, 64, 512),
+    files: cleanTextList(leading(value.files, 64), 512),
     intent: cleanText(value.intent, 512),
     runtimeState: cleanRuntimeState(value.runtimeState),
   }).filter(([, field]) => field !== undefined));
@@ -234,11 +234,10 @@ export function compactAgentInstancePresentationForHibernation(
 ): AgentInstancePresentation | undefined {
   if (!presentation) return undefined;
   return sanitizeAgentInstancePresentation({
-    // Large catalogs follow the existing model-catalog omission on compact
-    // hibernation. Durable observations remain available to launch routing.
+    // Runtime catalogs (models, parameters, commands, capabilities) live on
+    // the Instance row, which keeps them when a report omits them, so a long
+    // command list never pushes the attachment past its byte bound.
     ...(presentation.parameters?.length === 0 ? { parameters: [], parametersObservedAt: presentation.parametersObservedAt } : {}),
-    commands: presentation.commands,
-    capabilities: presentation.capabilities,
     clientVersion: presentation.clientVersion,
     hostName: presentation.hostName,
     workspace: presentation.workspace,
@@ -432,7 +431,7 @@ function cleanRuntimeWaiting(value: unknown): AgentRuntimeWaiting | undefined {
   const sinceMillis = cleanNonnegativeInteger(value.sinceMillis);
   if (sinceMillis === undefined) return undefined;
   const label = cleanText(value.label, 160);
-  const details = cleanTextList(value.details, 4, 300);
+  const details = cleanTextList(leading(value.details, 4), 300);
   const count = cleanNonnegativeInteger(value.count);
   return { kind: value.kind, ...(label ? { label } : {}), ...(count !== undefined && count <= 100_000 ? { count } : {}),
     ...(details ? { details } : {}), sinceMillis };
@@ -613,4 +612,9 @@ function hasOwn(value: object, key: PropertyKey): boolean {
 
 function cleanParameters(value: unknown): HarnessParameter[] | undefined {
   try { return parseHarnessParameters(value); } catch { return undefined; }
+}
+
+/** Activity files and wait details are glanceable summaries: only the first few show. */
+function leading(value: unknown, count: number): unknown {
+  return Array.isArray(value) ? value.slice(0, count) : value;
 }
