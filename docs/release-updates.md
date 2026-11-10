@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a missing harness is refused by name before its Run starts
+
+When npm left `opencode` off a Mac daemon's PATH, xMatrix still listed
+OpenCode as installed there and every Run died in the wrapper on a bare
+`No such file or directory`. Inventory and launches now search one PATH,
+the one a Run gets, which carries each harness installer's directory on
+every platform (now including `~/.opencode/bin` and `~/.kimi-code/bin`). At
+launch the daemon resolves the preset's launcher on the Run's own PATH; when
+it is missing, the launch is refused as `harness_missing`, naming the program
+and its install, and the machine reports its inventory again. An install or
+update xMatrix runs fails when the launcher cannot answer its own version.
+Hub and CLI, no migration (#1516). Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: a conversation's list copy can no longer stand in for its live Agents
 
 Since Instances became records of their own, a Channel held by a list carries
