@@ -166,7 +166,7 @@ async function startHub(databaseUrl) {
 function startWeb() {
   const hub = `http://localhost:${HUB_PORT}`;
   log(`starting Web on http://localhost:${WEB_PORT}`);
-  return spawn("pnpm", ["--filter", "@xmatrix/web", "exec", "next", "dev", "--turbopack", "-p", String(WEB_PORT)], {
+  return spawn("pnpm", ["--filter", "@xmatrix/web", "exec", "next", "dev", "-p", String(WEB_PORT)], {
     cwd: root,
     stdio: ["ignore", "inherit", "inherit"],
     env: {
