@@ -122,3 +122,33 @@ test("historical audit activity scopes project/service/time and emits principal 
   assert.match(empty.result.summary, /absence does not prove no use/u);
   await fetched([{ body: { entries: [{ protoPayload: { serviceName: "other.googleapis.com" } }] } }], () => assert.rejects(actions.query_audit_activity.execute(context, input), /another service/u));
 });
+
+test("website referrers are add-only on an existing browser restriction, keep API targets and etag, and refuse wildcards or unrestricted keys", async () => {
+  const target = `${number}/my-maps-key`;
+  for (const [t, opts] of [[`${project}/my-maps-key`, { referrers: ["*.example.com/*"] }], [`${number}/../keys`, { referrers: ["*.example.com/*"] }], [target, {}], [target, { referrers: [] }],
+    [target, { referrers: ["*"] }], [target, { referrers: ["*/*"] }], [target, { referrers: ["*.com/*"] }], [target, { referrers: ["example.com/*\nx"] }], [target, { referrers: ["a.example.com/*"], extra: 1 }],
+    [target, { referrers: Array.from({ length: 11 }, (_, i) => `s${i}.example.com/*`) }]]) assert.equal(typeof parse("add_key_referrers", t, opts), "string", JSON.stringify([t, opts]));
+  for (const ok of ["*.example.com/*", "https://beta.example.com/*", "localhost:5173/*", "example.com"]) assert.equal(typeof parse("add_key_referrers", target, { referrers: [ok] }), "object", ok);
+  const name = `projects/${number}/locations/global/keys/my-maps-key`;
+  const key = { name, displayName: "Maps browser key", etag: "W/\"etag-1\"", keyString: "secret-key-value",
+    restrictions: { apiTargets: [{ service: "maps-backend.googleapis.com" }], browserKeyRestrictions: { allowedReferrers: ["example.com/*", "private-existing.example.com/*"] } } };
+  const input = parse("add_key_referrers", target, { referrers: ["*.example.com/*", "example.com/*"] });
+  const run = await fetched([{ body: key }, { body: { name: "operations/akmf.1", done: true } }], () => actions.add_key_referrers.execute(context, input));
+  assert.equal(run.calls[0].url, `https://apikeys.googleapis.com/v2/${name}`);
+  assert.equal(run.calls[0].method, "GET");
+  assert.equal(run.calls[1].method, "PATCH");
+  assert.equal(new URL(run.calls[1].url).searchParams.get("updateMask"), "restrictions");
+  assert.equal(run.calls[1].headers.get("x-goog-user-project"), number);
+  assert.deepEqual(run.calls[1].body, { etag: key.etag, restrictions: { apiTargets: key.restrictions.apiTargets,
+    browserKeyRestrictions: { allowedReferrers: ["example.com/*", "private-existing.example.com/*", "*.example.com/*"] } } });
+  assert.match(run.result.summary, /2 before, 3 after; none removed/u);
+  assert.match(run.result.summary, /complete/u);
+  for (const secret of ["secret-key-value", "private-existing"]) assert.ok(!run.result.summary.includes(secret));
+  const same = await fetched([{ body: key }], () => actions.add_key_referrers.execute(context, parse("add_key_referrers", target, { referrers: ["example.com/*"] })));
+  assert.equal(same.calls.length, 1);
+  assert.match(same.result.summary, /nothing was written/u);
+  for (const body of [{ ...key, restrictions: { apiTargets: key.restrictions.apiTargets } }, { ...key, restrictions: { serverKeyRestrictions: { allowedIps: ["1.2.3.4"] } } }]) {
+    await fetched([{ body }], calls => assert.rejects(actions.add_key_referrers.execute(context, input), /no website restriction/u).then(() => assert.equal(calls.length, 1)));
+  }
+  await fetched([{ body: { ...key, name: `projects/${number}/locations/global/keys/other` } }], () => assert.rejects(actions.add_key_referrers.execute(context, input), /another API key/u));
+});
