@@ -63,15 +63,15 @@ export function useRealtimeChannelSelection<T>(
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
 
-/** Who an Instance is and where it runs, without what it is doing now. It
- * reads offline only when its machine is unreachable, the one status a
- * mention explains; busy, idle and a passing offline read as online. */
-function instanceIdentity(instance: AgentInstancePresence): AgentInstancePresence {
+/** Who an Instance is and where it runs, without what it is doing now. Only
+ * leaving or going offline changes its status here; busy and idle read as
+ * online. Rest and offlineReason stay, so residency reads as before. */
+function instanceIdentity(instance: AgentInstancePresence, withStatus: boolean): AgentInstancePresence {
   const { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest,
     offlineReason, hostName, hostId, hostname, machineId, cwd, workspaceName, repository } = instance;
   return { id, channelId, channelInstanceId, label, agentName, registration, email, connectedAt, rest, offlineReason,
     hostName, hostId, hostname, machineId, cwd, workspaceName, repository,
-    lastSeenAt: connectedAt, status: instance.status === "offline" && offlineReason ? "offline" : "online" };
+    lastSeenAt: connectedAt, status: withStatus && instance.status === "offline" ? "offline" : "online" };
 }
 
 type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
@@ -84,11 +84,12 @@ type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceI
  * Live work (activity, busy, usage) subscribes where it is drawn.
  */
 export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null,
-  source?: LiveChannelSource): LiveChannel | null {
+  source?: LiveChannelSource, options: { status?: boolean } = {}): LiveChannel | null {
+  const withStatus = options.status ?? true;
   const held = useRef<IdentityView | null>(null);
   const select = useCallback((live: LiveChannel | null): LiveChannel | null => {
     if (!channel) return null;
-    const next = new Map([...live?.presence?.instances ?? []].map(([id, instance]) => [id, instanceIdentity(instance)]));
+    const next = new Map([...live?.presence?.instances ?? []].map(([id, instance]) => [id, instanceIdentity(instance, withStatus)]));
     const prior = held.current;
     const instances = prior && sameValue(prior.instances, next) ? prior.instances : next;
     if (prior && prior.channel === channel && prior.instances === instances) return prior.view;
@@ -97,7 +98,7 @@ export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null
       ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } };
     held.current = { channel, instances, view };
     return view;
-  }, [channel]);
+  }, [channel, withStatus]);
   return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
 

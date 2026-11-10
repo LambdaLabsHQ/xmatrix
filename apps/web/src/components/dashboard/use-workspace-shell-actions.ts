@@ -409,8 +409,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // History and author identity build the rows. Live sender status subscribes
   // at the visible affordance, so activity never rebuilds Markdown models.
   // The list copy holds no Instances: rows read who each sender is from the
-  // identities, which do not change with what an Agent is doing.
-  const timelineChannel = useChannelWithInstanceIdentities(s.selectedChannel, s.realtimeChannels);
+  // identities. Rows never draw status (the affordances subscribe to it), so
+  // this shell-level read leaves it out: only an Instance joining, leaving or
+  // moving machine rebuilds them.
+  const timelineChannel = useChannelWithInstanceIdentities(s.selectedChannel, s.realtimeChannels, { status: false });
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
@@ -452,7 +454,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const threadParentId = s.selectedChannel && isThreadChannel(s.selectedChannel)
     ? metadataString(s.selectedChannel.metadata, "threadRootChannelId") : undefined;
   const threadParent = useChannelWithInstanceIdentities(
-    (threadParentId && s.channels.find((item) => item.id === threadParentId)) || null, s.realtimeChannels);
+    (threadParentId && s.channels.find((item) => item.id === threadParentId)) || null, s.realtimeChannels, { status: false });
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");

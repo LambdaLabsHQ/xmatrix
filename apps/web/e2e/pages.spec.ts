@@ -13,7 +13,7 @@ import {
 } from "./in-page-api-fixtures";
 import { editPageMarkdown, pageDocument, pageMarkdown, startedMarkdown } from "./page-document-fixture";
 import {
-  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs,
+  E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_USER_SENDER, harnessRegistrations, installWorkspaceStubs, routeHumanSocket,
 } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -1633,6 +1633,41 @@ test("a page's conversations sit beside what they are about, and one opens there
   await expect(open).toBeHidden();
   await expect(cards).toHaveCount(2);
   await expect(browser).toHaveURL(/page=p-relay$/u);
+});
+
+// The older margin tests carry Agents in page-links. A modern Instance report
+// must update an already mounted card without a catalog or page-links refresh.
+test("a page's linked conversation follows live Instance records", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  const release = { ...E2E_CHANNEL, id: "channel-live-release", name: "Live release notes" };
+  const instance = { id: `${release.id}:1`, channelId: release.id, channelInstanceId: "1",
+    label: "codex:1", agentName: "codex", status: "busy", connectedAt: NOW, lastSeenAt: NOW,
+    registration: { ownerUserId: "e2e-user", machineId: "machine", harness: "codex" },
+    revision: { version: 1, sequence: 1 } };
+  const socket = await routeHumanSocket(browser, (frame, reply) => {
+    if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
+  });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")],
+    [E2E_CHANNEL, { ...release, memberPresence: {}, instanceRecords: [instance] }]);
+  const recent = new Date().toISOString();
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, {
+    links: [{ linkId: "l-live", conversationId: release.id, pageId: "p-relay", blockId: "status", source: "edit",
+      createdAt: NOW, lastSeenAt: recent }],
+    conversations: [{ conversationId: release.id, name: release.name, activityAt: recent,
+      headSequence: 1, readSequence: 1, lastMessage: null, agents: [] }],
+  });
+  await openLivePage(browser);
+  const card = browser.getByTestId("page-margin-card").filter({ hasText: release.name });
+  const agent = card.locator(".page-margin-instance");
+  await expect(agent).toHaveText("codex:1");
+  await expect(agent).toHaveAttribute("data-status", "busy");
+  await expect.poll(socket.connections).toBeGreaterThan(0);
+  socket.send({ type: "instance_records", records: [{ ...instance, status: "idle",
+    revision: { version: 1, sequence: 2 } }] });
+  await expect(agent).toHaveAttribute("data-status", "idle");
+  socket.send({ type: "instance_records", records: [{ ...instance, status: "offline",
+    revision: { version: 1, sequence: 3 } }] });
+  await expect(agent).toHaveCount(0);
 });
 
 test("a co-writing margin card displays a Page title instead of the system notice's locator", async ({ page: browser }) => {
