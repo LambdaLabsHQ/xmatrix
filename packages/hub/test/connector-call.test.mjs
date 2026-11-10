@@ -16,6 +16,7 @@ import { CONNECTOR_CALL_COMMAND } from "../src/cli-commands-call.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
+import { commandMailAttachments } from "../src/connectors/gmail-attachments.ts";
 
 const loadRoute = await compileCommonJsSourceModule(new URL("../src/index-routes-connector-call.ts", import.meta.url));
 const loadExecutor = await compileCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url));
@@ -62,6 +63,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "./command-support": support,
     "./credentials": { connectorPermissionRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
     "./connection-credentials": connectionCredentialsDouble(async () => credentials),
+    "./gmail-attachments": { commandMailAttachments },
     "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
   })[name] ?? {});
