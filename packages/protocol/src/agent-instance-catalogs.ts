@@ -9,14 +9,23 @@ export function cleanAgentCapabilities(value: unknown): string[] | undefined {
 
 export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undefined {
   if (!Array.isArray(value)) return undefined;
-  const seen = new Set<string>();
+  const seen = new Map<string, AgentModelInfo>();
   const models: AgentModelInfo[] = [];
   for (const candidate of value.slice(0, 100)) {
     if (!record(candidate)) continue;
     const id = cleanAgentPresentationText(candidate.id, 128);
     const model = cleanAgentPresentationText(candidate.model, 128) || id;
-    if (!id || !model || seen.has(model.toLowerCase())) continue;
-    seen.add(model.toLowerCase());
+    if (!id || !model) continue;
+    // One entry per model; another selector for it is kept as that entry's alias.
+    const names = [id, cleanAgentPresentationText(candidate.displayName, 128), ...cleanAgentPresentationTextList(candidate.aliases, 8, 128) ?? []]
+      .filter((name): name is string => Boolean(name));
+    const known = seen.get(model.toLowerCase());
+    if (known) {
+      const aliases = [...new Set([...known.aliases ?? [], ...names])]
+        .filter(name => name !== known.id && name !== known.model && name !== known.displayName).slice(0, 8);
+      if (aliases.length) known.aliases = aliases;
+      continue;
+    }
     const efforts = Array.isArray(candidate.supportedReasoningEfforts)
       ? candidate.supportedReasoningEfforts.slice(0, 16).flatMap((effort) => {
           if (!record(effort)) return [];
@@ -31,9 +40,11 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
             : [];
         })
       : undefined;
-    models.push({
+    const aliases = cleanAgentPresentationTextList(candidate.aliases, 8, 128);
+    const entry: AgentModelInfo = {
       id,
       model,
+      ...(aliases?.length ? { aliases } : {}),
       ...(cleanAgentPresentationText(candidate.displayName, 128)
         ? { displayName: cleanAgentPresentationText(candidate.displayName, 128) }
         : {}),
@@ -53,7 +64,9 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
         ? { supportsPersonality: candidate.supportsPersonality }
         : {}),
       ...(cleanAgentPresentationText(candidate.upgrade, 128) ? { upgrade: cleanAgentPresentationText(candidate.upgrade, 128) } : {}),
-    });
+    };
+    seen.set(model.toLowerCase(), entry);
+    models.push(entry);
   }
   return models;
 }

@@ -62,7 +62,8 @@ export function routingModelCatalogObservation(value: unknown, observedAt: unkno
     const model = clean(raw.model, 160);
     if (!model) continue;
     // A selector and the model it resolves to are one model: merge their names.
-    const names = [clean(raw.id, 160), clean(raw.displayName, 160)].filter(name => name && name !== model);
+    const aliases = Array.isArray(raw.aliases) ? raw.aliases.slice(0, 8).map((alias: unknown) => clean(alias, 160)) : [];
+    const names = [clean(raw.id, 160), clean(raw.displayName, 160), ...aliases].filter(name => name && name !== model);
     const known = models.find(item => item.model === model);
     if (known) {
       const merged = [...new Set([...known.names ?? [], ...names])].slice(0, 8);

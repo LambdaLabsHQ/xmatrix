@@ -130,7 +130,10 @@ unless the author or the discussion names or asks for another model; keeping it
 selects no model (`registration-parameters-v12` records a model choice without a
 selected model). A written `model:` matches an entry by the runtime's model id or
 any name the catalog gives it (Claude's `sonnet`, a display name), ignoring case;
-nothing maps one model's name to another. A chosen entry rides on the launch as
+nothing maps one model's name to another. The stored catalog keeps one entry per
+model and records the runtime's other selectors for it as `aliases` (Claude lists
+`default` and `opus` for the same model), so those stay nameable here and in a
+live `/model`. A chosen entry rides on the launch as
 `preferredModel`: no grant or model resource changes, the spawn context carries
 `preferredModel`, and the daemon requests it of the runtime exactly as it does an
 admitted model, so a runtime that does not accept it fails to start instead of
