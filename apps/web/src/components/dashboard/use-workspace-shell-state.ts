@@ -99,7 +99,7 @@ import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, decodeChannelAgentPresence, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -306,7 +306,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const accessTokenRef = useRef<string | undefined>(token);
   const channelReadStateUserIdRef = useRef<string | null>(null);
   const desktopBridgeRef = useRef<DesktopBridge | null>(desktopBridge);
-  const channelsRef = useRef<ChannelSnapshot[]>([]);
+  const channelsRef = useRef<LiveChannel[]>([]);
   const spacesRef = useRef<SerializedSpace[]>([]);
 
   const routeSpaceIdRef = useRef<string | null>(null);
@@ -897,7 +897,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         reads: createViewerReads((channel, arrival: ChannelMessageArrival) => {
           const summarized = channelAfterMessage(channel, arrival);
           // A replay says nothing new about its sender either.
-          return arrival.known ? summarized : patchChannelAgentPresenceFromMessage(summarized, arrival.entry);
+          // Only a Channel that carries its Instances has one to mark busy.
+          return arrival.known || !isLiveChannel(summarized) ? summarized
+            : patchChannelAgentPresenceFromMessage(summarized, arrival.entry);
         }),
       };
     }
@@ -1544,7 +1546,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       connection.backOff();
     }
 
-    const refreshEndedWaits = (held: ChannelSnapshot | undefined, presence: ChannelPresence | undefined) => {
+    const refreshEndedWaits = (held: LiveChannel | undefined, presence: ChannelPresence | undefined) => {
       if (!held || !presence || !agentPresenceEndsWaits(held.presence, presence)) return;
       void queryClient.invalidateQueries({ exact: true,
         queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
@@ -1927,7 +1929,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         case "app_connector_result_channels": {
           setChannels((current) =>
-            message.channels.reduce(
+            message.channels.reduce<readonly ChannelSnapshot[]>(
               (nextChannels, resultChannel) => replaceChannel(nextChannels, resultChannel),
               current,
             ),

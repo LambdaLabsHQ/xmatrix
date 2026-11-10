@@ -128,6 +128,7 @@ import {
   type SerializedAgentInstance,
   type HumanProfile,
   type ChannelSnapshot,
+  type LiveChannel,
   type SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -1277,7 +1278,7 @@ export function ChannelPresenceAvatars({
   avatarItems,
   maxVisible,
 }: {
-  channel: ChannelSnapshot;
+  channel: LiveChannel;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1362,7 +1363,7 @@ export function channelAgentAvatarStatus(
 }
 
 /** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]) {
+export function channelWorkInHand(channel: LiveChannel, events: readonly ObservabilityEvent[]) {
   return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
     if (presence.kind !== "agent" || !item.instance) return [];
@@ -1372,11 +1373,11 @@ export function channelWorkInHand(channel: ChannelSnapshot, events: readonly Obs
   });
 }
 
-export function channelWorkInHandInstanceIds(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): string[] {
+export function channelWorkInHandInstanceIds(channel: LiveChannel, events: readonly ObservabilityEvent[]): string[] {
   return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
-export function channelHasWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): boolean {
+export function channelHasWorkInHand(channel: LiveChannel, events: readonly ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 

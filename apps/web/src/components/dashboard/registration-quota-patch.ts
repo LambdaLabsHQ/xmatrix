@@ -3,7 +3,7 @@ import {
   withRegistrationQuota,
   type AgentRegistrationKey,
   type LlmUsage,
-  type ChannelSnapshot,
+  type LiveChannel,
 } from "@xmatrix/protocol";
 import { sameValue } from "../../lib/same-value";
 
@@ -15,10 +15,10 @@ import { sameValue } from "../../lib/same-value";
  * were, so an unchanged reading renders nothing.
  */
 export function patchChannelsRegistrationQuota(
-  channels: ChannelSnapshot[],
+  channels: LiveChannel[],
   registration: AgentRegistrationKey,
   quota: LlmUsage
-): ChannelSnapshot[] {
+): LiveChannel[] {
   const project = (usage: LlmUsage | undefined) => {
     const next = withRegistrationQuota(usage, quota);
     return sameValue(next, usage) ? usage : next;

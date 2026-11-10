@@ -4,7 +4,7 @@
 import { agentTraceExactInstanceIds, agentTraceInstanceIds } from "@/components/dashboard/agent-trace-target";
 import { traceEventChannelInstanceId } from "@/components/dashboard/agent-trace-replica";
 import type { AgentTraceTarget } from "./workspace-shell-message-model";
-import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus } from "@xmatrix/protocol";
+import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus, type ChannelSnapshot, type LiveChannel } from "@xmatrix/protocol";
 import { formatRelativeAge } from "./time-display";
 import { sameValue } from "../../lib/same-value";
 import type {
@@ -13,7 +13,6 @@ import type {
   ObservabilityEvent,
   SerializedAgent,
   SerializedAgentInstance,
-  ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 export type PresentedChannelMemberPresence = ChannelMemberPresence |
@@ -101,7 +100,7 @@ export function memberPresence(
       : { kind: "agent" as const });
 }
 
-export function channelMembersByPresence(channel: ChannelSnapshot): string[] {
+export function channelMembersByPresence(channel: LiveChannel): string[] {
   return [...(channel.presence?.humans.keys() ?? []),
     ...channelPresenceInstances(channel.presence).map(instance => instance.id)];
 }

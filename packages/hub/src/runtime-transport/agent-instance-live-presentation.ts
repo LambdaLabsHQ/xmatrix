@@ -1,4 +1,4 @@
-import { ChannelPresenceConflict, decodeChannelSnapshot, encodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, withRegistrationQuota, type AgentInstancePresence, type ChannelSnapshot } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelSnapshot, encodeChannelSnapshot, emptyChannelPresence, presenceInstanceId, reduceChannelPresence, withRegistrationQuota, type AgentInstancePresence, type LiveChannel } from "@xmatrix/protocol";
 import type {
   LlmUsage,
   SerializedAgent,
@@ -50,9 +50,9 @@ export function overlayAgentPresenceOnChannel(
   return encodeChannelSnapshot(overlayAgentPresenceSnapshot(decodeChannelSnapshot(channel), input));
 }
 
-export function overlayAgentPresenceSnapshot(channel: ChannelSnapshot,
+export function overlayAgentPresenceSnapshot(channel: LiveChannel,
   input: { reason: "connect" | "update" | "disconnect"; session: Readonly<AgentInstanceLivePresenceSession>;
-    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): ChannelSnapshot {
+    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): LiveChannel {
   try { return overlayBoundInstance(channel, input); }
   catch (error) {
     if (!(error instanceof ChannelPresenceConflict) && !(error instanceof TypeError)) throw error;
@@ -61,9 +61,9 @@ export function overlayAgentPresenceSnapshot(channel: ChannelSnapshot,
   }
 }
 
-function overlayBoundInstance(channel: ChannelSnapshot,
+function overlayBoundInstance(channel: LiveChannel,
   input: { reason: "connect" | "update" | "disconnect"; session: Readonly<AgentInstanceLivePresenceSession>;
-    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): ChannelSnapshot {
+    status?: SerializedAgentInstance["status"]; offlineReason?: SerializedAgentInstance["offlineReason"] }): LiveChannel {
   const { reason, session } = input;
   const id = presenceInstanceId(session.run.instanceId);
   let presence = channel.presence ?? emptyChannelPresence(channel.id);

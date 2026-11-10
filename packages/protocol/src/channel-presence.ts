@@ -33,10 +33,30 @@ export interface ChannelPresence {
   readonly humansCovered?: false;
 }
 
-/** Internal model. The legacy member-to-array wire shape never enters a store. */
+/** What a Channel can say about its people. Its Agent Instances are records
+ * of their own (instance-record.ts), read only from a LiveChannel. */
+export type ChannelPeoplePresence = Omit<ChannelPresence, "instances">;
+
+/**
+ * A Channel as lists, catalogs and routes hold it: metadata and its people.
+ * It says nothing about Agent Instances, so code that reads them must take a
+ * LiveChannel, and a list copy cannot reach it by mistake.
+ */
 export type ChannelSnapshot = Omit<SerializedChannel, "memberPresence"> & {
+  readonly presence: ChannelPeoplePresence | undefined;
+};
+
+/** Internal model. The legacy member-to-array wire shape never enters a store.
+ * A Channel with its Agent Instances as this reader holds them now. */
+export type LiveChannel = Omit<ChannelSnapshot, "presence"> & {
   readonly presence: ChannelPresence | undefined;
 };
+
+/** Whether this Channel carries an Instance map: a decoded wire Channel or a
+ * live view does; a list copy does not. */
+export function isLiveChannel(channel: ChannelSnapshot): channel is LiveChannel {
+  return channel.presence === undefined || ("instances" in channel.presence && channel.presence.instances instanceof Map);
+}
 
 export class ChannelPresenceConflict extends Error {
   constructor(readonly channelId: string, readonly instanceId?: string) {

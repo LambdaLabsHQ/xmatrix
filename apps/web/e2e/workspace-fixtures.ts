@@ -501,3 +501,11 @@ export async function openGeneralChannelWithPagedHistory(
 
 /** Registration identity shared by Codex presence fixtures. */
 export const FIXTURE_AGENT_REGISTRATION = { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" };
+
+/** A modern Instance record (codex:1) as the Hub delivers it with a Channel. */
+export function codexInstanceRecord(channelId: string, extra: Record<string, unknown> = {}) {
+  return { id: `${channelId}:1`, channelId, channelInstanceId: "1",
+    label: "codex:1", agentName: "codex", status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
+    registration: { ownerUserId: "e2e-user", machineId: "machine", harness: "codex" },
+    revision: { version: 1, sequence: 1 }, ...extra };
+}

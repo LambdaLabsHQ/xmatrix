@@ -651,9 +651,9 @@ export { machineNetworkObservation, type MachineNetworkObservation, type Network
 
 export type { AgentBootstrapPrompts } from "./agent-bootstrap.js";
 
-export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence, presenceInstanceId,
+export { ChannelPresenceConflict, channelPresenceInstances, emptyChannelPresence, isLiveChannel, presenceInstanceId,
   reduceChannelPresence } from "./channel-presence.js";
-export type { AgentInstancePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot,
+export type { AgentInstancePresence, ChannelPeoplePresence, ChannelPresence, ChannelPresenceChange, ChannelSnapshot, LiveChannel,
   HumanDevicePresence, HumanPresence, PresenceInstanceId } from "./channel-presence.js";
 export { decodeChannelAgentPresence, decodeChannelSnapshot, encodeChannelPresence, encodeChannelSnapshot } from "./channel-presence-codec.js";
 export { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity,

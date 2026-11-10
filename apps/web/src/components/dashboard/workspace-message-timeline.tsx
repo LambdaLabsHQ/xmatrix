@@ -32,7 +32,8 @@ import {
 import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { SettingsCard } from "./settings-card";
-import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
+import { RealtimeChannelsContext, RealtimeEventsContext, useChannelWithInstanceIdentities,
+  useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
 import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
@@ -450,7 +451,7 @@ const TIMELINE_VIRTUOSO_COMPONENTS: VirtuosoComponents<TimelineItem, TimelineVir
 };
 
 export const MessageTimeline = memo(function MessageTimeline({
-  channel,
+  channel: catalogChannel,
   space,
   token,
   localContext,
@@ -536,6 +537,9 @@ export const MessageTimeline = memo(function MessageTimeline({
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
+  // The list copy holds no Instances. Mentions and their read state need who
+  // the Channel's Instances are, not what each is doing.
+  const channel = useChannelWithInstanceIdentities(catalogChannel);
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
   const agentLaunchQuery = useChannelAgentLaunches(channel, token, timeline, visibleInvocationIds, currentUserIdentityId);
@@ -3495,11 +3499,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   // supplies an operation; readLatest always rebuilds from the current store.
   useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
   const readLatest = useCallback((key: string) => {
-    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    // Only the live Channel holds Instances to act on.
+    const channel = realtimeChannels?.get(channelId);
     if (!channel) return undefined;
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
-  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  }, [realtimeChannels, realtimeEvents, channelId, events, launches]);
   const openTrace = useStableCallback((key: string) => {
     const item = readLatest(key);
     if (item) onOpenAgentTrace(item.target);

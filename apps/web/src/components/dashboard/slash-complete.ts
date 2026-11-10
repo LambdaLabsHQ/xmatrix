@@ -1,4 +1,4 @@
-import type { SerializedAgent, ChannelSnapshot, FaceOf } from "@xmatrix/protocol";
+import type { SerializedAgent, LiveChannel, FaceOf } from "@xmatrix/protocol";
 import {
   agentInstanceMentionLabel,
   channelAgentInstances,
@@ -154,7 +154,7 @@ function slashExpressionEnd(draft: string, cursor: number): number {
  * runs it is the next stage's question.
  */
 export function channelSlashCommands(
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   localContext?: MentionLocalContext | null
 ): SlashCommandCandidate[] {
   if (!channel) return [];
@@ -257,7 +257,7 @@ export function filterSlashCommandTargets(
 export function resolveSlashCompletion(
   draft: string,
   cursor: number,
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   localContext?: MentionLocalContext | null
 ): SlashCompletionResult {
   const active = findActiveSlashCommand(draft, cursor);
