@@ -2612,7 +2612,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
       if (payload.appConnectorResultChannels?.length) {
         setChannels((current) =>
-          payload.appConnectorResultChannels!.reduce(
+          payload.appConnectorResultChannels!.reduce<readonly ChannelSnapshot[]>(
             (nextChannels, resultChannel) => replaceChannel(nextChannels, resultChannel),
             current
           )

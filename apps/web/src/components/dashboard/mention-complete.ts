@@ -10,7 +10,6 @@ import type {
   MessageInteractionRegistry,
   SerializedAgent,
   SerializedAgentInstance,
-  ChannelSnapshot,
   LiveChannel,
   SerializedMachineDaemon,
   SerializedSpace,
@@ -306,7 +305,7 @@ export type MentionInstanceTargetScope = "channel" | "none";
  * offered are the ones the grammar knows.
  */
 export function channelInteractionTargets(
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -340,7 +339,7 @@ function registryOf(descriptors: readonly InteractionTargetDescriptor[]) {
 }
 
 export function channelMentionCandidates(
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -352,7 +351,7 @@ export function channelMentionCandidates(
 type TargetEntry = { descriptor: InteractionTargetDescriptor; candidate: MentionCandidate };
 
 function channelTargetEntries(
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   localContext: MentionLocalContext | null | undefined,
   appConnectors: MentionAppConnector[],
   space: MentionSpace | null | undefined,
@@ -460,7 +459,7 @@ function channelTargetEntries(
 export function resolveMentionCompletion(
   draft: string,
   cursor: number,
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   localContext?: MentionLocalContext | null,
   appConnectors: MentionAppConnector[] = [],
   space?: MentionSpace | null,
@@ -615,7 +614,7 @@ function handoffSuccessorQuery(
 function resolveHandoffSuccessorCompletion(
   active: ActiveMention,
   sourceAgent: SerializedAgent,
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   successorHarnesses: readonly string[],
   channelInstanceId: string,
   successorQuery: string,
@@ -845,7 +844,7 @@ function resolveAgentCommandCompletion(
   active: ActiveMention,
   targetToken: string,
   commandTail: string,
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
@@ -1090,7 +1089,7 @@ export function instanceEffortOptions(
 }
 
 function agentReferenceCandidates(
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   agent: SerializedAgent,
   agents: SerializedAgent[],
   localContext?: MentionLocalContext | null,
@@ -1181,7 +1180,7 @@ export function channelAgentInstances(
 }
 
 function findAgentInstanceTarget(
-  channel: ChannelSnapshot,
+  channel: LiveChannel,
   agents: SerializedAgent[],
   targetToken: string,
   instanceTargetScope: MentionInstanceTargetScope = "channel"
