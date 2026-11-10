@@ -541,10 +541,11 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
 }
 
 /**
- * The file parts of a message, as "name (size bytes)", split into real attachments and inline images (a part with a
- * Content-ID or `Content-Disposition: inline`, such as the logos of a quoted signature), so a card that would send
- * only someone's signature logos cannot look like it carries the documents its text promises. `complete` is false
- * past the MIME part limit.
+ * The file parts of a message, as "name (size bytes)", split into real attachments and inline images, so a card that
+ * would send only someone's signature logos cannot look like it carries the documents its text promises. A part is
+ * inline when its disposition is `inline`, or when it has no Content-Disposition but a Content-ID (the logos of a
+ * quoted signature); an explicit `Content-Disposition: attachment` is a real attachment even with a Content-ID, which
+ * Gmail's composer adds to ordinary paperclip attachments. `complete` is false past the MIME part limit.
  */
 function attachmentNames(payload: Record<string, unknown>): { names: string[]; inline: string[]; complete: boolean } {
   const names: string[] = [];
@@ -556,7 +557,8 @@ function attachmentNames(payload: Record<string, unknown>): { names: string[]; i
     if (isAttachment(part)) {
       const size = Number(record(part.body).size);
       const label = `${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`;
-      const embedded = !!header(part, "content-id") || /^inline(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim());
+      const disposition = header(part, "content-disposition").trim();
+      const embedded = disposition ? /^inline(?:\s*;|\s*$)/iu.test(disposition) : !!header(part, "content-id");
       (embedded ? inline : names).push(label);
       return;
     }

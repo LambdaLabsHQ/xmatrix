@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: Gmail paperclip attachments are no longer listed as inline images
+
+Gmail's web composer gives an ordinary paperclip attachment a Content-ID, and
+the Gmail connector counted any file part with a Content-ID as an inline
+image. A draft carrying a PDF therefore showed in `@gmail:drafts` as
+"0 attachment(s), 1 inline image(s)", and its `@gmail:send_draft` approval
+card listed no attachments. An explicit `Content-Disposition: attachment` now
+counts as an attachment. A part is inline only when its disposition says
+`inline`, or when it has a Content-ID and no disposition at all, as quoted
+signature logos do. Hub only, no schema or client migration. Recovery is a
+CI-validated beta Hub release reverting this change.
+
 ## Unreleased: Gmail send and reply carry the files attached to the command
 
 `@gmail:send` and `@gmail:reply` could only send a plain-text email; a file
