@@ -1,5 +1,5 @@
 import type { ChannelAgentMemberPresence, ChannelMemberPresence } from "./authority-runtime.js";
-import { presenceInstanceId, type AgentInstancePresence, type HumanPresence, type ChannelSnapshot } from "./channel-presence.js";
+import { presenceInstanceId, type AgentInstancePresence, type HumanPresence, type LiveChannel } from "./channel-presence.js";
 
 const agentViews = new WeakMap<AgentInstancePresence, ChannelAgentMemberPresence>();
 const humanViews = new WeakMap<HumanPresence, ChannelMemberPresence>();
@@ -18,7 +18,7 @@ export function agentInstanceMemberPresence(instance: AgentInstancePresence): Ch
   return view;
 }
 
-export function channelPresenceMember(channel: Pick<ChannelSnapshot, "presence">,
+export function channelPresenceMember(channel: Pick<LiveChannel, "presence">,
   member: string): ChannelMemberPresence | undefined {
   const human = channel.presence?.humans.get(member);
   if (human) {

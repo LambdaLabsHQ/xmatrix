@@ -33,8 +33,22 @@ export interface ChannelPresence {
   readonly humansCovered?: false;
 }
 
-/** Internal model. The legacy member-to-array wire shape never enters a store. */
+/** What a Channel can say about its people. Its Agent Instances are records
+ * of their own (instance-record.ts), read only from a LiveChannel. */
+export type ChannelPeoplePresence = Omit<ChannelPresence, "instances">;
+
+/**
+ * A Channel as lists, catalogs and routes hold it: metadata and its people.
+ * It says nothing about Agent Instances, so code that reads them must take a
+ * LiveChannel, and a list copy cannot reach it by mistake.
+ */
 export type ChannelSnapshot = Omit<SerializedChannel, "memberPresence"> & {
+  readonly presence: ChannelPeoplePresence | undefined;
+};
+
+/** Internal model. The legacy member-to-array wire shape never enters a store.
+ * A Channel with its Agent Instances as this reader holds them now. */
+export type LiveChannel = Omit<ChannelSnapshot, "presence"> & {
   readonly presence: ChannelPresence | undefined;
 };
 
@@ -137,6 +151,6 @@ export function channelPresenceInstances(presence: ChannelPresence | undefined):
   });
 }
 
-export type ChannelSnapshotCatalogPageRow = Omit<import("./authority-runtime.js").ChannelCatalogPageRow, "channel"> & { channel: ChannelSnapshot };
+export type ChannelSnapshotCatalogPageRow = Omit<import("./authority-runtime.js").ChannelCatalogPageRow, "channel"> & { channel: LiveChannel };
 export type ChannelSnapshotCatalogPage = Omit<import("./authority-runtime.js").ChannelCatalogPage, "rows"> & { rows: ChannelSnapshotCatalogPageRow[] };
-export type ChannelSnapshotCatalogResolveResult = Omit<import("./authority-runtime.js").ChannelCatalogResolveResult, "channels"> & { channels: ChannelSnapshot[] };
+export type ChannelSnapshotCatalogResolveResult = Omit<import("./authority-runtime.js").ChannelCatalogResolveResult, "channels"> & { channels: LiveChannel[] };
