@@ -787,7 +787,7 @@ type ChannelPresenceRouting = {
  * Channel table and routing indices are built once, rather than once per
  * alternating Agent/Channel pair. Snapshots still merge in their socket order. */
 export function createChannelPresenceBatch(channels: LiveChannel[], routing?: ChannelPresenceRouting) {
-  const positionsFor = (items: ChannelSnapshot[]) => {
+  const positionsFor = (items: LiveChannel[]) => {
     const positions = new Map<string, number>();
     items.forEach((channel, index) => positions.set(channel.id, index));
     return positions;
@@ -796,7 +796,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
   // to only one successor. Published arrays and commit indices never share it.
   // Ordinary reports stage only changed cards, without copying the catalog.
   const channelPositions = routing?.positions ?? positionsFor(channels);
-  const updates = new Map<string, ChannelSnapshot>();
+  const updates = new Map<string, LiveChannel>();
   const get = (id: string) => {
     const updated = updates.get(id);
     if (updated) return updated;
@@ -807,9 +807,9 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     for (const id of channelPositions.keys()) yield get(id)!;
     for (const [id, channel] of updates) if (!channelPositions.has(id)) yield channel;
   };
-  let committed: RealtimeCollectionCommit<ChannelSnapshot> | undefined;
-  let liveUpdates: ChannelSnapshot[] | undefined;
-  let published: ChannelSnapshot[] | undefined;
+  let committed: RealtimeCollectionCommit<LiveChannel> | undefined;
+  let liveUpdates: LiveChannel[] | undefined;
+  let published: LiveChannel[] | undefined;
   let publishedFromBasis = true;
   let sealed = false;
   const byInstance = routing?.byInstance ?? new Map<string, Set<string>>();
@@ -834,7 +834,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     };
     for (const instance of keys.instances) update(byInstance, instance);
   };
-  const put = (channel: ChannelSnapshot, rankMayChange = false) => {
+  const put = (channel: LiveChannel, rankMayChange = false) => {
     const previous = get(channel.id);
     if (previous === channel) return;
     // Validate the sort inputs too, including a new Channel: a later sort may
@@ -870,7 +870,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     const ordered = next.filter(channel => !reordered.has(channel.id));
     appendedOnly = [...reordered].every(id => !channelPositions.has(id));
     let positions: Map<string, number> | undefined;
-    const compare = (left: ChannelSnapshot, right: ChannelSnapshot) => {
+    const compare = (left: LiveChannel, right: LiveChannel) => {
       const rank = compareChannelsForSidebar(left, right);
       if (rank) return rank;
       positions ??= new Map(next.map((channel, index) => [channel.id, index]));
@@ -894,8 +894,8 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     if (sealed) throw new Error("A published presence batch cannot be changed");
   };
   return {
-    applyChannel(channel: ChannelSnapshot | SerializedChannel,
-      beforeApply?: (previous: ChannelSnapshot | undefined, updated: ChannelSnapshot) => void) {
+    applyChannel(channel: LiveChannel | SerializedChannel,
+      beforeApply?: (previous: LiveChannel | undefined, updated: LiveChannel) => void) {
       requireUnpublished();
       const previous = get(channel.id);
       const updated = mergeChannelListHydratedFields(previous, channel);
@@ -942,7 +942,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     },
     getSnapshot: snapshot,
     /** Seal a rank-preserving live run for the collection's keyed receive. */
-    getLiveUpdates(): readonly ChannelSnapshot[] | undefined {
+    getLiveUpdates(): readonly LiveChannel[] | undefined {
       if (liveUpdates) return liveUpdates;
       requireUnpublished();
       if (reordered.size) return undefined;
@@ -951,7 +951,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     },
     /** Called by receive before subscribers: reentrant writes cannot change
      * which immutable snapshot this run's routing belongs to. */
-    acceptLiveSnapshot(items: ChannelSnapshot[], previous: ChannelSnapshot[]) {
+    acceptLiveSnapshot(items: LiveChannel[], previous: LiveChannel[]) {
       if (!liveUpdates || published) throw new Error("A live presence snapshot must be accepted once after sealing");
       // Another collection can synchronously notify a writer before this run
       // reaches receive. Its result is valid, but the old routes/positions are
@@ -972,7 +972,7 @@ export function createChannelPresenceBatch(channels: LiveChannel[], routing?: Ch
     },
     /** Only the exact next live snapshot can inherit a completed run's routes.
      * Taking consumes them even on mismatch; other writers force a rebuild. */
-    takeRouting(basis: ChannelSnapshot[]) {
+    takeRouting(basis: LiveChannel[]) {
       const reusable = !routesTaken && indexed && publishedFromBasis && published === basis;
       routesTaken = true;
       if (!reusable) return undefined;
