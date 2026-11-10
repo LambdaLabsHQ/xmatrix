@@ -1,4 +1,4 @@
-import type { AgentRuntimeIssue, AgentRuntimeNotice, AgentRuntimeWaiting, ChannelSnapshot, FaceOf } from "@xmatrix/protocol";
+import type { AgentRuntimeIssue, AgentRuntimeNotice, AgentRuntimeWaiting, LiveChannel, FaceOf } from "@xmatrix/protocol";
 import { agentInstanceBranchLabel, type AgentWorkItem } from "./workspace-shell-message-model";
 import { agentInstanceDisplayStatus, presenceStatusLabel } from "./workspace-shell-presence";
 import type { UsageLimitSummary } from "./workspace-shell-domain-types";
@@ -67,11 +67,11 @@ function project(item: AgentWorkItem): AgentWorkView {
 
 /** A cache of presentation, never an authority for live interactions. Derive
  * full work first so trace phases, quota resets and launch expiry still apply. */
-export function createAgentWorkSelection(build: (channel: ChannelSnapshot | null) => AgentWorkItem[],
+export function createAgentWorkSelection(build: (channel: LiveChannel | null) => AgentWorkItem[],
   initialViews: readonly AgentWorkView[] = []) {
-  let source: ChannelSnapshot | null | undefined;
+  let source: LiveChannel | null | undefined;
   let views = initialViews;
-  return (channel: ChannelSnapshot | null): readonly AgentWorkView[] => {
+  return (channel: LiveChannel | null): readonly AgentWorkView[] => {
     if (source === channel) return views;
     source = channel;
     views = shareByKey(views, build(channel).map(project), view => view.key);

@@ -6,12 +6,14 @@ import { sameValue, type AgentInstancePresence, type ObservabilityEvent, type Ch
 import type { RealtimeCollection } from "./realtime-collection";
 
 /** What a live read needs: each Channel as it stands now, its Instances included. */
-export type LiveChannelSource = Pick<RealtimeCollection<LiveChannel>, "get" | "subscribeKey">;
+export type LiveChannelSource = Pick<RealtimeCollection<LiveChannel>, "get" | "subscribeKey" | "getSnapshot" | "subscribe">;
 export const RealtimeChannelsContext = createContext<LiveChannelSource | null>(null);
 export type ChannelEventView = { id: string; events: readonly ObservabilityEvent[] };
 export const RealtimeEventsContext = createContext<RealtimeCollection<ChannelEventView> | null>(null);
 
 const noSubscription = () => () => {};
+const NO_CHANNELS: LiveChannel[] = [];
+const noChannels = () => NO_CHANNELS;
 const wholeChannel = (channel: LiveChannel | null) => channel;
 
 const unplacedViews = new WeakMap<ChannelSnapshot, LiveChannel>();
@@ -121,4 +123,11 @@ export function useRealtimeChannelsSelection<T>(ids: readonly string[],
     return read;
   }, [store, key, select]);
   return useSyncExternalStore(subscribe, snapshot, snapshot);
+}
+
+/** Every live Channel, Instances included. It changes on every report, so
+ * read it only where each report is drawn. */
+export function useLiveChannels(): readonly LiveChannel[] {
+  const store = useContext(RealtimeChannelsContext);
+  return useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getSnapshot ?? noChannels, store?.getSnapshot ?? noChannels);
 }

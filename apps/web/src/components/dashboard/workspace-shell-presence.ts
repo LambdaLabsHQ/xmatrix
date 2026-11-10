@@ -4,7 +4,7 @@
 import { agentTraceExactInstanceIds, agentTraceInstanceIds } from "@/components/dashboard/agent-trace-target";
 import { traceEventChannelInstanceId } from "@/components/dashboard/agent-trace-replica";
 import type { AgentTraceTarget } from "./workspace-shell-message-model";
-import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus, type LiveChannel } from "@xmatrix/protocol";
+import { channelPresenceInstances, channelPresenceMember, isChannelResidentInstance, isLiveAgentStatus, type ChannelSnapshot, type LiveChannel } from "@xmatrix/protocol";
 import { formatRelativeAge } from "./time-display";
 import { sameValue } from "../../lib/same-value";
 import type {
@@ -75,7 +75,7 @@ export function agentInstancePresenceLabel(
 }
 
 export function memberPresence(
-  channel: LiveChannel,
+  channel: ChannelSnapshot,
   member: string,
   agentsById?: Map<string, SerializedAgent>
 ): PresentedChannelMemberPresence {

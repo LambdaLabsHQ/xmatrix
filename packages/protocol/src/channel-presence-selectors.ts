@@ -1,5 +1,5 @@
 import type { ChannelAgentMemberPresence, ChannelMemberPresence } from "./authority-runtime.js";
-import { presenceInstanceId, type AgentInstancePresence, type HumanPresence, type LiveChannel } from "./channel-presence.js";
+import { presenceInstanceId, type AgentInstancePresence, type HumanPresence, type ChannelPresence, type ChannelSnapshot } from "./channel-presence.js";
 
 const agentViews = new WeakMap<AgentInstancePresence, ChannelAgentMemberPresence>();
 const humanViews = new WeakMap<HumanPresence, ChannelMemberPresence>();
@@ -18,7 +18,9 @@ export function agentInstanceMemberPresence(instance: AgentInstancePresence): Ch
   return view;
 }
 
-export function channelPresenceMember(channel: Pick<LiveChannel, "presence">,
+/** A member's presence. A list copy (ChannelSnapshot) answers only for people;
+ * an Agent Instance is found only on a LiveChannel. */
+export function channelPresenceMember(channel: Pick<ChannelSnapshot, "presence">,
   member: string): ChannelMemberPresence | undefined {
   const human = channel.presence?.humans.get(member);
   if (human) {
@@ -30,6 +32,8 @@ export function channelPresenceMember(channel: Pick<LiveChannel, "presence">,
     return view;
   }
   if (!member) return undefined;
-  const instance = channel.presence?.instances.get(presenceInstanceId(member));
+  const presence = channel.presence;
+  const instance = presence && "instances" in presence
+    ? (presence as ChannelPresence).instances.get(presenceInstanceId(member)) : undefined;
   return instance ? agentInstanceMemberPresence(instance) : undefined;
 }

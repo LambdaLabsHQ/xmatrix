@@ -1450,10 +1450,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!token || !userId) throw new UserFacingProblem("Sign in again to start a conversation");
     const requestKey = crypto.randomUUID();
     const channel = await plannedConversation({ ...request, userId, requestKey });
-    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => {
-      s.channelsRef.current = next(s.channelsRef.current);
-      setChannels(next);
-    };
+    // The store publishes synchronously, and channelsRef follows each publication.
+    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => setChannels(next);
     const settled = () => {
       s.channelCreationsRef.current.delete(channel.id);
       s.setCreatingChannelIds((current) => {
@@ -1626,7 +1624,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setChannels(nextChannels);
       s.spacesRef.current = nextSpaces;
       setSpaces(s.spacesRef.current);
-      s.channelsRef.current = nextChannels;
       setHistoryError(null);
       navigateToChannel(nextChannel.id, link.messageId);
     } catch (error) {

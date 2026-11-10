@@ -149,6 +149,7 @@ import { cn } from "@/lib/utils";
 import type {
   ObservabilityEvent,
   ChannelSnapshot,
+  LiveChannel,
   SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -1080,7 +1081,7 @@ function ChannelRowSecondLine({
   badgeTitle,
   trailing,
 }: {
-  channel: ChannelSnapshot;
+  channel: LiveChannel;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];

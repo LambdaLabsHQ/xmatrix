@@ -1671,7 +1671,7 @@ export function traceEventChannelInstanceLabel(event: ObservabilityEvent): strin
 
 export function latestSpawnEventsByAgent(
   events: ObservabilityEvent[],
-  channel: ChannelSnapshot
+  channel: LiveChannel
 ): ObservabilityEvent[] {
   const byAgent = new Map<string, ObservabilityEvent>();
   const visibleMembers = new Set(channelMembersByPresence(channel));
@@ -1852,7 +1852,7 @@ export function traceInnerPayload(payload: Record<string, unknown> | null): Reco
 /* moved to workspace-shell-presence (10) */
 
 export function humanChannelMembersByPresence(channel: ChannelSnapshot): string[] {
-  return channelMembersByPresence(channel).filter((member) => {
+  return [...channel.presence?.humans.keys() ?? []].filter((member) => {
     const presence = memberPresence(channel, member);
     return presence.kind === "user";
   });

@@ -29,6 +29,7 @@ import { scheduleRunning, type ScheduleState } from "./schedules-model";
 import { formatRelativeAge } from "./time-display";
 import { ToolDetailSection, ToolList, ToolListGroup, ToolPaperScroll, ToolSplit } from "./tool-split";
 import { channelWorkInHand } from "./workspace-shell-chrome";
+import { useLiveChannels } from "./realtime-channels";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** Machine rows show at most this many runtimes; the rest are counted. */
@@ -95,8 +96,13 @@ export function StatusView({
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
   // Working is an Instance with work in hand in some conversation: a live
   // process waiting for its next message runs but does not work.
-  const working = useMemo(() => new Set(channels.flatMap((channel) => channelWorkInHand(channel, events)
-    .map((work) => work.instance.id))), [channels, events]);
+  // The list copies hold no Instances: work in hand is read from the live Channels.
+  const liveChannels = useLiveChannels();
+  const working = useMemo(() => {
+    const listed = new Set(channels.map((channel) => channel.id));
+    return new Set(liveChannels.filter((channel) => listed.has(channel.id)).flatMap((channel) =>
+      channelWorkInHand(channel, events).map((work) => work.instance.id)));
+  }, [channels, liveChannels, events]);
   const workingOf = (registration: AgentRegistrationSummary) =>
     registration.live?.running.filter((instance) => working.has(instance.instanceId)).length ?? 0;
 
