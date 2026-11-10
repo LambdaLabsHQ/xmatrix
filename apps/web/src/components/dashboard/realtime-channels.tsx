@@ -87,26 +87,21 @@ function senderIdentity(instance: AgentInstancePresence, seenAt: string): AgentI
 
 type IdentityView = { channel: ChannelSnapshot; instances: ReadonlyMap<PresenceInstanceId, AgentInstancePresence>;
   view: LiveChannel };
+type Identities = (live: LiveChannel | null, prior: IdentityView | null) => Map<PresenceInstanceId, AgentInstancePresence>;
 
-function useIdentityView(channel: ChannelSnapshot | null, source: LiveChannelSource | undefined,
-  identities: (live: LiveChannel | null, prior: IdentityView | null) => Map<PresenceInstanceId, AgentInstancePresence>) {
-  const held = useRef<IdentityView | null>(null);
-  const select = useCallback((live: LiveChannel | null): LiveChannel | null => {
-    if (!channel) return null;
-    const prior = held.current?.channel.id === channel.id ? held.current : null;
-    const next = identities(live, prior);
-    const instances = prior && sameValue(prior.instances, next) ? prior.instances : next;
-    if (prior && prior.channel === channel && prior.instances === instances) return prior.view;
-    const view: LiveChannel = { ...channel, presence: { channelId: channel.id,
-      humans: channel.presence?.humans ?? new Map(), instances,
-      ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } };
-    held.current = { channel, instances, view };
-    return view;
-  }, [channel, identities]);
-  return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
+/** The list copy with these identities as its Instances; the prior view while they say the same. */
+function identityView(channel: ChannelSnapshot, live: LiveChannel | null, held: IdentityView | null,
+  identities: Identities): IdentityView {
+  const prior = held?.channel.id === channel.id ? held : null;
+  const next = identities(live, prior);
+  const instances = prior && sameValue(prior.instances, next) ? prior.instances : next;
+  if (prior && prior.channel === channel && prior.instances === instances) return prior;
+  return { channel, instances, view: { ...channel, presence: { channelId: channel.id,
+    humans: channel.presence?.humans ?? new Map(), instances,
+    ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } } };
 }
 
-const currentIdentities = (live: LiveChannel | null) => new Map([...live?.presence?.instances ?? []]
+const currentIdentities: Identities = (live) => new Map([...live?.presence?.instances ?? []]
   .map(([id, instance]) => [id, instanceIdentity(instance)]));
 
 /**
@@ -117,10 +112,16 @@ const currentIdentities = (live: LiveChannel | null) => new Map([...live?.presen
  */
 export function useChannelWithInstanceIdentities(channel: ChannelSnapshot | null,
   source?: LiveChannelSource): LiveChannel | null {
-  return useIdentityView(channel, source, currentIdentities);
+  const held = useRef<IdentityView | null>(null);
+  const select = useCallback((live: LiveChannel | null): LiveChannel | null => {
+    if (!channel) return null;
+    held.current = identityView(channel, live, held.current, currentIdentities);
+    return held.current.view;
+  }, [channel]);
+  return useRealtimeChannelSnapshot(channel, channel?.id ?? "", source, select);
 }
 
-const senderIdentities = (live: LiveChannel | null, prior: IdentityView | null) => {
+const senderIdentities: Identities = (live, prior) => {
   // Present Instances first: a sender matched by email or label alone resolves
   // to one still here before one that has left.
   const present = live?.presence?.instances ?? new Map<PresenceInstanceId, AgentInstancePresence>();
@@ -131,14 +132,19 @@ const senderIdentities = (live: LiveChannel | null, prior: IdentityView | null) 
 };
 
 /**
- * Who has written in this Channel, for the rows that name them: every
- * Instance seen while it is open, kept after it leaves (its messages still
- * name it), without status, rest or connection time. Only a new Instance or a moved one changes it,
- * so a report, a rest, a reconnect or a brief absence never rebuilds the rows.
+ * Who has written in a Channel, for the rows that name them: every Instance
+ * seen while it is open, kept after it leaves (its messages still name it),
+ * without status, rest or connection time. It is read when rows are built and
+ * never subscribed: a new sender's own message rebuilds the rows, so no
+ * report, rest, reconnect or absence re-renders what holds them.
  */
-export function useChannelSenderIdentities(channel: ChannelSnapshot | null,
-  source?: LiveChannelSource): LiveChannel | null {
-  return useIdentityView(channel, source, senderIdentities);
+export function createSenderDirectory() {
+  let held: IdentityView | null = null;
+  return (channel: ChannelSnapshot | null, live: LiveChannel | undefined): LiveChannel | null => {
+    if (!channel) return null;
+    held = identityView(channel, live ?? null, held, senderIdentities);
+    return held.view;
+  };
 }
 
 /**

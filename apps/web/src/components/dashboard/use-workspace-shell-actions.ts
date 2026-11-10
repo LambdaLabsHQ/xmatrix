@@ -165,7 +165,7 @@ import {
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
 import { sameValue, shareByKey } from "../../lib/same-value";
-import { useChannelSenderIdentities } from "./realtime-channels";
+import { createSenderDirectory } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
@@ -409,13 +409,14 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // History and author identity build the rows. Live sender status subscribes
   // at the visible affordance, so activity never rebuilds Markdown models.
   // The list copy holds no Instances: rows read who each sender is from the
-  // Channel's sender identities (name, registration, machine), which activity,
-  // status, a rest, a reconnect or a brief absence never change, so this
-  // shell-level read does not re-render the shell.
-  const timelineChannel = useChannelSenderIdentities(s.selectedChannel, s.realtimeChannels);
+  // Channel's sender directory (name, registration, machine) as they are
+  // built. It is not subscribed, so no Instance report re-renders the shell.
+  const [senderDirectory] = useState(createSenderDirectory);
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
+      const timelineChannel = senderDirectory(s.selectedChannel,
+        s.selectedChannel ? s.realtimeChannels.get(s.selectedChannel.id) : undefined);
       const shared = shareByKey(previousTimelineRef.current, appendOutgoingTimelineItems(
         buildTimeline(
           s.renderableHistory,
@@ -441,8 +442,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       s.channels,
       renderableHistoryCache,
       renderableOutgoingMessages,
-      timelineChannel,
-      s.selectedChannel?.id,
+      senderDirectory,
+      s.selectedChannel,
+      s.realtimeChannels,
       s.renderableHistory,
       s.user, s.outboundPreviewByClientIdRef, s.outboundClientIdsByMessageIdRef,
     ]
@@ -451,10 +453,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // The root is rebuilt with every Channel change; while it says the same it
   // stays the message it was, as the timeline's own items do.
   const threadRootRef = useRef<TimelineItem | undefined>(undefined);
-  const threadParentId = s.selectedChannel && isThreadChannel(s.selectedChannel)
-    ? metadataString(s.selectedChannel.metadata, "threadRootChannelId") : undefined;
-  const threadParent = useChannelSenderIdentities(
-    (threadParentId && s.channels.find((item) => item.id === threadParentId)) || null, s.realtimeChannels);
+  const [threadSenderDirectory] = useState(createSenderDirectory);
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");
@@ -470,7 +469,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     ) {
       return null;
     }
-    const parentChannel = threadParent?.id === parentChannelId ? threadParent : undefined;
+    const parentCatalog = s.channels.find((item) => item.id === parentChannelId);
+    const parentChannel = parentCatalog
+      ? threadSenderDirectory(parentCatalog, s.realtimeChannels.get(parentChannelId)) ?? undefined : undefined;
     const rootMessage = renderableHistoryCache.get(parentChannelId)?.messages
       .find((item) => item.messageId === rootMessageId);
     if (!parentChannel || !rootMessage) return null;
@@ -490,7 +491,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const held = threadRootRef.current;
     return { message: (threadRootRef.current = held && sameValue(held, message) ? held : message), channel: parentChannel };
   }, [
-    threadParent,
+    threadSenderDirectory,
+    s.realtimeChannels,
     s.currentSpace?.members,
     s.channelReadCounts,
     s.channels,
