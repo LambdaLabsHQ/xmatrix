@@ -24,6 +24,32 @@ contract migration drops the column once this Hub is verified. Web, Hub and
 protocol, no expand migration; an older Web keeps working against this Hub and
 this Web against an older Hub. Recovery is a CI-validated beta reverting this
 change.
+## Unreleased: Gmail paperclip attachments are no longer listed as inline images
+
+Gmail's web composer gives an ordinary paperclip attachment a Content-ID, and
+the Gmail connector counted any file part with a Content-ID as an inline
+image. A draft carrying a PDF therefore showed in `@gmail:drafts` as
+"0 attachment(s), 1 inline image(s)", and its `@gmail:send_draft` approval
+card listed no attachments. An explicit `Content-Disposition: attachment` now
+counts as an attachment. A part is inline only when its disposition says
+`inline`, or when it has a Content-ID and no disposition at all, as quoted
+signature logos do. Hub only, no schema or client migration. Recovery is a
+CI-validated beta Hub release reverting this change.
+
+## Unreleased: Gmail send and reply carry the files attached to the command
+
+`@gmail:send` and `@gmail:reply` could only send a plain-text email; a file
+attached to the command message was ignored, so the email went out without it.
+The files on the command message itself (`xmatrix send --file`, or a file
+attached in the composer) now go as email attachments: at most 20 files and
+25 MiB. Each is read as the Human the command runs for, through the same
+Channel attachment authority as a download. The approval card lists every
+file's name and size; the send rereads each one and refuses a file whose
+content, type or version changed after approval. A message with attachments
+goes to Gmail's upload endpoint through the short-lived Hub staging that
+`send_draft` uses. An approved send reads the files its card froze; the first beta
+refused them as unreadable and sent nothing (#1521). No new scope, no reconnect. Hub and protocol only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this change.
 
 ## Unreleased: a missing harness is refused by name before its Run starts
 

@@ -7,6 +7,7 @@ import { composioGet, composioPost, type ComposioBound } from "../composio";
 import { quoteRetrievedText, requireText, titleAndBody } from "./common";
 import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } from "../gmail-mailboxes";
 import { gmailReadPhase } from "../gmail-read-failure";
+import { MAX_MAIL_ATTACHMENT_BYTES, MAX_MAIL_ATTACHMENTS, validMailAttachment, type MailAttachment } from "../gmail-attachments";
 
 /*
  * Gmail (API v1) through Composio: the Google account signs in to Composio's
@@ -20,7 +21,8 @@ import { gmailReadPhase } from "../gmail-read-failure";
  * alias Gmail lists as verified on one of those mailboxes (users.settings.sendAs,
  * read under the same grant); the mail goes out through that mailbox with the
  * alias in its From header, and `reply` answers from the alias the original was
- * addressed to. `read` lists every link in the message so an
+ * addressed to. `send` and `reply` carry the files attached to the command message itself
+ * (`gmail-attachments.ts`): the approval card names each one, and the send rereads them unchanged. `read` lists every link in the message so an
  * Agent can open one itself (a sign-up verification link, for example); the
  * Hub never fetches a link found in mail.
  */
@@ -55,9 +57,9 @@ const GMAIL_CALLS: Record<"GET" | "POST", RegExp> = {
   POST: /^\/(?:messages|drafts)\/send$/u,
 };
 
-function gmailPath(method: "GET" | "POST", path: string): string {
+function gmailPath(method: "GET" | "POST", path: string, upload = path === "/drafts/send"): string {
   if (!GMAIL_CALLS[method].test(path)) throw new ProviderRequestError(403, `xMatrix does not call Gmail ${method} ${path}`);
-  return path === "/drafts/send" ? `${UPLOAD_API}${path}` : `${API}${path}`;
+  return upload ? `${UPLOAD_API}${path}` : `${API}${path}`;
 }
 
 function gmailGet(credentials: Readonly<Record<string, string>>, path: string,
@@ -236,6 +238,54 @@ function gmailRaw(headers: [string, string][], body: string): string {
   return base64(message).replace(/\+/gu, "-").replace(/\//gu, "_").replace(/=+$/u, "");
 }
 
+/** Bytes as base64 in 76-character lines, a chunk at a time so a 25 MB file never becomes one huge string. */
+function base64Lines(bytes: Uint8Array): Uint8Array[] {
+  const text = new TextEncoder(), lines: Uint8Array[] = [];
+  /* 57 bytes encode to exactly one 76-character line. */
+  for (let offset = 0; offset < bytes.byteLength; offset += 57 * 1024) {
+    const chunk = bytes.subarray(offset, offset + 57 * 1024);
+    let binary = "";
+    for (let index = 0; index < chunk.byteLength; index += 8192) binary += String.fromCharCode(...chunk.subarray(index, index + 8192));
+    lines.push(text.encode(btoa(binary).replace(/.{1,76}/gu, "$&\r\n")));
+  }
+  return lines;
+}
+
+/** One file's part headers; a non-ASCII name as RFC 2231 for clients that read it and RFC 2047 for those that do not. */
+function fileHeaders(file: MailAttachment): string[] {
+  const flat = file.name.replace(/[\r\n\t"\\]+/gu, "_");
+  const quoted = /^[\x20-\x7e]*$/u.test(flat) ? flat : mimeHeader(flat);
+  const extended = quoted === flat ? ""
+    : `; filename*=UTF-8''${encodeURIComponent(flat).replace(/['()*]/gu, character => `%${character.charCodeAt(0).toString(16).toUpperCase()}`)}`;
+  return [`Content-Type: ${file.mimeType}; name="${quoted}"`, `Content-Disposition: attachment; filename="${quoted}"${extended}`,
+    "Content-Transfer-Encoding: base64"];
+}
+
+/**
+ * The frozen plain-text message `raw` as multipart/mixed with `files` after its text: its own headers stay as they
+ * were approved, and its text becomes the first part.
+ */
+function gmailMixed(raw: string, files: { file: MailAttachment; bytes: Uint8Array }[]): Uint8Array {
+  const message = atob(raw.replace(/-/gu, "+").replace(/_/gu, "/"));
+  const split = message.indexOf("\r\n\r\n");
+  if (split < 0) throw new ProviderRequestError(409, "the approved message is incomplete; ask again");
+  const headers = message.slice(0, split).split("\r\n").filter(line => !/^(?:MIME-Version|Content-Type|Content-Transfer-Encoding):/iu.test(line));
+  const boundary = `xmatrix-${crypto.randomUUID()}`;
+  const text = new TextEncoder();
+  const parts: Uint8Array[] = [text.encode([...headers, "MIME-Version: 1.0", `Content-Type: multipart/mixed; boundary="${boundary}"`, "",
+    `--${boundary}`, "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64", "", ""].join("\r\n")),
+  /* The approved text part is ASCII base64 already. */
+  Uint8Array.from(message.slice(split + 4), character => character.charCodeAt(0))];
+  for (const { file, bytes } of files) {
+    parts.push(text.encode([`\r\n--${boundary}`, ...fileHeaders(file), "", ""].join("\r\n")), ...base64Lines(bytes));
+  }
+  parts.push(text.encode(`\r\n--${boundary}--\r\n`));
+  const whole = new Uint8Array(parts.reduce((total, part) => total + part.byteLength, 0));
+  let offset = 0;
+  for (const part of parts) { whole.set(part, offset); offset += part.byteLength; }
+  return whole;
+}
+
 /** The bare address of a header such as `Name <a@b.c>`, if it names exactly one valid address. */
 function address(value: string): string | undefined {
   const bare = (value.match(/<([^<>]*)>\s*$/u)?.[1] ?? value).trim();
@@ -245,7 +295,7 @@ function address(value: string): string | undefined {
 /** The one Gmail write: messages/send for a frozen raw message, or the upload drafts/send for a checked draft snapshot. */
 async function gmailSend(credentials: Readonly<Record<string, string>>, path: "/messages/send" | "/drafts/send",
   body: Parameters<typeof composioPost>[2], meter: UpstreamMeter | undefined, bound?: ComposioBound): Promise<string> {
-  const sent = await composioPost(credentials, gmailPath("POST", path), body, meter, bound);
+  const sent = await composioPost(credentials, gmailPath("POST", path, path === "/drafts/send" || "binary" in body), body, meter, bound);
   if (typeof sent.id !== "string") throw new ProviderRequestError(502, "Google did not confirm the sent message");
   return line(sent.id, 32);
 }
@@ -371,6 +421,11 @@ export function gmailPreview(prepared: Record<string, string>): Record<string, s
   return preview;
 }
 
+/** How a receipt names the files a send carried. */
+function attachedLabel(input: Record<string, string>): string {
+  return input.attachments ? ` with attachments ${input.attachments}` : "";
+}
+
 /** How a receipt names the sender. */
 function senderLabel(input: Record<string, string>): string {
   return input.via ? `${input.from} (through ${input.via})` : input.from!;
@@ -399,9 +454,38 @@ async function findMessage(context: Context, mailboxes: GmailMailbox[], id: stri
   return { mailbox, message: found };
 }
 
+/**
+ * Freeze the files on the command message for the approval card: each one's name and size as the card lists them,
+ * and its identity, type, hash and version for the send to check. No file means none is sent, said outright.
+ */
+async function attachmentFields(context: Context): Promise<Record<string, string>> {
+  const sources = context.mailAttachments?.sources ?? [];
+  if (!sources.length) return {};
+  if (sources.length > MAX_MAIL_ATTACHMENTS) {
+    throw new ProviderRequestError(422, `attach at most ${MAX_MAIL_ATTACHMENTS} files to one email`);
+  }
+  const files = await Promise.all(sources.map(source => context.mailAttachments!.inspect(source)));
+  if (files.reduce((total, file) => total + file.size, 0) > MAX_MAIL_ATTACHMENT_BYTES) {
+    throw new ProviderRequestError(422, `Gmail sends at most ${MAX_MAIL_ATTACHMENT_BYTES / 1024 / 1024} MiB of attachments in one email`);
+  }
+  return { attachments: `${files.length}: ${files.map(file => `${file.name} (${file.size} bytes)`).join("; ")}`,
+    attachmentFiles: JSON.stringify(files) };
+}
+
+/** The approved files, or none for a request frozen without them. */
+function approvedFiles(input: Record<string, string>): MailAttachment[] {
+  if (!input.attachmentFiles) return [];
+  let files: unknown;
+  try { files = JSON.parse(input.attachmentFiles); } catch { files = undefined; }
+  if (!Array.isArray(files) || !files.length || files.length > MAX_MAIL_ATTACHMENTS || !files.every(validMailAttachment)) {
+    throw new ProviderRequestError(409, "the approved attachments are incomplete; ask again");
+  }
+  return files;
+}
+
 async function prepareSend(context: Context, input: Record<string, string>): Promise<Record<string, string>> {
   const { mailbox, alias } = await sendingIdentity(context, input.from ?? "");
-  return { ...input, ...senderFields(mailbox, alias),
+  return { ...input, ...senderFields(mailbox, alias), ...await attachmentFields(context),
     raw: gmailRaw([...(alias ? [["From", fromHeader(alias)]] as [string, string][] : []), ["To", input.to!], ["Subject", input.subject!]], input.body!) };
 }
 
@@ -419,7 +503,7 @@ async function prepareReply(context: Context, input: Record<string, string>): Pr
   const subject = /^re:/iu.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
   const messageId = line(header(payload, "message-id"), 998).trim();
   const references = [line(header(payload, "references"), 998).trim(), messageId].filter(Boolean).join(" ");
-  return { ...input, to, subject, ...senderFields(mailbox, alias), threadId,
+  return { ...input, to, subject, ...senderFields(mailbox, alias), threadId, ...await attachmentFields(context),
     raw: gmailRaw([...(alias ? [["From", fromHeader(alias)]] as [string, string][] : []), ["To", to], ["Subject", subject],
       ...(messageId ? [["In-Reply-To", messageId], ["References", references]] as [string, string][] : [])], input.body!) };
 }
@@ -435,15 +519,33 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
       throw new ProviderRequestError(409, `${input.from} is no longer a verified send-as address of ${mailbox.address}; ask again`);
     }
   }
+  const files = approvedFiles(input);
+  if (!files.length) {
+    await context.authorizeWrite?.();
+    return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
+  }
+  if (!context.mailAttachments) throw new ProviderRequestError(503, "the Hub cannot read Channel attachments for Gmail");
+  if (!context.mailSnapshot) throw new ProviderRequestError(503, "the Hub has no staging for Gmail attachments (ATTACHMENT_BUCKET and HUB_URL)");
+  const read: { file: MailAttachment; bytes: Uint8Array }[] = [];
+  for (const file of files) read.push({ file, bytes: await context.mailAttachments.read(file) });
+  const upload = gmailUpload(input.threadId ? { threadId: input.threadId } : {}, gmailMixed(input.raw!, read));
   await context.authorizeWrite?.();
-  return sendRaw(mailboxCredentials(context.credentials, mailbox), input.raw!, input.threadId || undefined, context.usage);
+  /* Composio refuses an inline body of a few MB, so it fetches the message from a short-lived Hub URL. */
+  const staged = await context.mailSnapshot.stage(upload.bytes, upload.contentType);
+  try {
+    return await gmailSend(mailboxCredentials(context.credentials, mailbox), "/messages/send",
+      { query: { uploadType: "multipart" }, binary: { url: staged.url, contentType: upload.contentType } }, context.usage, MAIL_SNAPSHOT);
+  } finally {
+    await staged.remove();
+  }
 }
 
 /**
- * The file parts of a message, as "name (size bytes)", split into real attachments and inline images (a part with a
- * Content-ID or `Content-Disposition: inline`, such as the logos of a quoted signature), so a card that would send
- * only someone's signature logos cannot look like it carries the documents its text promises. `complete` is false
- * past the MIME part limit.
+ * The file parts of a message, as "name (size bytes)", split into real attachments and inline images, so a card that
+ * would send only someone's signature logos cannot look like it carries the documents its text promises. A part is
+ * inline when its disposition is `inline`, or when it has no Content-Disposition but a Content-ID (the logos of a
+ * quoted signature); an explicit `Content-Disposition: attachment` is a real attachment even with a Content-ID, which
+ * Gmail's composer adds to ordinary paperclip attachments. `complete` is false past the MIME part limit.
  */
 function attachmentNames(payload: Record<string, unknown>): { names: string[]; inline: string[]; complete: boolean } {
   const names: string[] = [];
@@ -455,7 +557,8 @@ function attachmentNames(payload: Record<string, unknown>): { names: string[]; i
     if (isAttachment(part)) {
       const size = Number(record(part.body).size);
       const label = `${line(part.filename || "(unnamed)", 200)}${Number.isFinite(size) && size > 0 ? ` (${size} bytes)` : ""}`;
-      const embedded = !!header(part, "content-id") || /^inline(?:\s*;|\s*$)/iu.test(header(part, "content-disposition").trim());
+      const disposition = header(part, "content-disposition").trim();
+      const embedded = disposition ? /^inline(?:\s*;|\s*$)/iu.test(disposition) : !!header(part, "content-id");
       (embedded ? inline : names).push(label);
       return;
     }
@@ -553,8 +656,12 @@ async function sendDraftPrepared(context: Context, input: Record<string, string>
  * the checked snapshot's own bytes (Gmail's `raw` is base64url of them).
  */
 export function draftUpload(metadata: Record<string, unknown>, raw: string): { bytes: Uint8Array; contentType: string } {
+  return gmailUpload(metadata, Uint8Array.from(atob(raw.replace(/-/gu, "+").replace(/_/gu, "/")), character => character.charCodeAt(0)));
+}
+
+/** A Gmail upload body: the JSON metadata of a draft or message, then the message's own bytes as message/rfc822. */
+function gmailUpload(metadata: Record<string, unknown>, mime: Uint8Array): { bytes: Uint8Array; contentType: string } {
   const boundary = `xmatrix-${crypto.randomUUID()}`;
-  const mime = Uint8Array.from(atob(raw.replace(/-/gu, "+").replace(/_/gu, "/")), character => character.charCodeAt(0));
   const text = new TextEncoder();
   const head = text.encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
     `--${boundary}\r\nContent-Type: message/rfc822\r\n\r\n`);
@@ -632,7 +739,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const frozen = input.raw ? input : await prepareSend(context, input);
       const id = await sendPrepared(context, frozen);
-      return { summary: `Sent Gmail message ${id} from ${senderLabel(frozen)} to ${frozen.to}.` };
+      return { summary: `Sent Gmail message ${id} from ${senderLabel(frozen)} to ${frozen.to}${attachedLabel(frozen)}.` };
     },
   },
   drafts: {
@@ -674,7 +781,7 @@ export const GMAIL_ACTIONS: Record<string, ConnectorAction> = {
     async execute(context, input) {
       const frozen = input.raw ? input : await prepareReply(context, input);
       const id = await sendPrepared(context, frozen);
-      return { summary: `Replied to Gmail message ${frozen.id} from ${senderLabel(frozen)} as ${id}, to ${frozen.to}.` };
+      return { summary: `Replied to Gmail message ${frozen.id} from ${senderLabel(frozen)} as ${id}, to ${frozen.to}${attachedLabel(frozen)}.` };
     },
   },
 };

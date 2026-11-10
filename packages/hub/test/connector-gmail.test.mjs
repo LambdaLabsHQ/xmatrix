@@ -631,4 +631,18 @@ test("a draft's card separates real attachments from inline signature images and
   const listed = await fetched([gmail({ drafts: [{ id: "r-77" }] }), reply([logo("image001.png", 52012)])],
     () => ACTIONS.drafts.execute(ctx, { query: "", mailbox: "" }));
   assert.match(listed.result.summary, /\t0 attachment\(s\), 1 inline image\(s\)/u);
+  /* A signature logo with a Content-ID and no disposition at all is still inline. */
+  const bareLogo = { mimeType: "image/png", filename: "image003.png", headers: [{ name: "Content-ID", value: "<image003.png@01DD>" }],
+    body: { attachmentId: "ANGjdJ_bare", size: 900 } };
+  const bare = await fetched([reply([bareLogo])], () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-77" }));
+  assert.deepEqual([gmailPreview(bare.result).attachments, gmailPreview(bare.result).inlineImages], ["none", "1: image003.png (900 bytes)"]);
+  /* Gmail's composer gives a paperclip attachment a Content-ID too; its explicit attachment disposition makes it a real one. */
+  const paperclip = { mimeType: "application/pdf", filename: "x.pdf",
+    headers: [{ name: "Content-Disposition", value: 'attachment; filename="x.pdf"' }, { name: "Content-ID", value: "<f_m1abc0>" }],
+    body: { attachmentId: "ANGjdJ_clip", size: 35210 } };
+  const clipped = await fetched([reply([paperclip])], () => ACTIONS.send_draft.prepare(ctx, { draftId: "r-77" }));
+  assert.deepEqual([gmailPreview(clipped.result).attachments, gmailPreview(clipped.result).inlineImages], ["1: x.pdf (35210 bytes)", undefined], "no inline images line when there are none");
+  const clippedList = await fetched([gmail({ drafts: [{ id: "r-77" }] }), reply([paperclip])],
+    () => ACTIONS.drafts.execute(ctx, { query: "", mailbox: "" }));
+  assert.match(clippedList.result.summary, /\t1 attachment\(s\)\n/u);
 });
