@@ -570,39 +570,31 @@ test.describe("on a phone", () => {
     });
   }
 
-  test("what changed since the reader last read is walked from the right edge, beside each change, until viewed", async ({ page: browser }) => {
+  test("History on a phone is the page with what changed since the last visit, its versions folded to a line above it", async ({ page: browser }) => {
     const editor = await openChangedPage(browser);
     // A phone opens on the list of pages.
     await browser.getByRole("button", { name: /^Relay/u }).click();
-    // The page opens as it is; the changes are walked once the reader asks for them.
+    // The page opens as it is, with nothing marked in it; History's button says it changed.
     await expect(editor).toContainText("Shipped this week");
-    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
-    await expect(browser.getByTestId("page-reader-diff")).toContainText("5 changes since you last read this page");
-    await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
-    const mark = browser.getByRole("toolbar", { name: "Changes since you last read this page" });
-    await expect(mark).toContainText("1/4");
-    // It stands at the right edge beside the first change, not in a bar across the bottom.
-    const [markBox, changeBox] = [(await mark.boundingBox())!,
-      (await editor.locator(".page-reader-change").first().boundingBox())!];
-    expect(markBox.x + markBox.width).toBeGreaterThan(393 - 8);
-    expect(markBox.y).toBeLessThan(changeBox.y + changeBox.height);
-    // The changed paragraph keeps room at the edge for it, so no word runs under it.
-    const roomBox = (await editor.locator(".page-edge-room.is-reader-change").first().boundingBox())!;
-    expect(roomBox.x).toBeLessThanOrEqual(markBox.x);
-    expect(roomBox.y + roomBox.height).toBeGreaterThanOrEqual(markBox.y + markBox.height - 2);
-    // A paragraph that is all new is one change, not each of its words.
-    await expect(editor.locator(".page-reader-change.is-block", { hasText: "The second region is next" })).toHaveCount(1);
-    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "The second region" })).toHaveCount(0);
-    await expect(editor.locator(".page-reader-change:not(.is-block)", { hasText: "Shipped" })).toHaveCount(1);
-    await mark.getByRole("button", { name: "Next change" }).click();
-    await expect(mark).toContainText("2/4");
-    await browser.screenshot({ path: test.info().outputPath("pages-reader-changes-phone.png") });
-
-    await mark.getByRole("button", { name: "Viewed" }).click();
-    await expect(mark).toBeHidden();
-    await expect(editor.locator(".page-reader-change")).toHaveCount(0);
-    await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
-      .toContain(3);
+    await expect(editor.locator("ins, del, [data-change]")).toHaveCount(0);
+    await browser.getByRole("button", { name: "Version history, changed since your last visit" }).click();
+    const version = browser.getByTestId("page-version");
+    await expect(version.locator("del")).toHaveText("Planned for next");
+    await expect(version.locator("ins")).toHaveText("Shipped this");
+    // The versions are one line above the page, naming what is shown, until the reader opens them.
+    const versions = browser.getByTestId("page-versions");
+    await expect(versions.getByRole("button")).toHaveCount(1);
+    await expect(versions).toContainText("Since your last visit");
+    await browser.screenshot({ path: test.info().outputPath("pages-history-phone.png") });
+    await versions.getByRole("button").click();
+    await versions.getByRole("button", { name: /by Daniel$/u }).click();
+    // Choosing one folds them again, and the page is that version.
+    await expect(versions.getByRole("button")).toHaveCount(1);
+    await expect(version).toContainText("Planned for next week");
+    await expect(version.locator("ins, del")).toHaveCount(0);
+    await browser.getByRole("button", { name: "Back to the page" }).click();
+    await expect(editor).toContainText("Shipped this week");
+    await expect(browser.getByTestId("page-history-new")).toHaveCount(0);
   });
 
   test("co-writing starts with one tap on an Agent's face, and the reader stays on the page", async ({ page: browser }) => {
@@ -1120,96 +1112,124 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
-/** Opens a page whose reader last read revision 2, `before`, and that is `after` now: by default, changed in three places. */
-async function openChangedPage(browser: Page, before = "# Relay\n\n## Status\n\nPlanned for next week\n\n## Notes\n\nnone\n",
-  after = "# Relay\n\n## Status\n\nShipped this week\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n") {
+/** A change to the page, as its session tells everyone on it. */
+function committed(headRevision: number): Uint8Array {
+  const notice = encoding.createEncoder();
+  encoding.writeVarUint(notice, 2);
+  encoding.writeVarString(notice, JSON.stringify({ type: "committed", headRevision }));
+  return encoding.toUint8Array(notice);
+}
+
+/**
+ * Opens a page whose reader last read revision 2, written by Daniel, and that claude:1 has changed since in
+ * three places: a line reworded, a paragraph added under it, and a new section.
+ */
+async function openChangedPage(browser: Page) {
+  const before = "# Relay\n\n## Status\n\nPlanned for next week, after review\n\n## Notes\n\nnone\n";
+  const after = "# Relay\n\n## Status\n\nShipped this week, after review\n\nThe second region is next\n\n## Notes\n\nnone\n\n## Risks\n\nLate reviews\n";
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 2 },
     { method: "GET" });
   await fixtureJson(browser, "page-mark-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 3 },
     { method: "PUT" });
-  await fixtureJson(browser, "page-revision-2", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\?revision=2$/u, { page: {
-    ...page("p-relay", null, "Relay", "V"), body: before,
-    revisionInfo: { revision: 2, kind: "edit", authors: [], conversationIds: [], createdAt: NOW } } });
+  const revision = (n: number, author: Record<string, string>) => ({ revision: n, kind: "edit", authors: [author],
+    conversationIds: n === 3 ? [E2E_CHANNEL.id] : [], basedOnRevision: n - 1,
+    createdAt: new Date(Date.now() - (4 - n) * 3_600_000).toISOString() });
+  const revisions = [revision(3, { kind: "agent", id: "a", label: "claude:1" }), revision(2, { kind: "user", id: "u-daniel", label: "Daniel" })];
+  await fixtureJson(browser, "page-history", /\/pages\/p-relay\/history$/u, { revisions });
+  for (const [n, body] of [[1, "# Relay\n"], [2, before], [3, after]] as const) {
+    await fixtureJson(browser, `page-revision-${n}`, new RegExp(`/pages/p-relay\\?revision=${n}$`, "u"), { page: {
+      ...page("p-relay", null, "Relay", "V"), body, revisionInfo: revisions.find((entry) => entry.revision === n) ?? revisions[1] } });
+  }
   return openLivePage(browser, after);
 }
 
-test("the page opens as it is, and what changed since the reader last read it is a diff only when they ask for it", async ({ page: browser }) => {
+test("a page opens as it is now, and History shows first what changed since its reader's last visit", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   const editor = await openChangedPage(browser);
-  const added = editor.locator(".page-reader-change");
-  // Opened, the page is as it is now, and the margin's first card only says how much changed since the reader last read it.
-  const offer = browser.getByTestId("page-margin").getByTestId("page-reader-diff");
-  await expect(offer).toContainText("5 changes since you last read this page");
+  // The page is as it is now: nothing in it is marked and nothing about its changes is laid over it.
   await expect(editor).toContainText("Shipped this week");
-  await expect(added).toHaveCount(0);
-  await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
-  await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
-  await browser.screenshot({ path: test.info().outputPath("pages-reader-offer.png") });
-  await offer.getByRole("button", { name: "Show changes" }).click();
-  await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
-  await expect(added.filter({ hasText: "Late reviews" })).toHaveCount(1);
-  // Lines changed next to each other are barred once in the margin, left of the text: the changed status line
-  // and the new paragraph under it are one bar, the new Risks section another, the unchanged Notes parts them.
-  // A wholly new paragraph is barred, not underlined; words changed inside a line are underlined.
-  const bars = browser.getByTestId("page-reader-gutter").locator(".page-reader-bar");
+  await expect(editor.locator("ins, del, [data-change]")).toHaveCount(0);
+  // Having it open reads it, and History's button says it changed since the last visit.
+  await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3 });
+  const history = browser.getByRole("button", { name: "Version history, changed since your last visit" });
+  await expect(history.getByTestId("page-history-new")).toBeVisible();
+  const title = (await editor.locator("h1").boundingBox())!;
+  await browser.screenshot({ path: test.info().outputPath("pages-changed-since-last-visit.png") });
+
+  // History is the same page, where it stood, with what changed since marked in its text: the reworded line
+  // word by word, the new paragraph and the new section whole.
+  await history.click();
+  const versions = browser.getByTestId("page-versions");
+  await expect(versions.getByRole("button", { name: /^Since your last visit/u })).toHaveAttribute("aria-pressed", "true");
+  const version = browser.getByTestId("page-version");
+  await expect(version.locator('[data-change="edited"]')).toHaveText("Planned for next Shipped this week, after review");
+  await expect(version.locator("del")).toHaveText("Planned for next");
+  await expect(version.locator("ins")).toHaveText("Shipped this");
+  await expect(version.locator("ins")).toHaveCSS("text-decoration-line", "underline");
+  await expect(version.locator('[data-change="added"]')).toHaveText(["The second region is next", "Risks", "Late reviews"]);
+  await expect(version.locator('[data-change="added"]').first()).toHaveCSS("text-decoration-line", "none");
+  const sameTitle = (await version.locator("h1").boundingBox())!;
+  expect(Math.abs(sameTitle.x - title.x), "the text stands where the page's stood").toBeLessThanOrEqual(1);
+  expect(Math.abs(sameTitle.y - title.y)).toBeLessThanOrEqual(1);
+  // Lines changed next to each other are barred once in the margin, left of the text: the reworded line and the
+  // new paragraph under it are one bar, the new Risks section another, the unchanged Notes parts them.
+  const bars = browser.getByTestId("page-version-gutter").locator(".page-version-bar");
   await expect(bars).toHaveCount(2);
-  const newParagraph = added.filter({ hasText: "The second region is next" });
-  await expect(newParagraph).toHaveCSS("text-decoration-line", "none");
-  await expect(added.filter({ hasText: "Shipped" })).toHaveCSS("text-decoration-line", "underline");
-  const [first, shipped, second] = [(await bars.first().boundingBox())!,
-    (await editor.getByText("Shipped this week").boundingBox())!, (await newParagraph.boundingBox())!];
-  expect(first.x + first.width).toBeLessThan(shipped.x);
-  expect(first.y).toBeLessThanOrEqual(shipped.y + shipped.height / 2);
-  expect(first.y + first.height).toBeGreaterThanOrEqual(second.y + second.height / 2);
-  await expect(editor.locator(".page-reader-removed")).toContainText("Planned for next");
-  await browser.screenshot({ path: test.info().outputPath("pages-reader-changes.png") });
-  // Hidden again, it is still offered; the diff does not play out or fade, and the page, all of it on screen a
-  // moment, is read whole meanwhile.
-  await offer.getByRole("button", { name: "Hide changes" }).click();
-  await expect(added).toHaveCount(0);
-  await offer.getByRole("button", { name: "Show changes" }).click();
-  await browser.waitForTimeout(2_500);
-  await expect(added.filter({ hasText: "Shipped" })).toBeVisible();
-  expect(await added.first().evaluate((element) => getComputedStyle(element).animationName)).toBe("none");
-  await expect.poll(async () => await fixtureRequestBodies(browser, "page-mark-read")).toContainEqual({ revision: 3, seen: null });
-  // Done, the page is as it is and nothing is offered any more.
-  await offer.getByRole("button", { name: "Done" }).click();
-  await expect(offer).toHaveCount(0);
-  await expect(added).toHaveCount(0);
-  await expect(editor.locator(".page-reader-removed")).toHaveCount(0);
+  const [first, reworded, added] = [(await bars.first().boundingBox())!,
+    (await version.getByText("Shipped this").boundingBox())!, (await version.getByText("The second region is next").boundingBox())!];
+  expect(first.x + first.width).toBeLessThan(reworded.x);
+  expect(first.y).toBeLessThanOrEqual(reworded.y + reworded.height / 2);
+  expect(first.y + first.height).toBeGreaterThanOrEqual(added.y + added.height / 2);
+  // What is shown names the sections it changed.
+  await expect(browser.getByTestId("page-version-sections").getByRole("button")).toHaveText(["Status", "Risks"]);
+  await expect(browser.getByTestId("page-controls")).not.toContainText("Share");
+  await browser.screenshot({ path: test.info().outputPath("pages-history-since-last-visit.png") });
+
+  // One version shows what it alone changed; unmarked, it reads as it was, and can be put back.
+  await versions.getByRole("button", { name: /by Daniel$/u }).click();
+  await expect(version.locator('[data-change="added"]')).toHaveText(["Status", "Planned for next week, after review", "Notes", "none"]);
+  await versions.getByRole("switch", { name: "Show changes" }).click();
+  await expect(version).toContainText("Planned for next week, after review");
+  await expect(version.locator("ins, del, [data-change]")).toHaveCount(0);
+  await expect(bars).toHaveCount(0);
+  await expect(browser.getByRole("button", { name: "Restore this version" })).toBeVisible();
+
+  // Escape is the way back to the page as it is now; what was new has been looked at.
+  await browser.keyboard.press("Escape");
   await expect(editor).toContainText("Shipped this week");
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision))
-    .toContain(3);
+  await expect(browser.getByTestId("page-history")).toHaveCount(0);
+  await expect(browser.getByTestId("page-history-new")).toHaveCount(0);
 });
 
-test("what the reader has not had on screen stays unread, as they last saw it, to be shown as changed next time", async ({ page: browser }) => {
-  const filler = Array.from({ length: 40 }, (_, index) => `Filler line ${index + 1}`).join("\n\n");
-  const editor = await openChangedPage(browser, `# Relay\n\nPlanned\n\n${filler}\n\nOld ending\n`,
-    `# Relay\n\nShipped\n\n${filler}\n\nNew ending\n`);
-  await expect(browser.getByTestId("page-reader-diff")).toContainText("4 changes since you last read this page");
-  // The top was on screen, so it is read as it is; the ending below the fold is kept as the reader last saw it.
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 2,
-    seen: `# Relay\n\nShipped\n\n${filler}\n\nOld ending\n` });
-  // Scrolled to and dwelt on, the ending is read too, and with it the whole page.
-  await editor.getByText("New ending").scrollIntoViewIfNeeded();
-  await expect.poll(async () => (await fixtureRequestBodies(browser, "page-mark-read")).at(-1)).toEqual({ revision: 3,
-    seen: null });
-});
-
-test("writing on a page that changed while its reader was away stops marking the diff over the writing", async ({ page: browser }) => {
-  const editor = await openChangedPage(browser);
-  await browser.getByTestId("page-reader-diff").getByRole("button", { name: "Show changes" }).click();
-  await expect(browser.getByTestId("page-reader-gutter").locator(".page-reader-bar")).toHaveCount(2);
-  await editor.getByText("none", { exact: true }).click();
-  await browser.keyboard.press("End");
-  await browser.keyboard.type(" yet");
-  // Co-writing, what changes is seen as it happens, in its writer's ink: nothing of the diff stays marked.
-  await expect(editor.locator(".page-reader-change, .page-reader-removed")).toHaveCount(0);
-  await expect(browser.getByTestId("page-reader-gutter")).toHaveCount(0);
-  await expect(browser.getByTestId("page-reader-diff")).toHaveCount(0);
-  await expect(editor).toContainText("none yet");
+test("what changes while its reader watches is read, and coming back to the page's tab what it became meanwhile is new", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await fixtureJson(browser, "page-mark-read", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/read$/u, { revision: 3 },
+    { method: "PUT" });
+  let push: (data: Uint8Array) => void = () => {};
+  const editor = await openLivePage(browser, BODY, { connect: (send) => { push = send; } });
+  await expect(editor).toContainText("In progress");
+  const read = async () => (await fixtureRequestBodies(browser, "page-mark-read")).map((body) => body.revision);
+  const fresh = browser.getByTestId("page-history-new");
+  // Read to its head when it opened, the page has nothing new; a change that arrives in front of them is read.
+  push(committed(4));
+  await expect.poll(read).toContain(4);
+  await expect(fresh).toHaveCount(0);
+  // Away from its tab, nothing is read.
+  const show = (state: "hidden" | "visible") => browser.evaluate((to) => {
+    Object.defineProperty(window.document, "visibilityState", { configurable: true, get: () => to });
+    window.document.dispatchEvent(new Event("visibilitychange"));
+  }, state);
+  await show("hidden");
+  push(committed(5));
+  await browser.waitForTimeout(400);
+  expect(await read()).not.toContain(5);
+  // Back, what the page became meanwhile is new, and is read from now on.
+  await show("visible");
+  await expect(fresh).toBeVisible();
+  await expect.poll(read).toContain(5);
 });
 
 test("an editor that meets a Hub still keeping pages as text waits instead of showing an empty page", async ({ page: browser }) => {
@@ -1760,7 +1780,8 @@ test("a page's conversations stand beside its sections while the live session is
     { message: "the card stays level with its section in the editor" }).toBeLessThan(4);
 });
 
-test("a page's history shows what each revision changed, colored, and the conversation it came from", async ({ page: browser }) => {
+test("a page with nothing new opens History on its newest version, with the conversation it came from", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   const revision = (n: number) => ({ revision: n, kind: "edit", authors: [{ kind: "agent", id: "a", label: "claude:1" }],
@@ -1771,16 +1792,24 @@ test("a page's history shows what each revision changed, colored, and the conver
   await fixtureJson(browser, "revision-3", /\/pages\/p-relay\?revision=3$/u, body(BODY.replace("In progress", "Shipped")));
   await fixtureJson(browser, "revision-2", /\/pages\/p-relay\?revision=2$/u, body(BODY));
   await openLivePage(browser);
-  await browser.getByTestId("pages-view").getByRole("button", { name: /^Version history/u }).click();
-  // As in Google Docs: versions grouped by day, each with its time and its editors in their colours,
-  // and the newest open, its additions highlighted in its author's colour.
+  // Read to its head, the page says nothing is new.
+  await expect(browser.getByTestId("page-editor")).toContainText("In progress");
+  await expect(browser.getByTestId("page-history-new")).toHaveCount(0);
+  await browser.getByTestId("pages-view").getByRole("button", { name: "Version history" }).click();
+  // As in Google Docs: versions grouped by day, each with its time and its editors in their colours, and the
+  // newest open. A line rewritten past recognition is the old one struck out and the new one, each whole.
   const versions = browser.getByTestId("page-versions");
   await expect(versions.locator("h3")).toHaveText(["Today"]);
+  await expect(versions.getByRole("button", { name: /^Since your last visit/u })).toHaveCount(0);
   await expect(versions.getByRole("button", { name: /by claude:1$/u })).toHaveCount(2);
-  const diff = browser.getByTestId("page-revision-diff");
-  await expect(diff.locator('[data-change="removed"]')).toHaveText("In progress");
-  await expect(diff.locator('[data-change="added"]')).toHaveText("Shipped");
-  await expect(browser.getByTestId("page-history")).toContainText(`in ${E2E_CHANNEL.name}`);
+  await expect(versions.getByRole("button", { name: /by claude:1$/u }).first()).toHaveAttribute("aria-pressed", "true");
+  const version = browser.getByTestId("page-version");
+  await expect(version.locator('[data-change="removed"]')).toHaveText("In progress");
+  await expect(version.locator('[data-change="removed"]')).toHaveCSS("text-decoration-line", "line-through");
+  await expect(version.locator('[data-change="added"]')).toHaveText("Shipped");
+  await expect(versions).toContainText(`in ${E2E_CHANNEL.name}`);
+  // The current version is the page already: there is nothing to put back.
+  await expect(browser.getByRole("button", { name: "Restore this version" })).toHaveCount(0);
   await browser.screenshot({ path: test.info().outputPath("pages-version-history.png") });
 });
 

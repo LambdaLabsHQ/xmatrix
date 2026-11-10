@@ -31,7 +31,7 @@ import type { PageEditOpening } from "./page-edit-cards";
 export type PageReferenceScope = {
   spaceId: string;
   token: string;
-  /** `opening` says what changed since, and the message to go back to, when an edit card opens it. */
+  /** `opening` names the message to go back to, when an edit card opens it. */
   onOpenPage: (pageId: string, blockId?: string | null, opening?: PageEditOpening) => void;
 };
 

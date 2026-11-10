@@ -228,24 +228,17 @@ integration("pages: how far a person has read a page is theirs, only moves forwa
       await call("edit", { principal: owner, pageId: page.pageId, baseRevision: head.headRevision, body });
     }
 
-    assert.deepEqual(await call("readState", { principal: viewer, pageId: page.pageId }), { revision: null, seen: null },
+    assert.deepEqual(await call("readState", { principal: viewer, pageId: page.pageId }), { revision: null },
       "nobody has read it before they open it");
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 2 }), { revision: 2 });
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 1 }), { revision: 2 },
       "it never moves back");
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 99 }), { revision: 3 },
       "nor past the page's head");
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: null, seen: null },
+    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: null },
       "each person has their own");
-    // Part of the page seen past a revision is kept as the page they saw, until they have seen it whole.
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 2, seen: "# Plan\n\nTwo\n\nOld\n" });
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }),
-      { revision: 2, seen: "# Plan\n\nTwo\n\nOld\n" });
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 1, seen: "# Plan\n" });
-    assert.deepEqual((await call("readState", { principal: owner, pageId: page.pageId })).seen, "# Plan\n\nTwo\n\nOld\n",
-      "an older report does not take back what was seen");
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 3, seen: null });
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: 3, seen: null });
+    await call("markRead", { principal: owner, pageId: page.pageId, revision: 3 });
+    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: 3 });
     await call("markRead", { principal: owner, pageId: page.pageId, revision: 2 });
     const readIn = async (principal) => (await call("tree", { principal })).pages[0].readRevision;
     assert.deepEqual([await readIn(viewer), await readIn(owner), await readIn(agent)], [3, 3, null],

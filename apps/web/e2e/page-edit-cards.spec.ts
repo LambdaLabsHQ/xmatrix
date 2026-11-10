@@ -78,9 +78,13 @@ for (const first of ["bookmark", "edit card"] as const) test(`page edits and boo
   await expect(card).toHaveCount(1);
   await expect(page.locator(".app-message-row", { hasText: "Wrote the outline" }).getByTestId("page-edit-card")).toBeVisible();
 
+  // Open shows the page as it is now, with nothing marked in it, and the way back to the message.
   await card.getByRole("button", { name: "Open page" }).click();
   const back = page.getByTestId("page-back-to-message");
   await expect(back).toBeVisible();
+  const opened = page.getByTestId("page-preview");
+  await expect(opened).toContainText("Leave on 3 November from Shanghai on GA 859.");
+  await expect(opened.locator("ins, del, [data-change]")).toHaveCount(0);
   await back.click();
   await expect(page).toHaveURL(/channel-general/u);
   await expect(page.locator(".app-message-row", { hasText: "Wrote the outline" })).toBeVisible();

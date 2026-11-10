@@ -371,14 +371,9 @@ export function PageOffscreenCard({ side, entries, onJump }: {
  * The open conversation expands in its card's place, level with its anchor,
  * and the other cards make room above and below it.
  */
-/** The margin's head, kept apart from conversation and Agent ids. */
-const HEAD = "head:";
-
 export function PageMargin({ conversations, writers = [], editors = [], view = null, end = null, tops, focusedId, openId = null,
-  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
+  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions }: {
   conversations: MarginConversation[];
-  /** What stands at the top of the margin, above the cards it would otherwise cover. */
-  head?: ReactNode;
   /** The Agents at work on the page. Each stands beside its line, and its channel's card is not drawn again. */
   writers?: readonly MarginWriter[];
   /** People editing the page, at their caret's line: out of view, they are told at the margin's edges with what it holds. */
@@ -426,7 +421,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   const holder = openId ? holding.find((writer) => writer.conversation?.conversationId === openId) ?? null : null;
   const writerId = (writer: MarginWriter) => `writer:${writer.key}`;
   const items = [
-    ...(head ? [{ id: HEAD, top: 0, estimate: ESTIMATED_CARD_HEIGHT }] : []),
     ...cards.map((card) => ({ id: card.conversationId, top: anchorTop(tops, card), estimate: ESTIMATED_CARD_HEIGHT })),
     ...pens.map((writer) => ({ id: writerId(writer), estimate: ESTIMATED_WRITER_HEIGHT, top: writerTop(writer) - WRITER_RISE })),
   ];
@@ -507,7 +501,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
     };
     for (const item of shown) {
-      if (item.id === HEAD) continue;
       const top = positions.get(item.id)!;
       const height = heights.get(item.id) ?? item.estimate;
       const card = cards.find((conversation) => conversation.conversationId === item.id);
@@ -538,7 +531,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       <div className="relative" style={{ minHeight: bottom,
         ...(view && onJump ? { clipPath: `inset(${Math.max(0, view.top + (offscreen.above.length ? EDGE_ROOM : 0))}px 0 ${Math.max(0, bottom - view.top - view.height + (offscreen.below.length ? EDGE_ROOM : 0))}px 0)` } : {}),
       }} data-testid="page-margin" aria-label="Conversations on this page">
-        {head && place(HEAD, head)}
         {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
           <ConversationCard conversation={card} writer={inCard.get(card.conversationId)}
             focused={card.conversationId === focusedId} canResolve={canResolve}

@@ -887,25 +887,57 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /*
- * What changed since this reader last read the page (§3.1), until they tick it viewed or write on it. It is
- * marked as a proofreader marks paper, in ink and never in a tinted box: each stretch of changed lines barred
- * once in the left margin (PageReaderChangeGutter), and inside a line that changed in part, new words
- * underlined and words taken out struck through in faint ink where they stood. Brass is the app's one
- * accent, kept for what a person has yet to do; reading a change is that.
+ * What a version changed, in History (§4.2): the page as it was, marked as a proofreader marks paper, in ink
+ * and never in a tinted box. Each stretch of changed lines is barred once in the left margin
+ * (PageVersionGutter); inside a line that kept most of its words, new words are underlined in brass and words
+ * taken out struck through in faint ink where they stood. A block taken out whole is struck through; one
+ * that is all new is only barred. Brass is the app's one accent, kept for what a person has yet to read.
  */
-.page-reader-bar {
+.page-version-bar {
   position: absolute;
   width: 3px;
   border-radius: 3px;
   background: var(--m-ink-attention, var(--accent));
 }
-.page-document .page-reader-change:not(.is-block) {
+.page-document ins {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 0.24em;
   text-decoration-skip-ink: none;
 }
+.page-document del,
+.page-document [data-change="removed"],
+.page-document [data-change="removed"] :is(td, th, li, a, code) {
+  color: var(--m-ink-secondary, var(--muted-foreground));
+  text-decoration: line-through;
+}
+/* A cell rewritten past recognition holds its old words over its new ones, each whole. */
+.page-document [data-change="replaced"] > del { display: block; }
+.page-document [data-change="replaced"] > ins { text-decoration: none; }
+/* New to this reader since their last visit: on History's button, and on what is new in History's list. */
+.page-new-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--m-ink-attention, var(--accent));
+}
+/* The sections a version changed, under its row in History's list: each the change's own bar, in small. */
+.page-version-section { position: relative; }
+.page-version-section::before {
+  content: "";
+  position: absolute;
+  top: 0.3em;
+  bottom: 0.3em;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--m-ink-attention, var(--accent));
+}
+
+/* A suggested block is barred once in the left margin, in brass: the app's one accent, kept for what a
+   person has yet to do. */
 .page-document :is(.page-suggest-in, .page-suggest-out).is-block {
   position: relative;
 }
@@ -920,16 +952,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   background: var(--m-ink-attention, var(--accent));
   pointer-events: none;
 }
-.page-document .page-reader-removed {
-  color: var(--m-ink-secondary, var(--muted-foreground));
-  text-decoration: line-through;
-  white-space: pre-wrap;
-  user-select: none;
-  pointer-events: none;
-}
-.page-document .page-reader-removed.is-block { display: block; }
-.page-document .page-reader-removed:not(.is-block) + .page-reader-change:not(.is-block) { margin-left: 0.25em; }
-
 /* The Agent a page is written with, on a phone: its own face on its glass disc, floating at the right
    edge where Agents on the page show; the small ink "+" says a tap calls it. */
 .page-agent-button {
@@ -1130,8 +1152,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /*
- * Suggestions waiting on the page (§4.2), each change shown where it would land, in the same proofreading
- * ink as what changed since the reader last read: what it would put in is underlined in brass (a new block
+ * Suggestions waiting on the page (§4.2), each change shown where it would land, in proofreading
+ * ink: what it would put in is underlined in brass (a new block
  * stands ghosted, barred in the margin), what it would take out is struck through. The change in front of
  * the reader is drawn in full; the rest step back until their turn.
  */
@@ -1187,13 +1209,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .page-change-button:active { background: color-mix(in oklab, var(--foreground) 8%, transparent); }
 .xmatrix-app .page-change-button.is-primary { background: var(--foreground); color: var(--background); }
-.page-change-count {
-  padding-top: 2px;
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--m-ink-attention, var(--accent));
-}
 
 /* The words an Agent is writing, marked in its colour (its caret's and History's) as a highlighter marks
    lines of text, so whose change it is and where it lands are seen at a glance. */
@@ -1207,8 +1222,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 
 /* What to do with a change stands over the text's right edge on a phone or a narrow window: the lines
    beside it end short of it, as text runs around a picture, so no word, nor a pen, runs under it. The room
-   is as tall as what stands there: ✓ and ✕ beside a suggestion (§4.2), the count, ↓ and ✓ beside what
-   changed since the reader last read the page (§3.2), while those are walked from the edge. */
+   is as tall as what stands there: ✓ and ✕ beside a suggestion (§4.2). */
 .page-document .page-edge-room {
   float: right;
   clear: right;
@@ -1217,8 +1231,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   pointer-events: none;
   user-select: none;
 }
-.page-document .page-edge-room.is-reader-change { display: none; height: 6.25rem; }
-.has-reader-mark .page-document .page-edge-room.is-reader-change { display: block; }
 @media (min-width: 1024px) { .page-document .page-edge-room.is-suggestion { display: none; } }
 
 /* The Agent's pen: its own face, in the line at the height of the words it writes and centred on them,
