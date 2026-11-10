@@ -291,6 +291,11 @@ pub struct SerializedMachineDaemon {
 pub struct MachineSpawnContext {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub requested_model: Option<String>,
+    /// On the runtime's default model: a model from the runtime's own catalog
+    /// to start on instead, as a live `/model` would switch to it. It is not an
+    /// admitted model resource, so it never comes from the registration binding.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preferred_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub requested_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]

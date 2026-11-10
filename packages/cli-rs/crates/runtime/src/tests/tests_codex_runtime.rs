@@ -1539,6 +1539,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         source_message_id: Some("message-a".to_string()),
         initial_message_source: None,
         requested_model: None,
+        preferred_model: None,
         requested_effort: None,
         requested_parameters: None,
         prompt: "test".to_string(),

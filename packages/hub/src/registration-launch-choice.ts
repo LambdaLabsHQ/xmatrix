@@ -1,21 +1,31 @@
 import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
-  cursorQuotaBucketForModel, routingQuotaObservation, routingQuotaPace,
+  cursorQuotaBucketForModel, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
   machineNetworkObservation, type MachineNetworkObservation } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser } from "@xmatrix/db";
 import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
 import { RoutingEvaluationFailed, RoutingEvidenceUnavailable, evaluateRoutingChoices, type RoutingAnswer,
   type RoutingChoice, type RoutingEvaluator } from "./agent-routing-evaluation";
 
-/** A model and a harness are unrelated values. An empty model list allows no
- * model override, so there is no model decision. A non-empty list
- * is the complete set of allowed models: Jev chooses among the observed catalog
+/** One model (and effort) a launch may run. `native` is a model the runtime's
+ * own catalog offers while its owner declared none: the launch keeps the
+ * runtime-default authority and the runtime switches to it as it starts, the
+ * way a live `/model` would. A native entry with an empty model is the
+ * runtime's default itself. */
+interface ModelPair {
+  model: string; description: string; effort?: string; effortDescription: string; native?: true;
+}
+
+/** A model and a harness are unrelated values. A non-empty declared list is
+ * the complete set of allowed models: Jev chooses among the observed catalog
  * entries it allows, or among the allowed models themselves when the observed
- * catalog names none of them. */
-function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags) {
+ * catalog names none of them. With no declared list, the choice is the
+ * runtime's own fresh catalog, on a daemon that applies a preferred model;
+ * without such a catalog there is no model decision. */
+function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): ModelPair[] {
   const allowed = candidate.models;
   const requested = tags.model;
-  if (!allowed.length) return [];
   const catalog = candidate.modelCatalog ?? [];
+  if (!allowed.length) return nativeModelPairs(candidate, tags);
   const fromCatalog = catalog.flatMap(observed => {
     // An alias maps an allowed model to the runtime's own model id.
     const model = allowed.find(item => (candidate.modelAliases?.[item] ?? item) === observed.model);
@@ -35,6 +45,24 @@ function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags
     effortDescription: tags.effort ? "Requested effort" : "Runtime default effort" }));
 }
 
+/** The runtime's catalog entries a launch may prefer. The effort stays the
+ * runtime's default unless the author wrote one the entry lists, and that
+ * needs a daemon that carries an effort onto the runtime's default model. */
+function nativeModelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): ModelPair[] {
+  if (!candidate.supportsNativeModel) return [];
+  if (tags.effort && !candidate.supportsDefaultModelEffort) return [];
+  return (candidate.modelCatalog ?? []).filter(observed => tags.model ? routingModelOptionNamed(observed, tags.model) : !observed.isDefault)
+    .filter(observed => !tags.effort || observed.efforts.some(effort => effort.value === tags.effort))
+    .map(observed => ({ model: observed.model,
+      description: [observed.names?.join(" / "), observed.description].filter(Boolean).join(": ") || "Runtime model",
+      effort: tags.effort, effortDescription: tags.effort ? "Requested effort" : "Runtime default effort", native: true as const }));
+}
+
+/** The question's first option when a summon names no model: keep the runtime's default. */
+function runtimeDefaultPair(tags: AutoLaunchTags): ModelPair {
+  return { model: "", description: "The runtime's default model. Keep it unless the author or the discussion asks for a specific model.",
+    effort: tags.effort, effortDescription: tags.effort ? "Requested effort" : "Runtime default effort", native: true };
+}
 /**
  * No declared models means the runtime's own default model, and a named model
  * still refuses. A requested effort applies to that default model when the
@@ -287,7 +315,12 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       (!tags.pwd || workspace.canonicalCwd === tags.pwd) && (!tags.repo || workspace.repo === repoSummonReference(tags.repo)));
     const pairs = (candidate: RegistrationLaunchCandidate) => modelPairs(candidate, tags).filter(option => !tags.parameters ||
       !candidate.parameterModel || (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
-    const pairKey = (option: ReturnType<typeof modelPairs>[number]) => JSON.stringify([option.model, option.effort ?? null]);
+    const pairKey = (option: ModelPair) => JSON.stringify([option.model, option.effort ?? null]);
+    // A runtime's own catalog is a choice only beside its default: a summon
+    // that names no model may keep the model it would have run anyway.
+    const withDefault = (models: ModelPair[], candidates: RegistrationLaunchCandidate[]) =>
+      models.length && models.every(option => option.native) && candidates.every(candidate => usesRuntimeDefaults(candidate, tags))
+        ? [runtimeDefaultPair(tags), ...models] : models;
     const unique = <T>(values: T[], key: (value: T) => string) => [...new Map(values.map(value => [key(value), value])).values()];
     // Where the work happens is what it is about, so it is read first, over
     // every environment: a repository is available on each one offering it, a
@@ -313,15 +346,16 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // harness there is nothing to compare.
     const harnesses = [...new Set(eligible.map(candidate => candidate.key.harness))];
     const offering = (harness: string) => eligible.filter(candidate => candidate.key.harness === harness);
-    const modelQuestion = (models: ReturnType<typeof modelPairs>) => ({ type: "choice" as const,
-      instructions: "Select a supported model and effort pair. Missing effort means the explicitly offered harness default.",
+    const modelQuestion = (models: ModelPair[]) => ({ type: "choice" as const,
+      instructions: "Select a supported model and effort pair. Missing effort means the explicitly offered harness default. " +
+        "An empty model is the runtime's default model: choose another only when the author or the discussion names or asks for it.",
       criteria: Object.fromEntries(models.map((model, index) => [`model_${index}`, JSON.stringify(model)])) });
     // One harness whose every environment offers the same models: whichever place and machine run the work,
     // the models to choose from are these, so the model is chosen in the same call as the place, not after it.
     const modelLists = unique(eligible.map(candidate => unique(pairs(candidate), pairKey)),
       models => JSON.stringify(models.map(pairKey)));
     const modelsUpFront = harnesses.length === 1 && modelLists.length === 1 && modelLists[0]!.length
-      ? modelLists[0]! : undefined;
+      ? withDefault(modelLists[0]!, eligible) : undefined;
     const fitQuestions = harnesses.length > 1 ? harnesses.map((harness, index) => [`fit_${index}`, { type: "score" as const,
       instructions: FIT_INSTRUCTIONS + JSON.stringify({ harness,
         descriptions: [...new Set(offering(harness).map(candidate => candidate.description).filter(Boolean))],
@@ -372,15 +406,17 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // Whoever waits on the harness hears it now, while the model is chosen.
     const told = onHarness?.(harness);
     told?.catch(() => undefined); // still awaited below; a failed parameter choice must not orphan it
-    // Only declared models are a choice, made for the environment that runs the work.
-    const models = modelsUpFront ?? unique(pairs(best), pairKey);
+    // Declared models, or the runtime's own catalog, are a choice made for the environment that runs the work.
+    const models = modelsUpFront ?? withDefault(unique(pairs(best), pairKey), [best]);
     const request = models.length && !modelsUpFront ? { state, questions: { modelEffort: modelQuestion(models) } } : undefined;
     let modelAnswer: RoutingChoice | undefined = modelsUpFront ? choiceAnswer(identity.modelEffort) : undefined;
     if (request) {
       try { modelAnswer = choiceAnswer((await settle(request)).modelEffort); }
       catch (error) { throw selectionFailure("parameter", error); }
     }
-    const model = modelAnswer ? models[Number(modelAnswer.choice.slice("model_".length))]! : undefined;
+    const answered = modelAnswer ? models[Number(modelAnswer.choice.slice("model_".length))]! : undefined;
+    // Keeping the runtime's default is no model selection.
+    const model = answered?.model ? answered : undefined;
     // Cursor: after the model is known, only that model's Auto/API pool may
     // refuse; the next-ranked environment of the harness offering it runs it.
     const offered = ranking.map(item => item.candidate).filter(candidate => candidate.key.harness === harness &&
@@ -391,13 +427,16 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       ...ranking.filter(item => item.candidate !== candidate)];
     await told;
     // On the runtime's default model the only effort is the one the author asked for.
-    const effort = model ? model.effort : tags.effort;
+    const effort = answered ? answered.effort : tags.effort;
+    // A native model runs on the runtime-default authority; the runtime switches to it.
+    const preferred = model?.native ? model.model : undefined;
     const round = (value: number) => Math.round(value * 1000) / 1000;
-    return { key: candidate.key, model: model?.model ?? "",
+    return { key: candidate.key, model: model && !preferred ? model.model : "",
       ...(tags.parameters ? { parameters: launchHarnessParameters(tags) } : {}),
-      ...(!model ? { useRuntimeDefaultModel: true } : {}), ...(effort ? { effort } : {}),
+      ...(!model || preferred ? { useRuntimeDefaultModel: true } : {}), ...(preferred ? { preferredModel: preferred } : {}),
+      ...(effort ? { effort } : {}),
       ...(workspaceReference !== undefined ? { workspaceReference } : {}), parameterEvidence: {
-      rubricVersion: "registration-parameters-v11", evaluatedAt: new Date().toISOString(),
+      rubricVersion: "registration-parameters-v12", evaluatedAt: new Date().toISOString(),
       // The calls share one state; a digest reads each as the copy Jev received.
       inputDigest: await digestCanonicalCloneCborV1(JSON.parse(JSON.stringify(request ? [...inputs, request] : inputs))),
       ...(Object.keys(scores).length ? { fit: { inputDigest: await digestCanonicalCloneCborV1(JSON.parse(JSON.stringify(inputs))), scores } } : {}),

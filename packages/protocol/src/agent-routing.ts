@@ -34,6 +34,21 @@ export interface RoutingModelOption {
   model: string;
   description: string;
   efforts: Array<{ value: string; description: string }>;
+  /** Other names the runtime's catalog gives this model: its selectors (Claude's
+   * `opus`) and display names. */
+  names?: string[];
+  /** The runtime marks this entry as the model a new session starts on. */
+  isDefault?: true;
+}
+
+/**
+ * Whether a written `model:` value names this catalog entry: the runtime's
+ * model, its selector or its display name, ignoring case. The runtime's own
+ * catalog is the only vocabulary; nothing here maps one model name to another.
+ */
+export function routingModelOptionNamed(option: RoutingModelOption, written: string): boolean {
+  const wanted = written.trim().toLowerCase();
+  return Boolean(wanted) && [option.model, ...option.names ?? []].some(name => name.toLowerCase() === wanted);
 }
 
 /** A received catalog is an observation, not permission or a fabricated default. */
@@ -45,13 +60,23 @@ export function routingModelCatalogObservation(value: unknown, observedAt: unkno
   for (const raw of value) {
     if (!raw || typeof raw !== "object" || raw.hidden === true) continue;
     const model = clean(raw.model, 160);
-    if (!model || models.some(item => item.model === model)) continue;
+    if (!model) continue;
+    // A selector and the model it resolves to are one model: merge their names.
+    const names = [clean(raw.id, 160), clean(raw.displayName, 160)].filter(name => name && name !== model);
+    const known = models.find(item => item.model === model);
+    if (known) {
+      const merged = [...new Set([...known.names ?? [], ...names])].slice(0, 8);
+      if (merged.length) known.names = merged;
+      if (raw.isDefault === true) known.isDefault = true;
+      continue;
+    }
     const efforts: RoutingModelOption["efforts"] = [];
     for (const effort of Array.isArray(raw.supportedReasoningEfforts) ? raw.supportedReasoningEfforts.slice(0, 16) : []) {
       const value = clean(effort?.reasoningEffort, 80);
       if (value && !efforts.some(item => item.value === value)) efforts.push({ value, description: clean(effort.description, 512) });
     }
-    models.push({ model, description: clean(raw.description, 512), efforts });
+    models.push({ model, description: clean(raw.description, 512), efforts,
+      ...(names.length ? { names: [...new Set(names)] } : {}), ...(raw.isDefault === true ? { isDefault: true as const } : {}) });
   }
   return models.length ? { value: models, observedAt: new Date(at).toISOString(),
     expiresAt: new Date(at + 86_400_000).toISOString(), source: "launch-authority" } : undefined;

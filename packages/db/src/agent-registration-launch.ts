@@ -30,7 +30,7 @@ import {
   type RegistrationLaunchBinding,
   registrationLaunchBindingForDaemon,
   parseAgentRegistrationEnvironment,
-  routingModelCatalogObservation,
+  routingModelCatalogObservation, routingModelOptionNamed,
   hostObservedRequirements,
   machineResourceObservation,
   machineMentionValue, machineTagSelects,
@@ -82,6 +82,9 @@ interface LaunchRequest {
   modelResource?: string;
   /** Omit model/effort overrides when no runtime model observation exists. */
   useRuntimeDefaultModel?: true;
+  /** On the runtime default: the runtime's own catalog model it switches to as
+   * it starts, as a live `/model` would. Never a model resource or a grant. */
+  preferredModel?: string;
   /** Absent means a private managed directory with no registered workspace. */
   workspaceReference?: string;
   /** Host abilities the routed daemon must currently report (e.g. `github`). */
@@ -118,6 +121,9 @@ export interface RegistrationLaunchCandidate {
   supportsRequestedEffort?: boolean;
   /** Its daemon applies a requested effort to the runtime's own default model. */
   supportsDefaultModelEffort?: boolean;
+  /** Its daemon has the runtime switch to a preferred model from the runtime's
+   * own catalog as it starts (`registration_native_model_v1`). */
+  supportsNativeModel?: boolean;
   supportsRequestedParameters?: boolean;
   modelAliases?: Record<string, string>;
   observations?: {
@@ -187,6 +193,8 @@ export type RegistrationLaunchChooser = (input: {
   /** Told the harness as soon as Jev has read it, before the rest is chosen. */
   onHarness?: (harness: string) => Promise<void>;
 }) => Promise<{ key: SpaceAgentRegistrationKey; model: string; modelResource?: string; effort?: string; parameters?: Record<string, string>; useRuntimeDefaultModel?: true;
+  /** With the runtime default: a model from the runtime's own catalog it switches to as it starts. */
+  preferredModel?: string;
   workspaceReference?: string; parameterEvidence?: LaunchParameterEvidence }>;
 
 /** Whether Jev read anything for this launch: an intent, a harness's fit, or a choice with more than one
@@ -210,8 +218,13 @@ const text = (value: string, maximum = 300) => {
 /** A Jev choice becomes launch parameters; the chosen registration fixes the harness. */
 /** The runtime default names no model and requests no model resource. Any
  * named model must be one of the candidate's allowed models, compared
- * literally; an empty list allows none. */
-function selectedModelGranted(candidate: RegistrationLaunchCandidate, selected: { model: string; modelResource?: string; useRuntimeDefaultModel?: true }) {
+ * literally; an empty list allows none. A preferred model rides only on the
+ * runtime default of a registration that declares no models, and must be in
+ * the runtime's own fresh catalog on a daemon that applies it. */
+function selectedModelGranted(candidate: RegistrationLaunchCandidate,
+  selected: { model: string; modelResource?: string; useRuntimeDefaultModel?: true; preferredModel?: string }) {
+  if (selected.preferredModel !== undefined && (!selected.useRuntimeDefaultModel || candidate.models.length ||
+    !candidate.supportsNativeModel || !candidate.modelCatalog?.some(option => option.model === selected.preferredModel))) return false;
   if (selected.useRuntimeDefaultModel) return selected.model === "" && !selected.modelResource;
   return candidate.models.includes(selected.modelResource ?? selected.model);
 }
@@ -237,6 +250,7 @@ function validateSelectedHarnessParameters(candidate: RegistrationLaunchCandidat
 const selectedParameters = (selected: Awaited<ReturnType<RegistrationLaunchChooser>>, harness: string) => ({
   ...(selected.modelResource ? { modelResource: selected.modelResource } : {}),
   ...(selected.useRuntimeDefaultModel ? { useRuntimeDefaultModel: true as const } : {}),
+  ...(selected.preferredModel ? { preferredModel: selected.preferredModel } : {}),
   ...(selected.parameterEvidence ? { parameterEvidence: selected.parameterEvidence } : {}),
   requirements: { ...(selected.parameters ? { parameters: selected.parameters } : {}), model: selected.model, ...(selected.effort ? { effort: selected.effort } : {}),
     unattended: false, requiredCapabilities: [], harness } });
@@ -281,6 +295,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     if (!requirements.model && !raw.useRuntimeDefaultModel || raw.useRuntimeDefaultModel && (requirements.model || raw.modelResource)) {
+      throw new RegistrationAccessError("invalid_registration_launch", 400);
+    }
+    if (raw.preferredModel !== undefined && (!raw.useRuntimeDefaultModel || text(raw.preferredModel, 160) !== raw.preferredModel)) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     if (Object.hasOwn(raw, "oneshot")) throw new RegistrationAccessError("invalid_registration_launch", 400);
@@ -437,7 +454,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   /** Undefined when no message carries the invocation. */
   private async source(tx: DatabaseTransaction, input: LaunchRequest) {
     if (input.sourceMessageId === undefined) {
-      if (input.launchConditions) await this.validateConditions(input,
+      if (input.launchConditions) await this.validateConditions(tx, input,
         parseLaunchConditions(formatAutoLaunchMention(input.launchConditions), "@auto".length));
       return undefined;
     }
@@ -467,18 +484,41 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw new RegistrationAccessError("registration_invocation_target_mismatch", 403);
     }
     const options = selectionLaunchConditions(input.body, selection);
-    await this.validateConditions(input, options);
+    await this.validateConditions(tx, input, options);
     return source;
   }
 
-  private async validateConditions(input: LaunchRequest, options: { tags: AutoLaunchTags; error?: string }) {
+  /** Whether the author's `model:` names the preferred model in the runtime's
+   * catalog this registration last reported. Selection already required a fresh
+   * catalog; this only proves the launch is the model the author wrote, so a
+   * replay after the catalog aged still matches. */
+  private async preferredModelNamed(tx: DatabaseTransaction, input: LaunchRequest, written: string): Promise<boolean> {
+    const rows = await tx.query({ name: "registration_launch_preferred_model_v1", text: `SELECT i.presentation_json->'models' AS models,
+        i.presentation_json->>'modelsObservedAt' AS observed_at
+      FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
+      WHERE r.space_id=$1 AND r.owner_user_id=$2 AND r.machine_id=$3 AND r.harness=$4
+        AND jsonb_typeof(i.presentation_json->'models')='array'
+        AND pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
+      ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1`,
+    values: [input.key.spaceId, input.key.ownerUserId, input.key.machineId, input.key.harness], maxRows: 1 });
+    const observedAt = typeof rows[0]?.observed_at === "string" ? Date.parse(rows[0].observed_at) : NaN;
+    // Read as of its own time: the catalog's age bounds selection, not this check.
+    const catalog = Number.isFinite(observedAt)
+      ? routingModelCatalogObservation(rows[0]!.models, rows[0]!.observed_at, observedAt)?.value : undefined;
+    return catalog?.some(option => option.model === input.preferredModel && routingModelOptionNamed(option, written)) === true;
+  }
+
+  private async validateConditions(tx: DatabaseTransaction, input: LaunchRequest, options: { tags: AutoLaunchTags; error?: string }) {
     const tags = options.tags;
     const machineOk = !tags.machine || await this.machineKnownAs(input.key.ownerUserId, input.key.machineId, tags.machine);
-    if (options.error || (input.useRuntimeDefaultModel && tags.model) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
+    // A written model rides on the runtime default only as the catalog model it named.
+    const writtenModelPreferred = tags.model !== undefined && input.preferredModel !== undefined &&
+      await this.preferredModelNamed(tx, input, tags.model);
+    if (options.error || (input.useRuntimeDefaultModel && tags.model && !writtenModelPreferred) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
         (tags.pwd && input.workspaceReference === undefined) ||
         (tags.machine && !machineOk) ||
         (tags.harness && canonicalRegistrationHarness(tags.harness) !== input.key.harness) ||
-        (tags.model && tags.model !== input.requirements.model && tags.model !== input.modelResource) ||
+        (tags.model && tags.model !== input.requirements.model && tags.model !== input.modelResource && !writtenModelPreferred) ||
         (tags.effort && tags.effort !== input.requirements.effort) ||
         !sameHarnessParameterValues(launchHarnessParameters(tags), input.requirements.parameters ?? {})) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
@@ -533,10 +573,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND (NOT $4::boolean OR capabilities_json ? 'registration_optional_model_v1')
             AND (NOT $6::boolean OR capabilities_json ? 'machine_routing_parameters_v1')
             AND (NOT $7::boolean OR capabilities_json ? 'registration_default_effort_v1')
+            AND (NOT $8::boolean OR capabilities_json ? 'registration_native_model_v1')
             AND ${HOST_CAPABILITY_ROUTE_SQL("$5")} LIMIT 2 FOR SHARE`,
           values: [input.key.ownerUserId,input.key.machineId,reference === undefined ? "registration_managed_v1" : null,
             input.useRuntimeDefaultModel === true, capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0,
-            defaultModelEffort], maxRows: 2 });
+            defaultModelEffort, input.preferredModel !== undefined], maxRows: 2 });
         const routes = await repoRoutes(required);
         const unrouted = reference === undefined ? "registration_managed_route_unavailable" : "registration_repo_route_unavailable";
         if (!routes.length) throw await refuse(unrouted, () => repoRoutes([]), input.key);
@@ -556,9 +597,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           AND (NOT $4::boolean OR d.capabilities_json ? 'registration_optional_model_v1')
           AND (NOT $6::boolean OR d.capabilities_json ? 'machine_routing_parameters_v1')
           AND (NOT $7::boolean OR d.capabilities_json ? 'registration_default_effort_v1')
+          AND (NOT $8::boolean OR d.capabilities_json ? 'registration_native_model_v1')
           AND ${HOST_CAPABILITY_ROUTE_SQL("$5", "d.")} LIMIT 1 FOR SHARE OF w,d`,
         values: [input.workspaceReference,input.key.ownerUserId,input.key.machineId,input.useRuntimeDefaultModel === true,
-          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0, defaultModelEffort], maxRows: 1 });
+          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0, defaultModelEffort,
+          input.preferredModel !== undefined], maxRows: 1 });
       const rows = await workspaceRoutes(required);
       if (!rows[0]) throw await refuse("registration_workspace_or_daemon_unavailable", () => workspaceRoutes([]),
         { ...input.key, workspaceId: reference });
@@ -613,6 +656,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         ...(workspace.managed_key && !workspace.remote_repo ? { managementSpaceId: workspace.managed_key } : {}),
         ...(initialMessageId !== undefined ? { sourceMessageId: initialMessageId } : {}),
         context: { ...(!input.useRuntimeDefaultModel ? { requestedModel: allocation.runtimeModel } : {}),
+          ...(input.useRuntimeDefaultModel && input.preferredModel ? { preferredModel: input.preferredModel } : {}),
           ...(input.requirements.effort ? { requestedEffort: input.requirements.effort } : {}),
           ...(input.requirements.parameters ? { requestedParameters: input.requirements.parameters } : {}) },
         ...registrationInstructionsSpawnFields(configuration), ...spaceRules, ...connectedApps,
@@ -633,6 +677,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         summonedByUserId: input.actorUserId, identityKind: "instance",
         requestedRuntimeModel: allocation.runtimeModel ?? null, modelResource: resources.models[0] ?? null,
         agentName: row.display_name, useRuntimeDefaultModel: input.useRuntimeDefaultModel === true,
+        ...(input.useRuntimeDefaultModel && input.preferredModel ? { preferredRuntimeModel: input.preferredModel } : {}),
         ...(workspace.remote_repo ? { remoteRepo: workspace.remote_repo, runWorktree: true } : {}),
         ...(input.parameterEvidence ? { routingDecision: { source: jevDecided(input.parameterEvidence) ? "jev" : "deterministic",
           parameters: input.parameterEvidence, rows: [], machine: boundMachine(input.key.machineId, input.machineName) } } : {}) };
@@ -1206,6 +1251,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(startupFailedAt ? { startupFailedAt } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
+          ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),
           // A launch addressed to this Machine (one of its registrations or its id) named it.

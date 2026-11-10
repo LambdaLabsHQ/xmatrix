@@ -55,7 +55,7 @@ test('one harness has no fit to score; the location and its one list of models a
   assert.deepEqual(result.parameterEvidence.choices.map(choice => choice.key), ['modelEffort', 'workspace']);
   const { digestCanonicalCloneCborV1 } = await import('@xmatrix/protocol');
   assert.equal(result.parameterEvidence.inputDigest, await digestCanonicalCloneCborV1(calls), "the evidence is what Jev read");
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v12');
   assert.equal(result.parameterEvidence.harness, undefined);
   assert.equal(result.parameterEvidence.fit, undefined);
   assert.deepEqual(result.parameterEvidence.placement.ranking.map(item => item.machineId), ['first', 'last']);
@@ -460,7 +460,7 @@ test('with nothing left to choose Jev is not called, and each choice is recorded
   assert.equal(result.useRuntimeDefaultModel, true);
   assert.deepEqual(result.parameterEvidence.choices,
     [{ key: 'workspace', selected: 'workspace_0', probabilities: { workspace_0: 1 }, only: true }]);
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v12');
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
   // A choice beside it is still Jev's to make, and the one-option question goes with it as before.
@@ -497,6 +497,42 @@ test('an empty model list skips model selection, even beside an observed catalog
         ? 'registration_effort_unavailable' : 'registration_model_unavailable'));
     }
   }
+});
+
+test("a daemon that applies a native model offers the runtime's own catalog beside its default", async () => {
+  const candidate = { ...candidates[0], key: { ...candidates[0].key, harness: 'claude' }, models: [], supportsNativeModel: true,
+    modelCatalog: [
+      { model: 'claude-opus-5-5', description: '', efforts: [], names: ['default', 'Default (recommended)'], isDefault: true },
+      { model: 'claude-sonnet-5-5', description: 'Everyday', efforts: [], names: ['sonnet', 'Sonnet'] },
+      { model: 'claude-haiku-5-5', description: 'Fast', efforts: [], names: ['haiku'] }] };
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  const choose = async (tags, options = {}) => {
+    const calls = [];
+    const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, options); })({
+      message: '@claude review this', tags, candidates: [candidate] });
+    assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+    return { chosen, calls };
+  };
+  // The runtime's default is the first option; the default entry is not offered twice.
+  const kept = await choose({}, { modelEffort: 'model_0' });
+  const offered = Object.values(kept.calls[0].questions.modelEffort.criteria).map(value => JSON.parse(value).model);
+  assert.deepEqual(offered, ['', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+  assert.deepEqual([kept.chosen.useRuntimeDefaultModel, kept.chosen.model, kept.chosen.preferredModel], [true, '', undefined]);
+  assert.equal(Object.hasOwn(kept.chosen.parameterEvidence.selections, 'model'), false);
+  // Jev's pick from the catalog starts the runtime on it, on the runtime-default authority.
+  const picked = await choose({}, { modelEffort: 'model_1' });
+  assert.deepEqual([picked.chosen.useRuntimeDefaultModel, picked.chosen.model, picked.chosen.preferredModel],
+    [true, '', 'claude-sonnet-5-5']);
+  assert.equal(picked.chosen.parameterEvidence.selections.model, 'claude-sonnet-5-5');
+  // A written model is matched by any name the runtime gives it, and is then the only option.
+  const written = await choose({ model: 'Sonnet' });
+  assert.equal(written.chosen.preferredModel, 'claude-sonnet-5-5');
+  assert.deepEqual(Object.keys(written.calls[0].questions.modelEffort.criteria), ['model_0']);
+  await assert.rejects(choose({ model: 'gpt-6' }), error => error.code === 'registration_model_unavailable');
+  // A daemon that cannot apply it keeps the old contract: no model choice, a written model refused.
+  const old = { ...candidate, supportsNativeModel: undefined };
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({
+    message: '@claude', tags: { model: 'sonnet' }, candidates: [old] }), error => error.code === 'registration_model_unavailable');
 });
 
 test('a requested effort applies to the runtime default model without a model choice', async () => {
