@@ -641,7 +641,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn agent_spawn_path_preserves_profile_path_and_adds_user_bins() {
-        let path = super::augmented_agent_spawn_path(Some("/custom/bin:/usr/bin")).unwrap();
+        let path = super::agent_spawn_path(Some("/custom/bin:/usr/bin")).unwrap();
         let paths: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
 
         assert_eq!(
@@ -661,17 +661,28 @@ mod tests {
 }
 
 /// Where a harness's official installer puts its launcher outside the common
-/// user bin directories. The installer adds it to the user PATH, which a
-/// daemon started before the install never sees, so inventory, recipes and
+/// user bin directories. The installer adds it to the user's shell profile,
+/// which a service-started daemon never reads, so inventory, recipes and
 /// launches look here too.
 pub fn native_launcher_dirs(preset_id: &str) -> Vec<PathBuf> {
-    let Some(local) = dirs::data_local_dir() else {
-        return Vec::new();
-    };
+    let home = dirs::home_dir();
+    let local = dirs::data_local_dir();
     match preset_id {
-        "cursor" => vec![local.join("cursor-agent")],
+        "cursor" => local
+            .map(|local| vec![local.join("cursor-agent")])
+            .unwrap_or_default(),
         // install.ps1: %LOCALAPPDATA%\agy\bin\agy.exe. Unix installs into ~/.local/bin.
-        "antigravity" if cfg!(windows) => vec![local.join("agy").join("bin")],
+        "antigravity" if cfg!(windows) => local
+            .map(|local| vec![local.join("agy").join("bin")])
+            .unwrap_or_default(),
+        // opencode.ai/install puts the binary in ~/.opencode/bin.
+        "opencode" => home
+            .map(|home| vec![home.join(".opencode").join("bin")])
+            .unwrap_or_default(),
+        // Kimi Code's installer puts the binary in ~/.kimi-code/bin.
+        "kimi" => home
+            .map(|home| vec![home.join(".kimi-code").join("bin")])
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
 }
@@ -684,7 +695,6 @@ fn common_user_bin_paths() -> Vec<PathBuf> {
         paths.push(home.join("bin"));
     }
 
-    #[cfg(windows)]
     for preset in agent_presets() {
         paths.extend(native_launcher_dirs(&preset.id));
     }
@@ -702,7 +712,12 @@ fn common_user_bin_paths() -> Vec<PathBuf> {
     paths
 }
 
-fn augmented_agent_spawn_path(profile_path: Option<&str>) -> Option<std::ffi::OsString> {
+/// The PATH a daemon-started Agent runs with, and so the one place a
+/// harness's launcher is looked for: the profile's PATH (else the daemon's),
+/// then the common user bin directories and each harness's installer
+/// directory. Inventory and launch both search this, so "installed" means a
+/// launch finds the same file.
+pub fn agent_spawn_path(profile_path: Option<&str>) -> Option<std::ffi::OsString> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
     let base_path = profile_path
@@ -736,7 +751,7 @@ pub fn apply_agent_spawn_path(
     command: &mut std::process::Command,
     local_env: &BTreeMap<String, String>,
 ) {
-    if let Some(path) = augmented_agent_spawn_path(local_env.get("PATH").map(String::as_str)) {
+    if let Some(path) = agent_spawn_path(local_env.get("PATH").map(String::as_str)) {
         command.env("PATH", path);
     }
 }

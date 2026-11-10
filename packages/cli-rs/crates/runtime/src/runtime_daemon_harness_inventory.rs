@@ -61,20 +61,30 @@ pub(crate) fn harness_command(program: &Path, args: &[impl AsRef<OsStr>]) -> Com
     command
 }
 
-/// Cursor's generic `agent` name is also used by other vendors. Prefer its
-/// unambiguous launcher and accept a generic alias only beside that launcher.
+/// The launcher a daemon-started Run of this preset would execute: searched
+/// on the PATH that Run gets (`agent_spawn_path`), so inventory reports
+/// installed exactly when a launch finds the file.
 pub(crate) fn resolve_launcher(preset: &AgentPreset) -> Option<PathBuf> {
+    resolve_launcher_on(preset, None)
+}
+
+/// `resolve_launcher` for a Run whose profile sets its own PATH.
+pub(crate) fn resolve_launcher_on(
+    preset: &AgentPreset,
+    profile_path: Option<&str>,
+) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let mut paths = std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .unwrap_or_default();
-    paths.push(home.join(".local").join("bin"));
-    paths.extend(xmatrix_cli_agent::native_launcher_dirs(&preset.id));
-    let paths = std::env::join_paths(paths).ok()?;
+    let paths = xmatrix_cli_agent::agent_spawn_path(profile_path)?;
     resolve_launcher_in(preset, &paths, &home)
 }
 
-fn resolve_launcher_in(preset: &AgentPreset, paths: &OsStr, cwd: &Path) -> Option<PathBuf> {
+/// Cursor's generic `agent` name is also used by other vendors. Prefer its
+/// unambiguous launcher and accept a generic alias only beside that launcher.
+pub(crate) fn resolve_launcher_in(
+    preset: &AgentPreset,
+    paths: &OsStr,
+    cwd: &Path,
+) -> Option<PathBuf> {
     let cursor = preset.id == "cursor";
     let mut names = preset.launcher_names.iter().collect::<Vec<_>>();
     if cursor {
@@ -263,7 +273,7 @@ pub(crate) async fn refresh_readiness() -> bool {
     changed
 }
 
-async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
+pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
     let path = resolve_launcher(preset);
     let mut item = InventoryItem {
         id: preset.id.clone(),

@@ -79,3 +79,12 @@ test("quoted and truncated credentials cannot cross the Channel boundary", () =>
     assert.doesNotMatch(publicMachineStartupFailure(raw).summary, /JSON_SECRET|KEY_SECRET|HEADER_SECRET/u);
   }
 });
+
+test("a harness whose launcher the daemon cannot find is named with its install", () => {
+  // The daemon's preflight refusal, carried verbatim as the spawn error.
+  const failure = publicMachineStartupFailure("harness_missing: OpenCode (`opencode`) is not installed where xMatrix starts Agents on this machine. Install it with `npm install -g @opencode/cli`, or link it into ~/.local/bin, then send the message again.");
+  assert.equal(failure.code, "harness_missing");
+  assert.match(failure.summary, /OpenCode \(`opencode`\) is not installed/u);
+  assert.match(failure.summary, /npm install -g @opencode\/cli/u);
+  assert.match(failure.summary, /~\/\.local\/bin/u);
+});
