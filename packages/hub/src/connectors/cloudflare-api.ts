@@ -44,20 +44,24 @@ const QUERY_CELL = 120;
 const QUERY_OUTPUT = 6_000;
 
 type Credentials = Readonly<Record<string, string>>;
-/** One way into Cloudflare: a stored OAuth login, or a pasted API token. */
-interface Login { token: string }
+/**
+ * One way into Cloudflare: a stored OAuth login, or a pasted API token.
+ * `label` names it the way Apps → Cloudflare lists it, for error messages.
+ */
+interface Login { token: string; label: string }
 /** An account and the login that reaches it. */
 /**
  * An account and the logins that reach it: `token` is the first, `tokens`
  * every one in connection order, for calls whose scope an older grant lacks.
  */
-export interface CloudflareTarget { account: string; name: string; token: string; tokens: string[] }
+export interface CloudflareTarget { account: string; name: string; token: string; tokens: string[]; labels: string[] }
 
 function logins(credentials: Credentials): Login[] {
-  const list: Login[] = parseCloudflareLogins(credentials.logins).map((login) => ({ token: login.accessToken }));
+  const list: Login[] = parseCloudflareLogins(credentials.logins).map((login) => ({ token: login.accessToken,
+    label: `connected ${login.connectedAt.slice(0, 10)}` }));
   /* A connection that has not been connected again since logins existed keeps its single grant. */
-  if (credentials.oauthToken) list.push({ token: credentials.oauthToken });
-  if (credentials.apiToken) list.push({ token: credentials.apiToken });
+  if (credentials.oauthToken) list.push({ token: credentials.oauthToken, label: "connected before logins were listed" });
+  if (credentials.apiToken) list.push({ token: credentials.apiToken, label: "the pasted API token" });
   if (!list.length) throw new ConnectorRemedy(401, "Connect Cloudflare first", { kind: "reconnect" });
   return list;
 }
@@ -118,8 +122,12 @@ async function reach(credentials: Credentials): Promise<{ targets: CloudflareTar
     });
     for (const account of accounts) {
       const known = found.get(account.id);
-      if (known) known.tokens.push(login.token);
-      else found.set(account.id, { account: account.id, name: account.name, token: login.token, tokens: [login.token] });
+      if (known) {
+        known.tokens.push(login.token);
+        known.labels.push(login.label);
+      } else {
+        found.set(account.id, { account: account.id, name: account.name, token: login.token, tokens: [login.token], labels: [login.label] });
+      }
     }
   }
   return { targets: [...found.values()], ...(refused ? { refused } : {}) };
@@ -401,10 +409,18 @@ async function granted<T>(target: CloudflareTarget, grant: string, call: (token:
       refusal ??= error;
     }
   }
-  const reaching = target.tokens.length === 1 ? "the 1 connected login that reaches it lacks it"
-    : `none of the ${target.tokens.length} connected logins that reach it holds it`;
+  const named = target.labels.join("; ");
+  const reaching = target.tokens.length === 1 ? `the 1 connected login that reaches it (${named}) lacks it`
+    : `none of the ${target.tokens.length} connected logins that reach it (${named}) holds it`;
+  /*
+   * Connecting again replaces a login only when the new grant reaches the same
+   * accounts, so the person must sign in as that account's Cloudflare user and
+   * select the account with full access on the consent page.
+   */
   throw new ProviderRequestError(403, `${refusal?.message ?? "Cloudflare refused the request"}. ` +
-    `Reconnect Cloudflare in Apps to grant ${grant} on ${oneLine(target.name, 80) || target.account} (${reaching})`);
+    `Reconnect Cloudflare in Apps to grant ${grant} on ${oneLine(target.name, 80) || target.account} (${reaching}): ` +
+    "sign in as a Cloudflare user of that account, select it on the consent page with full access, " +
+    "and check the account allows public OAuth apps (Manage Account → Members → Settings)");
 }
 
 function namedAccount(statement: { target: string; text: string }, usage: string): Record<string, string> | string {
