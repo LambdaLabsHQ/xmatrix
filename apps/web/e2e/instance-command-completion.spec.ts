@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { expectDraft } from "./composer-draft";
-import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE,
+import { E2E_CHANNEL, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, codexInstanceRecord,
   installWorkspaceStubs, routeHumanSocket } from "./workspace-fixtures";
 
 // Resolver unit fixtures already carry presence. This exercises the real split:
@@ -9,11 +9,8 @@ for (const mobile of [false, true]) test.describe(mobile ? "phone" : "desktop", 
   test.use(mobile ? E2E_MOBILE_CONTEXT : E2E_DESKTOP_CONTEXT);
 
   test("Instance commands complete from the live store through both entry points", async ({ page }) => {
-    const instance = { id: `${E2E_CHANNEL.id}:1`, channelId: E2E_CHANNEL.id, channelInstanceId: "1",
-      label: "codex:1", agentName: "codex", status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
-      registration: { ownerUserId: "e2e-user", machineId: "machine", harness: "codex" },
-      commands: [{ token: "/compact", label: "Compact context", mode: "passthrough" }],
-      revision: { version: 1, sequence: 1 } };
+    const instance = codexInstanceRecord(E2E_CHANNEL.id,
+      { commands: [{ token: "/compact", label: "Compact context", mode: "passthrough" }] });
     const socket = await routeHumanSocket(page, (frame, reply) => {
       if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
     });

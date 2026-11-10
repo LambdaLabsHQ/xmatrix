@@ -5,6 +5,7 @@ import {
   E2E_NOW,
   E2E_SPACE,
   E2E_USER_SENDER,
+  codexInstanceRecord,
   fixtureJson,
   installWorkspaceStubs,
   routeHumanSocket,
@@ -67,10 +68,7 @@ test.describe("mention read state", () => {
   // Unit inputs already contain presence. This crosses the catalog/live split
   // and follows a machine's availability while the message stays mounted.
   test("an Instance mention follows live machine availability", async ({ page }) => {
-    const instance = { id: `${CHANNEL.id}:1`, channelId: CHANNEL.id, channelInstanceId: "1",
-      label: "codex:1", agentName: "codex", status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
-      registration: { ownerUserId: "e2e-user", machineId: "machine", harness: "codex" },
-      revision: { version: 1, sequence: 1 } };
+    const instance = codexInstanceRecord(CHANNEL.id);
     const socket = await routeHumanSocket(page, (frame, reply) => {
       if (frame.type === "ping") reply({ type: "pong", requestId: frame.requestId });
     });
