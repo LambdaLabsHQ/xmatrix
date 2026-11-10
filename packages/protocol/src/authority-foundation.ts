@@ -1263,67 +1263,52 @@ export interface AgentPresentationSnapshot {
   usage?: LlmUsage;
 }
 
-export interface SerializedAgentInstance extends AgentPresentationSnapshot {
-  /**
-   * Globally unique live instance id. Use this for traces, controls, storage,
-   * and any non-mention identity comparison.
-   */
+/** Runtime-owned display and capability observations, independent of Instance identity.
+ * Add presentation fields here so durable normalization must account for them. */
+export interface AgentInstancePresentation extends AgentPresentationSnapshot {
+  clientVersion?: string;
+  hostName?: string;
+  workspace?: WorkspaceRef;
+  workspaceName?: string;
+  /** Ref from which the daemon materialized this Run worktree. */
+  runWorktreeBaseRef?: string;
+  /** Temporary work fields travel only on the live activity stream. */
+  activity?: string;
+  files?: string[];
+  intent?: string;
+  gitBranch?: string;
+  runtimeState?: AgentRuntimeState;
+  capabilities?: string[];
+  goal?: AgentGoalStatus;
+  modelsObservedAt?: string;
+  parametersObservedAt?: string;
+}
+
+export interface SerializedAgentInstance extends AgentInstancePresentation {
+  /** Globally unique Instance id, used for traces, controls and storage. */
   id: string;
-  /**
-   * Per-channel ordinal used only for channel-visible addressing such as
-   * `@agent:1`.
-   */
+  /** Channel-local ordinal for addresses such as `@agent:1`. */
   channelInstanceId?: string;
-  /**
-   * Channel this live instance is registered in. `channelInstanceId` ordinals
-   * are only meaningful inside this channel; consumers must not match slots
-   * across channels without comparing this scope first.
-   */
+  /** An ordinal is addressable only inside this Channel. */
   channelId?: string;
   label: string;
-  /**
-   * Version of the xMatrix client that registered this live instance.
-   */
-  clientVersion?: string;
   connectedAt: string;
   lastSeenAt: string;
   status: AgentStatus;
-  /**
-   * Set only with `status: "offline"`: this Instance is resting, not gone, and
-   * the next message in its Channel wakes it (docs/instance-sleep.md).
-   */
+  /** An offline, resting Instance remains its Channel's and wakes on a message. */
   rest?: AgentInstanceRest;
-  /** Set only with `rest: "wake_failed"`: the failure code, then what the failing step said. */
+  /** The failure reported with `rest: "wake_failed"`. */
   restReason?: string;
-  /** Set only with `status: "offline"` on a live Instance whose machine is unreachable. */
+  /** A live Instance's Machine is unreachable. */
   offlineReason?: AgentInstanceOfflineReason;
   machineId?: string;
   /** Mutable OS observation; never selects or authorizes a Machine. */
   hostname?: string;
   hostId?: string;
-  hostName?: string;
   cwd?: string;
-  /** Repository admitted for this Run, for display only; independent of its checkout path. */
+  /** Repository admitted for this Run, for display only. */
   repository?: string;
-  workspace?: WorkspaceRef;
-  workspaceName?: string;
-  /**
-   * Current git branch reported by the live instance, when its cwd is inside a
-   * repository. Detached heads and non-git directories leave this unset.
-   */
-  gitBranch?: string;
-  /**
-   * Ref the instance's managed run worktree was cut from, when the daemon
-   * materialized one for this run (execution-context display).
-   */
-  runWorktreeBaseRef?: string;
-  activity?: string;
-  files?: string[];
-  intent?: string;
-  runtimeState?: AgentRuntimeState;
-  /** Provider-backed operations advertised by this exact live runtime. */
-  capabilities?: string[];
-  goal?: AgentGoalStatus;
+  /** Legacy wire field; current runtime discovery uses commands and capabilities. */
   skills?: AgentSkill[];
 }
 
