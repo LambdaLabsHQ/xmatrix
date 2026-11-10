@@ -1,4 +1,4 @@
-import { parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
+import { isLiveChannel, parseInstanceRecord, mergeInstanceRecord, parseInstanceActivity, mergeInstanceActivity, presenceInstanceId,
   accountQuotaUsageFromCandidates, withRegistrationQuota, mergeRegistrationPresentation,
   type RegistrationPresentation, type AgentRegistrationKey, type LlmUsage, type InstanceRecord, type InstanceActivity, type ChannelSnapshot, type LiveChannel, type AgentInstancePresence } from "@xmatrix/protocol";
 import { createRealtimeCollection, type RealtimeCollection, type RealtimeCollectionCommit } from "./realtime-collection";
@@ -148,32 +148,42 @@ export type InstanceStore = ReturnType<typeof createInstanceStore>;
 /** The session's Channels. Live reads (get, getSnapshot, subscribe) are
  * LiveChannels: each carries its Instances, derived from the one Instance store.
  * Catalog reads are what lists hold, typed ChannelSnapshot, which has no
- * Instances, so a list copy cannot be handed to code that reads them. */
-export type RealtimeChannels = Omit<RealtimeCollection<LiveChannel>, "getCatalogSnapshot" | "getCatalog"> & {
+ * Instances, so a list copy cannot be handed to code that reads them.
+ * Writes take any Channel; one that still carries legacy Instances keeps them
+ * until its Instance records arrive. */
+export type RealtimeChannels = Omit<RealtimeCollection<LiveChannel>,
+  "getCatalogSnapshot" | "getCatalog" | "set" | "receive" | "commit"> & {
   instances: InstanceStore;
   getCatalogSnapshot: () => ChannelSnapshot[];
   getCatalog: (id: string) => ChannelSnapshot | undefined;
+  set(update: readonly ChannelSnapshot[] | ((current: LiveChannel[]) => readonly ChannelSnapshot[]),
+    kind?: "catalog" | "live"): void;
+  receive(incoming: readonly ChannelSnapshot[], captureSnapshot?: (items: LiveChannel[], previous: LiveChannel[]) => void): void;
+  commit(commit: RealtimeCollectionCommit<ChannelSnapshot>, kind?: "catalog" | "live"): void;
 };
 
 /** Its Instance map is derived from the one store, never copied back into the Channel catalog. */
-export function createRealtimeChannels(initial: LiveChannel[] = []) {
-  const metadata = createRealtimeCollection<LiveChannel>();
+export function createRealtimeChannels(initial: ChannelSnapshot[] = []) {
+  const metadata = createRealtimeCollection<ChannelSnapshot>();
   const instances = createInstanceStore();
-  const views = new Map<string, { channel: LiveChannel; records: ReturnType<InstanceStore["getChannel"]>; view: LiveChannel }>();
-  const view = (channel: LiveChannel | undefined) => {
-    if (!channel || !instances.hasChannel(channel.id)) return channel;
-    const records = instances.getChannel(channel.id);
+  const views = new Map<string, { channel: ChannelSnapshot; records: ReturnType<InstanceStore["getChannel"]>; view: LiveChannel }>();
+  const view = (channel: ChannelSnapshot | undefined): LiveChannel | undefined => {
+    if (!channel) return undefined;
+    const modern = instances.hasChannel(channel.id);
+    // A Channel no Instance record has reached yet keeps what its own read said.
+    if (!modern && isLiveChannel(channel)) return channel;
+    const records = modern ? instances.getChannel(channel.id) : undefined;
     const held = views.get(channel.id);
     if (held?.channel === channel && held.records === records) return held.view;
     const map = new Map([...records?.values() ?? []].map(record => [presenceInstanceId(record.id),
       record as unknown as AgentInstancePresence]));
-    const next = { ...channel, presence: { channelId: channel.id,
+    const next: LiveChannel = { ...channel, presence: { channelId: channel.id,
       humans: channel.presence?.humans ?? new Map(), instances: map,
       ...(channel.presence?.humansCovered === false ? { humansCovered: false as const } : {}) } };
     views.set(channel.id, { channel, records, view: next });
     return next;
   };
-  const ingest = (channel: LiveChannel): LiveChannel => {
+  const ingest = (channel: ChannelSnapshot): ChannelSnapshot => {
     const held = views.get(channel.id);
     if (held?.view === channel) return held.channel;
     const { instanceRecords, ...rest } = channel;
@@ -181,14 +191,17 @@ export function createRealtimeChannels(initial: LiveChannel[] = []) {
     if (channel.spaceId) instances.setChannelSpace(channel.id, channel.spaceId);
     // Channel reads carry the registration pool in the compatibility view;
     // it has its own observation time, independent of Instance revisions.
-    for (const instance of channel.presence?.instances.values() ?? []) {
+    for (const instance of isLiveChannel(channel) ? channel.presence?.instances.values() ?? [] : []) {
       if (instance.registration && instance.usage) instances.receiveQuota(instance.registration, instance.usage);
     }
     if (instanceRecords) instances.receive(instanceRecords, channel.id);
     if (!instances.hasChannel(channel.id)) return channel;
-    return { ...rest, presence: rest.presence ? { ...rest.presence, instances: new Map() } : undefined };
+    // The catalog keeps the Channel's people only; its Instances live in their records.
+    if (!rest.presence) return rest;
+    const { channelId, humans, humansCovered } = rest.presence;
+    return { ...rest, presence: { channelId, humans, ...(humansCovered === false ? { humansCovered } : {}) } };
   };
-  let basis: LiveChannel[] | undefined;
+  let basis: ChannelSnapshot[] | undefined;
   let snapshot: LiveChannel[] = [];
   const getSnapshot = () => {
     const current = metadata.getSnapshot();
@@ -232,7 +245,7 @@ export function createRealtimeChannels(initial: LiveChannel[] = []) {
       const before = getSnapshot();
       metadata.receive(incoming.map(ingest), () => capture?.(getSnapshot(), before));
     },
-    commit(commit: RealtimeCollectionCommit<LiveChannel>, kind = "catalog") {
+    commit(commit, kind = "catalog") {
       const items = commit.items.map(ingest);
       metadata.commit({ ...commit, items, byId: new Map(items.map(channel => [channel.id, channel])) }, kind);
     },

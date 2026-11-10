@@ -52,6 +52,12 @@ export type LiveChannel = Omit<ChannelSnapshot, "presence"> & {
   readonly presence: ChannelPresence | undefined;
 };
 
+/** Whether this Channel carries an Instance map: a decoded wire Channel or a
+ * live view does; a list copy does not. */
+export function isLiveChannel(channel: ChannelSnapshot): channel is LiveChannel {
+  return channel.presence === undefined || ("instances" in channel.presence && channel.presence.instances instanceof Map);
+}
+
 export class ChannelPresenceConflict extends Error {
   constructor(readonly channelId: string, readonly instanceId?: string) {
     super("Conflicting Channel Instance identity; refresh the Channel snapshot");
