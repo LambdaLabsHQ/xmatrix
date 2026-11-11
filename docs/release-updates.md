@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: a GitHub command the Space cannot reach says who links the account
+
+A GitHub command against a repository whose App installation exists but is not
+linked to the Space answered `GitHub subscribe: failed; github installation not
+linked to space.`, the internal code with its underscores removed. The receipt
+now names the repository and says a Space admin links its account in the
+Space's Apps → GitHub (Find my GitHub accounts, then Link), and that installing
+the App on github.com alone does not link it. It carries the existing
+`reconnect` fix, so the receipt draws the settings card that opens Apps →
+GitHub. A Space with no linked installation gets the same treatment; a
+repository the App is not installed on gets a sentence and no card, because a
+mistyped name gets that answer too. The execution record and every other
+caller keep the machine codes. The card does not settle by itself after
+linking, because linking an installation does not run a connection check. Hub
+only, no schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
 ## Unreleased: a card that asks to connect GitHub offers Connect, and a link settles it
 
 A settings card for `connector:github/connect` showed a Space admin "A Space

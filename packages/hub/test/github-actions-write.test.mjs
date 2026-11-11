@@ -91,6 +91,7 @@ test("GitHub writes run by default and Actions writes fail closed on a missing l
       type: "terminal",
       status: "blocked",
       reason: "missing_capabilities:github.actions.write",
+      repository: { owner: "LambdaLabsHQ", repo: "xmatrix" },
     });
     assert.ok(!stub.calls.some((call) => call.url.includes("/rerun-failed-jobs")));
   } finally {

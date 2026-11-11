@@ -1,5 +1,5 @@
 import { plainRecord } from "@xmatrix/protocol";
-import type { ChannelAppMention, ChannelMessage } from "@xmatrix/protocol";
+import type { AppConnectorRemedy, ChannelAppMention, ChannelMessage, ConnectorReceiptFix } from "@xmatrix/protocol";
 import {
   executeAppConnectorProviderAction,
   getAppConnectorProvider,
@@ -35,6 +35,8 @@ interface ProductGitHubConnectorStatement extends ProductGitHubConnectorInput {
   statementKey: string;
   /** Collects this statement's status line; the message posts one combined. */
   status: (line: string) => void;
+  /** Collects what a person can do about a refused statement, for the receipt's card. */
+  fix: (fix: ConnectorReceiptFix) => void;
 }
 
 type ProductGitHubAction =
@@ -128,6 +130,7 @@ export async function dispatchProductGitHubConnectorAfterAuthorityMessage(
   const appId = leadingGitHubMention(statements[0] || "")?.appId;
   if (!appId) return;
   const lines: string[] = [];
+  const fixes: ConnectorReceiptFix[] = [];
   /* Sequentially: statements about one repository read the relation they each
      rewrite, so running them together would let the second overwrite the first
      from a snapshot taken before it. */
@@ -137,11 +140,41 @@ export async function dispatchProductGitHubConnectorAfterAuthorityMessage(
       body: statement,
       statementKey: index === 0 ? "" : `:s${index}`,
       status: (line) => lines.push(line),
+      // Several refused statements share the one connection to fix: one card entry.
+      fix: (fix) => { if (!fixes.some((known) => known.remedy.kind === fix.remedy.kind)) fixes.push(fix); },
     });
   }
   /* One message in, one receipt out: every statement contributes a line rather
      than its own channel message. */
-  await publishCommandStatus(getAppConnectorProvider(appId)!, input, lines);
+  await publishCommandStatus(getAppConnectorProvider(appId)!, { ...input, fixes }, lines);
+}
+
+/**
+ * The refusals whose machine code names nothing a reader can do: the Space's
+ * GitHub connection does not reach the repository. Each becomes the sentence
+ * that says who acts and where; linking is offered on the receipt's card.
+ * The execution keeps the code.
+ */
+function githubAccessRefusal(reason: string, repository: { owner: string; repo: string } | undefined):
+  { summary: string; remedy?: AppConnectorRemedy } | undefined {
+  const owner = repository?.owner ?? "the repository's GitHub account";
+  const name = repository ? `${repository.owner}/${repository.repo}` : "the repository";
+  if (reason === "github_installation_not_linked_to_space") {
+    return { remedy: { kind: "reconnect" }, summary: `${name} belongs to a GitHub App installation that is not linked to this Space. ` +
+      `A Space admin opens this Space's Apps → GitHub, authorizes on GitHub there (Find my GitHub accounts) and links ${owner}; ` +
+      "installing the App on github.com alone does not link it" };
+  }
+  if (reason === "github_installation_missing") {
+    return { remedy: { kind: "reconnect" }, summary: `this Space's GitHub connection has no linked GitHub account that reaches ${name}. ` +
+      `A Space admin opens this Space's Apps → GitHub, authorizes on GitHub there and links ${owner}` };
+  }
+  if (reason === "github_repository_not_installed") {
+    // No card: a mistyped repository name gets this answer too, and connecting again would not help it.
+    return { summary: `the xMatrix GitHub App is not installed on ${name}, or that repository does not exist. ` +
+      `Check the name; to add it, a Space admin opens this Space's Apps → GitHub and installs the App on ${owner} ` +
+      "or adds the repository to an account already linked (Manage on GitHub)" };
+  }
+  return undefined;
 }
 
 async function runGitHubConnectorStatement(
@@ -201,8 +234,11 @@ async function runGitHubConnectorStatement(
     connection,
   });
   if (result.type === "terminal") {
+    const refusal = githubAccessRefusal(result.reason, result.repository);
     await finalizeExecution(executionId, input, result.status, result.reason);
-    input.status(`GitHub ${action}: ${result.status}; ${result.reason.replace(/_/gu, " ")}.`);
+    // No execution id: these commands are not reads the card can run again.
+    if (refusal?.remedy) input.fix({ providerId: "github", actionId: action, remedy: refusal.remedy });
+    input.status(`GitHub ${action}: ${result.status}; ${refusal?.summary ?? result.reason.replace(/_/gu, " ")}.`);
     return;
   }
   if (action === "merge") {

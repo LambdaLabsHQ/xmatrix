@@ -88,6 +88,7 @@ test("GitHub merge fails closed when the installation lacks pull request write",
       type: "terminal",
       status: "blocked",
       reason: "missing_capabilities:github.pull_requests.write",
+      repository: { owner: "LambdaLabsHQ", repo: "xmatrix" },
     });
     assert.ok(!github.calls.some((call) => call.url.endsWith("/pulls/42/merge")));
   } finally {
