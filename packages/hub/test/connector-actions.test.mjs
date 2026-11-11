@@ -222,9 +222,19 @@ test("connector usage lists each connected provider's Channel commands, and noth
   const privateReads = usageOf(new Set(["gmail", "github"]));
   assert.ok(privateReads.find(provider => provider.provider === "gmail").actions
     .find(action => action.command.startsWith("@gmail:read:")).description.includes("xmatrix call"));
-  assert.ok(!privateReads.find(provider => provider.provider === "github").actions
-    .find(action => action.command.startsWith("@github:subscribe:")).description.includes("xmatrix call"),
-    "subscription setup cannot be advertised as a private read");
+  const read = privateReads.find(provider => provider.provider === "gmail").actions
+    .find(action => action.command.startsWith("@gmail:read:"));
+  assert.equal(read.via, "call");
+  const subscribe = privateReads.find(provider => provider.provider === "github").actions
+    .find(action => action.command.startsWith("@github:subscribe:"));
+  assert.ok(!subscribe.description.includes("Run xmatrix call"), "subscription setup cannot be advertised as a private read");
+  assert.equal(subscribe.via, "send", "a read the Hub cannot answer its caller is sent");
+  assert.match(subscribe.description, /send it with xmatrix send; xmatrix call cannot run it/u);
+  assert.equal(subscribe.effect, "read", "its approval class is unchanged");
+  const comment = privateReads.find(provider => provider.provider === "github").actions
+    .find(action => action.command.startsWith("@github:comment:"));
+  assert.deepEqual([comment.effect, comment.via], ["write", "send"]);
+  assert.doesNotMatch(comment.description, /xmatrix call/u, "a write says nothing about calls");
 });
 
 test("Channel action admission requires a declared own executor with the declared effect", () => {

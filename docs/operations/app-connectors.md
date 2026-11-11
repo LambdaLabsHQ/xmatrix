@@ -500,7 +500,9 @@ Space admin action; use a fresh alias for a new one-time-code attempt.
   and actions requiring approval use `xmatrix send`; their visible receipt
   replies to the command message.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`
-  prints each one's commands for the Run's Channel.
+  prints each one's commands for the Run's Channel. A row labelled `send`
+  (GitHub subscribe) runs only as a Channel message with `xmatrix send`;
+  `xmatrix call` refuses it and says so.
 
 **Automations.** `--on <connector>:<event|*>[:<source>]` fires a page
 Automation on a connector event in the same Space, for example

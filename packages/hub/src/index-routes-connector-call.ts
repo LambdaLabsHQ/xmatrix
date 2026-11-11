@@ -117,7 +117,10 @@ export async function recordedRead(env: Env, call: {
   const provider = connectorForCommand(call.command);
   const parsed = provider && parseActionCommand(provider.id, call.command);
   const action = parsed && connectorActionCatalog(provider!.id, provider!.actions).get(parsed.actionId)?.executor;
-  if (!provider || !parsed || !action) throw new ProviderRequestError(400, "Unknown connector action");
+  if (!provider || !parsed) throw new ProviderRequestError(400, "Unknown connector action");
+  // The provider runs this command from a Channel message and has no call executor for it.
+  if (!action) throw new ProviderRequestError(400, `@${provider.id}:${parsed.actionId} runs only as a Channel message; ` +
+    `send it with xmatrix send <channel-id> "<command>" instead of xmatrix call`);
   if (action.effect !== "read") throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
   const manifest = getAppConnectorProvider(provider.id)!;
   const input: ConnectorCommandInput = { env, channelId: call.channelId, actorUserId: call.ownerUserId,

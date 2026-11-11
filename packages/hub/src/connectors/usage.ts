@@ -17,7 +17,14 @@ import { connectorProvider } from "./registry";
 export interface ConnectorUsage {
   provider: string;
   name: string;
-  actions: Array<{ command: string; effect: "read" | "write"; description: string }>;
+  actions: Array<{
+    command: string;
+    /** The approval class the connection's permission decides on. */
+    effect: "read" | "write";
+    /** How an Agent runs it: `xmatrix call` for a read the Hub can answer its caller, `xmatrix send` for every other command. */
+    via: "call" | "send";
+    description: string;
+  }>;
 }
 
 export async function connectorUsage(env: Env, caller: { ownerUserId: string; channelId: string }):
@@ -35,11 +42,19 @@ export async function connectorUsage(env: Env, caller: { ownerUserId: string; ch
 export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
   return APP_CONNECTOR_PROVIDER_MANIFESTS.filter((manifest) => connected.has(manifest.id)).flatMap((manifest) => {
     const executable = connectorActionCatalog(manifest.id, connectorProvider(manifest.id)?.actions);
-    const actions = manifest.actions.flatMap((action) => action.effect ? [{
-      command: `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`,
-      effect: action.effect, description: action.description + (action.effect === "read" && executable.has(action.id)
-        ? ` Run xmatrix call "@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.` : ""),
-    }] : []);
+    const actions = manifest.actions.flatMap((action) => {
+      if (!action.effect) return [];
+      const command = `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`;
+      // Only a read with a call executor returns a result to its caller. A read
+      // without one (a GitHub subscription) acts on the Channel it is sent in.
+      const callable = action.effect === "read" && executable.has(action.id);
+      return [{
+        command, effect: action.effect, via: callable ? "call" as const : "send" as const,
+        description: action.description + (callable
+          ? ` Run xmatrix call "${command}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.`
+          : action.effect === "read" ? " It runs only as a Channel message: send it with xmatrix send; xmatrix call cannot run it." : ""),
+      }];
+    });
     return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions }] : [];
   });
 }

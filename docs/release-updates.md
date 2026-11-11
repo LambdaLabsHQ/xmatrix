@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: the connector list says a subscription is sent, not called
+
+`xmatrix connector list` printed `read   @github:subscribe:...`. The manifest's
+`read` is the approval class, and every other `read` row is run with `xmatrix
+call`, but subscribe has no call executor: it changes the Channel it is sent in,
+and `xmatrix call` answered `Unknown connector action`. `GET
+/api/connectors/usage` now adds `via` (`call` or `send`) to each action and the
+description of a read without a call executor says to send it with `xmatrix
+send`; the CLI labels that row `send`. `xmatrix call` on a command the provider
+runs only from a Channel message now answers that it is sent with `xmatrix
+send`. No action's `effect` or approval changed. An older CLI ignores `via` and
+still prints `read`, with the new description; a new CLI against an older Hub
+prints `read` as before. Hub and CLI. Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: a GitHub command the Space cannot reach says who links the account
 
 A GitHub command against a repository whose App installation exists but is not

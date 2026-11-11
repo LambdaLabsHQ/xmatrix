@@ -1136,7 +1136,13 @@ GitHub triggers may use either spelling.
     spawn, names only). `xmatrix connector list` reads
     `GET /api/connectors/usage` with the Run's credential: each configured
     provider of the Run's Channel's Space and the commands its manifest
-    declares. The listing grants nothing; execution checks Channel access,
+    declares. Each action carries its approval class (`effect`) and how an
+    Agent runs it (`via`): `call` for a read the Hub answers its caller
+    (`xmatrix call`), `send` for every other command. A read with no call
+    executor, the GitHub subscription, is `send`: it acts on the Channel it is
+    sent in, the CLI labels it `send` instead of `read`, and `xmatrix call`
+    answers that it is sent with `xmatrix send`. `via` changes no permission.
+    The listing grants nothing; execution checks Channel access,
     credentials and live policy again.
   - The generic Channel command handler admits only manifest-declared actions
     with an own executor whose read/write effect matches the declaration;
