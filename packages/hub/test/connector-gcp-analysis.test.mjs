@@ -147,6 +147,9 @@ test("website referrers are add-only on an existing browser restriction, keep AP
   const same = await fetched([{ body: key }], () => actions.add_key_referrers.execute(context, parse("add_key_referrers", target, { referrers: ["example.com/*"] })));
   assert.equal(same.calls.length, 1);
   assert.match(same.result.summary, /nothing was written/u);
+  await fetched([{ body: (({ etag: _etag, ...withoutEtag }) => withoutEtag)(key) }], calls =>
+    assert.rejects(actions.add_key_referrers.execute(context, input), /no API key etag/u)
+      .then(() => assert.equal(calls.length, 1, "missing concurrency evidence must refuse before PATCH")));
   for (const body of [{ ...key, restrictions: { apiTargets: key.restrictions.apiTargets } }, { ...key, restrictions: { serverKeyRestrictions: { allowedIps: ["1.2.3.4"] } } }]) {
     await fetched([{ body }], calls => assert.rejects(actions.add_key_referrers.execute(context, input), /no website restriction/u).then(() => assert.equal(calls.length, 1)));
   }
