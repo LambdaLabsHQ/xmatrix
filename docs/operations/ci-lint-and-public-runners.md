@@ -40,8 +40,10 @@ jobs each finish in about two minutes including setup:
   unused imports, duplicate CSS rules, the source line limit, and the
   protocol, billing, PostgreSQL package and script tests. The package check
   typechecks once, via the `tsc` build its tests run, then checks migration
-  syntax. A second `tsc --noEmit` of that same program only repeated this
-  lane's slowest stage;
+  syntax. Migration files are normalized to LF before the checksum and the
+  online-index marker, so a CRLF checkout does not change migration identity
+  or hide `CREATE INDEX CONCURRENTLY`. A second `tsc --noEmit` of that same
+  program only repeated this lane's slowest stage;
 - `node-tests (duplicates)`: the duplicate-code scan, on its own runner;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
