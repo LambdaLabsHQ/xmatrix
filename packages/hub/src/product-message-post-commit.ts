@@ -371,7 +371,7 @@ export async function dispatchProductMessagePostCommit(
     );
   }
   // A message that carries a `norn run` block starts that program; its author reads why when it could not.
-  tasks.push(startNornProgram(input).catch((error): { refusal: string } => {
+  if (input.body.includes("norn run")) tasks.push(startNornProgram(input).catch((error): { refusal: string } => {
     logPostCommitFailure("Norn program start failed", input, error);
     return { refusal: "The program could not be started. Send it again." };
   }).then(started => started?.refusal ? dispatchProductAgentSystemNotice({ ...input, sourceMessageId: input.messageId,

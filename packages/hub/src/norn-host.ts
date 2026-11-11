@@ -15,7 +15,6 @@ import { show, text, type Value } from "./vendor/norn/runtime/value";
 
 /** The program a message starts: its one fenced block tagged `norn run`. A block tagged `norn` alone is only shown. */
 export function nornProgramIn(body: string): { source: string } | { refusal: string } | undefined {
-  if (!body.includes("norn run")) return undefined;
   const sources: string[] = [];
   const pending: unknown[] = [parseMarkdown(body)];
   while (pending.length) {
