@@ -9,7 +9,10 @@
 // by side unless one ships a component the other ships or depends on
 // (release-dependencies.mjs); a beta train leaves open the intents that would
 // wait long for an active release, so they do not hold the train in front of
-// changes that could ship now.
+// changes that could ship now. A beta train that ships the Hub ships it alone
+// (shipHubAlone): the rest of what it selected stays open for the train it
+// wakes, so the Hub's place in line is held for a Hub deploy, not for the
+// slowest client build that rode with it.
 //
 // Releases come in two channels, and the version alone says which one
 // (release-version-order.mjs):
@@ -223,7 +226,9 @@ function superseded(stables, intent) {
 export function planTrain({ refs, trainSha, isAncestor, tagExists, productionState, stables = [] }) {
   const intents = refs.map(({ ref, sha }) => parseIntentRef(ref, sha)).filter(Boolean);
   const inflight = intents.filter((intent) => intent.state === "inflight");
-  const inflightIds = new Set(inflight.map((intent) => intent.id));
+  // One request can be in flight for its Hub while the rest of it is still open.
+  const part = (intent) => `${intent.id}/${intent.scope.join("+")}`;
+  const inflightParts = new Set(inflight.map(part));
   const updates = [];
   const open = [];
   const pending = [];
@@ -253,7 +258,7 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
   }
   for (const intent of intents.filter((candidate) => candidate.state === "open")) {
     // A move to in flight that stopped half way: the in-flight copy is the one.
-    if (inflightIds.has(intent.id)) updates.push({ delete: intent.ref });
+    if (inflightParts.has(part(intent))) updates.push({ delete: intent.ref });
     else open.push(intent);
   }
 
@@ -264,6 +269,25 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
 }
 
 /** Pure: `version` raised by a patch, minor or major bump. */
+/**
+ * Pure: a beta train that ships the Hub ships it alone. A release holds the
+ * Hub's place in line until its slowest component is published, and the Hub
+ * deploys in minutes while a client builds for half an hour, so a Hub fix
+ * merged meanwhile waited for builds it has nothing to do with. Everything
+ * else depends on the Hub and ships from the train this one wakes: an intent
+ * that names more than the Hub is shipped for its Hub, and its `rest` stays
+ * open under the same id.
+ */
+export function shipHubAlone(eligible) {
+  const selected = new Set(eligible.flatMap((intent) => intent.scope));
+  if (!selected.has("hub") || selected.size === 1) return { eligible, waiting: false };
+  return {
+    eligible: eligible.filter((intent) => intent.scope.includes("hub")).map((intent) => intent.scope.length === 1 ? intent
+      : { ...intent, scope: ["hub"], rest: intent.scope.filter((component) => component !== "hub") }),
+    waiting: true,
+  };
+}
+
 export function bumpVersion(version, bump) {
   const [major, minor, patch] = parseSemver(version).core;
   if (bump === "major") return `${major + 1n}.0.0`;
@@ -507,6 +531,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   pushUpdates(root, intents.flatMap((intent) => [
     { create: inflightRef(tag, intent.id, intent.scope, intent.stable), sha: intent.sha },
     { delete: intent.ref },
+    ...(intent.rest ? [{ create: intentRef(intent.id, intent.rest), sha: intent.sha }] : []),
   ]));
   console.log(`Train ${tag} ships ${scope.join(",")} (${channel}) for intents ${intents.map((intent) => intent.id).join(", ")}.`);
   output("scope", scope.join(","));
@@ -588,6 +613,12 @@ async function plan(root) {
     }
     ({ eligible, scope } = ready);
   }
+  const hubFirst = shipHubAlone(eligible);
+  if (hubFirst.waiting) {
+    console.log(`The Hub ships alone; ${scope.filter((component) => component !== "hub").join(",")} ships from the next train.`);
+    eligible = hubFirst.eligible;
+    scope = ["hub"];
+  }
   if (!eligible.length) {
     console.log("No open release intent this revision contains can ship now; nothing to release.");
     output("scope", "");
@@ -599,6 +630,8 @@ async function plan(root) {
     tag: `xmatrix-v${version}`, version, channel: "beta", sourceSha: trainSha, runId,
     intents: eligible, scope, token,
   });
+  // The rest waits only for this Hub release, which the next train sees running.
+  if (hubFirst.waiting) output("betas_waiting", "true");
 }
 
 /**
