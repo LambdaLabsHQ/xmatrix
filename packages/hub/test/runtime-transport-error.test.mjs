@@ -110,15 +110,18 @@ test("a repository rejection on a socket is reported once, under the id its clie
 
 test("XMATRIX-HUB-7F: a stale lease logs which fence refused it and on what command type", async () => {
   const stale = Object.assign(new ControlError("machine_command_stale_lease", 409, "Machine command lease is stale"),
-    { reason: "renew.epoch", commandType: "spawn" });
+    { reason: "complete.owner", commandType: "harness_action" });
   const { frame, logged } = await answered(stale);
   assert.equal(frame.failure.code, "machine_command_stale_lease");
-  const [[, detail]] = logged.error.filter(([message]) => message === "xMatrix runtime authority rejection");
-  assert.deepEqual([detail.authorityReason, detail.commandType], ["renew.epoch", "spawn"]);
-  assert.doesNotMatch(JSON.stringify(frame), /renew\.epoch|spawn/, "the labels stay in the Hub's log");
+  assert.equal(frame.failure.retryable, false);
+  assert.equal(logged.error.length, 0, "a lease fence that held is not a Hub error");
+  const [[, detail]] = logged.warn.filter(([message]) => message === "xMatrix runtime authority rejection");
+  assert.deepEqual([detail.authorityReason, detail.commandType], ["complete.owner", "harness_action"]);
+  assert.doesNotMatch(JSON.stringify(frame), /complete\.owner|harness_action/, "the labels stay in the Hub's log");
   const unlabelled = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
     { reason: "Private Reason", commandType: { nested: true } }));
-  const [[, plain]] = unlabelled.logged.error;
+  assert.equal(unlabelled.logged.error.length, 0);
+  const [[, plain]] = unlabelled.logged.warn;
   assert.equal(plain.authorityReason, undefined);
   assert.equal(plain.commandType, undefined);
 });
@@ -127,8 +130,9 @@ test("HUB-7F lease timing is logged once, bounded and absent from the socket rep
   const leaseTiming = { leaseWindowMs: 10_000, leaseExpiredForMs: 2_000, commandAgeMs: 120_000 };
   const { frame, logged } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
     { reason: "renew.expired", commandType: "harness_action", leaseTiming }));
-  assert.equal(logged.error.length, 1);
-  assert.deepEqual(logged.error[0][1], { ...frame.failure, authorityCode: "machine_command_stale_lease",
+  assert.equal(logged.error.length, 0, "a lease fence that held is not a Hub error");
+  assert.equal(logged.warn.length, 1);
+  assert.deepEqual(logged.warn[0][1], { ...frame.failure, authorityCode: "machine_command_stale_lease",
     operation: "Error", status: 409, authorityReason: "renew.expired", commandType: "harness_action", ...leaseTiming });
   assert.doesNotMatch(JSON.stringify(frame), /leaseWindow|leaseExpired|commandAge/);
   for (const [unsafe, expected] of [["private", {}], [null, {}],
@@ -137,11 +141,12 @@ test("HUB-7F lease timing is logged once, bounded and absent from the socket rep
     [{ leaseWindowMs: 60_001, leaseExpiredForMs: 86_400_001, commandAgeMs: 1.5 }, {}]]) {
     const { logged: rejected } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
       { leaseTiming: unsafe }));
-    const detail = rejected.error[0][1];
+    assert.equal(rejected.error.length, 0);
+    const detail = rejected.warn[0][1];
     assert.equal(detail.leaseWindowMs, expected.leaseWindowMs);
     assert.equal(detail.leaseExpiredForMs, expected.leaseExpiredForMs);
     assert.equal(detail.commandAgeMs, expected.commandAgeMs);
-    assert.doesNotMatch(JSON.stringify(rejected.error), /private|secret/);
+    assert.doesNotMatch(JSON.stringify(rejected.warn), /private|secret/);
   }
 });
 

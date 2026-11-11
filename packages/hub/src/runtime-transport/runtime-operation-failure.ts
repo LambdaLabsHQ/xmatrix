@@ -34,6 +34,9 @@ const COMMITTED_IDENTITY_CONFLICT_CODES = new Set(["idempotency_conflict", "mess
 // daemon connected again. Only a connect advances the epoch, so the authority's
 // fence did its job; the Hub has not failed.
 const SUPERSEDED_CONNECTION_CODE = "machine_daemon_stale_epoch";
+// The caller no longer holds the command lease (`complete.owner`, `renew.status`,
+// and the other static reasons). The 409 is that fence; the Hub has not failed.
+const STALE_COMMAND_LEASE_CODE = "machine_command_stale_lease";
 const AUTHORITY_CODE = /^[a-z][a-z0-9_.]{0,79}$/u;
 
 /** Keeps safe classification across an authority rejection without copying its body. */
@@ -61,7 +64,8 @@ export class RuntimeAuthorityOperationError extends Error {
     // Which fence refused, and on what command type (static labels, e.g. a stale lease's).
     const label = (field: unknown) => typeof field === "string" && AUTHORITY_CODE.test(field) ? field : undefined;
     const authorityReason = label(value.reason), commandType = label(value.commandType);
-    (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
+    (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE ||
+      code === STALE_COMMAND_LEASE_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status,
         ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}),
         ...leaseTimingDiagnostic(value) });

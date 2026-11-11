@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a stale command lease is a fence, not a Hub error
+
+HUB-7F kept reporting `machine_command_stale_lease` after the 409 had already
+refused the caller. The latest production case is `complete.owner` on a
+harness action: the command is still leased, but to a different holder, so the
+old completion must not land. `renew.status` is the same fence after the
+command has left `leased`. The socket still returns that non-retryable refusal
+and the log keeps the static reason, command type and bounded lease timing.
+The log is a warning, so console capture no longer files it as a Hub error.
+Hub only, no schema or client change. Recovery is a CI-validated beta Hub
+reverting this change.
+
 ## Unreleased: daemons tell the Hub they can start a summon on a catalog model
 
 The daemon kept two copies of its capability list, one in its connect metadata
