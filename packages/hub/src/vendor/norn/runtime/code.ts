@@ -1,10 +1,10 @@
-// Vendored from norn-lang/norn@5866bf327c23914e3aa0971c6e482554a307c3d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import { NODE_FIELDS, type AstNode, type Program } from "../frontend/ast.js";
 import { astToJson, astFromJson } from "../frontend/json.js";
 import { sha256 } from "./sha256.js";
 import { linkStd, requireLinked } from "./std.js";
 
-/** Pinned code is kept separately from a serializable machine checkpoint. */
+/** A program ready to evaluate: its frozen AST, with stable node IDs and a content identity. */
 export interface Code {
   id: string;
   ast: string;

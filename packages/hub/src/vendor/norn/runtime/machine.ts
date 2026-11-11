@@ -1,10 +1,9 @@
-// Vendored from norn-lang/norn@5866bf327c23914e3aa0971c6e482554a307c3d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
 import { equal, number, show, text, unit, variant, type Value } from "./value.js";
 
-export const machineVersion = "norn-cek:3";
 export interface Effect { name: string; args: Value[]; labels: Record<string, Value> }
 type Control =
   | { kind: "eval"; node: string; env: string }
@@ -12,6 +11,7 @@ type Control =
   | { kind: "effect"; effect: Effect }
   | { kind: "report"; outcome: Value }
   | { kind: "done"; value: Value }
+  | { kind: "error"; message: string }
   | { kind: "failed"; outcome: Value };
 type Frame =
   | { kind: "sequence"; rest: string[]; env: string }
@@ -29,8 +29,6 @@ type Frame =
   | { kind: "default"; lambda: string; remaining: string[]; env: string; pattern: string }
   | { kind: "forEach"; stream: Value; callback: Value; stage: "waiting" | "handling" | "reporting" };
 export interface Machine {
-  version: typeof machineVersion;
-  codeId: string;
   control: Control;
   frames: Frame[];
   environments: Record<string, { parent: string | null; bindings: Record<string, Value> }>;
@@ -39,11 +37,11 @@ export interface Machine {
 }
 const factBuiltins = new Set(["merged", "released", "machineUpdated", "replied", "runEnded"]);
 const streamBuiltins = new Set(["every", "after", "ciFailed", "prActivity", "docChanged", "message"]);
-const effectBuiltins = new Set(["ask", "run", "request", "start", "wait", "cancel", "handOver", "status", "say", "judge"]);
-const builtins = new Set([...factBuiltins, ...streamBuiltins, ...effectBuiltins, "now", "show", "ignore", "fail", "merge", "or", "never", "map", "filter", "forEach"]);
+const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first"]);
+const builtins = new Set([...factBuiltins, ...streamBuiltins, ...effectBuiltins, "now", "show", "ignore", "fail", "or", "never", "map", "filter", "forEach", "anyOf"]);
 
 export function start(code: Code, now = 0): Machine {
-  return { version: machineVersion, codeId: code.id, control: { kind: "eval", node: code.root, env: "e0" }, frames: [],
+  return { control: { kind: "eval", node: code.root, env: "e0" }, frames: [],
     environments: { e0: { parent: null, bindings: {} } }, nextEnvironment: 1, resumedAt: now };
 }
 export function resume(machine: Machine, value: Value, now: number): Machine {
@@ -69,8 +67,8 @@ function lookup(machine: Machine, env: string, name: string): Value {
 function bool(value: Value): boolean { if (value.type !== "bool") throw new Error("Expected a boolean"); return value.value; }
 function failureOutcome(value: Value): boolean {
   if (value.type !== "variant") return false;
-  if (value.name === "Declined" || value.name === "Failed") return value.args.length === 1 && value.args[0].type === "string";
-  return ["TimedOut", "Cancelled", "Revoked"].includes(value.name) && value.args.length === 0;
+  if (value.name === "Refused" || value.name === "Broke") return value.args.length === 1 && value.args[0].type === "string";
+  return ["NoReply", "Cancelled", "Revoked"].includes(value.name) && value.args.length === 0;
 }
 function bindings(pattern: Pattern, value: Value): Record<string, Value> {
   const found = match(pattern, value); if (found === null) throw new Error("Binding pattern did not match"); return found;
@@ -208,15 +206,28 @@ function builtin(_code: Code, machine: Machine, name: string, args: Value[], lab
     case "show": if (args.length !== 1 || Object.keys(labels).length) throw new Error("show needs one positional argument");
       value = text(show(args[0])); break;
     case "ignore": if (args.length !== 1 || Object.keys(labels).length) throw new Error("ignore needs one positional argument");
+      if (args[0].type === "request") throw new Error("ignore cannot discard a request; wait for it or cancel it");
       value = unit; break;
     case "now": if (args.length || Object.keys(labels).length) throw new Error("now takes no arguments");
       value = { type: "time", value: String(machine.resumedAt) }; break;
-    case "fail": machine.frames = []; machine.control = { kind: "failed", outcome: args[0] ?? variant("Failed", text("fail requires an outcome")) }; return;
+    case "fail": {
+      if (args.length !== 1 || Object.keys(labels).length || !failureOutcome(args[0])) throw new Error("fail requires a reply other than Answered");
+      machine.frames = []; machine.control = { kind: "failed", outcome: args[0] }; return;
+    }
+    case "anyOf": {
+      const [group] = args, { except, ...other } = labels;
+      if (args.length !== 1 || group.type !== "list" || !group.values.length || group.values.some(v => v.type !== "participant" || v.name === "anyOf") ||
+          Object.keys(other).length || (except !== undefined && except.type !== "participant")) {
+        throw new Error("anyOf needs a nonempty list of participants, and at most ~except");
+      }
+      // A group is a participant: whoever takes the request first holds it, and nobody else does.
+      value = { type: "participant", name: "anyOf", instance: null, labels: { of: group, ...(except === undefined ? {} : { except }) } }; break;
+    }
     case "never": {
       if (args.length || Object.keys(labels).length) throw new Error("never takes no arguments");
       value = { type: "source", kind: "stream", name, args, labels }; break;
     }
-    case "merge": case "or": {
+    case "or": {
       if (args.length !== 2 || Object.keys(labels).length || args.some(a => a.type !== "source" || a.kind !== "stream")) throw new Error(`${name} needs two positional streams`);
       value = { type: "source", kind: "stream", name, args, labels }; break;
     }
@@ -341,8 +352,8 @@ function accept(code: Code, machine: Machine, value: Value): void {
       else choose(code, machine, frame.value, frame.remaining, frame.outerEnv); break;
     case "return": break;
     case "try": {
-      if (value.type !== "variant") throw new Error("? needs an outcome, option or result");
-      if (["Done", "Some", "Ok"].includes(value.name) && value.args.length === 1) machine.control = { kind: "value", value: value.args[0] };
+      if (value.type !== "variant") throw new Error("? needs a reply, option or result");
+      if (["Answered", "Some", "Ok"].includes(value.name) && value.args.length === 1) machine.control = { kind: "value", value: value.args[0] };
       else {
         const marker = machine.frames.findLastIndex(f => f.kind === "return");
         if (marker < 0) { machine.frames = []; machine.control = { kind: "failed", outcome: value }; }
@@ -357,22 +368,22 @@ function accept(code: Code, machine: Machine, value: Value): void {
       enterFunction(code, machine, code.nodes[frame.lambda] as Lambda, frame.env, frame.remaining); break;
     }
     case "forEach": {
-      if (frame.stage === "waiting" && value.type === "variant" && value.name === "Done" && value.args.length === 1) {
+      if (frame.stage === "waiting") {
         // After the callback, wait for another occurrence. A unit callback result
         // is distinguished from an event result by this continuation frame.
         machine.frames.push({ ...frame, stage: "handling" });
-        invoke(code, machine, frame.callback, value.args, {});
+        invoke(code, machine, frame.callback, [value], {});
       } else if (frame.stage === "handling" && failureOutcome(value)) {
         machine.frames.push({ ...frame, stage: "reporting" });
         machine.control = { kind: "report", outcome: value };
-      } else if (frame.stage !== "waiting") {
+      } else {
         machine.frames.push({ ...frame, stage: "waiting" }); machine.control = { kind: "effect", effect: { name: "wait", args: [frame.stream], labels: {} } };
-      } else { machine.control = { kind: "failed", outcome: value }; }
+      }
       break;
     }
   }
 }
-/** Drop unreachable environments at each checkpoint; recursion does not retain abandoned stacks. */
+/** Drop unreachable environments after each slice; recursion does not retain abandoned stacks. */
 export function collectEnvironments(machine: Machine): void {
   const reachable = new Set<string>();
   function env(id: string): void {
@@ -395,7 +406,6 @@ export function collectEnvironments(machine: Machine): void {
 }
 /** A time slice yields a ready machine; it is never a total execution quota. */
 export function advance(code: Code, machine: Machine, steps = 1_000): Machine {
-  if (machine.codeId !== code.id || machine.version !== machineVersion) throw new Error("Pinned code or machine ABI mismatch");
   if (!Number.isSafeInteger(steps) || steps < 1) throw new Error("Time slice must have positive integer steps");
   try {
     for (let i = 0; i < steps; i++) {
@@ -406,7 +416,7 @@ export function advance(code: Code, machine: Machine, steps = 1_000): Machine {
     }
     collectEnvironments(machine);
   } catch (error) {
-    machine.control = { kind: "failed", outcome: variant("Failed", text(error instanceof Error ? error.message : String(error))) };
+    machine.control = { kind: "error", message: error instanceof Error ? error.message : String(error) };
     machine.frames = []; machine.environments = {};
   }
   return machine;

@@ -1,8 +1,8 @@
-// Vendored from norn-lang/norn@5866bf327c23914e3aa0971c6e482554a307c3d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import { astFromJson, astToJson } from "../frontend/json.js";
 import type { Pattern, Program, Statement, TopLevelItem } from "../frontend/ast.js";
 
-/** Link a private Std module into ordinary AST, so its exact definitions travel with checkpoints. */
+/** Link a private Std module into ordinary AST, so the program carries the exact definitions it was compiled with. */
 export function linkStd(program: Program, std?: Program): Program {
   if (!program.body.some(node => node.kind === "Open")) return program;
   if (!std) throw new Error("open Std needs a pinned library AST: compile(program, {std: stdProgram})");

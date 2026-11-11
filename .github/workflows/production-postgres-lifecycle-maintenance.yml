@@ -118,9 +118,6 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ steps.authority.outputs.maintenance_sha }}"
           test -z "$(git status --porcelain)"
-          # The operator imports shared SQL from packages/db/dist; build it
-          # (and the workspace packages it compiles against) before use.
-          pnpm --filter "@xmatrix/db..." build
           pnpm --dir packages/db exec node --test test/postgres-lifecycle-maintenance.test.mjs
 
   maintain:
@@ -149,8 +146,6 @@ jobs:
           test -f .github/actions/clear-linux-proxy/action.yml
       - uses: ./.github/actions/clear-linux-proxy
       - uses: ./.github/actions/setup-pnpm-node
-      - name: Build the exact tagged operator without production credentials
-        run: pnpm --filter "@xmatrix/db..." build
       - name: Maintain both production databases
         shell: bash
         env:

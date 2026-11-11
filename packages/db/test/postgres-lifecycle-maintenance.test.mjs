@@ -97,7 +97,7 @@ test("maintenance deletes expired PostgreSQL sequence reservations with the same
   ]));
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 1_250);
-  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, authSession: 1, scopedCommandReplay: 1, nornShadow: 1 });
+  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, authSession: 1, scopedCommandReplay: 1 });
   const deletes = fake.calls.filter(
     ({ text }) => text.includes("DELETE FROM data.message_sequence_reservations"),
   );
