@@ -177,7 +177,9 @@ export async function loadMigrationManifest(directory = defaultMigrationsDirecto
     if (sequence !== index) {
       throw new Error(`PostgreSQL migration sequence must be contiguous from 0000; found ${name}`);
     }
-    const source = await readFile(resolve(directory, name), "utf8");
+    // Checkouts may rewrite LF to CRLF. Migration identity is the LF text:
+    // a carriage return must not hide the online-index marker or change a checksum.
+    const source = (await readFile(resolve(directory, name), "utf8")).replaceAll("\r\n", "\n");
     if (!source.trim()) throw new Error(`${name} is empty`);
     const phase = match[2];
     if (phase === "expand") assertExpandOnlyPostgresMigration(source, name);
