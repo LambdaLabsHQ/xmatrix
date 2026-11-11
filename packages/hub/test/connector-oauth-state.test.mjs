@@ -6,11 +6,11 @@ import { signGitHubAppState } from "../src/index-shared.ts";
 const secret = "private-connector-client-secret";
 const claims = {
   providerId: "x",
-  spaceId: "6430eab0-adba-411e-bb17-573afc5c8e8d",
-  userId: "c42915d6-d025-4446-b7a9-02b5ad5d0ffd",
-  nonce: "c7c91028-32ab-402d-abbe-3e7a9f7e5f31",
+  spaceId: "space-fixture-0000000000000000000001",
+  userId: "human-fixture-0000000000000000000001",
+  nonce: "00000000-0000-4000-8000-000000000000",
   expiresAt: Date.now() + 600_000,
-  clientId: "T0tEUE1ObHpOMDZwYk8zcGpXMDQ6MTpjaQ",
+  clientId: "client-fixture-0000000000000000000000000",
   redirectUri: "https://xmatrix-hub.xmatrix.sh/api/connectors/oauth/callback",
   connectionSnapshot: { connectionVersion: 1, credentialVersion: 0,
     connectionGeneration: "app-connection:2026-11-11T13:40:18.930Z:connector-discord-start:3a03609e-e97d-44c5-b147-4b1ded585d41" },
@@ -35,7 +35,7 @@ test("unnamed future claims travel with the state instead of being dropped", asy
 
 test("a state minted in the earlier JSON payload still finishes its flow", async () => {
   const legacy = await signGitHubAppState({ providerId: "x", spaceId: "space-1", userId: "human-1",
-    nonce: "c7c91028-32ab-402d-abbe-3e7a9f7e5f31", expiresAt: Date.now() + 60_000 }, secret);
+    nonce: "00000000-0000-4000-8000-000000000000", expiresAt: Date.now() + 60_000 }, secret);
   assert.equal(await oauthStateProviderId(legacy), "x");
   assert.equal((await verifyOAuthStateClaims(legacy, secret)).userId, "human-1");
 });
