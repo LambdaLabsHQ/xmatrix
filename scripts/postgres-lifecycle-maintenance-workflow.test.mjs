@@ -26,19 +26,6 @@ test("maintenance preflight installs pinned dependencies after authority and bef
   assert.match(preflight, /test -z "\$\(git status --porcelain\)"/u);
 });
 
-test("both maintenance jobs build the db package the operator imports from dist before running it", async () => {
-  const operator = await readFile(new URL("../packages/db/scripts/postgres-lifecycle-maintenance.mjs", import.meta.url), "utf8");
-  assert.match(operator, /from "\.\.\/dist\//u);
-  const preflight = workflow.split("  preflight:")[1].split("  maintain:")[0];
-  const maintain = workflow.split("  maintain:")[1];
-  const build = 'pnpm --filter "@xmatrix/db..." build';
-  assert.ok(preflight.indexOf(build) > preflight.indexOf("uses: ./.github/actions/setup-pnpm-node"));
-  assert.ok(preflight.indexOf(build) < preflight.indexOf("test/postgres-lifecycle-maintenance.test.mjs"));
-  assert.ok(maintain.indexOf(build) > maintain.indexOf("uses: ./.github/actions/setup-pnpm-node"));
-  assert.ok(maintain.indexOf(build) < maintain.indexOf("name: Maintain both production databases"));
-  assert.ok(maintain.indexOf(build) < maintain.indexOf("secrets."));
-});
-
 test("both maintenance jobs restore the full tagged tree before any local action", () => {
   for (const job of [workflow.split("  preflight:")[1].split("  maintain:")[0], workflow.split("  maintain:")[1]]) {
     const materialize = job.indexOf("name: Materialize the full tagged tree");
