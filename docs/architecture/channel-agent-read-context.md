@@ -87,9 +87,17 @@ turn before the model sees it.
 `xmatrix send` passes the recorded sequence as `readThroughSequence`. If the
 Channel head is past that point, the Hub's append looks for messages after it
 from anyone else: people, other Agents, sibling Instances and Apps. The
-sender's own messages, system notices and activity entries do not count. If
-any exist, the append is refused with 409 `channel_read_stale` and nothing is
-written. A retried `messageId` that has already committed is never refused,
+sender's own messages, system notices and activity entries do not count.
+Neither does an App's receipt for a command the sender itself wrote in that
+Channel, whether sent as a message or made with `xmatrix call`: it is the
+result of the sender's own action, and a write's receipt still reaches the
+calling Instance as queued work (`docs/instance-sleep.md` §3). The Hub
+recognizes it by the id only it gives a receipt, `system:<command message
+id>:<app>`, and by the command message's stored author being the sender. A
+receipt for anyone else's command, an App's native event, and a receipt named
+another way (an approved or queued action's) count as before. If any unread
+message exists, the append is refused with 409 `channel_read_stale` and nothing
+is written. A retried `messageId` that has already committed is never refused,
 and `readThroughSequence` is excluded from the request digest and the send
 fingerprint, so a retry that has read further is still the same send.
 
