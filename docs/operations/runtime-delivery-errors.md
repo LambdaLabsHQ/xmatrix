@@ -204,7 +204,11 @@ whose database-clock lateness is under one second still extends the lease, and
 claim waits out that same second before taking the row: the 10 second admission
 lease otherwise loses to one read round trip while the generation fence still
 shows the original holder. Quota probes do not get that slack. A longer gap
-stays refused. Command replay and completion fencing are unchanged.
+stays refused. Command replay and completion fencing are unchanged. A stale-lease
+409, including `complete.owner` on a harness action and `renew.status` after the
+command has left `leased`, is that fence holding. The socket still returns the
+non-retryable refusal with these fields, and the log is a warning: console
+capture records errors only, so the refusal is not a Hub error.
 
 HUB-C1/C2 were two reports of the same Agent handshake binding refusal. The
 original event did not identify the failed comparison. Binding failures now
