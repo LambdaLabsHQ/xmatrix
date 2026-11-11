@@ -1,5 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
-import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
+import { oauthStateProviderId, signOAuthState, verifyOAuthStateClaims } from "./oauth-state";
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
 import { ConnectorRemedy, providerJson, ProviderRequestError } from "./http";
@@ -127,7 +127,11 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
     ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
     ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
     ...(["discord", "stripe"].includes(client.manifest.id) ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
-  const state = await signGitHubAppState(claims, client.clientSecret);
+  const state = await signOAuthState(claims, client.clientSecret);
+  /* A state the provider silently refuses before consent is a connect nobody can finish. */
+  if (oauth.stateLimit && state.length > oauth.stateLimit) {
+    throw new ProviderRequestError(500, `${client.manifest.name} connect state exceeds the provider limit; restart Connect`);
+  }
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
     callback.searchParams.set("state", state);
@@ -164,15 +168,10 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
 export async function verifyOAuthState(env: Env, state: string):
   Promise<{ client: OAuthClient; spaceId: string; userId: string; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string }; authorizationStartedAt?: number } | undefined> {
   if (!state || state.length > 4_096) return undefined;
-  let providerId = "";
-  try {
-    providerId = String((JSON.parse(base64UrlDecode(state.split(".")[0] ?? "")) as Record<string, unknown>).providerId ?? "");
-  } catch {
-    return undefined;
-  }
+  const providerId = await oauthStateProviderId(state);
   const client = oauthClient(env, providerId);
   if (!client) return undefined;
-  const claims = await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined);
+  const claims = await verifyOAuthStateClaims(state, client.clientSecret);
   if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" ||
       typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || ["discord", "stripe"].includes(client.manifest.id)) && !validPkceClaims(client, claims))) return undefined;
   const snapshot = claims.connectionSnapshot as { connectionVersion: number; credentialVersion: number; connectionGeneration: string } | undefined;
@@ -284,7 +283,7 @@ async function providerContext(client: OAuthClient, token: string): Promise<Reco
 export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string,
   meter?: UpstreamMeter): Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
   if (client.manifest.oauth.flow === "composio") {
-    const claims = state && state.length <= 4_096 ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
+    const claims = state && state.length <= 4_096 ? await verifyOAuthStateClaims(state, client.clientSecret) : undefined;
     if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" || typeof claims.nonce !== "string") {
       throw new ProviderRequestError(400, "Invalid or expired connect request; restart Connect");
     }
