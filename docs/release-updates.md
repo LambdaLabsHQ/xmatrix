@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a stop or reborn that did nothing tells whoever sent it
+
+`@<agent>:<n>:stop`, `:reborn` and `:handoff:` that address no Instance (a
+mistyped name, or the full Instance id in place of the Channel's number, as in
+`@deepseek:<id>:3:reborn`) recorded their refusal only on the message. An
+Agent sending through the CLI never saw it, and waited for a restart that was
+never queued. The send's answer now carries each refusal, and `xmatrix send`
+exits with an error that says the message was sent, quotes each refusal, and
+shows the address form to resend (`@deepseek:3:reborn`). Hub and CLI; the
+message and its recorded result are unchanged, and an older CLI ignores the
+new field. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Connect with X reaches consent again
 
 X answers an authorize request whose `state` is longer than 500 characters with

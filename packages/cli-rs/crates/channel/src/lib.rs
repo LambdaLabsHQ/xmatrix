@@ -657,6 +657,9 @@ pub(crate) async fn cmd_send(
         /// Summons this send did not ask to start: they stay mentions.
         #[serde(default, rename = "mentionsNotLaunched")]
         mentions_not_launched: Vec<String>,
+        /// Lifecycle commands in the message (stop, reborn, handoff) that did nothing.
+        #[serde(default, rename = "commandRefusals")]
+        command_refusals: Vec<String>,
     }
 
     let message =
@@ -855,8 +858,28 @@ pub(crate) async fn cmd_send(
             response.mentions_not_launched.join(", ")
         );
     }
+    if !response.command_refusals.is_empty() {
+        return Err(CliError::Launch(command_refusal_message(
+            &response.command_refusals,
+        )));
+    }
 
     Ok(())
+}
+
+/// The message is published; its command was not carried out. Saying so as
+/// an error stops an Agent from reporting a stop or reborn that never happened.
+fn command_refusal_message(refusals: &[String]) -> String {
+    format!(
+        "The message was sent, but its command did nothing:\n{}\nAddress an Instance by its \
+         number in this Channel, as in `@deepseek:3:reborn`, never by its full Instance id. \
+         Send the corrected command as a new message.",
+        refusals
+            .iter()
+            .map(|refusal| format!("- {refusal}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 /// The Hub's refusal of a send over messages its sender has not read.
@@ -3029,12 +3052,22 @@ mod tests {
     use super::{
         OpenedChannelThread, agent_sender_env_value, attachment_visibility_scope_id,
         build_send_message_body, channel_create_body, channel_entity_token, cmd_channel_create,
-        decode_send_newline_escapes, format_history_message_at, is_agent_execution_context,
-        is_intake, missing_body_message, process_descends_from_tracked_pid,
-        resolve_channel_selector, should_refuse_user_attributed_send_without_agent_identity,
-        tracked_ancestor_pid,
+        command_refusal_message, decode_send_newline_escapes, format_history_message_at,
+        is_agent_execution_context, is_intake, missing_body_message,
+        process_descends_from_tracked_pid, resolve_channel_selector,
+        should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn a_command_that_did_nothing_says_so_and_how_to_address_it() {
+        let message = command_refusal_message(&[
+            "xMatrix could not find @deepseek:45789d7f:3 to reborn.".into(),
+        ]);
+        assert!(message.starts_with("The message was sent, but its command did nothing:\n"));
+        assert!(message.contains("- xMatrix could not find @deepseek:45789d7f:3 to reborn.\n"));
+        assert!(message.contains("`@deepseek:3:reborn`"));
+    }
     use xmatrix_cli_core::protocol::{
         ChannelAttachment, ChannelMessage, MessageSender, SerializedChannel,
     };
