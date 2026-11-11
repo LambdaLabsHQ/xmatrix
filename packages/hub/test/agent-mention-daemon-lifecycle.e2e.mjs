@@ -435,7 +435,7 @@ test("a historical instance reborn mention reuses its durable session key after 
     assert.equal(sent.message.from.gitBranch, "fix/reborn-preserve-agent-presentation");
     assert.equal(sent.message.from.model, "gpt-5.6-sol");
     assert.equal(sent.message.from.effort, "xhigh");
-    assert.equal(sent.message.from.statusChips[0].value, "gpt-5.6-sol");
+    assert.equal(sent.message.from.statusChips[0].value, "GPT-5.6");
 
     agent.ws.send(JSON.stringify({
       ...presentation,

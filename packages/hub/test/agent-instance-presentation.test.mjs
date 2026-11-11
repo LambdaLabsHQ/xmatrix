@@ -212,7 +212,7 @@ test("presence patches preserve all Agent labels and quota windows across token-
   assert.equal(heartbeat.models[0].displayName, "GPT-5");
   assert.equal(heartbeat.commands[0].token, "/model");
   assert.deepEqual(heartbeat.files, ["packages/hub/src/scoped-control-authority-base.ts"]);
-  assert.equal(heartbeat.statusChips[0].value, "gpt-5");
+  assert.equal(heartbeat.statusChips[0].value, "GPT-5", "the catalog names the model tag");
   assert.equal(heartbeat.statusChips[1].value, "high");
   assert.equal(heartbeat.usage.totalTokens, 180);
   assert.equal(heartbeat.usage.quotaUsages[0].remaining, 70);
@@ -382,7 +382,7 @@ test("Agent messages capture immutable goal, branch, model, effort, and chip sna
     model: "gpt-5",
     effort: "high",
     statusChips: [
-      { id: "model", label: "Model", value: "gpt-5", source: "codex" },
+      { id: "model", label: "Model", value: "GPT-5", source: "codex" },
       { id: "effort", label: "Effort", value: "high" },
     ],
   });
@@ -701,6 +701,28 @@ test("Cursor placeholder model ids and default Agent mode are dropped from prese
   });
   assert.equal(presentation?.model, undefined);
   assert.equal(presentation?.statusChips, undefined);
+});
+
+test("the model tag names the selected model from the runtime catalog, in presence and message snapshots", () => {
+  const selector = '["deepseek-official","deepseek-flash"]';
+  const models = [
+    { id: '["deepseek-official","deepseek-v4-pro"]', model: '["deepseek-official","deepseek-v4-pro"]', displayName: "DeepSeek-V4-Pro" },
+    { id: selector, model: selector, displayName: "DeepSeek-V4.1-Flash" },
+  ];
+  const presentation = mergeAgentInstancePresentation(undefined, {
+    type: "presence_update", model: selector, models,
+    statusChips: [{ id: "model", label: "Model", value: selector }],
+  });
+  assert.equal(presentation?.model, selector, "the selector id stays exact for switching");
+  assert.equal(presentation?.statusChips?.find((chip) => chip.id === "model")?.value, "DeepSeek-V4.1-Flash");
+  assert.equal(agentMessagePresentation(presentation)?.statusChips?.find((chip) => chip.id === "model")?.value,
+    "DeepSeek-V4.1-Flash");
+  const switched = mergeAgentInstancePresentation(presentation, {
+    type: "presence_update", model: '["deepseek-official","deepseek-v4-pro"]',
+  });
+  assert.equal(switched?.statusChips?.find((chip) => chip.id === "model")?.value, "DeepSeek-V4-Pro");
+  const uncatalogued = mergeAgentInstancePresentation(undefined, { type: "presence_update", model: "gpt-5.5" });
+  assert.equal(uncatalogued?.statusChips?.find((chip) => chip.id === "model")?.value, "gpt-5.5");
 });
 
 test("non-default Cursor mode chips survive presence presentation", () => {

@@ -8,7 +8,7 @@ import { parseHarnessParameters, harnessParameterEnabled, harnessParameterKind, 
   type HarnessParameter } from "./harness-parameters.js";
 import { isAgentRuntimeWaitingKind, isAgentRuntimeIssueKind, isAgentRuntimeNoticeSeverity,
   type AgentInstancePresentation, type AgentGoalStatus, type AgentRuntimeState, type AgentRuntimeWaiting,
-  type AgentStatusChip, type SerializedAgent, type WorkspaceRef } from "./authority-foundation.js";
+  type AgentModelInfo, type AgentStatusChip, type SerializedAgent, type WorkspaceRef } from "./authority-foundation.js";
 import { isUnlistedParameterTag, parameterTagRule, PARAMETER_TAG_PREFIX } from "./status-tag-registry.js";
 import type { AgentInstanceConnectMessage, AgentInstancePresenceUpdateMessage } from "./connections/agent-instance.js";
 
@@ -119,12 +119,13 @@ export function mergeAgentInstancePresentation(
         next.model,
         next.effort,
         cleanStatusChips(update.statusChips),
+        next.models,
       ),
     );
-  } else if (hasOwn(update, "model") || hasOwn(update, "effort")) {
-    set("statusChips", statusChipsFromModelEffort(next.model, next.effort, next.statusChips));
+  } else if (hasOwn(update, "model") || hasOwn(update, "models") || hasOwn(update, "effort")) {
+    set("statusChips", statusChipsFromModelEffort(next.model, next.effort, next.statusChips, next.models));
   }
-  if (["parameters", "statusChips", "model", "effort"].some(key => hasOwn(update, key))) {
+  if (["parameters", "statusChips", "model", "models", "effort"].some(key => hasOwn(update, key))) {
     set("statusChips", withParameterChips(next.parameters, next.statusChips, current?.statusChips));
   }
   if (hasOwn(update, "usage")) {
@@ -155,6 +156,7 @@ export function normalizeAgentInstanceDurablePresentation(input: unknown): Agent
   const value = plainRecord(input) ?? {};
   const model = cleanModelId(value.model);
   const effort = cleanText(value.effort, 64);
+  const models = cleanModelCatalog(value.models);
   return {
     clientVersion: cleanText(value.clientVersion, 64),
     hostName: cleanText(value.hostName, 256),
@@ -165,13 +167,13 @@ export function normalizeAgentInstanceDurablePresentation(input: unknown): Agent
     capabilities: cleanAgentCapabilities(value.capabilities),
     goal: cleanGoal(value.goal),
     model,
-    models: cleanModelCatalog(value.models),
+    models,
     modelsObservedAt: observedAt(value.modelsObservedAt),
     effort,
     commands: cleanCommands(value.commands),
     parameters: cleanParameters(value.parameters),
     parametersObservedAt: observedAt(value.parametersObservedAt),
-    statusChips: withoutQuotaMeterChips(statusChipsFromModelEffort(model, effort, cleanStatusChips(value.statusChips))),
+    statusChips: withoutQuotaMeterChips(statusChipsFromModelEffort(model, effort, cleanStatusChips(value.statusChips), models)),
     usage: cleanUsage(value.usage),
   };
 }
@@ -297,10 +299,22 @@ function withParameterChips(
   return result.length > 0 ? result : undefined;
 }
 
+/** The name a person reads for a model: the runtime catalog's display name
+ * when it lists one. A model id can be an opaque selector — DeepSeek Harness
+ * selects `["deepseek-official","deepseek-flash"]` and names it
+ * `DeepSeek-V4.1-Flash` — so the id is shown only when the catalog has no name. */
+export function agentModelLabel(model: string, models?: readonly AgentModelInfo[]): string {
+  // Only the exact selector: a resolved model or alias can stand for several
+  // entries (Claude's `default` resolves to the model `opus` also names).
+  const entry = models?.find((item) => item.id === model);
+  return entry?.displayName?.trim() || model;
+}
+
 function statusChipsFromModelEffort(
   model?: string,
   effort?: string,
   existing?: AgentStatusChip[],
+  models?: readonly AgentModelInfo[],
 ): AgentStatusChip[] | undefined {
   const existingModel = existing?.find((chip) => chip.id.toLowerCase() === "model");
   const existingEffort = existing?.find((chip) => chip.id.toLowerCase() === "effort");
@@ -310,7 +324,7 @@ function statusChipsFromModelEffort(
       ...existingModel,
       id: "model",
       label: existingModel?.label || "Model",
-      value: model,
+      value: agentModelLabel(model, models).slice(0, 128),
     });
   }
   if (effort) {

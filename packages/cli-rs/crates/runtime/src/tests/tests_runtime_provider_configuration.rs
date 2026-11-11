@@ -98,6 +98,49 @@ fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     assert!(runtime_chip_matches(chips, "mode", "Plan"));
 }
 
+/// DeepSeek Harness 0.2.2 `session/new`: ACP select options grouped by
+/// provider, each value an opaque JSON selector.
+#[test]
+fn acp_grouped_model_options_name_the_selected_model() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("deepseek");
+    let mut facts = AgentPresentationFacts::default();
+    adapter.observe_acp(
+        &serde_json::json!({
+            "sessionId": "dsh-session",
+            "configOptions": [
+                {
+                    "id": "model", "name": "Model", "category": "model", "type": "select",
+                    "currentValue": "[\"deepseek-official\",\"deepseek-flash\"]",
+                    "options": [{
+                        "group": "deepseek-official", "name": "DeepSeek",
+                        "options": [
+                            { "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]", "name": "deepseek-v4-flash" },
+                            { "value": "[\"deepseek-official\",\"deepseek-flash\"]", "name": "DeepSeek-V4.1-Flash" },
+                            { "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]", "name": "DeepSeek-V4-Pro" }
+                        ]
+                    }]
+                },
+                {
+                    "id": "reasoning_effort", "name": "Reasoning effort", "category": "thought_level",
+                    "type": "select", "currentValue": "high",
+                    "options": [{ "value": "off", "name": "Off" }, { "value": "high", "name": "High" }]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    let presentation = adapter.present(&facts, &[]);
+    assert_eq!(
+        presentation.model.as_deref(),
+        Some("[\"deepseek-official\",\"deepseek-flash\"]"),
+        "the selector id stays exact for switching"
+    );
+    let models = presentation.models.as_ref().expect("grouped catalog");
+    assert_eq!(models.len(), 3);
+    let chips = presentation.status_chips.as_ref().expect("DeepSeek chips");
+    assert!(runtime_chip_matches(chips, "model", "DeepSeek-V4.1-Flash"));
+}
+
 #[test]
 fn macos_launchd_daemon_waits_for_lock_without_extra_env() {
     assert!(daemon_restart_waits_for_lock_from_env(
