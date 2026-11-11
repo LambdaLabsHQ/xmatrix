@@ -1,5 +1,24 @@
 # Release Updates
 
+## Unreleased: a Norn program in a message asks Agents typed requests
+
+A message with one top-level fenced block tagged `norn run` starts that
+[Norn](https://github.com/norn-lang/norn) program with its author's authority
+([Norn host](architecture/norn-host.md)). Each request the program makes is one
+xMatrix message under it that starts a Run of the harness it names (or of
+`@auto`), and that Run ends the request with the new Hub-defined commands
+`xmatrix reply`, `xmatrix refuse` or `xmatrix broke`; `xmatrix requests` lists
+the open ones. An answer outside the form the program reads is refused. A
+request whose launch was refused, whose Run stopped or exited, or whose turn
+ended without an answer is settled `Broke`, so a program never waits in
+silence. A stop of the whole conversation ends its programs, and the result is
+posted under the program's message. A block tagged `norn` alone is only shown,
+and no existing message starts anything. Requests to people and to an existing
+Instance are refused with the reason in this version. Hub only, with expand
+migration 0244 (`norn_programs`, `norn_requests`); every CLI that passes
+unknown words to the Hub has the commands. Recovery is a CI-validated beta Hub
+reverting this change; the two tables then stay unused.
+
 ## Unreleased: the connector list says a subscription is sent, not called
 
 `xmatrix connector list` printed `read   @github:subscribe:...`. The manifest's
