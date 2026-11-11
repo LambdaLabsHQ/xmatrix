@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9333fe512bf5af158f5f0695e27fbeb27218243b; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The form of a `run`'s report (docs/types.md §5a): the type the program uses
  * the report as, written as plain data so that a host can show it to whoever

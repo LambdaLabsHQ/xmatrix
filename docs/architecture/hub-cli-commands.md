@@ -51,6 +51,11 @@ commands keep working.
   positional may be `variadic` (it takes every remaining word) and a string
   option `repeatable`, both collected under `lists`.
 
+- `reply <request> <answer>…`, `refuse <request> <why>…`, `broke <request> <why>…` and
+  `requests [--json]` (`cli-commands-requests.ts`) are new Hub-defined commands. The Agent Run
+  that holds a request of a Norn program ends it, and reads the open requests it holds or waits
+  on ([Norn host](norn-host.md)).
+
 Moving another command: add it to the Hub table with the same options and
 output, delete its clap definition and handler from the CLI. Older CLIs keep
 their compiled copy.

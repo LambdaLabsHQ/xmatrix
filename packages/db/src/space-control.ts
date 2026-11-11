@@ -719,6 +719,17 @@ async function moveChannelSpaceFacts(
       text: `UPDATE data.agent_message_executions ${CHANNEL_MOVE_FACT_SQL}`,
       values, maxRows: 0,
     });
+    // A program and its requests move together: their foreign key is checked at commit.
+    await transaction.query({
+      name: "channel_move_norn_programs_v1",
+      text: `UPDATE data.norn_programs ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
+    await transaction.query({
+      name: "channel_move_norn_requests_v1",
+      text: `UPDATE data.norn_requests ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
     await transaction.query({
       name: "channel_move_channel_message_sequences_v1",
       text: `UPDATE data.channel_message_sequences ${CHANNEL_MOVE_FACT_SQL}`,

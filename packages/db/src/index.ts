@@ -339,6 +339,8 @@ export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRouting
 export { databaseFailureEvidence, linkDatabaseFailures, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
 
 export { PostgresMessageAskRepository, readMessageAsks } from "./message-asks.js";
+export { PostgresNornProgramRepository, NORN_CHANNEL_DUE_SQL, NORN_PROGRAM_OPEN_SQL,
+  type NornProgramState, type NornProgramWrite, type NornRequestRow, type NornStep } from "./norn-programs.js";
 export { PostgresQuotaRetryRepository, assertQuotaRetryAdmission, type QuotaRetryWork } from "./agent-quota-retry.js";
 
 export { PostgresStripeAccountRepository, type StripeAccountGrant,

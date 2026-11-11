@@ -175,10 +175,10 @@ computation over it (Norn spec [§9](https://github.com/norn-lang/norn/blob/main
 [§11.2](https://github.com/norn-lang/norn/blob/main/docs/spec.md#112-changing-a-program-while-it-runs)).
 The earlier shadow comparison, which stored a candidate's machine state beside
 existing executions, was retired with that stored-state runtime. The first host
-increment will let Agents make typed requests of each other. The Hub carries
+increment lets Agents make typed requests of each other from a program in a
+message ([Norn host](../architecture/norn-host.md)). The Hub carries
 the current Norn checker, evaluator and ledger as a
-[pinned snapshot](../../packages/hub/src/vendor/norn/README.md); nothing in
-production calls it yet.
+[pinned snapshot](../../packages/hub/src/vendor/norn/README.md).
 
 1. Move one opt-in path to one dispatcher with an atomic ownership/generation
    transition. Demonstrate restart, late reply, cancellation and revocation before

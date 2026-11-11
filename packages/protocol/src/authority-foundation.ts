@@ -220,6 +220,10 @@ export const HUB_ROUTES = {
   connector_usage: "/api/connectors/usage",
   /** Synchronous private read; the authenticated calling Run alone gets its result. */
   connector_call: "/api/connectors/call",
+  /** The open Norn requests an Agent Run holds or waits on. */
+  norn_requests: "/api/norn/requests",
+  /** The Run that holds a Norn request answers it. */
+  norn_request_answer: "/api/norn/requests/answer",
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,

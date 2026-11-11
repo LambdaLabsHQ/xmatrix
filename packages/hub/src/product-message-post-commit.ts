@@ -12,6 +12,7 @@ import {
   dispatchProductAgentSystemNotice,
   type ProductAgentMentionAuthorityEnv,
 } from "./product-agent-mention-authority-adapter";
+import { startNornProgram } from "./norn-programs";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import {
   dispatchProductAgentInterventionAfterAuthorityMessage,
@@ -369,6 +370,14 @@ export async function dispatchProductMessagePostCommit(
       }),
     );
   }
+  // A message that carries a `norn run` block starts that program; its author reads why when it could not.
+  if (input.body.includes("norn run")) tasks.push(startNornProgram(input).catch((error): { refusal: string } => {
+    logPostCommitFailure("Norn program start failed", input, error);
+    return { refusal: "The program could not be started. Send it again." };
+  }).then(started => started?.refusal ? dispatchProductAgentSystemNotice({ ...input, sourceMessageId: input.messageId,
+    body: started.refusal, replyToMessageId: input.messageId }) : undefined).catch((error) => {
+    logPostCommitFailure("Norn program refusal notice failed", input, error);
+  }));
   const about = channelAboutDue(input.sequence);
   if (about) {
     // A discussion's first message names it before the About reads it.

@@ -431,6 +431,9 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   // Private connector reads are scoped to the live requesting Run's own Channel.
   if (request.method === "POST" && path === HUB_ROUTES.connector_call) return true;
+  // Norn requests in its own Channel: the route proves the Run holds the one it answers.
+  if (request.method === "GET" && path === HUB_ROUTES.norn_requests) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_answer) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;

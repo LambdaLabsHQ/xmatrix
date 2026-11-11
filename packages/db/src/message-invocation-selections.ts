@@ -3,6 +3,7 @@ import { agentPresetForLauncher, createInstanceMentions, deriveHarnessInvocation
 import type { DatabaseTransaction } from "./contracts.js";
 import { requireChannelCapability } from "./channel-capability-policy.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
+import { NORN_DELIVERY_SOURCE_SQL } from "./norn-programs.js";
 import { messageChoiceSourceCurrentSql } from "./message-choice-source.js";
 
 /** The append/edit transaction supplies its authenticated actor and canonical
@@ -71,15 +72,17 @@ export const firstMessageSummonId = (firstMessageId: string) => `xmatrix-summon:
 /**
  * Whether the actor may invoke through a message it authored: its own Human
  * message, one an Agent Instance running under the actor's registration
- * posted, or xMatrix's summon for the first message whose decision the actor
- * owns. The launch reader and the staged-launch recheck share this rule.
+ * posted, xMatrix's summon for the first message whose decision the actor
+ * owns, or xMatrix's delivery of a request of a Norn program that runs with
+ * the actor's authority. The launch reader and the staged-launch recheck share this rule.
  */
 export async function messageAuthoredForActor(tx: DatabaseTransaction, input: {
   spaceId: string; channelId: string; messageId: string; authorKind: unknown; authorId: unknown; actorUserId: string;
 }): Promise<boolean> {
   if (input.authorKind === "user") return input.authorId === input.actorUserId;
   if (input.authorKind === "system") {
-    return input.authorId === XMATRIX_SYSTEM_AUTHOR_ID && await firstMessageSummonOfActor(tx, input);
+    return input.authorId === XMATRIX_SYSTEM_AUTHOR_ID &&
+      (await firstMessageSummonOfActor(tx, input) || await nornDeliveryOfActor(tx, input));
   }
   return input.authorKind === "agent" && await agentOfActor(tx, input.spaceId, String(input.authorId), input.actorUserId);
 }
@@ -92,6 +95,14 @@ async function firstMessageSummonOfActor(tx: DatabaseTransaction, input: {
     WHERE choice.space_id=$1 AND choice.channel_id=$2 AND $3='xmatrix-summon:'||choice.message_id
       AND choice.author_user_id=$4 AND choice.choice='start' AND ${messageChoiceSourceCurrentSql("choice")}`,
   values: [input.spaceId, input.channelId, input.messageId, input.actorUserId], maxRows: 1 });
+  return Boolean(rows[0]);
+}
+
+/** xMatrix delivers an open request of a Norn program that runs with the actor's authority. */
+async function nornDeliveryOfActor(tx: DatabaseTransaction, input: {
+  spaceId: string; channelId: string; messageId: string; actorUserId: string }): Promise<boolean> {
+  const rows = await tx.query({ name: "message_invocation_norn_delivery_v1", text: `SELECT 1 AS present WHERE ${NORN_DELIVERY_SOURCE_SQL}`,
+    values: [input.spaceId, input.channelId, input.messageId, input.actorUserId], maxRows: 1 });
   return Boolean(rows[0]);
 }
 

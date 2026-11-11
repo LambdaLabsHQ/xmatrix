@@ -214,5 +214,10 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
       Number(stored.revision) === report.revision && stored.report_digest !== await hash(report)) {
     return fail("execution_report_conflict", 409, "Execution report conflicts with existing evidence");
   }
-  return { ...receipt, status: Number(stored.revision) === report.revision ? "recorded" : "superseded" };
+  // A finished turn that leaves a Norn request it took unanswered has abandoned it: the Hub tells the request's program.
+  const abandoned = report.finishedAtMillis !== undefined && (await tx.query({ name: "runtime_execution_report_norn_request_v1",
+    text: `SELECT 1 FROM data.norn_requests WHERE channel_id=$1 AND delivery_message_id=ANY($2::text[])
+      AND settled_at IS NULL LIMIT 1`, values: [input.channelId, report.sources.map(source => source.messageId)], maxRows: 1 })).length > 0;
+  return { ...receipt, status: Number(stored.revision) === report.revision ? "recorded" : "superseded",
+    ...(abandoned ? { nornRequestAbandoned: true } : {}) };
 }
