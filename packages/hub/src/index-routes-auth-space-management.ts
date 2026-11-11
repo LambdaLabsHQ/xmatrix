@@ -569,8 +569,13 @@ export async function linkGitHubInstallation(
     spaceId, providerId: "github", actorUserId: userId,
     body: { ...body, metadataAppend: { installationIds: installationId } } as unknown as Record<string, unknown>,
   }).then(() => true, () => false);
-  return appended && (await recordGitHubInstallationLinks(env, { spaceId, actorUserId: userId, githubUserId,
+  const linked = appended && (await recordGitHubInstallationLinks(env, { spaceId, actorUserId: userId, githubUserId,
     installationIds: [installationId] }).catch(() => [] as string[])).includes(installationId);
+  // A link is a change GitHub is asked about: the check records when the connection last
+  // worked, which is what a settings card that asked for it waits on. The link stands either way.
+  if (linked) await checkAppConnection(env, { spaceId, providerId: "github", userId,
+    commandId: `github-link-check:${crypto.randomUUID()}` }).catch(() => undefined);
+  return linked;
 }
 
 /** Record the GitHub user Connect named for installations this Space already links and they administer. */

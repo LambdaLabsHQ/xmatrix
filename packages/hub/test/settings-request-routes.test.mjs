@@ -2,9 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
 
+import * as protocol from "@xmatrix/protocol";
 import { connectorReceiptFixesOf, settingsCardOf } from "@xmatrix/protocol";
+import { getAppConnectorProvider } from "../src/app-connectors.ts";
+import { credentialPolicy } from "../src/connectors/credential-policy.ts";
 import { registerSettingsRequestRoutes } from "../src/index-routes-settings-requests.ts";
 import { connectorSettingsDomain } from "../src/settings-domain-connector.ts";
+import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { harnessSettingsDomain } from "../src/settings-domain-harness.ts";
 import { secretAccessSettingsDomain, secretSettingsDomain } from "../src/settings-domain-secret.ts";
 
@@ -242,4 +246,24 @@ test("a person who cannot make a setting sees it without a way to change it", as
     "the owner's Machine is read for the card, and only its owner signs in");
   assert.equal((await member.make(card.messageId, { address: "harness:machine:a/codex/sign-in", value: "x" })).status, 400,
     "a harness signs in on its Machine, not by a typed value");
+});
+
+test("a Space admin connects an App that has no typed field from its card", async () => {
+  // GitHub is connected by authorizing, so the store has nothing to read back: who may connect it is the Space's admins.
+  const imports = {
+    "@xmatrix/protocol": protocol,
+    "./app-connectors": { getAppConnectorProvider },
+    "./apps": { listAppConnections: async () => [{ providerId: "github", status: "configured", lastCheckedAt: "2026-11-01T09:00:00.000Z" }] },
+    "./connectors/credential-policy": { credentialPolicy },
+    "./connectors/credentials": { connectorCredentialRepository: () => ({
+      authorizeAdmin: async ({ spaceId, actorUserId }) => { if (spaceId !== "space" || actorUserId !== "owner") throw new Error("forbidden"); } }) },
+  };
+  const domain = (await loadCommonJsSourceModule(new URL("../src/settings-domain-connector.ts", import.meta.url),
+    (name) => imports[name] ?? {})).connectorSettingsDomain();
+  const read = async (userId) => (await domain.describe({ env: {}, spaceId: "space", userId, since: ASKED },
+    [protocol.parseSettingAddress("connector:github/connect")]))[0];
+  const admin = await read("owner");
+  assert.deepEqual([admin.control, admin.canWrite, admin.satisfied, admin.href],
+    ["connect", true, false, "/app/space/apps?connector=github"], "connected before the card asked: the admin is offered Connect");
+  assert.equal((await read("member")).canWrite, false);
 });
