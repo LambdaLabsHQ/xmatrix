@@ -10,6 +10,7 @@ import { useComposerHint } from "./composer-hints";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
+  agentModelLabel,
   digestCanonicalCloneCborV1,
   parseAgentInvocationSelections,
   type AgentInvocationSelection,
@@ -1950,7 +1951,8 @@ const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   const noteTone = usageLimit?.credits ? "yellow" as const : usageLimit?.severity === "limit" ? "red" as const : undefined;
   const verdict = { ...(usageLimit?.note ? { note: usageLimit.note } : {}), ...(noteTone ? { noteTone } : {}) };
   const withVerdict = (tag: Omit<Tag, "title">): Tag => ({ ...tag, title: usageLimit?.title ?? "", ...verdict });
-  const statusChips = cleanStatusChips(instance.statusChips, instance.model, instance.effort)
+  const modelLabel = instance.model ? agentModelLabel(instance.model, instance.models) : undefined;
+  const statusChips = cleanStatusChips(instance.statusChips, modelLabel, instance.effort)
     ?.map((chip) => chip.id === limitChipId ? { ...chip, ...verdict } : chip);
   const branch = instance.gitBranch?.trim();
   const statusChipIds = new Set(statusChips?.map((chip) => chip.id) || []);

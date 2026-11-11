@@ -916,9 +916,14 @@ export function buildTimeline(
       message.from.kind === "agent"
         ? message.from.gitBranch
         : undefined;
+    // The Hub labels a header's model tag from that Instance's catalog when the
+    // message is sent (a selector id can be opaque JSON), so it outranks the id.
     const senderModel =
       message.from.kind === "agent"
-        ? cleanModelLabel(message.from.model)
+        ? cleanModelLabel(
+            message.from.statusChips?.find((chip) => chip.id?.toLowerCase() === "model")?.value
+              ?? message.from.model,
+          )
         : undefined;
     const senderEffort =
       message.from.kind === "agent"
@@ -2200,6 +2205,7 @@ export function cleanEffortLabel(effort?: string): string | undefined {
 
 export function cleanStatusChips(
   chips?: Array<{ id?: string; label?: string; value?: string; percent?: number; resetAt?: string; parameterKind?: string }>,
+  /** The live model as a person reads it (catalog display name, else id). */
   modelFallback?: string,
   effortFallback?: string
 ): StatusChip[] | undefined {

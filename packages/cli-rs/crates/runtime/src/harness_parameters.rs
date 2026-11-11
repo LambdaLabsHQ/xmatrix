@@ -191,18 +191,7 @@ pub fn acp_parameters(options: &[Value]) -> Vec<protocol::HarnessParameter> {
             let current = option
                 .get("currentValue")
                 .or_else(|| option.get("current_value"));
-            let rows: Vec<Value> = option
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
-                .flat_map(|entry| {
-                    entry
-                        .get("options")
-                        .and_then(Value::as_array)
-                        .map(|v| v.as_slice())
-                        .unwrap_or_else(|| std::slice::from_ref(entry))
-                })
+            let rows: Vec<Value> = crate::agent_presentation::select_option_entries(option)
                 .cloned()
                 .collect();
             let (values, current) = if kind == "boolean" {

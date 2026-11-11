@@ -681,7 +681,7 @@ export { parseMarkdown } from "./markdown.js";
 
 export {
   initialAgentInstancePresentation, mergeAgentInstancePresentation, sanitizeAgentInstancePresentation,
-  agentMessagePresentation, agentSummaryPresentation, compactAgentInstancePresentationForHibernation,
+  agentMessagePresentation, agentModelLabel, agentSummaryPresentation, compactAgentInstancePresentationForHibernation,
   agentRuntimePresentation, AGENT_INSTANCE_DURABLE_KEYS, normalizeAgentInstanceDurablePresentation,
   definedAgentInstanceDurablePresentation, type AgentInstanceDurableKey, type AgentInstanceDurablePresentation,
   type AgentMessagePresentation, type AgentInstancePresentation,

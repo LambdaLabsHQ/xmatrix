@@ -658,12 +658,23 @@ fn is_placeholder_model_id(value: &str) -> bool {
             .is_some_and(|rest| rest == "]")
 }
 
-fn option_current_display(option: &Value, current: &str) -> String {
+/// The choices of an ACP select option. ACP lets a select list its choices
+/// flat or in groups (`{ group, name, options: [...] }`); DeepSeek Harness
+/// groups its models by provider, so each group's choices are read in place.
+pub(crate) fn select_option_entries(option: &Value) -> impl Iterator<Item = &Value> {
     option
         .get("options")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .flat_map(|entry| match entry.get("options").and_then(Value::as_array) {
+            Some(grouped) => grouped.as_slice(),
+            None => std::slice::from_ref(entry),
+        })
+}
+
+fn option_current_display(option: &Value, current: &str) -> String {
+    select_option_entries(option)
         .find_map(|entry| {
             let value = option_value(entry)?;
             value
@@ -903,11 +914,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             128,
         );
         if key == "model" || key == "models" {
-            let models: Vec<_> = option
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+            let models: Vec<_> = select_option_entries(option)
                 .filter_map(|entry| {
                     let model = option_value(entry)?;
                     Some(protocol::AgentModelInfo {
@@ -940,11 +947,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             // `effort`, or `reasoning_effort`, category `thought_level`) and,
             // on Claude, a separate boolean `thinking` toggle. The boolean is
             // not a reasoning level. Keep the leveled control when both exist.
-            let supported: Vec<_> = option
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+            let supported: Vec<_> = select_option_entries(option)
                 .filter_map(|entry| {
                     let reasoning_effort = option_value(entry)?;
                     Some(protocol::AgentModelReasoningEffort {
