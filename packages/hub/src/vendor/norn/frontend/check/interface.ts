@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9333fe512bf5af158f5f0695e27fbeb27218243b; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Host interfaces (docs/types.md §7). A host tells the checker what its
  * programs can see in a Norn file of `type` and `external` declarations. Only

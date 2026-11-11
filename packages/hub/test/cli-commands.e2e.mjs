@@ -1,15 +1,9 @@
 import { Client } from "pg";
 import { createAuthorityDatabase, PostgresContentRepository } from "../../db/dist/index.js";
 import { restrictedChannelContentScope } from "@xmatrix/protocol";
-import { acceptSpaceInvite, channelSpaceId, createPgSpawnableScenario, inviteToSpace, isSpawnOf, startPgHubWorker, testPostgresUrl } from "./agent-launch-postgres.fixture.mjs";
+import { acceptSpaceInvite, channelSpaceId, createPgSpawnableScenario, inviteToSpace, isSpawnOf, runHubCommand as run, startPgHubWorker, testPostgresUrl } from "./agent-launch-postgres.fixture.mjs";
 import { assert, channelHistory, mintAgentRunToken, MOCK_TOKEN, postChannelMessage, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
 
-const run = async (worker, token, argv) => {
-  const response = await worker.fetch("/api/cli/commands/run", { method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ argv }) });
-  assert.equal(response.status, 200, await response.clone().text());
-  return response.json();
-};
 
 test("Hub commands answer a person and a Run through the Hub's own routes", async () => {
   const ownerId = `cli-commands-${randomUUID()}`, otherId = `cli-other-${randomUUID()}`;

@@ -185,6 +185,14 @@ export async function createPgSpawnableScenario(
   return { auth, workspace, channelId, daemon, registration, machineId, hostId, canonicalCwd };
 }
 
+/** One Hub-defined `xmatrix` command as the bearer of `token`: what the CLI would print. */
+export async function runHubCommand(worker, token, argv) {
+  const response = await worker.fetch("/api/cli/commands/run", { method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ argv }) });
+  assert.equal(response.status, 200, await response.clone().text());
+  return response.json();
+}
+
 /** Post a tagged `@auto` launch of a harness in a registered directory. */
 export function postAutoLaunch(worker, { channelId, harness = "codex", machineId, canonicalCwd }, prompt, token = MOCK_TOKEN) {
   return postChannelMessage(worker, token, channelId,

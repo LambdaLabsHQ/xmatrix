@@ -103,6 +103,7 @@ import { registerRequestBodyLimit } from "./request-body-limit";
 import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
 import { registerCliCommandRoutes } from "./index-routes-cli-commands";
+import { registerNornRequestRoutes } from "./index-routes-norn-requests";
 
 const app = new Hono<{ Bindings: Env }>();
 // A failure no route answered still gets the one error contract: a transient
@@ -127,6 +128,7 @@ registerIndexRoutesJev(app);
 registerSearchRerankRoutes(app);
 registerIndexRoutesAutomation(app);
 registerCliCommandRoutes(app);
+registerNornRequestRoutes(app);
 registerIndexRoutesSpaceJoinRequests(app);
 registerIndexRoutesChannelAgent(app);
 registerPageRoutes(app);
