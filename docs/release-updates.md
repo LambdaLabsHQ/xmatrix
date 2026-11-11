@@ -19,8 +19,8 @@ columns. A message's edit card opens the page as it is now at the change.
 
 Read now means visited: the newest version a person has had open. The Web no
 longer times which blocks were on screen or sends the page as its reader saw
-it, and the Hub no longer reads or writes `data.page_reads.seen_body`; a
-contract migration drops the column once this Hub is verified. Web, Hub and
+it, and the Hub no longer reads or writes `data.page_reads.seen_body`;
+contract migration 0243 drops the column once this Hub is verified. Web, Hub and
 protocol, no expand migration; an older Web keeps working against this Hub and
 this Web against an older Hub. Recovery is a CI-validated beta reverting this
 change.
