@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: an Agent's own connector receipt no longer refuses its next send
+
+An Agent that ran `xmatrix call "@googlesearchconsole:list_sites:*"` or sent a
+connector command such as `@cloudflare:put_dns:…` had its next `xmatrix send`
+refused with "the Channel moved on after the last message you read", once per
+command, and the identical retry went through. The read-before-send check
+counts every App message after the sender's last read as unread, and the
+receipt the Hub posts for a command is an App message: nothing related it to
+the command's own sender. The check now leaves out an App receipt whose id is
+`system:<command message id>:<app>` when that command message is the sender's
+own in the Channel. Messages from people, other Agents and sibling Instances,
+Apps' native events, and receipts for anyone else's command refuse a send as
+before. A write's outcome still reaches the Agent that sent it as queued work
+after its turn, so it may post once more before reading it. Hub only, no
+schema, protocol or client change. Recovery is a CI-validated beta Hub
+reverting this change.
 ## Unreleased: a card that asks to connect GitHub offers Connect, and a link settles it
 
 A settings card for `connector:github/connect` showed a Space admin "A Space

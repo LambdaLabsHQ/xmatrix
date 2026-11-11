@@ -103,3 +103,48 @@ test("an Agent send is refused while a newer message from someone else is unread
     committed(await asAgent("switching to the other thing", correction));
     assert.equal((await asAgent("unreadable", -1)).response.status, 400);
   }));
+
+/* An App's receipt for a command is a consequence of that command. The Agent
+   that wrote the command is not held back by its receipt; a receipt for
+   someone else's command is still a message it has not read. */
+test("an App receipt holds back every sender but the one whose command it answers", () => withAttributedRun(
+  "receipt-before-send", async ({ worker, channel, post, send }) => {
+    const command = "@gmail:read:18f2a9c0d1e2b3a4";
+    const committed = (sent) => {
+      assert.equal(sent.response.status, 200, JSON.stringify(sent.payload));
+      return sent.payload.message;
+    };
+    /** The App's receipt replying to `commandMessage`, once the connector has answered. */
+    const receiptOf = async (commandMessage) => {
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const page = await requestJson(worker, OWNER.token,
+          `/api/channels/${encodeURIComponent(channel.id)}/history?afterSequence=${commandMessage.sequence}`);
+        assert.equal(page.response.status, 200, JSON.stringify(page.payload));
+        const receipt = page.payload.messages.find((message) => message.replyToMessageId === commandMessage.messageId);
+        if (receipt) return receipt;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      assert.fail("the connector command got no receipt");
+    };
+    const asAgent = (body, readThroughSequence) =>
+      send(OWNER.token, { body, readThroughSequence, clientMessageId: randomUUID() });
+
+    // The Agent's own command: it has read through that command, and the
+    // receipt it caused arrives after it.
+    const asked = committed(await post(OWNER.token, { body: "please read that mail", clientMessageId: randomUUID() }));
+    const own = committed(await asAgent(command, Number(asked.sequence)));
+    const ownReceipt = await receiptOf(own);
+    assert.equal(ownReceipt.from.kind, "app");
+    const afterOwn = committed(await asAgent("the read is on its way", Number(own.sequence)));
+
+    // Someone else's command: the Agent read the command itself, not its receipt.
+    const theirs = committed(await post(OTHER.token, { body: command, clientMessageId: randomUUID() }));
+    assert.ok(Number(theirs.sequence) > Number(afterOwn.sequence));
+    const theirReceipt = await receiptOf(theirs);
+    assert.equal(theirReceipt.from.kind, "app");
+    const refused = await asAgent("answering over their receipt", Number(theirs.sequence));
+    assert.equal(refused.response.status, 409, JSON.stringify(refused.payload));
+    assert.equal(refused.payload.code, "channel_read_stale");
+    assert.match(refused.payload.error, /^channel_read_stale: 1 newer message/u);
+    committed(await asAgent("having read their receipt", Number(theirReceipt.sequence)));
+  }));
