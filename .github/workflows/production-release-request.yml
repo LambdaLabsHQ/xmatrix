@@ -6,7 +6,8 @@ run-name: Production Release train from ${{ github.sha }}
 # a finished Production Release wakes it too (Release Train Next). Each train
 # reconciles the intents already in flight and chooses the version itself
 # (scripts/release-train.mjs): a beta train freezes this main revision and
-# ships the union of every open beta it contains as X.Y.Z-beta.N; a stable
+# ships the union of every open beta it contains as X.Y.Z-beta.N, the Hub
+# alone when it is among them and the rest from the train it wakes; a stable
 # train ships one stable intent alone, rebuilding the verified beta's source as
 # X.Y.Z. Trains run one at a time; one GitHub displaces while pending loses
 # nothing, because intents live in refs. Their releases deploy side by side
@@ -74,9 +75,10 @@ jobs:
           export GIT_CONFIG_KEY_0="http.https://github.com/.extraheader"
           export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
           node scripts/release-train.mjs plan
-      # A stable train ships alone, so the betas it left open get the next one.
-      # GitHub holds that run pending until this one finishes.
-      - name: Wake the train for the betas this stable train left open
+      # A stable train ships alone, and so does the Hub of a beta train, so the
+      # betas either left open get the next one. GitHub holds that run pending
+      # until this one finishes.
+      - name: Wake the train for the betas this train left open
         if: steps.plan.outputs.betas_waiting == 'true'
         uses: actions/github-script@v7
         with:

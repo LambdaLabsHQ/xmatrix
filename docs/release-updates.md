@@ -1,5 +1,32 @@
 # Release Updates
 
+## Unreleased: a beta train ships the Hub alone, so a Hub fix no longer waits for client builds
+
+A release holds its first component's place in line until its slowest
+component is published. On 2026-11-11 `xmatrix-v4.0.7-beta.5` shipped all six
+components: its Hub deployed five minutes in, and the release held the Hub's
+place for 41 minutes while the desktop and CLI builds ran, so a Hub fix asked
+for at 19:34 UTC started deploying at 19:55. Of the last 39 releases, 13
+carried the Hub together with the CLI or desktop and ran 14 to 57 minutes; a
+Hub release alone takes 4 to 6.
+
+A beta train whose selection includes the Hub and anything else now ships only
+the Hub. A request that names more than the Hub is shipped for its Hub, and
+the rest of it stays open under the same request id; requests without the Hub
+stay open as they are. The train wakes the next one, which ships the rest
+beside or right after that Hub release by the existing dependency rule. The
+rest of a request therefore starts a few minutes later than before, and the
+Hub's place frees after a Hub deploy. Stable trains, the dependency rule,
+concurrency groups, authorization and recovery are unchanged; nothing is
+cancelled. A request whose Hub part is in flight while its rest is open is no
+longer read as a half-finished move, which is now decided by request id and
+scope together.
+
+Release train only (`scripts/release-train.mjs`,
+`production-release-request.yml`); no product, schema or client change.
+Recovery is a CI-validated main revision reverting this change: open and
+in-flight refs written by either version are read by both.
+
 ## Unreleased: the connector list says a subscription is sent, not called
 
 `xmatrix connector list` printed `read   @github:subscribe:...`. The manifest's
