@@ -26,11 +26,15 @@ Examples:
   xmatrix send <channel> --launch "@codex repo:owner/repo fix the failing test"
   xmatrix send <channel> "@codex:1 Please review the result"
   xmatrix send <channel> --reply-to <message-id> "Result"
+  xmatrix send <channel> --file reply.md
+  xmatrix send <channel> --attachment report.pdf "The report is attached"
   xmatrix send <channel> --wait "@Daniel Need the missing decision: ..."
   xmatrix send <channel> --final-for <execution-uuid> "Finished"
   xmatrix send <channel> --recover <saved-operation-id>
 
-For multiline Markdown use --stdin. Use --file once per attachment. After an
+The message text is the body: arguments, --stdin for multiline Markdown, or
+--file <path> when the text is already in a file. --attachment <path> attaches
+a file beside that body, once per attachment; it never carries the reply. After an
 uncertain send, recover the saved operation or reuse its --message-id; never
 repeat the work merely to resend its result. A reply to a message marked
 "via Channel <id>" needs --reply-to so the answer returns to its source.

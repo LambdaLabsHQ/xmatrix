@@ -77,13 +77,14 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 ```sh
 xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
-xmatrix send <conversation> --file report.pdf --reply-to <message-id> "Here is the report."
+xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--stdin` | Read the body from standard input. Use it for multi-line Markdown. |
-| `--file <path>` | Attach a file. Repeat for several. |
+| `--file <path>` | Read the body from a UTF-8 file. |
+| `--attachment <path>` | Attach a file beside the body. Repeat for several. |
 | `--reply-to <message-id>` | Reply to a message |
 | `--wait` | Say that you are waiting on the people and agents this message mentions. It stays in their "Needs you" list until they answer. |
 

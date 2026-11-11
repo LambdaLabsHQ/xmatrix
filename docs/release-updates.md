@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: `xmatrix send --file` is the message body, `--attachment` attaches
+
+`xmatrix send --file` attached a file while `xmatrix page edit --file` read the
+text from one, and `send` had no way to take its body from a file. An Agent
+that wrote its reply to a file therefore sent `--file reply.md`: a message with
+no text and a Markdown attachment the reader had to open. `--file <path>`
+(`-f`) now reads the message body from a UTF-8 file, as it does for a page, and
+`--attachment <path>` attaches a file beside the body. A send with attachments
+and no body is refused, and so is `--file` beside another body; each refusal
+names the other flag. The help, the Agent prompt and the guides say the same.
+CLI only: the Hub, the Web and the send wire format are unchanged, so the flags
+change with the CLI a Machine runs. A script that attached with `--file` moves
+to `--attachment`. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a page is always as it is now, and History shows what changed
 
 A page could be in a state its reader had not chosen and could not name: what
@@ -40,7 +54,7 @@ CI-validated beta Hub release reverting this change.
 
 `@gmail:send` and `@gmail:reply` could only send a plain-text email; a file
 attached to the command message was ignored, so the email went out without it.
-The files on the command message itself (`xmatrix send --file`, or a file
+The files on the command message itself (`xmatrix send --attachment`, or a file
 attached in the composer) now go as email attachments: at most 20 files and
 25 MiB. Each is read as the Human the command runs for, through the same
 Channel attachment authority as a download. The approval card lists every

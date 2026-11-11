@@ -788,7 +788,10 @@ mod tests {
             ]
         );
         assert_eq!(reason.as_deref(), Some("sales report"));
-        assert_eq!(propose, vec!["connector:appstoreconnect/vendorNumber=87654321".to_string()]);
+        assert_eq!(
+            propose,
+            vec!["connector:appstoreconnect/vendorNumber=87654321".to_string()]
+        );
         assert!(wait);
         assert!(!json);
         assert!(Cli::try_parse_from(["xmatrix", "request", "settings"]).is_err());
@@ -2452,6 +2455,33 @@ mod invocation_diagnostic_args_tests {
         );
     }
     #[test]
+    fn send_reads_its_body_from_a_file_and_attaches_with_attachment() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "send",
+            "channel",
+            "--file",
+            "reply.md",
+            "--attachment",
+            "a.png",
+            "--attachment",
+            "b.pdf",
+        ])
+        .expect("send should parse a body file and attachments");
+        let Some(Commands::Send(SendArgs {
+            file, attachments, ..
+        })) = cli.command
+        else {
+            panic!("expected send command");
+        };
+        assert_eq!(file, Some(PathBuf::from("reply.md")));
+        assert_eq!(
+            attachments,
+            [PathBuf::from("a.png"), PathBuf::from("b.pdf")]
+        );
+    }
+
+    #[test]
     fn send_recovery_cannot_change_the_saved_operation() {
         for prefix in [
             vec!["xmatrix", "send", "channel"],
@@ -2471,6 +2501,7 @@ mod invocation_diagnostic_args_tests {
             for extra in [
                 vec!["new body"],
                 vec!["--file", "new.txt"],
+                vec!["--attachment", "new.png"],
                 vec!["--stdin"],
                 vec!["--escape-newlines"],
                 vec!["--message-id", "different"],
@@ -2609,14 +2640,17 @@ pub struct SendArgs {
     #[arg(long)]
     pub launch: bool,
     /// Recover a saved send by checking its receipt before retrying the same message
-    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "launch", "files", "stdin", "escape_newlines", "message"])]
+    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "launch", "attachments", "stdin", "file", "escape_newlines", "message"])]
     pub recover: Option<String>,
-    /// File attachment path. Repeat for multiple files.
-    #[arg(long = "file")]
-    pub files: Vec<PathBuf>,
+    /// Attach this file to the message, beside its body. Repeat for multiple files.
+    #[arg(long = "attachment", value_name = "PATH")]
+    pub attachments: Vec<PathBuf>,
     /// Read the full message body from stdin. Use this for multi-line Markdown.
     #[arg(long)]
     pub stdin: bool,
+    /// Read the full message body from this UTF-8 file, as `xmatrix page edit --file` reads a page. It does not attach the file.
+    #[arg(long, short = 'f', value_name = "PATH")]
+    pub file: Option<PathBuf>,
     /// Decode literal \n and \r\n sequences in the message arguments into real newlines.
     #[arg(long)]
     pub escape_newlines: bool,

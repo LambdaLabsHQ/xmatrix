@@ -977,7 +977,7 @@ mod tests {
             "principal cannot access this channel".into()
         )));
         assert!(!agent_send_may_use_run_token(&CliError::Launch(
-            "Message or --file is required".into()
+            "A message needs a body".into()
         )));
     }
 
