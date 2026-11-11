@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@5866bf327c23914e3aa0971c6e482554a307c3d5; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@da755aeefe40f233998eb2b6fedeb59de752cb58; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /** All language values have a lossless JSON representation. */
 export type Value =
   | { type: "unit" }
@@ -13,6 +13,9 @@ export type Value =
   | { type: "builtin"; name: string }
   | { type: "request"; id: string }
   | { type: "source"; kind: "fact" | "stream"; name: string; args: Value[]; labels: Record<string, Value> };
+
+/** Plain data: what a ledger holds and what crosses a restart. */
+export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 
 export const unit: Value = { type: "unit" };
 export const text = (value: string): Value => ({ type: "string", value });
@@ -54,7 +57,9 @@ export function show(value: Value): string {
       }
       return `${ms}ms`;
     }
-    case "participant": return `@${value.name}${value.instance === null ? "" : `:${value.instance}`}`;
+    case "participant":
+      if (value.name === "anyOf") return `anyOf(${show(value.labels.of)}${value.labels.except ? `, ~except=${show(value.labels.except)}` : ""})`;
+      return `@${value.name}${value.instance === null ? "" : `:${value.instance}`}`;
     case "ref": return `${value.kind}"${value.value}"`;
     case "variant": return value.name + (value.args.length ? `(${value.args.map(show).join(", ")})` : "");
     case "list": return `[${value.values.map(show).join(", ")}]`;
@@ -64,4 +69,13 @@ export function show(value: Value): string {
     case "request": return `<request ${value.id}>`;
     case "source": return `<${value.kind} ${value.name}>`;
   }
+}
+/** Stable key for a value, independent of object insertion order: names a fact, a stream or a request's content. */
+export function eventKey(value: Value): string {
+  function canonical(item: unknown): unknown {
+    if (Array.isArray(item)) return item.map(canonical);
+    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => [k, canonical(v)]));
+    return item;
+  }
+  return JSON.stringify(canonical(value));
 }

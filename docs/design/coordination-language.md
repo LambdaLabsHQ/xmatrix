@@ -40,29 +40,18 @@ This proposal preserves that distinction.
 
 ## Separate language semantics from recovery machinery
 
-A continuation describes the remaining computation. It does not require native
-stack serialization, a particular surface syntax, CPS bytecode or an exposed
-`call/cc`. A compiler can represent the same direct-style program with explicit
-frames, a state machine, resumable functions or another intermediate form.
-
 The independent language owns program and effect semantics. The host owns
 identity resolution, admission, delivery, time, event observation, storage and
-result evidence. A possible evaluator interface is
-`(program, state, input) -> transition`, with the transition containing the next
-state and pending effects. This is an implementation model, not author syntax.
+result evidence.
 
-There are two candidates for an initial implementation:
+The durable state is a ledger of requests, and the host owns it. A program
+stores nothing of its own: no stack, snapshot or position. Each pass evaluates
+it from the top against the ledger and reports the requests that should exist
+now ([Norn spec §9](https://github.com/norn-lang/norn/blob/main/docs/spec.md#9-execution-model)). The
+evaluator interface is `(program, ledger, now) -> pass`. A crash, a restart or
+a second worker is another pass. Do not add another paid service for this.
 
-| Candidate | Benefit for this host | Cost to establish |
-| --- | --- | --- |
-| Serializable evaluator state plus an effect journal | State, pending intents and wait settlement can share the existing PG authority transaction; recovery need not replay the entire program history. | A versioned representation, fair execution and compatible state restoration must be implemented and tested. |
-| Deterministic execution on a durable workflow service | Existing timers, result journals and recovery machinery can be reused. Cloudflare Workflows is the current hosting match. | Step identity, version pinning, retention and reconciliation across the workflow-to-PG boundary remain explicit work. |
-
-The first is the leading architectural candidate, not a measured performance or
-cost winner. Choose after exercising both against the same source examples and
-failure cases. Do not add another paid service as part of this design study.
-
-Primary references: [Temporal history recovery](https://docs.temporal.io/encyclopedia/event-history/event-history-typescript)
+Other durable-execution systems, for comparison: [Temporal history recovery](https://docs.temporal.io/encyclopedia/event-history/event-history-typescript)
 and [version pinning](https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning),
 [Restate durable actions](https://docs.restate.dev/foundations/actions),
 [Cloudflare step rules](https://developers.cloudflare.com/workflows/build/rules-of-workflows/),
@@ -95,8 +84,7 @@ Agent's claim. Missing evidence stays unknown.
 
 ### Durable effects and single committed resumption
 
-Record the next program state and its pending effect intent atomically before
-dispatch. A durable dispatcher re-drives committed pending work after a crash.
+Record the requests a pass opens atomically before dispatch. A durable dispatcher re-drives committed pending work after a crash.
 The presence of `data.outbox` alone does not establish that such a consumer
 already exists. Reuse domain-owned launch and Run authority rather than creating
 a second lifecycle in the language runtime.
@@ -109,8 +97,8 @@ creating another attempt. If the recipient cannot deduplicate or report its
 outcome, expose uncertainty instead of blindly repeating an external action.
 
 Leases schedule workers; revision and placement/epoch checks fence stale commits.
-Pure computation can be reevaluated after a crash, while only one transition
-from the suspended state revision commits. Reply, timeout, cancellation and
+Pure computation can be reevaluated after a crash, while only one pass commits
+against a given ledger revision. Reply, timeout, cancellation and
 revocation arbitrate at that same owning boundary. Late or losing replies remain
 evidence and cannot consume the wait again.
 
@@ -143,16 +131,19 @@ wait in a race is separate from cancelling the work it was observing.
 
 ### Versioned code and current authority
 
-Pin each execution's definition and imported dependency closure. Preserve the
-compiler/IR version, persisted-value schema and host effect ABI needed to resume.
-Content hashes identify code; they do not solve incompatible state schemas or
-runtime upgrades. Unsupported state must produce a visible migration requirement
-instead of silently running a different program.
+A program can change while it runs
+([Norn spec §11.2](https://github.com/norn-lang/norn/blob/main/docs/spec.md#112-changing-a-program-while-it-runs)).
+Evaluating the edited program against the ledger without committing gives its
+difference: the requests it would open, the open requests it no longer reaches
+and the deadlines it moves. Show that difference to whoever applies the edit.
+A request the edited program still makes is the same request. An upgrade of the
+language, evaluator or standard library is an edit; a program whose difference
+is not empty stops with a notice to its author and does not go on silently.
 
 Every new host effect rechecks current owner membership, source lifecycle,
-recipient grants, resource scope and policy. A suspended program stores scoped
+recipient grants, resource scope and policy. The ledger stores scoped
 credential references, never credentials or live authorization tokens. Private
-captured values remain protected runtime data, not automatic Page content or
+values in it remain protected runtime data, not automatic Page content or
 public debugging output. A participant reference does not authorize impersonation.
 
 Executable Page content requires a deliberate declaration and the existing
@@ -160,10 +151,9 @@ policy-controlled execution admission. Ordinary examples, quoted code and
 imported content remain content. Editing a Page alone cannot expand execution
 authority.
 
-Changing executable code creates a new version. Define whether active work drains,
-is cancelled or undergoes an explicit migration; avoid accidentally dispatching
-both definitions or transplanting old frames into new code. Source removal must
-not leave hidden authorized work behind. Structured child executions have their
+An edit cancels nothing in flight. An open request the edited program no longer
+reaches is listed, and whoever applies the edit decides whether to cancel it or
+leave it open. Source removal must not leave hidden authorized work behind. Structured child executions have their
 own request identities and do not duplicate approvals or in-flight effects.
 
 ### Distribution and storage
@@ -180,26 +170,26 @@ global execution singleton is unnecessary.
 
 ## Incremental migration
 
-The first stage is specified in [comparison without dispatch](norn-shadow-comparison.md):
-separate observation, candidate evaluation and comparison records, with no
-candidate action transport and explicit causal evidence/authority-time rules.
-The first [operator-driven PG journal](../architecture/norn-shadow-comparison.md)
-supports an exact execution-receipt mapping. No automatic production observer
-or cohort is enabled.
+The ledger of requests is the durable state, and a program is a pure
+computation over it (Norn spec [§9](https://github.com/norn-lang/norn/blob/main/docs/spec.md#9-execution-model) and
+[§11.2](https://github.com/norn-lang/norn/blob/main/docs/spec.md#112-changing-a-program-while-it-runs)).
+The earlier shadow comparison, which stored a candidate's machine state beside
+existing executions, was retired with that stored-state runtime. The first host
+increment will let Agents make typed requests of each other. The Hub carries
+the current Norn checker, evaluator and ledger as a
+[pinned snapshot](../../packages/hub/src/vendor/norn/README.md); nothing in
+production calls it yet.
 
-1. Compare a non-dispatching candidate against selected existing reminders or a
-   release-verification chain. Only the existing path executes work during this
-   comparison; the candidate records intended waits, wakes and outcomes.
-2. Move one opt-in path to one dispatcher with an atomic ownership/generation
+1. Move one opt-in path to one dispatcher with an atomic ownership/generation
    transition. Demonstrate restart, late reply, cancellation and revocation before
    expanding. Old and new schedulers cannot both dispatch an occurrence.
-3. Keep `--wait` and `message_attention` display behavior compatible. Current
+2. Keep `--wait` and `message_attention` display behavior compatible. Current
    attention can clear on speech, reaction or Done; none automatically constitutes
    a typed decision or completion of the new request.
-4. Preserve Schedule cadence, coalescing, trigger authorization and occurrence
+3. Preserve Schedule cadence, coalescing, trigger authorization and occurrence
    identity through adapters. Simple Page task lines can compile to library calls
    after equivalence is established.
-5. Migrate PR observation, cards and lifecycle recovery one domain at a time.
+4. Migrate PR observation, cards and lifecycle recovery one domain at a time.
    Retire an old producer only when its replacement preserves causal evidence,
    visible failures and negative/recovery coverage.
 
@@ -220,11 +210,7 @@ These are proposed prototype checks, not tests already passed by this document.
 | Crash after dispatch, before receipt | Reconcile original work; expose uncertainty where confirmation is unavailable. |
 | Reply races timeout, revocation or source deletion | One authoritative resolution; late evidence does not revive the wait. |
 | Cancellation during an Agent's work | Revoked authority and process-stop confirmation remain distinct. |
-| A definition, library or VM ABI changes | Resume a supported pinned version or visibly require migration. |
+| A program, library or evaluator changes | The difference against the ledger is shown; a program whose difference is not empty stops with a notice. |
 | Event bursts occur while a task runs | Preserve declared serialization, coalescing or concurrency. |
 | Pure code loops without effects | Execution yields fairly and can be cancelled without blocking others. |
 | A fork or cross-Space handoff carries a handle | It neither duplicates approval rights nor grants access by reference. |
-
-Compare state/journal size, recovery work, implementation complexity, deployment
-footprint and upgrade behavior using the same language examples and host adapter.
-The resulting evidence selects a backend; surface syntax remains independent.

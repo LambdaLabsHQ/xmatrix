@@ -1,3 +1,0 @@
-// Replace the participant and binding reference with the exact admitted source.
-let report = run(@codex:2, "execution:<binding-id>")?
-Done(report.receipt)
