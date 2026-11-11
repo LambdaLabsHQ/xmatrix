@@ -9,7 +9,7 @@ pub use message_receipt::cmd_message_receipt;
 
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use colored::Colorize;
@@ -595,6 +595,8 @@ pub(crate) struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
     pub read_stdin: bool,
+    /// A UTF-8 file holding the whole message body.
+    pub body_file: Option<&'a Path>,
     pub escape_newlines: bool,
     pub message_id: Option<&'a str>,
     pub final_for: Option<&'a str>,
@@ -615,6 +617,7 @@ pub(crate) async fn cmd_send(
         message_parts,
         attachment_paths,
         read_stdin,
+        body_file,
         escape_newlines,
         message_id,
         final_for,
@@ -656,11 +659,12 @@ pub(crate) async fn cmd_send(
         mentions_not_launched: Vec<String>,
     }
 
-    let message = build_send_message_body(message_parts, read_stdin, escape_newlines).await?;
-    let attachments = load_channel_file_attachments(attachment_paths)?;
-    if message.is_empty() && attachments.is_empty() {
-        return Err(CliError::Launch("Message or --file is required".into()));
+    let message =
+        build_send_message_body(message_parts, read_stdin, body_file, escape_newlines).await?;
+    if message.is_empty() {
+        return Err(CliError::Launch(missing_body_message(attachment_paths)));
     }
+    let attachments = load_channel_file_attachments(attachment_paths)?;
     let channel_id = &resolve_channel_reference(hub_url, token, channel_id).await?;
 
     let sender = AgentSenderIdentity::from_env();
@@ -1621,8 +1625,9 @@ pub async fn cmd_send_args(
         wait,
         launch,
         recover,
-        files,
+        attachments,
         stdin,
+        file,
         escape_newlines,
         message,
     } = args;
@@ -1636,8 +1641,9 @@ pub async fn cmd_send_args(
         &channel_id,
         SendOptions {
             message_parts: &message,
-            attachment_paths: &files,
+            attachment_paths: &attachments,
             read_stdin: stdin,
+            body_file: file.as_deref(),
             escape_newlines,
             message_id: message_id.as_deref(),
             final_for: final_for.as_deref(),
@@ -1649,15 +1655,44 @@ pub async fn cmd_send_args(
     .await
 }
 
-/// Message bodies (`send`, `channel edit-message`) can be resent on `--stdin`.
+/// An edited message body can be resent on `--stdin`.
 const MESSAGE_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
     stdin: true,
     file_flag: None,
 };
 
+/// A send's body can also be resent from a file.
+const SEND_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
+    stdin: true,
+    file_flag: Some("--file"),
+};
+
+/// Why a send without a body was refused. A message is its text; a file sent alone is a reply
+/// nobody can read in the conversation.
+fn missing_body_message(attachment_paths: &[PathBuf]) -> String {
+    let Some(first) = attachment_paths.first() else {
+        return "A message needs a body: pass it as arguments, on --stdin, or with --file <path>."
+            .into();
+    };
+    let path = first.display();
+    format!(
+        "Nothing was sent: the message has no body, and --attachment only attaches a file. If {path} holds the reply, send its text with `--file {path}`. To attach it, add a body that says what it is."
+    )
+}
+
+/// Why `--file` beside another body was refused: it is the body, and the sender most likely
+/// meant to attach the file.
+fn second_body_message(path: &Path) -> String {
+    let path = path.display();
+    format!(
+        "Nothing was sent: --file reads the message body from {path}, and this send already has a body. To attach {path} to that body, use `--attachment {path}`."
+    )
+}
+
 async fn build_send_message_body(
     message_parts: &[String],
     read_stdin: bool,
+    body_file: Option<&Path>,
     escape_newlines: bool,
 ) -> error::Result<String> {
     let arguments = message_parts.join(" ");
@@ -1665,13 +1700,20 @@ async fn build_send_message_body(
         "message",
         &arguments,
         TextSource::Argument,
-        MESSAGE_TEXT_ROUTES,
+        SEND_TEXT_ROUTES,
     )?;
-    let mut message = if read_stdin {
+    let mut message = if let Some(path) = body_file {
+        if read_stdin || !arguments.trim().is_empty() {
+            return Err(CliError::Launch(second_body_message(path)));
+        }
+        let text = text_input::read_text_file(path)?;
+        text_input::ensure_text_intact("message", &text, TextSource::File, SEND_TEXT_ROUTES)?;
+        text
+    } else if read_stdin {
         let mut bytes = Vec::new();
         tokio::io::stdin().read_to_end(&mut bytes).await?;
         let input = text_input::decode_utf8_input(bytes, "stdin")?;
-        text_input::ensure_text_intact("message", &input, TextSource::Stdin, MESSAGE_TEXT_ROUTES)?;
+        text_input::ensure_text_intact("message", &input, TextSource::Stdin, SEND_TEXT_ROUTES)?;
         if message_parts.is_empty() {
             input
         } else if input.trim().is_empty() {
@@ -2515,7 +2557,7 @@ async fn cmd_channel_chat(
                             token,
                             channel_id,
                             SendOptions { message_parts: &[body.to_string()], attachment_paths: &[],
-                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false,
+                                read_stdin: false, body_file: None, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false,
                                 // A person typing here starts the Agents they summon, as in the web composer.
                                 launch: true },
                         ).await?;
@@ -2986,10 +3028,11 @@ mod tests {
 
     use super::{
         OpenedChannelThread, agent_sender_env_value, attachment_visibility_scope_id,
-        channel_create_body, channel_entity_token, cmd_channel_create, decode_send_newline_escapes,
-        format_history_message_at, is_agent_execution_context, is_intake,
-        process_descends_from_tracked_pid, resolve_channel_selector,
-        should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
+        build_send_message_body, channel_create_body, channel_entity_token, cmd_channel_create,
+        decode_send_newline_escapes, format_history_message_at, is_agent_execution_context,
+        is_intake, missing_body_message, process_descends_from_tracked_pid,
+        resolve_channel_selector, should_refuse_user_attributed_send_without_agent_identity,
+        tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
     use xmatrix_cli_core::protocol::{
@@ -3365,6 +3408,36 @@ mod tests {
             decode_send_newline_escapes("Title\\n\\n- item\\r\\nnext"),
             "Title\n\n- item\nnext"
         );
+    }
+
+    #[tokio::test]
+    async fn a_reply_written_to_a_file_is_sent_as_the_body() {
+        let path =
+            std::env::temp_dir().join(format!("xmatrix-send-body-{}.md", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "\u{feff}# 结论\n\n没有新回复。\n").unwrap();
+        let body = build_send_message_body(&[], false, Some(&path), false).await;
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(body.unwrap(), "# 结论\n\n没有新回复。");
+    }
+
+    #[tokio::test]
+    async fn a_file_beside_a_body_is_refused_and_points_at_attachment() {
+        let path = std::path::Path::new("report.pdf");
+        for (parts, stdin) in [(vec!["The report".to_string()], false), (vec![], true)] {
+            let refusal = build_send_message_body(&parts, stdin, Some(path), false)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(refusal.contains("--attachment report.pdf"), "{refusal}");
+        }
+    }
+
+    #[test]
+    fn an_attachment_sent_without_a_body_is_refused_with_both_ways_out() {
+        let refusal = missing_body_message(&[std::path::PathBuf::from("reply.md")]);
+        assert!(refusal.contains("--file reply.md"), "{refusal}");
+        assert!(refusal.contains("add a body"), "{refusal}");
+        assert!(missing_body_message(&[]).contains("--file <path>"));
     }
 
     #[test]

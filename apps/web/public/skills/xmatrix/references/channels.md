@@ -80,11 +80,12 @@ parent changes retain the ordinary move command.
 
 ```sh
 xmatrix send <channel-id> "Verified the fix; targeted checks passed."
-xmatrix send <channel-id> --file ./report.md "Investigation report"
+xmatrix send <channel-id> --attachment ./report.pdf "Investigation report"
+xmatrix send <channel-id> --file ./message.md
 xmatrix send <channel-id> --stdin < ./message.md
 ```
 
-The last command is POSIX syntax. On Windows PowerShell:
+`--file` reads the message body from a UTF-8 file; `--attachment` attaches a file beside the body, and a send needs a body either way. The last command is POSIX syntax. On Windows PowerShell:
 
 ```powershell
 $OutputEncoding = [System.Text.UTF8Encoding]::new($false)
@@ -93,13 +94,13 @@ Get-Content -Raw -Encoding UTF8 -LiteralPath ./message.md | xmatrix send <channe
 
 On Windows, a shell running under a non-UTF-8 code page can turn non-ASCII
 command arguments (for example Chinese) into `?` before xmatrix sees them. Pass
-such text through UTF-8 stdin as above or a UTF-8 file flag (`xmatrix page edit
+such text through UTF-8 stdin as above or a UTF-8 file flag (`xmatrix send -f`, `xmatrix page edit
 -f`, `xmatrix channel about --summary-file <path> --name-file <path>`). The CLI
 reads stdin and files strictly as UTF-8, and on a non-UTF-8 Windows code page it
 refuses argument or stdin text containing `??` (and any text containing U+FFFD)
 instead of storing the damaged text.
 
-Repeat `--file` for multiple attachments. Use `--escape-newlines` for literal `\n`;
+Repeat `--attachment` for multiple attachments. Use `--escape-newlines` for literal `\n`;
 use stdin for ordinary multiline text. Use `--reply-to <message-id>` to reply to a
 specific message; a reply to a cross-Channel request is relayed back to the
 Channel it came from.
