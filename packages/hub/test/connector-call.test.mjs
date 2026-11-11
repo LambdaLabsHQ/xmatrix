@@ -254,6 +254,19 @@ test("caller scope is server-owned; human, spoofed identity, malformed and overs
   }
 });
 
+test("a command that runs only as a Channel message says to send it; nothing is recorded or called", async () => {
+  for (const [command, error] of [
+    ["@github:subscribe:LambdaLabsHQ/xmatrix", /^@github:subscribe runs only as a Channel message; send it with xmatrix send /u],
+    ["@github:not_an_action:LambdaLabsHQ/xmatrix", /^Unknown connector action$/u],
+    ["@nothing:read:1", /^Unknown connector action$/u]]) {
+    const f = fixture();
+    const { result, calls } = await fetched([], () => f.request({ command }));
+    assert.equal(result.status, 400, command);
+    assert.match((await result.json()).error, error);
+    assert.equal(calls.length, 0); assert.deepEqual(f.appends, []); assert.deepEqual(f.persisted, []);
+  }
+});
+
 test("provider failures remain caller-only; unexpected errors cannot enter error reports with private content", async () => {
   for (const response of [{ body: { status: 403, data: { error: { message: privateText } } } }, { error: new Error(privateText) }]) {
     const f = fixture();

@@ -262,6 +262,8 @@ export type AppConnectorProviderExecutionResult =
       type: "terminal";
       status: Exclude<AppConnectorExecutionStatus, "queued" | "completed">;
       reason: string;
+      /** The repository a refused statement named, so its receipt can say whose account to link. */
+      repository?: { owner: string; repo: string };
     };
 
 export interface AppConnectorProviderExecutionContext {
@@ -1190,7 +1192,7 @@ export async function executeAppConnectorProviderAction(
         capabilities: result.capabilities,
       };
     } catch (error) {
-      return githubConnectorTerminalFailure(error);
+      return githubConnectorTerminalFailure(error, input.repository);
     }
   }
 
@@ -1211,7 +1213,7 @@ export async function executeAppConnectorProviderAction(
         runId: result.runId,
       };
     } catch (error) {
-      return githubConnectorTerminalFailure(error);
+      return githubConnectorTerminalFailure(error, input.repository);
     }
   }
 
@@ -1234,7 +1236,7 @@ export async function executeAppConnectorProviderAction(
         inputs: result.inputs,
       };
     } catch (error) {
-      return githubConnectorTerminalFailure(error);
+      return githubConnectorTerminalFailure(error, parsed.repository);
     }
   }
 
@@ -1252,7 +1254,7 @@ export async function executeAppConnectorProviderAction(
         capabilities,
       };
     } catch (error) {
-      return githubConnectorTerminalFailure(error);
+      return githubConnectorTerminalFailure(error, repositoryRef);
     }
   }
   if (!issueRef) {
@@ -1335,7 +1337,7 @@ export async function executeAppConnectorProviderAction(
       capabilities: fetched.capabilities,
     };
   } catch (error) {
-    return githubConnectorTerminalFailure(error);
+    return githubConnectorTerminalFailure(error, issueRef);
   }
 }
 
@@ -2430,9 +2432,12 @@ async function fetchGitHubJson(
   return responseText ? JSON.parse(responseText) : {};
 }
 
-function githubConnectorTerminalFailure(error: unknown): AppConnectorProviderExecutionResult {
+function githubConnectorTerminalFailure(
+  error: unknown, repository?: { owner: string; repo: string }
+): AppConnectorProviderExecutionResult {
   const reason = githubConnectorErrorReason(error);
-  return { type: "terminal", status: reason.startsWith("missing_capabilities:") ? "blocked" : "failed", reason };
+  return { type: "terminal", status: reason.startsWith("missing_capabilities:") ? "blocked" : "failed", reason,
+    ...(repository ? { repository: { owner: repository.owner, repo: repository.repo } } : {}) };
 }
 
 function githubConnectorErrorReason(error: unknown): string {

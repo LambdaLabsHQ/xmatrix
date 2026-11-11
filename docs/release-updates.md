@@ -1,5 +1,36 @@
 # Release Updates
 
+## Unreleased: the connector list says a subscription is sent, not called
+
+`xmatrix connector list` printed `read   @github:subscribe:...`. The manifest's
+`read` is the approval class, and every other `read` row is run with `xmatrix
+call`, but subscribe has no call executor: it changes the Channel it is sent in,
+and `xmatrix call` answered `Unknown connector action`. `GET
+/api/connectors/usage` now adds `via` (`call` or `send`) to each action and the
+description of a read without a call executor says to send it with `xmatrix
+send`; the CLI labels that row `send`. `xmatrix call` on a command the provider
+runs only from a Channel message now answers that it is sent with `xmatrix
+send`. No action's `effect` or approval changed. An older CLI ignores `via` and
+still prints `read`, with the new description; a new CLI against an older Hub
+prints `read` as before. Hub and CLI. Recovery is a CI-validated beta reverting
+this change.
+
+## Unreleased: a GitHub command the Space cannot reach says who links the account
+
+A GitHub command against a repository whose App installation exists but is not
+linked to the Space answered `GitHub subscribe: failed; github installation not
+linked to space.`, the internal code with its underscores removed. The receipt
+now names the repository and says a Space admin links its account in the
+Space's Apps → GitHub (Find my GitHub accounts, then Link), and that installing
+the App on github.com alone does not link it. It carries the existing
+`reconnect` fix, so the receipt draws the settings card that opens Apps →
+GitHub. A Space with no linked installation gets the same treatment; a
+repository the App is not installed on gets a sentence and no card, because a
+mistyped name gets that answer too. The execution record and every other
+caller keep the machine codes. The card does not settle by itself after
+linking, because linking an installation does not run a connection check. Hub
+only, no schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
 ## Unreleased: an Agent's own connector receipt no longer refuses its next send
 
 An Agent that ran `xmatrix call "@googlesearchconsole:list_sites:*"` or sent a
