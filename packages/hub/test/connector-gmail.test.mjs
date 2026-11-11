@@ -9,7 +9,7 @@ import { agentMailboxOwner, GMAIL_SUBSCRIPTIONS, mayUseMailbox, parseMailboxes }
 import { grantFieldsForgottenOnDisconnect } from "../src/connectors/oauth.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
-import { verifyGitHubAppState } from "../src/index-shared.ts";
+import { verifyOAuthStateClaims } from "../src/connectors/oauth-state.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 
 const composio = { CONNECTOR_GMAIL_CLIENT_ID: "ac_gmailreadonly", CONNECTOR_COMPOSIO_API_KEY: "composio-project-key" };
@@ -38,7 +38,7 @@ test("Connect signs in through Composio as a per-attempt user and stores only th
   const callback = new URL(link.body.callback_url);
   assert.equal(callback.origin + callback.pathname, "https://hub.test/api/connectors/oauth/callback");
   const state = callback.searchParams.get("state");
-  const claims = await verifyGitHubAppState(state, "composio-project-key");
+  const claims = await verifyOAuthStateClaims(state, "composio-project-key");
   assert.deepEqual([link.body.auth_config_id, link.body.user_id], ["ac_gmailreadonly", `xmatrix:space-1:${claims.nonce}`]);
 
   const account = { id: "ca_mailbox1", status: "ACTIVE", auth_config: { id: "ac_gmailreadonly" } };
