@@ -136,7 +136,9 @@ Space connection tokens remain separate encrypted connection credentials.
 
 One-click connects verify current owner/admin membership in the target Space
 before signing state or creating a Composio account. The signed, expiring state
-binds the provider, Space and initiating admin. The provider's redirect to `/api/connectors/oauth/callback`
+binds the provider, Space and initiating admin. A provider that caps the
+`state` parameter (X accepts 500 characters) gets a compressed payload, and a
+state that would exceed the declared limit is refused rather than sent. The provider's redirect to `/api/connectors/oauth/callback`
 carries no xMatrix session, so the Hub only checks the state there and hands the
 grant to the app's `/connect/oauth` page. That page completes it with
 `POST /api/connectors/oauth/complete` as the signed-in user, and the Hub

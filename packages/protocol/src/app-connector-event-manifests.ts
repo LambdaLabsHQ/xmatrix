@@ -92,7 +92,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     description: "Connect company and personal X accounts separately. Every command names its account; publishing asks for approval by default. Only the connecting member and their Agents use that account. Results are visible in the calling Channel. API usage is billed by X; quote-posting requires Enterprise API access.",
     oauth: { authorizeUrl: "https://x.com/i/oauth2/authorize", tokenUrl: "https://api.x.com/2/oauth2/token",
       scopes: ["tweet.read", "users.read", "tweet.write", "media.write", "offline.access"],
-      tokenField: "accounts", clientAuth: "basic", pkce: "S256" },
+      tokenField: "accounts", clientAuth: "basic", pkce: "S256", stateLimit: 500 },
     credentials: [{ id: "accounts", label: "X accounts", managed: true,
       description: "Connect adds an independent encrypted grant for each account. Never entered by hand." }],
     actions: [

@@ -20,7 +20,11 @@ and register exactly
 The Hub is a confidential client using Authorization Code with S256 PKCE and
 signed, expiring state bound to the original Space and signed-in admin. The
 authenticated completion step must be performed by the same admin who started
-the flow. An App-only bearer token cannot replace these user grants.
+the flow. An App-only bearer token cannot replace these user grants. X refuses
+an authorize request whose `state` is longer than 500 characters with
+`invalid_request` before it shows consent, so the Hub carries those claims in a
+compressed signed payload and refuses to start a connect that would exceed the
+provider's limit.
 
 The requested scope set is `tweet.read users.read tweet.write media.write
 offline.access`. It supports the exposed read, publishing and media operations

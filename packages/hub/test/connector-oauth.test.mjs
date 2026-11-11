@@ -48,9 +48,7 @@ test("the authorize URL carries a state bound to provider, Space and admin, whic
   assert.equal(verified.spaceId, "space-1");
   assert.equal(verified.userId, "admin-1");
   const [payload, signature] = state.split(".");
-  const tampered = JSON.parse(Buffer.from(payload, "base64url").toString());
-  tampered.spaceId = "space-2";
-  assert.equal(await verifyOAuthState(env, `${Buffer.from(JSON.stringify(tampered)).toString("base64url")}.${signature}`), undefined);
+  assert.equal(await verifyOAuthState(env, `${payload.slice(0, 12)}${payload[12] === "A" ? "B" : "A"}${payload.slice(13)}.${signature}`), undefined);
   assert.equal(await verifyOAuthState({ ...env, CONNECTOR_JIRA_CLIENT_SECRET: "rotated" }, state), undefined);
   const expired = new URL(await oauthAuthorizeUrl(client, { spaceId: "s", userId: "u", redirectUri: "https://hub.test/cb",
     now: Date.now() - 11 * 60_000 })).searchParams.get("state");
