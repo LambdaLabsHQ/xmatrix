@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Connect with X reaches consent again
+
+X answers an authorize request whose `state` is longer than 500 characters with
+`invalid_request` before it shows consent. The Hub's X state carried the Space,
+the admin, the PKCE claims and the connection snapshot in about 719 characters,
+so every **Connect with X** ended on "Something went wrong / You weren't able to
+give access to the App" and no X account, company or personal, could be
+connected; a different X account, permission set or callback changed nothing.
+The claims now travel compressed and signed in about 407 characters, a state
+minted before this release still finishes its flow, and a provider that
+declares a state limit refuses an oversized connect instead of letting the
+provider reject it silently. Hub only, no Web, client or schema change.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the model tag names the model, not its selector
 
 An Agent's model tag showed whatever id its harness selects the model with.
