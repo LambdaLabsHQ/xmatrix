@@ -1042,10 +1042,15 @@ export class PostgresMessageRepository {
 
   /**
    * How many messages after `afterSequence` the sender has not read: what
-   * people, Agents and Apps wrote there, except the sender's own messages and
-   * the Hub's own facts (system notices, activity entries). `replay` is set
-   * when `messageId` is already committed, so a retried send is answered by
-   * its receipt rather than refused for messages that came after it.
+   * people, Agents and Apps wrote there, except the sender's own messages,
+   * the Hub's own facts (system notices, activity entries) and an App's
+   * receipt for a command the sender itself wrote in this Channel. Only the
+   * Hub writes App messages, and it names a receipt `system:<command message
+   * id>:<app>`; the command is then one primary-key read, and it must be the
+   * sender's own row here. A receipt named any other way still counts.
+   * `replay` is set when `messageId` is already committed, so a retried send
+   * is answered by its receipt rather than refused for messages that came
+   * after it.
    */
   async unreadSince(input: {
     requestId: string;
@@ -1062,15 +1067,21 @@ export class PostgresMessageRepository {
     const afterSequence = nonnegative(input.afterSequence, "afterSequence");
     return this.inSpace(requestId, "message.unread-since", spaceId, async (transaction) => {
       const row = (await transaction.query<QueryResultRow & { unread: string | number; replay: boolean }>({
-        name: "message_unread_since_v1",
+        name: "message_unread_since_v2",
         text: `SELECT EXISTS(SELECT 1 FROM data.messages
               WHERE space_id=$1 AND channel_id=$2 AND message_id=$3) AS replay,
-            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages
-              WHERE space_id=$1 AND channel_id=$2 AND timeline_sequence>$4
-                AND deleted_at IS NULL AND recalled_at IS NULL
-                AND author_kind IN ('user','agent','app')
-                AND NOT (author_kind=$5 AND author_id=$6)
-                AND message_kind<>$7
+            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages m
+              WHERE m.space_id=$1 AND m.channel_id=$2 AND m.timeline_sequence>$4
+                AND m.deleted_at IS NULL AND m.recalled_at IS NULL
+                AND m.author_kind IN ('user','agent','app')
+                AND NOT (m.author_kind=$5 AND m.author_id=$6)
+                AND m.message_kind<>$7
+                AND NOT (m.author_kind='app' AND EXISTS (SELECT 1 FROM data.messages command
+                  WHERE command.space_id=$1 AND command.channel_id=$2
+                    AND command.author_kind=$5 AND command.author_id=$6
+                    AND command.message_id=substr(m.message_id,8,
+                      GREATEST(length(m.message_id)-length(m.author_id)-8,0))
+                    AND m.message_id='system:'||command.message_id||':'||m.author_id))
               LIMIT 100) unread) AS unread`,
         values: [spaceId, channelId, messageId, afterSequence, principal.kind, principal.id,
           bounded(input.activityMessageKind, "activityMessageKind")],
