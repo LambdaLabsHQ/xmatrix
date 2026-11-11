@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a card that asks to connect GitHub offers Connect, and a link settles it
+
+A settings card for `connector:github/connect` showed a Space admin "A Space
+admin can make this." and no button. The card decided who may act by reading
+back the App's typed credential fields, and GitHub, which is connected by
+authorizing, has none, so every viewer was treated as unable to connect it.
+The card now asks the Space's admin authorization directly for such an App and
+shows **Connect GitHub**, which opens the Space's Apps page. Linking a GitHub
+account there now also runs the connection check, so the card sees a check
+after it asked, settles, and wakes the Agent that asked; before, only a manual
+Check did. The link stands when the check cannot run. Hub only, no schema or
+client change. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: a stale command lease is a fence, not a Hub error
 
 HUB-7F kept reporting `machine_command_stale_lease` after the 409 had already
