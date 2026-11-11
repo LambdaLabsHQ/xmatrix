@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: the model tag names the model, not its selector
+
+An Agent's model tag showed whatever id its harness selects the model with.
+DeepSeek Harness selects with a JSON pair such as
+`["deepseek-official","deepseek-flash"]`, so its tag read
+`["deepseek-official","…` and never reached the model. The tag now shows the
+name the harness gives the selected model in its own catalog
+(`DeepSeek-V4.1-Flash`), on the Agent card and in message headers, and keeps
+the id only when the catalog lists no name. The CLI now also reads model
+choices a harness lists in groups, as DeepSeek Harness does per provider, so
+its models appear in the model switcher. A harness whose catalog names a
+model differently from its id (Cursor's `Composer 2.5`) shows that name too.
+Hub, Web and CLI; the selected id itself is unchanged, so switching works as
+before. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: `xmatrix send --file` is the message body, `--attachment` attaches
 
 `xmatrix send --file` attached a file while `xmatrix page edit --file` read the
