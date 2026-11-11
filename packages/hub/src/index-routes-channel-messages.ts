@@ -436,6 +436,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           },
           committedLiveRouting(committed),
         );
+        let commandRefusals: string[] = [];
         if (typeof message.body === "string") {
           // The message payload's sentAt predates validation and the database
           // transaction. Launch latency starts after the durable append returns,
@@ -464,7 +465,8 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
           if (productMessageControlFinishesBeforeResponse(message.body)) {
             // The message is committed; a handover the coordinator refused is a
             // retryable 503, and its retry re-runs the same launch idempotently.
-            await postCommit;
+            // A command that did nothing answers its sender here, not only on the message.
+            commandRefusals = (await postCommit).refusals;
           } else c.executionCtx.waitUntil(postCommit.catch(() => undefined));
         }
         return c.json({
@@ -487,6 +489,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
             metadata: body.metadata,
             ...(committedAttachments?.length ? { attachments: committedAttachments } : {}),
           },
+          ...(commandRefusals.length ? { commandRefusals } : {}),
         });
     } catch (error) {
       return requestErrorResponse(c, error);

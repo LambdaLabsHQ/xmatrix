@@ -344,16 +344,25 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
   actorUserId: string;
 }): Promise<ProductAgentInterventionResult | undefined> {
   if (!parseProductAgentStopCommand(input.body)) return undefined;
-  const result = await orchestrateProductAgentIntervention({
+  const port = createProductAgentInterventionAuthorityPort({
+    env: input.env,
+    actorUserId: input.actorUserId,
+    sourceMessageId: input.messageId,
+  });
+  // The result stays on the message; a stop that stopped nothing also goes
+  // back to whoever sent it, who may not be looking at the message.
+  const refusals: string[] = [];
+  const recordResult = port.recordResult.bind(port);
+  port.recordResult = async (channelId, text, key, outcome) => {
+    if (outcome === "not_stopped") refusals.push(text);
+    await recordResult(channelId, text, key, outcome);
+  };
+  const result = { ...await orchestrateProductAgentIntervention({
     channelId: input.channelId,
     sourceMessageId: input.messageId,
     body: input.body,
-    port: createProductAgentInterventionAuthorityPort({
-      env: input.env,
-      actorUserId: input.actorUserId,
-      sourceMessageId: input.messageId,
-    }),
-  });
+    port,
+  }), ...(refusals.length ? { refusals } : {}) };
   // The stops it issued are the command chip's next answer.
   await publishChannelInvocationsChanged(input.env, input.channelId);
   return result;

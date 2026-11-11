@@ -289,12 +289,19 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
  * Agent Runtime WebSocket appends (via Authority appendMessage waitUntil) must use
  * this same entry point so syntax never acquires source-specific behavior.
  */
+export interface ProductMessagePostCommitResult {
+  /** Each lifecycle command (stop, reborn, handoff) that did nothing, as its
+   * result on the message says, so the send can tell its sender. */
+  refusals: string[];
+}
+
 export async function dispatchProductMessagePostCommit(
   input: ProductMessagePostCommitInput,
-): Promise<void> {
+): Promise<ProductMessagePostCommitResult> {
+  const refusals: string[] = [];
   // An activity entry is a fact the runtime recorded, not something anyone
   // said: nothing in its body is a mention, command, page link or launch.
-  if (input.messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND) return;
+  if (input.messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND) return { refusals };
   const tasks: Promise<unknown>[] = [];
   // Interpretation nobody waits on (page links, the About) never
   // holds a launch's HTTP response: given a background scheduler, it runs there.
@@ -380,7 +387,9 @@ export async function dispatchProductMessagePostCommit(
     );
   }
   if (interaction.stop) {
-    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).catch((error) => {
+    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).then((result) => {
+      refusals.push(...result?.refusals ?? []);
+    }).catch((error) => {
       logPostCommitFailure("Product agent intervention orchestration failed", input, error);
     }));
   }
@@ -400,6 +409,8 @@ export async function dispatchProductMessagePostCommit(
       dispatchProductAgentMentionsAfterAuthorityMessage({
         ...postCommitTaskInput(input),
         skipCreateInstanceMentions,
+      }).then((result) => {
+        refusals.push(...result.notices);
       }).catch((error) => {
         logPostCommitFailure("Product agent mention orchestration failed", input, error);
       }),
@@ -410,4 +421,5 @@ export async function dispatchProductMessagePostCommit(
     catch { tasks.push(...sideTasks); }
   } else tasks.push(...sideTasks);
   await Promise.all(tasks);
+  return { refusals };
 }
