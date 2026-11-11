@@ -45,12 +45,15 @@ export const GCP_API_KEY_ACTIONS: Record<string, ConnectorAction> = {
       const added = requested.filter(value => !existing.includes(value));
       const header = [columns("Key", name), columns("Display name", current.displayName)];
       if (!added.length) return report("API key website restrictions unchanged", [...header, "Every requested referrer is already allowed; nothing was written."], {});
+      if (typeof current.etag !== "string" || !current.etag.trim()) {
+        throw new ProviderRequestError(502, "Google Cloud returned no API key etag; the website restrictions were not changed");
+      }
       if (existing.length + added.length > MAX_TOTAL_REFERRERS) throw new ProviderRequestError(400, "The key would exceed Google's website restriction limit");
       const url = new URL(`https://apikeys.googleapis.com/v2/${name}`);
       url.search = new URLSearchParams({ updateMask: "restrictions" }).toString();
       const result = await providerJson(url, { method: "PATCH", describeError: describeGoogleError,
         headers: { ...googleHeaders(credentials, "Google Cloud"), "x-goog-user-project": input.project },
-        json: { restrictions: { ...restrictions, browserKeyRestrictions: { allowedReferrers: [...existing, ...added] } }, ...(current.etag ? { etag: current.etag } : {}) } });
+        json: { restrictions: { ...restrictions, browserKeyRestrictions: { allowedReferrers: [...existing, ...added] } }, etag: current.etag } });
       const failure = record(result.error);
       return report("API key website restrictions update", [...header,
         columns("Added referrers", added.join(", ")), columns("Allowed referrers", `${existing.length} before, ${existing.length + added.length} after; none removed`),
