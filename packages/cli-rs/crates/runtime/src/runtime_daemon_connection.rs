@@ -2185,6 +2185,58 @@ async fn cmd_daemon_connected(
     result
 }
 
+/// Everything this daemon can do, sent once on connect. The Hub reads this list
+/// (and its copy in the connect metadata); keeping one list stops the two from
+/// drifting, as `registration_native_model_v1` once did.
+pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
+    "agent:spawn_in_workspace",
+    "pty:headless",
+    "machine_command_admission_ack_v1",
+    // The Hub reads this daemon's liveness from its edge heartbeat.
+    xmatrix_cli_core::machine_daemon_connection::MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY,
+    "machine_run_snapshot_causal_v1",
+    "machine_routing_model_v1",
+    "machine_routing_effort_v1",
+    "machine_routing_parameters_v1",
+    "registration_launch_v1",
+    "registration_launch_v2",
+    // v3: registered launches use the Hub's registration and preset;
+    // the machine keeps no installation registry.
+    "registration_launch_v3",
+    "registration_model_default_v1",
+    "registration_optional_model_v1",
+    // A requested effort applies to the runtime's default model too.
+    "registration_default_effort_v1",
+    // The runtime may start on a model from its own catalog instead of its default.
+    "registration_native_model_v1",
+    // A registered launch may run in a private managed directory.
+    "registration_managed_v1",
+    "reply_recovery_v1",
+    "machine_quota_probe_v2",
+    "machine_harness_inventory_v1",
+    "machine_harness_action_v1",
+    // The daemon answers one bounded text task with a fresh, tool-less harness process.
+    "machine_text_task_v1",
+    // The daemon sleeps a resting Run on the Hub's word, after its own check.
+    "machine_sleep_agent_v1",
+    "machine_harness_cursor_launcher_v1",
+    // The daemon parses and runs the `uninstall` harness action.
+    "machine_harness_uninstall_v1",
+    // The daemon parses and acts on the `release` harness action.
+    "machine_harness_release_v1",
+    // The daemon parses and runs the `login_*` harness actions.
+    "machine_harness_login_v1",
+    "machine_harness_login_start_cancel_v1",
+    // A stop may push the Run's whole checkout to a handoff branch.
+    "machine_handoff_export_v1",
+    // The owner lists and reclaims this machine's git worktrees.
+    "machine_worktree_action_v1",
+    // A spawn's prompt bundle may carry further official texts by name.
+    "bootstrap_prompt_texts_v1",
+    // The daemon keeps the Hub's harness registry and uses it over its compiled copy.
+    xmatrix_cli_core::hub_harness_registry::CAPABILITY,
+];
+
 #[allow(clippy::too_many_arguments)]
 async fn run_daemon_connection(
     hub_url: &str,
@@ -2222,54 +2274,6 @@ async fn run_daemon_connection(
         "xmatrixCliVersion": xmatrix_cli_core::version::current(),
         "machineId": machine_id,
         "hostname": observed_hostname(),
-        "capabilities": [
-            "agent:spawn_in_workspace",
-            "pty:headless",
-            "machine_command_admission_ack_v1",
-            // The Hub reads this daemon's liveness from its edge heartbeat.
-            xmatrix_cli_core::machine_daemon_connection::MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY,
-            "machine_run_snapshot_causal_v1",
-            "machine_routing_model_v1",
-            "machine_routing_effort_v1",
-            "machine_routing_parameters_v1",
-            "registration_launch_v1",
-            "registration_launch_v2",
-            // v3: registered launches use the Hub's registration and preset;
-            // the machine keeps no installation registry.
-            "registration_launch_v3",
-            "registration_model_default_v1",
-            "registration_optional_model_v1",
-            // A requested effort applies to the runtime's default model too.
-            "registration_default_effort_v1",
-            // The runtime may start on a model from its own catalog instead of its default.
-            "registration_native_model_v1",
-            // A registered launch may run in a private managed directory.
-            "registration_managed_v1",
-            "reply_recovery_v1",
-            "machine_quota_probe_v2",
-            "machine_harness_inventory_v1",
-            "machine_harness_action_v1",
-            // The daemon answers one bounded text task with a fresh, tool-less harness process.
-            "machine_text_task_v1",
-            // The daemon sleeps a resting Run on the Hub's word, after its own check.
-            "machine_sleep_agent_v1",
-            "machine_harness_cursor_launcher_v1",
-            // The daemon parses and runs the `uninstall` harness action.
-            "machine_harness_uninstall_v1",
-            // The daemon parses and acts on the `release` harness action.
-            "machine_harness_release_v1",
-            // The daemon parses and runs the `login_*` harness actions.
-            "machine_harness_login_v1",
-            "machine_harness_login_start_cancel_v1",
-            // A stop may push the Run's whole checkout to a handoff branch.
-            "machine_handoff_export_v1",
-            // The owner lists and reclaims this machine's git worktrees.
-            "machine_worktree_action_v1",
-            // A spawn's prompt bundle may carry further official texts by name.
-            "bootstrap_prompt_texts_v1",
-            // The daemon keeps the Hub's harness registry and uses it over its compiled copy.
-            "hub_harness_registry_v1",
-        ],
     });
     if let Some(platform) = runtime_daemon_harness_action::daemon_platform() {
         metadata["platform"] = serde_json::json!(platform);
@@ -2291,11 +2295,12 @@ async fn run_daemon_connection(
     // self-update off it still says it can check, so the Hub can tell the
     // owner exactly why it will not (no release capability beside it).
     let cli_update_check_capability = update_authority.then_some(CLI_UPDATE_CHECK_CAPABILITY);
-    if let Some(capabilities) = metadata["capabilities"].as_array_mut() {
-        for capability in cli_release_capability.into_iter().chain(cli_update_check_capability) {
-            capabilities.push(serde_json::json!(capability));
-        }
-    }
+    let daemon_capabilities: Vec<String> = DAEMON_CAPABILITIES.iter().copied()
+        .chain(cli_release_capability)
+        .chain(cli_update_check_capability)
+        .map(str::to_string)
+        .collect();
+    metadata["capabilities"] = serde_json::json!(daemon_capabilities);
 
     let mut relay = MachineDaemonConnectionClient::new(
         relay_url,
@@ -2304,43 +2309,7 @@ async fn run_daemon_connection(
         machine_id.clone(),
         host_id.clone(),
         Some(metadata),
-        vec![
-            "agent:spawn_in_workspace".to_string(),
-            "pty:headless".to_string(),
-            "machine_command_admission_ack_v1".to_string(),
-            xmatrix_cli_core::machine_daemon_connection::MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY
-                .to_string(),
-            "machine_run_snapshot_causal_v1".to_string(),
-            "machine_routing_model_v1".to_string(),
-            "machine_routing_effort_v1".to_string(),
-            "machine_routing_parameters_v1".to_string(),
-            "registration_launch_v1".to_string(),
-            "registration_launch_v2".to_string(),
-            "registration_launch_v3".to_string(),
-            "registration_model_default_v1".to_string(),
-            "registration_optional_model_v1".to_string(),
-            "registration_default_effort_v1".to_string(),
-            "registration_managed_v1".to_string(),
-            "reply_recovery_v1".to_string(),
-            "machine_quota_probe_v2".to_string(),
-            "machine_harness_inventory_v1".to_string(),
-            "machine_harness_action_v1".to_string(),
-            "machine_text_task_v1".to_string(),
-            "machine_sleep_agent_v1".to_string(),
-            "machine_harness_cursor_launcher_v1".to_string(),
-            "machine_harness_uninstall_v1".to_string(),
-            "machine_harness_release_v1".to_string(),
-            "machine_harness_login_v1".to_string(),
-            "machine_harness_login_start_cancel_v1".to_string(),
-            "machine_handoff_export_v1".to_string(),
-            "machine_worktree_action_v1".to_string(),
-            "bootstrap_prompt_texts_v1".to_string(),
-            xmatrix_cli_core::hub_harness_registry::CAPABILITY.to_string(),
-        ]
-        .into_iter()
-        .chain(cli_release_capability.map(str::to_string))
-        .chain(cli_update_check_capability.map(str::to_string))
-        .collect(),
+        daemon_capabilities.clone(),
     );
     if let Some(activation) = activation.clone() {
         relay.set_activation(activation);
@@ -3899,5 +3868,26 @@ mod repository_token_request_tests {
                 "executionKey": "execution-1",
             })
         );
+    }
+}
+
+#[cfg(test)]
+mod daemon_capability_tests {
+    use super::*;
+
+    #[test]
+    fn the_hub_hears_every_launch_capability_it_gates_on() {
+        // The Hub offers and applies a summon's model only to a daemon that
+        // advertises these; each must reach it in the one connect list.
+        for capability in [
+            "registration_launch_v3",
+            "registration_default_effort_v1",
+            "registration_native_model_v1",
+            "registration_managed_v1",
+        ] {
+            assert!(DAEMON_CAPABILITIES.contains(&capability), "{capability}");
+        }
+        let unique: std::collections::HashSet<_> = DAEMON_CAPABILITIES.iter().collect();
+        assert_eq!(unique.len(), DAEMON_CAPABILITIES.len());
     }
 }

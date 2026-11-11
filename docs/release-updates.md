@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: daemons tell the Hub they can start a summon on a catalog model
+
+The daemon kept two copies of its capability list, one in its connect metadata
+and one in the list the Hub stores. `registration_native_model_v1` (#1510) was
+added only to the metadata copy, so the Hub saw no daemon able to start a
+runtime on a model from its own catalog: the `@` menu offered no `model:` rows
+and `@claude model:sonnet` was still refused. The daemon now builds one list
+for both. CLI only; it takes effect when a Machine's daemon restarts on this
+release. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a stop or reborn that did nothing tells whoever sent it
 
 `@<agent>:<n>:stop`, `:reborn` and `:handoff:` that address no Instance (a
