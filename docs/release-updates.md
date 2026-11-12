@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: connecting an app from the desktop app returns to the desktop app
+
+A one-click connect started in the Mac or Windows app opened the provider's
+sign-in in the browser and then finished, and stayed, on the web. The connect
+now records that the app started it; after sign-in the browser page hands the
+grant back through `xmatrix://connect/oauth`, the app finishes the connection
+with its own sign-in and shows the connector's page, and the browser tab says
+it can be closed. It needs this desktop version; an older app keeps finishing
+on the web. Google Play Console's "API not enabled" failure now names the API
+and the Hub's Google project instead of asking to reconnect. Hub, web and
+desktop; no schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Google Play Console connects with one sign-in, for every app
 
 Connecting Google Play Console no longer asks for an app's package name. The

@@ -88,6 +88,16 @@ export function playUrl(path: string, query: readonly [string, string][] = []): 
   return url;
 }
 
+/**
+ * Google's "API has not been used in project N" is about the Hub's own Google project, not the person's
+ * sign-in: say which API and project, and that reconnecting cannot fix it.
+ */
+function apiNotEnabled(error: ProviderRequestError): ProviderRequestError | undefined {
+  const found = error.status === 403 ? /(Google Play [A-Za-z ]+ API) has not been used in project (\d{6,20})/u.exec(error.message) : null;
+  return found ? new ProviderRequestError(503, `The ${found[1]} is not enabled in this Hub's Google Cloud project ${found[2]}. ` +
+    "Its owner enables it once under APIs & Services; then Check again. Signing in again does not change this") : undefined;
+}
+
 /** One provider call of a validated catalog request. Errors keep Google's message and name the likely fix. */
 export async function sendPlay(credentials: Readonly<Record<string, string>>, call: PlayCall): Promise<Record<string, unknown>> {
   try {
@@ -96,6 +106,8 @@ export async function sendPlay(credentials: Readonly<Record<string, string>>, ca
       ...(call.body === undefined ? {} : { json: call.body }) });
   } catch (error) {
     if (!(error instanceof ProviderRequestError)) throw error;
+    const disabled = apiNotEnabled(error);
+    if (disabled) throw disabled;
     const hint = error.status === 401 ? " (reconnect Google Play Console in Apps)"
       : error.status === 403 ? " (the connected Google account needs this permission for the app in Play Console → Users and permissions, and the Google Play Android Developer API must be enabled)" : "";
     throw new ProviderRequestError(error.status, `${error.message.replace(/^Provider returned/u, "Google Play returned")}${hint}`);
@@ -118,7 +130,7 @@ export async function playApps(credentials: Readonly<Record<string, string>>, pa
   } catch (error) {
     if (!(error instanceof ProviderRequestError)) throw error;
     if (error.status === 401) throw new ConnectorRemedy(401, "Google no longer accepts the Google Play Console sign-in; reconnect", { kind: "reconnect" });
-    throw new ProviderRequestError(error.status, error.message.replace(/^Provider returned/u, "Google Play Developer Reporting API returned"));
+    throw apiNotEnabled(error) ?? new ProviderRequestError(error.status, error.message.replace(/^Provider returned/u, "Google Play Developer Reporting API returned"));
   }
   if (result.apps !== undefined && !Array.isArray(result.apps)) throw new ProviderRequestError(502, "Google Play did not return an app list");
   const apps = ((result.apps ?? []) as unknown[]).map(record).map(app => ({ packageName: text(app.packageName), displayName: text(app.displayName) }))
