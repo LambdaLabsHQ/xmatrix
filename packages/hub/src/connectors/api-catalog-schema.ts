@@ -15,10 +15,12 @@ export interface CatalogSchema {
 
 export const catalogFail = (path: string, reason: string): never => { throw new ProviderRequestError(400, `${path}: ${reason}`); };
 
-export function validateCatalogValue(value: unknown, input: CatalogSchema, resolve: (schema: CatalogSchema) => CatalogSchema, path = "body", depth = 0): void {
+export function validateCatalogValue(value: unknown, input: CatalogSchema, resolve: (schema: CatalogSchema) => CatalogSchema, path = "body", depth = 0,
+  /** The longest text a field may hold; a request body read from a file allows more than a typed command. */
+  maxText = 16_000): void {
   if (depth > 24) catalogFail(path, "too deeply nested");
   const schema = resolve(input), fail = catalogFail;
-  const child = (item: unknown, next: CatalogSchema, at: string) => validateCatalogValue(item, next, resolve, at, depth + 1);
+  const child = (item: unknown, next: CatalogSchema, at: string) => validateCatalogValue(item, next, resolve, at, depth + 1, maxText);
   if (value === null && schema.nullable) return;
   if (schema.readOnly) fail(path, "read-only field");
   if (schema.enum && !schema.enum.includes(value)) fail(path, "not one of the provider's allowed values (see api_schema)");
@@ -47,7 +49,7 @@ export function validateCatalogValue(value: unknown, input: CatalogSchema, resol
   } else if (schema.type === "string") {
     if (typeof value !== "string") fail(path, "must be text");
     const string = value as string;
-    if ([...string].length < (schema.minLength ?? 0) || [...string].length > Math.min(schema.maxLength ?? 16_000, 16_000) ||
+    if ([...string].length < (schema.minLength ?? 0) || [...string].length > Math.min(schema.maxLength ?? maxText, maxText) ||
       (schema.pattern && !new RegExp(schema.pattern, "u").test(string))) fail(path, "text outside its allowed format or length");
   } else if (schema.type === "integer" || schema.type === "number") {
     if (typeof value !== "number" || !Number.isFinite(value) || (schema.type === "integer" && !Number.isInteger(value)) ||

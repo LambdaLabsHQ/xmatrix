@@ -31,7 +31,7 @@ import { enqueueXUpload } from "./x-upload-executor-do";
 import { X_ACTIONS } from "./actions/x";
 import { gmailPreview } from "./actions/gmail";
 import { mailSnapshotLinks } from "./mail-snapshot-link";
-import { commandMailAttachments } from "./gmail-attachments";
+import { commandFiles, commandMailAttachments } from "./gmail-attachments";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
@@ -389,7 +389,8 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const mailSnapshot = providerId === "gmail" && ["send_draft", "send", "reply"].includes(actionId)
     && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
   const mailAttachments = providerId === "gmail" ? commandMailAttachments(actionId, input) : undefined;
-  return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const files = providerId === "googleplay" && ["api_plan", "api_write"].includes(actionId) ? commandFiles(input) : undefined;
+  return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(files ? { commandFiles: files } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

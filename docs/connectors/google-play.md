@@ -136,6 +136,20 @@ permission, and calls Google exactly once; a timeout is uncertain and is
 never retried. Edits-scoped writes take effect only when the edit is
 committed (`edits.commit`, or `release`).
 
+A request body too large for a command, such as the data safety form
+(`applications.dataSafety`, the whole CSV as `safetyLabels`), is attached to
+the command as one JSON file holding the body, for both steps:
+
+```text
+xmatrix send <channel> '@googleplay:api_plan:applications.dataSafety {"path":{"packageName":"sh.xmatrix.app"}}' --attachment body.json
+xmatrix send <channel> '@googleplay:api_write:applications.dataSafety {"path":{"packageName":"sh.xmatrix.app"},"digest":"<digest>"}' --attachment body.json
+```
+
+The Hub reads the file as the person the command runs for (at most 1 MiB),
+validates it against the operation's schema, and the digest binds its
+content. The plan shows the file's name, size and hash instead of the body.
+An approval freezes the file; a changed file is refused.
+
 High-frequency flows by operation: testers `edits.testers.get/update/patch`;
 store listing `edits.listings.*` and `edits.details.*`, screenshots
 `edits.images.*` (upload with `api_upload`); subscriptions

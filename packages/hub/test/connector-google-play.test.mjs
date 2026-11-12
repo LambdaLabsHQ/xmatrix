@@ -188,3 +188,28 @@ test("a read may name the fields it wants, so a large resource fits a bounded re
     assert.equal(typeof statement(bad), "string", bad);
   }
 });
+
+test("a body too large for a command rides as the command's attached JSON file; the digest binds its content", async () => {
+  const csv = `Question ID,Response\n${"PSL_DATA_COLLECTION,true\n".repeat(4000)}`;
+  const file = { messageId: "m1", attachmentId: "a1", name: "body.json", mimeType: "application/json", size: 100_000, hash: "a".repeat(64), version: 1 };
+  const files = content => ({ sources: [{ messageId: "m1", attachmentId: "a1" }], inspect: async () => file,
+    read: async approved => { assert.deepEqual(approved, file); return new TextEncoder().encode(content); } });
+  const good = JSON.stringify({ safetyLabels: csv });
+  const request = { path: { packageName: "sh.xmatrix.app" } };
+  const planned = await fetched([], () => ACTIONS.api_plan.execute({ credentials, commandFiles: files(good) }, statement(command("api_plan", "applications.dataSafety", request))));
+  assert.match(planned.result.summary, /"file": "body.json"/u);
+  assert.doesNotMatch(planned.result.summary, /PSL_DATA_COLLECTION/u);
+  const input = statement(command("api_write", "applications.dataSafety", { ...request, digest: digestOf(planned.result.summary) }));
+  // An approval freezes the file; the approved run has no files of its own and reads the frozen one.
+  const prepared = await fetched([], () => ACTIONS.api_write.prepare({ credentials, commandFiles: files(good) }, input));
+  assert.deepEqual(JSON.parse(prepared.result.bodyFile), file);
+  const written = await fetched([{ body: {} }], () => ACTIONS.api_write.execute({ credentials, commandFiles: { ...files(good), sources: [] } }, prepared.result));
+  assert.equal(written.calls[0].url, `${API}/sh.xmatrix.app/dataSafety`);
+  assert.equal(written.calls[0].body.safetyLabels, csv);
+  await fetched([], () => assert.rejects(ACTIONS.api_write.execute({ credentials, commandFiles: files(JSON.stringify({ safetyLabels: "other" })) }, input), /request or resource changed/u));
+  for (const [content, reason] of [["not json", /not a UTF-8 JSON file/u], [JSON.stringify({ safetyLabels: csv, extra: 1 }), /unknown field/u], [JSON.stringify([1]), /one JSON object/u]]) {
+    await fetched([], () => assert.rejects(ACTIONS.api_plan.execute({ credentials, commandFiles: files(content) }, statement(command("api_plan", "applications.dataSafety", request))), reason));
+  }
+  await fetched([], () => assert.rejects(ACTIONS.api_plan.execute({ credentials, commandFiles: files(good) },
+    statement(command("api_plan", "applications.dataSafety", { ...request, body: { safetyLabels: "x" } }))), /not both/u));
+});
