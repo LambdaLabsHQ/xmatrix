@@ -1,5 +1,11 @@
 # Release Updates
 
+## Unreleased: a failed app check states its reason once
+
+After Check again failed, an app's page showed the same reason twice: as a red
+line above and again in the block that holds the fix. It now appears once, in
+that block. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: connecting an app from the desktop app returns to the desktop app
 
 A one-click connect started in the Mac or Windows app opened the provider's
