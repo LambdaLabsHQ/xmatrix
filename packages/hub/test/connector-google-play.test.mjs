@@ -145,3 +145,31 @@ test("a connect started in the desktop app is marked for return to it; one start
   assert.equal((await verifyOAuthState(company, await stateOf({ desktop: true }))).desktop, true);
   assert.equal((await verifyOAuthState(company, await stateOf({}))).desktop, undefined);
 });
+
+test("base_plan prices a new plan in every region Google converts to, keeps existing plans and can activate", async () => {
+  const money = (currencyCode, units) => ({ currencyCode, units });
+  const converted = { convertedRegionPrices: { US: { regionCode: "US", price: money("USD", "10") }, JP: { regionCode: "JP", price: money("JPY", "1500") } },
+    convertedOtherRegionsPrice: { usdPrice: money("USD", "10"), eurPrice: money("EUR", "9") }, regionVersion: { version: "2025/03" } };
+  const existing = { basePlanId: "annual", state: "ACTIVE", autoRenewingBasePlanType: { billingPeriodDuration: "P1Y" } };
+  const input = statement('@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"activate":true}');
+  let grants = 0;
+  const { result, calls } = await fetched([{ body: { productId: "pro", basePlans: [existing] } }, { body: converted }, { body: {} },
+    { body: { basePlans: [{ basePlanId: "monthly", state: "ACTIVE" }] } }], () => ACTIONS.base_plan.execute({ credentials, authorizeWrite: async () => { grants++; } }, input));
+  assert.equal(grants, 1);
+  assert.deepEqual(calls.map(call => call.method), ["GET", "POST", "PATCH", "POST"]);
+  assert.match(calls[2].url, /subscriptions\/pro\?updateMask=basePlans&regionsVersion\.version=2025%2F03$/u);
+  assert.deepEqual(calls[2].body.basePlans.map(plan => plan.basePlanId), ["annual", "monthly"]);
+  assert.equal(calls[2].body.basePlans[0].state, undefined);
+  assert.deepEqual(calls[2].body.basePlans[1].regionalConfigs.map(region => [region.regionCode, region.price.units, region.newSubscriberAvailability]),
+    [["US", "10", true], ["JP", "1500", true]]);
+  assert.match(calls[3].url, /basePlans\/monthly:activate$/u);
+  assert.match(result.summary, /base plan monthly on pro: P1M, ACTIVE, priced in 2 regions/u);
+  const taken = await fetched([{ body: { basePlans: [{ basePlanId: "monthly" }] } }], () => assert.rejects(ACTIONS.base_plan.execute({ credentials }, input), /already has base plan monthly/u));
+  assert.equal(taken.calls.length, 1);
+  for (const bad of ['@googleplay:base_plan:sh.xmatrix.app/pro {"period":"P1M","price":{"currencyCode":"USD","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"monthly","price":{"currencyCode":"USD","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"usd","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"free":true}']) {
+    assert.equal(typeof statement(bad), "string", bad);
+  }
+});

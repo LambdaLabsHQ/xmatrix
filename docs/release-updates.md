@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Google Play Console creates a subscription base plan in one command
+
+`@googleplay:base_plan` adds an auto-renewing base plan to a subscription from
+one price: Google converts it to every region, the plan is saved with all
+regional prices, and it can be activated in the same step. The catalog write
+could not do this, because the converted prices of every region do not fit a
+bounded receipt. Hub and protocol; no schema change. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: a failed app check states its reason once
 
 After Check again failed, an app's page showed the same reason twice: as a red

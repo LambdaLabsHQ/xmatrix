@@ -72,6 +72,22 @@ commits without sending changes for review. A failure discards an edit the
 action opened; an edit you named stays for you to inspect or delete.
 Promoting a build is a `release` of its existing version code to another track.
 
+## Subscription base plans
+
+```text
+@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"activate":true}
+```
+
+`base_plan` adds one auto-renewing base plan to an existing subscription.
+Google converts the one price to every region it sells in
+(`monetization.convertRegionPrices`, current rates and local price patterns),
+and the plan is saved with all of those regional prices, new-subscriber
+availability on, and the converted USD/EUR prices for regions Play adds later.
+Existing base plans are kept; a base plan ID that already exists is refused,
+and changing one goes through `api_plan`/`api_write`. Without `activate` the
+plan stays a draft. `units` is whole currency units as text; add `nanos` for
+a fraction (`{"units":"9","nanos":990000000}`).
+
 ## Catalog operations
 
 ```text
