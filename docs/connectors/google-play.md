@@ -156,6 +156,13 @@ validates it against the operation's schema, and the digest binds its
 content. The plan shows the file's name, size and hash instead of the body.
 An approval freezes the file; a changed file is refused.
 
+For the data safety form, edit the CSV that Play Console exports in place:
+change only the response column and keep every other byte, including the
+quoting and the line endings. A CSV rewritten by a CSV library (different
+quoting, an extra final newline) is refused by Google with an error that names
+only the last question. A free-text explanation is accepted only where the
+matching answer is "Other".
+
 High-frequency flows by operation: testers `edits.testers.get/update/patch`;
 store listing `edits.listings.*` and `edits.details.*`, screenshots
 `edits.images.*` (upload with `api_upload`); subscriptions
