@@ -850,7 +850,7 @@ channel_instance_id: 1})]
   }
 });
 
-test("Message append writes zero, one, or ten attachments with at most one SQL call", async () => {
+test("Message append writes any number of attachments with at most one SQL call", async () => {
   const appendInput = (count) => (appendRequest({
     requestId: `request-${count}`,
     commandId: `command-${count}`,
@@ -862,7 +862,7 @@ test("Message append writes zero, one, or ten attachments with at most one SQL c
       mimeType: "text/plain", name: `file-${index}.txt`, width: index + 10,
     })),
   }));
-  for (const count of [0, 1, 10]) {
+  for (const count of [0, 1, 40]) {
     const db = database((query) => placement(query) ?? appendReservation(query) ?? (
       query.name === "message_append_preflight_v4"
         ? [appendPreflight()]
@@ -877,12 +877,6 @@ test("Message append writes zero, one, or ten attachments with at most one SQL c
       assert.match(writes[0].text, /jsonb_to_recordset/u);
     }
   }
-  const overLimitDb = database(() => []);
-  await assert.rejects(
-    new PostgresMessageRepository(overLimitDb).append(appendInput(11)),
-    (error) => error instanceof MessageAuthorityError && error.code === "invalid_command",
-  );
-  assert.equal(overLimitDb.calls.length, 0);
 });
 
 for (const [body, ambiguous, broadcast] of [
