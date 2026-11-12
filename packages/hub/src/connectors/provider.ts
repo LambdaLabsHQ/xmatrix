@@ -58,6 +58,8 @@ export interface ConnectorActionContext {
   mailSnapshot?: import("./mail-snapshot-link").MailSnapshotLinks;
   /** The files on a Gmail send or reply command, read as its Human through the Channel attachment authority. */
   mailAttachments?: import("./gmail-attachments").MailAttachments;
+  /** The files attached to the command message, for an action that takes a request body too large for a command. */
+  commandFiles?: import("./gmail-attachments").MailAttachments;
   /** Revalidates current app permission immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */

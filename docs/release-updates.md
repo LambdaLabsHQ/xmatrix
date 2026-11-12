@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a large Google Play request body rides as an attached file
+
+A request body that does not fit a command, such as the data safety CSV of
+about 180 KB, had no way in. `@googleplay:api_plan` and `api_write` now take
+the body from the one JSON file attached to the command message, read as the
+person the command runs for, validated against the operation and bound by the
+digest. Hub only; no schema change. Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: Google Play reads can name the fields they want
 
 `@googleplay:api_read` accepts Google's `fields` partial-response mask in its

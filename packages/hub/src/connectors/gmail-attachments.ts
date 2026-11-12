@@ -117,7 +117,11 @@ export function createMailAttachments(input: {
  */
 export function commandMailAttachments(actionId: string,
   input: Pick<ConnectorCommandInput, "env" | "channelId" | "messageId" | "actorUserId" | "attachments">): MailAttachments | undefined {
-  if (actionId !== "send" && actionId !== "reply") return undefined;
+  return actionId === "send" || actionId === "reply" ? commandFiles(input) : undefined;
+}
+
+/** The files attached to a command message, read as the Human the command runs for. */
+export function commandFiles(input: Pick<ConnectorCommandInput, "env" | "channelId" | "messageId" | "actorUserId" | "attachments">): MailAttachments {
   return createMailAttachments({ channelId: input.channelId, actorUserId: input.actorUserId, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     sources: (input.attachments ?? []).map(attachment => ({ messageId: input.messageId, attachmentId: attachment.id })),
     attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) });
