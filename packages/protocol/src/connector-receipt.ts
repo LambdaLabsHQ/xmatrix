@@ -20,12 +20,6 @@ export function connectorReceiptMessageId(executionMessageId: string, appId: str
   return `system:${executionMessageId}:${appId}`.slice(0, CONNECTOR_RECEIPT_ID_LIMIT);
 }
 
-/** Whether this receipt id answers that command for that App. */
-export function connectorReceiptAnswersCommand(receiptMessageId: string, commandMessageId: string, appId: string): boolean {
-  return CONNECTOR_RECEIPT_EXECUTION_SUFFIXES.some((suffix) =>
-    receiptMessageId === connectorReceiptMessageId(`${commandMessageId}${suffix}`, appId));
-}
-
 /** SQL boolean: `messageId` is a receipt for `commandId` authored as `appId`. */
 export function connectorReceiptAnswersCommandSql(messageId: string, commandId: string, appId: string): string {
   return CONNECTOR_RECEIPT_EXECUTION_SUFFIXES.map((suffix) =>

@@ -5,27 +5,21 @@ import { test } from "node:test";
 import { loadTypescriptModule } from "./load-typescript-module.mjs";
 
 const {
-  connectorReceiptAnswersCommand, connectorReceiptAnswersCommandSql, connectorReceiptBody,
+  connectorReceiptAnswersCommandSql, connectorReceiptBody,
   connectorReceiptMessageId, connectorReceiptPreview, parseConnectorReceipt,
 } = await loadTypescriptModule(new URL("../src/connector-receipt.ts", import.meta.url));
 
-test("a receipt answers the command it ran, including an approval and a finished upload", () => {
+test("a receipt id is the execution id, including an approval and a finished upload", () => {
   const command = "command-4";
   const app = "gmail";
   assert.equal(connectorReceiptMessageId(command, app), "system:command-4:gmail");
   assert.equal(connectorReceiptMessageId(`${command}:approved`, app), "system:command-4:approved:gmail");
   assert.equal(connectorReceiptMessageId(`${command}:upload-result`, "x"), "system:command-4:upload-result:x");
-  assert.equal(connectorReceiptAnswersCommand("system:command-4:gmail", command, app), true);
-  assert.equal(connectorReceiptAnswersCommand("system:command-4:approved:gmail", command, app), true);
-  assert.equal(connectorReceiptAnswersCommand("system:command-4:upload-result:x", command, "x"), true);
-  assert.equal(connectorReceiptAnswersCommand("system:command-4:approved:gmail", "command-5", app), false);
-  assert.equal(connectorReceiptAnswersCommand("system:command-4:approved:slack", command, app), false);
-  assert.equal(connectorReceiptAnswersCommand(`system:${command}:denied:${app}`, command, app), false);
-  assert.equal(connectorReceiptAnswersCommand("system:request-9:denied:gmail", "request-9", app), false);
+  assert.equal(connectorReceiptMessageId(`${command}:denied`, app), `system:${command}:denied:${app}`);
   const longCommand = "c".repeat(180);
   const truncated = connectorReceiptMessageId(`${longCommand}:approved`, app);
   assert.equal(truncated.length, 200);
-  assert.equal(connectorReceiptAnswersCommand(truncated, longCommand, app), true);
+  assert.equal(truncated.startsWith(`system:${longCommand}:approved:`), true);
 });
 
 test("the unread check uses the same receipt ids, and a denial stays unread", () => {
