@@ -1403,7 +1403,7 @@ export class PostgresMessageRepository {
       input.prepared.senderSnapshotDigest, "prepared.senderSnapshotDigest",
     );
     const attachmentViews = input.attachments ?? [];
-    if (!Array.isArray(attachmentViews) || attachmentViews.length > 10) {
+    if (!Array.isArray(attachmentViews)) {
       throw new MessageAuthorityError("invalid_command", 400, "attachments are invalid");
     }
     const attachmentOwnerUserId = attachmentViews.length && input.attachmentOwnerUserId
