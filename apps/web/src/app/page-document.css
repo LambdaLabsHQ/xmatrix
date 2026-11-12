@@ -782,6 +782,22 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E") center / contain no-repeat;
 }
 .page-automation-status:disabled { cursor: default; }
+
+/* A page's program is a code block; under it, small and quiet like a schedule's status, how it stands. */
+.page-program-status {
+  display: block;
+  margin: -0.35em 0 0.9em;
+  padding: 0;
+  color: var(--muted-foreground);
+  font-size: 0.85em;
+  text-align: left;
+  cursor: pointer;
+  user-select: none;
+}
+.page-program-status:disabled { cursor: default; }
+.page-program-status[data-state="running"]::before { content: "● "; color: var(--code-ink-string); }
+.page-program-status[data-state="problem"], .page-program-status[data-state="failed"] { color: var(--destructive); }
+.page-program-status:hover:not(:disabled) { color: var(--foreground); }
 .page-automation-status[data-state="problem"] { color: var(--destructive); }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 

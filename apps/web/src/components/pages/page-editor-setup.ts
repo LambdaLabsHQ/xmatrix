@@ -22,6 +22,7 @@ import {
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
 import { automationChips } from "./page-automation-chips";
+import { programChips } from "./page-program-chips";
 import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
@@ -1162,6 +1163,8 @@ export function editorPlugins(input: {
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;
+  /** Told whether the page holds a `norn run` block, and again when that changes. */
+  onProgramsPresent: (present: boolean) => void;
   /** Brings a discussion's card forward in the margin. */
   focusConversation: (conversationId: string) => void;
   headingActions: () => HeadingActions;
@@ -1212,6 +1215,7 @@ export function editorPlugins(input: {
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
     remoteChanges(input.fragment, input.awareness),
     automationChips(input.openConversation),
+    programChips(input.openConversation, input.onProgramsPresent),
     referenceChips(input.references),
     githubFileEmbeds(input.readGitHubFile),
   ];

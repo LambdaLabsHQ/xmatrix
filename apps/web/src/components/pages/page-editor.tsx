@@ -16,7 +16,7 @@ import { EditorView } from "prosemirror-view";
 import { yCursorPluginKey } from "y-prosemirror";
 import {
   channelReferenceToken, gitHubFileReferenceFrom, gitHubFileReferenceHref, pageBlocks, pageReferenceToken,
-  type PageAuthor, type PageSummary, type SerializedAutomation,
+  type PageAuthor, type PageProgramStatus, type PageSummary, type SerializedAutomation,
 } from "@xmatrix/protocol";
 import { Face } from "@/components/dashboard/face";
 import type { ChannelReference } from "@/components/dashboard/message-reference-catalog";
@@ -27,6 +27,7 @@ import { PaperPopover } from "@/components/ui/material-surfaces";
 import { sameValue } from "@/lib/same-value";
 import type { PageLiveSession } from "@/lib/pages/page-client";
 import { automationsKey } from "./page-automation-chips";
+import { programsKey } from "./page-program-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
@@ -321,7 +322,7 @@ function ToolButton({ label, active = false, disabled = false, onRun, children }
 }
 
 export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions, sections, follow, writeOn,
-  onOpenConversation, discussions, automations, headingActions, focusedConversationId = null, readCard = null,
+  onOpenConversation, discussions, automations, programs, onProgramsPresent, headingActions, focusedConversationId = null, readCard = null,
   onFocusConversation,
   onAnchorOffsets, cursorPresence, onReady, commentInMargin = false,
   suggestions = null, onSuggestions, suggestionControl, readGitHubFile, references, completion, placeholder, mediaUrl,
@@ -351,6 +352,9 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   discussions?: Discussion[];
   /** The page's Automations, drawn as chips where the text references them. */
   automations?: Map<string, SerializedAutomation>;
+  /** How each `norn run` block of the page stands, by its name. */
+  programs?: Map<string, PageProgramStatus>;
+  onProgramsPresent?: (present: boolean) => void;
   /** What a heading offers: its conversations, and on a phone a menu to write it with an Agent. */
   headingActions?: HeadingActions;
   /** The conversation whose passage is marked, because its card is being read. */
@@ -407,6 +411,8 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
   blocksChange.current = onBlocks;
   const openConversation = useRef(onOpenConversation);
   openConversation.current = onOpenConversation;
+  const programsPresent = useRef(onProgramsPresent);
+  programsPresent.current = onProgramsPresent;
   const focusConversation = useRef(onFocusConversation);
   focusConversation.current = onFocusConversation;
   const heading = useRef<HeadingActions>(headingActions ?? { canEdit });
@@ -599,6 +605,7 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         placeholder: () => placeholderText.current,
         onBlockChange: (blockId) => blockChange.current?.(blockId),
         openConversation: (conversationId) => openConversation.current?.(conversationId),
+        onProgramsPresent: (present) => programsPresent.current?.(present),
         focusConversation: (conversationId) => focusConversation.current?.(conversationId),
         headingActions: () => heading.current,
         cursorPresence: () => presenceOf.current,
@@ -721,6 +728,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
     const current = view.current;
     if (current && automations) current.dispatch(current.state.tr.setMeta(automationsKey, automations));
   }, [automations]);
+
+  useEffect(() => {
+    const current = view.current;
+    if (current && programs) current.dispatch(current.state.tr.setMeta(programsKey, programs));
+  }, [programs]);
 
   useEffect(() => {
     const current = view.current;

@@ -1,4 +1,5 @@
 import { PostgresNornProgramRepository, PostgresPageRepository, readPageNornPrograms } from "@xmatrix/db";
+import type { PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import { deterministicConversationId } from "./deterministic-id";
@@ -91,18 +92,6 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
       authorityUserId: userId, source: block.source, page: { pageId, name: block.name }, ledger: nornStartLedger }, nornStep());
     await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
   }
-}
-
-export interface PageProgramStatus {
-  name: string;
-  /** Where the program works; absent before its first run. */
-  channelId?: string;
-  state: "running" | "completed" | "failed" | "not_started";
-  /** Why the block as written does not run. */
-  problem?: string;
-  /** How its program ended: the result, or why it stopped. */
-  result?: string;
-  requests: { holder: string; text: string; by: string | null; reply: string | null }[];
 }
 
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
