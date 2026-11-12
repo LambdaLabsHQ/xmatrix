@@ -213,3 +213,14 @@ test("a body too large for a command rides as the command's attached JSON file; 
   await fetched([], () => assert.rejects(ACTIONS.api_plan.execute({ credentials, commandFiles: files(good) },
     statement(command("api_plan", "applications.dataSafety", { ...request, body: { safetyLabels: "x" } }))), /not both/u));
 });
+
+test("base_plans reads each plan's state, period and one region's price, however many regions it is priced in", async () => {
+  const regionalConfigs = [...Array.from({ length: 173 }, (_, index) => ({ regionCode: `X${String.fromCharCode(65 + index % 26)}`, price: { currencyCode: "EUR", units: String(index) } })),
+    { regionCode: "US", price: { currencyCode: "USD", units: "10" } }];
+  const body = { basePlans: [{ basePlanId: "monthly", state: "DRAFT", autoRenewingBasePlanType: { billingPeriodDuration: "P1M" }, regionalConfigs }] };
+  const { result } = await fetched([{ body }], () => ACTIONS.base_plans.execute({ credentials }, statement("@googleplay:base_plans:sh.xmatrix.app/pro")));
+  assert.match(result.summary, /pro has 1 base plan/u);
+  assert.match(result.summary, /"state": "DRAFT"[\s\S]*"period": "P1M"[\s\S]*"regions": 174[\s\S]*"US": \{\s*"currencyCode": "USD",\s*"units": "10"/u);
+  assert.deepEqual(statement("@googleplay:base_plans:sh.xmatrix.app/pro JP"), { packageName: "sh.xmatrix.app", productId: "pro", region: "JP" });
+  assert.equal(typeof statement("@googleplay:base_plans:sh.xmatrix.app"), "string");
+});

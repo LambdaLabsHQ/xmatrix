@@ -77,8 +77,14 @@ Promoting a build is a `release` of its existing version code to another track.
 ## Subscription base plans
 
 ```text
+@googleplay:base_plans:sh.xmatrix.app/pro
 @googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"activate":true}
 ```
+
+`base_plans:<package>/<subscription> [region]` reads each base plan as Google
+Play stores it: state, billing period, the number of regions it is priced in
+and its price in one region (US by default). A subscription priced in every
+region does not fit a catalog read's bounded result; this does.
 
 `base_plan` adds one auto-renewing base plan to an existing subscription.
 `region` is the region the price is for; it keeps exactly that price. Google
