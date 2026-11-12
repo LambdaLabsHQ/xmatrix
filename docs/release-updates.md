@@ -9,13 +9,33 @@ the Space it was bought for, like an App Store purchase on iPhone. The Hub
 reads every purchase from the Google Play Developer API, acknowledges it after
 recording it, and re-reads it on each Real-time developer notification
 (`/api/billing/google-play/notifications`, Pub/Sub push with an OIDC token).
-Expand migration 0245 adds `google` as a billing provider and the
+Expand migration 0246 adds `google` as a billing provider and the
 `google_play_account_tokens` and `google_play_purchase_bindings` tables.
 Purchases need the production secret `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` and an
 Android build with Play Billing; until both exist, the Android app shows that
 subscriptions are unavailable and the web keeps Stripe. Setup is in
 `docs/operations/google-play-subscriptions.md`. Recovery is a CI-validated beta
 reverting this change; the two tables then stay unused.
+## Unreleased: an Instance at rest that a Norn request started is retired too
+
+Stopping the Run a Norn request started left the Instance when that Run had
+already exited: an Instance at rest has no live Run, stays listed, and wakes
+with the conversation's next message. The release step now retires such an
+Instance as a stop of that exact address does, and stops the Instance's
+current Run when it is live. Hub only, no schema change. Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: a Run started for a Norn request ends with the request
+
+Every request of a Norn program starts a new Run, and those Runs stayed in the
+conversation after answering: a review of three rounds left ten resting
+Instances, and each later message woke all of them. Once a request has ended
+(answered, refused, broke, cancelled or past its deadline), the Channel's
+coordinator now stops the Run its delivery started, once, and the delivery
+message says that answering ends the Run. Requests that ended before this
+release have their Runs stopped at the conversation's next coordinator pass.
+Hub only, with expand migration 0245 (`norn_requests.released_at`). Recovery is
+a CI-validated beta Hub reverting this change.
 
 ## Unreleased: a Norn program in a message asks Agents typed requests
 

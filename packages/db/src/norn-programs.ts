@@ -50,6 +50,8 @@ const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_execu
         AND (launch.state IN ('prepared','queued','admitted','spawned') OR (run.status IN ('starting','running')
           AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
             WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id)))))`;
+/** A delivered request `r` that has ended, whose Run has not been let go yet. */
+const NORN_REQUEST_UNRELEASED_SQL = "(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
 
 /**
@@ -64,7 +66,8 @@ export const NORN_CHANNEL_DUE_SQL = `LEAST(
       WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL),
     (SELECT MIN(r.created_at) FROM data.norn_requests r
       WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL),
-    (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}))`;
+    (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}),
+    (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}))`;
 /** The Channels with any program still running or unreported: `p` is the program. */
 export const NORN_PROGRAM_OPEN_SQL = "(p.state='running' OR p.reported_at IS NULL)";
 
@@ -179,7 +182,25 @@ export class PostgresNornProgramRepository {
             WHERE p.author_kind='agent' AND instance.instance_id=p.author_id LIMIT 1) AS author_mention
         FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
+      // The Instance a request started exists for that request alone. Once the request has ended, its Run is
+      // stopped if still live, and the Instance is retired if it rests: an Instance at rest outlives its Run.
+      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v2", text: `SELECT r.program_id,r.request_id,
+          p.authority_user_id,started.run_id,started.mention
+        FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          LEFT JOIN LATERAL (SELECT CASE WHEN run.status IN ('starting','running') THEN run.run_id END AS run_id,
+              lower(registration.display_name||':'||instance.channel_instance_id::text) AS mention
+            FROM data.agent_launches launch JOIN data.instances instance ON instance.instance_id=launch.instance_id
+              JOIN data.runs run ON run.run_id=instance.run_id
+              JOIN data.run_agent_registrations binding ON binding.run_id=launch.run_id
+              JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+                AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
+                AND registration.harness=binding.harness
+            WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id LIMIT 1) started ON TRUE
+        WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       return {
+        releases: releases.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
+          authorityUserId: String(row.authority_user_id), runId: typeof row.run_id === "string" ? row.run_id : null,
+          mention: typeof row.mention === "string" ? row.mention : null })),
         passes: passes.map(row => String(row.program_id)),
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
@@ -197,6 +218,14 @@ export class PostgresNornProgramRepository {
     await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v1", text: `UPDATE
       data.norn_requests SET delivered_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
         AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.epoch],
+      maxRows: 0 }));
+  }
+
+  /** The Instance this ended request started was stopped or retired, or had already gone. */
+  async released(input: Scope & { ledgerRequestId: string }): Promise<void> {
+    await this.transaction(input.requestId, "released", tx => tx.query({ name: "norn_request_released_v1", text: `UPDATE
+      data.norn_requests SET released_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
+        AND settled_at IS NOT NULL AND released_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId],
       maxRows: 0 }));
   }
 

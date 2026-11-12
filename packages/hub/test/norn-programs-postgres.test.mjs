@@ -83,6 +83,12 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     assert.deepEqual([work.passes, work.deliveries, work.reports.map(report => [report.state, report.authorMention, report.ended.result.value])],
       [[], [], [["completed", null, "The Agent's work on this request ended without an answer"]]]);
     await programs.reported(scope());
+    // The request has ended: what its delivery started is let go, once. Nothing was launched here, so there is nothing to stop.
+    assert.equal(await due(), true);
+    assert.deepEqual((await programs.channelWork(scope())).releases.map(release => [release.requestId, release.runId, release.mention, release.authorityUserId]),
+      [[delivery.requestId, null, null, "owner"]]);
+    await programs.released({ ...scope(), ledgerRequestId: delivery.requestId });
+    assert.deepEqual((await programs.channelWork(scope())).releases, []);
     assert.equal(await due(), null);
 
     // A stop of the Channel ends its running programs at their next pass; a stop of one Run does not.

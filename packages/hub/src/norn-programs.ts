@@ -1,6 +1,7 @@
 import { ControlError, PostgresNornProgramRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { checkNornProgram, nornDeliveryBody, nornEndBody, nornProgramIn, nornStartLedger, nornStep, type NornPassResult } from "./norn-host";
+import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
@@ -87,6 +88,16 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       authorityUserId: report.authorityUserId,
       body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
+  }
+  // An Instance started for a request has nothing left to do in the conversation once the request has ended.
+  for (const release of work.releases) {
+    const port = createProductAgentInterventionAuthorityPort({ env, actorUserId: release.authorityUserId,
+      sourceMessageId: `norn-release:${release.programId}:${release.requestId}`.slice(0, 200) });
+    const target = release.runId ? (await port.listKillTargets(channelId)).find(candidate => candidate.runId === release.runId) : undefined;
+    if (target) await port.issueStop(target, `norn-release:${release.runId}`.slice(0, 200), "Its request has ended", channelId);
+    // At rest it has no Run to stop, and the next message in the conversation would wake it.
+    else if (release.mention) await port.stopResting?.(channelId, { mention: release.mention, exclude: [] });
+    await programs.released({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
 }
 

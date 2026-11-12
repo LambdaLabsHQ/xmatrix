@@ -43,4 +43,4 @@ Never commit this JSON, a key, or a purchase token.
 
 ## Release and recovery
 
-Migration 0245 is expand-only. Deploy Hub/Web before the Android build that adds Play Billing. An Android app without the billing bridge shows an update message instead of a purchase. A Google outage fails closed for new grants; existing access lasts through the verified expiry. Removing the configuration disables new purchases but does not cancel a customer's subscription.
+Migration 0246 is expand-only. Deploy Hub/Web before the Android build that adds Play Billing. An Android app without the billing bridge shows an update message instead of a purchase. A Google outage fails closed for new grants; existing access lasts through the verified expiry. Removing the configuration disables new purchases but does not cancel a customer's subscription.
