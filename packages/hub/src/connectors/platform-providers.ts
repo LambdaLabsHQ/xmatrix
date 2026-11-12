@@ -34,6 +34,8 @@ import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-ad
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
 import { GOOGLE_ADS_ACTIONS, verifyGoogleAds } from "./actions/google-ads";
 import { GOOGLE_BUSINESS_PROFILE_ACTIONS, verifyGoogleBusinessProfile } from "./actions/google-business-profile";
+import { GOOGLE_PLAY_ACTIONS } from "./actions/google-play";
+import { verifyGooglePlay } from "./google-play-api";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { GMAIL_SUBSCRIPTIONS } from "./gmail-mailboxes";
@@ -103,6 +105,7 @@ const PROVIDERS: Record<string, {
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
   googleads: { actions: GOOGLE_ADS_ACTIONS, verify: verifyGoogleAds },
   googlebusinessprofile: { actions: GOOGLE_BUSINESS_PROFILE_ACTIONS, verify: verifyGoogleBusinessProfile },
+  googleplay: { actions: GOOGLE_PLAY_ACTIONS, verify: verifyGooglePlay },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
   gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail, subscriptions: GMAIL_SUBSCRIPTIONS },
   x: { actions: X_ACTIONS },

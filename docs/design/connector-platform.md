@@ -418,6 +418,11 @@ API access (a request form, separate from OAuth verification) and the
 Account Management, Business Information and Performance APIs must be enabled;
 until then every call returns Google's 403.
 
+Google Play Console (`googleplay`) is another connection on the company
+Google client, holding only `https://www.googleapis.com/auth/androidpublisher`.
+Its operations come from the pinned androidpublisher v3 discovery document
+(`vendor/google-play`); see [the connector guide](../connectors/google-play.md).
+
 PageSpeed Insights (`pagespeed`) has no OAuth: the connection saves one Google
 Cloud API key with the PageSpeed Insights and Chrome UX Report APIs enabled,
 sent only in the `x-goog-api-key` header. `audit:<page url> [strategy=mobile|desktop]`

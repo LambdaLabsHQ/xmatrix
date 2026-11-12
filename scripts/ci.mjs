@@ -367,6 +367,13 @@ const nodeStaticStages = [
     parallelLane: "apple-api-check",
   },
   {
+    label: "Check pinned Google Play API operation catalog",
+    command: process.execPath,
+    args: ["scripts/google-play-discovery.mjs", "--check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "google-play-api-check",
+  },
+  {
     label: "Check synchronized versions",
     command: process.execPath,
     args: ["scripts/version.mjs", "check"],

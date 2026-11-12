@@ -1,0 +1,128 @@
+# Google Play Console connector
+
+The `googleplay` connection lets Agents publish and manage Android apps
+without the Play Console website. It pins the official Google Play Android
+Developer API discovery document (androidpublisher v3) and generates its
+operation catalog and request schemas from it, the same way the
+[App Store Connect connector](app-store-connect-api.md) pins Apple's OpenAPI.
+Two business actions cover the release loop that fastlane supply and Gradle
+Play Publisher run; every other capability is a catalog operation.
+
+## Connect
+
+A Human Space admin selects **Connect with Google Play Console** in Apps.
+It reuses the company `CONNECTOR_GOOGLE_CLIENT_ID` /
+`CONNECTOR_GOOGLE_CLIENT_SECRET` and the existing callback, like
+[`gcp`](gcp.md), but holds its own encrypted connection and token. Consent asks
+for offline access and exactly `https://www.googleapis.com/auth/androidpublisher`;
+an exchange or refresh that reports a different or additional scope is refused.
+Disconnecting deletes the grant.
+
+Then save **App for Check**: the package name of one app in the developer
+account (for example `sh.xmatrix.app`). Check reads that app's production
+track (`applications.tracks.releases.list`), a real read with the stored token.
+Actions always name their app explicitly.
+
+Prerequisites outside xMatrix:
+
+- The Google Play Android Developer API is enabled in the company OAuth
+  project (Google Cloud console → APIs & Services).
+- The Google account that consents is a user of the Play developer account
+  with permission for the apps it should manage (Play Console → Users and
+  permissions). Play permissions, not the OAuth scope, decide what each call
+  may do; a 403 names this.
+- The first upload of a new app's first bundle and some declarations
+  (content rating, data safety form, app access) are still done once in Play
+  Console. The API manages the app after that.
+
+## Release
+
+```text
+@googleplay:tracks:sh.xmatrix.app
+@googleplay:api_write:edits.insert {"path":{"packageName":"sh.xmatrix.app"},"body":{},"digest":"<from api_plan>"}
+@googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>"},"size":<bytes of app.aab>}
+@googleplay:release:sh.xmatrix.app/<edit id> {"track":"internal","versionCodes":["42"],"releaseNotes":[{"language":"en-US","text":"Fixes"}]}
+@googleplay:release:sh.xmatrix.app {"track":"production","versionCodes":["42"],"status":"inProgress","userFraction":0.1}
+```
+
+`tracks` lists every track with its releases, statuses, version codes and
+rollout fractions. Google exposes tracks only inside an edit, so it opens a
+temporary edit and deletes it; nothing is committed.
+
+Uploading takes two steps. `api_upload` opens a Google resumable upload
+session for any catalog upload operation (bundles, APKs, images, deobfuscation
+files, internal app sharing) after checking the byte size against Google's
+limit and the content type against the operation's accepted types. The receipt
+shows a `curl` command; run it on the machine that has the file. The session
+URL accepts only that file and needs no token, so the bytes never pass through
+the Hub. Keep it private; run `api_upload` with `--private` when the Channel
+should not see it. Google answers the PUT with the uploaded bundle and its
+`versionCode`.
+
+`release` writes one release on a track and commits the edit: in the edit
+given after the package (the one the upload used), or in a new edit it opens.
+`status` defaults to `completed`; use `inProgress` with `userFraction` for a
+staged rollout, `halted` to pause one, or `draft`. `changesNotSentForReview`
+commits without sending changes for review. A failure discards an edit the
+action opened; an edit you named stays for you to inspect or delete.
+Promoting a build is a `release` of its existing version code to another track.
+
+## Catalog operations
+
+```text
+@googleplay:api_operations:* subscriptions basePlans
+@googleplay:api_schema:edits.testers.update
+@googleplay:api_schema:Subscription properties.basePlans
+@googleplay:api_read:edits.testers.get {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>","track":"alpha"}}
+@googleplay:api_read:edits.listings.list {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>"}}
+@googleplay:api_read:monetization.subscriptions.list {"path":{"packageName":"sh.xmatrix.app"}}
+@googleplay:api_read:purchases.subscriptionsv2.get {"path":{"packageName":"sh.xmatrix.app","token":"<purchase token>"}}
+@googleplay:api_read:reviews.list {"path":{"packageName":"sh.xmatrix.app"},"query":{"maxResults":20}}
+```
+
+Operation names are the discovery method ids without `androidpublisher.`.
+`api_schema` reads an operation's parameters and body or a named schema,
+optionally a dotted field path inside it. Path values are single identifiers;
+resource names such as `developers/<id>/users/<email>` must match Google's
+pattern for that parameter. Repeated query parameters are JSON arrays.
+Unknown operations, parameters or body fields, wrong types and values outside
+an enum are refused before the token is used. Reads return one page; pass the
+returned `nextPageToken`/`token` back as the documented query parameter. Use
+`--private` for purchases, orders, users and reviews, which carry personal data.
+Fields named like credentials are refused in commands and removed from output.
+
+### Writes: plan, then write
+
+```text
+@googleplay:api_plan:edits.testers.update {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>","track":"alpha"},"body":{"googleGroups":["testers@example.com"]}}
+@googleplay:api_write:edits.testers.update {"path":{…same…},"body":{…same…},"digest":"<digest from plan>"}
+```
+
+`api_plan` writes nothing. Its digest binds the pinned document, the exact
+request and the target's current state: the GET at the same resource path
+(`edits.tracks.get` for `edits.tracks.update`), or for a custom method the
+resource it acts on (`edits.get` for `edits.commit`,
+`monetization.subscriptions.get` for `…subscriptions.archive`). Creates and
+methods without such a GET have no snapshot, and repeating a create may
+duplicate it. `api_write` reads the state again before approval and right
+before the call, refuses a changed request or state, rechecks write
+permission, and calls Google exactly once; a timeout is uncertain and is
+never retried. Edits-scoped writes take effect only when the edit is
+committed (`edits.commit`, or `release`).
+
+High-frequency flows by operation: testers `edits.testers.get/update/patch`;
+store listing `edits.listings.*` and `edits.details.*`, screenshots
+`edits.images.*` (upload with `api_upload`); subscriptions
+`monetization.subscriptions.*`, base plans and offers
+`monetization.subscriptions.basePlans.*`; one-time products
+`monetization.onetimeproducts.*`; purchases `purchases.subscriptionsv2.get`,
+`purchases.productsv2.getproductpurchasev2`, `purchases.voidedpurchases.list`;
+reviews `reviews.list`, `reviews.reply`. File downloads (generated APKs) are
+not offered.
+
+## Maintenance
+
+The snapshot, generator and refresh procedure are in
+[`vendor/google-play`](../../vendor/google-play/README.md). No runtime SDK,
+arbitrary URL or caller-chosen method is introduced, and no database or
+credential migration is required.
