@@ -9,21 +9,20 @@ switch run(@codex, "Review the design")->wait {
 | other => fail(other)
 }`;
 
-test("a program block on a page runs in a conversation of its own, and the page says how it stands", async () => {
-  const worker = await startPgHubWorker({ vars: { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN, XMATRIX_MOCK_AUTH_USER_ID: `norn-page-${randomUUID()}`,
-    XMATRIX_MOCK_AUTH_EMAIL: "norn-page@example.com", XMATRIX_MOCK_AUTH_NAME: "Norn Page" } });
+/** A Hub worker with one person, a Machine that can start `codex`, and that person's calls to the Space's pages. */
+async function pageScene(name, body) {
+  const worker = await startPgHubWorker({ vars: { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN, XMATRIX_MOCK_AUTH_USER_ID: `${name}-${randomUUID()}`,
+    XMATRIX_MOCK_AUTH_EMAIL: `${name}@example.com`, XMATRIX_MOCK_AUTH_NAME: "Norn Page" } });
   let daemon;
   try {
     const scenario = await createPgSpawnableScenario(worker, { agentName: "codex" });
     ({ daemon } = scenario);
-    const spaceId = await channelSpaceId(scenario.channelId);
-    const call = async (path, method = "GET", body) => {
+    const call = async (path, method = "GET", payload) => {
       const response = await worker.fetch(path, { method, headers: { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+        ...(payload === undefined ? {} : { body: JSON.stringify(payload) }) });
       assert.ok(response.ok, await response.clone().text());
       return response.json();
     };
-    const pages = `/api/spaces/${encodeURIComponent(spaceId)}/pages`;
     const until = async (read, what) => {
       for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
         const value = await read();
@@ -32,7 +31,15 @@ test("a program block on a page runs in a conversation of its own, and the page 
       }
       throw new Error(`timed out waiting for ${what}`);
     };
+    await body({ worker, scenario, daemon, call, until,
+      pages: `/api/spaces/${encodeURIComponent(await channelSpaceId(scenario.channelId))}/pages` });
+  } finally {
+    daemon?.ws.close();
+    await worker.stop();
+  }
+}
 
+test("a program block on a page runs in a conversation of its own, and the page says how it stands", () => pageScene("norn-page", async ({ worker, scenario, daemon, call, pages, until }) => {
     // A block that does not check starts nothing, and the page says why.
     const { page } = await call(pages, "POST", { title: "Design", body: `# Design\n\n${block(`run(@codex, "Review")`)}\n` });
     const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
@@ -65,35 +72,9 @@ test("a program block on a page runs in a conversation of its own, and the page 
     assert.deepEqual(await programs(), []);
     await until(async () => (await channelHistory(worker, MOCK_TOKEN, running.channelId, 30)).messages
       .some(message => message.body === "The program stopped: Removed from its page"), "the stop");
-  } finally {
-    daemon?.ws.close();
-    await worker.stop();
-  }
-});
+}));
 
-test("a page's program asks the same participant again where it already is, and lets it go when the program ends", async () => {
-  const worker = await startPgHubWorker({ vars: { XMATRIX_MOCK_AUTH_TOKEN: MOCK_TOKEN, XMATRIX_MOCK_AUTH_USER_ID: `norn-reuse-${randomUUID()}`,
-    XMATRIX_MOCK_AUTH_EMAIL: "norn-reuse@example.com", XMATRIX_MOCK_AUTH_NAME: "Norn Reuse" } });
-  let daemon;
-  try {
-    const scenario = await createPgSpawnableScenario(worker, { agentName: "codex" });
-    ({ daemon } = scenario);
-    const spaceId = await channelSpaceId(scenario.channelId);
-    const call = async (path, method = "GET", body) => {
-      const response = await worker.fetch(path, { method, headers: { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" },
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-      assert.ok(response.ok, await response.clone().text());
-      return response.json();
-    };
-    const pages = `/api/spaces/${encodeURIComponent(spaceId)}/pages`;
-    const until = async (read, what) => {
-      for (const deadline = Date.now() + 30_000; Date.now() < deadline;) {
-        const value = await read();
-        if (value) return value;
-        await new Promise(resolve => setTimeout(resolve, 200));
-      }
-      throw new Error(`timed out waiting for ${what}`);
-    };
+test("a page's program asks the same participant again where it already is, and lets it go when the program ends", () => pageScene("norn-reuse", async ({ worker, scenario, daemon, call, pages, until }) => {
     const { page } = await call(pages, "POST", { title: "Two steps", body: block(`let draft = ask(@codex, "Draft it")->wait?
 ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     const program = async () => (await call(`${pages}/${page.pageId}/programs`)).programs[0];
@@ -122,8 +103,4 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     assert.equal((await until(async () => { const now = await program(); return now.state === "completed" ? now : null; }, "the end")).result, "Short");
     // Kept while the program ran, its Instance is let go now.
     await daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId, "the holder's stop");
-  } finally {
-    daemon?.ws.close();
-    await worker.stop();
-  }
-});
+}));
