@@ -22,6 +22,7 @@ const GRAMMARS = {
   json: () => import("highlight.js/lib/languages/json"),
   kotlin: () => import("highlight.js/lib/languages/kotlin"),
   markdown: () => import("highlight.js/lib/languages/markdown"),
+  norn: () => import("./norn-grammar"),
   php: () => import("highlight.js/lib/languages/php"),
   python: () => import("highlight.js/lib/languages/python"),
   ruby: () => import("highlight.js/lib/languages/ruby"),
@@ -113,7 +114,7 @@ const LANGUAGE_NAMES: Record<string, string> = {
   py: "Python", python: "Python", rb: "Ruby", ruby: "Ruby", go: "Go", golang: "Go", rs: "Rust", rust: "Rust",
   swift: "Swift", kotlin: "Kotlin", kt: "Kotlin", java: "Java", c: "C", cpp: "C++", php: "PHP",
   sql: "SQL", diff: "Diff", patch: "Diff", css: "CSS", html: "HTML", xml: "XML", svg: "SVG",
-  md: "Markdown", markdown: "Markdown", dockerfile: "Dockerfile", docker: "Dockerfile", text: "Text", txt: "Text",
+  md: "Markdown", markdown: "Markdown", norn: "Norn", dockerfile: "Dockerfile", docker: "Dockerfile", text: "Text", txt: "Text",
 };
 const TERMINAL_LANGUAGES = new Set(["bash", "sh", "shell", "zsh", "console", "shellsession", "powershell", "ps1", "fish"]);
 const DATA_LANGUAGES = new Set(["json", "jsonc", "yaml", "yml", "toml", "ini"]);
