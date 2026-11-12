@@ -17,7 +17,7 @@ export type SpaceBilling = SpacePlanBilling & {
   seats: { used: number; limit: number };
   freeUsage: { acceptedMessages: number; limit: number; remaining: number };
   subscription: {
-    billingProvider?: "stripe" | "apple";
+    billingProvider?: "stripe" | "apple" | "google";
     status: string;
     seatQuantity: number;
     currentPeriodEnd?: string | null;

@@ -21,4 +21,13 @@ public final class BridgeScriptTest {
     assertTrue(source.contains("currentVersion: '0.15.68-test'"));
     assertFalse(source.contains("window.xmatrixNative.invoke"));
   }
+
+  @Test
+  public void sellsSubscriptionsOnlyThroughGooglePlay() {
+    String source = BridgeScript.source("4.0.7-test");
+
+    for (String method : new String[] {"googlePlayProducts", "googlePlayPurchase", "googlePlayPurchases", "googlePlayManage"}) {
+      assertTrue(method, source.contains(method + ": (input) => invoke('" + method + "', input)"));
+    }
+  }
 }

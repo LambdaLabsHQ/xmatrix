@@ -54,6 +54,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't load App Store products",
   "Couldn't load Automations",
   "Couldn't load GitHub accounts",
+  "Couldn't load Google Play subscriptions",
   "Couldn't load app actions",
   "Couldn't load app connections",
   "Couldn't load apps",

@@ -2,6 +2,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { BillingControlError, PostgresBillingRepository } from "./billing-control.js";
 import { boundedDatabaseIdentifier } from "./identifiers.js";
 import { accountRevokedSql } from "./account-deletion.js";
+import { reserveStorePurchase } from "./store-purchase-tokens.js";
 
 export interface AppleAccountBinding {
   appAccountToken: string;
@@ -39,19 +40,9 @@ export class PostgresAppleBillingRepository {
   }
 
   async prepare(input: { requestId: string; commandId: string; spaceId: string; actorUserId: string; interval: "month" | "year"; productId: string }) {
-    // The Space transaction verifies the owner, one human seat, provider conflict,
-    // and reserves a checkout before we return a token to StoreKit.
-    await this.billing.createCheckoutIntent({ ...input, priceId: input.productId, seatQuantity: 1, billingProvider: "apple" });
-    return this.database.transaction({ requestId: input.requestId, operation: "apple.purchase.prepare" }, async (tx) => {
-      const rows = await tx.query<{ app_account_token: string }>({
-        name: "apple_account_token_create_v1",
-        text: `INSERT INTO control.apple_account_tokens(app_account_token,space_id,owner_user_id)
-          VALUES ($1,$2,$3) ON CONFLICT (space_id,owner_user_id)
-          DO UPDATE SET space_id=EXCLUDED.space_id RETURNING app_account_token`,
-        values: [crypto.randomUUID(), input.spaceId, input.actorUserId], maxRows: 1,
-      });
-      return { appAccountToken: rows[0].app_account_token, productId: input.productId };
-    });
+    const appAccountToken = await reserveStorePurchase(this.database, this.billing, { provider: "apple", table: "control.apple_account_tokens",
+      column: "app_account_token", statement: "apple_account_token_create_v1", operation: "apple.purchase.prepare" }, input);
+    return { appAccountToken, productId: input.productId };
   }
 
   async resolve(requestId: string, token: string): Promise<AppleAccountBinding | null> {

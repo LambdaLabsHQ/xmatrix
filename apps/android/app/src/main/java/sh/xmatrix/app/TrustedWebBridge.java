@@ -6,6 +6,7 @@ import androidx.webkit.JavaScriptReplyProxy;
 import androidx.webkit.WebMessageCompat;
 import androidx.webkit.WebViewCompat;
 import androidx.webkit.WebViewFeature;
+import java.util.function.Consumer;
 
 final class TrustedWebBridge {
   private static final String JAVASCRIPT_OBJECT_NAME = "xmatrixNative";
@@ -21,7 +22,7 @@ final class TrustedWebBridge {
       JAVASCRIPT_OBJECT_NAME,
       AppConfiguration.trustedBridgeOriginRules(),
       (view, message, sourceOrigin, isMainFrame, replyProxy) ->
-        handleMessage(bridge, message, sourceOrigin, isMainFrame, replyProxy)
+        handleMessage(view, bridge, message, sourceOrigin, isMainFrame, replyProxy)
     );
     WebViewCompat.addDocumentStartJavaScript(
       webView,
@@ -32,6 +33,7 @@ final class TrustedWebBridge {
   }
 
   private static void handleMessage(
+    WebView view,
     NativeBridge bridge,
     WebMessageCompat message,
     Uri sourceOrigin,
@@ -57,6 +59,17 @@ final class TrustedWebBridge {
         String id = request.id;
         bridge.authorizeInBrowser(request.payload, response -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
         return;
+      }
+      if (request.method.startsWith("googlePlay") && !"googlePlayManage".equals(request.method)) {
+        // Google Play answers on its own thread; the reply goes back on the page's.
+        String id = request.id;
+        Consumer<String> reply = response -> view.post(() -> replyProxy.postMessage(BridgeProtocol.reply(id, response)));
+        switch (request.method) {
+          case "googlePlayProducts": bridge.playBilling.products(request.payload, reply); return;
+          case "googlePlayPurchase": bridge.playBilling.purchase(request.payload, reply); return;
+          case "googlePlayPurchases": bridge.playBilling.purchases(request.payload, reply); return;
+          default: break;
+        }
       }
       String response = bridge.invoke(request.method, request.payload.toString());
       replyProxy.postMessage(BridgeProtocol.reply(request.id, response));

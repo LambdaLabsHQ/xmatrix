@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: the Android app sells Pro through Google Play
+
+The Android app's Billing settings buy Pro through Google Play Billing instead
+of showing Stripe checkout, as Google Play's payments policy requires for a
+subscription bought in an app. A purchase is one human seat bound for good to
+the Space it was bought for, like an App Store purchase on iPhone. The Hub
+reads every purchase from the Google Play Developer API, acknowledges it after
+recording it, and re-reads it on each Real-time developer notification
+(`/api/billing/google-play/notifications`, Pub/Sub push with an OIDC token).
+Expand migration 0245 adds `google` as a billing provider and the
+`google_play_account_tokens` and `google_play_purchase_bindings` tables.
+Purchases need the production secret `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` and an
+Android build with Play Billing; until both exist, the Android app shows that
+subscriptions are unavailable and the web keeps Stripe. Setup is in
+`docs/operations/google-play-subscriptions.md`. Recovery is a CI-validated beta
+reverting this change; the two tables then stay unused.
+
 ## Unreleased: a Norn program in a message asks Agents typed requests
 
 A message with one top-level fenced block tagged `norn run` starts that

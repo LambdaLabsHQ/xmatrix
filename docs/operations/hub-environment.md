@@ -57,6 +57,7 @@ Leave unset to keep the feature off.
 | `GMAIL_WATCH_TOPIC` | secret | Pub/Sub topic in the same Google project as the OAuth application. |
 | `GOOGLE_CLIENT_ID` | secret | Google OAuth client id. Unset with its secret: Google sign-in is hidden. |
 | `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client secret. |
+| `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` | secret | Private Google Play service account key, subscription and base plan ids, Pub/Sub push identity and test-purchase Space allowlist. Unset disables Google Play subscription purchases. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
 | `PUSH_CONFIG` | secret | JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open. |
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |

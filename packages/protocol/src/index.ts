@@ -636,6 +636,7 @@ export { cleanRepositoryBaseline } from "./repository-baseline.js";
 export type { RepositoryBaseline } from "./repository-baseline.js";
 
 export { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "./apple-billing-config.js";
+export { parseGooglePlaySubscriptionConfig, type GooglePlaySubscriptionConfig } from "./google-play-billing-config.js";
 
 export type { AccountDeletionState, AccountDeletionBlocker, AccountDeletionReceipt } from "./account-deletion.js";
 export { ACCOUNT_REVOKED_STATES, isAccountRevoked } from "./account-deletion.js";
