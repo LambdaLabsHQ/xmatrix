@@ -83,14 +83,10 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     assert.deepEqual([work.passes, work.deliveries, work.reports.map(report => [report.state, report.authorMention, report.ended.result.value])],
       [[], [], [["completed", null, "The Agent's work on this request ended without an answer"]]]);
     await programs.reported(scope());
-    // The request has ended while the Run it started is still live: that Run is let go, once.
+    // The request has ended: what its delivery started is let go, once. Nothing was launched here, so there is nothing to stop.
     assert.equal(await due(), true);
-    await sql(`INSERT INTO data.agent_launches(launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,instance_id,
-      execution_key,control_id,machine_id,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
-      VALUES ('launch','space','channel',$1,'registration','owner','channel:2#1','channel:2','key','control','machine','connected',
-        '{}',now(),now(),now())`, [delivery.deliveryMessageId]);
-    assert.deepEqual((await programs.channelWork(scope())).releases.map(release => [release.requestId, release.runId, release.authorityUserId]),
-      [[delivery.requestId, "channel:2#1", "owner"]]);
+    assert.deepEqual((await programs.channelWork(scope())).releases.map(release => [release.requestId, release.runId, release.mention, release.authorityUserId]),
+      [[delivery.requestId, null, null, "owner"]]);
     await programs.released({ ...scope(), ledgerRequestId: delivery.requestId });
     assert.deepEqual((await programs.channelWork(scope())).releases, []);
     assert.equal(await due(), null);
