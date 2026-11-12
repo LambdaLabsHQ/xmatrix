@@ -9,6 +9,7 @@ import { statementParser } from "./support/google-read-grant.mjs";
 
 const company = { CONNECTOR_GOOGLE_CLIENT_ID: "fixture-client.apps.googleusercontent.com", CONNECTOR_GOOGLE_CLIENT_SECRET: "fixture-secret" };
 const scope = "https://www.googleapis.com/auth/androidpublisher";
+const reporting = "https://www.googleapis.com/auth/playdeveloperreporting";
 const credentials = { oauthToken: "play-access" };
 const statement = statementParser("googleplay", ACTIONS);
 const command = (action, operation, request = {}) => `@googleplay:${action}:${operation} ${JSON.stringify(request)}`;
@@ -17,23 +18,32 @@ const track = { path: { packageName: "sh.xmatrix.app", editId: "edit-1", track: 
   body: { track: "internal", releases: [{ status: "completed", versionCodes: ["42"] }] } };
 const digestOf = summary => summary.match(/digest ([a-f0-9]{64})/u)[1];
 
-test("Google Play keeps its own grant for exactly androidpublisher on the company Google client", async () => {
+test("Google Play keeps its own grant for exactly its two scopes on the company Google client", async () => {
   const client = oauthClient(company, "googleplay");
   assert.equal(client.clientId, company.CONNECTOR_GOOGLE_CLIENT_ID);
-  assert.deepEqual(getAppConnectorProvider("googleplay").oauth.scopes, [scope]);
-  const accepted = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope };
+  assert.deepEqual(getAppConnectorProvider("googleplay").oauth.scopes, [scope, reporting]);
+  assert.deepEqual(getAppConnectorProvider("googleplay").credentials.filter(field => !field.managed), []);
+  const accepted = { access_token: "a", refresh_token: "r", token_type: "Bearer", expires_in: 3600, scope: `${scope} ${reporting}` };
   assert.equal((await fetched([{ body: accepted }], () => exchangeOAuthGrant(client, "code", "https://hub.test/cb"))).result.fields.oauthToken, "a");
-  for (const wrong of [`${scope} https://www.googleapis.com/auth/cloud-platform`, "https://www.googleapis.com/auth/cloud-platform"]) {
+  for (const wrong of [scope, `${scope} ${reporting} https://www.googleapis.com/auth/cloud-platform`, "https://www.googleapis.com/auth/cloud-platform"]) {
     await fetched([{ body: { ...accepted, scope: wrong } }], () => assert.rejects(exchangeOAuthGrant(client, "code", "https://hub.test/cb"), /Google Play Console OAuth grant/u));
   }
   await assert.rejects(refreshOAuthFields(company, "googleplay", { oauthToken: "a" }), /complete expiring grant/u);
 });
 
-test("Check reads the saved app's production track, and names the missing package otherwise", async () => {
-  await assert.rejects(verifyGooglePlay(credentials), error => error.fix?.field === "packageName");
-  const { calls } = await fetched([{ body: { releases: [] } }], () => verifyGooglePlay({ ...credentials, packageName: "sh.xmatrix.app" }));
-  assert.equal(calls[0].url, `${API}/sh.xmatrix.app/tracks/production/releases`);
-  assert.equal(calls[0].headers.get("authorization"), "Bearer play-access");
+test("Check and list_apps read every app the sign-in can see; nobody types a package to connect", async () => {
+  const listed = { apps: [{ name: "apps/sh.xmatrix.app", packageName: "sh.xmatrix.app", displayName: "xMatrix" }], nextPageToken: "next_1" };
+  const check = await fetched([{ body: {} }], () => verifyGooglePlay(credentials));
+  assert.equal(check.calls[0].url, "https://playdeveloperreporting.googleapis.com/v1beta1/apps:search?pageSize=100");
+  assert.equal(check.calls[0].headers.get("authorization"), "Bearer play-access");
+  await fetched([{ status: 401, body: { error: { status: "UNAUTHENTICATED" } } }], () => assert.rejects(verifyGooglePlay(credentials), error => error.fix?.kind === "reconnect"));
+  await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "Google Play Developer Reporting API has not been used in project 1 before or it is disabled." } } }],
+    () => assert.rejects(verifyGooglePlay(credentials), /Reporting API returned 403.*disabled/u));
+  const { result, calls } = await fetched([{ body: listed }], () => ACTIONS.list_apps.execute({ credentials }, statement("@googleplay:list_apps:* next_0")));
+  assert.match(calls[0].url, /pageToken=next_0$/u);
+  assert.match(result.summary, /1 app this sign-in can see \(more: pass pageToken next_1\)/u);
+  assert.match(result.summary, /"packageName": "sh.xmatrix.app"/u);
+  assert.equal(typeof statement("@googleplay:list_apps:sh.xmatrix.app"), "string");
 });
 
 test("catalog requests are validated against the pinned discovery document before any credential is used", () => {

@@ -11,7 +11,8 @@ import { googleHeaders } from "./actions/google-headers";
  * vendor/google-play is the only source of operations, paths and request
  * schemas; callers name an operation and supply its parameters, never a URL,
  * method or header. Every call carries the connection's own OAuth token for
- * exactly the androidpublisher scope.
+ * the androidpublisher scope; listing apps uses the read-only
+ * playdeveloperreporting scope of the same grant.
  */
 
 export const PLAY_ORIGIN = "https://androidpublisher.googleapis.com";
@@ -106,13 +107,26 @@ export function play(credentials: Readonly<Record<string, string>>, id: GooglePl
   return sendPlay(credentials, playRequest(id, input));
 }
 
-/** Check: one real read of the saved app's production releases. */
-export async function verifyGooglePlay(credentials: Readonly<Record<string, string>>): Promise<void> {
-  const packageName = credentials.packageName?.trim() ?? "";
-  if (!PACKAGE_NAME.test(packageName)) {
-    throw new ConnectorRemedy(400, "Save the package name of one app in this Play developer account (such as com.example.app); Check reads its production track",
-      { kind: "credential", field: "packageName" });
+/** One page of the apps the connected account can see, from the Play Developer Reporting API (the publishing API lists none). */
+export async function playApps(credentials: Readonly<Record<string, string>>, pageToken?: string) {
+  const url = new URL("https://playdeveloperreporting.googleapis.com/v1beta1/apps:search");
+  url.searchParams.set("pageSize", "100");
+  if (pageToken) url.searchParams.set("pageToken", pageToken);
+  let result: Record<string, unknown>;
+  try {
+    result = await providerJson(url, { headers: googleHeaders(credentials, "Google Play Console"), describeError: describePlayError });
+  } catch (error) {
+    if (!(error instanceof ProviderRequestError)) throw error;
+    if (error.status === 401) throw new ConnectorRemedy(401, "Google no longer accepts the Google Play Console sign-in; reconnect", { kind: "reconnect" });
+    throw new ProviderRequestError(error.status, error.message.replace(/^Provider returned/u, "Google Play Developer Reporting API returned"));
   }
-  const result = await play(credentials, "applications.tracks.releases.list", { path: { parent: `applications/${packageName}/tracks/production` } });
-  if (result.releases !== undefined && !Array.isArray(result.releases)) throw new ProviderRequestError(502, "Google Play did not return a release list");
+  if (result.apps !== undefined && !Array.isArray(result.apps)) throw new ProviderRequestError(502, "Google Play did not return an app list");
+  const apps = ((result.apps ?? []) as unknown[]).map(record).map(app => ({ packageName: text(app.packageName), displayName: text(app.displayName) }))
+    .filter(app => PACKAGE_NAME.test(app.packageName));
+  return { apps, nextPageToken: text(result.nextPageToken) || undefined };
+}
+
+/** Check: one real read, the apps this sign-in can see. An account with no app yet still passes. */
+export async function verifyGooglePlay(credentials: Readonly<Record<string, string>>): Promise<void> {
+  await playApps(credentials);
 }

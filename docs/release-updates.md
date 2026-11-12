@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Google Play Console connects with one sign-in, for every app
+
+Connecting Google Play Console no longer asks for an app's package name. The
+sign-in also grants the read-only Play Developer Reporting scope, Check lists
+the apps the account can see, and `list_apps` gives Agents their package
+names. An existing connection signs in once more for the added scope. The
+Google Cloud connector's `enable_api` now accepts the two Play APIs. Hub and
+protocol only; no schema change. Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: a Google Play Console connector
 
 Apps gains Google Play Console (`googleplay`), so Agents release Android apps
