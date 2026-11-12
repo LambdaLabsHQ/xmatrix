@@ -2,6 +2,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { ControlError } from "./control-error.js";
+import { inActiveSpace } from "./page-control.js";
 
 /**
  * Norn programs (docs/architecture/norn-host.md). A program's request ledger
@@ -131,20 +132,45 @@ export class PostgresNornProgramRepository {
    * The message is the program's identity, so a repeat starts nothing.
    */
   async start<T>(input: Scope & { authorKind: "user" | "agent"; authorId: string; authorityUserId: string; source: string;
+    /** The Page block the program lives in, when it does. */
+    page?: { pageId: string; name: string };
     ledger: (nowMs: number) => unknown }, step: NornStep<T>): Promise<T | undefined> {
     return this.transaction(input.requestId, "start", async tx => {
-      const [created] = await tx.query<QueryResultRow>({ name: "norn_program_start_v1", text: `INSERT INTO data.norn_programs
-          (space_id,channel_id,program_id,author_kind,author_id,authority_user_id,source,ledger_json,state)
-        SELECT message.space_id,message.channel_id,message.message_id,$4,$5,$6,$7,'{}'::jsonb,'running'
+      const [created] = await tx.query<QueryResultRow>({ name: "norn_program_start_v2", text: `INSERT INTO data.norn_programs
+          (space_id,channel_id,program_id,author_kind,author_id,authority_user_id,source,ledger_json,state,page_id,page_name)
+        SELECT message.space_id,message.channel_id,message.message_id,$4,$5,$6,$7,'{}'::jsonb,'running',$8,$9
         FROM data.messages message WHERE message.space_id=$1 AND message.channel_id=$2 AND message.message_id=$3
           AND message.deleted_at IS NULL AND message.recalled_at IS NULL
         ON CONFLICT (space_id,program_id) DO NOTHING
         RETURNING *,floor(extract(epoch from clock_timestamp())*1000)::text AS now_millis`,
         values: [this.placement.spaceId, input.channelId, input.programId, input.authorKind, input.authorId,
-          input.authorityUserId, input.source], maxRows: 1 });
+          input.authorityUserId, input.source, input.page?.pageId ?? null, input.page?.name ?? null], maxRows: 1 });
       if (!created) return undefined;
       return this.pass(tx, { ...created, ledger_json: input.ledger(Number(created.now_millis)) }, step);
     });
+  }
+
+  /**
+   * The program's text changed where it lives. The same ledger is evaluated
+   * against the new text, as whoever changed it: what was already asked in the
+   * same words stays asked, and nothing is asked twice.
+   */
+  async revise<T>(input: Scope & { source: string; authorityUserId: string }, step: NornStep<T>): Promise<T | undefined> {
+    return this.transaction(input.requestId, "revise", async tx => {
+      const [program] = await tx.query<QueryResultRow>({ name: "norn_program_revise_v1", text: `UPDATE data.norn_programs
+        SET source=$4,authority_user_id=$5,updated_at=clock_timestamp()
+        WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' RETURNING *`,
+        values: [this.placement.spaceId, input.channelId, input.programId, input.source, input.authorityUserId], maxRows: 1 });
+      return program ? this.pass(tx, program, step) : undefined;
+    });
+  }
+
+  /** The program's block left its Page: its next pass ends it and cancels what it left open. */
+  async remove(input: Scope): Promise<void> {
+    await this.transaction(input.requestId, "remove", tx => tx.query({ name: "norn_program_remove_v1", text: `UPDATE
+      data.norn_programs SET stop_reason='Removed from its page',updated_at=clock_timestamp()
+      WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' AND stop_reason IS NULL`,
+      values: [this.placement.spaceId, input.channelId, input.programId], maxRows: 0 }));
   }
 
   /** One step on a running program, holding its row. `undefined`: no such running program in this Channel. */
@@ -167,13 +193,13 @@ export class PostgresNornProgramRepository {
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });
       const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v1", text: `SELECT r.program_id,
-          r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,
+          r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,
           p.ledger_json->'requests'->r.request_id AS request_json
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
         WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL
         ORDER BY r.created_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v1", text: `SELECT p.program_id,p.state,
-          p.authority_user_id,p.ledger_json->'ended' AS ended_json,
+          p.authority_user_id,p.page_id,p.ledger_json->'ended' AS ended_json,
           (SELECT '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id
             FROM data.instances instance JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
               LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
@@ -205,9 +231,10 @@ export class PostgresNornProgramRepository {
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
           deliveryMessageId: String(row.delivery_message_id), authorityUserId: String(row.authority_user_id),
+          onPage: row.page_id !== null,
           request: row.request_json as unknown })),
         reports: reports.map(row => ({ programId: String(row.program_id), state: String(row.state),
-          authorMention: typeof row.author_mention === "string" ? row.author_mention : null,
+          authorMention: typeof row.author_mention === "string" ? row.author_mention : null, onPage: row.page_id !== null,
           authorityUserId: String(row.authority_user_id), ended: row.ended_json as unknown })),
       };
     });
@@ -276,4 +303,25 @@ export class PostgresNornProgramRepository {
         text: String(row.text ?? ""), by: row.by_millis === null ? null : new Date(Number(row.by_millis)).toISOString(),
         held: row.held === true, asked: row.asked === true })));
   }
+}
+
+class NornSpaceError extends ControlError {
+  constructor(code: string, status: number) { super(code, status, "The Space is unavailable"); }
+}
+
+/**
+ * The latest program of each named block of a Page, with its ledger. Read by
+ * Space, because a Page's programs each work in a conversation of their own.
+ * The caller has read the Page as whoever asks.
+ */
+export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
+  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
+    async tx => (await tx.query<QueryResultRow>({
+      name: "norn_page_programs_v1", text: `SELECT DISTINCT ON (p.page_name) p.page_name,p.program_id,p.channel_id,p.source,p.state,
+          p.ledger_json,(SELECT count(*) FROM data.norn_programs earlier WHERE earlier.space_id=p.space_id
+            AND earlier.page_id=p.page_id AND earlier.page_name=p.page_name)::int AS runs
+        FROM data.norn_programs p WHERE p.space_id=$1 AND p.page_id=$2
+        ORDER BY p.page_name,p.created_at DESC LIMIT 200`, values: [input.spaceId, input.pageId], maxRows: 200 }))
+      .map(row => ({ name: String(row.page_name), programId: String(row.program_id), channelId: String(row.channel_id),
+        source: String(row.source), state: String(row.state), runs: Number(row.runs), ledger: row.ledger_json as unknown })));
 }

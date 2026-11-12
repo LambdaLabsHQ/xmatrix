@@ -21,6 +21,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
 import { syncPageSchedules } from "./page-schedule-sync";
+import { syncPagePrograms } from "./norn-page-programs";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
@@ -358,6 +359,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     if (!started && pageSchedules(String(body.body ?? "")).length) {
       await syncPageSchedules(c.env, { spaceId, pageId: created.page.pageId, revision: created.page.headRevision,
         userId: authUser.agentRun?.ownerUserId ?? authUser.id, viaAgentRun: Boolean(authUser.agentRun) });
+    }
+    if (!started && typeof body.body === "string" && body.body.includes("norn run")) {
+      await syncPagePrograms(c.env, { spaceId, pageId: created.page.pageId, userId: authUser.agentRun?.ownerUserId ?? authUser.id });
     }
     if (!started) return created;
     let seeded = false;
@@ -770,6 +774,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     await syncPageSchedules(c.env, { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
       revision: result.page.headRevision, userId: authUser.agentRun?.ownerUserId ?? authUser.id,
       viaAgentRun: Boolean(authUser.agentRun) });
+    await syncPagePrograms(c.env, { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      userId: authUser.agentRun?.ownerUserId ?? authUser.id });
     await refreshSession(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser);
     return { page: result.page, revision: result.revision };
   }));

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkNornProgram, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { checkNornProgram, nornBlocks, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -32,6 +32,9 @@ test("only a top-level block tagged norn run is a program", () => {
   assert.equal(nornProgramIn(`> \`\`\`norn run\n> ${review.split("\n")[0]}\n> \`\`\``), undefined);
   assert.match(nornProgramIn(fenced(review) + fenced(review)).refusal, /one program/u);
   assert.match(checkNornProgram(`run(@codex, "x")`).refusal, /^1:1 /u);
+  // On a page a block may carry a name; without one it is `main`.
+  assert.deepEqual(nornBlocks(`${fenced(review, "norn run review")}\n${fenced("1")}\n${fenced("2", "norn run two words")}`),
+    [{ name: "review", source: review }, { name: "main", source: "1" }]);
 });
 
 test("two Agents review a design through typed requests, and the program reads each answer at once", () => {

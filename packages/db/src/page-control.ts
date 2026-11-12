@@ -1556,7 +1556,7 @@ export class PostgresPageRepository {
   }
 
   async remove(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ removed: boolean; automationChannels: string[] }> {
+    Promise<{ removed: boolean; automationChannels: string[]; programChannels: string[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.remove", spaceId, async (tx) => {
@@ -1576,7 +1576,12 @@ export class PostgresPageRepository {
       const removed = await tx.query({ name: "page_remove_v1",
         text: "DELETE FROM data.pages WHERE space_id=$1 AND page_id=$2 RETURNING page_id",
         values: [spaceId, pageId], maxRows: 1 });
-      return { removed: removed.length === 1, automationChannels };
+      // The page's Norn programs go with it: each one's next pass ends it and cancels what it left open.
+      const programChannels = (await tx.query<QueryResultRow & { channel_id: string }>({ name: "page_remove_norn_programs_v1",
+        text: `UPDATE data.norn_programs SET stop_reason='Removed with its page',updated_at=clock_timestamp()
+          WHERE space_id=$1 AND page_id=$2 AND state='running' AND stop_reason IS NULL RETURNING channel_id`,
+        values: [spaceId, pageId], maxRows: 200 })).map(row => String(row.channel_id));
+      return { removed: removed.length === 1, automationChannels, programChannels };
     });
   }
 
