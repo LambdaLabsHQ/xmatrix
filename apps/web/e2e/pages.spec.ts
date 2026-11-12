@@ -1556,6 +1556,29 @@ test("a page's schedules are task lines whose timing is quiet and whose state fo
 });
 
 
+test("a page's program is its code block, and under it the page says how the program stands", async ({ page: browser }) => {
+  const source = 'switch run(@codex, "Review the design", ~by=30m)->wait {\n| Answered(_) => "reviewed"\n| other => fail(other)\n}';
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  await fixtureJson(browser, "page-programs", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/programs$/u, { programs: [
+    { name: "review", channelId: E2E_CHANNEL.id, state: "running",
+      requests: [{ holder: "@codex", text: "Review the design", by: null, reply: null }] },
+    { name: "main", state: "not_started", problem: "1:1 this request is the program's last value", requests: [] },
+  ] }, { method: "GET" });
+  const editor = await openLivePage(browser,
+    `# Relay\n\n\`\`\`norn run review\n${source}\n\`\`\`\n\n\`\`\`norn run\nrun(@codex, "x")\n\`\`\`\n\n\`\`\`norn\nask(@codex, "shown only")\n\`\`\`\n`);
+  // The block stays code, in Norn's inks; under it, whom its program waits on.
+  await expect(editor.locator("pre .hljs-title").first()).toHaveText("@codex");
+  const statuses = editor.locator(".page-program-status");
+  await expect(statuses).toHaveCount(2);
+  await expect(statuses.first()).toHaveText("waiting on @codex");
+  await expect(statuses.first()).toHaveAttribute("data-state", "running");
+  // A block that does not run as written says why; a block tagged `norn` alone is only shown.
+  await expect(statuses.nth(1)).toHaveAttribute("data-state", "problem");
+  await expect(statuses.nth(1)).toContainText("last value");
+  await browser.screenshot({ path: test.info().outputPath("pages-program-status.png") });
+});
+
 test("a schedule is written without its emoji: `@` offers when the line runs, and its timing offers it again", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });

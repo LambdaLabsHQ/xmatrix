@@ -16,6 +16,16 @@ import { formatAutomationNext } from "./page-automation-format";
  * opens the conversation its last occurrence ran in. A line that cannot run
  * as written says why instead.
  */
+/** A status line under the page's text opens the conversation behind it when pressed, and is inert without one. */
+export function pressOpens(status: HTMLButtonElement, conversationId: string | undefined, title: string,
+  openConversation: (conversationId: string) => void): void {
+  if (!conversationId) { status.disabled = true; return; }
+  status.title = title;
+  // The press must not move the editor's selection.
+  status.addEventListener("mousedown", (event) => event.preventDefault());
+  status.addEventListener("click", () => openConversation(conversationId));
+}
+
 export const automationsKey = new PluginKey<{
   automations: Map<string, SerializedAutomation>; decorations: DecorationSet;
 }>("page-automations");
@@ -63,12 +73,7 @@ function chipDecorations(doc: DocNode, automations: Map<string, SerializedAutoma
       status.contentEditable = "false";
       status.dataset.state = state;
       status.textContent = statusText(line, automation);
-      const target = automation?.lastChannelId;
-      if (target && !problem) {
-        status.title = "Open its last run";
-        status.addEventListener("mousedown", (event) => event.preventDefault());
-        status.addEventListener("click", () => openConversation(target));
-      } else status.disabled = true;
+      pressOpens(status, problem ? undefined : automation?.lastChannelId, "Open its last run", openConversation);
       return status;
     }, { side: 1, ignoreSelection: true, key: `schedule:${line.source}:${state}:${automation?.version ?? 0}:${
       automation?.nextRunAt ?? ""}` }));

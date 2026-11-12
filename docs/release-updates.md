@@ -1,5 +1,27 @@
 # Release Updates
 
+## Unreleased: a page says how its Norn programs stand
+
+Under each `norn run` code block a page now says how that block's program
+stands: whom it waits on, how it finished or why it stopped, or why the block
+does not run as written. Pressing the line opens the conversation the program
+works in. The page asks the Hub only while its text holds such a block, and
+again when the page changes. Web only, reading the Hub route that shipped
+with page programs. Recovery is a CI-validated beta Web reverting this
+change.
+
+## Unreleased: a Norn program lives on a Page
+
+A `norn run` block in a Page is now a program: saving the Page starts it, as
+whoever wrote the revision, in a conversation of its own that is named for the
+Page and the block and linked to the Page. Editing the block revises the
+running program against the same ledger, so nothing already asked is asked
+again; editing it after the program ended runs it again; removing the block or
+the Page stops it. A word after the tag names the block (`norn run review`).
+`GET /api/spaces/:space/pages/:page/programs` says how each block stands. A
+program in a message works as before. Hub only, with expand migration 0247
+(`norn_programs.page_id`, `page_name`); the Page does not draw the status
+yet. Recovery is a CI-validated beta Hub reverting this change.
 ## Unreleased: the duplicate-code scan takes half the time
 
 The duplicate-code scan runs on every pull request and train and shared the

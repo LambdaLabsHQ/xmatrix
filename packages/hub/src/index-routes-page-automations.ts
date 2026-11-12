@@ -10,6 +10,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { commitAutomation } from "./automations";
 import { withOutcomes } from "./automation-outcomes";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
+import { pageProgramStatus } from "./norn-page-programs";
 import { runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
 
@@ -209,6 +210,13 @@ export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void
     const automations = await pageAutomations(c.env, spaceId, pageId, humanOf(authUser), read);
     // What each one's latest occurrences produced, as the Space's list says it.
     return { automations: await withOutcomes(new PostgresAutomationRepository(database(c.env)), spaceId, automations) };
+  }));
+  // How each `norn run` block of the page stands. Reading the page as the caller is the access check.
+  app.get("/api/spaces/:spaceId/pages/:pageId/programs", (c) => run(c, async (authUser) => {
+    const [spaceId, pageId] = ids(c);
+    const { page } = await new PostgresPageRepository(database(c.env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+      principal: runPrincipalOf(authUser) });
+    return { programs: await pageProgramStatus(c.env, { spaceId, pageId, body: page.body }) };
   }));
   for (const action of ["pause", "resume", "run"] as const) {
     app.post(`${base}/:automationId/${action}`, (c) => run(c, async (authUser) => ({

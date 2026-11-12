@@ -24,11 +24,13 @@ async function repository(env: Env, channelId: string, requestId: string): Promi
  * repeat appends nothing and only interprets the message again.
  */
 async function say(env: Env, postCommit: PostCommit, input: { channelId: string; messageId: string; body: string;
-  authorityUserId: string; programId: string }): Promise<void> {
+  authorityUserId: string;
+  /** The program's message, when a person or an Agent wrote it: what xMatrix says is a reply to it. */
+  replyTo?: string }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
     body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true, launch: true,
-    residual: { replyToMessageId: input.programId },
+    ...(input.replyTo ? { residual: { replyToMessageId: input.replyTo } } : {}),
   });
   if (!response.ok) throw new Error(`Norn message append failed (${response.status})`);
   await postCommit({ env, channelId: input.channelId, messageId: input.messageId, body: input.body,
@@ -78,13 +80,15 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   }
   const work = await programs.channelWork({ requestId, channelId });
   for (const delivery of work.deliveries) {
-    await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, programId: delivery.programId,
+    // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
+    await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
       authorityUserId: delivery.authorityUserId, body: nornDeliveryBody(delivery.request as LedgerRequest, delivery.requestRef) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch });
   }
   for (const report of work.reports) {
     // An Agent that started the program is told by its address, so it wakes to read the result.
-    await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300), programId: report.programId,
+    await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300),
+      ...(report.onPage ? {} : { replyTo: report.programId }),
       authorityUserId: report.authorityUserId,
       body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
     await programs.reported({ requestId, channelId, programId: report.programId });

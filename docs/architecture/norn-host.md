@@ -20,6 +20,34 @@ not check starts nothing, and a reply under the message names the line and
 column of each error. One that checks runs with its author's authority: the
 person who wrote it, or the owner of the Agent Run that did.
 
+## Programs on a Page
+
+A Page is where a program lives; a message is the ad-hoc way to run one. Each
+top-level `norn run` block of a Page is a program. The word after the tag
+names it (`norn run review`); without one it is `main`. The Page and the name
+are the program's identity, so editing the block's text changes the same
+program. Two blocks with one name run nothing until one is renamed.
+
+A saved revision is synced like the Page's schedule lines
+(`syncPagePrograms`, from the Page session's commit, a new Page, and a
+restored revision), as whoever wrote it:
+
+- A new block that checks starts its program.
+- A changed block revises its running program: the same ledger is evaluated
+  against the new text, so what was already asked in the same words stays
+  asked and nothing is asked twice. A change that does not check is not
+  applied.
+- A block changed after its program ended runs again.
+- A removed block, or a removed Page, stops its program.
+
+Each block has one conversation for its whole life, named for the Page and
+the block and linked to the Page. Every run opens with xMatrix's message
+carrying the program's text, and its requests and result follow in that
+conversation. `GET /api/spaces/:space/pages/:page/programs` answers, for
+whoever can read the Page, how each block stands: its state, why it does not
+run as written, and each request with its holder and reply. The Page draws
+that under the block (`page-program-chips.ts`).
+
 ## State
 
 `data.norn_programs` holds one row per program: its source and its whole
@@ -141,6 +169,6 @@ addresses that Instance, so it wakes to read the result.
 - Requests to people, and to an existing Instance.
 - Facts from outside (a merged pull request, a release) and the standard
   library: programs are checked against the built-ins alone.
-- Programs in Pages, and changing a program while it runs.
+- A preview of what an edit to a Page's program would change before it is saved.
 - Moving `--wait`, cards, Automations and pull request subscriptions onto
   the ledger.

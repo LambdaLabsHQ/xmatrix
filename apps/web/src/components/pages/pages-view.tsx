@@ -321,7 +321,7 @@ function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, 
   };
 }
 
-const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-awareness"];
+const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-programs", "page-awareness"];
 // Co-writing commits arrive many a second; what they move beside the page is read again once they settle.
 const REVISION_REFRESH_MS = 1_000;
 
@@ -1088,6 +1088,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
     enabled: Boolean(spaceId && pageId && token),
   });
+  // The page's programs: asked only of a page whose text, as the editor holds it, has one.
+  const [hasProgram, setHasProgram] = useState(false);
+  const programs = useQuery({
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-programs", [spaceId, pageId]),
+    enabled: Boolean(spaceId && pageId && hasProgram), refetchInterval: () => refetchUnlessHumanPush(30_000),
+    queryFn: ({ signal }) => pageApi.programs(spaceId!, pageId!, token, signal).then((result) => result.programs),
+  });
+  const programsByName = useMemo(() => new Map((programs.data ?? []).map((item) => [item.name, item])), [programs.data]);
 
   const togglePublished = async () => {
     if (!spaceId || !page) return;
@@ -1755,7 +1763,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         actions={sectionActions} headingActions={headingActions} sections={sections}
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                        automations={automationsById} references={references} completion={completion}
+                        automations={automationsById} programs={programsByName} onProgramsPresent={setHasProgram} references={references} completion={completion}
                         summons={pageSummons}
                         focusedConversationId={activeConversationId ?? focused} readCard={readCard}
                         onFocusConversation={setFocused}

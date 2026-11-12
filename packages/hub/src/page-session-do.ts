@@ -19,6 +19,8 @@ import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-d
 import { parsePageOutputWrite } from "./page-output-receipts";
 import { pageSchedules } from "@xmatrix/protocol";
 import { syncPageSchedules } from "./page-schedule-sync";
+import { pageProgramsKey, syncPagePrograms } from "./norn-page-programs";
+import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
 /**
  * One Durable Object per page hosts its live session (page-session.ts). It
@@ -130,7 +132,10 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await pages(this.env).edit({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
-          if (result.revision.kind !== "suggestion") this.schedulesChanged(principal, input.body, result.page.headRevision);
+          if (result.revision.kind !== "suggestion") {
+            this.schedulesChanged(principal, input.body, result.page.headRevision);
+            this.programsChanged(principal, input.body);
+          }
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
             agentSuggestOnly: result.page.agentSuggestOnly };
         } catch (error) {
@@ -436,6 +441,30 @@ export class RelayPageSession extends DurableObject<Env> {
     this.later(this.schedulesSyncing);
   }
 
+  /**
+   * The page's programs are its `norn run` blocks: a revision that changed
+   * them is synced as whoever wrote it, after the commit, one sync at a time.
+   */
+  private programsSynced: string | null = null;
+  private programsSyncing: Promise<void> = Promise.resolve();
+
+  private programsChanged(principal: PageSessionPrincipal, body: string): void {
+    // The first revision this session commits is synced whatever it holds: a block removed while
+    // the session was away is seen only by reading the page's programs. After that, only a change syncs.
+    const key = pageProgramsKey(body);
+    if (key === this.programsSynced) return;
+    this.programsSynced = key;
+    const userId = principal.kind === "agent" ? principal.ownerUserId ?? "" : principal.id;
+    if (!userId) return;
+    this.programsSyncing = this.programsSyncing.then(() => syncPagePrograms(this.env, {
+      spaceId: this.need("space"), pageId: this.need("page"), userId })).then(() => undefined, (error) => {
+      this.programsSynced = null;
+      console.error("Page programs did not sync", { pageId: this.pageId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    this.later(this.programsSyncing);
+  }
+
   /** Work that outlives the call that started it; a test's context may not retain it. */
   private later(task: Promise<unknown>): void {
     try { this.ctx.waitUntil(task); } catch { void task; }
@@ -584,6 +613,7 @@ export class RelayPageSession extends DurableObject<Env> {
         if (await repository.exists(identity)) {
           const removed = await repository.remove({ ...identity, principal: pagePrincipalFromSession(principal) });
           await tellPageAutomationChannels(this.env, removed.automationChannels);
+          for (const channelId of removed.programChannels ?? []) await wakeAgentLaunchCoordinator(this.env, channelId, ["norn"]);
         }
       } catch (error) {
         await this.ctx.storage.delete("removing");

@@ -376,3 +376,17 @@ export interface PageMigrationApplied {
 
 /** The Yjs shared type a page's live document lives in, in the page session and every editor. */
 export const PAGE_DOCUMENT_FRAGMENT = "prosemirror";
+
+/** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
+export interface PageProgramStatus {
+  /** The block's name: the word after `norn run`, or `main`. */
+  name: string;
+  /** The conversation the program works in; absent before its first run. */
+  channelId?: string;
+  state: "running" | "completed" | "failed" | "not_started";
+  /** Why the block as written does not run. */
+  problem?: string;
+  /** How its program ended: the result, or why it stopped. */
+  result?: string;
+  requests: { holder: string; text: string; by: string | null; reply: string | null }[];
+}
