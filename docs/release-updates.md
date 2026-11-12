@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: Google Play Console reads a subscription's base plans
+
+`@googleplay:base_plans` shows each base plan of a subscription as Google Play
+stores it: state, billing period, how many regions it is priced in and its
+price in one region. A plan priced in 174 regions did not fit a catalog read,
+so a saved price could not be checked before activating. Hub and protocol; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a large Google Play request body rides as an attached file
 
 A request body that does not fit a command, such as the data safety CSV of

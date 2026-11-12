@@ -90,6 +90,24 @@ export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
       return { summary: `${input.packageName} tracks (read in a temporary edit, then discarded):\n${playOutput(rows)}` };
     },
   },
+  base_plans: {
+    effect: "read", requires: ["oauthToken"],
+    parse: statement => {
+      const [packageName = "", productId = "", extra] = statement.target.split("/"), region = statement.text.trim() || "US";
+      return PACKAGE_NAME.test(packageName) && PRODUCT_ID.test(productId) && extra === undefined && /^[A-Z]{2}$/u.test(region)
+        ? { packageName, productId, region } : "use <package>/<subscription id> [two-letter region, default US]";
+    },
+    async execute({ credentials }, input) {
+      const subscription = await play(credentials, "monetization.subscriptions.get", { path: { packageName: input.packageName!, productId: input.productId! } });
+      const plans = (Array.isArray(subscription.basePlans) ? subscription.basePlans : []).map(record).map(plan => {
+        const regions = (Array.isArray(plan.regionalConfigs) ? plan.regionalConfigs : []).map(record);
+        const kind = ["autoRenewingBasePlanType", "prepaidBasePlanType", "installmentsBasePlanType"].find(key => plan[key] !== undefined);
+        return { basePlanId: plan.basePlanId, state: plan.state, ...(kind ? { type: kind.replace("BasePlanType", ""), period: record(plan[kind]).billingPeriodDuration } : {}),
+          regions: regions.length, [input.region!]: regions.find(region => region.regionCode === input.region)?.price ?? "not sold in this region" };
+      });
+      return { summary: `${input.productId} has ${plans.length} base plan${plans.length === 1 ? "" : "s"}, as Google Play stores them (price shown for ${input.region}):\n${playOutput(plans)}` };
+    },
+  },
   base_plan: {
     effect: "write", requires: ["oauthToken"], parse: basePlanRequest,
     async execute(context, input) {
