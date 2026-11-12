@@ -112,7 +112,6 @@ test("capacity never goes negative", () => {
 let ledgerIdCounter = 0;
 
 function intakeWithLedger(ledger, rendered, count, maxAttachments = 10) {
-  ledger.reconcile(new Set(rendered));
   const result = plan({
     candidates: Array.from({ length: count }, (_, index) => candidate(`f${index}.pdf`, 10)),
     maxAttachments,
@@ -155,6 +154,7 @@ test("the intake after the render counts each row exactly once", () => {
 
   // React commits: the rows the reservation stood for are now real.
   const rendered = first.entries.map((entry) => entry.id);
+  ledger.reconcile(new Set(rendered));
   const second = intakeWithLedger(ledger, rendered, 6);
 
   assert.equal(
@@ -177,6 +177,19 @@ test("a row removed before it rendered gives its slot back", () => {
     3,
     "settling a reservation that never rendered must release its slot"
   );
+});
+
+test("files sent while they upload leave their slots to the next message", () => {
+  const ledger = createAttachmentSlotLedger();
+  const first = intakeWithLedger(ledger, [], 10);
+
+  // The rows render, then leave with the message before any other intake.
+  ledger.reconcile(new Set(first.entries.map((entry) => entry.id)));
+  ledger.reconcile(new Set());
+
+  const next = intakeWithLedger(ledger, [], 10);
+  assert.equal(next.entries.length, 10, "a new message starts with every slot free");
+  assert.equal(next.error, null);
 });
 
 test("a queued task cancelled before it starts never becomes live", () => {

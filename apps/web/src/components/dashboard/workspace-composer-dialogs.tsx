@@ -426,6 +426,16 @@ export const Composer = memo(function Composer({
   const [emptyPasteAnchorActive, setEmptyPasteAnchorActive] = useState(false);
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
   const slotLedgerRef = useRef(createAttachmentSlotLedger());
+  // The rows as last rendered. An intake counts from here, not from the render
+  // it was started in, and a reservation ends in the same step its row shows up
+  // here. Ending it at the next intake instead kept the slot of every file sent
+  // while it uploaded: its row left with the message before any intake saw it,
+  // and ten such files filled the composer of every later message.
+  const renderedPendingRef = useRef<PendingAttachment[]>([]);
+  useLayoutEffect(() => {
+    renderedPendingRef.current = pendingAttachments;
+    slotLedgerRef.current.reconcile(new Set(pendingAttachments.map((attachment) => attachment.id)));
+  }, [pendingAttachments]);
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -762,16 +772,14 @@ export const Composer = memo(function Composer({
   }
 
   async function intakeAttachmentCandidates(candidates: AttachmentDropCandidate[]): Promise<number> {
-    // Reservations the rendered rows already account for stop being
-    // reservations; what is left is the intakes whose rows have not landed yet.
+    // What is still reserved is the intakes whose rows have not rendered yet.
     const ledger = slotLedgerRef.current;
-    ledger.reconcile(new Set(pendingAttachments.map((attachment) => attachment.id)));
 
     const plan = planAttachmentIntake({
       candidates,
       attachmentsEnabled,
       draftCount: attachments.length,
-      pendingCount: pendingAttachments.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
+      pendingCount: renderedPendingRef.current.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
       maxAttachments: MAX_ATTACHMENTS,
       maxBytes: MAX_ATTACHMENT_BYTES,
       maxBytesLabel: formatFileSize(MAX_ATTACHMENT_BYTES),

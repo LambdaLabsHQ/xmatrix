@@ -131,7 +131,9 @@ function attachmentIntakeRejection(input: {
  * resolving) each saw the same free slots and both took them, past the ceiling.
  * A reservation is held by id and released the moment the rendered rows account
  * for it, so every id is counted by exactly one of the two — never both, never
- * neither.
+ * neither. The caller reconciles on every render of the rows, not at the next
+ * intake: a row can render and leave (sent with its message while it uploads)
+ * with no intake in between, and its reservation must not outlive it.
  */
 export function createAttachmentSlotLedger() {
   const reserved = new Set<string>();
@@ -139,7 +141,7 @@ export function createAttachmentSlotLedger() {
     reserve(ids: readonly string[]) {
       for (const id of ids) reserved.add(id);
     },
-    /** Call with the ids of the rendered pending rows before reading capacity. */
+    /** Call with the ids of the pending rows each time they render. */
     reconcile(renderedIds: { has: (id: string) => boolean }) {
       for (const id of Array.from(reserved)) {
         if (renderedIds.has(id)) reserved.delete(id);
