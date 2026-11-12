@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: Google Play reads can name the fields they want
+
+`@googleplay:api_read` accepts Google's `fields` partial-response mask in its
+query. A subscription with prices in every region did not fit the bounded
+result, so its state could not be read back; a read now asks for just the
+fields it needs. Hub only; no schema change. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a Google Play base plan keeps its stated price at home
 
 `@googleplay:base_plan` used Google's converted price for every region,

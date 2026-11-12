@@ -177,3 +177,14 @@ test("base_plan prices a new plan in every region Google converts to, keeps exis
     assert.equal(typeof statement(bad), "string", bad);
   }
 });
+
+test("a read may name the fields it wants, so a large resource fits a bounded result; a write may not", async () => {
+  const input = statement(command("api_read", "monetization.subscriptions.get", { path: { packageName: "sh.xmatrix.app", productId: "pro" },
+    query: { fields: "basePlans(basePlanId,state)" } }));
+  const { calls } = await fetched([{ body: { basePlans: [{ basePlanId: "monthly", state: "DRAFT" }] } }], () => ACTIONS.api_read.execute({ credentials }, input));
+  assert.equal(calls[0].url, `${API}/sh.xmatrix.app/subscriptions/pro?fields=basePlans%28basePlanId%2Cstate%29`);
+  for (const bad of [command("api_read", "monetization.subscriptions.get", { path: { packageName: "a.b", productId: "pro" }, query: { fields: "a&alt=media" } }),
+    command("api_plan", "monetization.subscriptions.delete", { path: { packageName: "a.b", productId: "pro" }, query: { fields: "x" } })]) {
+    assert.equal(typeof statement(bad), "string", bad);
+  }
+});
