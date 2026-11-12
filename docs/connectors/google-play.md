@@ -45,7 +45,7 @@ Prerequisites outside xMatrix:
 @googleplay:list_apps:*
 @googleplay:tracks:sh.xmatrix.app
 @googleplay:api_write:edits.insert {"path":{"packageName":"sh.xmatrix.app"},"body":{},"digest":"<from api_plan>"}
-@googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>"},"size":<bytes of app.aab>}
+xmatrix call '@googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>"},"size":<bytes of app.aab>}'
 @googleplay:release:sh.xmatrix.app/<edit id> {"track":"internal","versionCodes":["42"],"releaseNotes":[{"language":"en-US","text":"Fixes"}]}
 @googleplay:release:sh.xmatrix.app {"track":"production","versionCodes":["42"],"status":"inProgress","userFraction":0.1}
 ```
@@ -58,10 +58,12 @@ Uploading takes two steps. `api_upload` opens a Google resumable upload
 session for any catalog upload operation (bundles, APKs, images, deobfuscation
 files, internal app sharing) after checking the byte size against Google's
 limit and the content type against the operation's accepted types. The receipt
-shows a `curl` command; run it on the machine that has the file. The session
+returns a `curl` command; run it on the machine that has the file. The session
 URL accepts only that file and needs no token, so the bytes never pass through
-the Hub. Keep it private; run `api_upload` with `--private` when the Channel
-should not see it. Google answers the PUT with the uploaded bundle and its
+the Hub. Because that URL is a capability, `api_upload` runs only as
+`xmatrix call`: the result returns to the caller alone, the Channel receipt is
+always masked, and it does not run as a Channel message. It needs the app
+permission to allow writes without asking. Google answers the PUT with the uploaded bundle and its
 `versionCode`.
 
 `release` writes one release on a track and commits the edit: in the edit

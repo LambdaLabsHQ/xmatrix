@@ -47,10 +47,13 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
       const command = `@${manifest.id}:${action.id}:${action.usage ?? "<target> <text>"}`;
       // Only a read with a call executor returns a result to its caller. A read
       // without one (a GitHub subscription) acts on the Channel it is sent in.
-      const callable = action.effect === "read" && executable.has(action.id);
+      const executor = executable.get(action.id)?.executor;
+      const callable = Boolean(executor) && (action.effect === "read" || executor!.callerOnly === true);
       return [{
         command, effect: action.effect, via: callable ? "call" as const : "send" as const,
-        description: action.description + (callable
+        description: action.description + (executor?.callerOnly
+          ? ` Run xmatrix call "${command}": the result returns to you alone and is always masked in the Channel; it cannot run as a Channel message.`
+          : callable
           ? ` Run xmatrix call "${command}" for a normal Channel result; add --private only to mask the result. Invocation parameters are visible in both modes; private originals are also visible to the calling Agent’s Human owner in the Web for 30 days.`
           : action.effect === "read" ? " It runs only as a Channel message: send it with xmatrix send; xmatrix call cannot run it." : ""),
       }];

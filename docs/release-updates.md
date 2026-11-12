@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a Google Play upload URL reaches only the Agent that asked for it
+
+`@googleplay:api_upload` published its resumable upload URL in the Channel
+receipt, and that URL alone accepts the file. It now runs only as
+`xmatrix call`: the URL returns to the caller, the Channel receipt and
+execution history are always masked, and sent as a Channel message it is
+refused with that instruction. It needs the app permission to allow writes
+without asking. Hub and protocol; no schema change. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: Google Play Console creates a subscription base plan in one command
 
 `@googleplay:base_plan` adds an auto-renewing base plan to a subscription from

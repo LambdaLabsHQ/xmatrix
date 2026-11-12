@@ -117,7 +117,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   authorizeCaller: () => Promise<void>, resultVisibility: ConnectorResultVisibility): Promise<ConnectorActionResult> {
   const manifest = getAppConnectorProvider(providerId);
   const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
-  if (!manifest || !entry || action.effect !== "read") {
+  if (!manifest || !entry || (action.effect !== "read" && !action.callerOnly)) {
     throw new ConnectorRemedy(403, "Private calls support declared read actions only; use a Channel command for writes");
   }
   const parsed = action.parse(statement);
@@ -150,7 +150,8 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     return result;
   };
   let result: ConnectorActionResult | undefined, failure: unknown;
-  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "", retry: resultVisibility }, async () => {
+  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "",
+    ...(action.effect === "read" ? { retry: resultVisibility } : {}) }, async () => {
     try {
       result = await execute();
       return { status: "completed", summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
@@ -209,6 +210,8 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const label = entry?.label ?? actionId;
   const parsed = approved?.prepared ?? action.parse(statement);
   if (typeof parsed === "string") return result("failed", parsed);
+  // Its result would be published to everyone who reads the Channel.
+  if (action.callerOnly) return result("blocked", `its result is for the caller alone; run it with xmatrix call "@${providerId}:${actionId}:…"`);
   const scope = await commandScope(manifest, input, checkAppConnection);
   if (typeof scope === "string") return result("blocked", scope);
   const policyInput = { providerId, connectionId: scope.connectionId, actionId };
