@@ -44,7 +44,11 @@ jobs each finish in about two minutes including setup:
   online-index marker, so a CRLF checkout does not change migration identity
   or hide `CREATE INDEX CONCURRENTLY`. A second `tsc --noEmit` of that same
   program only repeated this lane's slowest stage;
-- `node-tests (duplicates)`: the duplicate-code scan, on its own runner;
+- `node-tests (duplicates)`: the duplicate-code scan, on its own runner. jscpd's
+  default store rejected every lookup miss with a new `Error`, and the scan
+  spent most of its CPU capturing those stack traces; it now uses a store with
+  the same get/set contract that rejects misses with one shared reason, and
+  hashes with Node's one-shot MD5, the same digest jscpd computes;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
