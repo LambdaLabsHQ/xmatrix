@@ -15,6 +15,14 @@ not the command. Messages from other people, Agents and Apps are unchanged.
 No schema or client change. Recovery is a CI-validated beta Hub reverting
 this change.
 
+## Unreleased: a Google Play base plan keeps its stated price at home
+
+`@googleplay:base_plan` used Google's converted price for every region,
+including the price's own, where Google's local pattern turned 10.00 into
+9.99. The command now names the region the price is for, and that region
+keeps exactly the stated price; the others take the conversion. Hub and
+protocol; no schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a Google Play upload URL reaches only the Agent that asked for it
 
 `@googleplay:api_upload` published its resumable upload URL in the Channel

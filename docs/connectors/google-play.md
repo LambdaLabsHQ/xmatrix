@@ -77,13 +77,14 @@ Promoting a build is a `release` of its existing version code to another track.
 ## Subscription base plans
 
 ```text
-@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"activate":true}
+@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"activate":true}
 ```
 
 `base_plan` adds one auto-renewing base plan to an existing subscription.
-Google converts the one price to every region it sells in
-(`monetization.convertRegionPrices`, current rates and local price patterns),
-and the plan is saved with all of those regional prices, new-subscriber
+`region` is the region the price is for; it keeps exactly that price. Google
+converts the price for every other region it sells in
+(`monetization.convertRegionPrices`, current rates and local price patterns,
+which would otherwise also turn 10.00 into 9.99 at home), and the plan is saved with all of those regional prices, new-subscriber
 availability on, and the converted USD/EUR prices for regions Play adds later.
 Existing base plans are kept; a base plan ID that already exists is refused,
 and changing one goes through `api_plan`/`api_write`. Without `activate` the
