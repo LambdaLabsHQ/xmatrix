@@ -6,7 +6,7 @@ import { getAppConnectorProvider } from "../app-connectors";
 import type { Env } from "../types";
 import { upstreamMeter } from "../usage-cost-metering";
 import { connectionCredentials } from "./connection-credentials";
-import { ProviderRequestError } from "./http";
+import { ConnectorRemedy, ProviderRequestError } from "./http";
 import { connectorProvider } from "./registry";
 import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
@@ -44,6 +44,8 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
     await connectorProvider(providerId)?.verify?.(credentials,
       upstreamMeter(env, { spaceId, connector: providerId, action: "verify" }));
   } catch (error) {
+    // A missing value of the connection is named as what to save, not as a refusal by the provider.
+    if (error instanceof ConnectorRemedy && error.fix?.kind === "credential") throw new Error(error.message);
     if (error instanceof ProviderRequestError) throw new Error(`${manifest.name} refused the credentials: ${error.message}`);
     throw new Error(error instanceof DOMException && error.name === "TimeoutError"
       ? `${manifest.name} did not answer in time` : `${manifest.name} could not be reached`);

@@ -373,7 +373,19 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
   } else if (kind === "oauth") {
     body = why ?? (disconnected ? `Sign in with ${name} again to resume channel delivery and commands.`
       : `Sign in with ${name} and approve what xMatrix may reach.`);
-    action = (
+    // A sign-in that went through can still lack a plain value of the account, such as the app Check reads.
+    // That value is the next step, typed right here; signing in again would not supply it.
+    const saved = new Set(connection?.credentialFields ?? []);
+    const signedIn = (connector.credentials ?? []).some((field) => field.managed && saved.has(field.id));
+    const plainMissing = signedIn ? writable.filter((field) => field.plain && !saved.has(field.id)) : [];
+    action = plainMissing.length > 0 ? (
+      <div className="space-y-3">
+        <ConnectorCredentialForm {...credentials} connector={{ ...connector, credentials: plainMissing }} submitLabel="Save and check" />
+        <ConnectorFold summary={`Sign in with ${name} again`}>
+          <div className="pt-2">{primary("Reconnect", () => onConnect(), connecting)}</div>
+        </ConnectorFold>
+      </div>
+    ) : (
       <div className="space-y-3">
         {primary(disconnected || needsAttention ? "Reconnect" : `Connect with ${name}`, () => onConnect(), connecting)}
         {writable.length > 0 ? (

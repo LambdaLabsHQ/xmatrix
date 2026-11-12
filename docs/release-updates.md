@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a sign-in that lacks a plain value asks for it in place
+
+When an app's sign-in went through but Check still needs a plain value of the
+account, such as the app Google Play Console's Check reads, the app's page now
+shows that field with Save and check, and folds Reconnect away. The failure
+reads as what to save rather than as the provider refusing the credentials.
+Web and Hub message only; no schema change. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a Google Play Console connector
 
 Apps gains Google Play Console (`googleplay`), so Agents release Android apps

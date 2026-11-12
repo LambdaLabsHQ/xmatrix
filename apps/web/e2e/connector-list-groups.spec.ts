@@ -84,3 +84,17 @@ test("Permissions are one choice for the app: read only, ask first, or read and 
   await page.getByRole("option", { name: "Ask first" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "policy-put")).toEqual([{ mode: "ask" }]);
 });
+
+test("a sign-in that went through but lacks a plain value asks for that value, not another sign-in", async ({ page }) => {
+  const signedIn = { ...connection("googleplay", "Google Play Console", "error", "oauth"),
+    error: "Signed in. Save App for Check", credentialFields: ["oauthToken", "oauthRefreshToken", "oauthExpiresAt"] };
+  await openApps(page, { providers: ["googleplay"], connections: [signedIn], app: "Google Play Console" });
+
+  const lead = page.getByTestId("connector-lead");
+  const form = lead.getByTestId("connector-credential-form");
+  await expect(form.getByText("App for Check")).toBeVisible();
+  await expect(form.getByRole("button", { name: "Save and check" })).toBeVisible();
+  await expect(lead.getByRole("button", { name: "Reconnect" })).toBeHidden();
+  await expect(lead.getByText("Sign in with Google Play Console again")).toBeVisible();
+  await page.screenshot({ path: "test-results/googleplay-missing-plain-field.png" });
+});

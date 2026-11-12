@@ -110,7 +110,7 @@ export function play(credentials: Readonly<Record<string, string>>, id: GooglePl
 export async function verifyGooglePlay(credentials: Readonly<Record<string, string>>): Promise<void> {
   const packageName = credentials.packageName?.trim() ?? "";
   if (!PACKAGE_NAME.test(packageName)) {
-    throw new ConnectorRemedy(400, "Save the package name of one app in this Play developer account (such as com.example.app); Check reads its production track",
+    throw new ConnectorRemedy(400, "Signed in. Save App for Check: the package name of one app in this Play developer account (such as com.example.app); Check reads its production track",
       { kind: "credential", field: "packageName" });
   }
   const result = await play(credentials, "applications.tracks.releases.list", { path: { parent: `applications/${packageName}/tracks/production` } });
