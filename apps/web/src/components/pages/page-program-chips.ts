@@ -1,9 +1,9 @@
 import type { PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
-import type { Node as DocNode } from "prosemirror-model";
-import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { pressOpens } from "./page-automation-chips";
+import type { Node as DocNode } from "prosemirror-model";
+import { Plugin, PluginKey } from "prosemirror-state";
 
 /**
  * A page's programs are its code blocks tagged `norn run`. The block stays
