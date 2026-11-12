@@ -110,7 +110,9 @@ optionally a dotted field path inside it. Path values are single identifiers;
 resource names such as `developers/<id>/users/<email>` must match Google's
 pattern for that parameter. Repeated query parameters are JSON arrays.
 Unknown operations, parameters or body fields, wrong types and values outside
-an enum are refused before the token is used. Reads return one page; pass the
+an enum are refused before the token is used. A read may add `"fields"` to `query`, Google's partial-response mask
+(`"basePlans(basePlanId,state,regionalConfigs(regionCode,price))"`), so a large
+resource fits the bounded result. Reads return one page; pass the
 returned `nextPageToken`/`token` back as the documented query parameter. Use
 `--private` for purchases, orders, users and reviews, which carry personal data.
 Fields named like credentials are refused in commands and removed from output.
