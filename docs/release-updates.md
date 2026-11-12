@@ -12,6 +12,18 @@ the Page stops it. A word after the tag names the block (`norn run review`).
 program in a message works as before. Hub only, with expand migration 0247
 (`norn_programs.page_id`, `page_name`); the Page does not draw the status
 yet. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: the duplicate-code scan takes half the time
+
+The duplicate-code scan runs on every pull request and train and shared the
+end of PR CI with the Node tests. jscpd's in-memory store answered each of
+the scan's millions of lookup misses by creating an `Error`, so stack capture
+and its garbage were most of the scan's CPU, and each token and window was
+hashed through a new Hash object. The scan now passes jscpd a store with the
+same get/set contract that rejects misses with one shared reason, and the same
+MD5 hex through Node's one-shot digest. Locally the full scan drops from about
+98 to 50 seconds with the same files, tokens and zero clones; on a sample that
+has clones, both stores report identical clones. Thresholds, formats, ignores
+and the zero-clone gate are unchanged. CI only; no product or migration change.
 
 ## Unreleased: Norn code is highlighted
 

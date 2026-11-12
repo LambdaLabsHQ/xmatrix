@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { hash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -13,6 +14,29 @@ const require = createRequire(import.meta.url);
 const { detectClones } = require("jscpd");
 const { FORMATS, getFormatByFile, tokenize } = createRequire(require.resolve("jscpd"))("@jscpd/tokenizer");
 const marker = ["jscpd", "ignore"].join(":");
+
+// jscpd's MemoryStore rejects every miss with a new Error, so most of the
+// scan's CPU went to capturing stack traces nobody reads. This store keeps the
+// same get/set contract but rejects misses with one shared reason.
+const missing = Object.freeze({ missing: true });
+class FrameStore {
+  #frames = new Map();
+  #namespace = new Map();
+  namespace(name) {
+    if (!this.#frames.has(name)) this.#frames.set(name, new Map());
+    this.#namespace = this.#frames.get(name);
+  }
+  get(key) {
+    return this.#namespace.has(key) ? Promise.resolve(this.#namespace.get(key)) : Promise.reject(missing);
+  }
+  set(key, value) {
+    this.#namespace.set(key, value);
+    return Promise.resolve(value);
+  }
+  close() {
+    this.#frames.clear();
+  }
+}
 
 export async function checkDuplicates(root = rootDir, { silent = false, configFile = ".jscpd.json" } = {}) {
   const config = JSON.parse(await readFile(path.resolve(root, configFile), "utf8"));
@@ -66,7 +90,10 @@ export async function checkDuplicates(root = rootDir, { silent = false, configFi
     noSymlinks: true,
     silent,
     noTips: true,
-  });
+    // The same MD5 hex jscpd computes, through Node's one-shot digest rather
+    // than a Hash object per token and per window.
+    hashFunction: value => hash("md5", value),
+  }, new FrameStore());
   // A percentage rounded to 0 is still a failure when there is one clone.
   if (clones.length) throw new Error(`Duplicate-code gate failed: ${clones.length} clone(s); required: 0.`);
 }
