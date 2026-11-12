@@ -1,9 +1,10 @@
 "use client";
 
 /**
- * ⌘F / Ctrl+F on a page finds in that page, as a reader expects: one glass
- * field where the search control stands, every match marked in the text, the
- * current one stronger and scrolled into view. Enter and Shift+Enter step
+ * ⌘F / Ctrl+F on a page finds in that page, as a reader expects: one paper
+ * slip where the search control stands, flat like the page's other menus (no
+ * glass, no shadow), every match marked in the text, the current one stronger
+ * and scrolled into view. Enter and Shift+Enter step
  * through them; Esc closes. The field does not cover the page, so the reader
  * keeps scrolling and writing while it is open, and matches follow the text
  * as people and Agents change it. Search across the Space stays on the
@@ -13,7 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObje
 import { createPortal } from "react-dom";
 import { ChevronDown, ChevronUp, X } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
-import { LiquidGlassCard } from "@/components/ui/material-surfaces";
+import { PaperPopover } from "@/components/ui/material-surfaces";
 import { isImeKeyDown } from "@/lib/ime-keydown";
 import { cn } from "@/lib/utils";
 import { searchPanelPlacement, visibleSearchAnchor } from "@/components/dashboard/workspace-search-panel";
@@ -23,7 +24,6 @@ const MATCHES = "page-find";
 const CURRENT = "page-find-current";
 /** The field is narrower than the Space's search: it holds a word, not results. */
 const WIDTH = 360;
-const MATERIAL = { blur: 16 } as const;
 /** Blocks that end a line of text: a match stops at their edge. */
 const BLOCK = "p, h1, h2, h3, h4, h5, h6, li, td, th, pre, blockquote, figcaption";
 
@@ -165,7 +165,7 @@ export function PageFind({ scope }: { scope: RefObject<HTMLElement | null> }) {
     reveal(scroller, found.current.ranges[next]!);
   }, [scope]);
 
-  // The field stands where the search control is, as the Space's search does, but holds only the field row.
+  // The slip stands where the search control is, as the Space's search does, but holds only the field row.
   useLayoutEffect(() => {
     if (!open) {
       setPlacement(null);
@@ -195,7 +195,7 @@ export function PageFind({ scope }: { scope: RefObject<HTMLElement | null> }) {
         style={placement ? { top: placement.top, right: placement.right, width: placement.width,
           "--app-search-panel-row": `${placement.row}px`,
           "--app-search-panel-column": `${placement.column}px` } as React.CSSProperties : undefined}>
-        <LiquidGlassCard role="search" aria-label="Find in page" material={MATERIAL}
+        <PaperPopover role="search" aria-label="Find in page"
           className="app-search-panel flex w-full flex-col text-foreground"
           style={placement ? { transformOrigin: `calc(100% - ${placement.column}px) ${placement.row / 2}px` } : undefined}>
           <div className="app-search-panel-field flex shrink-0 items-center gap-3">
@@ -230,7 +230,7 @@ export function PageFind({ scope }: { scope: RefObject<HTMLElement | null> }) {
               </button>
             </span>
           </div>
-        </LiquidGlassCard>
+        </PaperPopover>
       </div>
     </div>,
     document.body
