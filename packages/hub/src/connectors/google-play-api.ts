@@ -18,6 +18,7 @@ import { googleHeaders } from "./actions/google-headers";
 export const PLAY_ORIGIN = "https://androidpublisher.googleapis.com";
 export const PACKAGE_NAME = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/u;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+const FIELD_MASK = /^[A-Za-z][A-Za-z0-9_.,/()*]{0,499}$/u;
 const PATH_VALUE = /^[A-Za-z0-9][A-Za-z0-9._~:@+-]{0,1999}$/u;
 
 export interface PlayOperation {
@@ -58,7 +59,13 @@ export function playRequest(id: string, input: PlayInput): PlayCall {
   const query: [string, string][] = [];
   let path = operation.path;
   for (const kind of ["path", "query"] as const) {
-    const supplied = record(input[kind]), declared = operation.parameters.filter(parameter => parameter.in === kind);
+    const supplied = { ...record(input[kind]) }, declared = operation.parameters.filter(parameter => parameter.in === kind);
+    // Google's partial response: a read names the fields it wants, so a large resource fits a bounded result.
+    if (kind === "query" && operation.method === "GET" && supplied.fields !== undefined) {
+      if (typeof supplied.fields !== "string" || !FIELD_MASK.test(supplied.fields)) fail("query.fields", "must be a Google field mask such as basePlans(basePlanId,state)");
+      query.push(["fields", supplied.fields as string]);
+      delete supplied.fields;
+    }
     for (const name of Object.keys(supplied)) if (!declared.some(parameter => parameter.name === name)) fail(`${kind}.${name}`, "unknown parameter");
     for (const parameter of declared) {
       const value = supplied[parameter.name];
