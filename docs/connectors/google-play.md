@@ -10,23 +10,27 @@ Play Publisher run; every other capability is a catalog operation.
 
 ## Connect
 
-A Human Space admin selects **Connect with Google Play Console** in Apps.
-It reuses the company `CONNECTOR_GOOGLE_CLIENT_ID` /
-`CONNECTOR_GOOGLE_CLIENT_SECRET` and the existing callback, like
-[`gcp`](gcp.md), but holds its own encrypted connection and token. Consent asks
-for offline access and exactly `https://www.googleapis.com/auth/androidpublisher`;
-an exchange or refresh that reports a different or additional scope is refused.
+A Human Space admin selects **Connect with Google Play Console** in Apps and
+signs in. That is the whole setup: the connection covers every app the Google
+account can manage, and nothing is typed. It reuses the company
+`CONNECTOR_GOOGLE_CLIENT_ID` / `CONNECTOR_GOOGLE_CLIENT_SECRET` and the
+existing callback, like [`gcp`](gcp.md), but holds its own encrypted connection
+and token. Consent asks for offline access and exactly two scopes:
+`https://www.googleapis.com/auth/androidpublisher` for every operation, and the
+read-only `https://www.googleapis.com/auth/playdeveloperreporting`, because
+only the Play Developer Reporting API can list an account's apps. An exchange
+or refresh that reports fewer, different or additional scopes is refused.
 Disconnecting deletes the grant.
 
-Then save **App for Check**: the package name of one app in the developer
-account (for example `sh.xmatrix.app`). Check reads that app's production
-track (`applications.tracks.releases.list`), a real read with the stored token.
-Actions always name their app explicitly.
+Check lists the apps the sign-in can see (`apps:search`), a real read with the
+stored token; an account without an app yet still passes. `list_apps` shows
+the same list, so an Agent finds package names instead of asking for them.
 
 Prerequisites outside xMatrix:
 
-- The Google Play Android Developer API is enabled in the company OAuth
-  project (Google Cloud console → APIs & Services).
+- The Google Play Android Developer API and the Google Play Developer
+  Reporting API are enabled in the company OAuth project (`@gcp:enable_api`
+  supports both, or Google Cloud console → APIs & Services).
 - The Google account that consents is a user of the Play developer account
   with permission for the apps it should manage (Play Console → Users and
   permissions). Play permissions, not the OAuth scope, decide what each call
@@ -38,6 +42,7 @@ Prerequisites outside xMatrix:
 ## Release
 
 ```text
+@googleplay:list_apps:*
 @googleplay:tracks:sh.xmatrix.app
 @googleplay:api_write:edits.insert {"path":{"packageName":"sh.xmatrix.app"},"body":{},"digest":"<from api_plan>"}
 @googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"<edit id>"},"size":<bytes of app.aab>}

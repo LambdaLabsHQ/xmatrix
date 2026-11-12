@@ -419,7 +419,8 @@ Account Management, Business Information and Performance APIs must be enabled;
 until then every call returns Google's 403.
 
 Google Play Console (`googleplay`) is another connection on the company
-Google client, holding only `https://www.googleapis.com/auth/androidpublisher`.
+Google client, holding `https://www.googleapis.com/auth/androidpublisher` and the
+read-only `playdeveloperreporting` scope that lists the account's apps for Check.
 Its operations come from the pinned androidpublisher v3 discovery document
 (`vendor/google-play`); see [the connector guide](../connectors/google-play.md).
 

@@ -1,4 +1,4 @@
-import { PACKAGE_NAME, play, playRequest } from "../google-play-api";
+import { PACKAGE_NAME, play, playApps, playRequest } from "../google-play-api";
 import { record, text } from "../event-format";
 import { ProviderRequestError } from "../http";
 import type { ConnectorAction, ConnectorActionStatement } from "../provider";
@@ -46,6 +46,15 @@ function releaseRequest(statement: ConnectorActionStatement): Record<string, str
 
 export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
   ...GOOGLE_PLAY_OPERATION_ACTIONS,
+  list_apps: {
+    effect: "read", requires: ["oauthToken"],
+    parse: statement => statement.target === "*" && /^[A-Za-z0-9_=-]{0,2000}$/u.test(statement.text.trim())
+      ? { pageToken: statement.text.trim() } : "use @googleplay:list_apps:* [pageToken]",
+    async execute({ credentials }, input) {
+      const { apps, nextPageToken } = await playApps(credentials, input.pageToken || undefined);
+      return { summary: `${apps.length} app${apps.length === 1 ? "" : "s"} this sign-in can see${nextPageToken ? ` (more: pass pageToken ${nextPageToken})` : ""}:\n${playOutput(apps)}` };
+    },
+  },
   tracks: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => {
