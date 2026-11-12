@@ -106,6 +106,10 @@ export function privateFailure(error: unknown): string {
   return error instanceof ConnectorRemedy ? error.message : PRIVATE_CONNECTOR_RESULT;
 }
 
+/* The check reaches this file again through the provider registry, so it is loaded when a command first needs it. */
+const checkAppConnection: Parameters<typeof commandScope>[2] = async (env, check) =>
+  (await import("../app-connection-check")).checkAppConnection(env, check);
+
 /** A synchronous read returns the original result to its caller. Recorded
  * private calls give execution history a fixed mask rather than an excerpt. */
 export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
@@ -118,7 +122,7 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   }
   const parsed = action.parse(statement);
   if (typeof parsed === "string") throw new ConnectorRemedy(400, parsed);
-  const scope = await commandScope(manifest, input);
+  const scope = await commandScope(manifest, input, checkAppConnection);
   if (typeof scope === "string") throw new ConnectorRemedy(403, scope);
   const authorize = async () => {
     await authorizeCaller();
@@ -205,7 +209,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const label = entry?.label ?? actionId;
   const parsed = approved?.prepared ?? action.parse(statement);
   if (typeof parsed === "string") return result("failed", parsed);
-  const scope = await commandScope(manifest, input);
+  const scope = await commandScope(manifest, input, checkAppConnection);
   if (typeof scope === "string") return result("blocked", scope);
   const policyInput = { providerId, connectionId: scope.connectionId, actionId };
   const mode = await connectionActionPolicy(input.env, policyInput);
