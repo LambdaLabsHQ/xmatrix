@@ -2512,8 +2512,14 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 
 /* The control the panel dropped from is under its field row: the panel's
    magnifier and close button take its place, so it is not drawn twice. */
-.xmatrix-app.app-search-open [data-search-anchor] {
+.xmatrix-app.app-search-open [data-search-anchor],
+body:has(> .app-page-find) [data-search-anchor] {
   visibility: hidden;
+}
+
+.xmatrix-app .app-page-find-count {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A global rule makes every child of a portaled .xmatrix-app relative. */
@@ -2938,6 +2944,14 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 .xmatrix-app .message-citation-composer::before { left: 12px; top: 10px; width: 22px; height: 14px; }
 ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
+}
+
+/* Find in page (PageFind): every match washed in the cited passage's wood, the current one in full. */
+::highlight(page-find) {
+  background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 45%, transparent);
+}
+::highlight(page-find-current) {
+  background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 100%, var(--foreground) 12%);
 }
 
 

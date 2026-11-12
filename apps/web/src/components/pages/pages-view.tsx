@@ -72,6 +72,7 @@ import { pageMentions, type PageReferenceTargets } from "./page-reference-chips"
 import type { PageSummons } from "./page-mention-summons";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { usePageSummons, type PageSummon } from "./page-summon-store";
+import { PageFind } from "./page-find";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -1650,6 +1651,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   return (
     <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", marginOn && "pages-margin-on")}
       data-testid="pages-view">
+      <PageFind scope={articleElement} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* On a desktop the page's controls hold the band at the top, and the page scrolls below it: nothing
             passes under the band, and whatever waits at the page's top edge waits below it, clear of the

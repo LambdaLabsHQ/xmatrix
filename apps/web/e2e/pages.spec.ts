@@ -1112,6 +1112,35 @@ test("a page shows its document at once, and the live editor takes over when its
   }
 });
 
+test("⌘F on a page finds in that page: matches marked, Enter steps through them, Esc closes", async ({ page: browser }) => {
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const editor = await openLivePage(browser, "# Relay\n\n## Status\n\nThe relay is next; the **relay** test waits\n\n## Notes\n\nRelay owners review\n");
+  await expect(editor).toContainText("Relay owners review");
+
+  await browser.keyboard.press("ControlOrMeta+f");
+  const field = browser.getByTestId("page-find-input");
+  await expect(field).toBeFocused();
+  await expect(browser.locator("[data-workspace-search-input]")).toHaveCount(0);
+  await field.fill("relay");
+  const count = browser.getByTestId("page-find-count");
+  await expect(count).toHaveText("1 of 4");
+  const marked = () => browser.evaluate(() => [CSS.highlights.get("page-find")?.size ?? 0,
+    CSS.highlights.get("page-find-current")?.size ?? 0]);
+  expect(await marked()).toEqual([3, 1]);
+  await field.press("Enter");
+  await expect(count).toHaveText("2 of 4");
+  await field.press("Shift+Enter");
+  await field.press("Shift+Enter");
+  await expect(count).toHaveText("4 of 4");
+  await field.fill("nowhere");
+  await expect(count).toHaveText("No matches");
+
+  await field.press("Escape");
+  await expect(field).toHaveCount(0);
+  expect(await marked()).toEqual([0, 0]);
+});
+
 /** A change to the page, as its session tells everyone on it. */
 function committed(headRevision: number): Uint8Array {
   const notice = encoding.createEncoder();
