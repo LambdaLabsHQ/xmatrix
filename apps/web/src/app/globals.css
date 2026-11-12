@@ -2517,6 +2517,17 @@ body:has(> .app-page-find) [data-search-anchor] {
   visibility: hidden;
 }
 
+/* Find in page is a paper slip, not glass: the slip's own 8px corner, never a
+   capsule, and its buttons' hover a rounded square like the page's menus
+   (Daniel 2026-11-12: 纸面风格，不要有阴影；纸面不要用胶囊). */
+.xmatrix-app.app-page-find .app-search-panel {
+  border-radius: 8px;
+}
+
+.xmatrix-app.app-page-find .app-search-panel-close {
+  border-radius: 6px;
+}
+
 .xmatrix-app .app-page-find-count {
   font-size: 0.75rem;
   font-variant-numeric: tabular-nums;
