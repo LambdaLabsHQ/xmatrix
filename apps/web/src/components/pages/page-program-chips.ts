@@ -3,6 +3,7 @@ import { pageSchema } from "@xmatrix/protocol/page-document";
 import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
+import { pressOpens } from "./page-automation-chips";
 
 /**
  * A page's programs are its code blocks tagged `norn run`. The block stays
@@ -47,12 +48,7 @@ function chipDecorations(doc: DocNode, programs: Map<string, PageProgramStatus>,
       status.contentEditable = "false";
       status.dataset.state = state;
       status.textContent = text;
-      const target = program?.channelId;
-      if (target) {
-        status.title = "Open the conversation it works in";
-        status.addEventListener("mousedown", (event) => event.preventDefault());
-        status.addEventListener("click", () => openConversation(target));
-      } else status.disabled = true;
+      pressOpens(status, program?.channelId, "Open the conversation it works in", openConversation);
       return status;
     }, { side: -1, ignoreSelection: true, key: `program:${name}:${state}:${text}:${program?.channelId ?? ""}` }));
   });
