@@ -78,6 +78,7 @@ import { daemonFailureNeedsLogin, redactDaemonDetail } from "./daemon-failure";
 import { DEFAULT_SHELL_BACKGROUND_COLOR, desktopTitleBarOptions } from "./window-chrome";
 import { isVisibleLoadFailure, loadFailurePage } from "./load-failure";
 import { planWindowOpen } from "./window-navigation";
+import { deepLinkAppPath } from "./deep-link";
 import { signInServiceId } from "./sign-in-services";
 import { signInWithWindow } from "./sign-in-window";
 import {
@@ -794,29 +795,8 @@ function openAppPath(pathname: string, inWindow?: BrowserWindow | null) {
 }
 
 function openDeepLink(value: string) {
-  try {
-    const url = new URL(value);
-    if (url.protocol !== `${APP_PROTOCOL}:`) {
-      return;
-    }
-
-    if (url.hostname === "channel") {
-      const channelId = decodeURIComponent(url.pathname.replace(/^\/+/, ""));
-      if (channelId) {
-        openAppPath(`/app?channel=${encodeURIComponent(channelId)}`);
-        return;
-      }
-    }
-
-    if (url.hostname === "login") {
-      openAppPath(`/login${url.search}`);
-      return;
-    }
-
-    openAppPath("/app");
-  } catch {
-    openAppPath("/app");
-  }
+  if (!value.startsWith(`${APP_PROTOCOL}:`)) return;
+  openAppPath(deepLinkAppPath(value, APP_PROTOCOL));
 }
 
 function setDockBadge(state: DesktopBadgeState) {

@@ -149,6 +149,8 @@ export type DesktopBridge = {
    * Absent on shells older than signing in in place.
    */
   authorizeInBrowser?: (request: { url: string; redirectParam: string; ephemeral?: boolean }) => Promise<string>;
+  /** The shell takes `xmatrix://connect/oauth`, so a connect started in it returns to it from the browser. */
+  connectReturn?: boolean;
   /** Sign in with Apple, natively (iOS): the identity token for `nonce`, and the name Apple shares the first time. */
   signInWithApple?: (request: { nonce: string }) => Promise<{
     identityToken: string; givenName?: string; familyName?: string;

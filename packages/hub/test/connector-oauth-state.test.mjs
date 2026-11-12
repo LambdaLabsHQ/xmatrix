@@ -53,3 +53,9 @@ test("a forged, altered, expired or oversized state verifies as nothing", async 
   assert.equal(await verifyOAuthStateClaims(`${"z".concat("A".repeat(200))}.${signature}`, secret), undefined, "not deflate data");
   assert.equal(await oauthStateProviderId("not-a-state"), "");
 });
+
+test("a connect the desktop app started says so in its state and still fits X's limit", async () => {
+  const state = await signOAuthState({ ...claims, d: 1 }, secret);
+  assert.ok(state.length <= 500, `state is ${state.length} characters`);
+  assert.equal((await verifyOAuthStateClaims(state, secret)).d, 1);
+});

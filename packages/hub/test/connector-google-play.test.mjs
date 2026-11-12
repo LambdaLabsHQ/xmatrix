@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { GOOGLE_PLAY_ACTIONS as ACTIONS } from "../src/connectors/actions/google-play.ts";
 import { verifyGooglePlay } from "../src/connectors/google-play-api.ts";
-import { exchangeOAuthGrant, oauthClient, refreshOAuthFields } from "../src/connectors/oauth.ts";
+import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, refreshOAuthFields, verifyOAuthState } from "../src/connectors/oauth.ts";
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { statementParser } from "./support/google-read-grant.mjs";
 
@@ -37,8 +37,8 @@ test("Check and list_apps read every app the sign-in can see; nobody types a pac
   assert.equal(check.calls[0].url, "https://playdeveloperreporting.googleapis.com/v1beta1/apps:search?pageSize=100");
   assert.equal(check.calls[0].headers.get("authorization"), "Bearer play-access");
   await fetched([{ status: 401, body: { error: { status: "UNAUTHENTICATED" } } }], () => assert.rejects(verifyGooglePlay(credentials), error => error.fix?.kind === "reconnect"));
-  await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "Google Play Developer Reporting API has not been used in project 1 before or it is disabled." } } }],
-    () => assert.rejects(verifyGooglePlay(credentials), /Reporting API returned 403.*disabled/u));
+  await fetched([{ status: 403, body: { error: { status: "PERMISSION_DENIED", message: "Google Play Developer Reporting API has not been used in project 123456789012 before or it is disabled." } } }],
+    () => assert.rejects(verifyGooglePlay(credentials), /Google Play Developer Reporting API is not enabled in this Hub's Google Cloud project 123456789012\b.*Check again/u));
   const { result, calls } = await fetched([{ body: listed }], () => ACTIONS.list_apps.execute({ credentials }, statement("@googleplay:list_apps:* next_0")));
   assert.match(calls[0].url, /pageToken=next_0$/u);
   assert.match(result.summary, /1 app this sign-in can see \(more: pass pageToken next_1\)/u);
@@ -136,4 +136,12 @@ test("tracks reads in a discarded edit; release sets a track and commits, discar
     '@googleplay:release:sh.xmatrix.app {"track":"x","versionCodes":["1"],"status":"live"}', "@googleplay:tracks:nopackage", "@googleplay:tracks:a.b/e1"]) {
     assert.equal(typeof statement(bad), "string", bad);
   }
+});
+
+test("a connect started in the desktop app is marked for return to it; one started on the web is not", async () => {
+  const client = oauthClient(company, "googleplay");
+  const input = { spaceId: "space-1", userId: "human-1", redirectUri: "https://hub.test/api/connectors/oauth/callback" };
+  const stateOf = async extra => new URL(await oauthAuthorizeUrl(client, { ...input, ...extra })).searchParams.get("state");
+  assert.equal((await verifyOAuthState(company, await stateOf({ desktop: true }))).desktop, true);
+  assert.equal((await verifyOAuthState(company, await stateOf({}))).desktop, undefined);
 });

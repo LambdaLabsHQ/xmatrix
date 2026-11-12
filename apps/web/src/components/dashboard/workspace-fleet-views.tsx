@@ -14,6 +14,7 @@ import {
   setMachineAutoAssign,
 } from "./workspace-admin-views";
 
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import type { HumanProfile } from "@xmatrix/protocol";
 
@@ -1291,7 +1292,9 @@ export function AppsView({
         const started = await connectionMutation.mutateAsync({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
-          body: connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : undefined,
+          // A shell that takes the grant back says so; the browser then returns to it instead of finishing itself.
+          body: { ...(connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : {}),
+            ...(getDesktopBridge()?.connectReturn ? { returnTo: "desktop" } : {}) },
         });
         if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
