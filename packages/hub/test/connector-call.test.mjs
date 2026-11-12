@@ -31,12 +31,12 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
 function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false, retry,
-  receiptRefusal } = {}) {
+  receiptRefusal, providerId = "gmail", stored } = {}) {
   const checks = [], reports = [], refused = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
     ownerUserId: "member", spaceId: "space", executionKey: "execution-alpha" };
-  const credentials = { composioApiKey: "fixture-key", ...(noMailbox ? {} : { mailboxes: JSON.stringify([
+  const credentials = stored ?? { composioApiKey: "fixture-key", ...(noMailbox ? {} : { mailboxes: JSON.stringify([
     { account: "ca_fixture", address: "me@example.com", owner: otherMailbox ? "user:other" : "user:member" },
   ]) }) };
   const append = async (_env, channelId, command) => {
@@ -48,7 +48,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "../apps": { appCommand: async (_env, kind, input) => { persisted.push({ kind, input }); },
       usableAppConnections: async (_env, input) => {
         assert.equal(input.channelId, run.channelId); assert.equal(input.actorUserId, run.ownerUserId);
-        return [{ providerId: "gmail", status: "configured", id: changeConnection && ++scopes >= 3 ? "replaced" : "connection" }];
+        return [{ providerId, status: "configured", id: changeConnection && ++scopes >= 3 ? "replaced" : "connection" }];
       } },
     "../spaces": { getChannel: async () => ({ channel: { spaceId: "space" } }) },
     "@xmatrix/db": { ControlError },
@@ -288,4 +288,23 @@ test("XMATRIX-HUB-AH: a receipt the message authority refused as retryable stays
   assert.equal(error.code, "postgres_message_authority_unavailable");
   assert.equal(error.retryable, true);
   assert.doesNotMatch(error.message, /654321|fixture-private/);
+});
+
+test("a write whose result is the caller's own capability runs only as a call and is always masked in the Channel", async () => {
+  const session = "https://androidpublisher.googleapis.com/resumable/upload/androidpublisher/v3/applications/sh.xmatrix.app/edits/e1/bundles?uploadType=resumable&upload_id=CAPABILITY";
+  const command = '@googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"e1"},"size":1234}';
+  const play = { providerId: "googleplay", stored: { oauthToken: "play-access" } };
+  const f = fixture(play);
+  const { result, calls } = await fetched([{ raw: "", headers: { location: session } }], () => f.request({ command, resultVisibility: "public" }));
+  assert.equal(result.status, 200, await result.clone().text());
+  assert.match((await result.json()).summary, /upload_id=CAPABILITY/u);
+  assert.equal(calls.length, 1);
+  assert.equal(f.privateRecords.length, 1, "the caller asked for a public result and still got a masked one");
+  assert.doesNotMatch(JSON.stringify([f.appends[1], f.persisted]), /CAPABILITY/u);
+  assert.match(f.appends[1].body, /hidden — private call/u);
+  // Where a write needs approval there is nobody to approve a call, so it does not run.
+  const asked = fixture({ ...play, mode: "ask" });
+  const refused = await fetched([], () => asked.request({ command }));
+  assert.equal(refused.result.status, 403);
+  assert.equal(refused.calls.length, 0);
 });

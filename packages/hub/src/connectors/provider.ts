@@ -98,6 +98,11 @@ export interface ConnectorActionResult {
 
 export interface ConnectorAction {
   effect: "read" | "write";
+  /**
+   * A write whose result is a capability for its caller alone (an upload URL anyone could use). It runs only as
+   * a call, where the app permission allows writes without asking, and its Channel receipt is always masked.
+   */
+  callerOnly?: true;
   /** Credential fields the action cannot run without. */
   requires: readonly string[];
   /** Validates the statement before any provider call; a string is the reason it is invalid. */

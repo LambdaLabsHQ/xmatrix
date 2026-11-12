@@ -164,7 +164,7 @@ export const GOOGLE_PLAY_OPERATION_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   api_upload: {
-    effect: "write", requires: ["oauthToken"], parse: parse(["size", "contentType"]),
+    effect: "write", callerOnly: true, requires: ["oauthToken"], parse: parse(["size", "contentType"]),
     async execute(context, input) {
       const target = call(input), upload = target.operation.upload;
       if (!upload) reject("This operation does not take a file; use api_plan and api_write");
@@ -177,7 +177,7 @@ export const GOOGLE_PLAY_OPERATION_ACTIONS: Record<string, ConnectorAction> = {
       const session = await openUpload(context.credentials, target, size as number, contentType as string);
       return { summary: `Google Play opened an upload for ${target.id} (${size} bytes, ${contentType}). From the machine with the file, send exactly those bytes once:\n` +
         quoteRetrievedText(`curl --fail-with-body -X PUT -H 'Content-Type: ${contentType}' --upload-file <file> '${session}'`) +
-        "\nThe session URL accepts only this file and needs no token; keep it private. Google answers the PUT with the uploaded resource (a bundle's versionCode). An upload into an edit is live only after the edit is committed." };
+        "\nThe session URL accepts only this file and needs no token: it is returned to you alone and masked in the Channel. Google answers the PUT with the uploaded resource (a bundle's versionCode). An upload into an edit is live only after the edit is committed." };
     },
   },
 };

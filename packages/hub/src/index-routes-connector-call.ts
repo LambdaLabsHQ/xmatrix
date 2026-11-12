@@ -121,7 +121,9 @@ export async function recordedRead(env: Env, call: {
   // The provider runs this command from a Channel message and has no call executor for it.
   if (!action) throw new ProviderRequestError(400, `@${provider.id}:${parsed.actionId} runs only as a Channel message; ` +
     `send it with xmatrix send <channel-id> "<command>" instead of xmatrix call`);
-  if (action.effect !== "read") throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
+  if (action.effect !== "read" && !action.callerOnly) throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
+  // A caller-only result is masked in the Channel whatever the caller asked for.
+  if (action.callerOnly) call = { ...call, visibility: "private" };
   const manifest = getAppConnectorProvider(provider.id)!;
   const input: ConnectorCommandInput = { env, channelId: call.channelId, actorUserId: call.ownerUserId,
     senderKind: call.sender.kind, senderId: call.sender.id, messageId: crypto.randomUUID(), body: call.command };

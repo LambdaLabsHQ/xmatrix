@@ -301,7 +301,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
         readAction("api_read", "Read Play API resource", "Run one catalog GET with schema-checked parameters and bounded output. Use private reads for purchases, orders and users.", '<operation> {"path":{"packageName":"…"},"query":{}}'),
         readAction("api_plan", "Preview Play API write", "Validate a catalog mutation and read its current target without writing. Returns a digest binding the exact request and resource state.", '<operation> {"path":{…},"body":{…}}'),
         writeAction("api_write", "Write Play API resource", "Perform one catalog mutation after checking the digest from api_plan and current write authority. Never retried automatically.", '<operation> {"path":{…},"body":{…},"digest":"…"}'),
-        writeAction("api_upload", "Open Play upload", "Open a resumable upload for an upload operation (app bundle, APK, image, deobfuscation file); the machine with the file sends its bytes to the returned URL without a token.", '<operation> {"path":{"packageName":"…","editId":"…"},"size":12345678}'),
+        writeAction("api_upload", "Open Play upload", "Open a resumable upload for an upload operation (app bundle, APK, image, deobfuscation file); the machine with the file sends its bytes to the returned URL without a token. Runs only as xmatrix call; the URL returns to the caller alone and is masked in the Channel.", '<operation> {"path":{"packageName":"…","editId":"…"},"size":12345678}'),
       ],
     }),
     auth: { type: "oauth", scopes: ["https://www.googleapis.com/auth/androidpublisher", "https://www.googleapis.com/auth/playdeveloperreporting"], secretRefs: [] },
