@@ -25,6 +25,8 @@
     "catalogs:sources": "node scripts/refresh-agent-command-catalogs.mjs --print-sources",
     "asc:generate": "node scripts/app-store-connect-openapi.mjs",
     "asc:check": "node scripts/app-store-connect-openapi.mjs --check",
+    "play:generate": "node scripts/google-play-discovery.mjs",
+    "play:check": "node scripts/google-play-discovery.mjs --check",
     "test": "turbo test",
     "typecheck": "turbo typecheck",
     "web:dev": "pnpm --filter @xmatrix/web dev:local",

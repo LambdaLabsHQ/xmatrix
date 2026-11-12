@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { writeOrCheckGenerated } from "./pinned-catalog-output.mjs";
 import openapiTS, { astToString } from "openapi-typescript";
 
 const root = new URL("../", import.meta.url);
@@ -42,12 +43,7 @@ const generated = {
   "app-store-connect.json": JSON.stringify(catalog) + "\n",
   "app-store-connect.d.ts": astToString(await openapiTS(spec, { alphabetize: true, silent: true })),
 };
-for (const [file, contents] of Object.entries(generated)) {
-  const destination = new URL(file, output);
-  if (process.argv.includes("--check")) {
-    if (await readFile(destination, "utf8") !== contents) throw new Error(`${file} is stale; run pnpm asc:generate`);
-  } else await writeFile(destination, contents);
-}
+const outcome = await writeOrCheckGenerated(output, generated, "pnpm asc:generate");
 // Comparing a newly downloaded official snapshot does not silently replace the pinned authority.
 const comparison = process.argv.indexOf("--compare");
 if (comparison !== -1) {
@@ -57,4 +53,4 @@ if (comparison !== -1) {
   console.log(JSON.stringify({ version: next.info.version, added: Object.keys(ids).filter(id => !operations[id]),
     removed: Object.keys(operations).filter(id => !(id in ids)), deprecated: Object.keys(ids).filter(id => ids[id] && !operations[id]?.deprecated) }, null, 2));
 }
-console.log(`Apple ${catalog.version}: ${Object.keys(operations).length} operations; ${process.argv.includes("--check") ? "verified" : "generated"}`);
+console.log(`Apple ${catalog.version}: ${Object.keys(operations).length} operations; ${outcome}`);

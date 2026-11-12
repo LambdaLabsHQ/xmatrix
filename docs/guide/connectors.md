@@ -87,6 +87,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (writes ask by default; [guide](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)) |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
+| Google Play Console | `googleplay` | | `tracks`, `release`, `api_operations`, `api_schema`, `api_read`, `api_plan`, `api_write`, `api_upload` |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `list_adunits`, `report`, `list_payments`, `list_alerts`, `list_policy_issues` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |

@@ -37,6 +37,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googleads: { scope: "https://www.googleapis.com/auth/adwords", name: "Google Ads" },
   googlebusinessprofile: { scope: "https://www.googleapis.com/auth/business.manage", name: "Business Profile" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
+  googleplay: { scope: "https://www.googleapis.com/auth/androidpublisher", name: "Google Play Console" },
 };
 
 /**
@@ -51,7 +52,7 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google", googleplay: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -398,7 +399,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
-  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads" || providerId === "googlecalendar";
+  const completeGoogleGrant = ["gcp", "googleads", "googlecalendar", "googleplay"].includes(providerId);
   if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ConnectorRemedy(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`, { kind: "reconnect" });
