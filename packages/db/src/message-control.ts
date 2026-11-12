@@ -10,7 +10,7 @@ import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections, messageSummons } from "./message-invocation-selections.js";
 import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
 import { readChannelInstances, type AgentInstanceRecord } from "./channel-agent-presence.js";
-import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+import { ACTIVE_RUN_STATUS_SQL, connectorReceiptAnswersCommandSql, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
@@ -1045,9 +1045,11 @@ export class PostgresMessageRepository {
    * people, Agents and Apps wrote there, except the sender's own messages,
    * the Hub's own facts (system notices, activity entries) and an App's
    * receipt for a command the sender itself wrote in this Channel. Only the
-   * Hub writes App messages, and it names a receipt `system:<command message
-   * id>:<app>`; the command is then one primary-key read, and it must be the
-   * sender's own row here. A receipt named any other way still counts.
+   * Hub writes App messages. A receipt id is `system:<execution id>:<app>`,
+   * and the execution id is the command message id or that id plus a suffix
+   * from `connectorReceiptAnswersCommandSql`. The command is then one
+   * primary-key read, and it must be the sender's own row here. A receipt
+   * named any other way, including a denial, still counts.
    * `replay` is set when `messageId` is already committed, so a retried send
    * is answered by its receipt rather than refused for messages that came
    * after it.
@@ -1067,7 +1069,7 @@ export class PostgresMessageRepository {
     const afterSequence = nonnegative(input.afterSequence, "afterSequence");
     return this.inSpace(requestId, "message.unread-since", spaceId, async (transaction) => {
       const row = (await transaction.query<QueryResultRow & { unread: string | number; replay: boolean }>({
-        name: "message_unread_since_v2",
+        name: "message_unread_since_v3",
         text: `SELECT EXISTS(SELECT 1 FROM data.messages
               WHERE space_id=$1 AND channel_id=$2 AND message_id=$3) AS replay,
             (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages m
@@ -1079,9 +1081,7 @@ export class PostgresMessageRepository {
                 AND NOT (m.author_kind='app' AND EXISTS (SELECT 1 FROM data.messages command
                   WHERE command.space_id=$1 AND command.channel_id=$2
                     AND command.author_kind=$5 AND command.author_id=$6
-                    AND command.message_id=substr(m.message_id,8,
-                      GREATEST(length(m.message_id)-length(m.author_id)-8,0))
-                    AND m.message_id='system:'||command.message_id||':'||m.author_id))
+                    AND (${connectorReceiptAnswersCommandSql("m.message_id", "command.message_id", "m.author_id")})))
               LIMIT 100) unread) AS unread`,
         values: [spaceId, channelId, messageId, afterSequence, principal.kind, principal.id,
           bounded(input.activityMessageKind, "activityMessageKind")],

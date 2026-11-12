@@ -1,4 +1,4 @@
-import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, type ConnectorResultVisibility } from "@xmatrix/protocol";
+import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, connectorReceiptMessageId, type ConnectorResultVisibility } from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -137,7 +137,7 @@ export async function recordedRead(env: Env, call: {
   const publish = async (status: "completed" | "failed" | "blocked", summary: string, masked = PRIVATE_CONNECTOR_RESULT) => {
     if (call.visibility === "private") await writeConnectorPrivateResult(env, {
       channelId: call.channelId, spaceId: call.spaceId, ownerUserId: call.ownerUserId,
-      messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
+      messageId: connectorReceiptMessageId(input.messageId, manifest.id), detail: summary,
     });
     await publishCommandStatus(manifest, input, [commandResult(manifest.name, parsed.actionId, {
       status, summary: call.visibility === "private" ? masked : summary,

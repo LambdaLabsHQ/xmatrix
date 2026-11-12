@@ -1,5 +1,5 @@
 import { ControlError } from "@xmatrix/db";
-import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
@@ -139,7 +139,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
   if (lines.length === 0) return;
   const response = await dispatchProductMessageAppend(input.env, input.channelId, {
     commandId: `product:${manifest.id}-status:${input.messageId}`.slice(0, 200),
-    messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200),
+    messageId: connectorReceiptMessageId(input.messageId, manifest.id),
     channelId: input.channelId,
     body: connectorReceiptBody(lines),
     // Paid X work is already charged before I/O. Its receipt must remain
