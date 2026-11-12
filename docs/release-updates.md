@@ -13,6 +13,7 @@ suffix list now builds the receipt id and decides which receipts answer the
 sender's own command. A denial stays unread: its id is the approval request,
 not the command. Messages from other people, Agents and Apps are unchanged.
 No schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
 
 ## Unreleased: Google Play Console reads a subscription's base plans
 
