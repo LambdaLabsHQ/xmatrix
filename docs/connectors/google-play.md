@@ -77,8 +77,14 @@ Promoting a build is a `release` of its existing version code to another track.
 ## Subscription base plans
 
 ```text
+@googleplay:base_plans:sh.xmatrix.app/pro
 @googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"activate":true}
 ```
+
+`base_plans:<package>/<subscription> [region]` reads each base plan as Google
+Play stores it: state, billing period, the number of regions it is priced in
+and its price in one region (US by default). A subscription priced in every
+region does not fit a catalog read's bounded result; this does.
 
 `base_plan` adds one auto-renewing base plan to an existing subscription.
 `region` is the region the price is for; it keeps exactly that price. Google
@@ -135,6 +141,27 @@ before the call, refuses a changed request or state, rechecks write
 permission, and calls Google exactly once; a timeout is uncertain and is
 never retried. Edits-scoped writes take effect only when the edit is
 committed (`edits.commit`, or `release`).
+
+A request body too large for a command, such as the data safety form
+(`applications.dataSafety`, the whole CSV as `safetyLabels`), is attached to
+the command as one JSON file holding the body, for both steps:
+
+```text
+xmatrix send <channel> '@googleplay:api_plan:applications.dataSafety {"path":{"packageName":"sh.xmatrix.app"}}' --attachment body.json
+xmatrix send <channel> '@googleplay:api_write:applications.dataSafety {"path":{"packageName":"sh.xmatrix.app"},"digest":"<digest>"}' --attachment body.json
+```
+
+The Hub reads the file as the person the command runs for (at most 1 MiB),
+validates it against the operation's schema, and the digest binds its
+content. The plan shows the file's name, size and hash instead of the body.
+An approval freezes the file; a changed file is refused.
+
+For the data safety form, edit the CSV that Play Console exports in place:
+change only the response column and keep every other byte, including the
+quoting and the line endings. A CSV rewritten by a CSV library (different
+quoting, an extra final newline) is refused by Google with an error that names
+only the last question. A free-text explanation is accepted only where the
+matching answer is "Other".
 
 High-frequency flows by operation: testers `edits.testers.get/update/patch`;
 store listing `edits.listings.*` and `edits.details.*`, screenshots

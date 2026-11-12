@@ -13,6 +13,22 @@ suffix list now builds the receipt id and decides which receipts answer the
 sender's own command. A denial stays unread: its id is the approval request,
 not the command. Messages from other people, Agents and Apps are unchanged.
 No schema or client change. Recovery is a CI-validated beta Hub reverting
+
+## Unreleased: Google Play Console reads a subscription's base plans
+
+`@googleplay:base_plans` shows each base plan of a subscription as Google Play
+stores it: state, billing period, how many regions it is priced in and its
+price in one region. A plan priced in 174 regions did not fit a catalog read,
+so a saved price could not be checked before activating. Hub and protocol; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a large Google Play request body rides as an attached file
+
+A request body that does not fit a command, such as the data safety CSV of
+about 180 KB, had no way in. `@googleplay:api_plan` and `api_write` now take
+the body from the one JSON file attached to the command message, read as the
+person the command runs for, validated against the operation and bound by the
+digest. Hub only; no schema change. Recovery is a CI-validated beta reverting
 this change.
 
 ## Unreleased: Google Play reads can name the fields they want

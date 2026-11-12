@@ -53,7 +53,7 @@ function pathValue(operation: PlayOperation["parameters"][number], value: unknow
 }
 
 /** Only catalog paths and declared query parameters, validated before any credential is used. */
-export function playRequest(id: string, input: PlayInput): PlayCall {
+export function playRequest(id: string, input: PlayInput, maxBodyText?: number): PlayCall {
   const operation = Object.hasOwn(PLAY_OPERATIONS, id) ? PLAY_OPERATIONS[id] : undefined;
   if (!operation) return fail("operation", "not in the pinned Google Play discovery document (see api_operations)");
   const query: [string, string][] = [];
@@ -77,7 +77,7 @@ export function playRequest(id: string, input: PlayInput): PlayCall {
   }
   if (input.body !== undefined) {
     if (!operation.body) fail("body", "this operation does not accept a body");
-    validateCatalogValue(input.body, operation.body!, resolvePlaySchema);
+    validateCatalogValue(input.body, operation.body!, resolvePlaySchema, "body", 0, maxBodyText);
   }
   return { id, operation, path, query, ...(input.body === undefined ? {} : { body: input.body }) };
 }

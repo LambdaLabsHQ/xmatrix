@@ -6,6 +6,7 @@ import { canonicalJsonStringify, readBoundedStream, sha256Hex } from "@xmatrix/p
 import { PLAY_OPERATIONS, PLAY_ORIGIN, PLAY_REVISION, PLAY_SHA, playRequest, resolvePlaySchema, sendPlay, type PlayCall, type PlayInput } from "../google-play-api";
 import { ProviderRequestError } from "../http";
 import { record, text } from "../event-format";
+import type { MailAttachment } from "../gmail-attachments";
 
 /*
  * The whole pinned androidpublisher v3 surface (docs/connectors/google-play.md):
@@ -17,6 +18,7 @@ import { record, text } from "../event-format";
 const SECRET = /password|privatekey|authorization|cookie|secret|apikey|accesstoken|refreshtoken/iu;
 const OPERATION = /^[a-z][A-Za-z0-9]*(?:\.[A-Za-z][A-Za-z0-9]*){1,6}$/u;
 const LIMIT = { output: 12_000, input: 16_000 } as const;
+const MAX_FILE_BODY = 1024 * 1024;
 const reject = (message: string): never => { throw new ProviderRequestError(400, message); };
 const isObject = (value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -53,9 +55,32 @@ function parse(keys: readonly string[]) {
   };
 }
 
-function call(input: Record<string, string>): PlayCall & { fields: Record<string, unknown> } {
+type FileBody = { file: MailAttachment; body: unknown };
+
+function call(input: Record<string, string>, attached?: FileBody): PlayCall & { fields: Record<string, unknown> } {
   const fields = jsonFields(input.request!) ?? reject("Invalid API request");
-  return { ...playRequest(input.operation!, fields as PlayInput), fields };
+  if (attached && fields.body !== undefined) reject("Give the body in the command or as its attached file, not both");
+  return { ...playRequest(input.operation!, (attached ? { ...fields, body: attached.body } : fields) as PlayInput, attached ? MAX_FILE_BODY : undefined), fields };
+}
+
+/**
+ * A request body too large for a command (a data safety CSV) rides as the command message's one attached JSON file.
+ * It is read as the Human the command runs for; an approval freezes the file, and a changed file is refused.
+ */
+async function attachedBody(context: ConnectorActionContext, input: Record<string, string>): Promise<FileBody | undefined> {
+  const files = context.commandFiles;
+  const frozen = input.bodyFile ? JSON.parse(input.bodyFile) as MailAttachment : undefined;
+  if (!files || (!frozen && files.sources.length === 0)) return undefined;
+  if (!frozen && files.sources.length > 1) reject("Attach exactly one JSON file as the request body");
+  const file = frozen ?? await files.inspect(files.sources[0]!);
+  if (file.size > MAX_FILE_BODY) reject("The attached request body is larger than 1 MiB");
+  let body: unknown;
+  try { body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(await files.read(file))); } catch (error) {
+    if (error instanceof ProviderRequestError) throw error;
+    reject(`${file.name} is not a UTF-8 JSON file holding the request body`);
+  }
+  if (!isObject(body) || namesSecret(body)) reject(`${file.name} must hold the request body as one JSON object, without credentials`);
+  return { file, body };
 }
 
 /** The GET at the same resource path; a custom method (`…:commit`) reads the resource it acts on. */
@@ -69,21 +94,22 @@ function snapshotOf(target: ReturnType<typeof call>): PlayCall | undefined {
 }
 
 /** A digest binds the pinned contract, the exact request and the target's current state. */
-async function plan(credentials: Readonly<Record<string, string>>, input: Record<string, string>) {
-  const target = call(input);
+async function plan(context: ConnectorActionContext, input: Record<string, string>) {
+  const { credentials } = context, attached = await attachedBody(context, input);
+  const target = call(input, attached);
   if (target.operation.method === "GET") reject("Use api_read for a read operation");
   if (target.operation.upload && target.operation.method === "POST" && !target.operation.body) reject("This operation takes file bytes; use api_upload");
   const snapshot = snapshotOf(target);
   const before = snapshot ? await sendPlay(credentials, snapshot) : null;
   const digest = await sha256Hex(canonicalJsonStringify({ specification: PLAY_SHA, operation: target.id, method: target.operation.method,
     path: target.path, query: target.query, body: target.body ?? null, before }));
-  return { target, snapshot, before, digest };
+  return { target, snapshot, before, digest, attached };
 }
 
 async function prepare(context: ConnectorActionContext, input: Record<string, string>) {
-  const planned = await plan(context.credentials, input);
+  const planned = await plan(context, input);
   if (text(planned.target.fields.digest) !== planned.digest) reject("The request or resource changed; run api_plan again and use its current digest");
-  return input;
+  return planned.attached ? { ...input, bodyFile: JSON.stringify(planned.attached.file) } : input;
 }
 
 /** Google's resumable session: the Hub opens it with the token; its URL alone then accepts this one file. */
@@ -145,17 +171,19 @@ export const GOOGLE_PLAY_OPERATION_ACTIONS: Record<string, ConnectorAction> = {
   },
   api_plan: {
     effect: "read", requires: ["oauthToken"], parse: parse(["digest"]),
-    async execute({ credentials }, input) {
-      const planned = await plan(credentials, input);
+    async execute(context, input) {
+      const planned = await plan(context, input);
       return { summary: `No write performed. ${planned.target.operation.method} ${planned.target.path}\ndigest ${planned.digest}\n` +
         `Send the same request with this digest to api_write. ${planned.snapshot ? `The digest also binds the current ${planned.snapshot.id} state.` : "There is no resource to snapshot; a repeated create may duplicate it."}\n` +
-        playOutput({ request: { operation: planned.target.id, query: planned.target.query, body: planned.target.body }, current: planned.before }) };
+        playOutput({ request: { operation: planned.target.id, query: planned.target.query,
+          body: planned.attached ? { file: planned.attached.file.name, bytes: planned.attached.file.size, sha256: planned.attached.file.hash } : planned.target.body },
+          current: planned.before }) };
     },
   },
   api_write: {
     effect: "write", requires: ["oauthToken"], parse: parse(["digest"]), prepare,
     async execute(context, input) {
-      const planned = await plan(context.credentials, input);
+      const planned = await plan(context, input);
       if (text(planned.target.fields.digest) !== planned.digest) reject("The request or resource changed; run api_plan again and use its current digest");
       await context.authorizeWrite?.();
       // Exactly one provider mutation; a timeout is uncertain and is never retried here.
