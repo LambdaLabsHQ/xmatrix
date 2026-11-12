@@ -780,21 +780,23 @@ jobs:
             if [ "$attempt" -eq 3 ]; then exit "$status"; fi
             sleep $((attempt * 20))
           done
+          # The secret list can lag the deploy that just wrote the secret
+          # (4.1.0 read no GITHUB_TOKEN seconds after deploying it), so a
+          # missing name is read again before it fails the release.
           secret_names_file="$RUNNER_TEMP/production-web-secret-names.json"
-          for attempt in 1 2 3; do
-            if pnpm exec wrangler secret list --config "$XMATRIX_WEB_CONFIG" --format json > "$secret_names_file"; then
+          for attempt in 1 2 3 4 5; do
+            if pnpm exec wrangler secret list --config "$XMATRIX_WEB_CONFIG" --format json > "$secret_names_file" &&
+              test -s "$secret_names_file" &&
+              node ../../scripts/wrangler-secret-policy.mjs "$secret_names_file" --policy=web; then
               break
             fi
             rm -f "$secret_names_file"
-            if [ "$attempt" -eq 3 ]; then
-              echo "Timed out reading deployed production Web secret names after ${attempt} attempts" >&2
+            if [ "$attempt" -eq 5 ]; then
+              echo "Deployed production Web secret names did not satisfy the web policy after ${attempt} reads" >&2
               exit 1
             fi
-            sleep "$((attempt * 2))"
+            sleep "$((attempt * 5))"
           done
-          test -s "$secret_names_file"
-          node ../../scripts/wrangler-secret-policy.mjs \
-            "$secret_names_file" --policy=web
 
       - name: Verify live production Web build identity
         run: |
