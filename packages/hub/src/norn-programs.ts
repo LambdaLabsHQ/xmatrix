@@ -89,14 +89,14 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
-  // A Run started for a request has nothing left to do in the conversation once the request has ended.
+  // An Instance started for a request has nothing left to do in the conversation once the request has ended.
   for (const release of work.releases) {
-    if (release.runId) {
-      const port = createProductAgentInterventionAuthorityPort({ env, actorUserId: release.authorityUserId,
-        sourceMessageId: `norn-release:${release.programId}` });
-      const target = (await port.listKillTargets(channelId)).find(candidate => candidate.runId === release.runId);
-      if (target) await port.issueStop(target, `norn-release:${release.runId}`.slice(0, 200), "Its request has ended", channelId);
-    }
+    const port = createProductAgentInterventionAuthorityPort({ env, actorUserId: release.authorityUserId,
+      sourceMessageId: `norn-release:${release.programId}:${release.requestId}`.slice(0, 200) });
+    const target = release.runId ? (await port.listKillTargets(channelId)).find(candidate => candidate.runId === release.runId) : undefined;
+    if (target) await port.issueStop(target, `norn-release:${release.runId}`.slice(0, 200), "Its request has ended", channelId);
+    // At rest it has no Run to stop, and the next message in the conversation would wake it.
+    else if (release.mention) await port.stopResting?.(channelId, { mention: release.mention, exclude: [] });
     await programs.released({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
 }

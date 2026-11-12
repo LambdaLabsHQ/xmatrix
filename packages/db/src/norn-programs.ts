@@ -182,16 +182,25 @@ export class PostgresNornProgramRepository {
             WHERE p.author_kind='agent' AND instance.instance_id=p.author_id LIMIT 1) AS author_mention
         FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
-      // The Run a request started exists for that request alone: once the request has ended, a Run still live is stopped.
-      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v1", text: `SELECT r.program_id,r.request_id,
-          p.authority_user_id,(SELECT launch.run_id FROM data.agent_launches launch JOIN data.runs run ON run.run_id=launch.run_id
-            WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id
-              AND run.status IN ('starting','running') LIMIT 1) AS run_id
+      // The Instance a request started exists for that request alone. Once the request has ended, its Run is
+      // stopped if still live, and the Instance is retired if it rests: an Instance at rest outlives its Run.
+      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v2", text: `SELECT r.program_id,r.request_id,
+          p.authority_user_id,started.run_id,started.mention
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          LEFT JOIN LATERAL (SELECT CASE WHEN run.status IN ('starting','running') THEN run.run_id END AS run_id,
+              lower(registration.display_name||':'||instance.channel_instance_id::text) AS mention
+            FROM data.agent_launches launch JOIN data.instances instance ON instance.instance_id=launch.instance_id
+              JOIN data.runs run ON run.run_id=instance.run_id
+              JOIN data.run_agent_registrations binding ON binding.run_id=launch.run_id
+              JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+                AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
+                AND registration.harness=binding.harness
+            WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id LIMIT 1) started ON TRUE
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       return {
         releases: releases.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
-          authorityUserId: String(row.authority_user_id), runId: typeof row.run_id === "string" ? row.run_id : null })),
+          authorityUserId: String(row.authority_user_id), runId: typeof row.run_id === "string" ? row.run_id : null,
+          mention: typeof row.mention === "string" ? row.mention : null })),
         passes: passes.map(row => String(row.program_id)),
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
@@ -212,7 +221,7 @@ export class PostgresNornProgramRepository {
       maxRows: 0 }));
   }
 
-  /** The Run this ended request started was stopped, or had already gone. */
+  /** The Instance this ended request started was stopped or retired, or had already gone. */
   async released(input: Scope & { ledgerRequestId: string }): Promise<void> {
     await this.transaction(input.requestId, "released", tx => tx.query({ name: "norn_request_released_v1", text: `UPDATE
       data.norn_requests SET released_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3

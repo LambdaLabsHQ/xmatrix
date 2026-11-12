@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: an Instance at rest that a Norn request started is retired too
+
+Stopping the Run a Norn request started left the Instance when that Run had
+already exited: an Instance at rest has no live Run, stays listed, and wakes
+with the conversation's next message. The release step now retires such an
+Instance as a stop of that exact address does, and stops the Instance's
+current Run when it is live. Hub only, no schema change. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: a Run started for a Norn request ends with the request
 
 Every request of a Norn program starts a new Run, and those Runs stayed in the
