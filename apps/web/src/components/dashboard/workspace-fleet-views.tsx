@@ -1373,8 +1373,10 @@ export function AppsView({
         payload.connection!,
       ]);
       setSelectedConnectorId(connector.id);
-      if (payload.connection.status === "error") {
-        setConnectionsError(payload.connection.error || payload.message || "App connection check failed");
+      // A failed check's reason is the connection's own error, shown once where the fix is; only a
+      // failure that left none is reported here.
+      if (payload.connection.status === "error" && !payload.connection.error) {
+        setConnectionsError(payload.message || "App connection check failed");
       }
     } catch (error) {
       setConnectionsError(userErrorMessage(error, "Couldn't check the app", `Couldn't check ${connector.name}`));
