@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a Google Play Console connector
+
+Apps gains Google Play Console (`googleplay`), so Agents release Android apps
+without the Play Console website. It pins the official androidpublisher v3
+discovery document and offers every operation through `api_operations`,
+`api_schema`, `api_read`, a digest-bound `api_plan`/`api_write`, and
+`api_upload`, which opens a resumable upload the machine with the app bundle
+sends its bytes to. `tracks` and `release` read tracks and roll version codes
+out to a track and commit. It signs in with the company Google client and keeps
+its own grant for exactly the androidpublisher scope; Check reads the saved
+app's production track. Hub, protocol and web copy only; no schema change.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the Android app sells Pro through Google Play
 
 The Android app's Billing settings buy Pro through Google Play Billing instead
