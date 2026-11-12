@@ -45,7 +45,8 @@ the block and linked to the Page. Every run opens with xMatrix's message
 carrying the program's text, and its requests and result follow in that
 conversation. `GET /api/spaces/:space/pages/:page/programs` answers, for
 whoever can read the Page, how each block stands: its state, why it does not
-run as written, and each request with its holder and reply.
+run as written, and each request with its holder and reply. The Page draws
+that under the block (`page-program-chips.ts`).
 
 ## State
 
@@ -168,6 +169,6 @@ addresses that Instance, so it wakes to read the result.
 - Requests to people, and to an existing Instance.
 - Facts from outside (a merged pull request, a release) and the standard
   library: programs are checked against the built-ins alone.
-- The Page drawing its programs' status, and a preview of what an edit would change before it is saved.
+- A preview of what an edit to a Page's program would change before it is saved.
 - Moving `--wait`, cards, Automations and pull request subscriptions onto
   the ledger.

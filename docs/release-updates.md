@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a page says how its Norn programs stand
+
+Under each `norn run` code block a page now says how that block's program
+stands: whom it waits on, how it finished or why it stopped, or why the block
+does not run as written. Pressing the line opens the conversation the program
+works in. The page asks the Hub only while its text holds such a block, and
+again when the page changes. Web only, reading the Hub route that shipped
+with page programs. Recovery is a CI-validated beta Web reverting this
+change.
+
 ## Unreleased: a Norn program lives on a Page
 
 A `norn run` block in a Page is now a program: saving the Page starts it, as

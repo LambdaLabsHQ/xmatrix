@@ -4,6 +4,7 @@ import {
   type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
+  type PageProgramStatus,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
@@ -152,6 +153,10 @@ export const pageApi = {
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
       webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
+  // How each `norn run` block of a page stands.
+  programs: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ programs: PageProgramStatus[] }>({ hubPath: hubPage(spaceId, pageId, "programs"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/programs`, token, signal }),
   changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
     action: "pause" | "resume" | "run" | "delete") =>
     xmatrixApiRequest<{ automation?: SerializedAutomation }>({
