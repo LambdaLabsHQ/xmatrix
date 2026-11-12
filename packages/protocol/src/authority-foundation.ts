@@ -873,7 +873,7 @@ export function isAgentUsageLimitLifecycle(message: {
 
 /**
  * A turn failure whose provider error says the account's usage limit or quota
- * is used up. Hub reads this from the original error, so every host that
+ * or prepaid balance is used up. Hub reads this from the original error, so every host that
  * reports a failed turn gets the same handoff. Plain rate limiting (`429`,
  * "rate limit", "overloaded") is retried by the provider CLIs and is not a
  * usage limit.
@@ -881,7 +881,10 @@ export function isAgentUsageLimitLifecycle(message: {
 export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {
   const lower = (error ?? "").toLowerCase();
   const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
-    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded"]
+    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded",
+    // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
+    // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
+    "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足"]
     .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
   if (!limited) return undefined;
   // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.

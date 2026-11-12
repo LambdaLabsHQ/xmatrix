@@ -76,8 +76,8 @@ const en = {
   turn: {
     usage_limited: {
       title: (agent: string) => `${agent}'s provider quota is used up`,
-      explanation: "Its provider account has no usage left, so this turn could not finish.",
-      steps: ["Wait for the provider quota to reset before asking this agent to continue.",
+      explanation: "Its provider account has no usage or balance left, so this turn could not finish.",
+      steps: ["Wait for the provider quota to reset, or top up a prepaid account, before asking this agent to continue.",
         "To continue sooner, hand the work to another agent with available quota."],
     },
     rate_limited: {
@@ -180,8 +180,8 @@ const zh: ProblemCopy = {
   turn: {
     usage_limited: {
       title: (agent) => `${agent} 的服务商额度已用尽`,
-      explanation: "它使用的服务商账号没有剩余额度，这一轮无法继续。",
-      steps: ["等服务商额度重置后，再让这个 Agent 继续。", "需要尽快继续的话，交给还有额度的其他 Agent 接手。"],
+      explanation: "它使用的服务商账号没有剩余额度或余额，这一轮无法继续。",
+      steps: ["等服务商额度重置后（预付费账号要先充值），再让这个 Agent 继续。", "需要尽快继续的话，交给还有额度的其他 Agent 接手。"],
     },
     rate_limited: {
       title: (agent) => `${agent} 被服务商限流了`,

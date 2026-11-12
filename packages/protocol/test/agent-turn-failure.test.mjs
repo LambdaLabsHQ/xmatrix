@@ -125,6 +125,10 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     "429 insufficient_quota: You exceeded your current quota",
     "Quota exceeded for quota metric 'Generate Content API requests'",
     `${"context ".repeat(200)}You've hit your weekly limit`,
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: Insufficient Balance (request_id: 92cd1934)",
+    "402 Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+    "Your credit balance is too low to access the Anthropic API.",
+    "账户余额不足，请充值后重试",
   ]) assert.ok(agentUsageLimitFromError(error), error);
   for (const error of [
     "Claude API error 429 (rate_limit_error); retry 3/10 in 8s",
