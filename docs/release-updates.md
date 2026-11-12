@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a command checks a failed app connection again by itself
+
+A connection whose last check failed blocked every command until a Space admin
+pressed Check again in Apps, even after the cause was gone. A command by a
+Space admin, or by an Agent acting for one, now asks the provider again first,
+records the answer as Check again does, and runs when it passes; when it still
+fails the receipt carries the fresh reason. Others keep the pointer to Apps.
+Hub only; no schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a failed app check states its reason once
 
 After Check again failed, an app's page showed the same reason twice: as a red

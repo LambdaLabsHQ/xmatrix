@@ -41,8 +41,10 @@ async function channelSpace(manifest: AppConnectorProviderManifest, env: Connect
 }
 
 /** The Channel's Space and configured connection, or why the command is blocked. */
-export async function commandScope(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput):
-  Promise<CommandScope | string> {
+export async function commandScope(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
+  /** Asks the provider again and records the answer, as Check again in Apps does; refused unless the actor is a Space admin. */
+  checkAppConnection?: (env: ConnectorCommandInput["env"], check: { spaceId: string; providerId: string; userId: string; commandId: string }) =>
+    Promise<Record<string, unknown>>): Promise<CommandScope | string> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const spaceId = await channelSpace(manifest, input.env, input.channelId, principal);
   const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
@@ -50,7 +52,15 @@ export async function commandScope(manifest: AppConnectorProviderManifest, input
   const connection = listed.map(record).find((candidate) => candidate.providerId === manifest.id);
   if (!connection || connection.status !== "configured" || typeof connection.id !== "string") {
     if (connection?.status === "disconnected") return `${manifest.name} is disconnected in this Space; reconnect it in Apps → ${manifest.name}`;
-    if (connection?.status === "error") return `${manifest.name} needs attention in this Space; check it in Apps → ${manifest.name}`;
+    if (connection?.status === "error" && typeof connection.id === "string") {
+      // The recorded failure may be over (an API enabled, a key restored). The command is the moment to find
+      // out: a Space admin's command checks again, as Check again in Apps does, and goes on when it passes.
+      const checked = await checkAppConnection?.(input.env, { spaceId, providerId: manifest.id, userId: input.actorUserId,
+        commandId: `connector-command-check:${crypto.randomUUID()}` }).catch(() => undefined);
+      if (checked?.ok === true) return { principal, spaceId, connectionId: connection.id };
+      const reason = checked && typeof checked.message === "string" ? `: ${checked.message}` : "";
+      return `${manifest.name} needs attention in this Space${reason}; check it in Apps → ${manifest.name}`;
+    }
     return `connect ${manifest.name} to this Space first`;
   }
   return { principal, spaceId, connectionId: connection.id };
