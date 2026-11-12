@@ -4,6 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import Link from "next/link";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { AppleSpaceBillingSection } from "./settings-apple-billing";
+import { GooglePlaySpaceBillingSection } from "./settings-google-play-billing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, Loader2, RefreshCw } from "lucide-react";
@@ -159,14 +160,15 @@ function StripeSpaceBillingSection({ userId, space }: {
             <p className="text-sm text-muted-foreground">Only the Space owner can change its plan.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
+              {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a>
+                : subscription?.billingProvider === "google" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://play.google.com/store/account/subscriptions">Manage in Google Play</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
                 {busy === "portal" ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                 Manage subscription
               </button>}
-              <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
+              {subscription?.billingProvider !== "google" && <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
                 <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy === "reconcile" && "animate-spin")} />
                 Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
-              </button>
+              </button>}
               {billing.credits && <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
                 disabled={busy !== null || subscription?.access === "read_only"} onClick={() => void run("credits/checkout")}>
                 {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
@@ -355,9 +357,17 @@ function PlanFeatures({ features }: { features: readonly string[] }) {
 }
 
 
+/**
+ * The store app a Space is bought through decides who charges: the iPhone and
+ * Android apps sell through their own store, never Stripe checkout.
+ */
 export function SpaceBillingSection(props: { userId: string; space: { id: string; name: string } | null }) {
-  const [nativeIOS, setNativeIOS] = useState<boolean | null>(null);
-  useEffect(() => { setNativeIOS(getDesktopBridge()?.platform === "ios"); }, []);
-  if (nativeIOS === null) return <p>Loading plan…</p>;
-  return nativeIOS ? <AppleSpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
+  const [store, setStore] = useState<"apple" | "google" | "web" | null>(null);
+  useEffect(() => {
+    const platform = getDesktopBridge()?.platform;
+    setStore(platform === "ios" ? "apple" : platform === "android" ? "google" : "web");
+  }, []);
+  if (store === null) return <p>Loading plan…</p>;
+  return store === "apple" ? <AppleSpaceBillingSection {...props} />
+    : store === "google" ? <GooglePlaySpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
 }

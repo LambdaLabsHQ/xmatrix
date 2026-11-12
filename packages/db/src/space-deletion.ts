@@ -341,6 +341,7 @@ export const SPACE_PURGE_EXCLUDED_TABLES: Readonly<Record<string, string>> = Obj
   "data.channel_deletions": "minimal Channel retirement records prevent identity reuse",
   "control.apple_account_tokens": "immutable purchase ownership must prevent rebinding after Space deletion",
   "control.apple_seat_groups": "immutable organization purchase ownership must prevent rebinding",
+  "control.google_play_account_tokens": "immutable purchase ownership must prevent rebinding after Space deletion",
   "data.secret_grant_audit": "content-free credential-access audit survives Space deletion",
   "data.app_slack_workspace_claims": "the workspace's bot stays in its channels until Slack uninstalls it",
 });

@@ -19,6 +19,7 @@ export {
   PostgresBillingRepository,
   type StripeSubscriptionFact,
   type BillingSubscriptionFact,
+  type BillingProvider,
 } from "./billing-control.js";
 export {
   ContentControlError,
@@ -319,6 +320,7 @@ export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
 
 export { PostgresAppleBillingRepository, type AppleAccountBinding, type AppleAssignedSeat, type AppleSeatGroupState } from "./apple-billing-control.js";
+export { PostgresGooglePlayBillingRepository, type GooglePlayAccountBinding, type GooglePlayEnvironment } from "./google-play-billing-control.js";
 export { PostgresCreditPackRepository, type CreditPackPayment } from "./credit-pack-control.js";
 export { PostgresPaidCallRepository, type PaidCallReceipt } from "./paid-call-control.js";
 export {

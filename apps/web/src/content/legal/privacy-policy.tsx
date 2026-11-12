@@ -70,7 +70,9 @@ export function PrivacyPolicyContent() {
             Customer and transaction identifiers, subscription status, invoices, tax information,
             payment status, and limited payment-method details Stripe makes available to a merchant.
             Full card numbers and card security codes are entered into Stripe&apos;s hosted flow and are
-            not received by xMatrix.
+            not received by xMatrix. Purchases in the iPhone and Android apps are processed by Apple or
+            Google Play; xMatrix receives the purchase and subscription identifiers, product, status, and
+            renewal dates they report, not your payment method.
           </li>
           <li>
             <strong className="text-foreground">Service and diagnostic information:</strong> IP
@@ -465,7 +467,7 @@ export function PrivacyPolicyContent() {
           <Link href="/account/delete">account deletion page</Link>. A recent sign-in, your account
           email, and explicit confirmation are required. Close owned Spaces, leave other Spaces,
           and stop active agent work before proceeding. You can delete your account before a subscription expires; cancel provider renewal separately to stop future charges. Account deletion does
-          not cancel Apple or Stripe subscriptions or move them to another Space.
+          not cancel Apple, Google Play, or Stripe subscriptions or move them to another Space.
         </p>
         <p>
           Once committed, deletion revokes sign-in access and removes your profile, login credentials,

@@ -53,6 +53,14 @@ export type DesktopRuntimeCheckResult = {
   error?: string;
 };
 
+/** A Google Play subscription purchase the app holds; the Hub verifies it with Google. */
+export type GooglePlayPurchase = {
+  purchaseToken: string;
+  productIds: string[];
+  state: "purchased" | "pending";
+  accountToken: string;
+};
+
 export type ApplePurchaseTransaction = {
   transactionId: string;
   originalTransactionId: string;
@@ -61,6 +69,12 @@ export type ApplePurchaseTransaction = {
 };
 
 export type DesktopBridge = {
+  googlePlayProducts?: (input: { subscriptionId: string }) => Promise<{ basePlanId: string; displayPrice: string }[]>;
+  googlePlayPurchase?: (input: { subscriptionId: string; basePlanId: string; accountToken: string }) => Promise<{
+    status: "purchased" | "pending" | "cancelled"; purchase?: GooglePlayPurchase;
+  }>;
+  googlePlayPurchases?: (input: { subscriptionId: string }) => Promise<GooglePlayPurchase[]>;
+  googlePlayManage?: (input: { subscriptionId: string }) => Promise<void>;
   appleProducts?: (productIds: string[]) => Promise<{ id: string; displayName: string; displayPrice: string }[]>;
   applePurchase?: (input: { productId: string; appAccountToken: string; productIds: string[] }) => Promise<{
     status: "purchased" | "pending" | "cancelled"; transaction?: ApplePurchaseTransaction;

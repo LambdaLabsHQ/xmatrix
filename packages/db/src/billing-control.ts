@@ -21,9 +21,14 @@ const PAST_DUE_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
 const STRIPE_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due", "incomplete", "incomplete_expired",
   "unpaid", "canceled", "paused"] as const;
 
+/** Who charges for a Space: Stripe on the web, or the app store a native app bought through. */
+export type BillingProvider = "stripe" | "apple" | "google";
+/** Store-managed providers bound their entitlement by the store's period end. */
+const STORE_PROVIDERS: readonly string[] = ["apple", "google"];
+
 /** A verified provider snapshot, keyed to the Space it bills. */
 export interface BillingSubscriptionFact {
-  billingProvider?: "stripe" | "apple";
+  billingProvider?: BillingProvider;
   id: string;
   customerId: string;
   priceId: string;
@@ -103,7 +108,7 @@ async function requireOwner(tx: DatabaseTransaction, spaceId: string, userId: st
 }
 
 function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boolean {
-  if (row?.billing_provider === "apple" && (!row.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
+  if (STORE_PROVIDERS.includes(String(row?.billing_provider)) && (!row?.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
   return row?.status === "active" || row?.status === "trialing" ||
     (row?.status === "past_due" && row.grace_until &&
       new Date(row.grace_until as Date | string).getTime() > now);
@@ -258,6 +263,8 @@ export class PostgresBillingRepository {
       );
       if (rows[0].billing_provider === "apple") throw new BillingControlError(
         "apple_managed_subscription", 409, "Manage this subscription in the App Store");
+      if (rows[0].billing_provider === "google") throw new BillingControlError(
+        "google_play_managed_subscription", 409, "Manage this subscription in Google Play");
       return { customerId: rows[0].provider_customer_id,
         subscriptionId: rows[0].provider_subscription_id };
     });
@@ -300,13 +307,13 @@ export class PostgresBillingRepository {
 
   async createCheckoutIntent(input: {
     requestId: string; commandId: string; spaceId: string; actorUserId: string;
-    interval: "month" | "year"; priceId: string; seatQuantity: number; billingProvider?: "stripe" | "apple";
+    interval: "month" | "year"; priceId: string; seatQuantity: number; billingProvider?: BillingProvider;
   }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
     const commandId = text(input.commandId, "commandId");
     const priceId = text(input.priceId, "priceId");
     const provider = input.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && input.seatQuantity !== 1)) throw new BillingControlError("invalid_billing_checkout", 400, "Billing provider or seat quantity is invalid");
+    if (!["stripe", "apple", "google"].includes(provider) || (STORE_PROVIDERS.includes(provider) && input.seatQuantity !== 1)) throw new BillingControlError("invalid_billing_checkout", 400, "Billing provider or seat quantity is invalid");
     if (!Number.isSafeInteger(input.seatQuantity) || input.seatQuantity < 1 ||
         input.seatQuantity > 99 || (input.interval !== "month" && input.interval !== "year")) {
       throw new BillingControlError("invalid_billing_checkout", 400, "Billing checkout inputs are invalid");
@@ -334,7 +341,7 @@ export class PostgresBillingRepository {
         values: [spaceId], maxRows: 1,
       });
       const used = Number(seats[0]?.count ?? 0);
-      if (input.seatQuantity < used || (provider === "apple" && used !== 1)) throw new BillingControlError(
+      if (input.seatQuantity < used || (STORE_PROVIDERS.includes(provider) && used !== 1)) throw new BillingControlError(
         "billing_seat_quantity_too_low", 409,
         "Choose at least as many seats as current billable members", false, { usedSeats: used },
       );
@@ -508,7 +515,7 @@ export class PostgresBillingRepository {
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
     const provider = subscription.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
+    if (!["stripe", "apple", "google"].includes(provider) || (STORE_PROVIDERS.includes(provider) && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");

@@ -156,6 +156,7 @@ export const HUB_ENVIRONMENT = {
 
   // Optional integrations.
   APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
+  GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private Google Play service account key, subscription and base plan ids, Pub/Sub push identity and test-purchase Space allowlist. Unset disables Google Play subscription purchases." },
   PUSH_CONFIG: { kind: "secret", scope: "feature", summary: "JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open." },
   STRIPE_SECRET_KEY: { kind: "secret", scope: "feature", summary: "Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503." },
   STRIPE_WEBHOOK_SECRET: { kind: "secret", scope: "feature", summary: "Stripe webhook signing secret." },

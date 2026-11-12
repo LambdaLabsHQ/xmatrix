@@ -44,6 +44,10 @@ final class BridgeScript {
     "    notify: (payload) => invoke('notify', payload),\n" +
     "    openExternal: (url) => invoke('openExternal', { url }),\n" +
     "    authorizeInBrowser: (request) => invoke('authorizeInBrowser', request),\n" +
+    "    googlePlayProducts: (input) => invoke('googlePlayProducts', input),\n" +
+    "    googlePlayPurchase: (input) => invoke('googlePlayPurchase', input),\n" +
+    "    googlePlayPurchases: (input) => invoke('googlePlayPurchases', input),\n" +
+    "    googlePlayManage: (input) => invoke('googlePlayManage', input),\n" +
     "    getClipboardImages: () => Promise.resolve([]),\n" +
     "    checkCliInstalled: () => Promise.resolve({ installed: false }),\n" +
     "    openCliInstall: () => invoke('openExternal', { url: '" + AppConfiguration.CLI_INSTALL_URL + "' }),\n" +
