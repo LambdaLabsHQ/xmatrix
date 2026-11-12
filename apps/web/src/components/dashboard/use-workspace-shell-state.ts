@@ -1548,7 +1548,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setHistoryError(null);
     replaceBrowserPath(list);
     setBrowserPath(list);
-  }, [invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
+  }, [historyTailBaseGenerationRef, invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
 
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
