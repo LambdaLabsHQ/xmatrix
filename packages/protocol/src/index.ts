@@ -531,7 +531,7 @@ export type { AppSelectionView } from "./app-view-address.js";
 export { externalAppSource, messageExternalAppSource } from "./external-app-source.js";
 export type { ExternalAppSource } from "./external-app-source.js";
 export type {
-  PageAuthor, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation, PageProgramStatus, PageScheduleProblem,
+  PageAuthor, PageAwareness, PageBlame, PageBlockAwareness, PageChanges, PageEditResult, PageConversation, PageProgramRequest, PageProgramStatus, PageScheduleProblem,
   PageDocument, PageGitHubFile, PageLink, PageMessageEdit, PageLinkAnchor, PageMigration, PageMigrationApplied, PageMigrationDraft,
   PageMigrationDraftPage, PageMigrationReport, PageMigrationSource, PagePresent,
   PageRecentChange, PageRevision, PageRevisionMoment, PageSearchHit, PageSummary, PageTreeActivity, PageTreeAgent, PageWorkingAgent, PublicPage,

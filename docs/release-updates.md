@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a page's program shows its steps
+
+The one grey line under a `norn run` block is now the program's steps, joined
+to the code as one surface: a row per request with the Agent's face and name,
+what was asked, and the answer, how it failed, or how long it has left; then
+how the program ended. A block that does not run as written says why there,
+and the code is underlined where. Pressing the steps opens the program's
+conversation. The Hub's program status gains each request's outcome and
+times, and a report reads as its text. Hub and Web; an older Web against the
+new Hub keeps its one line. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: ⌘F on a page finds in that page
 
 On an open page, Ctrl/⌘+F opened the Space's search. It now finds in the

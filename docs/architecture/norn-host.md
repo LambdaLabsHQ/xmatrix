@@ -45,8 +45,9 @@ the block and linked to the Page. Every run opens with xMatrix's message
 carrying the program's text, and its requests and result follow in that
 conversation. `GET /api/spaces/:space/pages/:page/programs` answers, for
 whoever can read the Page, how each block stands: its state, why it does not
-run as written, and each request with its holder and reply. The Page draws
-that under the block (`page-program-chips.ts`).
+run as written, and each request with its holder, outcome, reply and times.
+The Page draws that as the program's steps, joined under the block
+(`page-program-chips.ts`).
 
 ## State
 
