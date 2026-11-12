@@ -109,6 +109,15 @@ The daemon's execution report tells the Hub when a finished turn left a
 request open, and the Hub wakes the Channel's coordinator. A Run that ends
 wakes it already.
 
+## Letting the Run go
+
+A Run that a delivery started exists for that one request. Once the request
+has ended, however it ended, the coordinator stops that Run if it is still
+live and records the release on the request's index row, so each is stopped
+once. An Agent that has answered therefore does not stay in the conversation
+to be woken by every later message. The delivery message tells the holder
+that its answer ends its Run.
+
 ## Deadlines and stop
 
 A request's `~by` and a timer are the ledger's: a pass records the earliest

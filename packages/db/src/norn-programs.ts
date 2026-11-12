@@ -50,6 +50,8 @@ const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_execu
         AND (launch.state IN ('prepared','queued','admitted','spawned') OR (run.status IN ('starting','running')
           AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
             WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id)))))`;
+/** A delivered request `r` that has ended, whose Run has not been let go yet. */
+const NORN_REQUEST_UNRELEASED_SQL = "(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
 
 /**
@@ -64,7 +66,8 @@ export const NORN_CHANNEL_DUE_SQL = `LEAST(
       WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL),
     (SELECT MIN(r.created_at) FROM data.norn_requests r
       WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL),
-    (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}))`;
+    (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}),
+    (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}))`;
 /** The Channels with any program still running or unreported: `p` is the program. */
 export const NORN_PROGRAM_OPEN_SQL = "(p.state='running' OR p.reported_at IS NULL)";
 
@@ -179,7 +182,16 @@ export class PostgresNornProgramRepository {
             WHERE p.author_kind='agent' AND instance.instance_id=p.author_id LIMIT 1) AS author_mention
         FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
+      // The Run a request started exists for that request alone: once the request has ended, a Run still live is stopped.
+      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v1", text: `SELECT r.program_id,r.request_id,
+          p.authority_user_id,(SELECT launch.run_id FROM data.agent_launches launch JOIN data.runs run ON run.run_id=launch.run_id
+            WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id
+              AND run.status IN ('starting','running') LIMIT 1) AS run_id
+        FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+        WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       return {
+        releases: releases.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
+          authorityUserId: String(row.authority_user_id), runId: typeof row.run_id === "string" ? row.run_id : null })),
         passes: passes.map(row => String(row.program_id)),
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
@@ -197,6 +209,14 @@ export class PostgresNornProgramRepository {
     await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v1", text: `UPDATE
       data.norn_requests SET delivered_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
         AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.epoch],
+      maxRows: 0 }));
+  }
+
+  /** The Run this ended request started was stopped, or had already gone. */
+  async released(input: Scope & { ledgerRequestId: string }): Promise<void> {
+    await this.transaction(input.requestId, "released", tx => tx.query({ name: "norn_request_released_v1", text: `UPDATE
+      data.norn_requests SET released_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
+        AND settled_at IS NOT NULL AND released_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId],
       maxRows: 0 }));
   }
 

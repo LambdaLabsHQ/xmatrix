@@ -56,7 +56,9 @@ switch run(@codex, "Review the design")->wait {
     const ended = await until(async () => (await messages()).find(message =>
       message.replyToMessageId === sent.messageId && message.body.startsWith("The program finished")), "the program's end");
     assert.equal(ended.body, "The program finished: no owner on failure");
-    assert.equal((await run(worker, runToken, ["requests"])).stdout, "No open requests.\n");
+    // The Run was started for that one request: once it has ended, its Machine is told to stop it.
+    const stop = await daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId, "the holder's stop");
+    assert.equal(stop.runId, spawn.runId);
   } finally {
     daemon?.ws.close();
     await worker.stop();

@@ -102,7 +102,7 @@ export function nornDeliveryBody(request: LedgerRequest, requestRef: string): st
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", "End this turn with exactly one of:", "",
+    "", "End this turn with exactly one of these. It ends your Run, so say nothing in the conversation and do it last:", "",
     `- \`xmatrix reply ${requestRef} '<answer>'\` when it is done. The answer must be ${answer}`,
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),
     `- \`xmatrix refuse ${requestRef} '<why>'\` when you will not do it.`,
