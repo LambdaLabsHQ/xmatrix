@@ -8,6 +8,7 @@ regional prices, and it can be activated in the same step. The catalog write
 could not do this, because the converted prices of every region do not fit a
 bounded receipt. Hub and protocol; no schema change. Recovery is a
 CI-validated beta reverting this change.
+
 ## Unreleased: a command checks a failed app connection again by itself
 
 A connection whose last check failed blocked every command until a Space admin
