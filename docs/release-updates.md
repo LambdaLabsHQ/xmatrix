@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Norn code is highlighted
+
+A fenced block tagged `norn` or `norn run`, in a message or on a page, was
+drawn as plain ink. It now takes the code inks: who is asked (`@codex`) reads
+like a name, what is asked of them (`run`, `ask`, `wait`) like a built-in, the
+outcomes (`Answered`, `Broke`) like types, with `~labels`, durations, strings
+and comments in their own inks. Web only; the grammar loads with the other
+grammars, after the first code block appears. Recovery is a CI-validated beta
+Web reverting this change.
+
 ## Unreleased: an approved write or a finished upload no longer refuses the sender's next message
 
 Approving a connector write, or finishing an X video upload, still refused the

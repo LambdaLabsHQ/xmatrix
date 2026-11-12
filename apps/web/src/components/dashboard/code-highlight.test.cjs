@@ -24,3 +24,19 @@ test("a fence without a language is coloured only when a grammar clearly claims 
 test("a language no grammar knows stays plain ink", () => {
   assert.equal(highlightCode(hljs, "anything", "not-a-language"), null);
 });
+
+test("a Norn program shows who is asked, what is asked and the outcomes it handles", () => {
+  hljs.registerLanguage("norn", require("./norn-grammar.ts").default);
+  const html = highlightCode(hljs, `// review
+type verdict = Sound | Flawed(string)
+switch run(@codex, "Find what does not hold", ~about=draft, ~by=30m)->wait {
+| Answered(Sound) => true
+| other => fail(other)
+}`, "norn");
+  for (const ink of ['<span class="hljs-comment">// review</span>', '<span class="hljs-keyword">switch</span>',
+    '<span class="hljs-built_in">run</span>', '<span class="hljs-title">@codex</span>', '<span class="hljs-attr">~about</span>',
+    '<span class="hljs-number">30m</span>', '<span class="hljs-built_in">wait</span>', '<span class="hljs-type">Answered</span>',
+    '<span class="hljs-literal">true</span>', '<span class="hljs-string">&quot;Find what does not hold&quot;</span>']) {
+    assert.ok(html.includes(ink), `${ink} in ${html}`);
+  }
+});
