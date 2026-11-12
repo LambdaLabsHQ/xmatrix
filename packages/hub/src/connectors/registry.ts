@@ -3,9 +3,13 @@ import { getAppConnectorProvider } from "../app-connectors";
 import type { ConnectorProvider } from "./provider";
 import { PLATFORM_CONNECTOR_PROVIDERS } from "./platform-providers";
 import { githubConnectorProvider } from "./github";
+import { checkAppConnection } from "../app-connection-check";
+import { installAppConnectionCheck } from "./connector-commands";
 
 /** Every provider the Hub runs; each id must have a shared manifest. */
 const CONNECTOR_PROVIDERS: readonly ConnectorProvider[] = [githubConnectorProvider, ...PLATFORM_CONNECTOR_PROVIDERS];
+// Commands re-check a failed app connection through the registry's own providers.
+installAppConnectionCheck((env, check) => checkAppConnection(env, check));
 
 /** The catalog is a projection of installed executors, not an authorization
  * store. Policy and credentials are rechecked by the selected executor. */

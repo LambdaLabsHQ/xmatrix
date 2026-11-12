@@ -106,9 +106,19 @@ export function privateFailure(error: unknown): string {
   return error instanceof ConnectorRemedy ? error.message : PRIVATE_CONNECTOR_RESULT;
 }
 
-/* The check reaches this file again through the provider registry, so it is loaded when a command first needs it. */
-const checkAppConnection: Parameters<typeof commandScope>[2] = async (env, check) =>
-  (await import("../app-connection-check")).checkAppConnection(env, check);
+type AppConnectionCheck = NonNullable<Parameters<typeof commandScope>[2]>;
+let installedAppConnectionCheck: AppConnectionCheck | undefined;
+
+/* The check reaches this file again through the provider registry, and the Worker bundle loads
+ * internal modules statically only. So the registry, which every command runs through, installs it. */
+export function installAppConnectionCheck(check: AppConnectionCheck): void {
+  installedAppConnectionCheck = check;
+}
+
+const checkAppConnection: AppConnectionCheck = (env, check) => {
+  if (!installedAppConnectionCheck) throw new Error("connectors/registry.ts has not installed the app connection check");
+  return installedAppConnectionCheck(env, check);
+};
 
 /** A synchronous read returns the original result to its caller. Recorded
  * private calls give execution history a fixed mask rather than an excerpt. */
