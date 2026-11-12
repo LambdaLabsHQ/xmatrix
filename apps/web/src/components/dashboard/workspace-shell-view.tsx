@@ -183,6 +183,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     channelReadCountsBaselineReady,
     selectedChannelId,
     setSelectedChannelId,
+    forgetDeletedChannel,
     selectedPageId,
     toggleChannelPinned,
     markChannelResponded,
@@ -981,9 +982,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   });
   const channelDeleted = useStableCallback((id: string) => {
     setDeletingChannel(null);
-    setChannels(current => current.filter(channel => channel.id !== id));
-    if (selectedChannelId === id) setSelectedChannelId(null);
-    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", { detail: { kind: "structure" } }));
+    forgetDeletedChannel(id);
   });
   const canDeleteSelectedChannel = Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
     ["owner", "admin"].includes(transferSpaceRole(space, user?.id ?? "") ?? "")));
