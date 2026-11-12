@@ -3,6 +3,35 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
 /** Both modes record the invocation; private originals stay outside shared history. */
 export type ConnectorResultVisibility = "public" | "private";
 
+/**
+ * A receipt's id is `system:<execution id>:<app>`, at most 200 characters.
+ * An immediate run's execution id is the command message id. An approved run
+ * uses `<command message id>:approved`, and a finished X video upload uses
+ * `<command message id>:upload-result`, so those executions do not collide
+ * with the command message. A denial is named from the approval request, not
+ * the command, so it is not a suffix here and still counts as unread.
+ * The writers and the unread check share this list: a new execution suffix
+ * that is not listed still counts.
+ */
+const CONNECTOR_RECEIPT_EXECUTION_SUFFIXES = ["", ":approved", ":upload-result"] as const;
+const CONNECTOR_RECEIPT_ID_LIMIT = 200;
+
+export function connectorReceiptMessageId(executionMessageId: string, appId: string): string {
+  return `system:${executionMessageId}:${appId}`.slice(0, CONNECTOR_RECEIPT_ID_LIMIT);
+}
+
+/** Whether this receipt id answers that command for that App. */
+export function connectorReceiptAnswersCommand(receiptMessageId: string, commandMessageId: string, appId: string): boolean {
+  return CONNECTOR_RECEIPT_EXECUTION_SUFFIXES.some((suffix) =>
+    receiptMessageId === connectorReceiptMessageId(`${commandMessageId}${suffix}`, appId));
+}
+
+/** SQL boolean: `messageId` is a receipt for `commandId` authored as `appId`. */
+export function connectorReceiptAnswersCommandSql(messageId: string, commandId: string, appId: string): string {
+  return CONNECTOR_RECEIPT_EXECUTION_SUFFIXES.map((suffix) =>
+    `${messageId}=left('system:'||${commandId}||'${suffix}:'||${appId},${CONNECTOR_RECEIPT_ID_LIMIT})`).join(" OR ");
+}
+
 export const PRIVATE_CONNECTOR_RESULT = "Result: [hidden — private call]";
 
 const CONNECTOR_RECEIPT_HEADING = "App connector command status:";

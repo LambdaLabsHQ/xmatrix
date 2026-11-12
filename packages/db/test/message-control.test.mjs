@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
+import { connectorReceiptAnswersCommandSql, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 
 import {
   isBillableMessage,
@@ -1249,6 +1249,22 @@ function messageCommandFields() {
 function historyDatabase() {
   return database(query => placement(query) ?? (query.name === "message_history_page_v5" ? historyPage() : []));
 }
+
+test("unread messages leave out a receipt for the sender's own command", async () => {
+  const db = database(() => [{ unread: 0, replay: false }]);
+  const result = await new PostgresMessageRepository(db).unreadSince({
+    requestId: "unread-1", spaceId: "space-1", channelId: "channel-1",
+    principal: { kind: "agent", id: "instance-1" }, messageId: "next-1", afterSequence: 4,
+    activityMessageKind: "xmatrix.activity",
+    placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
+  });
+  assert.deepEqual(result, { unread: 0, replay: false });
+  const query = db.calls.find((call) => call.name === "message_unread_since_v3");
+  assert.equal(query.text.includes("substr("), false);
+  assert.equal(query.text.includes(connectorReceiptAnswersCommandSql(
+    "m.message_id", "command.message_id", "m.author_id")), true);
+  assert.deepEqual(query.values, ["space-1", "channel-1", "next-1", 4, "agent", "instance-1", "xmatrix.activity"]);
+});
 
 test("xMatrix's own messages never use a Space's writes", () => {
   // People, Agents and apps write; the counter and credits read this flag.

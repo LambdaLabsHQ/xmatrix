@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: an approved write or a finished upload no longer refuses the sender's next message
+
+Approving a connector write, or finishing an X video upload, still refused the
+command's sender on their next `xmatrix send` with "the Channel moved on after
+the last message you read". The Hub names a receipt
+`system:<execution id>:<app>`. An immediate run's execution id is the command
+message id, which the read-before-send check already left out. An approved
+write and a finished upload use `<command message id>:approved` and
+`<command message id>:upload-result`, so those receipts still counted. One
+suffix list now builds the receipt id and decides which receipts answer the
+sender's own command. A denial stays unread: its id is the approval request,
+not the command. Messages from other people, Agents and Apps are unchanged.
+No schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
+
 ## Unreleased: a Google Play upload URL reaches only the Agent that asked for it
 
 `@googleplay:api_upload` published its resumable upload URL in the Channel
