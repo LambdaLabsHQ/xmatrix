@@ -33,7 +33,7 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
         typeof body.text !== "string" || !body.text.trim()) {
       return c.json({ error: "Name the request and give its answer or the reason" }, 400, NO_STORE);
     }
-    return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId,
+    return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId, instanceId: run.instanceId,
       requestRef: body.requestRef, outcome, text: body.text.trim() }), 200, NO_STORE);
   }));
 }

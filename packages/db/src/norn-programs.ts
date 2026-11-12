@@ -38,6 +38,13 @@ interface Scope { requestId: string; channelId: string; programId: string }
  * quota or starting, or a Run it started that has not taken the message yet.
  * With none of these an unanswered request has been abandoned.
  */
+/** An Instance that takes a message sent to it: live with a live Run, or at rest where the message wakes it. */
+const instanceTakesMessages = (instance: string) => `((${instance}.status IN ('online','busy','idle') AND EXISTS (SELECT 1
+      FROM data.runs live WHERE live.run_id=${instance}.run_id AND live.status IN ('starting','running')))
+    OR ${instance}.rest_state IN ('sleeping','interrupted'))`;
+/** The Instance that holds request `r`: the one it was handed to, or the one its delivery started. */
+const requestInstance = (r: string) => `COALESCE(${r}.instance_id,(SELECT launch.instance_id FROM data.agent_launches launch
+    WHERE launch.channel_id=${r}.channel_id AND launch.trigger_id=${r}.delivery_message_id LIMIT 1))`;
 const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_executions execution
       WHERE execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id
         AND execution.state IN ('accepted','running'))
@@ -50,9 +57,19 @@ const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_execu
       WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id
         AND (launch.state IN ('prepared','queued','admitted','spawned') OR (run.status IN ('starting','running')
           AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
-            WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id)))))`;
-/** A delivered request `r` that has ended, whose Run has not been let go yet. */
-const NORN_REQUEST_UNRELEASED_SQL = "(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL)";
+            WHERE taken.run_id=launch.run_id AND taken.source_message_id=r.delivery_message_id))))
+    OR (r.instance_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
+        WHERE taken.instance_id=r.instance_id AND taken.source_message_id=r.delivery_message_id)
+      AND EXISTS (SELECT 1 FROM data.instances held WHERE held.instance_id=r.instance_id AND ${instanceTakesMessages("held")})))`;
+/**
+ * A delivered request `r` that has ended, whose Instance has not been let go
+ * yet. A Page's program keeps its Instances while it runs, because its next
+ * request to the same participant goes to the one already there; a program in
+ * a shared conversation lets each go at once.
+ */
+const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM data.norn_programs kept WHERE kept.space_id=r.space_id AND kept.program_id=r.program_id
+      AND kept.page_id IS NOT NULL AND kept.state='running'))`;
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
 
 /**
@@ -110,7 +127,7 @@ export class PostgresNornProgramRepository {
       WHERE space_id=$1 AND program_id=$2`, values: [...scope, JSON.stringify(write.ledger), write.state,
       write.nextDueMs === null || write.state !== "running" ? null : new Date(write.nextDueMs).toISOString()], maxRows: 0 });
     // A new holding (another epoch) is delivered again; an unchanged one keeps its delivery.
-    await tx.query({ name: "norn_request_write_v1", text: `INSERT INTO data.norn_requests
+    await tx.query({ name: "norn_request_write_v2", text: `INSERT INTO data.norn_requests
         (space_id,channel_id,program_id,request_id,request_ref,epoch,holder,delivery_message_id,settled_at)
       SELECT $1,$3,$2,entry.request_id,entry.request_ref,entry.epoch,entry.holder,entry.delivery_message_id,
         CASE WHEN entry.settled THEN clock_timestamp() END
@@ -120,6 +137,7 @@ export class PostgresNornProgramRepository {
         delivery_message_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.delivery_message_id
           ELSE 'norn:'||norn_requests.request_ref||':'||EXCLUDED.epoch END,
         delivered_at=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.delivered_at END,
+        instance_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.instance_id END,
         settled_at=COALESCE(norn_requests.settled_at,EXCLUDED.settled_at)`,
       values: [...scope, String(program.channel_id), JSON.stringify(write.requests.map(request => ({
         request_id: request.requestId, request_ref: request.requestRef, epoch: request.epoch, holder: request.holder,
@@ -192,10 +210,23 @@ export class PostgresNornProgramRepository {
           OR p.next_due_at<=clock_timestamp() OR EXISTS (SELECT 1 FROM data.norn_requests r
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });
-      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v1", text: `SELECT r.program_id,
+      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v2", text: `SELECT r.program_id,
           r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,
-          p.ledger_json->'requests'->r.request_id AS request_json
+          p.ledger_json->'requests'->r.request_id AS request_json,there.instance_id AS there_instance_id,there.mention AS there_mention
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          -- A Page's program asks the same participant again where it already is: the Instance that last
+          -- answered it for this program, if that one still takes messages.
+          LEFT JOIN LATERAL (SELECT instance.instance_id,
+              '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id AS mention
+            FROM data.norn_requests earlier JOIN data.instances instance ON instance.instance_id=${requestInstance("earlier")}
+              JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
+              LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+                AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
+                AND registration.harness=binding.harness
+            WHERE p.page_id IS NOT NULL AND earlier.space_id=r.space_id AND earlier.program_id=r.program_id
+              AND earlier.holder=r.holder AND earlier.settled_at IS NOT NULL AND instance.channel_id=r.channel_id
+              AND ${instanceTakesMessages("instance")}
+            ORDER BY earlier.settled_at DESC LIMIT 1) there ON TRUE
         WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL
         ORDER BY r.created_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v1", text: `SELECT p.program_id,p.state,
@@ -210,18 +241,17 @@ export class PostgresNornProgramRepository {
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
       // The Instance a request started exists for that request alone. Once the request has ended, its Run is
       // stopped if still live, and the Instance is retired if it rests: an Instance at rest outlives its Run.
-      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v2", text: `SELECT r.program_id,r.request_id,
+      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v3", text: `SELECT r.program_id,r.request_id,
           p.authority_user_id,started.run_id,started.mention
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
           LEFT JOIN LATERAL (SELECT CASE WHEN run.status IN ('starting','running') THEN run.run_id END AS run_id,
               lower(registration.display_name||':'||instance.channel_instance_id::text) AS mention
-            FROM data.agent_launches launch JOIN data.instances instance ON instance.instance_id=launch.instance_id
-              JOIN data.runs run ON run.run_id=instance.run_id
-              JOIN data.run_agent_registrations binding ON binding.run_id=launch.run_id
+            FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
+              JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
               JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
                 AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
                 AND registration.harness=binding.harness
-            WHERE launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id LIMIT 1) started ON TRUE
+            WHERE instance.instance_id=${requestInstance("r")} LIMIT 1) started ON TRUE
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       return {
         releases: releases.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
@@ -232,6 +262,8 @@ export class PostgresNornProgramRepository {
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
           deliveryMessageId: String(row.delivery_message_id), authorityUserId: String(row.authority_user_id),
           onPage: row.page_id !== null,
+          there: typeof row.there_instance_id === "string" && typeof row.there_mention === "string"
+            ? { instanceId: row.there_instance_id, mention: row.there_mention } : null,
           request: row.request_json as unknown })),
         reports: reports.map(row => ({ programId: String(row.program_id), state: String(row.state),
           authorMention: typeof row.author_mention === "string" ? row.author_mention : null, onPage: row.page_id !== null,
@@ -241,11 +273,13 @@ export class PostgresNornProgramRepository {
   }
 
   /** The delivery message of this holding was appended and its launch dispatched. */
-  async delivered(input: Scope & { ledgerRequestId: string; epoch: number }): Promise<void> {
-    await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v1", text: `UPDATE
-      data.norn_requests SET delivered_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
-        AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.epoch],
-      maxRows: 0 }));
+  async delivered(input: Scope & { ledgerRequestId: string; epoch: number;
+    /** The Instance the request was handed to, when it went to one already there. */
+    instanceId?: string }): Promise<void> {
+    await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v2", text: `UPDATE
+      data.norn_requests SET delivered_at=clock_timestamp(),instance_id=$5 WHERE space_id=$1 AND program_id=$2 AND request_id=$3
+        AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.epoch,
+        input.instanceId ?? null], maxRows: 0 }));
   }
 
   /** The Instance this ended request started was stopped or retired, or had already gone. */
@@ -265,17 +299,18 @@ export class PostgresNornProgramRepository {
 
   /**
    * The open request a Run answers by its reference. The Run holds it only if
-   * the request's delivery message started the Run or one of its turns.
+   * the request's delivery message started the Run or one of its turns, or the
+   * request was handed to the Run's Instance.
    */
-  async heldRequest(input: { requestId: string; channelId: string; requestRef: string; runId: string }) {
+  async heldRequest(input: { requestId: string; channelId: string; requestRef: string; runId: string; instanceId: string }) {
     return this.transaction(input.requestId, "held-request", async tx => {
-      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_held_v1", text: `SELECT r.program_id,r.request_id,r.epoch,
-          r.holder,r.settled_at,(EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=$4
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_held_v2", text: `SELECT r.program_id,r.request_id,r.epoch,
+          r.holder,r.settled_at,(r.instance_id=$5 OR EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=$4
               AND launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id)
             OR EXISTS (SELECT 1 FROM data.agent_message_executions execution WHERE execution.run_id=$4
               AND execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id)) AS held
         FROM data.norn_requests r WHERE r.space_id=$1 AND r.channel_id=$2 AND r.request_ref=$3 LIMIT 1`,
-        values: [this.placement.spaceId, input.channelId, input.requestRef, input.runId], maxRows: 1 });
+        values: [this.placement.spaceId, input.channelId, input.requestRef, input.runId, input.instanceId], maxRows: 1 });
       if (!row) throw unavailable();
       if (row.held !== true) throw new ControlError("norn_request_not_held", 403, "This request is not yours to answer");
       if (row.settled_at !== null) throw new ControlError("norn_request_ended", 409, "The request has already ended");
@@ -286,11 +321,11 @@ export class PostgresNornProgramRepository {
   /** The open requests this Run holds, and those of the programs its Instance started. */
   async openRequests(input: { requestId: string; channelId: string; runId: string; instanceId: string }) {
     return this.transaction(input.requestId, "open-requests", async tx => (await tx.query<QueryResultRow>({
-      name: "norn_requests_open_v1", text: `SELECT r.request_ref,r.holder,r.program_id,
+      name: "norn_requests_open_v2", text: `SELECT r.request_ref,r.holder,r.program_id,
           p.ledger_json->'requests'->r.request_id->>'text' AS text,
           p.ledger_json->'requests'->r.request_id->>'by' AS by_millis,
           (p.author_kind='agent' AND p.author_id=$4) AS asked,
-          (EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=$3
+          (r.instance_id=$4 OR EXISTS (SELECT 1 FROM data.agent_launches launch WHERE launch.run_id=$3
               AND launch.channel_id=r.channel_id AND launch.trigger_id=r.delivery_message_id)
             OR EXISTS (SELECT 1 FROM data.agent_message_executions execution WHERE execution.run_id=$3
               AND execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id)) AS held

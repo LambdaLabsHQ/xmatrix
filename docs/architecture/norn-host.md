@@ -138,13 +138,25 @@ The daemon's execution report tells the Hub when a finished turn left a
 request open, and the Hub wakes the Channel's coordinator. A Run that ends
 wakes it already.
 
+## Asking the same participant again
+
+A program on a Page that asks the same participant again asks the Instance
+that last answered it for this program, if that one still takes messages
+(live, or at rest where a message wakes it). The delivery is addressed to that
+Instance and starts no Run; only that Instance is woken, so the other
+Instances resting in the program's conversation are left alone. The request
+records the Instance, which holds it. Without such an Instance, and for a
+program in a message, each request starts a new Run as before.
+
 ## Letting the Run go
 
 The Instance that a delivery started exists for that one request. Once the
 request has ended, however it ended, the coordinator stops the Instance's Run
 if it is still live, or retires the Instance if it is at rest (an Instance at
 rest has no live Run, and the next message would wake it). It records the
-release on the request's index row, so each is let go once. An Agent that has answered therefore does not stay in the conversation
+release on the request's index row, so each is let go once. A Page's
+program keeps its Instances while it runs, for its next request to the same
+participant, and lets them go when it ends. An Agent that has answered therefore does not stay in the conversation
 to be woken by every later message. The delivery message tells the holder
 that its answer ends its Run.
 

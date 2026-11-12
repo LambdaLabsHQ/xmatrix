@@ -5,6 +5,7 @@ import { createProductAgentInterventionAuthorityPort } from "./product-agent-int
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
+import { wakeRestingInstances } from "./registration-launch-dispatch";
 import type { ProductMessagePostCommitInput } from "./product-message-post-commit";
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
@@ -26,13 +27,25 @@ async function repository(env: Env, channelId: string, requestId: string): Promi
 async function say(env: Env, postCommit: PostCommit, input: { channelId: string; messageId: string; body: string;
   authorityUserId: string;
   /** The program's message, when a person or an Agent wrote it: what xMatrix says is a reply to it. */
-  replyTo?: string }): Promise<void> {
+  replyTo?: string;
+  /** The one Instance the message is for. It alone is woken if it rests; nobody else in the conversation is. */
+  onlyInstanceId?: string;
+  /** Said for whoever reads the conversation: it summons and wakes nobody. */
+  quiet?: boolean }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
-    body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true, launch: true,
+    body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true,
+    ...(input.onlyInstanceId || input.quiet ? {} : { launch: true }),
     ...(input.replyTo ? { residual: { replyToMessageId: input.replyTo } } : {}),
   });
   if (!response.ok) throw new Error(`Norn message append failed (${response.status})`);
+  if (input.quiet) return;
+  if (input.onlyInstanceId) {
+    // Live, it has the message already. Interpreting the message as any other would wake every resting Instance here.
+    await wakeRestingInstances(env, { commandId: `norn-wake:${input.messageId}`.slice(0, 200), channelId: input.channelId,
+      sourceMessageId: input.messageId, targetInstanceId: input.onlyInstanceId, prompt: input.body });
+    return;
+  }
   await postCommit({ env, channelId: input.channelId, messageId: input.messageId, body: input.body,
     actorUserId: input.authorityUserId, senderKind: "system", senderId: XMATRIX_SYSTEM_AUTHOR_ID,
     committedAt: new Date().toISOString() });
@@ -82,13 +95,17 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   for (const delivery of work.deliveries) {
     // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
-      authorityUserId: delivery.authorityUserId, body: nornDeliveryBody(delivery.request as LedgerRequest, delivery.requestRef) });
-    await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch });
+      authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
+      body: nornDeliveryBody(delivery.request as LedgerRequest, delivery.requestRef,
+        { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage }) });
+    await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
+      ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });
   }
   for (const report of work.reports) {
     // An Agent that started the program is told by its address, so it wakes to read the result.
     await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300),
-      ...(report.onPage ? {} : { replyTo: report.programId }),
+      // A page's program ends in its own conversation, where only its Instances rest, about to be let go.
+      ...(report.onPage ? { quiet: true } : { replyTo: report.programId }),
       authorityUserId: report.authorityUserId,
       body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
@@ -106,11 +123,11 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
 }
 
 /** The Run that holds a request answers it; the program reads the answer in the same step. */
-export async function answerNornRequest(env: Env, input: { channelId: string; runId: string; requestRef: string;
+export async function answerNornRequest(env: Env, input: { channelId: string; runId: string; instanceId: string; requestRef: string;
   outcome: "answered" | "refused" | "broke"; text: string }): Promise<NornPassResult> {
   const requestId = `norn-answer:${input.requestRef}:${crypto.randomUUID()}`;
   const programs = await repository(env, input.channelId, requestId);
-  const held = await programs.heldRequest({ requestId, channelId: input.channelId, requestRef: input.requestRef, runId: input.runId })
+  const held = await programs.heldRequest({ requestId, channelId: input.channelId, requestRef: input.requestRef, runId: input.runId, instanceId: input.instanceId })
     .catch(async (error: unknown) => {
       // The answer may have been recorded by a call whose wake failed: its repeat wakes the Channel again.
       if (error instanceof ControlError && error.code === "norn_request_ended") await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
