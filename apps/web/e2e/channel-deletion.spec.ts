@@ -37,6 +37,8 @@ for (const layout of ["desktop", "mobile"] as const) {
     expect(await fixtureRequestBodies(page, "channel-delete")).toHaveLength(1);
     await releaseFixture(page, "channel-stop");
     await expect(dialog).toHaveCount(0);
+    // The address leaves the deleted Channel for its Space's list.
+    await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels$/u);
     expect(await fixtureRequestBodies(page, "channel-delete")).toEqual([1, 2, 3].map(() => ({ name: E2E_CHANNEL.name, confirmation: "DELETE", acknowledge: true })));
     expect(await fixtureRequestBodies(page, "channel-stop")).toEqual([{ body: "/stop all", clientMessageId: expect.any(String) }]);
   });

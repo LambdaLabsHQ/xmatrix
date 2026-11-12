@@ -1518,6 +1518,38 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setChannelMentionClearedAt(readChannelMentionClearedAt(authenticatedUserId));
   }, [authenticatedUserId, clearChannels, resetChannelReadSync, realtimeAgents]);
 
+  /* A deleted Channel leaves every place that still holds it: the list, its
+     history, and the address. An address left naming it kept the reader on a
+     Channel that no longer exists, so the deletion read as having failed. */
+  const forgetDeletedChannel = useCallback((channelId: string) => {
+    const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
+    invalidateAgentTraceChannels([channelId], "close");
+    historyCacheRef.current.delete(channelId);
+    historyTailBaseGenerationRef.current.delete(channelId);
+    purgeProductTailCacheChannel(channelId);
+    setChannels((current) => current.filter((channel) => channel.id !== channelId));
+    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+      detail: { kind: "structure" },
+    }));
+    if (selectedChannelIdRef.current === channelId) {
+      historyChannelIdRef.current = null;
+      historyRef.current = [];
+      hasOlderMessagesRef.current = false;
+      setHistory([]);
+      setHasOlderMessages(false);
+      setSelectedChannelId(null);
+    }
+    const route = appRouteInfo(currentBrowserLocation());
+    const routeKey = route.channelKey || route.legacyChannelId;
+    const named = resolveChannelRouteKey(channelsRef.current, routeKey,
+      resolveSpaceRouteKey(spacesRef.current, route.spaceKey))?.id ?? exactChannelIdFromRouteKey(routeKey || "") ?? routeKey;
+    if (named !== channelId) return;
+    const list = spaceId ? `${spaceAppPath(spaceId, spacesRef.current)}/channels` : "/app";
+    setHistoryError(null);
+    replaceBrowserPath(list);
+    setBrowserPath(list);
+  }, [invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
+
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
   useEffect(() => {
@@ -1953,22 +1985,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         }
         case "channel_deleted":
-          invalidateAgentTraceChannels([message.channelId], "close");
-          historyCacheRef.current.delete(message.channelId);
-          historyTailBaseGenerationRef.current.delete(message.channelId);
-          purgeProductTailCacheChannel(message.channelId);
-          setChannels((current) => current.filter((channel) => channel.id !== message.channelId));
-          window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-            detail: { kind: "structure" },
-          }));
-          if (selectedChannelIdRef.current === message.channelId) {
-            historyChannelIdRef.current = null;
-            historyRef.current = [];
-            hasOlderMessagesRef.current = false;
-            setHistory([]);
-            setHasOlderMessages(false);
-            setSelectedChannelId(null);
-          }
+          forgetDeletedChannel(message.channelId);
           break;
         case "channel_topic_updated":
           setChannels((current) =>
@@ -2236,10 +2253,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     clearReplyTarget,
     clearChannelHistory,
     invalidateAgentTraceChannels,
+    forgetDeletedChannel,
     commitChannelHistory,
     mergeAndRememberChannelHistory,
     observeChannelReadSequence,
-    purgeProductTailCacheChannel,
     queueChannelTimelineScroll,
     recordHistoryTailBase,
     reconcileAgentTraceChannelAccess,
@@ -3155,6 +3172,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setChannelReadCountsBaselineReady,
     selectedChannelId,
     setSelectedChannelId,
+    forgetDeletedChannel,
     selectedPageId,
     setSelectedPageId,
     setPendingExplicitSpaceId,
