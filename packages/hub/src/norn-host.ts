@@ -102,14 +102,19 @@ const fence = (body: string): string => {
  * is quoted as literal text, so nothing in it summons or commands anyone;
  * the only summon is the holder's own, on the first line.
  */
-export function nornDeliveryBody(request: LedgerRequest, requestRef: string): string {
+export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to: {
+  /** The Instance already there that the request goes to, by its address; without one the holder's summon starts a Run. */
+  there?: string;
+  /** Its Instance stays for the program's next request, instead of ending with this one. */
+  kept?: boolean } = {}): string {
   const [answer, ...types] = answerText(request).split("\n");
-  return [`${request.holder} launch:force`, "",
+  return [to.there ?? `${request.holder} launch:force`, "",
     `**Request \`${requestRef}\`** from a program. Your answer goes back to the program, not to this conversation.`, "",
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", "End this turn with exactly one of these. It ends your Run, so say nothing in the conversation and do it last:", "",
+    "", to.kept ? "End this turn with exactly one of these, and say nothing else in the conversation. The program may ask you again here:"
+      : "End this turn with exactly one of these. It ends your Run, so say nothing in the conversation and do it last:", "",
     `- \`xmatrix reply ${requestRef} '<answer>'\` when it is done. The answer must be ${answer}`,
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),
     `- \`xmatrix refuse ${requestRef} '<why>'\` when you will not do it.`,

@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a page's Norn program asks the same Agent again instead of starting another
+
+Every request of a Norn program started a new Run, so a review of three
+rounds started six. A program on a Page now sends its next request for the
+same participant to the Instance that last answered it for that program,
+when that Instance still takes messages: the delivery is addressed to it,
+starts nothing, and wakes only it. The program's Instances stay while it
+runs and are let go when it ends. A program in a message, where the
+conversation is shared, keeps starting and ending one Run per request. Hub
+only, with expand migration 0248 (`norn_requests.instance_id`). Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: a page's program shows its steps
 
 The one grey line under a `norn run` block is now the program's steps, joined
