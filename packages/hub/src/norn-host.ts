@@ -13,18 +13,25 @@ import { show, text, type Value } from "./vendor/norn/runtime/value";
  * database layer runs `nornStep` while it holds the program's row.
  */
 
-/** The program a message starts: its one fenced block tagged `norn run`. A block tagged `norn` alone is only shown. */
+/**
+ * The programs a text carries: its top-level fenced blocks tagged `norn run`,
+ * each under the name that follows the tag (`norn run review`), or `main`.
+ * A block tagged `norn` alone is only shown, and so is one inside a quote.
+ */
+export function nornBlocks(body: string): { name: string; source: string }[] {
+  const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
+  return (root.children ?? []).flatMap(node => {
+    const [run, name, ...rest] = (node.meta ?? "").trim().split(/\s+/u);
+    return node.type === "code" && node.lang === "norn" && run === "run" && !rest.length && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/u.test(name ?? "main")
+      ? [{ name: name ?? "main", source: node.value ?? "" }] : [];
+  });
+}
+
+/** The program a message starts: its one `norn run` block. */
 export function nornProgramIn(body: string): { source: string } | { refusal: string } | undefined {
-  const sources: string[] = [];
-  const pending: unknown[] = [parseMarkdown(body)];
-  while (pending.length) {
-    const node = pending.pop() as { type?: string; lang?: string | null; meta?: string | null; value?: string; children?: unknown[] };
-    // Only a block at the top of the message runs: a quoted program is someone showing one.
-    if (node.type === "code" && node.lang === "norn" && node.meta?.trim() === "run") sources.push(node.value ?? "");
-    else if (node.type === "root") pending.push(...[...(node.children ?? [])].reverse());
-  }
-  if (!sources.length) return undefined;
-  return sources.length === 1 ? { source: sources[0]! } : { refusal: "A message starts one program: it has more than one `norn run` block." };
+  const blocks = nornBlocks(body);
+  if (!blocks.length) return undefined;
+  return blocks.length === 1 ? { source: blocks[0]!.source } : { refusal: "A message starts one program: it has more than one `norn run` block." };
 }
 
 type Checked = { code: Code; targets: string[] } | { refusal: string };
@@ -98,7 +105,7 @@ const fence = (body: string): string => {
 export function nornDeliveryBody(request: LedgerRequest, requestRef: string): string {
   const [answer, ...types] = answerText(request).split("\n");
   return [`${request.holder} launch:force`, "",
-    `**Request \`${requestRef}\`** from the program above. Your answer goes back to the program, not to this conversation.`, "",
+    `**Request \`${requestRef}\`** from a program. Your answer goes back to the program, not to this conversation.`, "",
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
