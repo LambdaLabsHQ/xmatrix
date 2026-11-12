@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: ⌘F on a page finds in that page
+
+On an open page, Ctrl/⌘+F opened the Space's search. It now finds in the
+page: a flat paper slip where the search control stands shows "n of N" with
+previous, next and close; every match is washed in wood, the current one in
+full and scrolled into view. Enter and Shift+Enter step, Esc closes. The slip
+does not cover the page, and matches follow the text as people and Agents
+change it. In a conversation ⌘F still opens the Space's search. Web only;
+recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: a page says how its Norn programs stand
 
 Under each `norn run` code block a page now says how that block's program
