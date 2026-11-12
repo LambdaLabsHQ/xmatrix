@@ -1556,28 +1556,49 @@ test("a page's schedules are task lines whose timing is quiet and whose state fo
 });
 
 
-test("a page's program is its code block, and under it the page says how the program stands", async ({ page: browser }) => {
-  const source = 'switch run(@codex, "Review the design", ~by=30m)->wait {\n| Answered(_) => "reviewed"\n| other => fail(other)\n}';
+test("a page's program is its code block, and joined under it are its steps: who was asked what, and what they answered", async ({ page: browser }) => {
+  const source = ['type verdict = Sound | Flawed(string)', 'let rec settle = (draft, round) =>',
+    '  switch run(@grok, "Find where this design does not hold", ~about=draft, ~by=30m)->wait? {',
+    '  | Sound => Answered(draft)',
+    '  | Flawed(why) => settle(run(@claude, "Revise the design", ~about=draft, ~context=why, ~by=30m)->wait?, round + 1)',
+    '  }', 'settle(run(@claude, "Draft a design for requests to people", ~by=30m)->wait?, 0)'].join("\n");
+  const asked = (holder: string, text: string, change: Record<string, unknown> = {}) => ({ holder, text, askedAt: NOW, by: null,
+    outcome: null, reply: null, settledAt: null, ...change });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
   await fixtureJson(browser, "page-programs", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/programs$/u, { programs: [
-    { name: "review", channelId: E2E_CHANNEL.id, state: "running",
-      requests: [{ holder: "@codex", text: "Review the design", by: null, reply: null }] },
-    { name: "main", state: "not_started", problem: "1:1 this request is the program's last value", requests: [] },
+    { name: "review", channelId: E2E_CHANNEL.id, state: "running", requests: [
+      asked("@claude", "Draft a design for requests to people", { outcome: "answered", reply: "A card under the program", settledAt: NOW }),
+      asked("@grok", "Find where this design does not hold", { outcome: "answered", reply: "Flawed(no owner when the person leaves)", settledAt: NOW }),
+      asked("@claude", "Revise the design", { by: new Date(Date.now() + 24 * 60_000 + 20_000).toISOString() })] },
+    { name: "main", state: "not_started", problem: "1:1 this request is the program's last value, so nothing waits for it", requests: [] },
+    { name: "done", channelId: E2E_CHANNEL.id, state: "completed", result: "ok",
+      requests: [asked("@codex", "Reply with ok", { outcome: "broke", reply: "its turn ended without an answer", settledAt: NOW })] },
   ] }, { method: "GET" });
-  const editor = await openLivePage(browser,
-    `# Relay\n\n\`\`\`norn run review\n${source}\n\`\`\`\n\n\`\`\`norn run\nrun(@codex, "x")\n\`\`\`\n\n\`\`\`norn\nask(@codex, "shown only")\n\`\`\`\n`);
-  // The block stays code, in Norn's inks; under it, whom its program waits on.
-  await expect(editor.locator("pre .hljs-title").first()).toHaveText("@codex");
-  const statuses = editor.locator(".page-program-status");
-  await expect(statuses).toHaveCount(2);
-  await expect(statuses.first()).toHaveText("waiting on @codex");
-  await expect(statuses.first()).toHaveAttribute("data-state", "running");
-  // A block that does not run as written says why; a block tagged `norn` alone is only shown.
-  await expect(statuses.nth(1)).toHaveAttribute("data-state", "problem");
-  await expect(statuses.nth(1)).toContainText("last value");
+  const fence = (tag: string, code: string) => `\`\`\`${tag}\n${code}\n\`\`\`\n\n`;
+  const editor = await openLivePage(browser, `# Relay\n\n${fence("norn run review", source)}${fence("norn run", 'run(@codex, "x")')}${
+    fence("norn run done", 'ask(@codex, "Reply with ok")->wait')}${fence("norn", 'ask(@codex, "shown only")')}`);
+  // The block stays code, in Norn's inks; its steps are joined under it, one row per request.
+  await expect(editor.locator("pre .hljs-title").first()).toHaveText("@grok");
+  const programs = editor.locator(".page-program-steps");
+  await expect(programs).toHaveCount(3);
+  const rows = programs.first().locator(".page-program-step");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(1)).toHaveAttribute("data-state", "answered");
+  await expect(rows.nth(1).locator(".page-program-holder")).toHaveText("grok");
+  await expect(rows.nth(1).locator(".page-program-note")).toHaveText("Flawed(no owner when the person leaves)");
+  await expect(rows.nth(2)).toHaveAttribute("data-state", "working");
+  await expect(rows.nth(2).locator(".page-program-note")).toHaveText("working · 24 min left");
+  // A block that does not run as written says why, and marks where; a block tagged `norn` alone is only shown.
+  await expect(programs.nth(1).locator(".page-program-end")).toHaveAttribute("data-state", "problem");
+  await expect(programs.nth(1).locator(".page-program-end")).toContainText("last value");
+  await expect(editor.locator(".page-program-wrong")).toHaveText("run");
+  // A request that failed says how, and the program that went on says how it ended.
+  await expect(programs.nth(2).locator(".page-program-step")).toHaveAttribute("data-state", "failed");
+  await expect(programs.nth(2).locator(".page-program-end")).toHaveText("ok");
   await browser.screenshot({ path: test.info().outputPath("pages-program-status.png") });
 });
+
 
 test("a schedule is written without its emoji: `@` offers when the line runs, and its timing offers it again", async ({ page: browser }) => {
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);

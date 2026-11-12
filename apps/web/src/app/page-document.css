@@ -783,21 +783,77 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .page-automation-status:disabled { cursor: default; }
 
-/* A page's program is a code block; under it, small and quiet like a schedule's status, how it stands. */
-.page-program-status {
+/* A page's program is a code block with its steps joined under it: one tinted surface, the code above and, below a
+   hairline, who was asked what and what they answered. No badge colours beyond the inks the code already uses. */
+.page-document pre.page-program-code { margin-bottom: 0; border-radius: 10px 10px 0 0; }
+.page-program-wrong { text-decoration: underline wavy var(--destructive); text-underline-offset: 3px; }
+.page-program-steps {
+  /* The code's string ink, for what went well. */
+  --code-ink-string: oklch(0.45 0.1 145);
   display: block;
-  margin: -0.35em 0 0.9em;
-  padding: 0;
-  color: var(--muted-foreground);
+  width: 100%;
+  margin: 0 0 1em;
+  padding: 0.25em 1em 0.4em;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent);
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+  color: var(--foreground);
+  font: inherit;
   font-size: 0.85em;
   text-align: left;
   cursor: pointer;
   user-select: none;
 }
-.page-program-status:disabled { cursor: default; }
-.page-program-status[data-state="running"]::before { content: "● "; color: var(--code-ink-string); }
-.page-program-status[data-state="problem"], .page-program-status[data-state="failed"] { color: var(--destructive); }
-.page-program-status:hover:not(:disabled) { color: var(--foreground); }
+.page-program-steps:disabled { cursor: default; }
+.page-program-steps:hover:not(:disabled) { background: color-mix(in oklch, var(--foreground) 6.5%, transparent); }
+.page-program-step, .page-program-end { display: flex; align-items: center; gap: 0.6em; padding: 0.32em 0; min-width: 0; }
+.page-program-step + .page-program-step, .page-program-step + .page-program-end {
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 5%, transparent);
+}
+.page-program-face {
+  flex: none;
+  width: 1.35em;
+  height: 1.35em;
+  border-radius: 0.35em;
+  display: inline-grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--foreground) 8%, transparent);
+  font-size: 0.95em;
+  font-weight: 600;
+}
+.page-program-holder { flex: none; min-width: 3.6em; font-weight: 600; }
+.page-program-ask { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.page-program-note {
+  flex: none;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.05em 0.65em;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+.page-program-step[data-state="answered"] .page-program-note { color: var(--code-ink-string); }
+.page-program-step[data-state="answered"] .page-program-note::before { content: "✓ "; }
+.page-program-step[data-state="failed"] .page-program-note { color: var(--destructive); }
+.page-program-step[data-state="working"] .page-program-note::before {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.45em;
+  border-radius: 50%;
+  background: var(--code-ink-string);
+  vertical-align: 0.08em;
+  animation: page-program-working 1.6s ease-in-out infinite;
+}
+@keyframes page-program-working { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .page-program-step[data-state="working"] .page-program-note::before { animation: none; } }
+.page-program-end { color: var(--muted-foreground); }
+.page-program-end[data-state="finished"] { color: var(--foreground); font-weight: 600; }
+.page-program-end[data-state="finished"]::before { content: "✓"; color: var(--code-ink-string); }
+.page-program-end[data-state="stopped"], .page-program-end[data-state="problem"] { color: var(--destructive); }
 .page-automation-status[data-state="problem"] { color: var(--destructive); }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 

@@ -377,6 +377,20 @@ export interface PageMigrationApplied {
 /** The Yjs shared type a page's live document lives in, in the page session and every editor. */
 export const PAGE_DOCUMENT_FRAGMENT = "prosemirror";
 
+/** One request of a Page's program: who holds it, what was asked, and how it ended. */
+export interface PageProgramRequest {
+  holder: string;
+  text: string;
+  askedAt: string;
+  /** When it closes by itself; null without a deadline. */
+  by: string | null;
+  /** How it ended; null while it is open. */
+  outcome: "answered" | "refused" | "broke" | "no_reply" | "cancelled" | "revoked" | null;
+  /** The answer, or the reason it was refused or could not be done. */
+  reply: string | null;
+  settledAt: string | null;
+}
+
 /** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
 export interface PageProgramStatus {
   /** The block's name: the word after `norn run`, or `main`. */
@@ -388,5 +402,6 @@ export interface PageProgramStatus {
   problem?: string;
   /** How its program ended: the result, or why it stopped. */
   result?: string;
-  requests: { holder: string; text: string; by: string | null; reply: string | null }[];
+  /** Each request the program made, oldest first. */
+  requests: PageProgramRequest[];
 }

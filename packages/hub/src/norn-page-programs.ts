@@ -10,7 +10,7 @@ import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import type { Ledger } from "./vendor/norn/runtime/ledger";
-import { show } from "./vendor/norn/runtime/value";
+import { show, type Value } from "./vendor/norn/runtime/value";
 
 /**
  * Programs that live on a Page (docs/architecture/norn-host.md): each
@@ -94,6 +94,16 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
   }
 }
 
+const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoReply: "no_reply", Cancelled: "cancelled",
+  Revoked: "revoked" } as const;
+/** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
+const answerText = (value: Value): string =>
+  value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
+
+/** A program's result: what it answered with, without the `Answered(…)` around it. */
+const resultText = (value: Value): string =>
+  value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? answerText(value.args[0]!) : show(value);
+
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
 export async function pageProgramStatus(env: Env, input: { spaceId: string; pageId: string; body: string }): Promise<PageProgramStatus[]> {
   const programs = await readPageNornPrograms(database(env), { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
@@ -106,11 +116,14 @@ export async function pageProgramStatus(env: Env, input: { spaceId: string; page
       ...(program ? { channelId: program.channelId } : {}),
       state: program ? program.state as PageProgramStatus["state"] : "not_started",
       ...("refusal" in checked ? { problem: checked.refusal } : {}),
-      ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? show(ledger.ended.result) : "") } : {}),
+      ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
       requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
-        holder: request.holder, text: request.text, by: request.by === null ? null : new Date(request.by).toISOString(),
-        reply: request.reply === null ? null : request.reply.tag === "Answered" ? show(request.reply.value)
-          : "reason" in request.reply ? `${request.reply.tag}: ${request.reply.reason}` : request.reply.tag })),
+        holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
+        by: request.by === null ? null : new Date(request.by).toISOString(),
+        outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
+        reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
+          : "reason" in request.reply ? request.reply.reason : null,
+        settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
     };
   });
 }
