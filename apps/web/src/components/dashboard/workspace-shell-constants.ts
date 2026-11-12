@@ -99,8 +99,6 @@ export function channelRowIndentPx(depth: number): number {
   return CHANNEL_ROW_INDENT_BASE_PX + depth * CHANNEL_ROW_INDENT_STEP_PX;
 }
 
-export const MAX_ATTACHMENTS = 10;
-
 export const MAX_IMAGE_ATTACHMENT_BYTES = 1_000_000;
 
 export const MAX_ATTACHMENT_BYTES = RELAY_V2_BLOB_MAX_BYTES;

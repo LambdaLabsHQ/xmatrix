@@ -12,7 +12,7 @@ export function agentSendSubmissionCanonical(scope: {
     "readThroughSequence", "launch",
   ].includes(key)) || typeof body.body !== "string") return null;
   const attachments = body.attachments === undefined ? [] : body.attachments;
-  if (!Array.isArray(attachments) || attachments.length > 10) return null;
+  if (!Array.isArray(attachments)) return null;
   const bindings: Array<Array<string | number>> = [];
   for (const attachment of attachments) {
     if (!attachment || typeof attachment !== "object" || Array.isArray(attachment) ||

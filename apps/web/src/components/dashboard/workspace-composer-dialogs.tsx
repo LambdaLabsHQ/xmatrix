@@ -26,7 +26,6 @@ import { WoodPanel } from "@/components/ui/material-surfaces";
 import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
 
 import {
-  MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   COUNT_CHIP_MATERIAL_CLASS,
 } from "./workspace-shell-constants";
@@ -47,7 +46,6 @@ import {
 import {
   ATTACHMENT_UPLOAD_CONCURRENCY,
   boundedConcurrency,
-  createAttachmentSlotLedger,
   createAttachmentUploadRegistry,
   planAttachmentIntake,
 } from "./composer-attachment-intake";
@@ -425,17 +423,6 @@ export const Composer = memo(function Composer({
   const preparingSendRef = useRef(false);
   const [emptyPasteAnchorActive, setEmptyPasteAnchorActive] = useState(false);
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
-  const slotLedgerRef = useRef(createAttachmentSlotLedger());
-  // The rows as last rendered. An intake counts from here, not from the render
-  // it was started in, and a reservation ends in the same step its row shows up
-  // here. Ending it at the next intake instead kept the slot of every file sent
-  // while it uploaded: its row left with the message before any intake saw it,
-  // and ten such files filled the composer of every later message.
-  const renderedPendingRef = useRef<PendingAttachment[]>([]);
-  useLayoutEffect(() => {
-    renderedPendingRef.current = pendingAttachments;
-    slotLedgerRef.current.reconcile(new Set(pendingAttachments.map((attachment) => attachment.id)));
-  }, [pendingAttachments]);
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -596,7 +583,6 @@ export const Composer = memo(function Composer({
     uploadRegistryRef.current.cancelAll();
     for (const url of pendingPreviewUrlsRef.current.values()) URL.revokeObjectURL(url);
     pendingPreviewUrlsRef.current.clear();
-    slotLedgerRef.current.clear();
     setPendingAttachments([]);
     setAttachmentError(null);
   }, [composerIdentity]);
@@ -772,15 +758,9 @@ export const Composer = memo(function Composer({
   }
 
   async function intakeAttachmentCandidates(candidates: AttachmentDropCandidate[]): Promise<number> {
-    // What is still reserved is the intakes whose rows have not rendered yet.
-    const ledger = slotLedgerRef.current;
-
     const plan = planAttachmentIntake({
       candidates,
       attachmentsEnabled,
-      draftCount: attachments.length,
-      pendingCount: renderedPendingRef.current.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
-      maxAttachments: MAX_ATTACHMENTS,
       maxBytes: MAX_ATTACHMENT_BYTES,
       maxBytesLabel: formatFileSize(MAX_ATTACHMENT_BYTES),
       kindOf: channelAttachmentKindForFile,
@@ -791,7 +771,6 @@ export const Composer = memo(function Composer({
     // Rows first, awaits after. Everything below this point can take a network
     // round-trip; nothing below it may be the first thing the user sees.
     if (plan.entries.length > 0) {
-      ledger.reserve(plan.entries.map((entry) => entry.id));
       setPendingAttachments((current) => [
         ...current,
         ...plan.entries.map<PendingAttachment>((entry) => ({
@@ -1371,7 +1350,6 @@ export const Composer = memo(function Composer({
       URL.revokeObjectURL(previewUrl);
     }
     uploadRegistryRef.current.settle(id);
-    slotLedgerRef.current.settle(id);
     uploadSourcesRef.current.delete(id);
     setPendingAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }

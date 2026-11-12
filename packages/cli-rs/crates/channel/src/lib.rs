@@ -31,7 +31,6 @@ pub use read_context::{
     ChannelReadContext, LaunchContext, load_channel_read_context, load_launch_context,
 };
 
-const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
 const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload::BLOB_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
 // Hubs clamp to 50, and any Hub may return fewer under its page byte budget).
@@ -990,12 +989,6 @@ impl UploadedMessageAttachment {
 pub(crate) fn load_channel_file_attachments(
     paths: &[PathBuf],
 ) -> error::Result<Vec<PendingFileAttachment>> {
-    if paths.len() > CHANNEL_FILE_ATTACHMENT_LIMIT {
-        return Err(CliError::Launch(format!(
-            "Send at most {CHANNEL_FILE_ATTACHMENT_LIMIT} files per message"
-        )));
-    }
-
     let mut attachments = Vec::with_capacity(paths.len());
     for path in paths {
         let metadata = std::fs::metadata(path)

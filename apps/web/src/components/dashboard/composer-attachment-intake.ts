@@ -43,24 +43,9 @@ export function attachmentsDisabledError(): string {
   return "Preparing the thread before attachments can be added.";
 }
 
-export function attachmentLimitError(maxAttachments: number): string {
-  return `Attach at most ${maxAttachments} files.`;
-}
-
-export function attachmentIntakeCapacity(input: {
-  maxAttachments: number;
-  draftCount: number;
-  pendingCount: number;
-}): number {
-  return Math.max(0, input.maxAttachments - input.draftCount - input.pendingCount);
-}
-
 export function planAttachmentIntake<TFile extends IntakeFileShape>(input: {
   candidates: readonly AttachmentIntakeCandidate<TFile>[];
   attachmentsEnabled: boolean;
-  draftCount: number;
-  pendingCount: number;
-  maxAttachments: number;
   maxBytes: number;
   maxBytesLabel: string;
   kindOf: (file: TFile) => AttachmentKind;
@@ -74,16 +59,7 @@ export function planAttachmentIntake<TFile extends IntakeFileShape>(input: {
     return { entries: [], error: attachmentsDisabledError() };
   }
 
-  const capacity = attachmentIntakeCapacity({
-    maxAttachments: input.maxAttachments,
-    draftCount: input.draftCount,
-    pendingCount: input.pendingCount,
-  });
-  if (capacity <= 0) {
-    return { entries: [], error: attachmentLimitError(input.maxAttachments) };
-  }
-
-  const entries = input.candidates.slice(0, capacity).map((candidate) => {
+  const entries = input.candidates.map((candidate) => {
     const kind = candidate.isDirectory ? "file" : input.kindOf(candidate.file);
     const size = candidate.file.size ?? 0;
     return {
@@ -101,11 +77,7 @@ export function planAttachmentIntake<TFile extends IntakeFileShape>(input: {
     };
   });
 
-  return {
-    entries,
-    error:
-      input.candidates.length > capacity ? attachmentLimitError(input.maxAttachments) : null,
-  };
+  return { entries, error: null };
 }
 
 function attachmentIntakeRejection(input: {
@@ -120,44 +92,6 @@ function attachmentIntakeRejection(input: {
   if (input.size <= 0) return "This file is empty.";
   if (input.size > input.maxBytes) return `File must be ${input.maxBytesLabel} or smaller.`;
   return null;
-}
-
-/**
- * Slots reserved by an intake that has planned its rows but whose render has
- * not landed yet.
- *
- * Capacity used to be read straight off the render closure, so two intakes in
- * the same tick (a drop landing while the desktop clipboard read is still
- * resolving) each saw the same free slots and both took them, past the ceiling.
- * A reservation is held by id and released the moment the rendered rows account
- * for it, so every id is counted by exactly one of the two — never both, never
- * neither. The caller reconciles on every render of the rows, not at the next
- * intake: a row can render and leave (sent with its message while it uploads)
- * with no intake in between, and its reservation must not outlive it.
- */
-export function createAttachmentSlotLedger() {
-  const reserved = new Set<string>();
-  return {
-    reserve(ids: readonly string[]) {
-      for (const id of ids) reserved.add(id);
-    },
-    /** Call with the ids of the pending rows each time they render. */
-    reconcile(renderedIds: { has: (id: string) => boolean }) {
-      for (const id of Array.from(reserved)) {
-        if (renderedIds.has(id)) reserved.delete(id);
-      }
-    },
-    /** The row is gone (committed or removed) before it was ever rendered. */
-    settle(id: string) {
-      reserved.delete(id);
-    },
-    clear() {
-      reserved.clear();
-    },
-    reservedCount(): number {
-      return reserved.size;
-    },
-  };
 }
 
 export type AbortableRequest = { abort: () => void };
