@@ -148,10 +148,10 @@ test("a connect started in the desktop app is marked for return to it; one start
 
 test("base_plan prices a new plan in every region Google converts to, keeps existing plans and can activate", async () => {
   const money = (currencyCode, units) => ({ currencyCode, units });
-  const converted = { convertedRegionPrices: { US: { regionCode: "US", price: money("USD", "10") }, JP: { regionCode: "JP", price: money("JPY", "1500") } },
+  const converted = { convertedRegionPrices: { US: { regionCode: "US", price: { ...money("USD", "9"), nanos: 990000000 } }, JP: { regionCode: "JP", price: money("JPY", "1500") } },
     convertedOtherRegionsPrice: { usdPrice: money("USD", "10"), eurPrice: money("EUR", "9") }, regionVersion: { version: "2025/03" } };
   const existing = { basePlanId: "annual", state: "ACTIVE", autoRenewingBasePlanType: { billingPeriodDuration: "P1Y" } };
-  const input = statement('@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"activate":true}');
+  const input = statement('@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"activate":true}');
   let grants = 0;
   const { result, calls } = await fetched([{ body: { productId: "pro", basePlans: [existing] } }, { body: converted }, { body: {} },
     { body: { basePlans: [{ basePlanId: "monthly", state: "ACTIVE" }] } }], () => ACTIONS.base_plan.execute({ credentials, authorizeWrite: async () => { grants++; } }, input));
@@ -160,16 +160,20 @@ test("base_plan prices a new plan in every region Google converts to, keeps exis
   assert.match(calls[2].url, /subscriptions\/pro\?updateMask=basePlans&regionsVersion\.version=2025%2F03$/u);
   assert.deepEqual(calls[2].body.basePlans.map(plan => plan.basePlanId), ["annual", "monthly"]);
   assert.equal(calls[2].body.basePlans[0].state, undefined);
-  assert.deepEqual(calls[2].body.basePlans[1].regionalConfigs.map(region => [region.regionCode, region.price.units, region.newSubscriberAvailability]),
-    [["US", "10", true], ["JP", "1500", true]]);
+  // Google rounds the price's own region to its local pattern (9.99); that region keeps exactly the stated price.
+  assert.deepEqual(calls[2].body.basePlans[1].regionalConfigs.map(region => [region.regionCode, region.price.units, region.price.nanos, region.newSubscriberAvailability]),
+    [["US", "10", undefined, true], ["JP", "1500", undefined, true]]);
+  const elsewhere = statement('@googleplay:base_plan:sh.xmatrix.app/pro/weekly {"period":"P1W","region":"JP","price":{"currencyCode":"USD","units":"10"}}');
+  await fetched([{ body: { basePlans: [] } }, { body: converted }], () => assert.rejects(ACTIONS.base_plan.execute({ credentials }, elsewhere), /JP is not a region Google Play sells in with USD/u));
   assert.match(calls[3].url, /basePlans\/monthly:activate$/u);
   assert.match(result.summary, /base plan monthly on pro: P1M, ACTIVE, priced in 2 regions/u);
   const taken = await fetched([{ body: { basePlans: [{ basePlanId: "monthly" }] } }], () => assert.rejects(ACTIONS.base_plan.execute({ credentials }, input), /already has base plan monthly/u));
   assert.equal(taken.calls.length, 1);
-  for (const bad of ['@googleplay:base_plan:sh.xmatrix.app/pro {"period":"P1M","price":{"currencyCode":"USD","units":"10"}}',
-    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"monthly","price":{"currencyCode":"USD","units":"10"}}',
-    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"usd","units":"10"}}',
-    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"},"free":true}']) {
+  for (const bad of ['@googleplay:base_plan:sh.xmatrix.app/pro {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"monthly","region":"US","price":{"currencyCode":"USD","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","price":{"currencyCode":"USD","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"usd","units":"10"}}',
+    '@googleplay:base_plan:sh.xmatrix.app/pro/monthly {"period":"P1M","region":"US","price":{"currencyCode":"USD","units":"10"},"free":true}']) {
     assert.equal(typeof statement(bad), "string", bad);
   }
 });
