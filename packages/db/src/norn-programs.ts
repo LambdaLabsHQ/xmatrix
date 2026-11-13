@@ -27,6 +27,8 @@ export interface NornProgramState {
 export interface NornProgramWrite {
   ledger: unknown; state: "running" | "completed" | "failed"; nextDueMs: number | null;
   requests: { requestId: string; requestRef: string; epoch: number; holder: string; settled: boolean }[];
+  /** What the program said in this step (`say`), to be posted to its conversation. */
+  notices: { noticeId: string; recipient: string; body: string }[];
 }
 export type NornStep<T> = (state: NornProgramState) => { write: NornProgramWrite | null; result: T };
 
@@ -92,7 +94,8 @@ export const NORN_CHANNEL_DUE_SQL = `LEAST(
     (SELECT MIN(r.created_at) FROM data.norn_requests r
       WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL),
     (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}),
-    (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}))`;
+    (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}),
+    (SELECT MIN(n.created_at) FROM data.norn_notices n WHERE n.channel_id=$1 AND n.posted_at IS NULL))`;
 /** The Channels with any program still running or unreported: `p` is the program. */
 export const NORN_PROGRAM_OPEN_SQL = "(p.state='running' OR p.reported_at IS NULL)";
 
@@ -150,6 +153,13 @@ export class PostgresNornProgramRepository {
       values: [...scope, String(program.channel_id), JSON.stringify(write.requests.map(request => ({
         request_id: request.requestId, request_ref: request.requestRef, epoch: request.epoch, holder: request.holder,
         delivery_message_id: nornDeliveryMessageId(request.requestRef, request.epoch), settled: request.settled })))], maxRows: 0 });
+    if (write.notices.length) await tx.query({ name: "norn_notice_write_v1", text: `INSERT INTO data.norn_notices
+        (space_id,channel_id,program_id,notice_id,recipient,body)
+      SELECT $1,$3,$2,entry.notice_id,entry.recipient,entry.body
+      FROM jsonb_to_recordset($4::jsonb) AS entry(notice_id text,recipient text,body text)
+      ON CONFLICT (space_id,program_id,notice_id) DO NOTHING`,
+      values: [...scope, String(program.channel_id), JSON.stringify(write.notices.map(notice => ({
+        notice_id: notice.noticeId, recipient: notice.recipient, body: notice.body })))], maxRows: 0 });
     return result;
   }
 
@@ -262,7 +272,14 @@ export class PostgresNornProgramRepository {
                 AND registration.harness=binding.harness
             WHERE instance.instance_id=${requestInstance("r")} LIMIT 1) started ON TRUE
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
+      const notices = await tx.query<QueryResultRow>({ name: "norn_channel_notices_v1", text: `SELECT n.program_id,n.notice_id,
+          n.recipient,n.body,p.authority_user_id,p.page_id
+        FROM data.norn_notices n JOIN data.norn_programs p ON p.space_id=n.space_id AND p.program_id=n.program_id
+        WHERE n.channel_id=$1 AND n.posted_at IS NULL ORDER BY n.created_at,n.notice_id LIMIT 200`, values, maxRows: 200 });
       return {
+        notices: notices.map(row => ({ programId: String(row.program_id), noticeId: String(row.notice_id),
+          recipient: String(row.recipient), body: String(row.body), authorityUserId: String(row.authority_user_id),
+          onPage: row.page_id !== null })),
         releases: releases.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           authorityUserId: String(row.authority_user_id), runId: typeof row.run_id === "string" ? row.run_id : null,
           mention: typeof row.mention === "string" ? row.mention : null })),
@@ -297,6 +314,13 @@ export class PostgresNornProgramRepository {
       data.norn_requests SET released_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND request_id=$3
         AND settled_at IS NOT NULL AND released_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId],
       maxRows: 0 }));
+  }
+
+  /** What the program said was posted to its conversation. */
+  async noticed(input: Scope & { noticeId: string }): Promise<void> {
+    await this.transaction(input.requestId, "noticed", tx => tx.query({ name: "norn_notice_posted_v1", text: `UPDATE
+      data.norn_notices SET posted_at=clock_timestamp() WHERE space_id=$1 AND program_id=$2 AND notice_id=$3
+        AND posted_at IS NULL`, values: [this.placement.spaceId, input.programId, input.noticeId], maxRows: 0 }));
   }
 
   /** The program's end was told to the Channel. */

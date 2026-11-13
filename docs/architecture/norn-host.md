@@ -182,6 +182,17 @@ participant, and lets them go when it ends. An Agent that has answered therefore
 to be woken by every later message. The delivery message tells the holder
 that its answer ends its Run.
 
+## Saying something
+
+`say(who, text)` tells someone without asking anything of them: a reminder,
+a note that a round failed. What a program says is new to the ledger in the
+pass that says it, so the step hands it over with the ledger and it is stored
+in `data.norn_notices` in the same transaction. The coordinator posts each
+one to the program's conversation as xMatrix, naming whom it is for, and
+marks it posted. The message is appended without being interpreted, so it
+starts and wakes nobody: whoever is named is told the way a mention tells
+them.
+
 ## Deadlines and stop
 
 A request's `~by` and a timer are the ledger's: a pass records the earliest

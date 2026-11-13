@@ -104,3 +104,11 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     // Kept while the program ran, its Instance is let go now.
     await daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId, "the holder's stop");
 }));
+
+test("what a program says is posted to its conversation, for whom it names", () => pageScene("norn-say", async ({ worker, call, pages, until }) => {
+  const { page } = await call(pages, "POST", { title: "Reminders", body: block(`say(@codex, "The renewal is due on Friday")`, "norn run remind") });
+  const program = await until(async () => (await call(`${pages}/${page.pageId}/programs`)).programs.find(each => each.state === "completed"), "the program's end");
+  const said = await until(async () => (await channelHistory(worker, MOCK_TOKEN, program.channelId, 20)).messages
+    .find(message => message.body === "@codex The renewal is due on Friday"), "what it said");
+  assert.equal(said.from.kind, "system");
+}));

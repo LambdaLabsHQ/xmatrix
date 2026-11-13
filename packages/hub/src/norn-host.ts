@@ -169,6 +169,8 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
     const now = Math.max(state.nowMs, ledger.startedAt);
     const checked = checkNornProgram(state.source);
     let refusal: string | undefined, nextDue: number | null = null, taken = false;
+    // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
+    const said: { to: string; text: string }[] = [];
     if ("refusal" in checked) stop(ledger, now, `The program no longer checks: ${checked.refusal}`);
     else if (state.stopReason !== null) stop(ledger, now, state.stopReason);
     else {
@@ -191,7 +193,9 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
       // Each round ends at least one request this host cannot deliver, so the rounds end.
       for (let undelivered = true; undelivered;) {
         undelivered = false;
-        nextDue = evaluate(checked.code, ledger, now).nextDue;
+        const pass = evaluate(checked.code, ledger, now);
+        nextDue = pass.nextDue;
+        said.push(...pass.said);
         for (const request of Object.values(ledger.requests)) {
           if (request.reply !== null) continue;
           // One of a group takes the request for the group: the first this host can reach.
@@ -213,7 +217,8 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
       // Only requests that were or will be delivered are indexed: the rest ended in the pass that opened them.
       requests: Object.values(ledger.requests).filter(request => refs.has(request.id) || request.reply === null)
         .map(request => ({ requestId: request.id, requestRef: refs.get(request.id) ?? reference(), epoch: request.epoch,
-          holder: request.holder, settled: request.reply !== null })) };
+          holder: request.holder, settled: request.reply !== null })),
+      notices: said.map(({ to, text: body }) => ({ noticeId: reference(), recipient: to, body })) };
     return { write, result: { status, ...(refusal === undefined ? {} : { refusal }) } };
   };
 }

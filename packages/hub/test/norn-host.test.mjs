@@ -127,3 +127,10 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
   assert.equal(unknown.step().result.status, "completed");
   assert.match(unknown.state.ledger.ended.result.value, /does not know the condition ~mood/u);
 });
+
+test("what a program says is handed over once, in the step that says it", () => {
+  const { step } = program(`say(@daniel, "The flight leaves at 12:15")
+ask(@codex, "Anything else?")->wait`);
+  assert.deepEqual(step().write.notices.map(({ recipient, body }) => [recipient, body]), [["@daniel", "The flight leaves at 12:15"]]);
+  assert.deepEqual(step().write.notices, []);
+});

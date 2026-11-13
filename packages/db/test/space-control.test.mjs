@@ -582,7 +582,7 @@ test("Cross-Space Channel moves reassign Space-scoped message facts", async () =
     "channel_move_delivery_cursors_v1", "channel_move_message_attention_v1",
     "channel_move_message_attention_revisions_v1", "channel_move_channel_content_counters_v1",
     "channel_move_channel_message_sequences_v1",
-    "channel_move_agent_message_executions_v1", "channel_move_norn_programs_v1", "channel_move_norn_requests_v1",
+    "channel_move_agent_message_executions_v1", "channel_move_norn_programs_v1", "channel_move_norn_requests_v1", "channel_move_norn_notices_v1",
     "channel_move_message_sequence_reservations_v1",
     "channel_move_reborn_intents_v1",
   ]) {
