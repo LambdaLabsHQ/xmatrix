@@ -89,6 +89,20 @@ test("a request this host cannot deliver ends at once, and one of a group goes t
   assert.deepEqual(group.step().open.map(request => [request.holder, request.epoch]), [["@codex", 1]]);
 });
 
+test("a program this build cannot check is left as it is and tried again, and can still be stopped", () => {
+  const { state, step } = program(`ask(@codex, "Ship it?")->wait`);
+  const [open] = step().open;
+  // Written for a newer build: a word this one does not know. Nothing of the program changes but when it is next tried.
+  const newer = structuredClone({ ...state, source: `open Std\nlater(@codex, "Ship it?")`, nowMs: 60_000 });
+  const deferred = nornStep()(newer);
+  assert.deepEqual([deferred.write, deferred.result.status], [{ retryAtMs: 60_000 + 5 * 60_000 }, "running"]);
+  assert.match(deferred.result.refusal, /does not check on this build/u);
+  assert.match(nornStep({ requestId: open.requestId, epoch: open.epoch, reply: { typed: "yes" } })(newer).result.refusal, /does not check on this build/u);
+  // A stop reads no text: the program ends and its request is called off.
+  const stopped = nornStep()({ ...newer, stopReason: "Removed from its page" });
+  assert.deepEqual([stopped.write.state, stopped.write.ledger.requests[open.requestId].reply], ["failed", { tag: "Cancelled" }]);
+});
+
 test("a deadline is the ledger's: the program's next due time is the request's", () => {
   const { step } = program(`switch ask(@codex, "Ship it?", ~by=1h)->wait { | NoReply => "late" | other => fail(other) }`);
   const first = step();

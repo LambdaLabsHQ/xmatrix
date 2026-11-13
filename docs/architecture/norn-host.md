@@ -315,6 +315,13 @@ fence's transaction. Their next pass ends them and cancels their open
 requests. A stop of one Run does not end a program: the request that Run
 held becomes `Broke`.
 
+A program is checked where it is written, so text that a pass cannot check
+was written for another build of the Hub: one being rolled out, or one
+rolled back. The pass leaves the program and its ledger as they are and
+moves only the time of the next pass (five minutes on), and an answer given
+meanwhile is refused with that reason. A stop reads no text and is taken
+either way.
+
 ## How it ends
 
 When a program completes or fails, the coordinator posts its result in reply

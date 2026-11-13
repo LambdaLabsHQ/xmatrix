@@ -252,6 +252,8 @@ export function nornEndBody(ended: Ledger["ended"]): string {
   return ended.error ? `The program stopped: ${ended.error}` : `The program ended without its result: ${ended.result ? show(ended.result) : "failed"}`;
 }
 
+/** How long a pass waits before trying again a program this build cannot check. */
+const NORN_RECHECK_MS = 5 * 60_000;
 export interface NornPassResult {
   status: "running" | "completed" | "failed";
   /** Why the answer this pass carried was not taken; absent when it settled its request. */
@@ -278,9 +280,14 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
     const said: { to: string; text: string }[] = [];
     let waits: unknown[] = [];
-    if ("refusal" in checked) stop(ledger, now, `The program no longer checks: ${checked.refusal}`);
-    else if (state.stopReason !== null) stop(ledger, now, state.stopReason);
-    else {
+    // A program is checked where it is written, so text that does not check here was written for another
+    // build of the Hub: one being rolled out, or one rolled back. The program is left as it is and the pass is
+    // tried again later, on a build that reads it. Stopping it would end work that nothing is wrong with.
+    // A stop needs no reading of the text, so it is taken either way.
+    if (state.stopReason !== null) stop(ledger, now, state.stopReason);
+    else if ("refusal" in checked) {
+      return { write: { retryAtMs: now + NORN_RECHECK_MS }, result: { status: "running", refusal: `The program does not check on this build of the Hub yet:\n${checked.refusal}` } };
+    } else {
       const asked = answer ? ledger.requests[answer.requestId] : undefined;
       if (answer && asked) {
         const read = "typed" in answer.reply ? readNornAnswer(asked, answer.reply.typed) : undefined;

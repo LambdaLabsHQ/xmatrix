@@ -150,6 +150,18 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     await programs.released({ ...scope("person"), ledgerRequestId: asked.requestId });
     assert.deepEqual((await programs.channelWork(scope())).closings, []);
     await programs.reported(scope("person"));
+    // A pass that cannot be made here moves only the time of the next one: the program and its ledger stay as they are.
+    await message("skewed", 6, "user", "owner");
+    await programs.start({ ...scope("skewed"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      source: `after(1h)->wait`, ledger: nornStartLedger }, nornStep());
+    const before = (await sql("SELECT ledger_json,revision FROM data.norn_programs WHERE program_id='skewed'"))[0];
+    const retryAt = Date.now() + 5 * 60_000;
+    await programs.advance(scope("skewed"), () => ({ write: { retryAtMs: retryAt }, result: undefined }));
+    const [kept] = await sql("SELECT ledger_json,revision,state,next_due_at FROM data.norn_programs WHERE program_id='skewed'");
+    assert.deepEqual([kept.ledger_json, kept.revision, kept.state, kept.next_due_at.getTime()], [before.ledger_json, before.revision, "running", retryAt]);
+    await programs.remove(scope("skewed"));
+    await programs.advance(scope("skewed"), nornStep());
+    await programs.reported(scope("skewed"));
     // A stop of the Channel ends its running programs at their next pass; a stop of one Run does not.
     await message("second", 3, "user", "owner");
     await start("second");
