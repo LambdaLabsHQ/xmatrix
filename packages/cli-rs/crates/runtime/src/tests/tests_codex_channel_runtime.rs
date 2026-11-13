@@ -1178,46 +1178,39 @@ fn codex_runtime_trace_payload_covers_historical_tool_item_types() {
     }
 }
 
-/* The daemon hands the wrapper the Profile's stored name, and the Hub binds the
-run to that exact string. Folding a valid name into a sanitized one made every
-Profile named after a macOS host fail to start. */
+/* The daemon hands the wrapper the name the Hub bound the Run to, and the Hub
+compares it verbatim. The Hub accepts any display name, so a wrapper that
+folded a name it did not like into an ASCII slug (`牛马` became
+`xmatrix-agent`) made that Agent fail every handshake. */
 #[test]
-fn a_valid_profile_name_survives_the_override_verbatim() {
+fn the_name_the_hub_bound_the_run_to_is_sent_verbatim() {
+    let long = "名".repeat(26);
     for name in [
-        "claude-Devs-MacBook-Pro.local",
-        "kimi-eeveewangdeMac-mini.local",
-        "codex_worker.02",
-        "a",
-    ] {
-        assert!(super::is_platform_agent_name(name), "{name}");
-    }
-}
-
-#[test]
-fn a_name_the_platform_would_reject_is_not_taken_verbatim() {
-    for name in [
-        "",
-        " ",
-        "-leading-dash",
-        ".leading-dot",
-        "has space",
-        "has/slash",
-        "has:colon",
+        "牛马",
+        "高级工程师claude",
+        "My Agent",
         "emoji-🎉",
+        "claude-Devs-MacBook-Pro.local",
+        "codex_worker.02",
+        long.as_str(),
     ] {
-        assert!(!super::is_platform_agent_name(name), "{name:?}");
+        assert_eq!(super::build_agent_name_from(Some(name), "codex"), name);
     }
+    // The Hub trims the display name it stores and the name it compares.
+    assert_eq!(super::build_agent_name_from(Some(" 牛马 "), "codex"), "牛马");
 }
 
 #[test]
-fn an_over_long_name_falls_back_to_sanitizing() {
-    let long = format!("a{}", "b".repeat(124));
-    assert!(!super::is_platform_agent_name(&long));
+fn without_a_bound_name_the_wrapper_names_itself_after_its_tool() {
+    for missing in [None, Some(""), Some("  ")] {
+        let name = super::build_agent_name_from(missing, "codex");
+        assert!(name.starts_with("codex-"), "{name}");
+    }
 }
 
 #[test]
 fn sanitizing_still_folds_names_the_platform_rejects() {
-    // The fallback keeps working for hand-set values like `XMATRIX_AGENT_NAME_OVERRIDE="My Agent"`.
+    // Names the wrapper makes up itself (tool, directory, host) are still folded.
     assert_eq!(super::sanitize_agent_name("My Agent"), "my-agent");
     assert_eq!(
         super::sanitize_agent_name("claude-Devs-MacBook-Pro.local"),

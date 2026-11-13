@@ -37,7 +37,6 @@ const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload:
 // Fetching history is still unbounded from the CLI's perspective, but it must
 // advance through this bounded Authority window using its sequence cursor.
 const CHANNEL_HISTORY_PAGE_SIZE: usize = 200;
-const MAX_AGENT_NAME_LEN: usize = 64;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1166,8 +1165,7 @@ impl AgentSenderIdentity {
             agent_name: agent_sender_env_value(&[
                 "XMATRIX_AGENT_NAME",
                 "XMATRIX_AGENT_NAME_OVERRIDE",
-            ])
-            .filter(|value| value.len() <= MAX_AGENT_NAME_LEN),
+            ]),
             agent_id: agent_sender_env_value(&[
                 "XMATRIX_AGENT_ID",
                 "XMATRIX_AGENT_IDENTITY_ID_OVERRIDE",

@@ -47,43 +47,20 @@ fn uses_grok_runtime(tool: &str, cmd: &str, cmd_args: &[String]) -> bool {
 
 const MAX_AGENT_NAME_LEN: usize = 64;
 
-/* The platform's own Agent name rule, mirrored from AGENT_NAME_SOURCE in
-`packages/protocol/src/agent-mention.ts`, minus `:` because a colon would
-end the name when the mention is composed. Uppercase letters and dots are
-valid — a Profile is routinely named after a host such as
-`claude-Devs-MacBook-Pro.local`. */
-fn is_platform_agent_name(value: &str) -> bool {
-    let mut chars = value.chars();
-    let Some(first) = chars.next() else {
-        return false;
-    };
-    if !first.is_ascii_alphanumeric() {
-        return false;
-    }
-    if value.chars().count() > 124 {
-        return false;
-    }
-    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+/* The daemon passes the name the Hub bound this Run to, and the Hub compares
+`message.name` against `principal.agentName` verbatim. The Hub is the only
+authority on what a name may be: it accepts any display name (`牛马`,
+`My Agent`, `claude-Devs-MacBook-Pro.local`). Folding the name here into an
+ASCII slug made every such Agent fail its handshake with "Agent credential
+does not match the live Authority run", so the name is taken as given. */
+fn build_agent_name(tool: &str) -> String {
+    let override_name = std::env::var("XMATRIX_AGENT_NAME_OVERRIDE").ok();
+    build_agent_name_from(override_name.as_deref(), tool)
 }
 
-fn build_agent_name(tool: &str) -> String {
-    if let Ok(override_name) = std::env::var("XMATRIX_AGENT_NAME_OVERRIDE") {
-        let trimmed = override_name.trim();
-        /* The daemon passes the Profile's stored name here, and the Hub binds
-        the run to that exact string — it compares `message.name` against
-        `principal.agentName` verbatim. Sanitizing a name that is already
-        valid rewrote `claude-Devs-MacBook-Pro.local` into
-        `claude-devs-macbook-pro-local`, so every Profile named after a
-        macOS host failed to start with "Agent registration does not match
-        the live Authority run-bound principal". Only a name the platform would
-        reject still gets folded into something usable. */
-        if is_platform_agent_name(trimmed) {
-            return trimmed.to_string();
-        }
-        let name = sanitize_agent_name(trimmed);
-        if !name.is_empty() {
-            return name;
-        }
+fn build_agent_name_from(override_name: Option<&str>, tool: &str) -> String {
+    if let Some(bound) = override_name.map(str::trim).filter(|name| !name.is_empty()) {
+        return bound.to_string();
     }
 
     let dirname = std::env::current_dir()
