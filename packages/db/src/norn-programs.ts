@@ -27,6 +27,8 @@ export interface NornProgramState {
 export interface NornProgramWrite {
   ledger: unknown; state: "running" | "completed" | "failed"; nextDueMs: number | null;
   requests: { requestId: string; requestRef: string; epoch: number; holder: string; settled: boolean }[];
+  /** The outside streams the program now waits on, as the evaluator names them; an event is matched against these. */
+  waits: unknown[];
   /** What the program said in this step (`say`), to be posted to its conversation. */
   notices: { noticeId: string; recipient: string; body: string }[];
 }
@@ -133,10 +135,11 @@ export class PostgresNornProgramRepository {
       nowMs: Number(rows[0]!.now_millis), stopReason: program.stop_reason === null ? null : String(program.stop_reason),
       requests: rows.filter(row => row.request_id !== null).map(requestRow) });
     if (!write) return result;
-    await tx.query({ name: "norn_program_write_v1", text: `UPDATE data.norn_programs SET ledger_json=$3::jsonb,state=$4,
-        next_due_at=$5,stop_reason=NULL,revision=revision+1,updated_at=clock_timestamp()
+    await tx.query({ name: "norn_program_write_v2", text: `UPDATE data.norn_programs SET ledger_json=$3::jsonb,state=$4,
+        next_due_at=$5,waits_json=$6::jsonb,stop_reason=NULL,revision=revision+1,updated_at=clock_timestamp()
       WHERE space_id=$1 AND program_id=$2`, values: [...scope, JSON.stringify(write.ledger), write.state,
-      write.nextDueMs === null || write.state !== "running" ? null : new Date(write.nextDueMs).toISOString()], maxRows: 0 });
+      write.nextDueMs === null || write.state !== "running" ? null : new Date(write.nextDueMs).toISOString(),
+      write.state === "running" && write.waits.length ? JSON.stringify(write.waits) : null], maxRows: 0 });
     // A new holding (another epoch) is delivered again; an unchanged one keeps its delivery.
     await tx.query({ name: "norn_request_write_v2", text: `INSERT INTO data.norn_requests
         (space_id,channel_id,program_id,request_id,request_ref,epoch,holder,delivery_message_id,settled_at)
@@ -392,4 +395,22 @@ export async function readPageNornPrograms(database: AuthorityDatabase, input: {
         ORDER BY p.page_name,p.created_at DESC LIMIT 200`, values: [input.spaceId, input.pageId], maxRows: 200 }))
       .map(row => ({ name: String(row.page_name), programId: String(row.program_id), channelId: String(row.channel_id),
         source: String(row.source), state: String(row.state), runs: Number(row.runs), ledger: row.ledger_json as unknown })));
+}
+
+/**
+ * The running programs on this shard that wait on an outside stream, with
+ * what each waits on, for an event to be matched against. Only a program
+ * whose authority may use its Space's connected apps now is told of an event:
+ * owner, admin or member, as for a Page's schedule.
+ */
+export async function readWaitingNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId?: string }) {
+  return database.transaction({ requestId: input.requestId, operation: "norn.waiting-programs" }, async tx =>
+    (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v1", text: `SELECT p.space_id,p.channel_id,p.program_id,
+        p.authority_user_id,p.waits_json
+      FROM data.norn_programs p JOIN data.space_members member ON member.space_id=p.space_id
+        AND member.user_id=p.authority_user_id AND member.role NOT IN ('viewer','participant')
+      WHERE p.state='running' AND p.waits_json IS NOT NULL AND ($1::text IS NULL OR p.space_id=$1)
+      ORDER BY p.program_id LIMIT 1000`, values: [input.spaceId ?? null], maxRows: 1000 }))
+      .map(row => ({ spaceId: String(row.space_id), channelId: String(row.channel_id), programId: String(row.program_id),
+        authorityUserId: String(row.authority_user_id), waits: Array.isArray(row.waits_json) ? row.waits_json as unknown[] : [] })));
 }

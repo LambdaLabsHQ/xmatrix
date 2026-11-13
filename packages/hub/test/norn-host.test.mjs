@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { checkNornProgram, nornBlocks, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornBlocks, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -133,4 +133,25 @@ test("what a program says is handed over once, in the step that says it", () => 
 ask(@codex, "Anything else?")->wait`);
   assert.deepEqual(step().write.notices.map(({ recipient, body }) => [recipient, body]), [["@daniel", "The flight leaves at 12:15"]]);
   assert.deepEqual(step().write.notices, []);
+});
+
+test("a program waits for an outside event beside its beat, and an event it hears starts a round at once", () => {
+  const { state, step } = program(`every(1d)->or(ciFailed("acme/app"))->forEach(_ => run(@auto(~repo="acme/app"), "Check production")->wait)`);
+  const first = step();
+  assert.deepEqual(first.write.waits.map(stream => [stream.name, stream.args[0].value]), [["ciFailed", "acme/app"]]);
+  assert.equal(first.open.length, 0);
+  const heard = nornStep(undefined, { stream: first.write.waits[0], what: "Workflow CI failed on main" })(structuredClone({ ...state, nowMs: state.nowMs + 60_000 }));
+  assert.deepEqual(heard.write.requests.map(request => request.holder), ["@auto"]);
+  // While the round runs the program waits on its request, not on the stream: a second failure is not queued behind it.
+  assert.deepEqual(heard.write.waits, []);
+  assert.match(checkNornProgram(`appEvent("sentry", ~feature="issue.created")->forEach(what => ask(@auto, what)->wait)`).targets.join(","), /@auto/u);
+  // An event is an occurrence of the streams that name its source: the repository, or the app and — when named — its feature.
+  const waits = source => program(source).step().write.waits;
+  const [ci] = waits(`ciFailed("acme/app")->forEach(what => ask(@auto, what)->wait)`);
+  assert.deepEqual([githubStream("ci-failed", "acme/app")(ci), githubStream("merged", "acme/app")(ci), githubStream("ci-failed", "acme/web")(ci)],
+    [true, false, false]);
+  const [issue] = waits(`appEvent("sentry", ~feature="issue.created")->forEach(what => ask(@auto, what)->wait)`);
+  const [any] = waits(`appEvent("sentry")->forEach(what => ask(@auto, what)->wait)`);
+  assert.deepEqual([appStream("sentry", "issue.created")(issue), appStream("sentry", "issue.resolved")(issue),
+    appStream("sentry", "issue.resolved")(any), appStream("stripe", "issue.created")(any)], [true, false, true, false]);
 });

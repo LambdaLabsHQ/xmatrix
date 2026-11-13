@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@e2ad669ba30822030d8d0bb86279b990b3e5f996; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import { NODE_FIELDS, type AstNode, type Program } from "../frontend/ast.js";
 import { astToJson, astFromJson } from "../frontend/json.js";
 import { sha256 } from "./sha256.js";
@@ -10,14 +10,21 @@ export interface Code {
   ast: string;
   root: string;
   nodes: Record<string, AstNode>;
+  /** The facts and streams the host supplies, by the name a program calls them. */
+  sources: Sources;
   nodeId(node: AstNode): string;
 }
-export function compile(program: Program, options: {std?: Program} = {}): Code {
-  return compileAstJson(astToJson(linkStd(program, options.std)));
+/** What a host supplies for a program to wait on: a fact holds once and stays true, a stream keeps occurring. */
+export type Sources = Readonly<Record<string, "fact" | "stream">>;
+/** The reference host's sources (hosts/reference.norn): what a program compiled for no named host may wait on. */
+export const REFERENCE_SOURCES: Sources = Object.freeze({ merged: "fact", released: "fact", machineUpdated: "fact", replied: "fact",
+  runEnded: "fact", ciFailed: "stream", prActivity: "stream", docChanged: "stream", message: "stream" });
+export function compile(program: Program, options: {std?: Program; sources?: Sources} = {}): Code {
+  return compileAstJson(astToJson(linkStd(program, options.std)), options.sources);
 }
 
 /** Load an existing definition without recoding the bytes that name it. */
-export function compileAstJson(ast: string): Code {
+export function compileAstJson(ast: string, sources: Sources = REFERENCE_SOURCES): Code {
   const pinned = astFromJson(ast);
   requireLinked(pinned);
   const objects: unknown[] = [pinned];
@@ -53,6 +60,7 @@ export function compileAstJson(ast: string): Code {
     ast,
     id: `sha256:${sha256(ast)}`,
     root: ids.get(pinned)!, nodes,
+    sources: Object.freeze(Object.assign(Object.create(null), sources, { every: "stream", after: "stream" })) as Sources,
     nodeId(node: AstNode) { const id = ids.get(node); if (!id) throw new Error("Node does not belong to pinned code"); return id; },
   });
 }

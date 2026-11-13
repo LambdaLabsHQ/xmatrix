@@ -160,6 +160,33 @@ Pages before its first turn, not the conversation's history: the request
 carries what the program gives it, and a program that repeats would otherwise
 hand each new Run a longer history than the last.
 
+## Events from outside
+
+A program waits for what happens outside it through the streams this host
+declares (`NORN_HOST_INTERFACE` in `norn-host.ts`):
+
+| Stream | An occurrence |
+| --- | --- |
+| `ciFailed("owner/repo")` | a workflow failed on the repository's default branch |
+| `prMerged("owner/repo")` | a pull request was merged into its default branch |
+| `appEvent("sentry", ~feature="issue.created")` | a connected app delivered an event; without `~feature`, any of its events |
+
+`every(1d)->or(ciFailed("acme/app"))->forEach(_ => run(…)->wait)` runs a
+round on its beat and at once when CI fails. Each pass stores the streams the
+program is left waiting on (`norn_programs.waits_json`, expand migration
+0251). An event, arriving where Automation triggers arrive
+(`automation-triggers.ts`), is recorded as an occurrence in the ledger of
+every running program that waits on a matching stream, and the program is
+evaluated at once (`norn-events.ts`). The value is the event in words, with
+its link. A program hears an event only under the rule an Automation does:
+its authority is a member who may act, and the Space's connection still
+covers the event's source. A program in the middle of a round waits on its
+request, not on the stream, so an event that arrives then starts no second
+round behind it.
+
+The streams are compiled into the program from the host's interface
+(`hostSources`), so a name another host supplies is refused by the checker.
+
 ## Asking the same participant again
 
 A program on a Page that asks the same participant again asks the Instance
@@ -213,8 +240,8 @@ addresses that Instance, so it wakes to read the result.
 ## Not in this version
 
 - Requests to people, and to an existing Instance.
-- Facts from outside (a merged pull request, a release) and the standard
-  library: programs are checked against the built-ins alone.
+- Facts from outside that hold once (a given pull request merged, a release
+  that contains it) and the standard library.
 - A preview of what an edit to a Page's program would change before it is saved.
 - Moving `--wait`, cards, Automations and pull request subscriptions onto
   the ledger.

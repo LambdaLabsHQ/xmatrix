@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@e2ad669ba30822030d8d0bb86279b990b3e5f996; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
@@ -35,10 +35,8 @@ export interface Machine {
   nextEnvironment: number;
   resumedAt: number;
 }
-const factBuiltins = new Set(["merged", "released", "machineUpdated", "replied", "runEnded"]);
-const streamBuiltins = new Set(["every", "after", "ciFailed", "prActivity", "docChanged", "message"]);
 const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first"]);
-const builtins = new Set([...factBuiltins, ...streamBuiltins, ...effectBuiltins, "now", "show", "ignore", "fail", "or", "never", "map", "filter", "forEach", "anyOf"]);
+const builtins = new Set([...effectBuiltins, "now", "show", "ignore", "fail", "or", "never", "map", "filter", "forEach", "anyOf"]);
 
 export function start(code: Code, now = 0): Machine {
   return { control: { kind: "eval", node: code.root, env: "e0" }, frames: [],
@@ -53,7 +51,7 @@ function environment(machine: Machine, parent: string, bindings: Record<string, 
   const id = `e${machine.nextEnvironment++}`;
   machine.environments[id] = { parent, bindings: Object.assign(Object.create(null), bindings) }; return id;
 }
-function lookup(machine: Machine, env: string, name: string): Value {
+function lookup(code: Code, machine: Machine, env: string, name: string): Value {
   let current: string | null = env;
   while (current !== null) {
     const frame: Machine["environments"][string] = machine.environments[current];
@@ -61,7 +59,7 @@ function lookup(machine: Machine, env: string, name: string): Value {
     if (Object.hasOwn(frame.bindings, name)) return frame.bindings[name];
     current = frame.parent;
   }
-  if (builtins.has(name)) return { type: "builtin", name };
+  if (builtins.has(name) || code.sources[name]) return { type: "builtin", name };
   throw new Error(`Unbound name ${name}`);
 }
 function bool(value: Value): boolean { if (value.type !== "bool") throw new Error("Expected a boolean"); return value.value; }
@@ -197,11 +195,11 @@ function invoke(code: Code, machine: Machine, fn: Value, args: Value[], labels: 
   if (machine.frames.at(-1)?.kind !== "return") machine.frames.push({ kind: "return" });
   enterFunction(code, machine, lambda, env, defaults);
 }
-function builtin(_code: Code, machine: Machine, name: string, args: Value[], labels: Record<string, Value>): void {
+function builtin(code: Code, machine: Machine, name: string, args: Value[], labels: Record<string, Value>): void {
   let value: Value;
   if (effectBuiltins.has(name)) { machine.control = { kind: "effect", effect: { name, args, labels } }; return; }
-  if (factBuiltins.has(name) || streamBuiltins.has(name)) {
-    value = { type: "source", kind: factBuiltins.has(name) ? "fact" : "stream", name, args, labels };
+  if (code.sources[name]) {
+    value = { type: "source", kind: code.sources[name], name, args, labels };
   } else switch (name) {
     case "show": if (args.length !== 1 || Object.keys(labels).length) throw new Error("show needs one positional argument");
       value = text(show(args[0])); break;
@@ -274,7 +272,7 @@ function evaluate(code: Code, machine: Machine, node: AstNode, env: string): voi
       if (parent?.kind !== "sequence") throw new Error("Recursive bindings must be inside a sequence");
       parent.env = local; machine.control = { kind: "value", value: unit }; break;
     }
-    case "Identifier": machine.control = { kind: "value", value: lookup(machine, env, node.name) }; break;
+    case "Identifier": machine.control = { kind: "value", value: lookup(code, machine, env, node.name) }; break;
     case "Lambda": machine.control = { kind: "value", value: { type: "closure", node: code.nodeId(node), environment: env } }; break;
     case "Constructor": collect(code, machine, node, node.args, env); break;
     case "TupleLiteral": collect(code, machine, node, node.elements, env); break;
