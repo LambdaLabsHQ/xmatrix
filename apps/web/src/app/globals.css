@@ -73,6 +73,21 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Cascadia Code, self-hosted, for code. The mono stack used to name a font the
+   app never shipped, so code drew in whatever monospace each machine had (SF
+   Mono on a Mac), which has no ligatures: a Norn program's `after(…)->wait`
+   read as a hyphen and a bracket jammed between two words. Cascadia Code draws
+   `->`, `=>`, `!=` and `>=` as one sign each, on by default. Only the Latin
+   file: a code character outside it falls back to the system monospace.
+   Source: @fontsource-variable/cascadia-code 5.3.0 (SIL Open Font License 1.1). */
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/fonts/cascadia-code-latin-wght-normal.a3018c0c6b.woff2") format("woff2");
+}
+
 @theme inline {
     /* `tracking-tight` keeps the type at its own spacing. */
     --tracking-tight: 0em;

@@ -24,6 +24,12 @@ export default function norn(hljs: HLJSApi): Language {
       // A participant, the way a mention reads everywhere else: @codex, @claude:2.
       { className: "title", begin: /@[A-Za-z][A-Za-z0-9_-]*(?::[0-9]+)?/ },
       { className: "attr", begin: /~[a-z][A-Za-z0-9_]*/ },
+      // A moment is one value, so it takes one ink: 2026-11-03T01:00Z, not a number, a dash and loose digits.
+      { className: "number", begin: /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z)?/ },
+      // The pipe between steps, written tight: `after(…)->wait`. It is drawn with a space's room on either side,
+      // as `=>` is written (page-document.css), while the program's text, and a copy of it, stays as written; a
+      // pipe already written with spaces keeps them and takes no more.
+      { className: "pipe", begin: /(?<=\S)->(?=\S)/ },
       // A duration (30m, 2d) or a number.
       { className: "number", begin: /\b\d+(?:\.\d+)?(?:ms|s|m|h|d|w)?\b/ },
       // A constructor or a module: Answered, Flawed, Std.
