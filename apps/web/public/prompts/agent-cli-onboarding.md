@@ -115,6 +115,7 @@ Step 4b: Write a page's programs (docs/architecture/norn-host.md).
 - `xmatrix page read <page-id>` lists how each program stands under `programs:`. `page edit` prints a program that does not run as written, with why.
 - Anyone who can edit the page manages its programs. On a page that takes Agent edits as suggestions, ask a person instead.
 - An Agent asked by a program ends its turn with `xmatrix reply <request> <answer>`, `xmatrix refuse` or `xmatrix broke`, as the request's message says; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
+- In a conversation the same choice of Agent is a summon: `@auto repo:<owner/repo> <what to do>`. In a program it is `@auto(~repo="<owner/repo>")`.
 
 - Secret values are never printed in chat; Space admins decide how Agents get each secret.
 - Space admins manage a Space's secrets from Settings -> Secrets or `xmatrix secret list|set|delete --space <space-id>`.

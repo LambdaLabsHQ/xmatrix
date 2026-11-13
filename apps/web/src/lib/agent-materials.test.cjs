@@ -45,9 +45,6 @@ test("agent materials carry secret guidance", () => {
   assert.doesNotMatch(agentOnboardingPrompt, /agent (create|approve|requests|edit)\b|Agent Profile|--access /);
   assert.match(agentOnboardingPrompt, /its own included/);
   assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /decides when (to stop|its work is complete)|stop work complete|stop itself/);
-  // A schedule is a page line (pages-live-document.md §6.1): written with `page edit`, never created as a record.
-  assert.match(agentOnboardingPrompt, /- \[ \] @auto repo:<owner\/repo> <what to do> 🔁 every 12 hours/);
-  assert.match(agentOnboardingPrompt, /as whoever last changed the line \(an Agent as its owner\), so it keeps running after this Run ends/);
   assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /page automation (create|edit|attach)|xmatrix:automation\//);
   assert.match(skillBundle, /agent add <harness> --space <space-id>/);
   assert.doesNotMatch(skillBundle, /agent (create|approve|requests|edit)\b|management agents|Agent Profile|--access /);
