@@ -35,6 +35,8 @@ test("only a top-level block tagged norn run is a program", () => {
   // On a page a block may carry a name; without one it is `main`.
   assert.deepEqual(nornBlocks(`${fenced(review, "norn run review")}\n${fenced("1")}\n${fenced("2", "norn run two words")}`),
     [{ name: "review", source: review }, { name: "main", source: "1" }]);
+  // A name is a word in any language: it is what the program's conversation is called.
+  assert.deepEqual(nornBlocks(`${fenced("1", "norn run 物业费")}\n${fenced("2", "norn run 2nd")}`).map(block => block.name), ["物业费"]);
 });
 
 test("two Agents review a design through typed requests, and the program reads each answer at once", () => {
@@ -223,7 +225,13 @@ switch choose(@Daniel, "How risky is this release?", [Low, High("say why")], ~by
   assert.deepEqual([card.verb, card.holderUserId, card.options, card.about, card.by], ["choose", "user-1", ["Low", "High(say why)"], "4.2",
     new Date(asked.by).toISOString()]);
   const body = nornPersonBody(asked, open.requestRef).split("\n");
-  assert.deepEqual([body[0], body.at(-1)], ["@Daniel", `Answer on this card: one of: Low, High(say why). It closes at ${card.by}.`]);
+  // What is asked leads the message: it is what a list of conversations shows of it.
+  assert.deepEqual([body[0], body.at(-1)], ["@Daniel How risky is this release?",
+    `Answer on this card: one of: Low, High(say why). It closes at ${card.by}. A program asks (request \`${open.requestRef}\`).`]);
+  const long = program(`ask(@Daniel, "Pay the **fee**?\\nTwo invoices disagree.")->wait`);
+  const [asked2] = long.step().open;
+  assert.deepEqual(nornPersonBody(long.state.ledger.requests[asked2.requestId], asked2.requestRef).split("\n").slice(0, 3),
+    ["@Daniel Pay the fee?", "", "```text"]);
   // A person's request is not an Agent's: conditions on where to run do not apply, and silence is not an answer.
   const conditioned = program(`switch ask(@Daniel(~repo="acme/app"), "Which?")->wait { | Broke(why) => why | other => fail(other) }`);
   conditioned.step();

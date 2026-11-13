@@ -138,8 +138,9 @@ is delivered, among those who can read the conversation, by name or handle
 as a mention reads them. Nobody by that name, or more than one, settles the
 request `Broke` with the reason, and the program goes on from that.
 
-The delivery is a message from xMatrix that names the person and carries the
-request as a card (`appMetadata.nornRequest`: what is asked, about what,
+The delivery is a message from xMatrix that names the person, then says
+what is asked in its first line (what a list of conversations shows of it),
+and carries the request as a card (`appMetadata.nornRequest`: what is asked, about what,
 what `choose` offers, when it closes). It declares a wait on them, so it
 shows where what needs them shows. The Web draws the controls from the
 request's verb: Yes and No, the options, or a field for words; Decline

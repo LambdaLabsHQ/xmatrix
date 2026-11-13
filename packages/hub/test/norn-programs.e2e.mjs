@@ -91,7 +91,7 @@ switch run(@codex, "Review the design")->wait {
       message.replyToMessageId === asked.messageId && message.messageResidual?.appMetadata?.nornRequest), "the request card");
     const request = card.messageResidual.appMetadata.nornRequest;
     assert.deepEqual([request.verb, request.holder, request.holderUserId, request.text, request.about, card.body.split("\n")[0]],
-      ["confirm", "@Norn", ownerId, "Ship the release?", "4.2", "@Norn"]);
+      ["confirm", "@Norn", ownerId, "Ship the release?", "4.2", "@Norn Ship the release?"]);
     // An Agent Run does not answer for a person, and an answer of the wrong kind is refused with the request left open.
     assert.ok([401, 403].includes((await answer(request.ref, { outcome: "answered", text: "Yes" }, runToken)).status));
     assert.match((await (await answer(request.ref, { outcome: "answered", text: "Maybe" })).json()).refusal, /Yes/u);
