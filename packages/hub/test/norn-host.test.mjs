@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appStream, checkNornProgram, githubStream, nornBlocks, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornRequestCard, personHolder, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -82,10 +82,10 @@ test("a stop in the conversation ends the program and cancels what it left open"
 });
 
 test("a request this host cannot deliver ends at once, and one of a group goes to whom it can reach", () => {
-  const person = program(`switch ask(@daniel, "Approve?")->wait { | Broke(why) => why | other => fail(other) }`);
-  assert.equal(person.step().result.status, "completed");
-  assert.match(person.state.ledger.ended.result.value, /cannot deliver a request to @daniel/u);
-  const group = program(`run(anyOf([@daniel, @codex, @claude]), "Audit")->wait`);
+  const instance = program(`switch ask(@codex:2, "Approve?")->wait { | Broke(why) => why | other => fail(other) }`);
+  assert.equal(instance.step().result.status, "completed");
+  assert.match(instance.state.ledger.ended.result.value, /cannot deliver a request to @codex:2/u);
+  const group = program(`run(anyOf([@codex:2, @codex, @claude]), "Audit")->wait`);
   assert.deepEqual(group.step().open.map(request => [request.holder, request.epoch]), [["@codex", 1]]);
 });
 
@@ -176,4 +176,32 @@ both(every(1d)->map(_ => "the daily round"), both(ciFailed("acme/app"), ciFailed
   const [any] = waits(`appEvent("sentry")->forEach(what => ask(@auto, what)->wait)`);
   assert.deepEqual([appStream("sentry", "issue.created")(issue), appStream("sentry", "issue.resolved")(issue),
     appStream("sentry", "issue.resolved")(any), appStream("stripe", "issue.created")(any)], [true, false, true, false]);
+});
+
+test("a request of a person stays open for them, and reads as a card with what an answer may be", () => {
+  assert.deepEqual(["@Daniel", "@claude", "@auto", "@claude:2"].map(personHolder), [true, false, false, false]);
+  const { state, step } = program(`type risk = Low | High(string)
+switch choose(@Daniel, "How risky is this release?", [Low, High("say why")], ~by=2h, ~about="4.2")->wait {
+| Answered(Low) => "ship"
+| Answered(High(why)) => why
+| NoReply => "nobody decided"
+| other => fail(other)
+}`);
+  const [open] = step().open;
+  assert.equal(open.holder, "@Daniel");
+  const asked = state.ledger.requests[open.requestId];
+  const card = nornRequestCard(asked, open.requestRef, "user-1");
+  assert.deepEqual([card.verb, card.holderUserId, card.options, card.about, card.by], ["choose", "user-1", ["Low", "High(say why)"], "4.2",
+    new Date(asked.by).toISOString()]);
+  const body = nornPersonBody(asked, open.requestRef).split("\n");
+  assert.deepEqual([body[0], body.at(-1)], ["@Daniel", `Answer on this card: one of: Low, High(say why). It closes at ${card.by}.`]);
+  // A person's request is not an Agent's: conditions on where to run do not apply, and silence is not an answer.
+  const conditioned = program(`switch ask(@Daniel(~repo="acme/app"), "Which?")->wait { | Broke(why) => why | other => fail(other) }`);
+  conditioned.step();
+  assert.match(conditioned.state.ledger.ended.result.value, /is a person/u);
+  step(undefined, { nowMs: state.nowMs + 3 * 3_600_000 });
+  assert.equal(state.ledger.ended.result.value, "nobody decided");
+  assert.deepEqual([nornOutcomeText("@Daniel", { tag: "Answered", value: { type: "variant", name: "Low", args: [] } }),
+    nornOutcomeText("@Daniel", { tag: "Refused", reason: "not mine" }), nornOutcomeText("@Daniel", { tag: "NoReply" })],
+    ["@Daniel answered: Low", "@Daniel declined: not mine", "It closed without an answer."]);
 });

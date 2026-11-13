@@ -121,6 +121,34 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     await programs.remove(scope("events"));
     assert.equal((await programs.advance(scope("events"), nornStep())).status, "failed");
     await programs.reported(scope("events"));
+    // A request of a person needs nothing working on it: it stays theirs while they can read the conversation,
+    // is found by their id alone, and ends when they no longer can.
+    await message("person", 5, "user", "owner");
+    await sql(`INSERT INTO control.auth_users (id,name,email,handle,profile_version,created_at,updated_at)
+      VALUES ('owner','Owner','owner@example.com','owner',1,now(),now()) ON CONFLICT (id) DO NOTHING`);
+    await programs.start({ ...scope("person"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      source: `switch ask(@Owner, "Approve the budget?")->wait { | Broke(why) => why | other => fail(other) }`, ledger: nornStartLedger }, nornStep());
+    const [asked] = (await programs.channelWork(scope())).deliveries;
+    assert.deepEqual(await programs.people({ requestId: randomUUID(), channelId: "channel", matches: name => name === "Owner" }), ["owner"]);
+    await programs.delivered({ ...scope("person"), ledgerRequestId: asked.requestId, epoch: asked.epoch, holderUserId: "owner" });
+    assert.deepEqual((await programs.channelWork(scope())).passes, []);
+    assert.equal((await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "owner" })).programId, "person");
+    assert.equal(await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "someone-else" }), undefined);
+    // The conversation is closed to them: the request is left with nobody, and the next pass ends it with the reason.
+    await sql("UPDATE data.channels SET mode='closed' WHERE channel_id='channel'");
+    await sql("UPDATE data.space_members SET role='member' WHERE space_id='space' AND user_id='owner'");
+    assert.deepEqual((await programs.channelWork(scope())).passes, ["person"]);
+    assert.equal((await programs.advance(scope("person"), nornStep())).status, "completed");
+    await sql("UPDATE data.channels SET mode='open' WHERE channel_id='channel'");
+    await sql("UPDATE data.space_members SET role='owner' WHERE space_id='space' AND user_id='owner'");
+    assert.match((await sql("SELECT ledger_json->'ended'->'result'->>'value' AS why FROM data.norn_programs WHERE program_id='person'"))[0].why,
+      /@Owner can no longer read this conversation/u);
+    // Ended, its card is still to be told how; told, nothing is left of it.
+    const [closing] = (await programs.channelWork(scope())).closings;
+    assert.deepEqual([closing.programId, closing.holderUserId, closing.deliveryMessageId], ["person", "owner", asked.deliveryMessageId]);
+    await programs.released({ ...scope("person"), ledgerRequestId: asked.requestId });
+    assert.deepEqual((await programs.channelWork(scope())).closings, []);
+    await programs.reported(scope("person"));
     // A stop of the Channel ends its running programs at their next pass; a stop of one Run does not.
     await message("second", 3, "user", "owner");
     await start("second");

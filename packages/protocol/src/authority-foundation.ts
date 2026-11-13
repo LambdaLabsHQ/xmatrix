@@ -224,6 +224,9 @@ export const HUB_ROUTES = {
   norn_requests: "/api/norn/requests",
   /** The Run that holds a Norn request answers it. */
   norn_request_answer: "/api/norn/requests/answer",
+  /** The person a Norn request was delivered to answers it, from its card. */
+  channel_norn_request_answer: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,
@@ -613,6 +616,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}`,
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
+  channel_norn_request_answer: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
   context_feed: "/api/xmatrix/context/feed",
   assistant_memory: "/api/xmatrix/assistant-memory",
   shared_memory: "/api/xmatrix/shared-memory",
