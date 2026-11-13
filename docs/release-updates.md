@@ -17,6 +17,19 @@ language setting. Any App event can carry such a card
 older than the Hub shows the text. Messages already posted keep theirs.
 Recovery is a CI-validated beta Hub and Web reverting this change.
 
+## Unreleased: Billing shows who used a Space's allowance and how it is counted
+
+Settings → Billing showed one meter for the whole Space and no way to tell
+which Agent or app used it. Each counted write is now itemized against its
+author in the statement that counts it (`data.space_credit_usage`), and
+Billing lists this month's credits (or a Free Space's writes) by Agent, app
+and paid X calls, the total for you and your Agents, and how credits are
+counted. The operator's own Space, whose credits are waived, showed 0; it now
+shows what it really used, marked "not charged". The iPhone and Android apps
+show the same. Expand-only migration 0249; usage before it appears as one
+"counted before itemizing began" row. Recovery is a CI-validated Hub and Web
+release reverting the change; the table may stay.
+
 ## Unreleased: `xmatrix goal` works inside a Claude run
 
 `xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is

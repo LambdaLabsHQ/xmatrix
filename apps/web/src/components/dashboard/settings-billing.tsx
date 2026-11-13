@@ -17,6 +17,7 @@ import { billingCheckoutReturn } from "@/lib/billing-checkout-return";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { spacePlanMark } from "./space-plan-mark";
+import { allowanceUsed, SpaceUsage } from "./space-usage";
 import { replaceBrowserPath } from "./workspace-shell-navigation";
 import { spaceBillingKey, useSpaceBilling, type SpaceBilling, type SpaceCredits } from "./space-billing";
 
@@ -152,7 +153,8 @@ function StripeSpaceBillingSection({ userId, space }: {
             state={mark && mark.state !== "active" ? { label: mark.state === "blocked" ? "Blocked" : capitalized(subscription?.status ?? "Ending"), title: mark.title, alert: mark.state === "blocked" } : null}
           >
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
-            {billing.credits && <CreditUsage credits={billing.credits} />}
+            {billing.credits && <CreditUsage billing={billing} credits={billing.credits} />}
+            <SpaceUsage billing={billing} userId={userId} />
             <PlanFeatures features={PRO_PLAN_FEATURES} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -181,6 +183,7 @@ function StripeSpaceBillingSection({ userId, space }: {
         <>
           <PlanCard plan="free" name="Free" title={space.name}>
             <PlanMeter label="Messages & page edits" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
+            <SpaceUsage billing={billing} userId={userId} />
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -312,8 +315,9 @@ function SeatPips({ used, limit }: { used: number; limit: number }) {
 }
 
 /** The month's Agent credits: included first, then packs, then the grace. */
-function CreditUsage({ credits }: { credits: SpaceCredits }) {
-  const extra = [
+function CreditUsage({ billing, credits }: { billing: SpaceBilling; credits: SpaceCredits }) {
+  const waived = billing.usage?.waived === true;
+  const extra = waived ? `not charged · resets ${formatPlanDate(credits.resetsOn)}` : [
     credits.packBalance > 0 || credits.packUsed > 0
       ? `${credits.packBalance.toLocaleString()} pack credits left` : null,
     credits.graceUsed > 0 ? `${credits.graceUsed.toLocaleString()} of ${credits.grace.toLocaleString()} grace used` : null,
@@ -321,17 +325,18 @@ function CreditUsage({ credits }: { credits: SpaceCredits }) {
   ].filter(Boolean).join(" · ");
   return (
     <div className="space-y-1">
-      <PlanMeter label="Agent credits" used={credits.includedUsed} limit={credits.included} />
+      <PlanMeter label="Agent credits" used={waived ? allowanceUsed(billing) : credits.includedUsed} limit={credits.included}
+        charged={!waived} />
       <p className="text-xs text-muted-foreground">{extra}</p>
-      <p className="text-xs text-muted-foreground">Paid X actions use this balance too. <a className="underline" href="/#pricing" target="_blank" rel="noreferrer">See credit prices</a>.</p>
     </div>
   );
 }
 
-function PlanMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
+/** `charged` false: an allowance counted but never enforced, so reaching it is no alarm. */
+function PlanMeter({ label, used, limit, charged = true }: { label: string; used: number; limit: number; charged?: boolean }) {
   const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
   return (
-    <div className="app-plan-meter" data-full={ratio >= 1 ? "true" : undefined}>
+    <div className="app-plan-meter" data-full={charged && ratio >= 1 ? "true" : undefined}>
       <div className="flex items-baseline justify-between gap-3">
         <span className="app-plan-meter-label">{label}</span>
         <span className="app-plan-meter-label tabular-nums">{used.toLocaleString()} of {limit.toLocaleString()}</span>

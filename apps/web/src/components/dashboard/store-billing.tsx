@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { useSpaceBilling } from "./space-billing";
+import { allowanceUsed, SpaceUsage } from "./space-usage";
 
 /**
  * Busy and status for a store's Billing section: one store action runs at a
@@ -101,8 +102,8 @@ export function canPurchaseFromStore(billing: Billing | undefined): boolean {
  * immutable binding, the period buttons and the legal links. Each store adds
  * only its own name, buttons and renewal terms.
  */
-export function StoreBillingFrame({ testId, storeName, provider, space, billing, coverage, products, busy, onPurchase, actions, terms, message }: {
-  testId: string; storeName: string; provider: "apple" | "google"; space: { name: string }; billing: Billing | undefined; coverage: string;
+export function StoreBillingFrame({ testId, storeName, provider, userId, space, billing, coverage, products, busy, onPurchase, actions, terms, message }: {
+  testId: string; storeName: string; provider: "apple" | "google"; userId: string; space: { name: string }; billing: Billing | undefined; coverage: string;
   products: { key: string; displayPrice: string; interval: "month" | "year" }[]; busy: boolean;
   onPurchase: (key: string) => void; actions: React.ReactNode; terms: string; message: string;
 }) {
@@ -110,6 +111,7 @@ export function StoreBillingFrame({ testId, storeName, provider, space, billing,
   const canPurchase = canPurchaseFromStore(billing);
   return <div className="app-settings-section space-y-4" data-testid={testId}>
     <div><h3 className="font-semibold">{space.name}</h3><p>{active ? "Pro" : "Free"} · {billing ? `${billing.seats.used} / ${billing.seats.limit}` : "–"} human seats</p></div>
+    {billing && <StoreAllowance billing={billing} userId={userId} />}
     <p>{coverage}</p>
     <p>The subscription is bound to this Space. Switching Spaces or restoring purchases does not move it. Rebinding is not supported.</p>
     {canPurchase && <div className="flex flex-wrap gap-2">{products.map((product) => <button key={product.key} disabled={busy}
@@ -122,5 +124,16 @@ export function StoreBillingFrame({ testId, storeName, provider, space, billing,
     <p className="text-xs text-muted-foreground">{terms}</p>
     <div className="flex gap-4 text-sm"><Link href="/terms">Terms of Service</Link><Link href="/privacy">Privacy Policy</Link></div>
     {message && <p role="status">{message}</p>}
+  </div>;
+}
+
+/** The allowance the Space is using and who used it, as Settings → Billing shows on the web. */
+function StoreAllowance({ billing, userId }: { billing: Billing; userId: string }) {
+  const limit = billing.plan === "pro" && billing.credits ? billing.credits.included : billing.freeUsage.limit;
+  return <div className="space-y-3">
+    <p>{billing.plan === "pro" && billing.credits ? "Agent credits this month" : "Messages & page edits"}:{" "}
+      <span className="tabular-nums">{allowanceUsed(billing).toLocaleString()} of {limit.toLocaleString()}</span>
+      {billing.usage?.waived ? " (not charged)" : ""}</p>
+    <SpaceUsage billing={billing} userId={userId} />
   </div>;
 }

@@ -252,6 +252,22 @@ export interface PostgresSenderSnapshotRepair {
 /** What xMatrix itself says is never a write the Space pays for (agent-credits.md):
  * its system notices, the welcome steps it writes under the owner's name, and the
  * summon it sends for a first message. Only people's, Agents' and apps' speech counts. */
+/**
+ * Who a billable message is counted against, for an itemized allowance: a
+ * person by their own id, an Agent by its registration name and owner, an app
+ * by its id. Read from the sender snapshot this append already fixed.
+ */
+function billedAuthor(senderKind: string, senderId: string, snapshot: Record<string, unknown>,
+  runOwnerUserId: string | undefined): { ownerUserId: string; name: string } {
+  const text = (value: unknown) => typeof value === "string" ? value : "";
+  if (senderKind === "user") return { ownerUserId: senderId, name: "" };
+  if (senderKind === "agent") return {
+    ownerUserId: (runOwnerUserId ?? text(snapshot.userId)).slice(0, 300),
+    name: (text(snapshot.agentName) || text(snapshot.name) || senderId).slice(0, 200),
+  };
+  return { ownerUserId: "", name: senderId.slice(0, 200) };
+}
+
 export function isBillableMessage(senderKind: string, messageKind: string): boolean {
   return senderKind !== "system" && !messageKind.startsWith("xmatrix.system.") &&
     messageKind !== ONBOARDING_MESSAGE_KIND;
@@ -1815,8 +1831,9 @@ export class PostgresMessageRepository {
       // Billing admission and the durable publish receipt share the final SQL
       // statement, so a metered counter is never locked across another round trip.
       const billing = this.billing.message;
+      const billed = billedAuthor(senderKind, senderId, input.senderSnapshot, runOwnerUserId);
       const admission = (await transaction.query<MessagePublishRow>({
-        name: `message_append_publish_${this.billing.id}_v3`,
+        name: `message_append_publish_${this.billing.id}_v4`,
         text: `WITH ${billing.ctes}, accepted AS MATERIALIZED (
             SELECT admission.*,$5::jsonb AS result_json FROM admission
             WHERE NOT $10 OR (${billing.accepts})
@@ -1861,11 +1878,12 @@ export class PostgresMessageRepository {
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
               EXISTS (SELECT 1 FROM reservation_commit) AS sequence_confirmed,
-              $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
+              $13::text AS author_kind,$14::boolean AS credits_waived,
+              $15::text AS billed_owner_user_id,$16::text AS billed_author_name FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
           billableMessage, channelId, recordDigest, senderKind,
-          input.creditsWaived === true],
+          input.creditsWaived === true, billed.ownerUserId, billed.name],
         maxRows: 1,
       }))[0];
       if (admission?.accepted && !admission.channel_id) throw new MessageAuthorityError(

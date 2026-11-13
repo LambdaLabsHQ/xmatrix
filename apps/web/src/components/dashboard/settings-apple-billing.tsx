@@ -66,7 +66,7 @@ export function AppleSpaceBillingSection({ userId, space }: { userId: string; sp
   if (!space) return <p>Open a Space to see its plan.</p>;
   if (!available) return <p>Update xMatrix to manage App Store subscriptions. Existing Space access is unchanged.</p>;
   const apple = billing?.subscription?.billingProvider === "apple";
-  return <StoreBillingFrame testId="apple-billing" storeName="App Store" provider="apple" space={space} billing={billing}
+  return <StoreBillingFrame testId="apple-billing" storeName="App Store" provider="apple" userId={userId} space={space} billing={billing}
     coverage="App Store Pro covers as many human seats as were bought through the App Store (a purchase here is one seat) and 5,000 Agent credits per seat each month for Agent/app writing and paid X actions; people write in xMatrix for free. Agents do not occupy seats. Model-provider subscriptions are separate."
     products={products.map((product) => ({ key: product.id, displayPrice: product.displayPrice, interval: product.interval }))}
     busy={busy} onPurchase={(key) => { const product = products.find((item) => item.id === key); if (product) purchase(product); }}

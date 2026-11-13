@@ -432,7 +432,8 @@ export class PostgresPageRepository {
    */
   private async chargeRevision(tx: DatabaseTransaction, spaceId: string, actor: Actor, now: string): Promise<void> {
     const rejection = await spaceBilling.durableWrite(tx, { spaceId, now, kind: "page_revision",
-      author: actor.isAgent ? "agent" : "person", creditsWaived: spaceId === this.options.creditsWaivedSpaceId });
+      author: actor.isAgent ? "agent" : "person", creditsWaived: spaceId === this.options.creditsWaivedSpaceId,
+      ownerUserId: actor.userId, authorName: actor.isAgent ? actor.author.label : "" });
     if (rejection) throw new PageControlError(rejection.code, rejection.status, rejection.message, rejection.details);
   }
 

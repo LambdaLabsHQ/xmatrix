@@ -36,7 +36,10 @@ export interface BillingRejection {
  * needs) from the statement's parameters: `$2` Space id, `$6` commit time
  * (timestamptz), `$10` whether the message is billable, `$13` the author kind
  * (`user`, `agent`, `app` or `system`), `$14` whether the deployment waives the
- * Space's Agent credits (its own operator Space). `accepts` is a predicate over
+ * Space's Agent credits (its own operator Space), `$15` the user the write is
+ * on behalf of (a person themself, an Agent's owner; empty for an app) and
+ * `$16` the author's name (an Agent's registration name, an app's id; empty
+ * for a person), so a policy can itemize who used an allowance. `accepts` is a predicate over
  * `admission` columns. The core publishes when the message is not billable or
  * `accepts` holds, and returns the `admission` row to `rejection` otherwise.
  * A published billable message's row goes to `notice`, which may ask the core
@@ -147,7 +150,11 @@ export interface SpaceBillingPolicy {
    */
   durableWrite(
     transaction: BillingTransaction,
-    input: { spaceId: string; now: string; kind: DurableWriteKind; author: "person" | "agent"; creditsWaived?: boolean },
+    input: {
+      spaceId: string; now: string; kind: DurableWriteKind; author: "person" | "agent"; creditsWaived?: boolean;
+      /** The person, or the Agent's owner; and the Agent's registration name (empty for a person), as for messages. */
+      ownerUserId: string; authorName: string;
+    },
   ): Promise<BillingRejection | null>;
   /**
    * Called in the transaction that admits an upload of `bytes` into a Space

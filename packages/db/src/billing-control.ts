@@ -175,6 +175,64 @@ async function summary(
   };
 }
 
+/** One author's share of an allowance: an Agent, an app, a person, or a person's paid X calls. */
+export interface UsageItem {
+  kind: "agent" | "app" | "user" | "x";
+  /** The person, or the Agent's owner; empty for an app. */
+  ownerUserId: string;
+  ownerName: string;
+  /** An Agent's registration name or an app's id; empty for a person. */
+  name: string;
+  messages: number;
+  pageRevisions: number;
+  units: number;
+}
+
+/**
+ * Who used the Space's allowance (docs/design/agent-credits.md#who-used-it):
+ * this month's credits for a paid Space, every write for a Free one. Paid X
+ * calls are read from their permanent receipts. `since` is the first write the
+ * ledger itemized, so a caller can tell writes counted before it apart.
+ */
+async function itemizedUsage(tx: DatabaseTransaction, spaceId: string, meter: "credit" | "free",
+  creditsWaived: boolean): Promise<{ meter: "credit" | "free"; waived: boolean; since: string | null; items: UsageItem[] }> {
+  const today = new Date();
+  const periodStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const rows = await tx.query<QueryResultRow>({
+    name: "billing_itemized_usage_v1",
+    text: `WITH ledger AS (
+        SELECT author_kind AS kind,owner_user_id,author_name AS name,
+          SUM(units) FILTER (WHERE write_kind='message') AS messages,
+          SUM(units) FILTER (WHERE write_kind='page_revision') AS page_revisions,
+          SUM(units) AS units,MIN(created_at) AS since
+        FROM data.space_credit_usage
+        WHERE space_id=$1 AND meter=$2 AND ($2='free' OR period_start=$3::date)
+        GROUP BY 1,2,3
+      ), x AS (
+        SELECT 'x' AS kind,actor_user_id AS owner_user_id,'' AS name,0 AS messages,0 AS page_revisions,
+          SUM(COALESCE(actual_credits,reserved_credits)) AS units,NULL::timestamptz AS since
+        FROM data.paid_call_receipts
+        WHERE space_id=$1 AND $2='credit' AND created_at>=$3::date
+        GROUP BY actor_user_id HAVING SUM(COALESCE(actual_credits,reserved_credits))>0
+      ), items AS (SELECT * FROM ledger UNION ALL SELECT * FROM x)
+      SELECT items.*,COALESCE(NULLIF(member.display_name,''),member.email,'') AS owner_name
+      FROM items LEFT JOIN data.space_members member
+        ON member.space_id=$1 AND member.user_id=items.owner_user_id
+      ORDER BY items.units DESC,items.kind,items.name LIMIT 200`,
+    values: [spaceId, meter, periodStart], maxRows: 200,
+  });
+  const since = rows.map((row) => row.since).filter((value) => value != null)
+    .map((value) => new Date(value as string | Date).toISOString()).sort()[0] ?? null;
+  return {
+    meter, waived: meter === "credit" && creditsWaived, since,
+    items: rows.map((row) => ({
+      kind: String(row.kind) as UsageItem["kind"], ownerUserId: String(row.owner_user_id ?? ""),
+      ownerName: String(row.owner_name ?? ""), name: String(row.name ?? ""),
+      messages: Number(row.messages ?? 0), pageRevisions: Number(row.page_revisions ?? 0), units: Number(row.units ?? 0),
+    })),
+  };
+}
+
 /** This month's Agent credits (docs/design/agent-credits.md). A row from an
  * earlier month has nothing used yet this month; its pack balance carries over. */
 function creditSummary(allowance: CreditAllowance, seatQuantity: number, row: QueryResultRow | undefined,
@@ -234,7 +292,14 @@ export class PostgresBillingRepository {
     });
   }
 
-  async readSpaceBilling(input: { requestId: string; spaceId: string; actorUserId: string }) {
+  /**
+   * The Space's plan for a member. `itemize` adds who used its allowance, for
+   * the Billing page; `creditsWaived` is the deployment's own operator Space,
+   * whose credits are recorded but never charged.
+   */
+  async readSpaceBilling(input: {
+    requestId: string; spaceId: string; actorUserId: string; itemize?: { creditsWaived: boolean };
+  }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
     const placement = await this.spaces.resolve(requestId, "billing.read", spaceId);
     const session = this.database.openSession();
@@ -242,7 +307,10 @@ export class PostgresBillingRepository {
       // READ COMMITTED already takes a snapshot per SELECT. These independent
       // reads need no BEGIN/COMMIT; each retains its fence and bounded recovery.
       const tx = singleReadStatements(session, { requestId, operation: "billing.read", placement });
-      return { billing: await summary(tx, spaceId, actorUserId) };
+      const billing = await summary(tx, spaceId, actorUserId);
+      if (!input.itemize) return { billing };
+      return { billing: { ...billing,
+        usage: await itemizedUsage(tx, spaceId, billing.plan === "pro" ? "credit" : "free", input.itemize.creditsWaived) } };
     } finally {
       await session.close();
     }
