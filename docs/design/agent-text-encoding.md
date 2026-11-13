@@ -43,6 +43,13 @@ The CLI still rejects damaged text and non-UTF-8 input before publishing, becaus
 setting a later process's code page cannot recover characters a previous process
 already replaced.
 
+`??` from an argument or stdin is refused while the Windows ANSI code page is not
+UTF-8. The code page does not see every lossy writer: Windows PowerShell pipes
+through an ASCII `$OutputEncoding` under any code page, and a body saved with
+`Set-Content`/`Out-File -Encoding ascii` reaches `--file` as valid UTF-8. Both
+leave pure ASCII, so on Windows a `???` run in text with no non-ASCII character
+is refused from arguments, stdin and files alike.
+
 ## Verification
 
 Regression tests exercise inherited non-UTF-8 overrides and case-insensitive
