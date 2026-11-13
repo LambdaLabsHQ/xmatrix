@@ -184,6 +184,10 @@ covers the event's source. A program in the middle of a round waits on its
 request, not on the stream, so an event that arrives then starts no second
 round behind it.
 
+Streams of one kind are brought to one shape with `map`, so a handler reads
+text whichever stream occurred:
+`let both = (a, b) => a->or(b)->map(each => switch each { | First(what) => what | Second(what) => what })`.
+
 The streams are compiled into the program from the host's interface
 (`hostSources`), so a name another host supplies is refused by the checker.
 

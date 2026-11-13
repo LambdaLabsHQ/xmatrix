@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a Norn program can map an event stream
+
+A Norn program that waited on a mapped stream (`ciFailed(…)->map(…)`) ended
+at once: the vendored runtime did not implement `map`. A program that listens
+to several repositories therefore got a nested `either` and could not read
+which event woke it. Norn is vendored at norn-lang/norn#35: a mapped stream
+occurs when its stream does and the handler receives the mapped value. Hub
+only. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: a Norn program hears events from outside
 
 A Norn program could wait for time and for answers only, so work that an

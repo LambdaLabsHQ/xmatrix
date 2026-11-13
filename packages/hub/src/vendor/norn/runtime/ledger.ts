@@ -1,11 +1,11 @@
-// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
 import type { ReportForm } from "../frontend/check/forms.js";
 import type { Code } from "./code.js";
 import { mismatch } from "./form.js";
-import { advance, resume, start, type Effect } from "./machine.js";
+import { advance, resume, resumeThrough, start, type Effect, type Through } from "./machine.js";
 import { sha256 } from "./sha256.js";
 import { equal, eventKey, show, text, unit, variant, type Json, type Value } from "./value.js";
 
@@ -243,7 +243,9 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
       targets.push({ kind: "request", id: source.id });
     } else if (source.type !== "source") throw new ProgramError("wait needs a request, a fact or a stream");
     else if (source.name === "or") pending.push({ source: source.args[1], path: [...path, "Second"] }, { source: source.args[0], path: [...path, "First"] });
-    else if (source.name === "map" || source.name === "filter") throw new ProgramError("Stream map/filter are not implemented by the reference host yet");
+    // A mapped stream occurs when its stream does; the function runs on the value the wait gives (`through`).
+    else if (source.name === "map") pending.push({ source: source.args[0], path });
+    else if (source.name === "filter") throw new ProgramError("Stream filter is not implemented by the reference host yet");
     else if (source.name === "after" || source.name === "every") {
       if (source.args.length !== 1 || Object.keys(source.labels).length) throw new ProgramError("A timer needs one positional argument");
       const when = source.args[0];
@@ -258,6 +260,30 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
     } else if (source.name !== "never") targets.push({ kind: source.kind, source, path });
   }
   return targets;
+}
+
+/**
+ * The functions `map` put on the way from the stream that occurred to what a
+ * wait on `waited` gives, innermost first, with the constructors `or` and
+ * `waitUntil` put around the value between them. Null: no function is on the
+ * way, and the wait gives the recorded value as it stands.
+ */
+function through(waited: Value, given: Value, name: string): { value: Value; steps: Through[] } | null {
+  const steps: Through[] = [];
+  const outer: Through[] = [];
+  let source = waited, value = given;
+  if (name === "waitUntil") {
+    if (value.type !== "variant" || value.name !== "Some") return null;
+    value = value.args[0]; outer.push({ wrap: "Some" });
+  }
+  while (source.type === "source" && (source.name === "or" || source.name === "map")) {
+    if (source.name === "map") { outer.unshift({ fn: source.args[1] }); source = source.args[0]; continue; }
+    if (value.type !== "variant") break;
+    outer.unshift({ wrap: value.name });
+    source = source.args[value.name === "First" ? 0 : 1]; value = value.args[0];
+  }
+  steps.push(...outer);
+  return steps.some(step => "fn" in step) ? { value, steps } : null;
 }
 
 /** At one instant a request's own deadline comes first, then the wait's, then any other reply or occurrence. */
@@ -473,7 +499,10 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       end("failed", null, error.message); break;
     }
     if (!resumption) break;
-    resume(machine, resumption.value, resumption.at);
+    const { name, args } = control.effect;
+    const mapped = name === "wait" || name === "waitUntil" ? through(args[0], resumption.value, name) : null;
+    if (mapped) resumeThrough(machine, mapped.value, mapped.steps, resumption.at);
+    else resume(machine, resumption.value, resumption.at);
   }
 
   for (const request of Object.values(ledger.requests)) {

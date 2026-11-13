@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * A runtime sees values, not types. `elaborate` writes the form of each
  * `run`'s report into a copy of the program as that call's `~form` argument,

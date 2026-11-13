@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "b082e26527d15f8d5e316326da0d613c6c031405";
+const revision = "96c71706b2dd17ca23bd39d62d9e373b7cc20f14";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
 const root = fileURLToPath(new URL("../packages/hub/src/vendor/norn/", import.meta.url));

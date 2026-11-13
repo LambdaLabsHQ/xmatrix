@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
@@ -27,7 +27,10 @@ type Frame =
   | { kind: "try" }
   | { kind: "return" }
   | { kind: "default"; lambda: string; remaining: string[]; env: string; pattern: string }
-  | { kind: "forEach"; stream: Value; callback: Value; stage: "waiting" | "handling" | "reporting" };
+  | { kind: "forEach"; stream: Value; callback: Value; stage: "waiting" | "handling" | "reporting" }
+  | { kind: "through"; steps: Through[] };
+/** What a stream's value passes through on its way to the program: a function given to `map`, or a constructor around it. */
+export type Through = { fn: Value } | { wrap: string };
 export interface Machine {
   control: Control;
   frames: Frame[];
@@ -45,6 +48,12 @@ export function start(code: Code, now = 0): Machine {
 export function resume(machine: Machine, value: Value, now: number): Machine {
   if (machine.control.kind !== "effect" && machine.control.kind !== "report") throw new Error("Only a suspended effect or report can resume");
   machine.control = { kind: "value", value }; machine.resumedAt = now;
+  return machine;
+}
+/** Resumes a wait with a stream's value, which first passes through each step in turn. */
+export function resumeThrough(machine: Machine, value: Value, steps: Through[], now: number): Machine {
+  resume(machine, value, now);
+  machine.frames.push({ kind: "through", steps });
   return machine;
 }
 function environment(machine: Machine, parent: string, bindings: Record<string, Value>): string {
@@ -364,6 +373,16 @@ function accept(code: Code, machine: Machine, value: Value): void {
         Object.defineProperty(machine.environments[frame.env].bindings, name, { value: bound, enumerable: true, writable: true, configurable: true });
       }
       enterFunction(code, machine, code.nodes[frame.lambda] as Lambda, frame.env, frame.remaining); break;
+    }
+    case "through": {
+      let passed = value;
+      for (let index = 0; index < frame.steps.length; index++) {
+        const step = frame.steps[index];
+        if ("wrap" in step) { passed = variant(step.wrap, passed); continue; }
+        machine.frames.push({ kind: "through", steps: frame.steps.slice(index + 1) });
+        invoke(code, machine, step.fn, [passed], {}); return;
+      }
+      machine.control = { kind: "value", value: passed }; break;
     }
     case "forEach": {
       if (frame.stage === "waiting") {

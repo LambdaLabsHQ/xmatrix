@@ -145,6 +145,13 @@ test("a program waits for an outside event beside its beat, and an event it hear
   // While the round runs the program waits on its request, not on the stream: a second failure is not queued behind it.
   assert.deepEqual(heard.write.waits, []);
   assert.match(checkNornProgram(`appEvent("sentry", ~feature="issue.created")->forEach(what => ask(@auto, what)->wait)`).targets.join(","), /@auto/u);
+  // Several repositories and the beat read as one stream of text: `map` brings each to the same shape.
+  const many = program(`let both = (a, b) => a->or(b)->map(each => switch each { | First(what) => what | Second(what) => what })
+both(every(1d)->map(_ => "the daily round"), both(ciFailed("acme/app"), ciFailed("acme/web")))->forEach(why => ask(@auto, why)->wait)`);
+  const listening = many.step().write;
+  assert.deepEqual(listening.waits.map(stream => stream.args[0].value), ["acme/app", "acme/web"]);
+  const round = nornStep(undefined, { stream: listening.waits[1], what: "Deploy failed" })(structuredClone({ ...many.state, nowMs: many.state.nowMs + 1 })).write;
+  assert.deepEqual(Object.values(round.ledger.requests).map(request => request.text), ["Deploy failed"]);
   // An event is an occurrence of the streams that name its source: the repository, or the app and — when named — its feature.
   const waits = source => program(source).step().write.waits;
   const [ci] = waits(`ciFailed("acme/app")->forEach(what => ask(@auto, what)->wait)`);
