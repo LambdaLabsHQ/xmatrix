@@ -15,6 +15,7 @@ USD`): an App event can now carry its message in each language a Space can
 choose, and delivery posts the one the Space is set to. Hub only, no schema
 change; messages already posted keep their text. Recovery is a
 CI-validated beta Hub reverting this change.
+
 ## Unreleased: a used-up provider account's resting Instances stay resting
 
 When an Agent's provider account ran out, its failure notice woke that
