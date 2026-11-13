@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@4ea1312845432b288450bcf42411efe29d421882; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@1bbc58dbf2854a5d14452ca93f4c4c3ff6e9c9c2; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -66,7 +66,7 @@ type Path = ("First" | "Second")[];
 /** One thing a wait is for. */
 export type Target =
   | { kind: "request"; id: string }
-  | { kind: "fact" | "stream"; source: Source; path: Path }
+  | { kind: "fact" | "stream"; source: Source; path: Path; /** A stream taken with all that has arrived: `gather`. */ gathered?: true }
   | { kind: "timer"; at: number; path: Path };
 export interface Waiting { targets: Target[]; until: number | null }
 
@@ -101,6 +101,12 @@ export interface Pass {
   said: { to: string; text: string }[];
   /** The wait the pass stopped at. */
   waiting: Waiting | null;
+  /**
+   * The host's streams the program's loops take occurrences from, whether a
+   * loop waits now or its handler is at work: an occurrence recorded on one of
+   * them is not lost, the loop takes it when the handler has finished.
+   */
+  listening: Source[];
   /** The earliest time at which another pass could make progress with no new reply or fact. */
   nextDue: number | null;
 }
@@ -142,7 +148,7 @@ function participant(value: Value | undefined): string {
   return show(value);
 }
 function external(source: Value, kind: "fact" | "stream", verb: string): string {
-  if (source.type !== "source" || source.kind !== kind || ["or", "never", "after", "every", "map", "filter"].includes(source.name)) {
+  if (source.type !== "source" || source.kind !== kind || COMPOSED.includes(source.name)) {
     throw new Error(`${verb} needs a ${kind} of the host, not a timer or a composition`);
   }
   return eventKey(source);
@@ -232,12 +238,21 @@ export function occur(ledger: Ledger, stream: Value, value: Value, now: number):
   ledger.occurrences.push({ key: external(stream, "stream", "occur"), at: now, value });
 }
 
+/** Streams the language makes from others, or from the clock: nothing occurs on one of these by a host's word. */
+const COMPOSED = ["or", "never", "after", "every", "map", "filter", "gather"];
+/** The host's streams under a stream a program composed, in the order `or` gives them. */
+function hostStreams(stream: Value): Source[] {
+  if (stream.type !== "source" || stream.kind !== "stream") return [];
+  if (stream.name === "or" || stream.name === "map" || stream.name === "filter" || stream.name === "gather") return stream.args.flatMap(hostStreams);
+  return COMPOSED.includes(stream.name) ? [] : [stream];
+}
+
 /** What a wait is for, with `or` flattened left to right. A timer counts from when the wait began. */
 function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
   const targets: Target[] = [];
-  const pending: { source: Value; path: Path }[] = [{ source: waited, path: [] }];
+  const pending: { source: Value; path: Path; gathered?: true }[] = [{ source: waited, path: [] }];
   while (pending.length) {
-    const { source, path } = pending.pop()!;
+    const { source, path, gathered } = pending.pop()!;
     if (source.type === "request") {
       if (!ledger.requests[source.id]) throw new ProgramError("wait needs a request of this program");
       targets.push({ kind: "request", id: source.id });
@@ -246,6 +261,11 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
     // A mapped stream occurs when its stream does; the function runs on the value the wait gives (`through`).
     else if (source.name === "map") pending.push({ source: source.args[0], path });
     else if (source.name === "filter") throw new ProgramError("Stream filter is not implemented by the reference host yet");
+    else if (source.name === "gather") {
+      const [of] = source.args;
+      if (of?.type !== "source" || of.kind !== "stream" || COMPOSED.includes(of.name)) throw new ProgramError("gather takes a stream of the host, as in ciFailed(\"acme/api\")->gather");
+      pending.push({ source: of, path, gathered: true });
+    }
     else if (source.name === "after" || source.name === "every") {
       const { from, ...unknown } = source.labels;
       if (source.args.length !== 1 || Object.keys(unknown).length || (from && (source.name !== "every" || from.type !== "time"))) {
@@ -261,7 +281,7 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
       const at = period <= 0 ? instant(when, began)! : began < anchor ? anchor : anchor + (Math.floor((began - anchor) / period) + 1) * period;
       if (!Number.isSafeInteger(at)) throw new ProgramError("A deadline lies outside the clock's range");
       targets.push({ kind: "timer", at, path });
-    } else if (source.name !== "never") targets.push({ kind: source.kind, source, path });
+    } else if (source.name !== "never") targets.push({ kind: source.kind, source, path, ...(gathered ? { gathered } : {}) });
   }
   return targets;
 }
@@ -291,7 +311,9 @@ function through(waited: Value, given: Value, name: string): { value: Value; ste
 }
 
 /** At one instant a request's own deadline comes first, then the wait's, then any other reply or occurrence. */
-interface Candidate { at: number; value: Value; rank: 0 | 1 | 2 }
+interface Candidate { at: number; value: Value; rank: 0 | 1 | 2; /** The stream it came from, and how far that stream is then taken. */ taken?: { stream: string; next: number } }
+/** Where a loop stands on its streams: the position it began at, and for each stream it has taken from, the next one. */
+interface Taken { from: number; streams: Record<string, number> }
 
 /**
  * One pass, yielding between slices of pure computation so a host can give
@@ -300,7 +322,7 @@ interface Candidate { at: number; value: Value; rank: 0 | 1 | 2 }
  * abandoned leaves it as it was.
  */
 export function* slices(code: Code, source: Ledger, now: number, options: PassOptions = {}): Generator<undefined, Pass> {
-  const pass: Pass = { status: "waiting", result: null, error: null, log: [], opened: [], unreached: [], cancelled: [], rescheduled: [], said: [], waiting: null, nextDue: null };
+  const pass: Pass = { status: "waiting", result: null, error: null, log: [], opened: [], unreached: [], cancelled: [], rescheduled: [], said: [], waiting: null, listening: [], nextDue: null };
   if (source.ended) return { ...pass, status: source.ended.status, result: source.ended.result, error: source.ended.error };
   const ledger = structuredClone(source), log = pass.log;
   settleDue(ledger, now);
@@ -373,11 +395,12 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       return { value: { type: "request", id }, at: request.openedAt };
     }
 
-    if (effect.loop) {
+    const loop = effect.loop ? `forEach:${sha256(eventKey(args[0])).slice(0, 16)}` : null;
+    if (loop) {
       // A loop's handled occurrences are behind it. Where its handler last finished, the ledger keeps how far
       // every identity had counted; a later pass begins the loop from there and evaluates none of them again,
       // so a long-running program stays cheap to evaluate and a change to its text asks nothing over.
-      const handled = `forEach:${sha256(eventKey(args[0])).slice(0, 16)}/handled`;
+      const handled = `${loop}/handled`;
       if (effect.loop === "continues") ledger.entries[handled] = { at: now, value: Object.fromEntries(seen) };
       else for (const [kind, count] of Object.entries((ledger.entries[handled]?.value ?? {}) as Record<string, number>)) {
         seen.set(kind, Math.max(seen.get(kind) ?? 0, count));
@@ -387,8 +410,12 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       if (args.length !== (name === "waitUntil" ? 2 : 1)) throw new ProgramError(`${name} needs a target${name === "waitUntil" ? " and a positional deadline" : ""}`);
       const key = identity("wait", { target: args[0], until: args[1] ?? null });
       const fresh = !ledger.entries[`${key}/began`];
-      const beginning = entry(`${key}/began`, () => ({ at: now, value: ledger.occurrences.length }));
-      const began = beginning.at, cursor = beginning.value as number;
+      // A wait takes what occurs after it began. A loop misses nothing: each of its waits goes on from where the
+      // loop has taken each stream to, so what occurred while its handler worked is handled next, not lost.
+      const taken = loop ? entry(`${loop}/taken`, () => ({ at: now, value: { from: ledger.occurrences.length, streams: {} } })) : null;
+      const beginning = entry(`${key}/began`, () => ({ at: now, value: taken ? structuredClone(taken.value) : ledger.occurrences.length }));
+      const began = beginning.at, position = beginning.value as unknown as number | Taken;
+      const cursor = (stream: string): number => typeof position === "number" ? position : position.streams[stream] ?? position.from;
       let ended = ledger.entries[key];
       if (!ended) {
         const targets = targetsOf(ledger, args[0], began);
@@ -398,8 +425,8 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         if (lost && args[0].type !== "request") return revoked();
         if (fresh) log.push({ kind: "waiting", targets, until });
         const candidates: Candidate[] = [];
-        const occurred = (at: number, value: Value, path: Path, rank: 0 | 2 = 2): void => {
-          if (at <= now) candidates.push({ at, value: path.reduceRight((inner, side) => variant(side, inner), value), rank });
+        const occurred = (at: number, value: Value, path: Path, rank: 0 | 2 = 2, from?: Candidate["taken"]): void => {
+          if (at <= now) candidates.push({ at, value: path.reduceRight((inner, side) => variant(side, inner), value), rank, ...(from ? { taken: from } : {}) });
           else due(at);
         };
         for (const target of targets) {
@@ -413,9 +440,15 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
             const fact = ledger.facts[eventKey(target.source)];
             if (fact) occurred(Math.max(fact.at, began), fact.value, target.path); // A fact may already hold.
           } else {
-            const stream = eventKey(target.source);
-            const next = ledger.occurrences.find((occurrence, index) => index >= cursor && occurrence.key === stream);
-            if (next) occurred(next.at, next.value, target.path);
+            const stream = eventKey(target.source), from = cursor(stream);
+            const arrived = ledger.occurrences.flatMap((occurrence, index) => index >= from && occurrence.key === stream ? [{ ...occurrence, index }] : []);
+            const [next] = arrived;
+            // A loop coalesces: whatever arrived while its handler worked is one occurrence, with the latest value, or
+            // with all of them as a list under `gather`. A plain wait takes the first that occurs after it began.
+            const latest = arrived.at(-1);
+            if (next && target.gathered) occurred(next.at, { type: "list", values: arrived.map(each => each.value) }, target.path, 2, { stream, next: latest!.index + 1 });
+            else if (next && loop) occurred(next.at, latest!.value, target.path, 2, { stream, next: latest!.index + 1 });
+            else if (next) occurred(next.at, next.value, target.path, 2, { stream, next: next.index + 1 });
           }
         }
         if (until !== null) { if (until <= now) candidates.push({ at: until, value: unit, rank: 1 }); else due(until); }
@@ -425,6 +458,10 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         const elapsed = winner.rank === 1;
         const value = name === "waitUntil" ? (elapsed ? variant("None") : variant("Some", winner.value)) : winner.value;
         ended = ledger.entries[key] = { at: winner.at, value: value as unknown as Json };
+        if (loop && winner.taken) {
+          const stands = ledger.entries[`${loop}/taken`].value as unknown as Taken;
+          ledger.entries[`${loop}/taken`] = { at: now, value: { from: stands.from, streams: { ...stands.streams, [winner.taken.stream]: winner.taken.next } } };
+        }
         log.push({ kind: "waited", targets, until, at: winner.at, value: elapsed ? null : winner.value });
       }
       return { value: ended.value as unknown as Value, at: Math.max(ended.at, began) };
@@ -519,6 +556,7 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     else resume(machine, resumption.value, resumption.at);
   }
 
+  if (pass.status === "waiting") pass.listening = machine.frames.flatMap(frame => frame.kind === "forEach" ? hostStreams(frame.stream) : []);
   for (const request of Object.values(ledger.requests)) {
     if (request.reply !== null) continue;
     // Ending a program cancels what it left open, in the same commit that records its result.

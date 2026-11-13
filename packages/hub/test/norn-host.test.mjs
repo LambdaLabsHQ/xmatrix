@@ -157,8 +157,18 @@ test("a program waits for an outside event beside its beat, and an event it hear
   assert.equal(first.open.length, 0);
   const heard = nornStep(undefined, { stream: first.write.waits[0], what: "Workflow CI failed on main" })(structuredClone({ ...state, nowMs: state.nowMs + 60_000 }));
   assert.deepEqual(heard.write.requests.map(request => request.holder), ["@auto"]);
-  // While the round runs the program waits on its request, not on the stream: a second failure is not queued behind it.
-  assert.deepEqual(heard.write.waits, []);
+  // While the round runs the program still listens: two more failures are kept, and are one more round with the latest.
+  assert.deepEqual(heard.write.waits.map(stream => stream.name), ["ciFailed"]);
+  const during = { ...state, ledger: heard.write.ledger, requests: [] };
+  for (const [what, at] of [["Deploy failed", 120_000], ["Tests failed again", 180_000]]) {
+    during.ledger = nornStep(undefined, { stream: heard.write.waits[0], what })(structuredClone({ ...during, nowMs: state.nowMs + at })).write.ledger;
+  }
+  assert.equal(Object.keys(during.ledger.requests).length, 1);
+  const [running] = Object.values(during.ledger.requests);
+  const after = nornStep({ requestId: running.id, epoch: running.epoch, reply: { typed: "fixed" } })(structuredClone({ ...during, nowMs: state.nowMs + 240_000,
+    requests: [{ requestId: running.id, requestRef: "rsecond2345", epoch: running.epoch, holder: running.holder, deliveryMessageId: "d", delivered: true, settled: false, abandoned: false }] })).write;
+  assert.deepEqual(Object.values(after.ledger.requests).map(request => [request.text, request.reply?.tag ?? "open"]),
+    [["Check production", "Answered"], ["Check production", "open"]]);
   assert.match(checkNornProgram(`appEvent("sentry", ~feature="issue.created")->forEach(what => ask(@auto, what)->wait)`).targets.join(","), /@auto/u);
   // Several repositories and the beat read as one stream of text: `map` brings each to the same shape.
   const many = program(`let both = (a, b) => a->or(b)->map(each => switch each { | First(what) => what | Second(what) => what })

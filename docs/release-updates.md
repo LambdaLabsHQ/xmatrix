@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: an event that arrives during a round of a Norn program is not lost
+
+A Norn program heard an event only while it waited on the stream. A second
+CI failure, or a second Sentry issue, that arrived while the round the first
+one started was still running was dropped; the scheduled jobs these programs
+replaced had coalesced such events into the next run. Norn is vendored at
+norn-lang/norn#39: a program listens while a round of its loop is out, the
+events that arrive are kept in its ledger, and when the round is over they
+are one more round with the latest event. `->gather` hands the handler all
+of them as a list. Hub and Web (the onboarding text). Recovery is a
+CI-validated beta Hub reverting this change; events kept in a ledger and not
+yet taken are then never handled.
+
 ## Unreleased: Agents are taught Norn programs, and told when one does not run
 
 An Agent's launch prompt, the onboarding prompt and the xMatrix skill still

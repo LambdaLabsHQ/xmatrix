@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@4ea1312845432b288450bcf42411efe29d421882; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@1bbc58dbf2854a5d14452ca93f4c4c3ff6e9c9c2; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What every program sees without declaring it: the base types, `list`,
  * `option`, `result`, `reply`, `yesno`, `either`, the three source types, and
@@ -137,6 +137,10 @@ export function builtinValues(): Builtin[] {
     ["filter", null, () => {
       const a = g();
       return fun([t.stream(a), fun([a], [], t.bool)], [], t.stream(a));
+    }],
+    ["gather", null, () => {
+      const a = g();
+      return fun([t.stream(a)], [], t.stream(t.list(a)));
     }],
     // forEach waits for each occurrence, so it counts as the wait family.
     ["forEach", "wait", () => {

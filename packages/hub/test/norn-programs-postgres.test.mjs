@@ -113,10 +113,11 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     await programs.advance(scope("events"), nornStep(undefined, { stream: waiting.waits[0], what: "Workflow CI failed on main" }));
     assert.deepEqual((await programs.channelWork(scope())).deliveries.map(each => [each.programId, each.request.text]),
       [["events", "Workflow CI failed on main"]]);
-    assert.deepEqual(await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" }), []);
+    // While its round runs it still listens: an event then is kept for the loop, not lost.
+    assert.deepEqual((await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" })).map(program => program.programId), ["events"]);
     await programs.advance(scope("events"), nornStep({ requestId: (await programs.channelWork(scope())).deliveries[0].requestId, epoch: 0,
       reply: { tag: "Refused", reason: "not now" } }));
-    // The round over, it listens again; removed, it is gone from every later pass.
+    // The round over, it goes on listening; removed, it is gone from every later pass.
     assert.equal((await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" })).length, 1);
     await programs.remove(scope("events"));
     assert.equal((await programs.advance(scope("events"), nornStep())).status, "failed");
