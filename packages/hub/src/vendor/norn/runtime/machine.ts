@@ -1,10 +1,14 @@
-// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@186f2084b147284f08a133ffa7f4987569796f2e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
 import { equal, number, show, text, unit, variant, type Value } from "./value.js";
 
-export interface Effect { name: string; args: Value[]; labels: Record<string, Value> }
+export interface Effect {
+  name: string; args: Value[]; labels: Record<string, Value>;
+  /** On the wait of a `forEach`: the loop begins, or its handler has just finished an occurrence and it continues. */
+  loop?: "begins" | "continues";
+}
 type Control =
   | { kind: "eval"; node: string; env: string }
   | { kind: "value"; value: Value }
@@ -246,7 +250,7 @@ function builtin(code: Code, machine: Machine, name: string, args: Value[], labe
       if (args.length !== 2 || args[0].type !== "source" || args[0].kind !== "stream") throw new Error("forEach needs a stream and callback");
       if (Object.keys(labels).length) throw new Error("Concurrent stream handlers are not implemented by the reference machine yet");
       machine.frames.push({ kind: "forEach", stream: args[0], callback: args[1], stage: "waiting" });
-      machine.control = { kind: "effect", effect: { name: "wait", args: [args[0]], labels: {} } }; return;
+      machine.control = { kind: "effect", effect: { name: "wait", args: [args[0]], labels: {}, loop: "begins" } }; return;
     }
     default: throw new Error(`Unknown built-in ${name}`);
   }
@@ -394,7 +398,7 @@ function accept(code: Code, machine: Machine, value: Value): void {
         machine.frames.push({ ...frame, stage: "reporting" });
         machine.control = { kind: "report", outcome: value };
       } else {
-        machine.frames.push({ ...frame, stage: "waiting" }); machine.control = { kind: "effect", effect: { name: "wait", args: [frame.stream], labels: {} } };
+        machine.frames.push({ ...frame, stage: "waiting" }); machine.control = { kind: "effect", effect: { name: "wait", args: [frame.stream], labels: {}, loop: "continues" } };
       }
       break;
     }

@@ -155,6 +155,12 @@ condition this host does not know settles the request `Broke` with the
 reason. An automatically chosen participant is chosen anew for every request
 and is never asked again where it was.
 
+A loop does not go back over the rounds it has handled: when a round's
+handler finishes, the ledger keeps where the loop stands, and a later pass
+begins there. Rewording the task on its Page therefore asks nothing again;
+the next round is asked in the new words. A round that is out when the text
+changes is asked again in the new words.
+
 A Run started for a request reads that request and the conversation's linked
 Pages before its first turn, not the conversation's history: the request
 carries what the program gives it, and a program that repeats would otherwise

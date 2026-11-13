@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@186f2084b147284f08a133ffa7f4987569796f2e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What the checker reports. A diagnostic reads like a parse error: a message
  * that says what was expected and what was found, and a span. In JSON it also

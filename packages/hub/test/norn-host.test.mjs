@@ -122,6 +122,12 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
     step({ requestId: request.requestId, epoch: request.epoch, reply: { typed: "nothing to fix" } }, { nowMs: day * DAY + 7_200_000 });
   }
   assert.equal(Object.keys(state.ledger.requests).length, 3);
+  // The task reworded on its Page: the rounds behind it are not asked again, and the next beat asks in the new words.
+  state.source = state.source.replace("Audit the day's merges", "Audit the day's merges and the changelog");
+  assert.equal(step(undefined, { nowMs: 3 * DAY + 7_300_000 }).open.length, 0);
+  const [reworded] = step(undefined, { nowMs: 4 * DAY }).open;
+  assert.deepEqual([state.ledger.requests[reworded.requestId].text, Object.keys(state.ledger.requests).length],
+    ["Audit the day's merges and the changelog", 4]);
   // A condition this host cannot write into a summon ends the request with the reason, not with a silent default.
   const unknown = program(`switch run(@auto(~mood="calm"), "Audit")->wait { | Broke(why) => why | other => fail(other) }`);
   assert.equal(unknown.step().result.status, "completed");

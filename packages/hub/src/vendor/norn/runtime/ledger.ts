@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@96c71706b2dd17ca23bd39d62d9e373b7cc20f14; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@186f2084b147284f08a133ffa7f4987569796f2e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -369,6 +369,16 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       return { value: { type: "request", id }, at: request.openedAt };
     }
 
+    if (effect.loop) {
+      // A loop's handled occurrences are behind it. Where its handler last finished, the ledger keeps how far
+      // every identity had counted; a later pass begins the loop from there and evaluates none of them again,
+      // so a long-running program stays cheap to evaluate and a change to its text asks nothing over.
+      const handled = `forEach:${sha256(eventKey(args[0])).slice(0, 16)}/handled`;
+      if (effect.loop === "continues") ledger.entries[handled] = { at: now, value: Object.fromEntries(seen) };
+      else for (const [kind, count] of Object.entries((ledger.entries[handled]?.value ?? {}) as Record<string, number>)) {
+        seen.set(kind, Math.max(seen.get(kind) ?? 0, count));
+      }
+    }
     if (name === "wait" || name === "waitUntil") {
       if (args.length !== (name === "waitUntil" ? 2 : 1)) throw new ProgramError(`${name} needs a target${name === "waitUntil" ? " and a positional deadline" : ""}`);
       const key = identity("wait", { target: args[0], until: args[1] ?? null });
