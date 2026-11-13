@@ -1,4 +1,5 @@
 import { spaceBilling } from "@xmatrix/billing";
+import { platformAdminSpaceId } from "./admin-platform-access";
 import { Hono, type Context } from "hono";
 import type { Env } from "./types";
 import { billingReadSubject, agentSpaceStatus } from "./billing-read-access";
@@ -137,7 +138,8 @@ export function registerIndexRoutesBilling(app: Hono<{ Bindings: Env }>): void {
     const spaceId = c.req.param("spaceId");
     const subject = await billingReadSubject(authUser, () => requireLiveAgentRun(c.env, authUser), spaceId);
     const billing = await billingRepository(c.env).readSpaceBilling({ requestId: crypto.randomUUID(),
-      spaceId, actorUserId: subject.userId });
+      spaceId, actorUserId: subject.userId,
+      ...(subject.agentRun ? {} : { itemize: { creditsWaived: spaceId === platformAdminSpaceId(c.env) } }) });
     if (subject.agentRun) {
       return c.json(agentSpaceStatus(billing), 200, { "cache-control": "private, no-store" });
     }

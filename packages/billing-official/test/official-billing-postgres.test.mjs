@@ -11,16 +11,25 @@ const integration = connectionString || process.env.XMATRIX_REQUIRE_POSTGRES_TES
   ? test : test.skip;
 
 // The publishing statement's parameter shape: $2 Space id, $6 commit time,
-// $10 billable, $13 author kind, $14 credits waived. The others carry the
-// message itself and are typed here only.
-const publish = (client, spaceId, billable, author = "user", at = new Date().toISOString(), waived = false) =>
+// $10 billable, $13 author kind, $14 credits waived, $15 the owner, $16 the
+// author's name. The others carry the message itself and are typed here only.
+const publish = (client, spaceId, billable, author = "user", at = new Date().toISOString(), waived = false,
+  who = { owner: author === "app" ? "" : "owner-1", name: author === "agent" ? "claude" : author === "app" ? "github" : "" }) =>
   client.query({
     text: `WITH ${spaceBilling.message.ctes}
       SELECT admission.*, COALESCE(NOT $10 OR (${spaceBilling.message.accepts}), FALSE) AS accepted,
         $1::text, $3::text, $4::text, $5::text, $7::text, $8::text, $9::text, $11::text, $12::text,
-        $13::text, $14::boolean FROM admission`,
-    values: ["", spaceId, "", "", "", at, "", "", "", billable, "", "", author, waived],
+        $13::text, $14::boolean, $15::text, $16::text FROM admission`,
+    values: ["", spaceId, "", "", "", at, "", "", "", billable, "", "", author, waived, who.owner, who.name],
   }).then((result) => result.rows[0]);
+
+/** A page revision by the Space's owner, or by their Agent "claude". */
+const durableWrite = (client, input) => spaceBilling.durableWrite(transaction(client),
+  { ownerUserId: "owner-1", authorName: input.author === "agent" ? "claude" : "", ...input });
+
+const ledger = (client, spaceId) => client.query(`SELECT meter,author_kind,owner_user_id,author_name,write_kind,
+  units::int AS units FROM data.space_credit_usage WHERE space_id=$1
+  ORDER BY meter,author_kind,author_name,write_kind`, [spaceId]).then((result) => result.rows);
 
 const transaction = (client) => ({
   query: (query) => client.query({ text: query.text, values: query.values }).then((result) => result.rows),
@@ -40,19 +49,21 @@ integration("the Free allowance and seat limit hold against the real schema", as
     await client.query("UPDATE data.space_billing_usage SET free_message_count=$2 WHERE space_id=$1",
       [spaceId, FREE_SPACE_MESSAGE_LIMIT - 2]);
     // A page revision takes the same counter as messages, whoever writes it.
-    assert.equal(await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now, kind: "page_revision", author: "person" }), null);
+    assert.equal(await durableWrite(client, { spaceId, now, kind: "page_revision", author: "person" }), null);
 
     const last = await publish(client, spaceId, true);
     assert.equal(last.accepted, true);
     assert.equal(spaceBilling.message.rejection(last, { now }), null);
     const over = await publish(client, spaceId, true);
-    assert.equal((await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now, kind: "page_revision", author: "person" }))?.code, "payment_required",
+    assert.equal((await durableWrite(client, { spaceId, now, kind: "page_revision", author: "person" }))?.code, "payment_required",
     "a page revision after the 500th write is refused");
     assert.equal(over.accepted, false);
     assert.equal(spaceBilling.message.rejection(over, { now })?.code, "payment_required");
     assert.equal((await publish(client, spaceId, false)).accepted, true, "system messages are not billable");
+    assert.deepEqual(await ledger(client, spaceId), [
+      { meter: "free", author_kind: "user", owner_user_id: "owner-1", author_name: "", write_kind: "message", units: 1 },
+      { meter: "free", author_kind: "user", owner_user_id: "owner-1", author_name: "", write_kind: "page_revision", units: 1 },
+    ], "each counted Free write is itemized against its author, a refused one is not");
 
     for (const [index, role] of ["owner", "member", "admin"].entries()) {
       assert.equal(await spaceBilling.seatAdmission(transaction(client), { spaceId, now }), null, role);
@@ -84,8 +95,7 @@ integration("a past-due Space in its grace takes no page revision", async () => 
        seat_quantity,grace_until,provider_event_created_at,version,created_at,updated_at)
       VALUES ($1,'owner-1','cus_test',$1,'price_test','pro','past_due',1,now()+interval '1 day',now(),1,now(),now())`,
     [spaceId]);
-    assert.equal((await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now, kind: "page_revision", author: "person" }))?.code, "billing_grace_read_only");
+    assert.equal((await durableWrite(client, { spaceId, now, kind: "page_revision", author: "person" }))?.code, "billing_grace_read_only");
     const usage = await client.query("SELECT free_message_count FROM data.space_billing_usage WHERE space_id=$1", [spaceId]);
     assert.equal(Number(usage.rows[0].free_message_count), 0, "a grace refusal takes nothing from the Free allowance");
   } finally {
@@ -148,10 +158,12 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
     assert.equal((await publish(client, spaceId, true, "user")).accepted, true, "people still write");
     const waived = await publish(client, spaceId, true, "agent", now, true);
     assert.deepEqual([waived.accepted, waived.credit_metered], [true, false], "an operator Space is not charged");
-    assert.equal((await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now, kind: "page_revision", author: "agent" }))?.code, "credits_exhausted");
-    assert.equal(await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now, kind: "page_revision", author: "person" }), null, "people still edit pages");
+    assert.equal((await durableWrite(client, { spaceId, now, kind: "page_revision", author: "agent" }))?.code, "credits_exhausted");
+    assert.equal(await durableWrite(client, { spaceId, now, kind: "page_revision", author: "person" }), null, "people still edit pages");
+    assert.deepEqual(await ledger(client, spaceId), [
+      { meter: "credit", author_kind: "agent", owner_user_id: "owner-1", author_name: "claude", write_kind: "message", units: 6 },
+      { meter: "credit", author_kind: "app", owner_user_id: "", author_name: "github", write_kind: "message", units: 1 },
+    ], "charged writes are itemized, the waived one too; people's writes and refusals are not");
 
     // A new month starts the counters again and keeps the pack balance.
     await client.query("UPDATE data.space_credit_state SET pack_balance=7 WHERE space_id=$1", [spaceId]);
@@ -160,19 +172,18 @@ integration("a paid Space's Agent credits run included, packs, grace, then refus
     const rolled = await credits();
     assert.deepEqual([Number(rolled.included_used), Number(rolled.grace_used), Number(rolled.pack_balance),
       Number(rolled.notice_level)], [1, 0, 7, 0]);
-    assert.equal(await spaceBilling.durableWrite(transaction(client), { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
+    assert.equal(await durableWrite(client, { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
     assert.equal(Number((await credits()).included_used), 2);
 
     // A page revision has no Channel to tell: the crossing it makes is announced by the next message.
     await state({ included: CREDITS_PER_SEAT * 0.8 - 1 });
-    assert.equal(await spaceBilling.durableWrite(transaction(client), { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
+    assert.equal(await durableWrite(client, { spaceId, now: next, kind: "page_revision", author: "agent" }), null);
     assert.equal(Number((await credits()).notice_level), 0);
     assert.equal(spaceBilling.message.notice(await publish(client, spaceId, true, "agent", next))?.key.endsWith(":1"), true);
 
     // The operator's own Space is not charged for page revisions either.
     await state({ included: CREDITS_PER_SEAT, grace: GRACE_CREDITS_PER_SEAT });
-    assert.equal(await spaceBilling.durableWrite(transaction(client),
-      { spaceId, now: next, kind: "page_revision", author: "agent", creditsWaived: true }), null);
+    assert.equal(await durableWrite(client, { spaceId, now: next, kind: "page_revision", author: "agent", creditsWaived: true }), null);
     assert.equal(Number((await credits()).grace_used), GRACE_CREDITS_PER_SEAT);
   } finally {
     await client.query("ROLLBACK");

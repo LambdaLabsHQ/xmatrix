@@ -28,6 +28,28 @@ export type SpaceBilling = SpacePlanBilling & {
   seatAdjustmentRequired?: boolean;
   /** A Pro Space's Agent credits this month (docs/design/agent-credits.md). */
   credits?: SpaceCredits;
+  /** Who used the allowance: this month's credits on Pro, every write on Free. */
+  usage?: SpaceUsage;
+};
+
+export type SpaceUsageItem = {
+  kind: "agent" | "app" | "user" | "x";
+  /** The person, or the Agent's owner; empty for an app. */
+  ownerUserId: string;
+  ownerName: string;
+  /** An Agent's or app's name; empty for a person. */
+  name: string;
+  messages: number;
+  pageRevisions: number;
+  units: number;
+};
+
+export type SpaceUsage = {
+  meter: "credit" | "free";
+  /** The deployment's own Space: credits counted, never charged. */
+  waived: boolean;
+  since: string | null;
+  items: SpaceUsageItem[];
 };
 
 export type SpaceCredits = {
