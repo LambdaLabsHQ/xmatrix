@@ -8752,6 +8752,28 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   accent-color: currentColor;
 }
 
+/* An answer the reader writes on an ask (norn-request-card.tsx) is a strip of
+   the plain paper laid on the slip, written on like the composer: the words
+   and the buttons that send them share the strip, the field grows with what
+   is written, and nothing else marks it (Daniel 2026-11-13: 这输入框太丑了,
+   the bare underline on a grey well). Focus darkens its hairline. */
+.xmatrix-app .app-ask-answer {
+  border-radius: 8px;
+  background: var(--app-panel-paper, oklch(0.976 0.005 85));
+  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.12);
+  transition: box-shadow 120ms ease;
+}
+.xmatrix-app .app-ask-answer:focus-within {
+  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.4);
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-ask-answer.app-ask-answer textarea {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* The Pending approvals dock is one such block, and the asks inside it are
    its lines, not blocks of their own. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {
