@@ -1,5 +1,25 @@
 # Release Updates
 
+## Unreleased: a used-up Google Play quota is called a quota
+
+When Google refused a Play call because its quota was used up (403 or 429),
+the receipt told the reader to grant the account a permission and enable the
+API. It now says the quota is used up and to try again later. Hub only; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Billing shows who used a Space's allowance and how it is counted
+
+Settings → Billing showed one meter for the whole Space and no way to tell
+which Agent or app used it. Each counted write is now itemized against its
+author in the statement that counts it (`data.space_credit_usage`), and
+Billing lists this month's credits (or a Free Space's writes) by Agent, app
+and paid X calls, the total for you and your Agents, and how credits are
+counted. The operator's own Space, whose credits are waived, showed 0; it now
+shows what it really used, marked "not charged". The iPhone and Android apps
+show the same. Expand-only migration 0249; usage before it appears as one
+"counted before itemizing began" row. Recovery is a CI-validated Hub and Web
+release reverting the change; the table may stay.
+
 ## Unreleased: a Stripe notification is a card
 
 A Stripe event in a Channel was five lines of record: the account id twice,
@@ -16,19 +36,6 @@ language setting. Any App event can carry such a card
 (`xmatrixEventCard` on the message). Hub and Web, no schema change; a Web
 older than the Hub shows the text. Messages already posted keep theirs.
 Recovery is a CI-validated beta Hub and Web reverting this change.
-
-## Unreleased: Billing shows who used a Space's allowance and how it is counted
-
-Settings → Billing showed one meter for the whole Space and no way to tell
-which Agent or app used it. Each counted write is now itemized against its
-author in the statement that counts it (`data.space_credit_usage`), and
-Billing lists this month's credits (or a Free Space's writes) by Agent, app
-and paid X calls, the total for you and your Agents, and how credits are
-counted. The operator's own Space, whose credits are waived, showed 0; it now
-shows what it really used, marked "not charged". The iPhone and Android apps
-show the same. Expand-only migration 0249; usage before it appears as one
-"counted before itemizing began" row. Recovery is a CI-validated Hub and Web
-release reverting the change; the table may stay.
 
 ## Unreleased: `xmatrix goal` works inside a Claude run
 
