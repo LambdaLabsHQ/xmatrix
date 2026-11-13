@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a request card says what it asks where conversations are listed
+
+A request a Norn program made of a person read, in the list of
+conversations, as "Request `r343twe5ccg` from a program" under a title made
+of the Page's name and the block's English slug: thirteen such rows told
+their reader nothing. The card's message now starts with the question
+itself, and a program block's name may be a word in any language, so the
+conversation is called what its author calls it. Hub only. Recovery is a
+CI-validated beta Hub reverting this change; a block named outside ASCII
+then stops being read as a program.
+
 ## Unreleased: an Agent that works for half an hour and says nothing is asked last too
 
 The breaker for an Agent that connects and does nothing counted only first

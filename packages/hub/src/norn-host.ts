@@ -23,7 +23,7 @@ export function nornBlocks(body: string): { name: string; source: string }[] {
   const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
   return (root.children ?? []).flatMap(node => {
     const [run, name, ...rest] = (node.meta ?? "").trim().split(/\s+/u);
-    return node.type === "code" && node.lang === "norn" && run === "run" && !rest.length && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/u.test(name ?? "main")
+    return node.type === "code" && node.lang === "norn" && run === "run" && !rest.length && /^\p{L}[\p{L}\p{N}_-]{0,39}$/u.test(name ?? "main")
       ? [{ name: name ?? "main", source: node.value ?? "" }] : [];
   });
 }
@@ -188,10 +188,14 @@ export const nornRequestCard = (request: LedgerRequest, requestRef: string, hold
  * card: the person's name first, so it tells them as a mention does.
  */
 export function nornPersonBody(request: LedgerRequest, requestRef: string): string {
-  return [request.holder, "", `**Request \`${requestRef}\`** from a program, for you.`, "", fence(request.text),
+  // What is asked comes first: a list of conversations shows the start of the message, and that is what its
+  // reader needs. The first line is plain words; the rest of a longer question follows as the program wrote it.
+  const [first = "", ...more] = request.text.split("\n");
+  return [`${request.holder} ${first.replace(/[`*_\[\]]/gu, "").trim()}`,
+    ...(more.join("").trim() ? ["", fence(request.text)] : []),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`}`,
+    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`} A program asks (request \`${requestRef}\`).`,
   ].join("\n");
 }
 /** How a person's request ended, in a line under its card. */
