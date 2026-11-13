@@ -138,6 +138,22 @@ The daemon's execution report tells the Hub when a finished turn left a
 request open, and the Hub wakes the Channel's coordinator. A Run that ends
 wakes it already.
 
+## Work that repeats
+
+A program repeats with `every(1d)->forEach(_ => run(…)->wait)`. Its ticks
+keep the program's beat, a whole number of periods after it started, and each
+round asks anew. The conditions a program puts on its participant
+(`@auto(~repo="acme/app", ~effort="high")`; `repo`, `pwd`, `machine`,
+`harness`, `model`, `effort`) are written into the delivery's summon. A
+condition this host does not know settles the request `Broke` with the
+reason. An automatically chosen participant is chosen anew for every request
+and is never asked again where it was.
+
+A Run started for a request reads that request and the conversation's linked
+Pages before its first turn, not the conversation's history: the request
+carries what the program gives it, and a program that repeats would otherwise
+hand each new Run a longer history than the last.
+
 ## Asking the same participant again
 
 A program on a Page that asks the same participant again asks the Instance

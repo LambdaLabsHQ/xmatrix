@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@9333fe512bf5af158f5f0695e27fbeb27218243b; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@e2ad669ba30822030d8d0bb86279b990b3e5f996; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -22,6 +22,12 @@ export interface LedgerRequest {
   candidates: string[] | null;
   epoch: number;
   text: string;
+  /**
+   * What the program asked of whoever takes the request, beyond their name: the
+   * participant's own labels, as in `@auto(~repo="acme/app")`, each as a message
+   * shows it. A host reads them when it chooses or starts the participant.
+   */
+  conditions: Record<string, string>;
   /** What the request is about (`~about`), as a message shows it; null when the program named nothing. */
   about: string | null;
   /** What a `run` was given to work from (`~context`), as a message shows it. */
@@ -195,6 +201,10 @@ export function take(ledger: Ledger, id: string, taker: string, now: number): bo
   request.holder = taker; request.candidates = null; request.epoch++;
   return true;
 }
+function conditionsOf(who: Value | undefined): Record<string, string> {
+  if (who?.type !== "participant" || who.name === "anyOf") return {};
+  return Object.fromEntries(Object.entries(who.labels).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([label, value]) => [label, show(value)]));
+}
 function candidatesOf(who: Value): string[] | null {
   if (who.type !== "participant" || who.name !== "anyOf") return null;
   const except = who.labels.except ? show(who.labels.except) : null;
@@ -238,7 +248,13 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
       if (source.args.length !== 1 || Object.keys(source.labels).length) throw new ProgramError("A timer needs one positional argument");
       const when = source.args[0];
       if (!(source.name === "after" && when.type === "time") && (when.type !== "duration" || BigInt(when.value) <= 0n)) throw new ProgramError("A relative timer needs a positive duration");
-      targets.push({ kind: "timer", at: instant(when, began)!, path });
+      // `after` counts from when the wait began. `every` keeps the program's beat: its ticks fall a whole number
+      // of periods after the program started, so work between two waits does not push the next tick back, and
+      // ticks that passed while it worked are not made up.
+      const period = source.name === "every" ? Number(when.value) : 0;
+      const at = period > 0 ? ledger.startedAt + (Math.floor((began - ledger.startedAt) / period) + 1) * period : instant(when, began)!;
+      if (!Number.isSafeInteger(at)) throw new ProgramError("A deadline lies outside the clock's range");
+      targets.push({ kind: "timer", at, path });
     } else if (source.name !== "never") targets.push({ kind: source.kind, source, path });
   }
   return targets;
@@ -309,6 +325,7 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         if (!permitted()) return revoked();
         request = ledger.requests[id] = {
           id, verb: name, holder, candidates: name === "judge" ? null : candidatesOf(args[0]), epoch: 0, text: question.value,
+          conditions: conditionsOf(args[0]),
           about: labels.about ? show(labels.about) : null, context: labels.context ? show(labels.context) : null,
           options: choices?.type === "list" ? choices.values : null,
           form: labels.form?.type === "string" ? JSON.parse(labels.form.value) as ReportForm : null,
@@ -422,7 +439,7 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         if (request.reply === null && next === null) close(request, { tag: "Cancelled" }, now);
         else if (request.reply === null) {
           log.push({ kind: "handedOver", id: request.id, from: request.holder, to: next! });
-          request.holder = next!; request.candidates = candidatesOf(args[1]); request.epoch++;
+          request.holder = next!; request.candidates = candidatesOf(args[1]); request.conditions = conditionsOf(args[1]); request.epoch++;
         }
       }
       const at = entry(key, () => ({ at: now, value: null })).at;

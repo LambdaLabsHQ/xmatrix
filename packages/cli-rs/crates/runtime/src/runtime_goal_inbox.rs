@@ -254,6 +254,12 @@ pub(crate) fn bound_goal_inbox_path() -> Option<PathBuf> {
 
 /// This live instance's inbox, keyed by instance id so concurrent instances of
 /// the same agent on one machine never share a file.
+/// The inbox of the instance this process runs as, from its environment, without
+/// binding it: for a child started before [`bind_goal_inbox_path`] has run.
+pub(crate) fn goal_inbox_path_of_this_run() -> Option<PathBuf> {
+    goal_inbox_path_for_instance(None)
+}
+
 fn goal_inbox_path_for_instance(instance_id: Option<&str>) -> Option<PathBuf> {
     let instance_id = instance_id
         .map(str::trim)
