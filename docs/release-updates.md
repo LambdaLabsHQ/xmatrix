@@ -10,6 +10,7 @@ what is written, holds Send and a quiet Decline in its corner, and sends
 with Cmd or Ctrl and Enter. A choice shows only its options until one that
 takes words is picked. Web only. Recovery is a CI-validated beta Web
 reverting this change.
+
 ## Unreleased: a request's reference reads as the request
 
 Messages about a Norn request named it by its reference (`rhqycstuhxc`),
