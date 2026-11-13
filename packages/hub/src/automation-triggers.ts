@@ -6,6 +6,8 @@ import { tellPageAutomationChannels } from "./page-automation-wake";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 import { findAppConnection } from "./apps";
+import { occurNornEvent } from "./norn-events";
+import { appStream, githubStream } from "./norn-host";
 
 /**
  * Events fire a page's Automations (docs/design/pages-live-document.md §6.2):
@@ -87,6 +89,13 @@ export async function fireGitHubAutomationTriggers(env: Env, event: string,
     })().catch(() => false));
     return connected.get(key)!;
   };
+  // The same event reaches the Norn programs that wait for it, under the same rule: the Space's GitHub
+  // connection still includes the installation it came from.
+  if (fired.branch === fired.defaultBranch) {
+    await occurNornEvent(env, { what: fired.url ? `${fired.summary} (${fired.url})` : fired.summary,
+      matches: githubStream(fired.kind, fired.repository),
+      allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
+  }
   // A connected app's event reaches only Automations whose authority may use it now.
   return fireAcrossShards(env, { trigger: { kind: fired.kind, repository: fired.repository }, appUse: true }, async (candidate) => {
     let matches = false;
@@ -146,6 +155,9 @@ export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId
   const source = input.event.sourceRef.slice(input.provider.length + 1);
   const fired: FiredEvent = { id: `${input.provider}:${input.event.eventId}`.slice(0, 200), kind: "event",
     summary: input.event.summary, ...(input.event.url ? { url: input.event.url } : {}) };
+  await occurNornEvent(env, { spaceId: input.spaceId, what: fired.url ? `${fired.summary} (${fired.url})` : fired.summary,
+    matches: appStream(input.provider, input.event.feature),
+    allowed: async (program) => !input.authorizedUserId || program.authorityUserId === input.authorizedUserId });
   return fireAcrossShards(env, { trigger: { kind: "event", provider: input.provider }, spaceId: input.spaceId, appUse: true },
     async (candidate) => (!input.authorizedUserId || candidate.authorityRootUserId === input.authorizedUserId) &&
       (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,

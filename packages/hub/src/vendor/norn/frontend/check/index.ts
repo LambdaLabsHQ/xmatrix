@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@e2ad669ba30822030d8d0bb86279b990b3e5f996; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn type checker (docs/types.md).
  *
@@ -19,5 +19,5 @@ export type { EffectSummary } from "./effects.js";
 export { elaborate } from "./elaborate.js";
 export type { Form, FormDefinition, ReportForm } from "./forms.js";
 export { checkProgram, loadLibrary, type CheckOptions, type CheckResult, type Library } from "./infer.js";
-export { builtinInterface, loadInterface, type HostInterface, type ValueBinding } from "./interface.js";
+export { builtinInterface, hostSources, loadInterface, type HostInterface, type ValueBinding } from "./interface.js";
 export { checkSource, readInterface, readLibrary, type SourceCheck } from "./source.js";

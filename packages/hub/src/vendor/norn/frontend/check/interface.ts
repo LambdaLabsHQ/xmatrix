@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@e2ad669ba30822030d8d0bb86279b990b3e5f996; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@b082e26527d15f8d5e316326da0d613c6c031405; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Host interfaces (docs/types.md §7). A host tells the checker what its
  * programs can see in a Norn file of `type` and `external` declarations. Only
@@ -9,7 +9,7 @@ import { STACK_EXHAUSTED, isStackExhausted } from "../diagnostics.js";
 import { builtinTable, builtinValues, type Family } from "./builtins.js";
 import { TypeReader, declareTypes, externalType, typeInfo, type Origin, type TypeTable } from "./declarations.js";
 import { sortDiagnostics, type CheckDiagnostic } from "./diagnostics.js";
-import type { Type } from "./types.js";
+import { FACT, SOURCE, resolve, type Type } from "./types.js";
 
 /** A name bound to a value: a built-in, an external, a standard library function, or a binding of the program. */
 export interface ValueBinding {
@@ -129,4 +129,21 @@ function describeItem(item: A.TopLevelItem): string {
     default:
       return "an expression";
   }
+}
+
+/**
+ * The facts and streams a host's interface declares, by name: what
+ * `compile(program, { sources })` needs so that a program can wait on them.
+ * An external is one when it is, or returns, an `event` or a `stream`.
+ */
+export function hostSources(host: HostInterface): Record<string, "fact" | "stream"> {
+  const sources: Record<string, "fact" | "stream"> = {};
+  for (const [name, value] of host.values) {
+    if (value.origin !== "host") continue;
+    const declared = resolve(value.type), type = declared.tag === "fun" ? resolve(declared.result) : declared;
+    if (type.tag !== "con" || type.name !== SOURCE) continue;
+    const kind = resolve(type.args[0]);
+    sources[name] = kind.tag === "con" && kind.name === FACT.name ? "fact" : "stream";
+  }
+  return sources;
 }

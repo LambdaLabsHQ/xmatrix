@@ -1,6 +1,6 @@
 # Norn snapshot
 
-Source: https://github.com/norn-lang/norn/tree/e2ad669ba30822030d8d0bb86279b990b3e5f996
+Source: https://github.com/norn-lang/norn/tree/b082e26527d15f8d5e316326da0d613c6c031405
 
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
@@ -46,7 +46,6 @@ Never edit these files by hand. The script applies every change:
 
 - every file: a provenance header, and `.ts` import suffixes rewritten to `.js`
 - `runtime/machine.ts`: unused parameter `env` renamed `_env`
-- `runtime/machine.ts`: unused parameter `code` renamed `_code`
 - `runtime/std.ts`: local `module` renamed `linkedModule`
 - `runtime/std.ts`: its one use renamed with it
 - `runtime/value.ts`: redundant `\"` escapes in a template literal written as `"`

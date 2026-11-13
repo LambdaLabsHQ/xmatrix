@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a Norn program hears events from outside
+
+A Norn program could wait for time and for answers only, so work that an
+event starts (a failed CI run, a Sentry issue) had to stay an Automation. A
+program now waits on `ciFailed("owner/repo")`, `prMerged("owner/repo")` and
+`appEvent("sentry", ~feature="issue.created")`, alone or beside a beat
+(`every(1d)->or(ciFailed(…))`). Each pass stores the streams the program is
+left waiting on (expand migration 0251, `norn_programs.waits_json`); an event
+that fires Automation triggers is also recorded in the ledger of each program
+waiting on it, under the same authority rule, and the program runs at once.
+Norn is vendored at norn-lang/norn#34, which lets a program wait on the
+streams its own host declares. Hub only. Recovery is a CI-validated beta Hub
+reverting this change; the column then stays unused.
+
 ## Unreleased: an Agent whose name is not ASCII starts
 
 An Agent named `牛马` exited seconds after every summon. The Hub accepts any

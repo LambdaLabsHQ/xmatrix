@@ -1,9 +1,9 @@
 import { parseHarnessCapabilityMentions, parseMarkdown, utf8ByteLength } from "@xmatrix/protocol";
 import type { NornProgramState, NornProgramWrite, NornStep } from "@xmatrix/db";
-import { builtinInterface, checkSource, elaborate, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
+import { checkSource, elaborate, hostSources, readInterface, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
-import { emptyLedger, evaluate, settle, stop, take, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
+import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
 import { show, text, type Value } from "./vendor/norn/runtime/value";
 
 /**
@@ -34,15 +34,33 @@ export function nornProgramIn(body: string): { source: string } | { refusal: str
   return blocks.length === 1 ? { source: blocks[0]!.source } : { refusal: "A message starts one program: it has more than one `norn run` block." };
 }
 
+/**
+ * What this host adds to the language: the outside events a program can wait
+ * for. Each is a stream of what happened, in words, with its link when it has
+ * one. The Hub tells a program of an event only while the program's authority
+ * may use its Space's connected apps.
+ */
+export const NORN_HOST_INTERFACE = `// A workflow failed on the default branch of the repository "owner/repo".
+external ciFailed: (string) => stream<string>
+
+// A pull request was merged into the default branch of the repository "owner/repo".
+external prMerged: (string) => stream<string>
+
+// A connected app delivered an event: appEvent("sentry", ~feature="issue.created").
+external appEvent: (string, ~feature: string=?) => stream<string>
+`;
+const HOST = readInterface(NORN_HOST_INTERFACE, "xmatrix.norn");
+const SOURCES = hostSources(HOST);
+
 type Checked = { code: Code; targets: string[] } | { refusal: string };
 /** Checks a program against this host: the built-ins alone, with no standard library and no facts yet. */
 export function checkNornProgram(source: string): Checked {
-  const checked = checkSource(source, { host: builtinInterface(), std: null });
+  const checked = checkSource(source, { host: HOST, std: null });
   const errors = checked.diagnostics.filter(diagnostic => diagnostic.severity === "error");
   if (!checked.ok || !checked.program || errors.length) {
     return { refusal: errors.slice(0, 20).map(({ message, span }) => `${span.start.line}:${span.start.column} ${message}`).join("\n") };
   }
-  return { code: compile(elaborate(checked.program, checked.reports)),
+  return { code: compile(elaborate(checked.program, checked.reports), { sources: SOURCES }),
     targets: [...new Set((checked.effects ?? []).flatMap(effect => effect.targets))].sort() };
 }
 
@@ -163,7 +181,9 @@ const reference = (): string => {
  * the requests nobody works on any more, then the program from the top.
  * Requests this host cannot deliver end at once, so the program reads why.
  */
-export function nornStep(answer?: { requestId: string; epoch: number; reply: Reply | { typed: string } }): NornStep<NornPassResult> {
+export function nornStep(answer?: { requestId: string; epoch: number; reply: Reply | { typed: string } },
+  /** An outside event the program waits for: the stream as the program named it, and what happened. */
+  occurred?: { stream: unknown; what: string }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
     const ledger = state.ledger as Ledger;
     const now = Math.max(state.nowMs, ledger.startedAt);
@@ -171,6 +191,7 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
     let refusal: string | undefined, nextDue: number | null = null, taken = false;
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
     const said: { to: string; text: string }[] = [];
+    let waits: unknown[] = [];
     if ("refusal" in checked) stop(ledger, now, `The program no longer checks: ${checked.refusal}`);
     else if (state.stopReason !== null) stop(ledger, now, state.stopReason);
     else {
@@ -184,6 +205,7 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
           if (!taken) refusal = ledger.evidence.at(-1)?.reason ?? "The answer was not taken";
         }
       }
+      if (occurred) occur(ledger, occurred.stream as Value, text(occurred.what), now);
       for (const row of state.requests) {
         const request = ledger.requests[row.requestId];
         if (row.abandoned && request?.reply === null && request.epoch === row.epoch) {
@@ -195,6 +217,7 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         undelivered = false;
         const pass = evaluate(checked.code, ledger, now);
         nextDue = pass.nextDue;
+        waits = (pass.waiting?.targets ?? []).flatMap(target => target.kind === "stream" ? [target.source] : []);
         said.push(...pass.said);
         for (const request of Object.values(ledger.requests)) {
           if (request.reply !== null) continue;
@@ -218,10 +241,27 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
       requests: Object.values(ledger.requests).filter(request => refs.has(request.id) || request.reply === null)
         .map(request => ({ requestId: request.id, requestRef: refs.get(request.id) ?? reference(), epoch: request.epoch,
           holder: request.holder, settled: request.reply !== null })),
-      notices: said.map(({ to, text: body }) => ({ noticeId: reference(), recipient: to, body })) };
+      waits, notices: said.map(({ to, text: body }) => ({ noticeId: reference(), recipient: to, body })) };
     return { write, result: { status, ...(refusal === undefined ? {} : { refusal }) } };
   };
 }
 
 /** The ledger a program starts from. */
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);
+
+/** An outside stream as a program named it: `ciFailed("acme/app")`, `appEvent("sentry", ~feature="issue.created")`. */
+export interface NornStream { name: string; args: { type: string; value?: unknown }[]; labels: Record<string, { type: string; value?: unknown }> }
+
+export const isNornStream = (value: unknown): value is NornStream => Boolean(value) && typeof value === "object" &&
+  typeof (value as NornStream).name === "string" && Array.isArray((value as NornStream).args);
+/** The text a program wrote in a stream's position or label, when it wrote text there. */
+const streamText = (value: { type: string; value?: unknown } | undefined): string | undefined =>
+  value?.type === "string" && typeof value.value === "string" ? value.value : undefined;
+
+/** Which streams a GitHub event on a repository's default branch is an occurrence of. */
+export const githubStream = (kind: "ci-failed" | "merged", repository: string) => (stream: NornStream): boolean =>
+  stream.name === (kind === "ci-failed" ? "ciFailed" : "prMerged") && streamText(stream.args[0]) === repository;
+/** Which streams a connected app's event is an occurrence of: the app, and its feature when the program named one. */
+export const appStream = (provider: string, feature: string) => (stream: NornStream): boolean =>
+  stream.name === "appEvent" && streamText(stream.args[0]) === provider &&
+  (stream.labels?.feature === undefined || streamText(stream.labels.feature) === feature);

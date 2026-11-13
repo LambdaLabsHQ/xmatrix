@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresNornProgramRepository, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
+import { createAuthorityDatabase, PostgresNornProgramRepository, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
 import { fenceChannelRunsForStop } from "../../db/dist/channel-stop-fence.js";
 import { initialMessageSource } from "../../db/dist/runtime-initial-input.js";
 import { integration, isolatedPostgres, seedOwnedTestSpace } from "../../db/test/postgres-database.fixture.mjs";
@@ -104,6 +104,23 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     assert.deepEqual((await programs.channelWork(scope())).releases, []);
     assert.equal(await due(), null);
 
+    // A program that waits for an outside event is found by what it waits on, and hears the event in its ledger.
+    await message("events", 4, "user", "owner");
+    await programs.start({ ...scope("events"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      source: `ciFailed("acme/app")->forEach(what => ask(@codex, what)->wait)`, ledger: nornStartLedger }, nornStep());
+    const [waiting] = await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" });
+    assert.deepEqual([waiting.programId, waiting.authorityUserId, waiting.waits.map(stream => stream.name)], ["events", "owner", ["ciFailed"]]);
+    await programs.advance(scope("events"), nornStep(undefined, { stream: waiting.waits[0], what: "Workflow CI failed on main" }));
+    assert.deepEqual((await programs.channelWork(scope())).deliveries.map(each => [each.programId, each.request.text]),
+      [["events", "Workflow CI failed on main"]]);
+    assert.deepEqual(await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" }), []);
+    await programs.advance(scope("events"), nornStep({ requestId: (await programs.channelWork(scope())).deliveries[0].requestId, epoch: 0,
+      reply: { tag: "Refused", reason: "not now" } }));
+    // The round over, it listens again; removed, it is gone from every later pass.
+    assert.equal((await readWaitingNornPrograms(database, { requestId: randomUUID(), spaceId: "space" })).length, 1);
+    await programs.remove(scope("events"));
+    assert.equal((await programs.advance(scope("events"), nornStep())).status, "failed");
+    await programs.reported(scope("events"));
     // A stop of the Channel ends its running programs at their next pass; a stop of one Run does not.
     await message("second", 3, "user", "owner");
     await start("second");

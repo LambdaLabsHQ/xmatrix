@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "e2ad669ba30822030d8d0bb86279b990b3e5f996";
+const revision = "b082e26527d15f8d5e316326da0d613c6c031405";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
 const root = fileURLToPath(new URL("../packages/hub/src/vendor/norn/", import.meta.url));
@@ -19,7 +19,6 @@ const files = [...frontend, ...runtime].sort();
 const patches = {
   "runtime/machine.ts": [
     ["values: Value[], env: string): void {", "values: Value[], _env: string): void {", "unused parameter `env` renamed `_env`"],
-    ["function builtin(code: Code,", "function builtin(_code: Code,", "unused parameter `code` renamed `_code`"],
   ],
   "runtime/std.ts": [
     ["const module: Statement", "const linkedModule: Statement", "local `module` renamed `linkedModule`"],
