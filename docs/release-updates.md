@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: a used-up Google Play quota is called a quota
+
+When Google refused a Play call because its quota was used up (403 or 429),
+the receipt told the reader to grant the account a permission and enable the
+API. It now says the quota is used up and to try again later. Hub only; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Billing shows who used a Space's allowance and how it is counted
 
 Settings → Billing showed one meter for the whole Space and no way to tell
