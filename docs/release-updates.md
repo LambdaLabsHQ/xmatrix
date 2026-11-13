@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a failed round of a repeating Norn program is told in its conversation
+
+When a round of a repeating Norn program ended in anything but an answer
+(refused, broke, nobody replied), the loop went on and nothing was posted:
+the failure showed only in the steps under the program on its Page. The
+round's outcome is now posted once to the program's conversation as xMatrix,
+naming nobody, through the same notices a program's `say` uses. Hub only.
+Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: rewording a repeating Norn program does not rerun its past rounds
 
 A repeating Norn program was evaluated from its first round on every pass.
