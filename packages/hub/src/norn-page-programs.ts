@@ -1,16 +1,16 @@
-import { PostgresNornProgramRepository, PostgresPageRepository, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
+import { PostgresNornProgramRepository, PostgresPageRepository, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import { deterministicConversationId } from "./deterministic-id";
 import { checkNornProgram, nornBlocks, nornStartLedger, nornStep } from "./norn-host";
+import { answerText, nornFlow, resultText } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest } from "./vendor/norn/runtime/ledger";
-import { show, type Value } from "./vendor/norn/runtime/value";
 
 /**
  * Programs that live on a Page (docs/architecture/norn-host.md): each
@@ -97,9 +97,6 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
 
 const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoReply: "no_reply", Cancelled: "cancelled",
   Revoked: "revoked" } as const;
-/** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
-const answerText = (value: Value): string =>
-  value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
 
 /**
  * What a `request:<ref>` shows in place of the reference: the request itself,
@@ -116,30 +113,48 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
       : "reason" in request.reply ? request.reply.reason : null };
 }
 
-/** A program's result: what it answered with, without the `Answered(…)` around it. */
-const resultText = (value: Value): string =>
-  value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? answerText(value.args[0]!) : show(value);
+/**
+ * How a program stands for whoever reads it: its requests so far, how it
+ * ended, and what it does from here on. `source` is the text to read the
+ * rest from: the block as it is written now, which a program that has not
+ * started is read from too.
+ */
+function programStatus(name: string, source: string, problem: string | undefined,
+  program: { channelId: string; state: string; ledger: unknown } | undefined): PageProgramStatus {
+  const checked = problem === undefined ? checkNornProgram(source) : { refusal: problem };
+  const ledger = program?.ledger as Ledger | undefined;
+  const now = Date.now();
+  return {
+    name,
+    ...(program ? { channelId: program.channelId } : {}),
+    state: program ? program.state as PageProgramStatus["state"] : "not_started",
+    ...("refusal" in checked ? { problem: checked.refusal } : {}),
+    ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
+    requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
+      holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
+      by: request.by === null ? null : new Date(request.by).toISOString(),
+      outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
+      reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
+        : "reason" in request.reply ? request.reply.reason : null,
+      settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
+    next: "refusal" in checked ? [] : nornFlow(checked.code, ledger ?? nornStartLedger(now), now),
+  };
+}
 
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
 export async function pageProgramStatus(env: Env, input: { spaceId: string; pageId: string; body: string }): Promise<PageProgramStatus[]> {
   const programs = await readPageNornPrograms(database(env), { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
-  return pageBlocks(input.body).map(block => {
-    const program = programs.find(candidate => candidate.name === block.name);
-    const checked = block.duplicate ? { refusal: `Two blocks are named ${block.name}; rename one.` } : checkNornProgram(block.source);
-    const ledger = program?.ledger as Ledger | undefined;
-    return {
-      name: block.name,
-      ...(program ? { channelId: program.channelId } : {}),
-      state: program ? program.state as PageProgramStatus["state"] : "not_started",
-      ...("refusal" in checked ? { problem: checked.refusal } : {}),
-      ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
-      requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
-        holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
-        by: request.by === null ? null : new Date(request.by).toISOString(),
-        outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
-        reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
-          : "reason" in request.reply ? request.reply.reason : null,
-        settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
-    };
-  });
+  return pageBlocks(input.body).map(block => programStatus(block.name, block.source,
+    block.duplicate ? `Two blocks are named ${block.name}; rename one.` : undefined, programs.find(candidate => candidate.name === block.name)));
+}
+
+/**
+ * How the program a message carries stands, for whoever can read its
+ * conversation: the message is the program's identity, whether a person or an
+ * Agent wrote it or xMatrix wrote it for a Page's block. Undefined for anyone
+ * else, and for a message that is no program.
+ */
+export async function messageProgramStatus(env: Env, input: { spaceId: string; programId: string; userId: string }): Promise<PageProgramStatus | undefined> {
+  const program = await readNornProgram(database(env), { requestId: crypto.randomUUID(), ...input });
+  return program && programStatus(program.name ?? "main", program.source, undefined, program);
 }

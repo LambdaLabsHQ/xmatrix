@@ -2,7 +2,7 @@ import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
-import { nornRequestView } from "./norn-page-programs";
+import { messageProgramStatus, nornRequestView } from "./norn-page-programs";
 import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, openNornRequests } from "./norn-programs";
 import type { Env } from "./types";
 
@@ -63,6 +63,17 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
     if (auth.agentRun || !/^r[a-z0-9]{6,40}$/u.test(requestRef)) return c.json({ error: "No such request" }, 404, NO_STORE);
     const request = await nornRequestView(c.env, { spaceId: c.req.param("spaceId") ?? "", requestRef, userId: auth.id });
     return request ? c.json({ request }, 200, NO_STORE) : c.json({ error: "No such request" }, 404, NO_STORE);
+  }));
+  // How the program a message carries stands and what it does next, for a person who can read its conversation.
+  const program = HUB_ROUTES.space_norn_program(":spaceId", ":programId").replace("%3AspaceId", ":spaceId").replace("%3AprogramId", ":programId");
+  app.get(program, c => jsonErrors(c, async () => {
+    const auth = await requireAuth(c.req.raw, c.env);
+    const programId = c.req.param("programId") ?? "";
+    if (auth.agentRun) return c.json({ error: "A program's flow is drawn for a person" }, 403, NO_STORE);
+    // A message that only shows Norn text is no program: that is an answer, not a failure.
+    const found = !programId || programId.length > 200 ? undefined
+      : await messageProgramStatus(c.env, { spaceId: c.req.param("spaceId") ?? "", programId, userId: auth.id });
+    return c.json({ program: found ?? null }, 200, NO_STORE);
   }));
   // A person answers the request on its card. Whoever they are, they hold it only if it was delivered to them.
   const personAnswer = HUB_ROUTES.channel_norn_request_answer(":channelId", ":requestRef")

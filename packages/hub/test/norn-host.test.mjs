@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { nornFlow } from "../src/norn-plan.ts";
 import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
@@ -288,4 +289,102 @@ decide(@Daniel, "Which billing plan?", ~options=[Monthly, Yearly], ~recommend=Ye
   assert.equal(decision.state.ledger.ended.result.name, "Yearly");
   // A word the library does not have is refused where the program is written.
   assert.match(checkNornProgram(`open Std\nreminder(@Daniel, "x", ~at=1h)`).refusal, /reminder/u);
+});
+
+/** The flow a program is drawn as, read at `now` from the ledger its row holds. */
+const flowOf = (source, ledger, now = Date.parse("2026-11-13T18:00:00Z")) => nornFlow(checkNornProgram(source).code, ledger ?? nornStartLedger(now), now);
+/** A flow as one line a step, a branch indented under the request it leaves. */
+const outline = (steps, indent = "") => steps.flatMap(step => {
+  if (step.kind === "wait") return [`${indent}wait ${[step.at, ...step.on, step.repeats ? `repeats ${step.every}` : ""].filter(Boolean).join(" | ")}`];
+  if (step.kind === "ask") return [`${indent}${step.verb} ${step.holder}${step.open ? " (open)" : ""}: ${step.text}`,
+    ...step.otherwise.flatMap(way => [`${indent}  [${way.when}]`, ...outline(way.steps, `${indent}    `)]), ...(step.then ? [`${indent}[${step.then}]`] : [])];
+  if (step.kind === "say") return [`${indent}say ${step.to}: ${step.text}`];
+  if (step.kind === "end") return [`${indent}${step.failed ? "stop" : "end"} ${step.result}`.trimEnd()];
+  return [`${indent}${step.kind}${step.text ? ` ${step.text}` : ""}`];
+});
+
+test("a program's flow is read off the program: the time it waits for, whom it asks, and who is asked when that fails", () => {
+  const source = `let task = "Check the price snapshots are gone"
+after(2026-11-17T02:00:00Z)->wait
+switch run(@auto(~repo="acme/router"), task, ~by=8h)->wait {
+| Answered(report) => Answered(report)
+| _ => run(@claude(~repo="acme/router"), task, ~by=8h)->wait
+}`;
+  const flow = flowOf(source);
+  assert.deepEqual(outline(flow), [
+    "wait 2026-11-17T02:00:00.000Z",
+    "run @auto: Check the price snapshots are gone",
+    "  [otherwise]",
+    "    run @claude: Check the price snapshots are gone",
+    "      [otherwise]",
+    "        stop",
+    "    [answered]",
+    "    end the answer",
+    "[answered]",
+    "end the answer",
+  ]);
+  // What is asked of whoever takes it, and how long they have, come with the request.
+  assert.deepEqual([flow[1].conditions, flow[1].within, flow[1].open], [{ repo: "acme/router" }, 8 * 3_600_000, false]);
+});
+
+test("a routine's flow is one round and the way back: the beat it keeps, what else starts a round, and a failed round told", () => {
+  const source = `open Std
+routine(~every=1d, ~from=2026-11-14T09:00Z, ~on=ciFailed("acme/app"), ~who=@auto(~repo="acme/app"), ~otherwise=@claude(~repo="acme/app"), "Daily upkeep")`;
+  assert.deepEqual(outline(flowOf(source)), [
+    "wait 2026-11-14T09:00:00.000Z | CI fails on acme/app | repeats 86400000",
+    "run @auto: Daily upkeep",
+    "  [otherwise]",
+    "    run @claude: Daily upkeep",
+    "      [otherwise]",
+    "        say : This round did not succeed.",
+    "        again",
+    "    [answered]",
+    "    again",
+    "[answered]",
+    "again",
+  ]);
+  // Mid-round the flow begins with the request that is out, then shows the round that repeats.
+  const { state, step } = program(source);
+  step();
+  step(undefined, { nowMs: Date.parse("2026-11-14T09:00:00Z") });
+  assert.deepEqual(outline(flowOf(source, state.ledger, Date.parse("2026-11-14T09:05:00Z"))).filter(line => !line.startsWith(" ")), [
+    "run @auto (open): Daily upkeep", "[answered]",
+    "wait 2026-11-15T09:00:00.000Z | CI fails on acme/app | repeats 86400000", "run @auto: Daily upkeep", "[answered]", "again"]);
+});
+
+test("a flow branches on each answer a request can get, and a function that calls itself goes back to where it asked before", () => {
+  assert.deepEqual(outline(flowOf(`switch confirm(@Daniel, "Ship 4.2?", ~by=1d)->wait {
+| Answered(Yes) => say(@Daniel, "Shipping")
+| _ => say(@Daniel, "Held")
+}`)), ["confirm @Daniel: Ship 4.2?", "  [No, otherwise]", "    say @Daniel: Held", "    end", "[Yes]", "say @Daniel: Shipping", "end"]);
+  assert.deepEqual(outline(flowOf(review)), [
+    "run @claude: Draft the design",
+    "  [otherwise]",
+    "    stop",
+    "[answered]",
+    "run @codex: Find what does not hold",
+    "  [Flawed]",
+    "    run @claude: Revise for these flaws",
+    "      [otherwise]",
+    "        stop",
+    "    [answered]",
+    "    again Find what does not hold",
+    "  [otherwise]",
+    "    stop",
+    "[Sound]",
+    "end the answer",
+  ]);
+  // The same wait written twice in a row is two steps, not a round that repeats.
+  assert.deepEqual(outline(flowOf(`after(1d)->wait\nsay(@Daniel, "one")\nafter(1d)->wait\nsay(@Daniel, "two")`)),
+    ["wait 2026-11-14T18:00:00.000Z", "say @Daniel: one", "wait 2026-11-15T18:00:00.000Z", "say @Daniel: two", "end"]);
+});
+
+test("reading a program's flow changes nothing, and a program that has ended has none", () => {
+  const { state, step } = program(`run(@codex, "Reply with ok")->wait`);
+  const [asked] = step().open;
+  const before = JSON.stringify(state.ledger);
+  assert.deepEqual(outline(flowOf(state.source, state.ledger, 5_000)), ["run @codex (open): Reply with ok", "  [otherwise]", "    stop", "[answered]", "end the answer"]);
+  assert.equal(JSON.stringify(state.ledger), before);
+  step({ requestId: asked.requestId, epoch: asked.epoch, reply: { typed: "ok" } });
+  assert.deepEqual(flowOf(state.source, state.ledger, 9_000), []);
 });

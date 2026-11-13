@@ -4,7 +4,7 @@ import { checkSource, elaborate, hostSources, readInterface, readLibrary, type F
 import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
-import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
+import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Pass, type PassOptions, type Reply } from "./vendor/norn/runtime/ledger";
 import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 
 /**
@@ -283,6 +283,38 @@ const reference = (): string => {
 };
 
 /**
+ * The program from the top, until every request it has open is one this host
+ * can deliver: one it cannot ends `Broke` at once with the reason, and the
+ * program is evaluated again, so it reads the failure in the same pass. Each
+ * evaluation is handed to `each`; the last one is returned.
+ */
+export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass: Pass) => void = () => {}, options: PassOptions = {}): Pass {
+  // Each round ends at least one request this host cannot deliver, so the rounds end.
+  for (;;) {
+    const pass = evaluate(code, ledger, now, options);
+    // A request the program's changed text no longer makes is called off, so nobody goes on working for a
+    // program that will not read the answer: its Agent is let go, and a person's card says it is no longer asked.
+    for (const left of pass.unreached) settle(ledger, left.id, left.holder, { tag: "Cancelled" }, now, left.epoch);
+    each(pass);
+    let undelivered = false;
+    for (const request of Object.values(ledger.requests)) {
+      if (request.reply !== null) continue;
+      // One of a group takes the request for the group: the first this host can reach.
+      const taker = request.candidates?.find(deliverable);
+      if (taker) take(ledger, request.id, taker, now);
+      const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
+        : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
+        : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
+          ?? (utf8ByteLength(nornDelivery(request, reference()).body) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
+      if (reason === null) continue;
+      settle(ledger, request.id, request.holder, { tag: "Broke", reason }, now, request.epoch);
+      undelivered = true;
+    }
+    if (!undelivered) return pass;
+  }
+}
+
+/**
  * One pass over a program's ledger: a stop, the answer this call carries,
  * the requests nobody works on any more, then the program from the top.
  * Requests this host cannot deliver end at once, so the program reads why.
@@ -324,10 +356,7 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
             ? `${request.holder} can no longer read this conversation` : "The Agent's work on this request ended without an answer" }, now, row.epoch);
         }
       }
-      // Each round ends at least one request this host cannot deliver, so the rounds end.
-      for (let undelivered = true; undelivered;) {
-        undelivered = false;
-        const pass = evaluate(checked.code, ledger, now);
+      nornPasses(checked.code, ledger, now, pass => {
         nextDue = pass.nextDue;
         // The streams a plain wait is on, and those the program's loops take from while a handler works:
         // an event on one of the latter is kept for the loop, which handles it when the round is over.
@@ -335,26 +364,10 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         waits = streams.filter((stream, index) => streams.findIndex(other => eventKey(other) === eventKey(stream)) === index);
         said.push(...pass.said);
         // A round whose handler ended in anything but an answer is told in the program's conversation, once.
-        // A request the program's changed text no longer makes is called off, so nobody goes on working for a
-        // program that will not read the answer: its Agent is let go, and a person's card says it is no longer asked.
-        for (const left of pass.unreached) settle(ledger, left.id, left.holder, { tag: "Cancelled" }, now, left.epoch);
         for (const entry of pass.log) {
           if (entry.kind === "handlerFailed") said.push({ to: "", text: `A round of this program did not succeed: ${show(entry.reply)}` });
         }
-        for (const request of Object.values(ledger.requests)) {
-          if (request.reply !== null) continue;
-          // One of a group takes the request for the group: the first this host can reach.
-          const taker = request.candidates?.find(deliverable);
-          if (taker) take(ledger, request.id, taker, now);
-          const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
-            : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
-            : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
-              ?? (utf8ByteLength(nornDelivery(request, reference()).body) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
-          if (reason === null) continue;
-          settle(ledger, request.id, request.holder, { tag: "Broke", reason }, now, request.epoch);
-          undelivered = true;
-        }
-      }
+      });
     }
     if (answer && !taken && refusal === undefined) refusal = "The request has already ended";
     const refs = new Map(state.requests.map(row => [row.requestId, row.requestRef]));

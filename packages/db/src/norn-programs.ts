@@ -441,11 +441,6 @@ class NornSpaceError extends ControlError {
 }
 
 /**
- * The latest program of each named block of a Page, with its ledger. Read by
- * Space, because a Page's programs each work in a conversation of their own.
- * The caller has read the Page as whoever asks.
- */
-/**
  * A request by its reference, as `userId` may see it: only if they can read
  * its conversation. Undefined otherwise, the same for "no such request".
  */
@@ -463,6 +458,28 @@ export async function readNornRequest(database: AuthorityDatabase, input: { requ
     });
 }
 
+/**
+ * A program by its message, as `userId` may see it: only if they can read its
+ * conversation. Undefined otherwise, the same for "no such program".
+ */
+export async function readNornProgram(database: AuthorityDatabase, input: { requestId: string; spaceId: string; programId: string; userId: string }) {
+  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.program", spaceId: input.spaceId }, NornSpaceError,
+    async tx => {
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_program_view_v1", text: `SELECT p.channel_id,p.page_name,p.source,p.state,p.ledger_json
+        FROM data.norn_programs p JOIN data.channels c ON c.space_id=p.space_id AND c.channel_id=p.channel_id
+        WHERE p.space_id=$1 AND p.program_id=$2 AND ${channelCapabilityPredicate({ capability: "message_content_read",
+          channelAlias: "c", principalKindSql: "'user'", principalIdSql: "$3" })} LIMIT 1`,
+        values: [input.spaceId, input.programId, input.userId], maxRows: 1 });
+      return row ? { channelId: String(row.channel_id), name: row.page_name === null ? null : String(row.page_name),
+        source: String(row.source), state: String(row.state), ledger: row.ledger_json as unknown } : undefined;
+    });
+}
+
+/**
+ * The latest program of each named block of a Page, with its ledger. Read by
+ * Space, because a Page's programs each work in a conversation of their own.
+ * The caller has read the Page as whoever asks.
+ */
 export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
   return inActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
     async tx => (await tx.query<QueryResultRow>({
