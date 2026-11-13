@@ -3,7 +3,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { canonicalMentionToken } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { checkNornProgram, nornDelivery, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornQuestionSource,
+import { checkNornProgram, nornAnswerBody, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody, nornProgramIn, nornQuestionSource,
   nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion, type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -47,13 +47,16 @@ async function say(env: Env, postCommit: PostCommit, input: { channelId: string;
   quiet?: boolean;
   /** A request of a person: the card the message carries, and the one it waits on. */
   card?: NornRequestCard;
+  /** The people what is said waits on: it shows where what needs them shows, until they respond. */
+  waitsOn?: string[];
   /** A request of an Agent: where in the body the holder's own part begins. A person reads only what comes before it. */
   answerFrom?: number }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
     body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true,
     ...(input.onlyInstanceId || input.quiet ? {} : { launch: true }),
-    ...(input.card ? { messageKind: NORN_REQUEST_MESSAGE_KIND, waitsOnUserIds: [input.card.holderUserId] } : {}),
+    ...(input.card ? { messageKind: NORN_REQUEST_MESSAGE_KIND, waitsOnUserIds: [input.card.holderUserId] }
+      : input.waitsOn?.length ? { waitsOnUserIds: input.waitsOn } : {}),
     ...(input.replyTo || input.card || input.answerFrom ? { residual: { ...(input.replyTo ? { replyToMessageId: input.replyTo } : {}),
       ...(input.card ? { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, nornRequest: input.card } }
         // Not a system fact: that would make the request context to the Instance it is work for.
@@ -136,7 +139,8 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
       authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
       ...nornDelivery(delivery.request as LedgerRequest, delivery.requestRef,
-        { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage }) });
+        { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage, handedOn: delivery.handedOn,
+          withPerson: delivery.withPerson }) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });
   }
@@ -156,12 +160,16 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await programs.noticed({ requestId, channelId, programId: notice.programId, noticeId: notice.noticeId });
   }
   for (const report of work.reports) {
-    // An Agent that started the program is told by its address, so it wakes to read the result.
+    const ended = report.ended as Ledger["ended"];
+    // A page's program ends in its own conversation. It wakes nobody there: one that failed by itself waits on
+    // the people it worked for, and the Agent that stayed takes what they say next.
+    const page = report.onPage ? nornPageEnd({ ended, requests: report.requests as Record<string, LedgerRequest> | null,
+      people: report.people, authority: { userId: report.authorityUserId, name: report.authorityName } }) : undefined;
     await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300),
-      // A page's program ends in its own conversation, where only its Instances rest, about to be let go.
-      ...(report.onPage ? { quiet: true } : replyTo(report)),
+      ...(page ? { quiet: true, waitsOn: page.waitsOn } : replyTo(report)),
       authorityUserId: report.authorityUserId,
-      body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"], report.onPage)}` });
+      // An Agent that started the program is told by its address, so it wakes to read the result.
+      body: page?.body ?? `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(ended)}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
   // An Instance started for a request has nothing left to do in the conversation once the request has ended.
@@ -178,6 +186,8 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
 
 /** The Run that holds a request answers it; the program reads the answer in the same step. */
 export async function answerNornRequest(env: Env, input: { channelId: string; runId: string; instanceId: string; ownerUserId: string; requestRef: string;
+  /** The Run as it authors a message: xMatrix posts its answer in the conversation under its name. */
+  agent: { agentId: string; agentName: string; executionKey: string };
   outcome: "answered" | "refused" | "broke"; text: string }): Promise<NornPassResult> {
   const requestId = `norn-answer:${input.requestRef}:${crypto.randomUUID()}`;
   const programs = await repository(env, input.channelId, requestId);
@@ -198,6 +208,18 @@ export async function answerNornRequest(env: Env, input: { channelId: string; ru
     await runtimeRepository(env).recordAgentLaunchFirstReply({ requestId: crypto.randomUUID(), channelId: input.channelId,
       runId: input.runId, actorUserId: input.ownerUserId, at: new Date().toISOString() }).catch((error: unknown) => {
       console.warn("Norn answer could not be recorded as the Run's first reply", { channelId: input.channelId, runId: input.runId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    // The answer stands in the conversation as the holder's own message, where whoever follows the work reads it.
+    // It is appended and not interpreted: nothing in it summons, commands or wakes. Best effort, as above.
+    const messageId = `norn-answer:${input.requestRef}:${held.epoch}`;
+    await dispatchProductMessageAppend(env, input.channelId, { commandId: `norn-message:${messageId}`.slice(0, 200), messageId,
+      channelId: input.channelId, body: nornAnswerBody(input.outcome, input.text), principal: { kind: "agent", id: input.agent.agentId },
+      senderSnapshot: { identityId: input.agent.agentId, kind: "agent", agentId: input.agent.agentId, label: input.agent.agentName,
+        name: input.agent.agentName, agentName: input.agent.agentName, email: "", userId: input.ownerUserId, instanceId: input.instanceId },
+      agentRunProof: { runId: input.runId, executionKey: input.agent.executionKey, instanceId: input.instanceId },
+    }).then(response => { if (!response.ok) throw new Error(`append failed (${response.status})`); }).catch((error: unknown) => {
+      console.warn("Norn answer could not be posted to its conversation", { channelId: input.channelId, requestRef: input.requestRef,
         error: error instanceof Error ? error.message : String(error) });
     });
     // What the answer opened, or the program's end, is the coordinator's to deliver.

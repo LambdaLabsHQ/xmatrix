@@ -547,7 +547,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due"
       | "automation_due" | "retry_due" | "quota_due" | "idle_sleep_due" | "summon_due" | "norn_due", string | Date | null>>({ name: options.automation
-        ? "agent_launch_channel_step_due_automation_v5" : "agent_launch_channel_step_due_v5",
+        ? "agent_launch_channel_step_due_automation_v6" : "agent_launch_channel_step_due_v6",
       text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
           WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}),

@@ -3,14 +3,13 @@ import type { NornRequestView, PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import { deterministicConversationId } from "./deterministic-id";
-import { checkNornProgram, nornBlocks, nornStartLedger, nornStep } from "./norn-host";
+import { checkNornProgram, nornBlocks, nornStartLedger, nornStep, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest } from "./vendor/norn/runtime/ledger";
-import { show, type Value } from "./vendor/norn/runtime/value";
 
 /**
  * Programs that live on a Page (docs/architecture/norn-host.md): each
@@ -97,9 +96,6 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
 
 const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoReply: "no_reply", Cancelled: "cancelled",
   Revoked: "revoked" } as const;
-/** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
-const answerText = (value: Value): string =>
-  value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
 
 /**
  * What a `request:<ref>` shows in place of the reference: the request itself,
@@ -115,10 +111,6 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
     reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
       : "reason" in request.reply ? request.reply.reason : null };
 }
-
-/** A program's result: what it answered with, without the `Answered(…)` around it. */
-const resultText = (value: Value): string =>
-  value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? answerText(value.args[0]!) : show(value);
 
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
 export async function pageProgramStatus(env: Env, input: { spaceId: string; pageId: string; body: string }): Promise<PageProgramStatus[]> {

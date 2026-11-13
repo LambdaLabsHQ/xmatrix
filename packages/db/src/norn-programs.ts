@@ -18,6 +18,12 @@ export interface NornRequestRow {
   deliveryMessageId: string; delivered: boolean; settled: boolean;
   /** Delivered, unanswered, and nothing is working on it any more. */
   abandoned: boolean;
+  /**
+   * The work on this holding broke off rather than ended: its turn failed, or
+   * no turn ever took it. A turn that ended in order, or was interrupted and
+   * not taken up again, is not this.
+   */
+  brokeOff: boolean;
 }
 /** What a step reads: the program, the authority's clock and the index. */
 export interface NornProgramState {
@@ -83,18 +89,49 @@ const NORN_REQUEST_WORKED_SQL = `(${NORN_REQUEST_HELD_BY_PERSON_SQL} OR EXISTS (
     OR (r.instance_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions taken
         WHERE taken.instance_id=r.instance_id AND taken.source_message_id=r.delivery_message_id)
       AND EXISTS (SELECT 1 FROM data.instances held WHERE held.instance_id=r.instance_id AND ${instanceTakesMessages("held")})))`;
+/** How request `q` of program `owner` ended, when its holder ended it: an answer, a refusal, a failure. */
+const endedByHolder = (q: string, owner: string) =>
+  `(${owner}.ledger_json->'requests'->${q}.request_id->'reply'->>'tag' IN ('Answered','Refused','Broke'))`;
 /**
- * A delivered request `r` that has ended, whose Instance has not been let go
- * yet. A Page's program keeps its Instances while it runs, because its next
- * request to the same participant goes to the one already there; a program in
- * a shared conversation lets each go at once.
+ * Whether the Instance of request `r` stays in the conversation. It stays
+ * while any request it holds is open, and while a program it started (a
+ * question it asked) still runs, so the answer finds it. In a Page program's
+ * conversation it also stays as the one a running program asks again by name,
+ * and as the one that ended a request last: after the program, a person who
+ * writes there reaches the Agent that did the work. Every other Instance a
+ * request started is let go once its request has ended.
  */
+const NORN_INSTANCE_STAYS_SQL = `(EXISTS (SELECT 1 FROM data.norn_requests other
+      JOIN data.norn_programs theirs ON theirs.space_id=other.space_id AND theirs.program_id=other.program_id
+    WHERE other.space_id=r.space_id AND other.channel_id=r.channel_id AND other.delivered_at IS NOT NULL
+      AND other.holder_user_id IS NULL AND ${requestInstance("other")}=${requestInstance("r")}
+      AND (other.settled_at IS NULL
+        OR (theirs.page_id IS NOT NULL AND theirs.state='running' AND other.holder<>'@auto'
+          AND NOT EXISTS (SELECT 1 FROM data.norn_requests later WHERE later.space_id=other.space_id
+            AND later.program_id=other.program_id AND later.holder=other.holder AND later.delivered_at IS NOT NULL
+            AND later.settled_at>other.settled_at))
+        OR (theirs.page_id IS NOT NULL AND ${endedByHolder("other", "theirs")}
+          AND NOT EXISTS (SELECT 1 FROM data.norn_requests newer
+              JOIN data.norn_programs newest ON newest.space_id=newer.space_id AND newest.program_id=newer.program_id
+            WHERE newer.space_id=other.space_id AND newer.channel_id=other.channel_id AND newer.delivered_at IS NOT NULL
+              AND newer.holder_user_id IS NULL AND newer.settled_at>other.settled_at AND newest.page_id IS NOT NULL
+              AND ${endedByHolder("newer", "newest")}))))
+    OR EXISTS (SELECT 1 FROM data.norn_programs asking WHERE asking.space_id=r.space_id AND asking.channel_id=r.channel_id
+      AND asking.state='running' AND asking.author_kind='agent' AND asking.author_id=${requestInstance("r")}))`;
+/** A delivered request `r` that has ended, whose Instance is to be let go and has not been yet. */
 const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL
-    AND r.holder_user_id IS NULL AND NOT EXISTS (SELECT 1 FROM data.norn_programs kept WHERE kept.space_id=r.space_id AND kept.program_id=r.program_id
-      AND kept.page_id IS NOT NULL AND kept.state='running'))`;
+    AND r.holder_user_id IS NULL AND NOT ${NORN_INSTANCE_STAYS_SQL})`;
 /** A request a person held that has ended: its card still says it waits on them. */
 const NORN_REQUEST_UNCLOSED_SQL = "(r.settled_at IS NOT NULL AND r.holder_user_id IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
+/** No turn on request `r` ended in order or was cut short by a newer message: whatever took it failed, or nothing took it. */
+const NORN_REQUEST_BROKE_OFF_SQL = `(NOT EXISTS (SELECT 1 FROM data.agent_message_executions ended
+    WHERE ended.channel_id=r.channel_id AND ended.source_message_id=r.delivery_message_id AND ended.state NOT IN ('failed','unknown')))`;
+/**
+ * Why the ledger's evidence holds a holding that was given up on: the host
+ * handed the request to a new Instance because the work on it broke off.
+ */
+export const NORN_HANDED_ON_REASON = "The work broke off, and the request was handed to a new Instance";
 
 /**
  * When a Channel's programs next need a pass, a delivery or a report; NULL
@@ -123,7 +160,8 @@ export const NORN_DELIVERY_SOURCE_SQL = `EXISTS (SELECT 1 FROM data.norn_request
 
 const requestRow = (row: QueryResultRow): NornRequestRow => ({ requestId: String(row.request_id), requestRef: String(row.request_ref),
   epoch: Number(row.epoch), holder: String(row.holder), deliveryMessageId: String(row.delivery_message_id),
-  delivered: row.delivered_at !== null, settled: row.settled_at !== null, abandoned: row.abandoned === true });
+  delivered: row.delivered_at !== null, settled: row.settled_at !== null, abandoned: row.abandoned === true,
+  brokeOff: row.broke_off === true });
 const unavailable = () => new ControlError("norn_request_unavailable", 404, "No such request");
 
 /** The message that delivers one holding of a request. A handover is a new holding, so a new message. */
@@ -139,8 +177,9 @@ export class PostgresNornProgramRepository {
 
   private async pass<T>(tx: DatabaseTransaction, program: QueryResultRow, step: NornStep<T>): Promise<T> {
     const scope = [this.placement.spaceId, String(program.program_id)];
-    const rows = await tx.query<QueryResultRow>({ name: "norn_request_index_v1", text: `SELECT r.request_id,r.request_ref,r.epoch,
+    const rows = await tx.query<QueryResultRow>({ name: "norn_request_index_v2", text: `SELECT r.request_id,r.request_ref,r.epoch,
         r.holder,r.delivery_message_id,r.delivered_at,r.settled_at,${NORN_REQUEST_ABANDONED_SQL} AS abandoned,
+        ${NORN_REQUEST_BROKE_OFF_SQL} AS broke_off,
         floor(extract(epoch from clock_timestamp())*1000)::text AS now_millis
       FROM (SELECT 1) one LEFT JOIN data.norn_requests r ON r.space_id=$1 AND r.program_id=$2
       ORDER BY r.created_at,r.request_id LIMIT 10000`, values: scope, maxRows: 10_000 });
@@ -251,9 +290,16 @@ export class PostgresNornProgramRepository {
           OR p.next_due_at<=clock_timestamp() OR EXISTS (SELECT 1 FROM data.norn_requests r
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });
-      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v2", text: `SELECT r.program_id,
+      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v3", text: `SELECT r.program_id,
           r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,
-          p.ledger_json->'requests'->r.request_id AS request_json,there.instance_id AS there_instance_id,there.mention AS there_mention
+          p.ledger_json->'requests'->r.request_id AS request_json,there.instance_id AS there_instance_id,there.mention AS there_mention,
+          -- An earlier holding of this request broke off: whoever takes it now reads what that one had done.
+          EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.ledger_json->'evidence')='array'
+              THEN p.ledger_json->'evidence' ELSE '[]'::jsonb END) gave_up
+            WHERE gave_up->>'request'=r.request_id AND gave_up->>'reason'=$2) AS handed_on,
+          -- A person takes part in this program, so what its Agents do is for a person to follow.
+          EXISTS (SELECT 1 FROM data.norn_requests person WHERE person.space_id=r.space_id AND person.program_id=r.program_id
+            AND person.holder_user_id IS NOT NULL) AS with_person
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
           -- A Page's program asks the same participant again where it already is: the Instance that last
           -- answered it for this program, if that one still takes messages.
@@ -268,11 +314,22 @@ export class PostgresNornProgramRepository {
               -- Whoever fits is chosen anew each time: only a participant asked for by name is asked again where it is.
               AND r.holder<>'@auto' AND earlier.holder=r.holder AND earlier.settled_at IS NOT NULL AND instance.channel_id=r.channel_id
               AND ${instanceTakesMessages("instance")}
+              -- A request handed on goes to an Instance that has not had it.
+              AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions had WHERE had.instance_id=instance.instance_id
+                AND had.channel_id=r.channel_id AND had.source_message_id LIKE 'norn:'||r.request_ref||':%')
             ORDER BY earlier.settled_at DESC LIMIT 1) there ON TRUE
         WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL
-        ORDER BY r.created_at,r.request_id LIMIT 200`, values, maxRows: 200 });
-      const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v1", text: `SELECT p.program_id,p.state,
-          p.authority_user_id,p.page_id,p.ledger_json->'ended' AS ended_json,
+        ORDER BY r.created_at,r.request_id LIMIT 200`, values: [input.channelId, NORN_HANDED_ON_REASON], maxRows: 200 });
+      const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v2", text: `SELECT p.program_id,p.state,
+          p.authority_user_id,p.page_id,p.page_name,p.ledger_json->'ended' AS ended_json,
+          -- A Page's program that ends is told to people: what it asked and of whom, and who answered it.
+          CASE WHEN p.page_id IS NOT NULL THEN p.ledger_json->'requests' END AS requests_json,
+          (SELECT COALESCE(jsonb_agg(DISTINCT jsonb_build_object('userId',person.holder_user_id,'name',person.holder)),'[]'::jsonb)
+            FROM data.norn_requests person WHERE person.space_id=p.space_id AND person.program_id=p.program_id
+              AND person.holder_user_id IS NOT NULL) AS people_json,
+          (SELECT COALESCE(NULLIF(h.handle,''),NULLIF(h.name,''),m.display_name) FROM data.space_members m
+              LEFT JOIN control.auth_users h ON h.id=m.user_id
+            WHERE m.space_id=p.space_id AND m.user_id=p.authority_user_id) AS authority_name,
           (SELECT '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id
             FROM data.instances instance JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
               LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
@@ -283,7 +340,7 @@ export class PostgresNornProgramRepository {
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
       // The Instance a request started exists for that request alone. Once the request has ended, its Run is
       // stopped if still live, and the Instance is retired if it rests: an Instance at rest outlives its Run.
-      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v3", text: `SELECT r.program_id,r.request_id,
+      const releases = await tx.query<QueryResultRow>({ name: "norn_channel_releases_v4", text: `SELECT r.program_id,r.request_id,
           p.authority_user_id,started.run_id,started.mention
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
           LEFT JOIN LATERAL (SELECT CASE WHEN run.status IN ('starting','running') THEN run.run_id END AS run_id,
@@ -318,13 +375,18 @@ export class PostgresNornProgramRepository {
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
           deliveryMessageId: String(row.delivery_message_id), authorityUserId: String(row.authority_user_id),
-          onPage: row.page_id !== null,
+          onPage: row.page_id !== null, handedOn: row.handed_on === true, withPerson: row.with_person === true,
           there: typeof row.there_instance_id === "string" && typeof row.there_mention === "string"
             ? { instanceId: row.there_instance_id, mention: row.there_mention } : null,
           request: row.request_json as unknown })),
         reports: reports.map(row => ({ programId: String(row.program_id), state: String(row.state),
           authorMention: typeof row.author_mention === "string" ? row.author_mention : null, onPage: row.page_id !== null,
-          authorityUserId: String(row.authority_user_id), ended: row.ended_json as unknown })),
+          name: typeof row.page_name === "string" ? row.page_name : null,
+          authorityUserId: String(row.authority_user_id), ended: row.ended_json as unknown, requests: row.requests_json as unknown,
+          authorityName: typeof row.authority_name === "string" ? row.authority_name : null,
+          people: (Array.isArray(row.people_json) ? row.people_json as { userId?: unknown; name?: unknown }[] : [])
+            .flatMap(person => typeof person.userId === "string" && typeof person.name === "string"
+              ? [{ userId: person.userId, name: person.name }] : []) })),
       };
     });
   }
