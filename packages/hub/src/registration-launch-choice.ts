@@ -291,7 +291,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       // pools newer than it is one the refusal never saw.
       const observed = eligible.map(candidate => Date.parse(candidate.observations?.quota?.observedAt ?? ""))
         .filter(Number.isFinite);
-      throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined, undefined,
+      throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined,
         eligible.map(candidate => candidate.key),
         observed.length ? new Date(Math.min(...observed)).toISOString() : new Date(now).toISOString());
     }

@@ -5,7 +5,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, HarnessSignedOut, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AutoLaunchTags, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresQuotaRetryRepository,
@@ -60,7 +60,7 @@ export async function executeRegistrationLaunchDispatch(input: {
         // an untyped value collapses to the generic rejection.
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
           ? item.code : "registration_launch_rejected",
-        ...(item.tooOld ? { tooOld: item.tooOld } : {}), ...(item.signedOut ? { signedOut: item.signedOut } : {}),
+        ...(item.tooOld ? { tooOld: item.tooOld } : {}),
         ...(item.offline ? { offline: item.offline } : {}), ...(item.machineAgents ? { machineAgents: item.machineAgents } : {}) })),
     });
   }
@@ -484,9 +484,9 @@ interface MessageLaunchResult {
   prepared?: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[];
 }
 
-/** A summon the dispatch refused, and what it names: a program too old or signed out, offline machines,
+/** A summon the dispatch refused, and what it names: a program too old, offline machines,
  * or what a named machine runs. */
-export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut;
+export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld;
   offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaRetryId?: string; selectionIndex?: number }
 
 type MessageLaunchDependencies = {

@@ -1,11 +1,11 @@
 import { publishChannelInvocationsChanged, publishChannelPresenceChanged, runInstanceId } from "./channel-live-judgment";
-import { cleanRepositoryBaseline } from "@xmatrix/protocol";
+import { agentPresetById, cleanRepositoryBaseline } from "@xmatrix/protocol";
 import { PostgresMachineLifecycleRepository, RuntimeControlError, type AuthorityDatabase } from "@xmatrix/db";
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { isRecoverableLaunchFailure } from "./live-run-admission";
 import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice,
-  publishStartupFallbackNotice, type MachineStopCause } from "./machine-run-failure-notice";
+  publishSignedOutStartNotice, publishStartupFallbackNotice, type MachineStopCause } from "./machine-run-failure-notice";
 import { dispatchStartupFallback } from "./registration-launch-dispatch";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import {
@@ -47,7 +47,8 @@ function optionalMachineName(value: unknown): string | undefined {
 export async function machineRunLifecycleReport(
   env: Env,
   input: Record<string, unknown>,
-  dependencies: { database?: AuthorityDatabase; startupFallback?: typeof dispatchStartupFallback } = {},
+  dependencies: { database?: AuthorityDatabase; startupFallback?: typeof dispatchStartupFallback;
+    signedOutStart?: typeof publishSignedOutStartNotice } = {},
 ): Promise<Record<string, unknown>> {
   const database = dependencies.database ?? createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-hub-runtime", ...POSTGRES_AUTHORITY_TIMEOUTS });
@@ -95,22 +96,30 @@ export async function machineRunLifecycleReport(
     const failure = machineRunStartupFailureDetail(String(input.eventType), payload);
     if (failure && !isRecoverableLaunchFailure(failure.detail)) {
       const context = object(value.startupFailureNoticeContext, "startupFailureNoticeContext");
-      await publishMachineRunFailureNotice(env, {
+      const notice = {
         runId: text(context.runId, "runId"), channelId: text(context.channelId, "channelId"),
         ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
         agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
         ...(typeof context.harness === "string" && context.harness ? { harness: context.harness } : {}),
-        hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
+        machineName: optionalMachineName(context.machineName),
         ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
-      });
+      };
+      // A start its program refused as signed out is answered with its sign-in,
+      // once it is known whether another Agent took the message.
+      const signedOut = context.signedOut === true && notice.harness ? { harness: notice.harness,
+        program: agentPresetById(notice.harness)?.displayName ?? notice.harness, machineId: notice.machineId,
+        ...(notice.machineName ? { machineName: notice.machineName } : {}) } : undefined;
+      if (!signedOut) await publishMachineRunFailureNotice(env, { ...notice, hostId: optionalHostname(context.hostId), ...failure });
       // An `@auto` summon's work goes to the next-ranked Agent, once. Its
       // command is per Run, so a replay of this report recovers that launch.
       const handed = await (dependencies.startupFallback ?? dispatchStartupFallback)(env, {
-        channelId: text(context.channelId, "channelId"), runId: text(context.runId, "runId") });
-      if (handed) await publishStartupFallbackNotice(env, { runId: text(context.runId, "runId"),
-        channelId: text(context.channelId, "channelId"), agentName: handed.agentName,
-        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
-        ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}) });
+        channelId: notice.channelId, runId: notice.runId });
+      if (handed) await publishStartupFallbackNotice(env, { runId: notice.runId, channelId: notice.channelId,
+        agentName: handed.agentName, ownerUserId: notice.ownerUserId, ownerEmail: notice.ownerEmail,
+        ...(notice.sourceMessageId ? { sourceMessageId: notice.sourceMessageId } : {}) });
+      // Another Agent has the message: signing this one in sends nothing again.
+      if (signedOut) await (dependencies.signedOutStart ?? publishSignedOutStartNotice)(env, { ...notice, signedOut,
+        ...(!handed && typeof context.sourceMention === "string" ? { sourceMention: context.sourceMention } : {}) });
     }
   }
   if ("repositoryBaselineNoticeContext" in value) {

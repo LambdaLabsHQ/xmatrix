@@ -1,4 +1,4 @@
-import { cleanRepositoryBaseline, type RepositoryBaseline } from "@xmatrix/protocol";
+import { AGENT_SIGNED_OUT_LIFECYCLE_REASON, cleanRepositoryBaseline, type RepositoryBaseline } from "@xmatrix/protocol";
 import { storeScopedCommandReplay } from "./command-replay.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { acknowledgeMachineExecution, recordMessageExecutions } from "./runtime-message-executions.js";
@@ -21,7 +21,7 @@ import {
   type SpacePlacement,
 } from "./placement.js";
 import { invocationProgress, readInvocationProgress } from "./runtime-invocation-progress.js";
-import { commitRuntime, RuntimeControlError } from "./runtime-control.js";
+import { commitRuntime, RuntimeControlError, SUMMON_LAUNCH_COMMAND } from "./runtime-control.js";
 import { resumableChannelRun, runEndRestState, type InstanceRestState } from "./instance-rest-state.js";
 import { releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { commandFields } from "./command-fields.js";
@@ -57,6 +57,15 @@ const { text, object: record } = commandFields((field) =>
 function metadata(row: QueryResultRow): Record<string, unknown> {
   return row.metadata_json && typeof row.metadata_json === "object" && !Array.isArray(row.metadata_json)
     ? row.metadata_json as Record<string, unknown> : {};
+}
+
+/** Whether the Run's program refused its start as signed out, by the failure
+ * code its runtime reported with the exit (AGENT_SIGNED_OUT_LIFECYCLE_REASON). */
+function refusedAsSignedOut(runMetadata: Record<string, unknown>): boolean {
+  const progress = runMetadata.invocationProgress;
+  const failure = progress && typeof progress === "object" ? (progress as Record<string, unknown>).operationFailure : undefined;
+  return Boolean(failure && typeof failure === "object" &&
+    (failure as Record<string, unknown>).code === AGENT_SIGNED_OUT_LIFECYCLE_REASON);
 }
 
 function positiveInteger(value: unknown, field: string): number {
@@ -310,8 +319,10 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v9", text: `SELECT
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v10", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
+          EXISTS (SELECT 1 FROM data.registration_launch_intents intent WHERE intent.run_id=r.run_id
+            AND intent.state='committed' AND intent.command_id LIKE '${SUMMON_LAUNCH_COMMAND}') AS summoned,
           (SELECT message.message_id FROM data.agent_launches launch
             JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
               AND message.message_id=launch.trigger_id AND message.deleted_at IS NULL
@@ -385,7 +396,12 @@ export class PostgresMachineLifecycleRepository {
           });
         } else Object.assign(value, { startupFailureNoticeContext: { ...notice,
           // A summoned Run's failed start answers on the summon, not as another message.
-          ...(context!.summon_message_id ? { sourceMessageId: String(context!.summon_message_id) } : {}) } });
+          ...(context!.summon_message_id ? { sourceMessageId: String(context!.summon_message_id) } : {}),
+          // A start its program refused as signed out is answered with the
+          // sign-in, and the summon to send again once it is signed in.
+          ...(refusedAsSignedOut(metadata(context!)) ? { signedOut: true,
+            ...(context!.summoned === true && typeof metadata(context!).sourceMention === "string"
+              ? { sourceMention: metadata(context!).sourceMention } : {}) } : {}) } });
       }
       await commit(tx, { spaceId: String(channel.space_id), commandId, requestDigest, value, at,
         ttlMs: eventType === "machine_run_snapshot" ? SNAPSHOT_REPLAY_TTL_MS : REPLAY_TTL_MS });

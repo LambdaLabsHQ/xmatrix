@@ -1,8 +1,7 @@
 /** PostgreSQL-backed port for agent mention orchestration. */
 
 import { recordCommandResult } from "./command-result";
-import { HARNESS_SIGNED_OUT_NOTICE_KIND, PREPARATION_REJECTION_MESSAGES, preparationRejectionMessage,
-  type ChannelAttachment } from "@xmatrix/protocol";
+import type { ChannelAttachment } from "@xmatrix/protocol";
 import type { HubAuthorityEnv } from "./postgres-authority-fleet";
 import { appendChannelMessage } from "./channel-messages";
 import { deliverCommittedProductMessage } from "./product-message-append";
@@ -243,14 +242,6 @@ export function createProductAgentMentionAuthorityPort(input: {
 
     async getHandoffTarget(input) {
       return this.getRebornTarget(input);
-    },
-
-    async signedOutNotice({ channelId, signedOut, sourceMention }) {
-      const code = "registration_harness_signed_out";
-      await dispatchProductAgentSystemNotice({ env: input.env, actorUserId: input.actorUserId,
-        sourceMessageId: input.sourceMessageId, channelId,
-        body: `Agent launch failed: ${preparationRejectionMessage(code, signedOut) ?? PREPARATION_REJECTION_MESSAGES[code]} (${code})`,
-        metadata: { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention } });
     },
 
     async recordResult(channelId, text, key) {

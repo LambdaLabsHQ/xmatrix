@@ -45,6 +45,11 @@ const RETAINED_INSTANCE_CATALOGS: readonly (readonly [string, string?])[] = [
 ];
 type InstanceStatus = AgentStatus;
 
+/** The launch a message's own summon started (`registration-launch:<message>:<selection>`),
+ * as a LIKE pattern: not "Start" on it again, a handoff's successor or a fallback. Only
+ * that launch's refused start is answered by sending its summon again. */
+export const SUMMON_LAUNCH_COMMAND = "registration-launch:%";
+
 export class RuntimeControlError extends ControlError {
   override name = "RuntimeControlError";
 }
@@ -383,12 +388,9 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
       sourceMessageId: String(result.sourceMessageId), sourceMention: value.sourceMention,
       targetRef: value.targetRef.slice(0, 300), code,
       ...(routingDecisionView(value.routingDecision) ? { routingDecision: routingDecisionView(value.routingDecision) } : {}),
-      ...(code === "registration_harness_signed_out" && parseHarnessSignedOut(value.signedOut)
-        ? { signedOut: parseHarnessSignedOut(value.signedOut)! } : {}),
       ...(code === "registration_daemon_offline" && parseOfflineMachines(value.offline)
         ? { offline: parseOfflineMachines(value.offline)! } : {}),
       message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld
-        : code === "registration_harness_signed_out" ? value.signedOut
         : code === "registration_daemon_offline" ? value.offline
         : code === "registration_machine_unavailable" ? value.machineAgents : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
@@ -542,7 +544,7 @@ export class PostgresRuntimeRepository {
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown; tooOld?: unknown; signedOut?: unknown; offline?: unknown; machineAgents?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown; offline?: unknown; machineAgents?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -558,11 +560,10 @@ export class PostgresRuntimeRepository {
       const answerFailure = item.code === "routing_parameter_invalid_answer"
         ? parseDecisionAnswerFailure(item.answerFailure) : undefined;
       const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
-      const signedOut = item.code === "registration_harness_signed_out" ? parseHarnessSignedOut(item.signedOut) : undefined;
       const offline = item.code === "registration_daemon_offline" ? parseOfflineMachines(item.offline) : undefined;
       const machineAgents = item.code === "registration_machine_unavailable" ? parseMachineAgents(item.machineAgents) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
-        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}), ...(signedOut ? { signedOut } : {}),
+        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}),
         ...(offline ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
@@ -1718,11 +1719,14 @@ export class PostgresRuntimeRepository {
     });
   }
 
-  /** A Run whose program refused a turn as signed out: recorded on the Run, so
-   * routing passes its registration over until its machine reports a newer
-   * sign-in, and returned as the program and machine its sign-in names.
+  /** The program and machine of a Run whose program refused a turn as signed
+   * out, for the sign-in its notice offers, and, while the Run has not replied,
+   * the summon it was started for, to send again once it is signed in.
+   * Nothing is recorded: only the program knows whether its provider accepts
+   * it, and it says so each time it is given work.
    * Undefined for a Run without a registration. */
-  async recordRunSignedOut(input: { requestId: string; runId: string; actorUserId: string }): Promise<HarnessSignedOut | undefined> {
+  async signedOutRunHarness(input: { requestId: string; runId: string; actorUserId: string }): Promise<{
+    signedOut: HarnessSignedOut; summon?: { sourceMessageId: string; sourceMention: string } } | undefined> {
     const requestId = text(input.requestId, "requestId", 200);
     const runId = text(input.runId, "runId", 300);
     const route = await this.entityDirectory.resolve(
@@ -1732,19 +1736,26 @@ export class PostgresRuntimeRepository {
     const placement = await this.spaces.resolve(requestId, "runtime.run-signed-out.placement", route.spaceId);
     const rows = await this.database.transaction({ requestId, operation: "runtime.run-signed-out",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } },
-    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v1", text: `WITH marked AS (
-        UPDATE data.runs SET metadata_json=metadata_json||jsonb_build_object('signedOutAt',statement_timestamp())
-        WHERE run_id=$1 AND owner_user_id=$2 RETURNING run_id)
-      SELECT b.machine_id,b.harness,
-        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name
-      FROM data.run_agent_registrations b JOIN marked ON marked.run_id=b.run_id WHERE b.owner_user_id=$2 LIMIT 1`,
+    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v2", text: `SELECT b.machine_id,b.harness,
+        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name,
+        intent.source_message_id,run.metadata_json->>'sourceMention' AS source_mention,
+        EXISTS (SELECT 1 FROM data.agent_launches launch
+          WHERE launch.run_id=b.run_id AND launch.first_reply_at IS NOT NULL) AS replied
+      FROM data.run_agent_registrations b JOIN data.runs run ON run.run_id=b.run_id
+      LEFT JOIN data.registration_launch_intents intent ON intent.run_id=b.run_id AND intent.state='committed'
+        AND intent.command_id LIKE '${SUMMON_LAUNCH_COMMAND}'
+      WHERE b.run_id=$1 AND b.owner_user_id=$2 LIMIT 1`,
     values: [runId, text(input.actorUserId, "actorUserId", 300)], maxRows: 1 }));
     const row = rows[0];
     if (!row) return undefined;
     const harness = String(row.harness);
     const machineName = typeof row.machine_name === "string" ? row.machine_name.trim() : "";
-    return parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
+    const signedOut = parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
       machineId: String(row.machine_id), ...(machineName ? { machineName } : {}) });
+    if (!signedOut) return undefined;
+    const sourceMention = typeof row.source_mention === "string" ? row.source_mention : "";
+    return { signedOut, ...(row.replied !== true && typeof row.source_message_id === "string" && /^[@＠]/u.test(sourceMention)
+      ? { summon: { sourceMessageId: row.source_message_id, sourceMention } } : {}) };
   }
 
   async getRun(input: { requestId: string; runId: string; actorUserId: string; requireExecutionAccess?: boolean }) {
