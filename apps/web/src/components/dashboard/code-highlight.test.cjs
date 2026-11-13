@@ -41,9 +41,11 @@ switch run(@codex, "Find what does not hold", ~about=draft, ~by=30m)->wait {
   }
 });
 
-test("a Norn moment is one ink", () => {
+test("a Norn moment is one ink, and a pipe is its own run so it can stand apart from its steps", () => {
   hljs.registerLanguage("norn", require("./norn-grammar.ts").default);
   const html = highlightCode(hljs, "after(2027-06-04T00:00Z)->wait\nevery(1d, ~from=2026-11-03)->forEach(_ => say(@Daniel, \"hi\"))", "norn");
-  assert.ok(html.includes('<span class="hljs-number">2027-06-04T00:00Z</span>)-&gt;'), html);
+  assert.ok(html.includes('<span class="hljs-number">2027-06-04T00:00Z</span>)<span class="hljs-pipe">-&gt;</span>'), html);
   assert.ok(html.includes('<span class="hljs-number">2026-11-03</span>'), html);
+  assert.ok(html.includes(')<span class="hljs-pipe">-&gt;</span>forEach'), html);
+  assert.ok(highlightCode(hljs, "after(2027-06-04T00:00Z) -> wait", "norn").includes(") -&gt; <span"), "a spaced pipe keeps its own spaces");
 });
