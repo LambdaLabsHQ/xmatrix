@@ -71,6 +71,10 @@ function continuationInput(raw: { commandId: string; actorUserId: string; channe
     ...(raw.quotaRetry ? { quotaRetry: raw.quotaRetry } : {}) };
 }
 
+function registrationTriple(row: QueryResultRow): string {
+  return JSON.stringify([String(row.owner_user_id), String(row.machine_id), String(row.harness)]);
+}
+
 /** A wake refusal that no later message can change: the Instance stops resting.
  * `registration_daemon_offline` is deliberately absent: the daemon reconnects. */
 const PERMANENT_WAKE_REFUSALS = new Set(["instance_not_found", "registration_not_found",
@@ -298,9 +302,10 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const commandId = text(raw.commandId);
     const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v2", text: `SELECT
-        i.instance_id,r.owner_user_id FROM data.instances i
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v3", text: `SELECT
+        i.instance_id,r.owner_user_id,b.machine_id,b.harness FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
+        LEFT JOIN data.run_agent_registrations b ON b.run_id=i.run_id
         WHERE i.channel_id=$1 AND ($2::text IS NULL OR i.instance_id=$2)
           AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
@@ -310,8 +315,16 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
+    const usedUp = await this.usedUpRegistrations(commandId, candidates);
     for (const candidate of candidates) {
       const instanceId = String(candidate.instance_id);
+      // Its provider account is used up (a sibling may have just reported the
+      // limit): waking it would only fail the same way. It keeps resting, and
+      // the first message after the reset wakes it.
+      if (usedUp.has(registrationTriple(candidate))) {
+        refused.push({ instanceId, code: "registration_quota_exhausted", permanent: false });
+        continue;
+      }
       try {
         const value = await this.recordResume(continuationInput({
           commandId: `instance-wake:${sourceMessageId}:${instanceId}`.slice(0, 200),
@@ -340,6 +353,28 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       }
     }
     return { woken, refused };
+  }
+
+  /** Of these resting Instances' registrations, those whose quota pool reads
+   * empty now: a reported usage limit holds it so until the reset, and a
+   * provider reading of no headroom says the same. */
+  private async usedUpRegistrations(commandId: string, candidates: readonly QueryResultRow[]): Promise<Set<string>> {
+    const keyed = candidates.filter(row => row.machine_id != null && row.harness != null);
+    if (!keyed.length) return new Set();
+    const rows = await this.directory.transaction({ requestId: `${commandId}:wake-quota`.slice(0, 200),
+      operation: "registration.wake.quota" }, tx => tx.query({ name: "registration_wake_resting_quota_v1",
+      text: `SELECT e.owner_user_id,e.machine_id,e.harness,q.source,q.remaining,q.observed_at,q.expires_at,
+          q.windows_json,q.account_json
+        FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
+        JOIN unnest($1::text[],$2::text[],$3::text[]) AS k(owner_user_id,machine_id,harness)
+          ON k.owner_user_id=e.owner_user_id AND k.machine_id=e.machine_id AND k.harness=e.harness
+        WHERE q.owner_user_id IS NOT NULL`,
+      values: [keyed.map(row => String(row.owner_user_id)), keyed.map(row => String(row.machine_id)),
+        keyed.map(row => String(row.harness))], maxRows: MAX_WAKES_PER_MESSAGE }));
+    return new Set(rows.flatMap(row => {
+      const reading = registrationQuotaReading(row);
+      return reading && reading.remainingPercent <= 0 ? [registrationTriple(row)] : [];
+    }));
   }
 
   /** Hand a predecessor's retained directory to a new Instance of another

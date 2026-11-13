@@ -994,6 +994,23 @@ integration("launch survives a hostname change with stale Workspace metadata and
       await sql(`UPDATE data.runs SET status='exited' WHERE run_id=$1`, [target.runId]);
       await sql(`UPDATE data.instances SET status='offline',rest_state='sleeping' WHERE instance_id=$1`, [target.instanceId]);
     }
+    // While its provider account reads used up (a sibling just reported the
+    // limit), waking it would fail the same way: it keeps resting.
+    await sql(`INSERT INTO control.registration_quota_observations
+        (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source)
+      SELECT DISTINCT owner_user_id,COALESCE(NULLIF(btrim(declaration_json->>'quotaPoolId'),''),
+          'registration:'||machine_id||':'||harness),0,statement_timestamp()-interval '1 second',
+          statement_timestamp()+interval '1 hour','daemon'
+        FROM control.agent_registration_environments
+      ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET remaining=0,source='daemon',
+        observed_at=EXCLUDED.observed_at,expires_at=EXCLUDED.expires_at,windows_json=NULL`);
+    const usedUp = await reborn.wakeResting({ commandId: "wake-used-up", channelId: "channel", sourceMessageId: "used-up" });
+    assert.deepEqual(usedUp.woken, [], "a used-up registration's resting Instances do not wake");
+    assert.deepEqual(usedUp.refused.map(item => [item.code, item.permanent]),
+      [["registration_quota_exhausted", false], ["registration_quota_exhausted", false]]);
+    assert.equal((await sql(`SELECT count(*)::int AS count FROM data.instances WHERE instance_id=ANY($1)
+      AND rest_state='sleeping'`, [[sleeper.instanceId, repoSleeper.instanceId]])).rows[0].count, 2, "they keep resting");
+    await sql(`DELETE FROM control.registration_quota_observations`);
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
     assert.deepEqual(targeted.woken.map(item => item.instanceId), [sleeper.instanceId],

@@ -790,6 +790,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });
     if (!command) return;
+    const usageLimited = isAgentUsageLimitLifecycle(message);
+    // Held before the notice commits: the notice wakes the Channel's resting
+    // Instances, and those of this used-up registration must read it held.
+    if (usageLimited) await this.holdUsageLimitedInstance(session, message, command.messageId);
     try {
       await this.dependencies.messages.append(command.payload, {
         actorUserId: session.principal.ownerUserId,
@@ -803,9 +807,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         return;
       }
     }
-    if (isAgentUsageLimitLifecycle(message)) {
-      await this.handOffUsageLimitedInstance(session, message, command.messageId);
-    }
+    if (usageLimited) await this.handOffUsageLimitedInstance(session, command.messageId);
   }
 
   /**
@@ -815,25 +817,32 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
    * successor on any machine. The committed turn-failure notice keys both, so
    * a replayed lifecycle signal repeats neither.
    */
-  private async handOffUsageLimitedInstance(
+  private async holdUsageLimitedInstance(
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"agent_lifecycle">,
     sourceMessageId: string,
   ): Promise<void> {
     const ids = await usageLimitHandoffIds(sourceMessageId);
-    const channelId = session.run.channelId;
-    const ownerUserId = session.principal.ownerUserId;
     try {
       await this.dependencies.runtime.holdUsageLimit({
         commandId: ids.commandId,
-        actorUserId: ownerUserId,
-        channelId,
+        actorUserId: session.principal.ownerUserId,
+        channelId: session.run.channelId,
         sourceInstanceId: session.run.instanceId,
         ...(typeof message.resetsAt === "string" ? { resetsAt: message.resetsAt.slice(0, 64) } : {}),
       });
     } catch (error) {
       console.error("Agent usage limit could not be recorded", error);
     }
+  }
+
+  private async handOffUsageLimitedInstance(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    sourceMessageId: string,
+  ): Promise<void> {
+    const ids = await usageLimitHandoffIds(sourceMessageId);
+    const channelId = session.run.channelId;
+    const ownerUserId = session.principal.ownerUserId;
     const body = usageLimitHandoffCommand(session.principal.agentName, session.run.channelInstanceId);
     if (!body) return;
     try {
