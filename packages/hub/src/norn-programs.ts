@@ -161,7 +161,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       // A page's program ends in its own conversation, where only its Instances rest, about to be let go.
       ...(report.onPage ? { quiet: true } : replyTo(report)),
       authorityUserId: report.authorityUserId,
-      body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
+      body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"], report.onPage)}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
   // An Instance started for a request has nothing left to do in the conversation once the request has ended.

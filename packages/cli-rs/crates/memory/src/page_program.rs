@@ -104,7 +104,7 @@ mod tests {
                 { "holder": "@claude", "text": "Audit", "askedAt": "2026-11-13T18:00:01.000Z", "by": null,
                   "outcome": null, "reply": null, "settledAt": null }] },
             { "name": "main", "state": "not_started", "problem": "1:1 Unbound name remind\nmore", "requests": [] },
-            { "name": "check", "channelId": "conv-2", "state": "completed", "result": "The program finished: ()",
+            { "name": "check", "channelId": "conv-2", "state": "completed", "result": "()",
               "requests": [{ "holder": "@auto", "text": "Check", "askedAt": "2026-11-12T09:00:00.000Z", "by": null,
                 "outcome": "answered", "reply": "fine", "settledAt": "2026-11-12T09:04:00.000Z" }] }
         ]))
@@ -113,7 +113,7 @@ mod tests {
             render_page_programs_header(&programs),
             "programs:\n  - audit · running in conv-1 · 2 asked, latest: @claude asked 2026-11-13T18:00:01.000Z, open\n\
              \x20 - main · not started\n    1:1 Unbound name remind\n\
-             \x20 - check · completed in conv-2 · 1 asked, latest: @auto answered 2026-11-12T09:04:00.000Z\n    The program finished: ()\n"
+             \x20 - check · completed in conv-2 · 1 asked, latest: @auto answered 2026-11-12T09:04:00.000Z\n    ()\n"
         );
         assert_eq!(render_page_programs_header(&[]), "");
     }

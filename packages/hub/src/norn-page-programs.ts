@@ -85,7 +85,8 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
     // The program's own message: its requests and its result are replies to it. A fence tagged `norn` only shows.
     const response = await dispatchProductMessageAppend(env, channelId, { commandId: `norn-page-run:${programId}`.slice(0, 200),
       messageId: programId, channelId, principal, xmatrixAuthor: true,
-      body: `The program \`${block.name}\` of page:${pageId}${run > 1 ? `, run ${run}` : ""}.\n\n\`\`\`norn\n${block.source}\n\`\`\`` });
+      // The conversation is named for the page and the block, and links the page: the message is the source alone.
+      body: `${run > 1 ? `Run ${run}.\n\n` : ""}\`\`\`norn\n${block.source}\n\`\`\`` });
     if (!response.ok) throw new Error(`Norn page program message append failed (${response.status})`);
     const requestId = `norn-page-start:${programId}`;
     await (await repository(channelId, requestId)).start({ requestId, channelId, programId, authorKind: "user", authorId: userId,

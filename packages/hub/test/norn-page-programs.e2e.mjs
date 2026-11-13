@@ -53,7 +53,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
     const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
       message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");
     const history = await channelHistory(worker, MOCK_TOKEN, running.channelId, 20);
-    assert.match(history.messages[0].body, /^The program `review` of page:/u);
+    assert.match(history.messages[0].body, /^```norn\n/u);
     const delivery = history.messages.find(message => message.body.startsWith("@codex launch:force"));
     const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
 
@@ -71,7 +71,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
     await edit("# Design\n\nNo program.\n");
     assert.deepEqual(await programs(), []);
     await until(async () => (await channelHistory(worker, MOCK_TOKEN, running.channelId, 30)).messages
-      .some(message => message.body === "The program stopped: Removed from its page"), "the stop");
+      .some(message => message.body === "Stopped: Removed from its page"), "the stop");
 }));
 
 test("a page's program asks the same participant again where it already is, and lets it go when the program ends", () => pageScene("norn-reuse", async ({ worker, scenario, daemon, call, pages, until }) => {
