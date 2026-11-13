@@ -68,7 +68,7 @@ export function GooglePlaySpaceBillingSection({ userId, space }: { userId: strin
   if (!space) return <p>Open a Space to see its plan.</p>;
   if (!available) return <p>Update xMatrix from Google Play to manage subscriptions. Existing Space access is unchanged.</p>;
   const google = billing?.subscription?.billingProvider === "google";
-  return <StoreBillingFrame testId="google-play-billing" storeName="Google Play" provider="google" space={space} billing={billing}
+  return <StoreBillingFrame testId="google-play-billing" storeName="Google Play" provider="google" userId={userId} space={space} billing={billing}
     coverage="Google Play Pro covers one human seat and 5,000 Agent credits each month for Agent/app writing and paid X actions; people write in xMatrix for free. Agents do not occupy seats. Model-provider subscriptions are separate."
     products={products.map((product) => ({ key: product.basePlanId, displayPrice: product.displayPrice, interval: product.interval }))}
     busy={busy} onPurchase={(key) => { const product = products.find((item) => item.basePlanId === key); if (product) purchase(product); }}
