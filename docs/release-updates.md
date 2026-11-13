@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: A handoff refused for a signed-out successor shows the sign-in notice
+
+When `handoff:@auto` (or a named handoff) found its successor's program signed
+out on its machine, the only trace was a line under the handoff message ending
+in `(registration_harness_signed_out)`. It now posts the same sign-in notice a
+refused summon gets, naming the program and machine, and the handoff goes
+again once the owner signs in. Hub only; no schema change. Recovery is a
+CI-validated Hub release reverting the notice.
+
 ## Unreleased: an Agent's startup error on Windows reads as Windows wrote it
 
 When an Agent failed to start on a Chinese Windows, its card showed the last
