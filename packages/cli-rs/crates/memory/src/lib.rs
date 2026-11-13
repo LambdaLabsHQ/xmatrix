@@ -2,6 +2,7 @@
 
 mod page;
 mod page_automation;
+mod page_program;
 mod page_upload;
 pub use page::cmd_page;
 
