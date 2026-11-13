@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@4ea1312845432b288450bcf42411efe29d421882; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@1bbc58dbf2854a5d14452ca93f4c4c3ff6e9c9c2; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Argument, AstNode, BinaryOperator, Case, Expression, Lambda, Pattern, Statement, TopLevelItem } from "../frontend/ast.js";
 import type { Code } from "./code.js";
 import { match } from "./pattern.js";
@@ -43,7 +43,7 @@ export interface Machine {
   resumedAt: number;
 }
 const effectBuiltins = new Set(["ask", "confirm", "choose", "run", "wait", "waitUntil", "cancel", "handOver", "status", "say", "judge", "first"]);
-const builtins = new Set([...effectBuiltins, "now", "show", "ignore", "fail", "or", "never", "map", "filter", "forEach", "anyOf"]);
+const builtins = new Set([...effectBuiltins, "now", "show", "ignore", "fail", "or", "never", "map", "filter", "gather", "forEach", "anyOf"]);
 
 export function start(code: Code, now = 0): Machine {
   return { control: { kind: "eval", node: code.root, env: "e0" }, frames: [],
@@ -244,6 +244,10 @@ function builtin(code: Code, machine: Machine, name: string, args: Value[], labe
     }
     case "map": case "filter": {
       if (args.length !== 2 || args[0].type !== "source" || args[0].kind !== "stream" || !["closure", "builtin"].includes(args[1].type)) throw new Error(`${name} needs a stream and function`);
+      value = { type: "source", kind: "stream", name, args, labels }; break;
+    }
+    case "gather": {
+      if (args.length !== 1 || Object.keys(labels).length || args[0].type !== "source" || args[0].kind !== "stream") throw new Error("gather needs one stream");
       value = { type: "source", kind: "stream", name, args, labels }; break;
     }
     case "forEach": {

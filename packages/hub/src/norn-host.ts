@@ -5,7 +5,7 @@ import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
 import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
-import { show, text, type Value } from "./vendor/norn/runtime/value";
+import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 
 /**
  * The xMatrix host of Norn (docs/architecture/norn-host.md): what a program
@@ -304,7 +304,10 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         undelivered = false;
         const pass = evaluate(checked.code, ledger, now);
         nextDue = pass.nextDue;
-        waits = (pass.waiting?.targets ?? []).flatMap(target => target.kind === "stream" ? [target.source] : []);
+        // The streams a plain wait is on, and those the program's loops take from while a handler works:
+        // an event on one of the latter is kept for the loop, which handles it when the round is over.
+        const streams = [...(pass.waiting?.targets ?? []).flatMap(target => target.kind === "stream" ? [target.source] : []), ...pass.listening];
+        waits = streams.filter((stream, index) => streams.findIndex(other => eventKey(other) === eventKey(stream)) === index);
         said.push(...pass.said);
         // A round whose handler ended in anything but an answer is told in the program's conversation, once.
         for (const entry of pass.log) {

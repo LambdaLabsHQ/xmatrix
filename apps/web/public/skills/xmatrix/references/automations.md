@@ -30,7 +30,7 @@ say(@<person>, "Renew the domain today")
 ````
 
 - `routine` (after `open Std`) is a round on a beat: `~every` is a duration (`30m`, `12h`, `7d`), `~from` the UTC time of the first round. `~who` does it; when that does not end in an answer, `~otherwise` is asked the same once. A round that still fails is told in the program's conversation.
-- `ciFailed("<owner/repo>")`, `prMerged("<owner/repo>")` and `appEvent("<app>", ~feature="<event>")` are the events a program can wait on, joined to a beat with `or`. The Space's connection must cover the repository or app. An event that arrives while a round runs starts no second round.
+- `ciFailed("<owner/repo>")`, `prMerged("<owner/repo>")` and `appEvent("<app>", ~feature="<event>")` are the events a program can wait on, joined to a beat with `or`. The Space's connection must cover the repository or app. Events that arrive while a round runs are one more round after it, with the latest event; `ciFailed("<owner/repo>")->gather` hands the program all of them as a list.
 - `after(<UTC time>)->wait` waits once. `say(@<person>, "…")` tells them; `run(@auto(…), "…")->wait` has an Agent check something then.
 - `confirm(@<person>, "<question>", ~by=2d)`, `choose(@<person>, "<question>", [A, B])` and `ask(@<person>, "<question>")` ask a person, who answers on a card. Without an answer by `~by` the program reads `NoReply`; `decide(who, question, ~options, ~recommend, ~by)` (after `open Std`) takes the recommendation then.
 - `@auto(~repo="<owner/repo>")` asks whichever Agent fits; `~pwd`, `~machine`, `~harness`, `~model` and `~effort` are the other conditions. `@claude` or `@codex` asks that one.

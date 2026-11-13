@@ -225,16 +225,18 @@ declares (`NORN_HOST_INTERFACE` in `norn-host.ts`):
 
 `every(1d)->or(ciFailed("acme/app"))->forEach(_ => run(…)->wait)` runs a
 round on its beat and at once when CI fails. Each pass stores the streams the
-program is left waiting on (`norn_programs.waits_json`, expand migration
+program waits on or listens to (`norn_programs.waits_json`, expand migration
 0251). An event, arriving where Automation triggers arrive
 (`automation-triggers.ts`), is recorded as an occurrence in the ledger of
 every running program that waits on a matching stream, and the program is
 evaluated at once (`norn-events.ts`). The value is the event in words, with
 its link. A program hears an event only under the rule an Automation does:
 its authority is a member who may act, and the Space's connection still
-covers the event's source. A program in the middle of a round waits on its
-request, not on the stream, so an event that arrives then starts no second
-round behind it.
+covers the event's source. A program listens while a round of its loop is
+out, too: the streams its loops take from are stored with the ones it waits
+on (`pass.listening`). Events that arrive during a round are kept in the
+ledger and are one more round when that one is over, with the latest event;
+`ciFailed("acme/app")->gather` hands the handler all of them as a list.
 
 Streams of one kind are brought to one shape with `map`, so a handler reads
 text whichever stream occurred:
