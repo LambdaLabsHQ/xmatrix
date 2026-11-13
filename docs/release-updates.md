@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a repeating Norn program can keep a time of the day or the week
+
+`every(7d)` in a Norn program ticked a whole number of periods after the
+program started: its first round came a week after it was written, on
+whatever weekday that was. A weekly operation moved to Norn would have
+skipped a round and changed its day. Norn is vendored at norn-lang/norn#37:
+`every(7d, ~from=2026-11-16T09:00Z)` counts the beat from that time, so the
+first round is then. Without `~from` nothing changes. Hub only. Recovery is
+a CI-validated beta Hub reverting this change; a program that uses `~from`
+then stops with the label named.
+
 ## Unreleased: `xmatrix page read` says how a Page's Norn programs stand
 
 An Agent that read a Page saw its `norn run` blocks as text only: whether a
@@ -7,6 +18,7 @@ program was running, where its work was discussed and how its latest request
 ended showed only in the Web. `page read` now prints a `programs:` section in
 its header, one line a block, from the route the Page's steps are drawn from.
 CLI only. Recovery is a CI-validated beta CLI reverting this change.
+
 
 ## Unreleased: a failed round of a repeating Norn program is told in its conversation
 
