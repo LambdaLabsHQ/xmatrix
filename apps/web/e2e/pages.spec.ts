@@ -1556,7 +1556,7 @@ test("a page's schedules are task lines whose timing is quiet and whose state fo
 });
 
 
-test("a page's program is its code block, and joined under it are its steps: who was asked what, and what they answered", async ({ page: browser }) => {
+test("a page's program is its code block, and joined under it is its flow: who was asked what, what they answered, and what it does next", async ({ page: browser }) => {
   const source = ['type verdict = Sound | Flawed(string)', 'let rec settle = (draft, round) =>',
     '  switch run(@grok, "Find where this design does not hold", ~about=draft, ~by=30m)->wait? {',
     '  | Sound => Answered(draft)',
@@ -1566,36 +1566,54 @@ test("a page's program is its code block, and joined under it are its steps: who
     outcome: null, reply: null, settledAt: null, ...change });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
   await fixtureJson(browser, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\?.*$/u, { links: [] });
+  const closes = new Date(Date.now() + 24 * 60_000 + 20_000).toISOString();
+  // What the Hub reads off the program from here on: the request that is out, then each way the review can go.
+  const step = (holder: string, text: string, change: Record<string, unknown> = {}) => ({ kind: "ask", verb: "run", holder, conditions: {},
+    text, options: [], open: false, by: null, within: 30 * 60_000, main: "answered",
+    otherwise: [{ when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }], ...change });
   await fixtureJson(browser, "page-programs", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/programs$/u, { programs: [
     { name: "review", channelId: E2E_CHANNEL.id, state: "running", requests: [
       asked("@claude", "Draft a design for requests to people", { outcome: "answered", reply: "A card under the program", settledAt: NOW }),
       asked("@grok", "Find where this design does not hold", { outcome: "answered", reply: "Flawed(no owner when the person leaves)", settledAt: NOW }),
-      asked("@claude", "Revise the design", { by: new Date(Date.now() + 24 * 60_000 + 20_000).toISOString() })] },
-    { name: "main", state: "not_started", problem: "1:1 this request is the program's last value, so nothing waits for it", requests: [] },
-    { name: "done", channelId: E2E_CHANNEL.id, state: "completed", result: "ok",
+      asked("@claude", "Revise the design", { by: closes })],
+    next: [step("@claude", "Revise the design", { open: true, by: closes, within: null }),
+      step("@grok", "Find where this design does not hold", { main: "Sound", otherwise: [
+        { when: "Flawed", steps: [step("@claude", "Revise the design"), { kind: "again", text: "Find where this design does not hold" }] },
+        { when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }] }),
+      { kind: "end", failed: false, result: "the answer" }] },
+    { name: "main", state: "not_started", problem: "1:1 this request is the program's last value, so nothing waits for it", requests: [], next: [] },
+    { name: "done", channelId: E2E_CHANNEL.id, state: "completed", result: "ok", next: [],
       requests: [asked("@codex", "Reply with ok", { outcome: "broke", reply: "its turn ended without an answer", settledAt: NOW })] },
   ] }, { method: "GET" });
   const fence = (tag: string, code: string) => `\`\`\`${tag}\n${code}\n\`\`\`\n\n`;
   const editor = await openLivePage(browser, `# Relay\n\n${fence("norn run review", source)}${fence("norn run", 'run(@codex, "x")')}${
     fence("norn run done", 'ask(@codex, "Reply with ok")->wait')}${fence("norn", 'ask(@codex, "shown only")')}`);
-  // The block stays code, in Norn's inks; its steps are joined under it, one row per request.
+  // The block stays code, in Norn's inks; its flow is joined under it: a row per request made, then what comes next.
   await expect(editor.locator("pre .hljs-title").first()).toHaveText("@grok");
   const programs = editor.locator(".page-program-steps");
   await expect(programs).toHaveCount(3);
-  const rows = programs.first().locator(".page-program-step");
-  await expect(rows).toHaveCount(3);
+  const rows = programs.first().locator(".program-flow > .program-flow-steps > .program-flow-step");
   await expect(rows.nth(1)).toHaveAttribute("data-state", "answered");
-  await expect(rows.nth(1).locator(".page-program-holder")).toHaveText("grok");
-  await expect(rows.nth(1).locator(".page-program-note")).toHaveText("Flawed(no owner when the person leaves)");
-  await expect(rows.nth(2)).toHaveAttribute("data-state", "working");
-  await expect(rows.nth(2).locator(".page-program-note")).toHaveText("working · 24 min left");
+  await expect(rows.nth(1).locator(".program-flow-title")).toHaveText("grok");
+  await expect(rows.nth(1).locator(".program-flow-note")).toHaveText("Flawed(no owner when the person leaves)");
+  // The request that is out is where the program stands now; under it, each way it can end and where that leads.
+  await expect(rows.nth(2)).toHaveAttribute("data-state", "now");
+  await expect(rows.nth(2).locator("> .program-flow-body > .program-flow-head .program-flow-note")).toHaveText("working · 24 min left");
+  await expect(rows.nth(2).locator(".program-flow-branch")).toHaveText("otherwiseStops without a result");
+  const review = rows.nth(4);
+  await expect(review.locator("> .program-flow-body > .program-flow-branch > .program-flow-when")).toHaveText(["Flawed", "otherwise"]);
+  await expect(review.locator(".program-flow-step[data-kind=again]")).toHaveText("Back to “Find where this design does not hold”");
+  // Under its own text the flow names each request by its first lines; a fallback that asks the same says so.
+  await expect(review.locator("> .program-flow-body > .program-flow-text")).toHaveText("Find where this design does not hold");
+  await expect(rows.last()).toHaveText("Ends with the answer");
   // A block that does not run as written says why, and marks where; a block tagged `norn` alone is only shown.
-  await expect(programs.nth(1).locator(".page-program-end")).toHaveAttribute("data-state", "problem");
-  await expect(programs.nth(1).locator(".page-program-end")).toContainText("last value");
+  const ended = (index: number) => programs.nth(index).locator(".program-flow-step[data-kind=ended]");
+  await expect(ended(1)).toHaveAttribute("data-state", "problem");
+  await expect(ended(1)).toContainText("last value");
   await expect(editor.locator(".page-program-wrong")).toHaveText("run");
   // A request that failed says how, and the program that went on says how it ended.
-  await expect(programs.nth(2).locator(".page-program-step")).toHaveAttribute("data-state", "failed");
-  await expect(programs.nth(2).locator(".page-program-end")).toHaveText("ok");
+  await expect(programs.nth(2).locator(".program-flow-step[data-kind=ask]")).toHaveAttribute("data-state", "failed");
+  await expect(ended(2)).toHaveText("ok");
   await browser.screenshot({ path: test.info().outputPath("pages-program-status.png") });
 });
 

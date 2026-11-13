@@ -294,6 +294,7 @@ import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
 import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
+import { carriesNornBlock, MessageProgramFlow, MessageProgramProvider } from "@/components/dashboard/message-program-flow";
 import { MessageAskLine } from "./message-ask-line";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
@@ -2692,6 +2693,13 @@ export const MessageRow = memo(function MessageRow({
     <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
   ) : null;
   const hasCardBody = cardBody !== null || Boolean(message.isEvent);
+  // A message that carries a program draws the program's flow over its text. An edit or a quote of it is no program.
+  const programSpaceId = !contextOnly && !recalled && carriesNornBlock(displayBody) ? channel?.spaceId : undefined;
+  const programFlow = useMemo(() => programSpaceId && token && message.messageId ? (
+    <MessageProgramFlow spaceId={programSpaceId} programId={message.messageId} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />} />
+  ) : null, [programSpaceId, token, message.messageId, currentUserIdentityId, markdownComponents]);
   const richMessage = useMemo(() => prepareRichMessageContent({ body: hasCardBody ? "" : displayBody,
     collapsed: collapsible && !expanded, components: markdownComponents, connector: connectorInvocation }),
   [hasCardBody, displayBody, collapsible, expanded, markdownComponents, connectorInvocation]);
@@ -2700,7 +2708,7 @@ export const MessageRow = memo(function MessageRow({
       {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
       <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
         <MessagePicturesContext.Provider value={drawPicture}>
-          {richMessage.content}
+          <MessageProgramProvider value={programFlow}>{richMessage.content}</MessageProgramProvider>
         </MessagePicturesContext.Provider>
       </div>
     </MentionReadMessageScopeProvider>

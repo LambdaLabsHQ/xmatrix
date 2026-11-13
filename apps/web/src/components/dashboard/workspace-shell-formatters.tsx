@@ -4,6 +4,7 @@ export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageA
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { directMediaLink } from "./attachment-media-type";
 import { codeLanguageLabel, useHighlightedCode } from "./code-highlight";
+import { useMessageProgramFlow } from "./message-program-flow";
 import { MediaLink } from "./media-player";
 import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
@@ -259,9 +260,12 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
 
   const language = markdownCodeLanguage(children);
   const highlighted = useHighlightedCode(text, language);
+  // A program's flow stands over its text: what it does, before how it is written.
+  const programFlow = useMessageProgramFlow(language);
   // The block draws its own code element from the text, so a fence without a language never falls through to the
   // inline span's chip and gets a rim on every line.
-  return (
+  return (<>
+    {programFlow}
     <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden first:mt-0" data-language={language || undefined}>
       {language ? <MarkdownCodeLanguage language={language} /> : null}
       <button
@@ -281,7 +285,7 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
         )}
       </pre>
     </div>
-  );
+  </>);
 }
 
 export function isSafeMessageImageSrc(src: string): boolean {

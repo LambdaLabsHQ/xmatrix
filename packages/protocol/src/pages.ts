@@ -391,6 +391,49 @@ export interface PageProgramRequest {
   settledAt: string | null;
 }
 
+/**
+ * One step of what a program does from here on, as its flow draws it. The
+ * Hub reads the steps off the program itself: it evaluates the program on a
+ * copy of its ledger, moves the clock to what it waits for, and answers each
+ * request every way it can end.
+ */
+export type PageProgramStep =
+  /** It waits for a time, or for something outside to happen. */
+  | { kind: "wait";
+      /** The time it waits for; null when it waits only for what happens outside. */
+      at: string | null;
+      /** What outside it waits for, in words: "CI fails on acme/app". */
+      on: string[];
+      /** The flow comes back here: it is a round of work that repeats. */
+      repeats: boolean;
+      /** How long between two rounds, in milliseconds, where the clock sets the beat. */
+      every: number | null }
+  /** It asks someone for something and waits for the answer. */
+  | { kind: "ask"; verb: string; holder: string;
+      /** What the program asks of whoever takes it: `repo`, `machine`, … */
+      conditions: Record<string, string>;
+      text: string;
+      /** What `choose` offers. */
+      options: string[];
+      /** Asked already, and not answered yet. */
+      open: boolean;
+      /** When an open request closes by itself. */
+      by: string | null;
+      /** How long whoever is asked has, in milliseconds, for a request not made yet. */
+      within: number | null;
+      /** The answer the steps after this one follow, when another way it can end leads elsewhere. */
+      main: string | null;
+      /** The other ways it can end, where they lead somewhere else. */
+      otherwise: { when: string; steps: PageProgramStep[] }[] }
+  /** It tells someone something and goes on. */
+  | { kind: "say"; to: string; text: string }
+  /** The program ends here. */
+  | { kind: "end"; failed: boolean; result: string }
+  /** The flow goes back to an earlier step: the wait that repeats, or the request with this text. */
+  | { kind: "again"; text: string | null }
+  /** The flow goes on past what was read of it. */
+  | { kind: "more" };
+
 /** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
 export interface PageProgramStatus {
   /** The block's name: the word after `norn run`, or `main`. */
@@ -404,4 +447,6 @@ export interface PageProgramStatus {
   result?: string;
   /** Each request the program made, oldest first. */
   requests: PageProgramRequest[];
+  /** What it does from here on, beginning with what it waits for now. Empty once it has ended. */
+  next: PageProgramStep[];
 }

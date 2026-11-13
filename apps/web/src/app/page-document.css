@@ -787,17 +787,16 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .page-automation-status:disabled { cursor: default; }
 
-/* A page's program is a code block with its steps joined under it: one tinted surface, the code above and, below a
-   hairline, who was asked what and what they answered. No badge colours beyond the inks the code already uses. */
+/* A page's program is a code block with its flow joined under it: one tinted surface, the code above and, below a
+   hairline, what the program has asked, what it waits for now and what it does next (program-flow.ts). A
+   conversation draws the same flow over the program's text. No badge colours beyond the inks the code already uses. */
 .page-document pre.page-program-code { margin-bottom: 0; border-radius: 10px 10px 0 0; }
 .page-program-wrong { text-decoration: underline wavy var(--destructive); text-underline-offset: 3px; }
 .page-program-steps {
-  /* The code's string ink, for what went well. */
-  --code-ink-string: oklch(0.45 0.1 145);
   display: block;
   width: 100%;
   margin: 0 0 1em;
-  padding: 0.25em 1em 0.4em;
+  padding: 0.35em 1em 0.5em;
   border: 0;
   border-top: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent);
   border-radius: 0 0 10px 10px;
@@ -811,37 +810,90 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .page-program-steps:disabled { cursor: default; }
 .page-program-steps:hover:not(:disabled) { background: color-mix(in oklch, var(--foreground) 6.5%, transparent); }
-.page-program-step, .page-program-end { display: flex; align-items: center; gap: 0.6em; padding: 0.32em 0; min-width: 0; }
-.page-program-step + .page-program-step, .page-program-step + .page-program-end {
-  border-top: 1px solid color-mix(in oklch, var(--foreground) 5%, transparent);
+
+/* The flow: steps down a line. A step is a mark on the line (whose face it is, or what kind of step) and its words. */
+.program-flow {
+  /* The code's string ink, for what went well and for where the program stands now. */
+  --code-ink-string: oklch(0.45 0.1 145);
+  --program-flow-mark: 1.45em;
+  --program-flow-gap: 0.65em;
+  --program-flow-line: color-mix(in oklch, var(--foreground) 16%, transparent);
+  display: block;
+  line-height: 1.45;
 }
-.page-program-face {
-  flex: none;
-  width: 1.35em;
-  height: 1.35em;
-  border-radius: 0.35em;
+.program-flow-steps { display: block; }
+.program-flow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--program-flow-mark) minmax(0, 1fr);
+  column-gap: var(--program-flow-gap);
+  align-items: start;
+  padding: 0.3em 0;
+}
+/* The line from a step's mark down to the next step's. */
+.program-flow-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--program-flow-mark) / 2);
+  top: calc(0.3em + var(--program-flow-mark) + 2px);
+  bottom: calc(-0.3em + 2px);
+  width: 1px;
+  background: var(--program-flow-line);
+}
+.program-flow-mark {
+  width: var(--program-flow-mark);
+  height: var(--program-flow-mark);
+  border-radius: 0.38em;
   display: inline-grid;
   place-items: center;
-  background: color-mix(in oklch, var(--foreground) 8%, transparent);
-  font-size: 0.95em;
-  font-weight: 600;
+  object-fit: cover;
 }
-.page-program-holder { flex: none; min-width: 3.6em; font-weight: 600; }
-.page-program-ask { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
-.page-program-note {
-  flex: none;
-  max-width: 46%;
+.program-flow-face { background: color-mix(in oklch, var(--foreground) 8%, transparent); font-size: 0.95em; font-weight: 600; }
+.program-flow-icon { border-radius: 50%; color: var(--muted-foreground); }
+.program-flow-icon::before { content: ""; width: 1.05em; height: 1.05em; background: currentColor; mask: var(--program-flow-icon) center / contain no-repeat; }
+.program-flow-icon[data-icon="clock"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="event"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="say"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="done"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="stop"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18'/%3E%3Cpath d='m6 6 12 12'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="again"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m17 2 4 4-4 4'/%3E%3Cpath d='M3 11v-1a4 4 0 0 1 4-4h14'/%3E%3Cpath d='m7 22-4-4 4-4'/%3E%3Cpath d='M21 13v1a4 4 0 0 1-4 4H3'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="more"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='1'/%3E%3Ccircle cx='19' cy='12' r='1'/%3E%3Ccircle cx='5' cy='12' r='1'/%3E%3C/svg%3E"); }
+.program-flow-body { display: block; min-width: 0; padding-top: 0.06em; }
+.program-flow-head { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 0.6em; min-width: 0; }
+.program-flow-title { font-weight: 600; overflow-wrap: anywhere; }
+.program-flow-meta { color: var(--muted-foreground); overflow-wrap: anywhere; }
+.program-flow-offered { display: block; }
+.program-flow-note {
+  margin-left: auto;
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 0.05em 0.65em;
+  padding: 0.02em 0.65em;
   border-radius: 999px;
   background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
 }
-.page-program-step[data-state="answered"] .page-program-note { color: var(--code-ink-string); }
-.page-program-step[data-state="answered"] .page-program-note::before { content: "✓ "; }
-.page-program-step[data-state="failed"] .page-program-note { color: var(--destructive); }
-.page-program-step[data-state="working"] .page-program-note::before {
+.program-flow-text { display: block; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.program-flow-text[data-same] { color: var(--muted-foreground); }
+/* What is asked, drawn by a conversation as it draws a message's words, keeps the flow's own measure. */
+.xmatrix-app .program-flow-text :is(.rich-message, .rich-message *) { font-size: inherit; line-height: inherit; }
+.program-flow-text :is(p, ul, ol):first-child { margin-top: 0; }
+.program-flow-text :is(p, ul, ol):last-child { margin-bottom: 0; }
+/* Under a program's own text, what it asks is kept short: the text stands right above. */
+.program-flow[data-compact] .program-flow-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted-foreground); }
+
+/* A request that has ended is one line: who, what, and the answer. */
+.program-flow-step:is([data-state="answered"], [data-state="failed"], [data-state="working"]) .program-flow-head { flex-wrap: nowrap; }
+.program-flow-head > .program-flow-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.program-flow-head > .program-flow-note { flex: none; max-width: 46%; }
+.program-flow-step[data-state="answered"] .program-flow-note { color: var(--code-ink-string); }
+.program-flow-step[data-state="answered"] .program-flow-note::before { content: "✓ "; }
+.program-flow-step[data-state="failed"] .program-flow-note { color: var(--destructive); }
+
+/* Where the program stands now. */
+.program-flow-step:is([data-state="now"], [data-state="working"]) > .program-flow-body > .program-flow-head > .program-flow-note { color: var(--code-ink-string); }
+.program-flow-step:is([data-state="now"], [data-state="working"]) > .program-flow-body > .program-flow-head > .program-flow-note::before {
   content: "";
   display: inline-block;
   width: 0.5em;
@@ -852,12 +904,62 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   vertical-align: 0.08em;
   animation: page-program-working 1.6s ease-in-out infinite;
 }
+.program-flow-step[data-state="now"] > .program-flow-icon { color: var(--code-ink-string); }
 @keyframes page-program-working { 50% { opacity: 0.3; } }
-@media (prefers-reduced-motion: reduce) { .page-program-step[data-state="working"] .page-program-note::before { animation: none; } }
-.page-program-end { color: var(--muted-foreground); }
-.page-program-end[data-state="finished"] { color: var(--foreground); font-weight: 600; }
-.page-program-end[data-state="finished"]::before { content: "✓"; color: var(--code-ink-string); }
-.page-program-end[data-state="stopped"], .page-program-end[data-state="problem"] { color: var(--destructive); }
+@media (prefers-reduced-motion: reduce) { .program-flow-note::before { animation: none !important; } }
+
+/* The ways a request can end. The word for a way sits on its line: the main way's on the flow's own line, each
+   other way's at the head of a branch that leaves the request. */
+.program-flow-when {
+  position: relative;
+  display: inline-block;
+  padding: 0.02em 0.65em;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--foreground) 9%, var(--background));
+  color: var(--muted-foreground);
+}
+.program-flow-step[data-kind="then"] { display: block; padding: 0.15em 0; }
+.program-flow-step[data-kind="then"]::before { top: 0; bottom: 0; }
+.program-flow-branch { position: relative; display: block; margin-top: 0.45em; }
+.program-flow-branch::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * (var(--program-flow-gap) + var(--program-flow-mark) / 2));
+  top: 0;
+  width: calc(var(--program-flow-gap) + var(--program-flow-mark) / 2);
+  height: 0.75em;
+  border-left: 1px solid var(--program-flow-line);
+  border-bottom: 1px solid var(--program-flow-line);
+  border-bottom-left-radius: 0.5em;
+}
+.program-flow-branch > .program-flow-steps { margin-top: 0.15em; }
+.program-flow-leads { margin-left: 0.6em; color: var(--muted-foreground); }
+
+/* How it ended takes the inks of an outcome; where the flow would end, or goes back, is said quietly: it has not happened. */
+.program-flow-step[data-kind="ended"][data-state="finished"] > .program-flow-icon { color: var(--code-ink-string); }
+.program-flow-step[data-kind="ended"]:is([data-state="stopped"], [data-state="problem"]) { color: var(--destructive); }
+.program-flow-step[data-kind="ended"]:is([data-state="stopped"], [data-state="problem"]) > .program-flow-icon { color: var(--destructive); }
+.program-flow-step[data-kind="ended"]:is([data-state="starting"], [data-state="running"]),
+.program-flow-step:is([data-kind="end"], [data-kind="again"], [data-kind="more"]) { color: var(--muted-foreground); }
+.program-flow-step:is([data-kind="end"], [data-kind="again"], [data-kind="more"]) .program-flow-title,
+.program-flow-step[data-kind="ended"]:is([data-state="starting"], [data-state="running"]) .program-flow-title { font-weight: 400; }
+
+/* In a conversation the flow stands over the program's text, the two one tinted surface. */
+.message-program-flow {
+  display: block;
+  margin-top: 1rem;
+  padding: 0.55em 1em 0.6em;
+  border-radius: 10px 10px 0 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent);
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+  font-size: 0.9em;
+}
+.message-program-flow:empty { display: none; }
+.xmatrix-app .rich-message .message-program-flow:not(:empty) + .message-code-block {
+  margin-top: 0;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
 .page-automation-status[data-state="problem"] { color: var(--destructive); }
 .page-automation-status:hover:not(:disabled) { color: var(--foreground); }
 

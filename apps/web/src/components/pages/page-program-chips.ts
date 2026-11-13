@@ -1,17 +1,18 @@
-import { staticFace, type PageProgramRequest, type PageProgramStatus } from "@xmatrix/protocol";
+import type { PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { pressOpens } from "./page-automation-chips";
+import { drawProgramFlow } from "./program-flow";
 import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";
 
 /**
  * A page's programs are its code blocks tagged `norn run`. The block stays
- * text people edit. Joined under it, from the Hub, are the program's steps:
- * each request as a row with who holds it, what was asked, and the answer or
- * how long it has left; then how the program ended. A block that does not
- * run as written says why there, and the code is marked where. Pressing the
- * steps opens the conversation the program works in.
+ * text people edit. Joined under it, from the Hub, is the program's flow
+ * (program-flow.ts): each request it made with its answer, what it waits for
+ * now, what it does after that, and how it ended. A block that does not run
+ * as written says why there, and the code is marked where. Pressing the flow
+ * opens the conversation the program works in.
  */
 export const programsKey = new PluginKey<{ programs: Map<string, PageProgramStatus>; decorations: DecorationSet }>("page-programs");
 
@@ -19,43 +20,6 @@ export const programsKey = new PluginKey<{ programs: Map<string, PageProgramStat
 export function programBlockName(language: unknown): string | null {
   const [lang, run, name, ...rest] = String(language ?? "").trim().split(/\s+/u);
   return lang === "norn" && run === "run" && !rest.length ? name ?? "main" : null;
-}
-
-export interface ProgramStep {
-  /** `answered` and `working` are the ordinary course; `failed` is anything else a request ended as. */
-  state: "working" | "answered" | "failed";
-  holder: string;
-  text: string;
-  /** The answer, why it failed, or how long it has left. */
-  note: string;
-}
-
-const SPAN: [number, string][] = [[86_400_000, "d"], [3_600_000, "h"], [60_000, "min"], [1_000, "s"]];
-function span(ms: number): string {
-  const [size, unit] = SPAN.find(([each]) => ms >= each) ?? SPAN[3]!;
-  return `${Math.max(1, Math.round(ms / size))} ${unit}`;
-}
-const ENDED: Record<Exclude<PageProgramRequest["outcome"], "answered" | null>, string> = {
-  refused: "refused", broke: "could not", no_reply: "no reply", cancelled: "called off", revoked: "not allowed any more" };
-
-/** A request as a row of the program's steps, at `now`. */
-export function programStep(request: PageProgramRequest, now: number): ProgramStep {
-  const { holder, text } = request;
-  if (request.outcome === null) {
-    const left = request.by ? Date.parse(request.by) - now : Number.NaN;
-    return { state: "working", holder, text, note: Number.isFinite(left) && left > 0 ? `working · ${span(left)} left` : "working" };
-  }
-  if (request.outcome === "answered") return { state: "answered", holder, text, note: request.reply ?? "" };
-  return { state: "failed", holder, text, note: [ENDED[request.outcome], request.reply].filter(Boolean).join(" · ") };
-}
-
-/** How the program stands below its steps, or null while its steps say it all. */
-export function programFooter(program: PageProgramStatus | undefined): { state: "starting" | "running" | "finished" | "stopped" | "problem"; text: string } | null {
-  if (program?.problem) return { state: "problem", text: program.problem.split("\n")[0]!.replace(/^\d+:\d+\s+/u, "") };
-  if (!program || program.state === "not_started") return { state: "starting", text: "starting…" };
-  if (program.state === "completed") return { state: "finished", text: program.result || "finished" };
-  if (program.state === "failed") return { state: "stopped", text: program.result || "stopped" };
-  return program.requests.some((request) => request.outcome === null) ? null : { state: "running", text: "running" };
 }
 
 /** Where a problem that names its place (`3:14 …`) is in the block's text, to the end of that word. */
@@ -70,44 +34,13 @@ export function problemRange(source: string, problem: string | undefined): { fro
   return word ? { from, to: from + word } : null;
 }
 
-function el(tag: string, className: string, text?: string): HTMLElement {
-  const node = document.createElement(tag);
-  node.className = className;
-  if (text !== undefined) node.textContent = text;
-  return node;
-}
-
-/** An Agent by the harness its request names (`@claude`): its face, or its first letter where it has none. */
-function holderFace(holder: string): HTMLElement {
-  const name = holder.replace(/^@/u, "");
-  const face = staticFace({ kind: "agent", harness: name, name });
-  if (!face?.imageUrl) return el("span", "page-program-face", face?.initials ?? name.slice(0, 1).toUpperCase());
-  const image = el("img", "page-program-face") as HTMLImageElement;
-  image.src = face.imageUrl;
-  image.alt = "";
-  return image;
-}
-
 function steps(program: PageProgramStatus | undefined, openConversation: (conversationId: string) => void): HTMLElement {
-  const box = el("button", "page-program-steps") as HTMLButtonElement;
+  const box = document.createElement("button");
+  box.className = "page-program-steps";
   box.type = "button";
   box.contentEditable = "false";
   pressOpens(box, program?.channelId, "Open the conversation it works in", openConversation);
-  const now = Date.now();
-  for (const request of program?.problem ? [] : program?.requests ?? []) {
-    const step = programStep(request, now);
-    const row = el("span", "page-program-step");
-    row.dataset.state = step.state;
-    row.append(holderFace(step.holder), el("span", "page-program-holder", step.holder.replace(/^@/u, "")),
-      el("span", "page-program-ask", step.text.split("\n")[0]), el("span", "page-program-note", step.note.split("\n")[0]));
-    box.append(row);
-  }
-  const footer = programFooter(program);
-  if (footer) {
-    const row = el("span", "page-program-end", footer.text);
-    row.dataset.state = footer.state;
-    box.append(row);
-  }
+  box.append(drawProgramFlow(program, { compact: true }).root);
   return box;
 }
 

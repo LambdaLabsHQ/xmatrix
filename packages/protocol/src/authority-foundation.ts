@@ -224,6 +224,9 @@ export const HUB_ROUTES = {
   norn_requests: "/api/norn/requests",
   /** The Run that holds a Norn request answers it. */
   norn_request_answer: "/api/norn/requests/answer",
+  /** The Norn program a message carries, for whoever can read its conversation: how it stands and what it does next. */
+  space_norn_program: (spaceId: string, programId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
   /** A Norn request by its reference, for whoever can read its conversation: what a `request:<ref>` shows. */
   space_norn_request: (spaceId: string, requestRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
@@ -621,6 +624,8 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}`,
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
+  space_norn_program: (spaceId: string, programId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
   space_norn_request: (spaceId: string, requestRef: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
   channel_norn_request_answer: (channelId: string, requestRef: string) =>

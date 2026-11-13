@@ -60,15 +60,46 @@ the block and linked to the Page. Every run opens with xMatrix's message
 carrying the program's text, and its requests and result follow in that
 conversation. `GET /api/spaces/:space/pages/:page/programs` answers, for
 whoever can read the Page, how each block stands: its state, why it does not
-run as written, and each request with its holder, outcome, reply and times.
-The Page draws that as the program's steps, joined under the block
-(`page-program-chips.ts`).
+run as written, each request with its holder, outcome, reply and times, and
+what it does next. The Page draws that as the program's flow, joined under
+the block (`page-program-chips.ts`).
 `xmatrix page read` prints the same under `programs:` in its header, one
 line a block: its state, its conversation, how many requests it made and how
 the latest stands.
 A whole-document edit answers with each block that does not run as written
 and why (`nornProgramProblems`, in the edit's `scheduleProblems`), so an
 Agent that writes a program reads the checker's words at once.
+
+## What it does next
+
+A reader of a program wants to know what it will do, not only how it is
+written. The Hub reads that off the program itself (`nornFlow`,
+`norn-plan.ts`). A program is a pure computation over its ledger, so its
+future is the same computation on a copy of the ledger: the clock is moved to
+the time it waits for, an outside event it waits for is made to occur, and
+each request it waits on is ended every way it can end (each answer its type
+allows, declined, could not, no answer in time). The steps that follow each
+way are read the same way. Ways that lead to the same steps are one; where
+they lead apart, the others are branches of the request. Nothing is written:
+the ledger, the requests and the conversation stay as they are.
+
+The result is the program's flow from this moment, beginning with what it
+waits for now: a time or an event, whom it asks what and under which
+conditions, what it says, how it ends. A loop is one round and the way back
+to its wait, with the beat it keeps; a function that calls itself goes back
+to the request it asked before. The standard library needs no reading of its
+own: `routine(…)` is evaluated like any other text. Each evaluation copies
+the ledger, so the reading is given a number of evaluations that shrinks as
+the ledger grows, follows the main line first, and says where it stopped.
+
+The flow comes with a program's status (`next`), for a Page's blocks and for
+the program a message carries: `GET /api/spaces/:space/norn-programs/:message`
+answers how that program stands, for whoever can read its conversation, and
+`null` for a message that is no program. The Web draws one flow
+(`program-flow.ts`): under the block on a Page, and over the program's text
+in its conversation, where what a request asks is read in full. A block that
+has not started is drawn from an empty ledger, so its flow is there before
+its first pass.
 
 ## State
 

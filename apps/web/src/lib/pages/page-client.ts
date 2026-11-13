@@ -157,6 +157,10 @@ export const pageApi = {
   request: (spaceId: string, requestRef: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ request: NornRequestView }>({ hubPath: HUB_ROUTES.space_norn_request(spaceId, requestRef),
       webUrl: WEB_PROXY_ROUTES.space_norn_request(spaceId, requestRef), token, signal }).then((result) => result.request),
+  // How the program a message carries stands and what it does next; null for a message that is no program.
+  program: (spaceId: string, programId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ program: PageProgramStatus | null }>({ hubPath: HUB_ROUTES.space_norn_program(spaceId, programId),
+      webUrl: WEB_PROXY_ROUTES.space_norn_program(spaceId, programId), token, signal }).then((result) => result.program),
   // How each `norn run` block of a page stands.
   programs: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ programs: PageProgramStatus[] }>({ hubPath: hubPage(spaceId, pageId, "programs"),

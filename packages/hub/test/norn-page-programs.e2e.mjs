@@ -52,8 +52,16 @@ test("a program block on a page runs in a conversation of its own, and the page 
     assert.deepEqual(running.requests.map(request => [request.holder, request.text, request.reply]), [["@codex", "Review the design", null]]);
     const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
       message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");
+    // Its flow is what it does from here: the request that is out, and where another ending than an answer leads.
+    const [asked, ends] = running.next;
+    assert.deepEqual([asked.holder, asked.open, asked.main, asked.otherwise.map(way => [way.when, way.steps.map(step => step.kind)]), ends.kind],
+      ["@codex", true, "answered", [["otherwise", ["end"]]], "end"]);
     const history = await channelHistory(worker, MOCK_TOKEN, running.channelId, 20);
     assert.match(history.messages[0].body, /^```norn\n/u);
+    // The program's message answers the same in its conversation; a message that is no program has no program.
+    const ofMessage = async messageId => (await call(`${pages.replace(/\/pages$/u, "")}/norn-programs/${encodeURIComponent(messageId)}`)).program;
+    assert.deepEqual(await ofMessage(history.messages[0].messageId), { ...running, next: (await programs())[0].next });
+    assert.equal(await ofMessage(history.messages.at(-1).messageId), null);
     const delivery = history.messages.find(message => message.body.startsWith("@codex launch:force"));
     const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
 

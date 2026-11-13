@@ -1,9 +1,10 @@
-import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
+import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import { deterministicConversationId } from "./deterministic-id";
 import { checkNornProgram, nornBlocks, nornStartLedger, nornStep, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
+import { nornFlow } from "./norn-plan";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
@@ -138,31 +139,53 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
       : "reason" in request.reply ? request.reply.reason : null };
 }
 
+/**
+ * How a program stands for whoever reads it: its requests so far, how it
+ * ended, and what it does from here on. `source` is the text to read the
+ * rest from: the block as it is written now, which a program that has not
+ * started is read from too.
+ */
+function programStatus(name: string, source: string, problem: string | undefined,
+  program: { channelId: string; state: string; ledger: unknown } | undefined): PageProgramStatus {
+  const checked = problem === undefined ? checkNornProgram(source) : { refusal: problem };
+  const ledger = program?.ledger as Ledger | undefined;
+  const now = Date.now();
+  return {
+    name,
+    ...(program ? { channelId: program.channelId } : {}),
+    state: program ? program.state as PageProgramStatus["state"] : "not_started",
+    ...("refusal" in checked ? { problem: checked.refusal } : {}),
+    ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
+    requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
+      holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
+      by: request.by === null ? null : new Date(request.by).toISOString(),
+      outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
+      reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
+        : "reason" in request.reply ? request.reply.reason : null,
+      settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
+    next: "refusal" in checked ? [] : nornFlow(checked.code, ledger ?? nornStartLedger(now), now),
+  };
+}
+
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
 export async function pageProgramStatus(env: Env, input: { spaceId: string; pageId: string; body: string }): Promise<PageProgramStatus[]> {
   const db = database(env);
   const programs = await readPageNornPrograms(db, { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
   const blocks = pageBlocks(input.body);
   const deleted = await deletedBlocks(db, input.spaceId, input.pageId, blocks.map(block => block.name));
-  return blocks.map(block => {
+  return blocks.map(block => programStatus(block.name, block.source,
+    block.duplicate ? `Two blocks are named ${block.name}; rename one.` : deleted.has(block.name) ? DELETED_PROBLEM : undefined,
     // A deleted conversation is cleared away over minutes: its program is gone from the page at once.
-    const program = deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name);
-    const checked = block.duplicate ? { refusal: `Two blocks are named ${block.name}; rename one.` }
-      : deleted.has(block.name) ? { refusal: DELETED_PROBLEM } : checkNornProgram(block.source);
-    const ledger = program?.ledger as Ledger | undefined;
-    return {
-      name: block.name,
-      ...(program ? { channelId: program.channelId } : {}),
-      state: program ? program.state as PageProgramStatus["state"] : "not_started",
-      ...("refusal" in checked ? { problem: checked.refusal } : {}),
-      ...(ledger?.ended ? { result: ledger.ended.error ?? (ledger.ended.result ? resultText(ledger.ended.result) : "") } : {}),
-      requests: Object.values(ledger?.requests ?? {}).sort((a, b) => a.openedAt - b.openedAt).map(request => ({
-        holder: request.holder, text: request.text, askedAt: new Date(request.openedAt).toISOString(),
-        by: request.by === null ? null : new Date(request.by).toISOString(),
-        outcome: request.reply === null ? null : OUTCOMES[request.reply.tag],
-        reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
-          : "reason" in request.reply ? request.reply.reason : null,
-        settledAt: request.settledAt === null ? null : new Date(request.settledAt).toISOString() })),
-    };
-  });
+    deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name)));
+}
+
+/**
+ * How the program a message carries stands, for whoever can read its
+ * conversation: the message is the program's identity, whether a person or an
+ * Agent wrote it or xMatrix wrote it for a Page's block. Undefined for anyone
+ * else, and for a message that is no program.
+ */
+export async function messageProgramStatus(env: Env, input: { spaceId: string; programId: string; userId: string }): Promise<PageProgramStatus | undefined> {
+  const program = await readNornProgram(database(env), { requestId: crypto.randomUUID(), ...input });
+  return program && programStatus(program.name ?? "main", program.source, undefined, program);
 }
