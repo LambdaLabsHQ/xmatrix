@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: `xmatrix goal` works inside a Claude run
+
+`xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is
+bound to this shell", so a Claude Agent could not set the goal its runtime
+says it supports. The wrapper starts the Claude process before it binds the
+goal inbox, and exported the inbox to the child only when it was already
+bound. The child now gets the inbox of the run's own Instance, which is the
+file the wrapper binds and drains. CLI only. Recovery is a CI-validated beta
+CLI reverting this change.
+
 ## Unreleased: a Norn program can carry work that repeats
 
 Moving the company's scheduled work onto Norn programs needed three things. A
