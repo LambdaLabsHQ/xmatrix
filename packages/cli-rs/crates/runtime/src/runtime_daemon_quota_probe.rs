@@ -571,19 +571,13 @@ mod tests {
         }))
         .expect("probe");
         assert!(probe.window_labels);
-        assert!(
-            !probe.fresh,
-            "a probe that does not ask may answer from the cache"
-        );
+        assert!(!probe.fresh, "a probe that does not ask may answer from the cache");
         let probe: MachineQuotaProbeRequest = serde_json::from_value(serde_json::json!({
             "requestId": "quota:1", "connectionEpoch": 3, "fresh": true,
             "targets": [{ "targetId": "registration:claude", "configurationDigest": "d" }],
         }))
         .expect("probe");
-        assert!(
-            probe.fresh,
-            "a probe that checks a refusal reads the provider now"
-        );
+        assert!(probe.fresh, "a probe that checks a refusal reads the provider now");
     }
 
     #[test]
