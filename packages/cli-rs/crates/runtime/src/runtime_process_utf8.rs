@@ -248,7 +248,7 @@ impl AppServerChild {
             let mut line = Vec::new();
             while matches!(reader.read_until(b'\n', &mut line).await, Ok(n) if n > 0) {
                 let _ = std::io::stderr().write_all(&line);
-                sink.push(&String::from_utf8_lossy(&line));
+                sink.push(&xmatrix_cli_core::text_input::decode_child_output(&line));
                 line.clear();
             }
         });

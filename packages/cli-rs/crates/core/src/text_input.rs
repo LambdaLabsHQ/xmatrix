@@ -154,9 +154,67 @@ pub fn read_text_file(path: &Path) -> error::Result<String> {
     decode_utf8_input(bytes, &path.display().to_string())
 }
 
+/// A line a child process wrote, as text. Agents write UTF-8; what Windows
+/// itself writes for them does not: `cmd.exe` running an npm `.cmd` shim
+/// reports "系统找不到指定的路径。" in the console's OEM code page (936 on a
+/// Chinese system), which a UTF-8 read turns into replacement characters.
+/// Bytes that are not UTF-8 are read in the OEM code page, then the ANSI one.
+pub fn decode_child_output(bytes: &[u8]) -> String {
+    if let Ok(text) = std::str::from_utf8(bytes) {
+        return text.to_string();
+    }
+    #[cfg(windows)]
+    {
+        // SAFETY: both take no arguments and only read process state.
+        let pages = unsafe {
+            [windows_sys::Win32::Globalization::GetOEMCP(), windows_sys::Win32::Globalization::GetACP()]
+        };
+        for code_page in pages {
+            if let Some(text) = decode_code_page(bytes, code_page) {
+                return text;
+            }
+        }
+    }
+    String::from_utf8_lossy(bytes).into_owned()
+}
+
+/// `bytes` read strictly in Windows code page `code_page`; `None` when they
+/// are not valid there.
+#[cfg(windows)]
+fn decode_code_page(bytes: &[u8], code_page: u32) -> Option<String> {
+    use windows_sys::Win32::Globalization::{MB_ERR_INVALID_CHARS, MultiByteToWideChar};
+    if code_page == UTF8_CODE_PAGE || bytes.is_empty() || bytes.len() > i32::MAX as usize {
+        return None;
+    }
+    let len = bytes.len() as i32;
+    // SAFETY: `bytes` is valid for `len` bytes; a null output asks for the size.
+    let wide_len = unsafe {
+        MultiByteToWideChar(code_page, MB_ERR_INVALID_CHARS, bytes.as_ptr(), len, std::ptr::null_mut(), 0)
+    };
+    if wide_len <= 0 {
+        return None;
+    }
+    let mut wide = vec![0u16; wide_len as usize];
+    // SAFETY: `wide` holds exactly the `wide_len` units the first call asked for.
+    let written = unsafe {
+        MultiByteToWideChar(code_page, MB_ERR_INVALID_CHARS, bytes.as_ptr(), len, wide.as_mut_ptr(), wide_len)
+    };
+    (written == wide_len).then(|| String::from_utf16_lossy(&wide))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn child_output_keeps_utf8_and_reads_windows_code_pages() {
+        assert_eq!(decode_child_output("系统找不到指定的路径。\n".as_bytes()), "系统找不到指定的路径。\n");
+        #[cfg(windows)]
+        {
+            let gbk = [0xcf, 0xb5, 0xcd, 0xb3, 0xd5, 0xd2, 0xb2, 0xbb, 0xb5, 0xbd];
+            assert_eq!(decode_code_page(&gbk, 936).as_deref(), Some("系统找不到"));
+        }
+    }
 
     const GBK: Option<u32> = Some(936);
 
