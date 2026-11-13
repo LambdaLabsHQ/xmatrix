@@ -91,7 +91,9 @@ test("a request of an Agent reads as the request, without the Agent's copy of th
   await expect(timeline).toContainText("Hidden end: xmatrix reply nothing");
   await expect(timeline).not.toContainText("xmatrix reply rabcdefgh23");
   await expect(timeline).not.toContainText("from a program");
-  await expect(timeline).not.toContainText("Keep the whole task here.");
+  // The task itself is read in full, as the paragraphs it was written in.
+  await expect(page.getByTestId("request-reference-block")).toContainText("Keep the whole task here.");
+  await expect(page.getByTestId("request-reference-block")).toContainText("waiting for @claude");
   await page.screenshot({ path: test.info().outputPath("norn-agent-request.png") });
 });
 
@@ -110,26 +112,25 @@ test("a request's reference in a message reads as the request: what is asked, of
   await page.screenshot({ path: test.info().outputPath("norn-request-reference.png") });
 });
 
-test("a long task stays a short chip, and its preview holds the whole of it", async ({ page }) => {
-  const task = "按「搜索与候选」做每周供应商池维护。榜单在管理页（独立持久化）：先用 CLI `admin aggregate pool get` 读最新快照与 revision，不从 Page 读逐站名单。"
-    + "主任务是逐家复查池内所有站点和待办，未完成覆盖前不优先找新站。".repeat(40) + "最终报告显式发到本轮会话。";
+test("a long task is read in full as paragraphs, not as a chip or a cut line", async ({ page }) => {
+  const first = "按「搜索与候选」做每周供应商池维护。榜单在管理页（独立持久化）：先用 CLI `admin aggregate pool get` 读最新快照与 revision，不从 Page 读逐站名单。"
+    + "主任务是逐家复查池内所有站点和待办，未完成覆盖前不优先找新站。".repeat(8);
+  const second = "维护完成后再看新站：有空位、或证据不弱且可比条件明确地优于旧项时才入池。最终报告显式发到本轮会话。";
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
     channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
     body: "@codex launch:force\n\n**Request** `request:rabcdefgh23`" }], hasMore: false });
   await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
-    channelId: CHANNEL.id, holder: "@codex", text: task, state: "open" } });
+    channelId: CHANNEL.id, holder: "@codex", text: `${first}\n\n${second}`, state: "open" } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
-  const chip = page.getByTestId("request-reference-chip");
-  await expect(chip).toHaveText("按「搜索与候选」做每周供应商池维护。 …", { timeout: 20_000 });
-  // The chip is a line or two of the message, not a highlighted wall of it.
-  expect((await chip.boundingBox())!.height).toBeLessThan(60);
-  await page.screenshot({ path: test.info().outputPath("norn-long-request-chip.png") });
-  await chip.hover();
-  const preview = page.getByTestId("request-reference-preview");
-  await expect(preview).toContainText("最终报告显式发到本轮会话。");
-  await expect(preview).toContainText("waiting for @codex");
-  const body = preview.locator(".app-page-reference-popup-body");
-  await page.screenshot({ path: test.info().outputPath("norn-long-request-preview.png") });
-  expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+  const block = page.getByTestId("request-reference-block");
+  await expect(block).toContainText("最终报告显式发到本轮会话。", { timeout: 20_000 });
+  await expect(block).toContainText("waiting for @codex");
+  const paragraphs = block.locator(".app-request-block-paragraph");
+  await expect(paragraphs).toHaveCount(2);
+  // Body text on the page's own ground: no capsule behind the words.
+  expect(await paragraphs.first().evaluate((element) => getComputedStyle(element).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+  await expect(block.locator("code")).toHaveText("admin aggregate pool get");
+  await expect(page.getByTestId("request-reference-chip")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("norn-long-request-paragraphs.png") });
 });
