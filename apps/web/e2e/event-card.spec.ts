@@ -54,3 +54,20 @@ test.describe("in Chinese", () => {
     await page.screenshot({ path: test.info().outputPath("event-cards-zh.png") });
   });
 });
+
+// Messages posted before events carried a card are the same card, read out of their text.
+test("an older Stripe message draws as the same card", async ({ page }) => {
+  const account = "acct_1SbH3vRMzTj9NjJj";
+  await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2,
+    historyHeadSequence: 2, updatedAt: E2E_NOW }, [
+    `**Stripe · ${account}** — Payment succeeded — pi_3UaIQSRMzTj9NjJj1OcxIw0Z\nAccount: ${account}\nEvent: payment_intent.succeeded\nAmount: 1000 USD (minor units)\nStatus: succeeded`,
+    `**Stripe · ${account}** — payment_intent.payment_failed — pi_3UafOfRMzTj9NjJj1umQQqnb\nAccount: ${account}\nAmount: 2000 USD (minor units)\nStatus: requires_payment_method`,
+  ].map((body, index) => ({ messageId: `old-${index}`, channelId: E2E_CHANNEL.id, sequence: index + 1, sentAt: E2E_NOW, from: STRIPE, body })));
+  const cards = page.getByTestId("event-card");
+  await expect(cards).toHaveCount(2, { timeout: 20_000 });
+  await expect(cards.nth(0)).toContainText("Payment succeeded");
+  await expect(cards.nth(0)).toContainText("10.00 USD");
+  await expect(cards.nth(1)).toHaveAttribute("data-event-card", "bad");
+  await expect(cards.nth(1)).toContainText("Requires payment method");
+  await expect(page.locator('[id="message:old-0"]')).not.toContainText("minor units");
+});

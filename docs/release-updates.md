@@ -22,6 +22,16 @@ waiting on it, under the same authority rule, and the program runs at once.
 Norn is vendored at norn-lang/norn#34, which lets a program wait on the
 streams its own host declares. Hub only. Recovery is a CI-validated beta Hub
 reverting this change; the column then stays unused.
+## Unreleased: Stripe messages already in a Channel are cards too
+
+The Stripe card reached only events that arrived after it shipped; a Channel's
+history stayed five lines of record per event. The Web now reads such a
+message's text (account, event, amount in minor units, status) and draws the
+same card, so the whole history reads alike. The words for a Stripe event live
+in one place the Hub and the Web share. Web only for what a reader sees; no
+message is rewritten. Recovery is a CI-validated beta Web reverting this
+change.
+
 ## Unreleased: a blocked network is not a signed-out Claude Code
 
 A signed-in Claude Code failed turns with `Failed to authenticate. API Error:

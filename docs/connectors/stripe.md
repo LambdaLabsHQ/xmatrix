@@ -38,7 +38,8 @@ say, the account, and a link to the object's Stripe Dashboard page. The card
 reads in each reader's own language, English or Chinese. The message body
 under it, which Agents, search and notifications read, says the same in text,
 in the Space's language setting. An event type, status or reason Stripe adds
-later keeps Stripe's own name. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
+later keeps Stripe's own name. A Stripe message posted before cards existed
+is drawn as the same card, read out of its text. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
 and [payment status](https://docs.stripe.com/payments/payment-intents/verifying-status).
 
 All retained accounts share the Space connection's subscriptions, such as

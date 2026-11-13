@@ -299,7 +299,7 @@ import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-ou
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
 import { QuotaRetryNotice } from "./quota-retry-notice";
-import { eventCardOf, quotaRetryOfferId } from "@xmatrix/protocol";
+import { eventCardOf, legacyStripeEventFacts, quotaRetryOfferId, stripeEventWords } from "@xmatrix/protocol";
 import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
@@ -1929,8 +1929,12 @@ export const MessageRow = memo(function MessageRow({
   // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
   const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"
     && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string";
-  const eventCard = useMemo(() => message.senderKind === "app" ? eventCardOf(message.metadata) : undefined,
-    [message.senderKind, message.metadata]);
+  // A Stripe message from before events carried a card draws as the same card, read out of its text.
+  const eventCard = useMemo(() => {
+    if (message.senderKind !== "app") return undefined;
+    const legacy = message.senderId === "app:stripe" ? legacyStripeEventFacts(message.body) : undefined;
+    return eventCardOf(message.metadata) ?? (legacy ? stripeEventWords(legacy).card : undefined);
+  }, [message.senderKind, message.senderId, message.metadata, message.body]);
   const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
     : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
     : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
