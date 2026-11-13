@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a program's question is answered on a strip of paper
+
+The field on a request card a Norn program sends was a bare underline over
+the app's grey input well: the words touched its edge, it showed a resize
+grip, and Send and Decline sat under it at equal weight. The answer is now
+written on a strip of the plain paper laid on the card, which grows with
+what is written, holds Send and a quiet Decline in its corner, and sends
+with Cmd or Ctrl and Enter. A choice shows only its options until one that
+takes words is picked. Web only. Recovery is a CI-validated beta Web
+reverting this change.
+
 ## Unreleased: a request card says what it asks where conversations are listed
 
 A request a Norn program made of a person read, in the list of
