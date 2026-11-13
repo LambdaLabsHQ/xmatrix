@@ -230,3 +230,14 @@ test("base_plans reads each plan's state, period and one region's price, however
   assert.deepEqual(statement("@googleplay:base_plans:sh.xmatrix.app/pro JP"), { packageName: "sh.xmatrix.app", productId: "pro", region: "JP" });
   assert.equal(typeof statement("@googleplay:base_plans:sh.xmatrix.app"), "string");
 });
+
+test("a used-up Google quota is reported as a quota, never as a missing permission", async () => {
+  const input = statement("@googleplay:tracks:sh.xmatrix.app");
+  for (const status of [403, 429]) {
+    const quota = { status, body: { error: { status: status === 429 ? "RESOURCE_EXHAUSTED" : "PERMISSION_DENIED", message: "Listing releases quota exceeded." } } };
+    await fetched([quota, quota, quota, quota], () => assert.rejects(ACTIONS.tracks.execute({ credentials }, input),
+      error => /quota for this call is used up; try again later/u.test(error.message) && !/needs this permission/u.test(error.message)));
+  }
+  const denied = { status: 403, body: { error: { status: "PERMISSION_DENIED", message: "The caller does not have permission" } } };
+  await fetched([denied, denied, denied, denied], () => assert.rejects(ACTIONS.tracks.execute({ credentials }, input), /needs this permission/u));
+});

@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: a used-up Google Play quota is called a quota
+
+When Google refused a Play call because its quota was used up (403 or 429),
+the receipt told the reader to grant the account a permission and enable the
+API. It now says the quota is used up and to try again later. Hub only; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: `xmatrix goal` works inside a Claude run
 
 `xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is

@@ -115,7 +115,10 @@ export async function sendPlay(credentials: Readonly<Record<string, string>>, ca
     if (!(error instanceof ProviderRequestError)) throw error;
     const disabled = apiNotEnabled(error);
     if (disabled) throw disabled;
-    const hint = error.status === 401 ? " (reconnect Google Play Console in Apps)"
+    // Google answers a used-up quota as 429 or as 403; neither is about the account's permissions.
+    const quota = error.status === 429 || /quota|rate limit|RESOURCE_EXHAUSTED/iu.test(error.message);
+    const hint = quota ? " (Google's quota for this call is used up; try again later. The account's permissions are fine)"
+      : error.status === 401 ? " (reconnect Google Play Console in Apps)"
       : error.status === 403 ? " (the connected Google account needs this permission for the app in Play Console → Users and permissions, and the Google Play Android Developer API must be enabled)" : "";
     throw new ProviderRequestError(error.status, `${error.message.replace(/^Provider returned/u, "Google Play returned")}${hint}`);
   }
