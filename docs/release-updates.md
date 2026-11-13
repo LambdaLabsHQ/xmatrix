@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a Stripe notification reads as a sentence, not a record
+
+A Stripe event in a Channel repeated the account id twice, gave the amount as
+`1000 USD (minor units)`, named most events by their API type
+(`customer.subscription.deleted`) and repeated the status the title already
+said. It is now two lines: the event in words with the amount in the
+currency's own units (`Payment succeeded — 10.00 USD`, zero- and
+three-decimal currencies included), then the object linked to its Stripe
+Dashboard page, the account, and the status only when it adds something. A
+failed payment, a dispute and a canceled subscription add Stripe's reason.
+Hub only; messages already posted keep their text. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: an Agent's startup error on Windows reads as Windows wrote it
 
 When an Agent failed to start on a Chinese Windows, its card showed the last

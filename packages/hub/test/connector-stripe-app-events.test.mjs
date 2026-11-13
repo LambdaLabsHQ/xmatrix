@@ -3,6 +3,7 @@ import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { handleStripeAppDelivery } from "../src/connectors/stripe-app-ingress.ts";
 import { handleStripePublisherDelivery } from "../src/connectors/stripe-publisher-ingress.ts";
+import { stripeEvent } from "../src/connectors/wave2-events.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { AppControlError } from "@xmatrix/db";
 
@@ -109,7 +110,7 @@ test("publisher delivery uses the retained grant to retrieve the same event and 
   assert.equal(f.reads[0].url, "https://api.stripe.com/v1/events/evt_publisher1");
   assert.equal(f.reads[0].headers.get("authorization"), `Basic ${btoa("retained-account-token:")}`);
   assert.equal(f.reads[0].headers.get("stripe-account"), null);
-  assert.match(f.appends[0].body, /Amount: 900 USD/);
+  assert.match(f.appends[0].body, /— 9\.00 USD\n/);
   assert.match(f.appends[0].body, /acct_fixtureA/);
   assert.equal(f.appends[0].messageId, f.appends[1].messageId);
   assert.equal(f.automations.length, 2);
@@ -245,8 +246,8 @@ test("a connected account event is delivered and deauthorization retires without
 test("paid invoices, successful payments and subscription creation reach the subscribed Channel with their actual status", async t => {
   const created = Math.floor(Date.now() / 1000);
   for (const [index, [type, object, label, amount]] of [
-    ["invoice.paid", { id: "in_paid", amount_paid: 1200, amount_due: 9999, currency: "usd", status: "paid" }, "Invoice paid", "1200"],
-    ["payment_intent.succeeded", { id: "pi_paid", amount: 2400, currency: "usd", status: "succeeded" }, "Payment succeeded", "2400"],
+    ["invoice.paid", { id: "in_paid", amount_paid: 1200, amount_due: 9999, currency: "usd", status: "paid" }, "Invoice paid", "12.00 USD"],
+    ["payment_intent.succeeded", { id: "pi_paid", amount: 2400, currency: "usd", status: "succeeded" }, "Payment succeeded", "24.00 USD"],
     ["customer.subscription.created", { id: "sub_new", status: "incomplete" }, "Subscription created", undefined],
   ].entries()) {
     const payload = { id: `evt_success${index}`, object: "event", type, created, livemode: true, data: { object } };
@@ -254,11 +255,27 @@ test("paid invoices, successful payments and subscription creation reach the sub
     assert.deepEqual(await (await send({ ...payload, account }, f)).json(), { ok: true, events: 1, delivered: 1 });
     assert.deepEqual(await (await sendPublisher(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
     for (const posted of f.appends) {
-      assert.match(posted.body, new RegExp(label));
-      assert.ok(posted.body.includes(`Event: ${type}`));
-      assert.ok(posted.body.includes(`Status: ${object.status}`));
-      if (amount) assert.ok(posted.body.includes(`Amount: ${amount} USD (minor units)`));
-      else assert.doesNotMatch(posted.body, /Invoice paid|Payment succeeded|Amount:/);
+      assert.equal(posted.body.split("\n")[0], `**${label}**${amount ? ` — ${amount}` : ""}`);
+      assert.ok(posted.body.includes(`](https://dashboard.stripe.com/${account}/`));
+      // A status the label already says is not repeated; any other is kept.
+      assert.equal(posted.body.includes(" · incomplete"), object.status === "incomplete");
+      assert.doesNotMatch(posted.body, /minor units|Event:|Status:| · (paid|succeeded)/);
     }
   }
+});
+
+test("a Stripe event reads as an amount, a Dashboard link, the account and the reason", () => {
+  const body = (type, object, extra = {}) => stripeEvent({ id: "evt_x", type, account, data: { object }, ...extra }).body;
+  assert.equal(body("payment_intent.payment_failed", { id: "pi_1", amount: 2000, currency: "usd", status: "requires_payment_method",
+    last_payment_error: { message: "Your card was declined. @someone" } }, { livemode: false }),
+    "**Payment failed** — 20.00 USD" +
+    `\n[pi_1](https://dashboard.stripe.com/${account}/test/payments/pi_1) · ${account} · requires payment method` +
+    "\nReason: Your card was declined. @\u200bsomeone");
+  assert.equal(body("customer.subscription.deleted", { id: "sub_1", status: "canceled", cancellation_details: { reason: "payment_failed" } }),
+    `**Subscription canceled**\n[sub_1](https://dashboard.stripe.com/${account}/subscriptions/sub_1) · ${account}\nReason: payment failed`);
+  // Stripe's smallest unit is the whole yen and a thousandth of a dinar.
+  assert.match(body("payment_intent.succeeded", { id: "pi_2", amount: 1500, currency: "jpy" }), /— 1,500 JPY\n/);
+  assert.match(body("payment_intent.succeeded", { id: "pi_3", amount: 1500, currency: "kwd" }), /— 1\.500 KWD\n/);
+  // An unknown type keeps Stripe's name, and an id that is no Dashboard object is not linked.
+  assert.equal(body("charge.refunded", { id: "weird id" }), `**charge.refunded**\nweird id · ${account}`);
 });

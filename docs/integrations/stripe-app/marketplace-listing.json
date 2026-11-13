@@ -19,7 +19,7 @@
   "features": [
     {
       "title": "Know when payments succeed or need attention",
-      "description": "Receive paid-invoice and successful-payment notifications alongside failures in selected xMatrix channels. See the account, event, amount in Stripe minor units, and actual status so your team can coordinate follow-up.",
+      "description": "Receive paid-invoice and successful-payment notifications alongside failures in selected xMatrix channels. See the event, amount, account and actual status so your team can coordinate follow-up.",
       "image": null
     },
     {
