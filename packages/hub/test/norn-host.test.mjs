@@ -128,8 +128,13 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
   const [reworded] = step(undefined, { nowMs: 4 * DAY }).open;
   assert.deepEqual([state.ledger.requests[reworded.requestId].text, Object.keys(state.ledger.requests).length],
     ["Audit the day's merges and the changelog", 4]);
+  // Reworded while that round is out: the round is asked in the new words, and the request in the old words is called off.
+  state.source = state.source.replace("and the changelog", "and the release notes");
+  const again = step(undefined, { nowMs: 4 * DAY + 60_000 });
+  assert.deepEqual(again.open.map(request => state.ledger.requests[request.requestId].text), ["Audit the day's merges and the release notes"]);
+  assert.deepEqual(state.ledger.requests[reworded.requestId].reply, { tag: "Cancelled" });
   // A round that ends in anything but an answer is told in the program's conversation, once, and the loop goes on.
-  const [failing] = step(undefined, { nowMs: 5 * DAY }).open;
+  const [failing] = step(undefined, { nowMs: 4 * DAY + 120_000 }).open;
   const told = step({ requestId: failing.requestId, epoch: failing.epoch, reply: { tag: "Refused", reason: "no quota today" } }, { nowMs: 5 * DAY + 60_000 });
   assert.deepEqual(told.write.notices.map(notice => [notice.recipient, notice.body]), [["", "A round of this program did not succeed: Refused(no quota today)"]]);
   assert.deepEqual([step(undefined, { nowMs: 5 * DAY + 120_000 }).write.notices, state.ledger.ended], [[], null]);

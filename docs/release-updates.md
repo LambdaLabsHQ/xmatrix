@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a request a changed Norn program no longer makes is called off
+
+When a Norn program's text changed while one of its requests was out, the
+program asked again in the new words and left the old request open: its
+Agent went on working for a program that would never read the answer, and a
+person's card kept waiting on them. The Hub now ends such a request as
+`Cancelled` in the pass that finds it unreached, so the Agent is let go and
+the card says the program no longer asks. Hub only. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: an event that arrives during a round of a Norn program is not lost
 
 A Norn program heard an event only while it waited on the stream. A second

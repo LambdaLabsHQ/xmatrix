@@ -310,6 +310,9 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         waits = streams.filter((stream, index) => streams.findIndex(other => eventKey(other) === eventKey(stream)) === index);
         said.push(...pass.said);
         // A round whose handler ended in anything but an answer is told in the program's conversation, once.
+        // A request the program's changed text no longer makes is called off, so nobody goes on working for a
+        // program that will not read the answer: its Agent is let go, and a person's card says it is no longer asked.
+        for (const left of pass.unreached) settle(ledger, left.id, left.holder, { tag: "Cancelled" }, now, left.epoch);
         for (const entry of pass.log) {
           if (entry.kind === "handlerFailed") said.push({ to: "", text: `A round of this program did not succeed: ${show(entry.reply)}` });
         }
