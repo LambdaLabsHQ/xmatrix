@@ -2627,6 +2627,7 @@ export const MessageRow = memo(function MessageRow({
     />
   ) : nornRequest && channel ? (
     <NornRequestCard request={nornRequest} channelId={channel.id} token={token}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />}
       userId={currentUserIdentityId.replace(/^user:/, "")}
       {...(message.commandNotices?.[0]?.body ? { outcome: message.commandNotices[0].body } : {})} />
   ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
@@ -2909,8 +2910,9 @@ export const MessageRow = memo(function MessageRow({
               App
             </span>
           )}
-          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
-          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && (
+          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice.
+              A program's request is an ask of a person, which its card says; "system fact" would call it a notice. */}
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && !nornRequest && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
