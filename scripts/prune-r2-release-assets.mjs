@@ -160,11 +160,13 @@ export async function pruneR2ReleaseAssets({ accountId, cloudflareToken, fetchIm
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
-  pruneR2ReleaseAssets({
-    accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-    cloudflareToken: process.env.CLOUDFLARE_API_TOKEN,
-  }).catch((error) => {
-    console.error(error instanceof Error ? error.message : String(error));
+  try {
+    await pruneR2ReleaseAssets({
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      cloudflareToken: process.env.CLOUDFLARE_API_TOKEN,
+    });
+  } catch (error) {
+    process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     process.exitCode = 1;
-  });
+  }
 }
