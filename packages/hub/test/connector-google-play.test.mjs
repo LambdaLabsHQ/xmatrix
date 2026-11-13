@@ -114,11 +114,17 @@ test("an upload opens a resumable session whose URL alone takes the bytes", asyn
   await assert.rejects(ACTIONS.api_upload.execute({ credentials }, statement(command("api_upload", "edits.get", { path: { packageName: "sh.xmatrix.app", editId: "edit-1" }, size: 1 }))), /does not take a file/u);
 });
 
-test("tracks reads in a discarded edit; release sets a track and commits, discarding its own edit on failure", async () => {
-  const read = await fetched([{ body: { id: "e1" } }, { body: { tracks: [{ track: "internal", releases: [{ status: "completed", versionCodes: ["7"] }] }] } }, { body: {} }],
-    () => ACTIONS.tracks.execute({ credentials }, statement("@googleplay:tracks:sh.xmatrix.app")));
-  assert.deepEqual(read.calls.map(call => call.method), ["POST", "GET", "DELETE"]);
-  assert.match(read.result.summary, /"track": "internal"/u);
+test("tracks reads without opening an edit; release sets a track and commits, discarding its own edit on failure", async () => {
+  // A read never opens an edit: a Google account has one open edit, and a new one deletes somebody's upload.
+  const summary = { releases: [{ releaseName: "1209 (4.0.7)", releaseLifecycleState: "RELEASE_LIFECYCLE_STATE_PUBLISHED", activeArtifacts: [{ versionCode: 1209 }] }] };
+  const read = await fetched([{ body: {} }, { body: {} }, { body: {} }, { body: summary }, { body: {} }],
+    () => ACTIONS.tracks.execute({ credentials }, statement("@googleplay:tracks:sh.xmatrix.app closed-qa")));
+  assert.deepEqual(read.calls.map(call => `${call.method} ${call.url.replace(API, "")}`), ["production", "beta", "alpha", "internal", "closed-qa"]
+    .map(track => `GET /sh.xmatrix.app/tracks/${track}/releases`));
+  assert.match(read.result.summary, /no edit opened[\s\S]*"track": "internal"[\s\S]*"state": "PUBLISHED"[\s\S]*1209/u);
+  const own = await fetched([{ body: { tracks: [{ track: "internal", releases: [{ status: "draft", versionCodes: ["7"] }] }] } }],
+    () => ACTIONS.tracks.execute({ credentials }, statement("@googleplay:tracks:sh.xmatrix.app/e1")));
+  assert.deepEqual(own.calls.map(call => `${call.method} ${call.url.replace(API, "")}`), ["GET /sh.xmatrix.app/edits/e1/tracks"]);
   const release = statement(`@googleplay:release:sh.xmatrix.app {"track":"internal","versionCodes":[42],"releaseNotes":[{"language":"en-US","text":"Fixes"}]}`);
   assert.equal(typeof release, "object");
   const done = await fetched([{ body: { id: "e2" } }, { body: { releases: [{ status: "completed", versionCodes: ["42"] }] } }, { body: { id: "e2" } }],
@@ -133,7 +139,7 @@ test("tracks reads in a discarded edit; release sets a track and commits, discar
   const staged = await fetched([{ body: {} }, { body: { id: "e9" } }], () => ACTIONS.release.execute({ credentials }, existing));
   assert.equal(staged.calls[1].url, `${API}/sh.xmatrix.app/edits/e9:commit?changesNotSentForReview=true`);
   for (const bad of ["@googleplay:release:sh.xmatrix.app {}", '@googleplay:release:sh.xmatrix.app {"track":"x","versionCodes":["-1"]}',
-    '@googleplay:release:sh.xmatrix.app {"track":"x","versionCodes":["1"],"status":"live"}', "@googleplay:tracks:nopackage", "@googleplay:tracks:a.b/e1"]) {
+    '@googleplay:release:sh.xmatrix.app {"track":"x","versionCodes":["1"],"status":"live"}', "@googleplay:tracks:nopackage", "@googleplay:tracks:a.b/e1 extra", "@googleplay:tracks:a.b ../x"]) {
     assert.equal(typeof statement(bad), "string", bad);
   }
 });

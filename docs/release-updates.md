@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: reading Google Play tracks no longer deletes an upload in progress
+
+`@googleplay:tracks` opened a temporary edit to list tracks. A Google account
+has one open edit, so that deleted the edit another Agent was uploading an
+app bundle into ("This Edit has been deleted"). It now reads each track's
+releases directly and opens no edit; with an edit ID it reads that edit. The
+guide states the one-open-edit rule for `release` and `edits.insert`. Hub and
+protocol; no schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a used-up provider account's resting Instances stay resting
 
 When an Agent's provider account ran out, its failure notice woke that

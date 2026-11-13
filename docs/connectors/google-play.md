@@ -50,9 +50,17 @@ xmatrix call '@googleplay:api_upload:edits.bundles.upload {"path":{"packageName"
 @googleplay:release:sh.xmatrix.app {"track":"production","versionCodes":["42"],"status":"inProgress","userFraction":0.1}
 ```
 
-`tracks` lists every track with its releases, statuses, version codes and
-rollout fractions. Google exposes tracks only inside an edit, so it opens a
-temporary edit and deletes it; nothing is committed.
+`tracks` reads the releases of production, beta, alpha and internal, plus any
+custom track named after the package (`tracks:sh.xmatrix.app closed-qa`),
+with each release's state and version codes. It opens no edit. To see every
+track as an edit holds it, name that edit: `tracks:sh.xmatrix.app/<edit id>`.
+
+**One open edit per Google account.** Opening an edit (`edits.insert`, or
+`release` without an edit ID) deletes the edit the same account had open,
+and an upload into that edit then fails with "This Edit has been deleted".
+All Agents of a Space share the connection's account, so run one release
+flow per app at a time and pass the edit ID from step to step. No read
+action opens an edit.
 
 Uploading takes two steps. `api_upload` opens a Google resumable upload
 session for any catalog upload operation (bundles, APKs, images, deobfuscation
