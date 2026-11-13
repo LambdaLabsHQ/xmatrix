@@ -58,7 +58,6 @@ export const REGISTRATION_PREPARATION_REJECTION_CODES = [
   "registration_effort_unavailable", "registration_parameter_unavailable", "registration_directory_unavailable",
   "registration_quota_exhausted", "registration_machine_not_auto_assigned",
   "registration_workspace_or_daemon_unavailable", "registration_daemon_offline", "registration_harness_outdated",
-  "registration_harness_signed_out",
   "registration_workspace_not_configured",
   "registration_workspace_constraint_mismatch", "registration_workspaces_limit", "registration_invocation_target_mismatch",
   "registration_source_changed", "registration_environment_changed", "registration_launch_changed",
@@ -121,8 +120,6 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_daemon_offline: "The computer this agent runs on is offline, so nothing was launched. Turn it on and open xMatrix there, then send your message again. No launch was allocated.",
   // A refusal names the program and versions (harnessTooOldMessage); this is the code alone.
   registration_harness_outdated: "The agent's program on that machine is too old for xMatrix. Update it there, then try again. No launch was allocated.",
-  // A refusal names the program and machine (harnessSignedOutMessage); this is the code alone.
-  registration_harness_signed_out: "The agent's program on that machine is not signed in. Sign it in there, then try again. No launch was allocated.",
   registration_workspace_not_configured: "The selected registration has no configured workspace for this launch. No launch was allocated.",
   registration_workspace_constraint_mismatch: "The selected workspace does not satisfy this invocation's repository or directory constraint. No launch was allocated.",
   registration_workspaces_limit: "Too many registered workspaces matched this invocation. No launch was allocated.",
@@ -193,17 +190,17 @@ function parameterAnswerMessage(detail: DecisionAnswerFailure): string {
   return `xMatrix's ${subject} ${issue[detail.issue]}. No launch was allocated.`;
 }
 
-/** A harness its machine reports signed out of its own account: which
- * program, on which machine, so its owner can sign it in from the refusal. */
+/** A program that refused work because its own account is signed out: which
+ * program, on which machine, so its owner can sign it in where the refusal
+ * shows. xMatrix keeps no record of it: only the program knows whether its
+ * provider accepts it, and it is asked by being given work. */
 export interface HarnessSignedOut { harness: string; program: string; machineId: string; machineName?: string }
 
 /** A registration a launch could see, and why it was not offered. */
 export type LaunchMachineBlock = { machineId: string; machineName?: string } & (
   | { reason: "daemon_offline" }
   /** The machine reports this harness older than its preset's minimum version. */
-  | { reason: "harness_outdated"; tooOld: HarnessTooOld }
-  /** The machine reports this harness signed out: nothing sent to it is answered. */
-  | { reason: "harness_signed_out"; signedOut: HarnessSignedOut });
+  | { reason: "harness_outdated"; tooOld: HarnessTooOld });
 
 /** A machine a refused launch would have used, whose daemon is not connected. */
 export interface OfflineMachine { machineId: string; machineName?: string }
@@ -211,9 +208,9 @@ export interface OfflineMachine { machineId: string; machineName?: string }
 const OFFLINE_MACHINES_MAX = 8;
 
 /** Why a launch that found nothing to offer is refused, and for a harness
- * too old to talk to or signed out, which program on which machine; for an
- * offline machine, which machines. */
-export interface LaunchRefusal { code: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut; offline?: OfflineMachine[] }
+ * too old to talk to, which program on which machine; for an offline machine,
+ * which machines. */
+export interface LaunchRefusal { code: string; tooOld?: HarnessTooOld; offline?: OfflineMachine[] }
 
 /** The offline machines among what a launch could see, each once. */
 function offlineMachines(blocked: readonly LaunchMachineBlock[],
@@ -244,10 +241,6 @@ export function launchRefusal(code: string, machineTag: string | undefined,
   const outdated = blocked.find(block => block.reason === "harness_outdated" &&
     (!machineTag || machineTagSelects(machineTag, block.machineId, block.machineName)));
   if (outdated?.reason === "harness_outdated") return { code: "registration_harness_outdated", tooOld: outdated.tooOld };
-  // Nothing else could take it because what there was is not signed in.
-  const signedOut = blocked.find(block => block.reason === "harness_signed_out" &&
-    (!machineTag || machineTagSelects(machineTag, block.machineId, block.machineName)));
-  if (signedOut?.reason === "harness_signed_out") return { code: "registration_harness_signed_out", signedOut: signedOut.signedOut };
   if (!machineTag) return { code };
   const offline = offlineMachines(blocked, block => machineTagSelects(machineTag, block.machineId, block.machineName));
   return offline.length ? { code: "registration_daemon_offline", offline } : { code };
@@ -362,17 +355,17 @@ export function harnessSignedOutSentence(signedOut: HarnessSignedOut): string {
 }
 
 /** The kind of a Channel notice whose program needs signing in on its machine:
- * a summon refused for it, a turn it refused, or an Agent's request
- * (`xmatrix request sign-in`). The Web draws it as the sign-in, then sends a
- * refused summon again. */
+ * a start or a turn it refused, or an Agent's request (`xmatrix request
+ * sign-in`). The Web draws it as the sign-in, then sends again the summon
+ * that start or first turn was for. */
 export const HARNESS_SIGNED_OUT_NOTICE_KIND = "xmatrix.harness-signed-out.v1";
 
 const SIGN_IN_REQUESTER_MAX = 120;
 const SIGN_IN_REASON_MAX = 500;
 
 /** A signed-out notice's facts: what to sign in, the summon to send again
- * when it answers one (a turn failure answers none), and the Agent that asked
- * for it when an Agent did. */
+ * when the refused start or first turn was for one (a later turn answers
+ * none), and the Agent that asked for it when an Agent did. */
 export function harnessSignedOutNoticeOf(metadata: Record<string, unknown> | undefined):
   { signedOut: HarnessSignedOut; summon?: { sourceMention: string; sourceMessageId: string }; requestedBy?: string } | null {
   if (!metadata || metadata.kind !== HARNESS_SIGNED_OUT_NOTICE_KIND) return null;
@@ -398,10 +391,6 @@ export function harnessSignInRequestNotice(input: { signedOut: HarnessSignedOut;
   };
 }
 
-function harnessSignedOutMessage(signedOut: HarnessSignedOut): string {
-  return `${harnessSignedOutSentence(signedOut)} Sign it in from here, then the message goes to it. No launch was allocated.`;
-}
-
 /** What is too old, and the one thing to do about it. */
 function harnessTooOldMessage(tooOld: HarnessTooOld): string {
   const where = tooOld.machineName ? "there" : "on that computer";
@@ -410,16 +399,15 @@ function harnessTooOldMessage(tooOld: HarnessTooOld): string {
 }
 
 /** `detail` is what the rejection stored for its code: an invalid answer's
- * failure, what is too old, what is signed out, which machines are offline,
- * or what a named machine runs. */
+ * failure, what is too old, which machines are offline, or what a named
+ * machine runs. */
 export function preparationRejectionMessage(code: string, detail?: unknown): string | undefined {
   const answer = code === "routing_parameter_invalid_answer" ? parseDecisionAnswerFailure(detail) : undefined;
   const tooOld = code === "registration_harness_outdated" ? parseHarnessTooOld(detail) : undefined;
-  const signedOut = code === "registration_harness_signed_out" ? parseHarnessSignedOut(detail) : undefined;
   const offline = code === "registration_daemon_offline" ? parseOfflineMachines(detail) : undefined;
   const machineAgents = code === "registration_machine_unavailable" ? parseMachineAgents(detail) : undefined;
   return answer ? parameterAnswerMessage(answer) : tooOld ? harnessTooOldMessage(tooOld)
-    : signedOut ? harnessSignedOutMessage(signedOut) : offline ? daemonOfflineMessage(offline)
+    : offline ? daemonOfflineMessage(offline)
     : machineAgents ? machineAgentsMessage(machineAgents)
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }

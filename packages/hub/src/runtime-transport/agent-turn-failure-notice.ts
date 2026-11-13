@@ -29,6 +29,8 @@ export function agentTurnFailureAppendCommand(input: {
   resetsAt?: string | null;
   /** For a turn its program refused as signed out: what to sign in, drawn as the sign-in. */
   signedOut?: HarnessSignedOut;
+  /** The summon that turn was the first answer to, sent again once its program is signed in. */
+  summon?: { sourceMessageId: string; sourceMention: string };
   noticeId?: string | null;
   senderSnapshot: Record<string, unknown>;
 }): {
@@ -84,7 +86,7 @@ export function agentTurnFailureAppendCommand(input: {
           ...(!background ? { xmatrixFailureEvidence: { version: 1, ...agentFailureEvidence(input.detail),
             ...(usageLimit ? { usageLimit } : {}) } } : {}),
           ...(input.signedOut && input.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON
-            ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut } : {}),
+            ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut, ...input.summon } : {}),
         },
       },
     },

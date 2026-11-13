@@ -9,7 +9,8 @@ const ERROR_MAX = 256;
  * Fold a completed action's re-probe into the Machine's inventory. A refresh
  * replaces the whole observation unless a fresher one is stored; a single
  * re-probed preset replaces only its own item in an existing observation and
- * records when it was observed, so a sign-in answers refusals made before it.
+ * records when it was observed, so a setting asked for after an earlier
+ * sign-in is met only by a later one (settings-domain-harness).
  */
 export async function recordHarnessActionInventory(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;

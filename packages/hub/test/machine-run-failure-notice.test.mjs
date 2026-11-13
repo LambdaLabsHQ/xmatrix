@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { machineRunFailureNoticeCommand, machineStopCauseText, machineStopResultNoticeCommand, repositoryBaselineNoticeCommand,
-  startupFallbackNoticeCommand } from "../src/machine-run-failure-notice.ts";
+  signedOutStartNoticeCommand, startupFallbackNoticeCommand } from "../src/machine-run-failure-notice.ts";
+import { answerStartupFailure } from "../src/machine-run-lifecycle-report.ts";
 
 const base = { runId: "run-1", channelId: "channel-1", agentName: "grok", ownerUserId: "owner",
   ownerEmail: "owner@example.test", machineId: "machine:a", hostId: "cursor" };
@@ -94,6 +95,43 @@ test("the Agent that takes over a failed start is named once per failed Run", as
   assert.deepEqual(await startupFallbackNoticeCommand({ ...base, agentName: "claude" }), notice);
   assert.notEqual((await startupFallbackNoticeCommand({ ...base, runId: "run-2", agentName: "claude" })).messageId, notice.messageId);
   assert.notEqual(notice.messageId, (await machineRunFailureNoticeCommand({ ...base, detail: "boom" })).messageId);
+});
+
+test("a start its program refused as signed out is its sign-in, with the summon to send again", async () => {
+  const signedOut = { harness: "codex", program: "Codex", machineId: "machine:a", machineName: "Build Box" };
+  const summoned = await signedOutStartNoticeCommand({ ...base, agentName: "codex", machineName: "Build Box", signedOut,
+    sourceMessageId: "message-1", sourceMention: "@codex fix it" });
+  assert.equal(summoned.body, "Couldn't start @codex on Build Box. Codex on Build Box is not signed in, so it can't take work. " +
+    "Sign it in from here, then the message goes to it.");
+  assert.deepEqual(summoned.residual.appMetadata, { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, runId: "run-1",
+    kind: "xmatrix.harness-signed-out.v1", signedOut, sourceMessageId: "message-1", sourceMention: "@codex fix it" });
+  // Without a summon to send again it offers the sign-in alone; one notice per failed Run.
+  const alone = await signedOutStartNoticeCommand({ ...base, agentName: "codex", signedOut, sourceMessageId: "message-1" });
+  assert.match(alone.body, /Sign it in from here\.$/u);
+  assert.equal(alone.residual.appMetadata.sourceMention, undefined);
+  assert.equal(alone.residual.appMetadata.sourceMessageId, undefined);
+  assert.equal(alone.messageId, summoned.messageId);
+  assert.notEqual(summoned.messageId, (await machineRunFailureNoticeCommand({ ...base, detail: "boom" })).messageId);
+});
+
+test("a failed start says so on its summon; a signed-out one gives its sign-in, and its summon unless another Agent took it", async () => {
+  const context = { runId: "run-1", channelId: "channel-1", ownerUserId: "owner", agentName: "codex", machineId: "machine:a",
+    harness: "codex", machineName: "Build Box", sourceMessageId: "message-1", sourceMention: "@auto fix it" };
+  const answered = async (extra, handed) => {
+    const calls = [];
+    await answerStartupFailure({}, { ...context, ...extra }, { detail: "Not logged in", phase: "runtime_starting" },
+      "owner@example.test", {
+        failed: async (_env, input) => { calls.push(["failed", input.detail]); },
+        startupFallback: async (_env, input) => { calls.push(["fallback", input.runId]); return handed; },
+        handedOn: async (_env, input) => { calls.push(["handed", input.agentName]); },
+        signedOutStart: async (_env, input) => { calls.push(["sign-in", input.signedOut.program, input.sourceMention]); },
+      });
+    return calls;
+  };
+  assert.deepEqual(await answered({}, undefined), [["failed", "Not logged in"], ["fallback", "run-1"]]);
+  assert.deepEqual(await answered({ signedOut: true }, undefined), [["fallback", "run-1"], ["sign-in", "Codex", "@auto fix it"]]);
+  assert.deepEqual(await answered({ signedOut: true }, { agentName: "grok" }),
+    [["fallback", "run-1"], ["handed", "grok"], ["sign-in", "Codex", undefined]]);
 });
 
 test("a stop nothing in the Channel asked for says why and who caused it", async () => {

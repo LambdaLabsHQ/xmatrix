@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: a summon reaches its machine, and the program says whether it is signed in
+
+On 2026-11-13 summons to Claude Code on a signed-in machine were refused as
+"not signed in". The Hub kept its own record that the program had refused
+earlier turns as signed out, answered by a later machine report; a sign-in
+from the card updated the Hub's copy of that report, and a daemon reconnect
+40 minutes later overwrote it with the daemon's older copy, so the refusal
+stood again. The same record had refused a recovered program on 2026-10-22.
+The Hub no longer keeps or reads that state for routing: a summon is given to
+its machine, and a start or first turn the program refuses as signed out
+shows its sign-in where it failed. An `@auto` message that Run never answered
+goes on to the next Agent; any other is sent again from the notice once the
+program is signed in. A summon to a program that really is signed out is
+therefore answered a few seconds later, by the program, instead of at once by
+the Hub. A handoff whose successor turns out signed out now starts that
+successor, which shows the sign-in; after signing in, send it a message.
+Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: code draws in Cascadia Code, a Norn pipe as a spaced arrow
 
 Code named a monospace font the app never shipped, so it drew in each

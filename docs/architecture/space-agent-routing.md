@@ -298,13 +298,20 @@ it answers clears it. An answer to a Norn request counts as the Run's first
 reply (`recordAgentLaunchFirstReply`), as a message in the conversation
 does.
 
-A harness that its machine reports as signed out, or that refused a start or
-turn as signed out within the last 24 hours with no later report answering it
-(`SIGNED_OUT_FAILURE_WINDOW_HOURS`), is not offered, like a harness that is too
-old. When nothing else can take the work, the launch is refused with
-`registration_harness_signed_out`, naming the program and machine, and the
-machine's owner can sign in from that notice. An unknown or unchecked sign-in
-is not judged.
+Routing keeps no record of whether a harness is signed in, and does not read
+the one its machine last reported. Only the program knows whether its provider
+accepts it now, and nothing tells xMatrix when that changes (a sign-in in a
+terminal, a token another process refreshed, a revocation), so any copy goes
+stale: a copy kept here refused summons to a signed-in program on 2026-10-22
+and again on 2026-11-13. A summon is given to its machine, and the program
+answers by taking the work or refusing it. A start or turn it refuses as signed
+out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed, with a
+notice that is its sign-in (`HARNESS_SIGNED_OUT_NOTICE_KIND`). What follows
+belongs to that one request: when the Run never answered an `@auto` summon, the
+message goes on to the next-ranked Agent, once (`dispatchStartupFallback`);
+otherwise the notice carries the summon and sends it again once the program is
+signed in. The owner who does not want that program used turns the Agent off,
+which is the only thing that keeps routing away from it.
 
 ### Machine network measurement
 

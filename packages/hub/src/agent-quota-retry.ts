@@ -210,7 +210,7 @@ async function retryLaunch(
   if (!result.prepared.length) {
     const refusal = result.quotaRefusals[0];
     throw new RegistrationAccessError(result.rejected[0]?.code ?? "registration_source_changed", 409,
-      undefined, undefined, undefined, refusal?.registrations, refusal?.refusedThrough);
+      undefined, undefined, refusal?.registrations, refusal?.refusedThrough);
   }
   await wakeAgentLaunchCoordinator(env, channelId, ["launch"]);
 }
