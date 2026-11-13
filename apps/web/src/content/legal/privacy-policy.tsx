@@ -299,7 +299,13 @@ export function PrivacyPolicyContent() {
           account&apos;s settings, campaigns, budgets, ads, and performance reports. When requested and
           permitted by the app&apos;s permission or a specific approval, it validates, creates,
           updates, pauses, or enables advertising resources in that account. Enabling a campaign can
-          incur Google Ads charges in the Customer&apos;s account.
+          incur Google Ads charges in the Customer&apos;s account. Google Play Console access lists the
+          Android apps the connected account can manage and reads their releases, store listings,
+          testers, subscriptions and prices, purchases and orders, and reviews when a person or Agent
+          asks. When requested and permitted by the app&apos;s permission or a specific approval, it
+          uploads app builds, publishes or changes a release, and edits those listings, testers and
+          subscription plans. Purchase, order and review records can include the personal data of the
+          app&apos;s own users.
         </p>
         <p>
           We use Google user data only to provide those user-facing features: we retrieve it when a
