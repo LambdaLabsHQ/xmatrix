@@ -1,5 +1,5 @@
 import type { PageProgramStep } from "@xmatrix/protocol";
-import { nornPasses } from "./norn-host";
+import { nornPasses, plainResult } from "./norn-host";
 import type { Form, ReportForm } from "./vendor/norn/frontend/check/index";
 import type { Code } from "./vendor/norn/runtime/code";
 import { occur, settle, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
@@ -15,13 +15,6 @@ import { show, text, variant, type Value } from "./vendor/norn/runtime/value";
 
 /** What stands in for words nobody has written yet: an answer, a report, an event. */
 const UNWRITTEN = "…";
-
-/** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
-export const answerText = (value: Value): string =>
-  value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
-/** A program's result: what it answered with, without the `Answered(…)` around it. */
-export const resultText = (value: Value): string =>
-  value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? answerText(value.args[0]!) : show(value);
 
 type Ask = Extract<PageProgramStep, { kind: "ask" }>;
 type Wait = Extract<PageProgramStep, { kind: "wait" }>;
@@ -125,7 +118,7 @@ function flow(reading: Reading, ledger: Ledger, from: number, path: Path): PageP
     }, { steps: 200_000 });
     if (pass.status !== "waiting" || !pass.waiting) {
       // What it ends with is words nobody has written yet, unless the program wrote them itself.
-      const result = pass.error ?? (pass.result && pass.result.type !== "unit" ? resultText(pass.result) : "");
+      const result = pass.error ?? (pass.result && pass.result.type !== "unit" ? plainResult(pass.result) : "");
       return [...steps, { kind: "end", failed: pass.status === "failed", result: result === UNWRITTEN ? "the answer" : result.includes(UNWRITTEN) ? "" : result }];
     }
     const { targets, until } = pass.waiting;

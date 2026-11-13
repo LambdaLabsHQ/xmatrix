@@ -109,3 +109,27 @@ test("a request's reference in a message reads as the request: what is asked, of
   await expect(page.locator('[id="message:delivery"]')).not.toContainText("rabcdefgh23");
   await page.screenshot({ path: test.info().outputPath("norn-request-reference.png") });
 });
+
+test("a long task stays a short chip, and its preview holds the whole of it", async ({ page }) => {
+  const task = "按「搜索与候选」做每周供应商池维护。榜单在管理页（独立持久化）：先用 CLI `admin aggregate pool get` 读最新快照与 revision，不从 Page 读逐站名单。"
+    + "主任务是逐家复查池内所有站点和待办，未完成覆盖前不优先找新站。".repeat(40) + "最终报告显式发到本轮会话。";
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
+    channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+    body: "@codex launch:force\n\n**Request** `request:rabcdefgh23`" }], hasMore: false });
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@codex", text: task, state: "open" } });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const chip = page.getByTestId("request-reference-chip");
+  await expect(chip).toHaveText("按「搜索与候选」做每周供应商池维护。 …", { timeout: 20_000 });
+  // The chip is a line or two of the message, not a highlighted wall of it.
+  expect((await chip.boundingBox())!.height).toBeLessThan(60);
+  await page.screenshot({ path: test.info().outputPath("norn-long-request-chip.png") });
+  await chip.hover();
+  const preview = page.getByTestId("request-reference-preview");
+  await expect(preview).toContainText("最终报告显式发到本轮会话。");
+  await expect(preview).toContainText("waiting for @codex");
+  const body = preview.locator(".app-page-reference-popup-body");
+  await page.screenshot({ path: test.info().outputPath("norn-long-request-preview.png") });
+  expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+});

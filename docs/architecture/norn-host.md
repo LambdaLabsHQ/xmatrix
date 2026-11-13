@@ -40,6 +40,14 @@ restored revision), as whoever wrote it:
 - A block changed after its program ended runs again.
 - A removed block, or a removed Page, stops its program.
 
+The sync is owed from the commit until it is made. The Page's session stores
+what it owes (`programsDue`) before the work and clears it when the work is
+done, and the event that committed the revision waits for it. A sync that
+failed, hung, or that the session did not live to finish is made again from
+the session's alarm, later each time, until it succeeds; syncing twice starts
+nothing twice. Whoever saves while a sync is owed is told so in the edit's
+`scheduleProblems`.
+
 Each block has one conversation for its whole life, named for the Page and
 the block and linked to the Page. Every run opens with xMatrix's message
 carrying the program's text, and its requests and result follow in that
@@ -136,7 +144,12 @@ program's message. Its id is `norn:<reference>:<epoch>`, so a repeat appends
 nothing. Its first line is the holder's summon. Everything the program wrote
 (the task, `~about`, `~context`) is quoted in fenced text, which never
 summons or commands anyone. The message states the form the answer must have
-and the three commands that end the request. All of that is for the holder
+and the three commands that end the request. It tells the holder that what is
+left for a person to do or decide goes to them as a card (`xmatrix ask`,
+`confirm`, `choose`) before it answers, because words in an answer ask nobody.
+Where a person holds or held a request of the program, the holder is told to
+say in the conversation what it does, as on a task from them; Agents that work
+for one another alone say nothing but their answers. All of that is for the holder
 alone: the message marks where it begins (`metadata.nornAnswerFrom`), and a
 person reading the conversation is shown only what comes before it, the
 summon and the request's reference drawn as the request.
@@ -163,6 +176,11 @@ the way Norn writes values (`Sound`, `Flawed("no owner on failure")`). Where
 the request wants text, what was typed is the answer. An answer that does not
 have the form the program reads is refused and kept as evidence in the
 ledger; the request stays open.
+
+An answer that is taken is also a message: xMatrix posts it in the
+conversation under the holder's own name (`norn-answer:<reference>:<epoch>`),
+so whoever follows the work reads who did it and what came of it. The message
+is appended and not interpreted: nothing in it summons, commands or wakes.
 
 ## Asking a person
 
@@ -208,8 +226,9 @@ message, because that message is xMatrix's own and takes no reply.
 
 Where a request is named to people, they are shown the request, not its
 reference. A message names one as `request:<ref>` (the delivery to an Agent
-does, in its heading), and the Web draws that as a chip: the first line of
-what is asked, of whom, and how it stands, read from
+does, in its heading), and the Web draws that as a chip: how what is asked
+starts, cut at a sentence or a word so a long task stays a chip, with the
+whole request, of whom it is asked and how it stands in the chip's preview, read from
 `GET /api/spaces/:space/norn-requests/:ref` by whoever can read the
 request's conversation; anyone else sees only "a request". A card for a
 person carries no reference in its text at all. An Agent still answers by
@@ -222,8 +241,17 @@ it: no execution of its delivery message is under way, no launch for it is
 being prepared, waits for quota or is starting, and no Run it started is
 still to take the message (`NORN_REQUEST_WORKED_SQL`). That covers a launch
 that was refused, a process that never started, a Run that was stopped or
-exited, and a turn that ended without one of the three commands. The next
-pass settles the request `Broke`, and the program decides what follows.
+exited, and a turn that ended without one of the three commands.
+
+Work that broke off is not the Agent giving up: when no turn on the request
+ended in order (its turn failed, or nothing ever took it), the next pass hands
+the request on, once. The holding that broke off is kept as evidence
+(`NORN_HANDED_ON_REASON`), the request takes a new epoch, and its delivery is
+a new message that starts a new Run, never the Instance that had it. That
+message tells the holder to read the conversation for what the first attempt
+did and to go on from there. A request that is abandoned again, and one whose
+turn ended in order without an answer, is settled `Broke`, and the program
+decides what follows.
 
 A turn that was interrupted, because a newer message arrived in the
 conversation, has not ended the work: its Instance goes on in its next turn
@@ -323,17 +351,25 @@ Instances resting in the program's conversation are left alone. The request
 records the Instance, which holds it. Without such an Instance, and for a
 program in a message, each request starts a new Run as before.
 
-## Letting the Run go
+## Who stays in the conversation
 
-The Instance that a delivery started exists for that one request. Once the
-request has ended, however it ended, the coordinator stops the Instance's Run
-if it is still live, or retires the Instance if it is at rest (an Instance at
-rest has no live Run, and the next message would wake it). It records the
-release on the request's index row, so each is let go once. A Page's
-program keeps its Instances while it runs, for its next request to the same
-participant, and lets them go when it ends. An Agent that has answered therefore does not stay in the conversation
-to be woken by every later message. The delivery message tells the holder
-that its answer ends its Run.
+An Instance that a delivery started is let go once its request has ended: the
+coordinator stops its Run if it is still live, or retires the Instance if it
+is at rest (an Instance at rest has no live Run, and the next message would
+wake it). The release is recorded on the request's index row, so each is let
+go once. Some stay (`NORN_INSTANCE_STAYS_SQL`):
+
+- one that holds a request still open;
+- one that asked a question (`xmatrix ask`, `confirm`, `choose`) whose program
+  still runs, so the answer finds it;
+- in a Page program's conversation, the one a running program asks again by
+  name, and the one that ended a request last (answered, refused, or failed).
+
+So a Page program's conversation always has the Agent that did the work last:
+a person who writes there after the program reaches it, with what it knows.
+The others are let go, also while the program runs, so a routine does not
+leave one Instance per round. In a shared conversation an Agent that has
+answered does not stay to be woken by every later message.
 
 ## Saying something
 
@@ -373,6 +409,14 @@ either way.
 When a program completes or fails, the coordinator posts its result in reply
 to the program's message. When an Agent started the program, the message
 addresses that Instance, so it wakes to read the result.
+
+A Page's program ends in its own conversation (`nornPageEnd`). A result that
+is an Agent's answer stands there under that Agent's name already, so the end
+says only that it finished. A program that failed by itself, and was
+not stopped or taken off its page, names the people who held its requests, or
+with none whoever saved it, says which request stopped it and why, and
+declares a wait on them: it shows where what needs them shows. Nothing goes on
+by itself from there; the Agent that stayed takes what they say next.
 
 ## Not in this version
 

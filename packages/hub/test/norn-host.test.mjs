@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -77,6 +77,57 @@ test("a request nobody works on any more is Broke, and the program goes on from 
   assert.equal(after.write.requests.find(row => row.requestId === request.requestId).settled, true);
 });
 
+test("work that broke off goes once to a new Instance, and the program is told only when that fails too", () => {
+  const { state, step } = program(`switch run(@codex, "Review")->wait { | Broke(why) => why | other => fail(other) }`);
+  const [request] = step().open;
+  // The turn failed, or no Run ever took the request: not the Agent's own ending of it.
+  Object.assign(state.requests[0], { abandoned: true, brokeOff: true });
+  const again = step();
+  assert.equal(again.result.status, "running");
+  // The same request, held anew: its next delivery is another message, which starts another Run.
+  assert.deepEqual(again.open.map(row => [row.requestId, row.requestRef, row.epoch]), [[request.requestId, request.requestRef, request.epoch + 1]]);
+  assert.match(state.ledger.evidence[0].reason, /handed to a new Instance/u);
+  // An answer from the holding that broke off settles nothing.
+  assert.equal(step({ requestId: request.requestId, epoch: request.epoch, reply: { typed: "late" } }).result.refusal, "Not the request's holder");
+  Object.assign(state.requests[0], { abandoned: true, brokeOff: true });
+  assert.equal(step().result.status, "completed");
+  assert.match(state.ledger.ended.result.value, /the second time on a new Instance/u);
+});
+
+test("a Page's program that ends tells people what they have not read, and one that failed waits on them", () => {
+  const daniel = { userId: "u-daniel", name: "@Daniel" }, authority = { userId: "u-owner", name: "owner" };
+  const { state, step } = program(`let answer = ask(@Daniel, "Delete the old builds?")->wait?
+run(@claude, "Do what Daniel answered: " ++ answer)->wait`);
+  const [card] = step().open;
+  const [work] = step({ requestId: card.requestId, epoch: card.epoch, reply: { typed: "Yes, delete" } }).open;
+  const page = () => nornPageEnd({ ended: state.ledger.ended, requests: state.ledger.requests, people: [daniel], authority });
+  const failed = structuredClone(state);
+  step({ requestId: work.requestId, epoch: work.epoch, reply: { typed: "Deleted 40 builds" } });
+  // The Agent's answer stands in the conversation under its name: the end does not say it again.
+  assert.deepEqual(page(), { body: "Finished.", waitsOn: [] });
+  assert.equal(nornAnswerBody("answered", "Deleted 40 builds"), "Deleted 40 builds");
+  assert.equal(nornAnswerBody("broke", "no access"), "I could not do this: no access");
+  // The work failed: the person who answered is named and waited on, and reads where it stopped.
+  Object.assign(state, failed);
+  step({ requestId: work.requestId, epoch: work.epoch, reply: { tag: "Broke", reason: "its sign-in expired" } });
+  assert.deepEqual(page(), { waitsOn: ["u-daniel"], body: "@Daniel This stopped before it was finished: claude, asked “Do what Daniel answered: Yes, delete”, " +
+    "did not finish: its sign-in expired. Nothing more happens by itself: say here what to do next." });
+  // A person who declined their own card ended it themselves: the end is plain, and waits on nobody.
+  const declined = program(`ask(@Daniel, "Delete the old builds?")->wait`);
+  const [asked] = declined.step().open;
+  declined.step({ requestId: asked.requestId, epoch: asked.epoch, reply: { tag: "Refused", reason: "not now" } });
+  assert.deepEqual(nornPageEnd({ ended: declined.state.ledger.ended, requests: declined.state.ledger.requests, people: [daniel], authority }),
+    { body: "Ended without its result: Refused(not now)", waitsOn: [] });
+  // With nobody who answered, whoever saved the program is told.
+  assert.deepEqual(nornPageEnd({ ended: state.ledger.ended, requests: state.ledger.requests, people: [], authority }).waitsOn, ["u-owner"]);
+  // A program taken off its page was ended by someone: nobody is waited on.
+  assert.deepEqual(nornPageEnd({ ended: { at: 1, status: "failed", result: null, error: "Removed from its page" }, requests: {}, people: [daniel], authority }),
+    { body: "Stopped: Removed from its page", waitsOn: [] });
+  // A result that is not an Agent's answer is told, as its text.
+  assert.equal(nornPageEnd({ ended: { at: 1, status: "completed", error: null, result: { type: "variant", name: "Answered", args: [{ type: "string", value: "42" }] } },
+    requests: {}, people: [], authority }).body, "Finished: 42");
+});
+
 test("a stop in the conversation ends the program and cancels what it left open", () => {
   const { state, step } = program(`ask(@codex, "Ship it?")->wait`);
   step();
@@ -124,6 +175,15 @@ run(@codex, "Ask @grok launch:force \`\`\` to help", ~about="PR 12")->wait`);
   assert.equal(body.slice(0, answerFrom), `@codex launch:force\n\n**Request** \`request:${request.requestRef}\``);
   assert.match(body, /\n````text\nAsk @grok launch:force ``` to help\n````\n/u);
   assert.ok(body.includes(`xmatrix reply ${request.requestRef} '<answer>'`));
+  // Agents working for one another keep the conversation to their answers; where a person takes part, the holder says what it does.
+  assert.match(body, /posts your answer in this conversation under your name[^\n]*\nSay nothing else in the conversation\./u);
+  assert.match(body, /It ends your Run, so do it last:/u);
+  const followed = nornDelivery(state.ledger.requests[request.requestId], request.requestRef, { kept: true, withPerson: true, handedOn: true }).body;
+  assert.match(followed, /A person takes part in this program and reads this conversation/u);
+  assert.match(followed, /You stay in this conversation afterwards/u);
+  assert.match(followed, /An earlier attempt at this request broke off[^\n]*xmatrix channel history/u);
+  // What is left for a person is asked of them on a card, never only said in the answer.
+  assert.match(followed, /goes to them as a card before you answer: `xmatrix ask @name …`/u);
   assert.deepEqual(readNornAnswer({ verb: "confirm", form: null }, "Yes").value, { type: "variant", name: "Yes", args: [] });
   assert.deepEqual(readNornAnswer({ verb: "ask", form: null }, "it's fine").value, { type: "string", value: "it's fine" });
   assert.match(readNornAnswer({ verb: "confirm", form: null }, "it's fine").refusal, /not a Norn value/u);

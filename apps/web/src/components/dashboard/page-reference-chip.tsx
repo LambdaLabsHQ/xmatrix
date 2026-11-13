@@ -9,7 +9,7 @@
  */
 import { createContext, Fragment, memo, useContext, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Hash, Lock, MessageCircleQuestion } from "lucide-react";
+import { ClipboardList, FileText, Hash, Lock } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import {
   messageReferenceSpans,
@@ -28,6 +28,8 @@ import { useAppPortalContainer } from "./app-portal-container";
 import { useMessageReferenceCatalog } from "./message-reference-catalog";
 import { channelLabel } from "./reference-complete";
 import { InlineRowPreview } from "./inline-row-preview";
+import { referencePreview } from "./reference-preview";
+import { requestSummary } from "./request-summary";
 import type { PageEditOpening } from "./page-edit-cards";
 
 export type PageReferenceScope = {
@@ -90,7 +92,7 @@ export function MessageReferenceChip({ span }: { span: MessageReferenceSpan }) {
 
 /** The chip and its hover preview, shared by page and channel references. */
 export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, testId, data, onOpen,
-  className = "app-page-reference-chip" }: {
+  className = "app-page-reference-chip", popupClassName = "" }: {
   icon: ReactNode;
   label: ReactNode;
   title: string;
@@ -101,6 +103,8 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
   data: Record<`data-${string}`, string | undefined>;
   onOpen: () => void;
   className?: string;
+  /** Added to the preview's panel, for a reference whose preview is more than a status line. */
+  popupClassName?: string;
 }) {
   const portal = useAppPortalContainer();
   return (
@@ -134,7 +138,7 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
           className="app-page-reference-positioner"
         >
           <Popover.Popup
-            className="app-page-reference-popup"
+            className={`app-page-reference-popup ${popupClassName}`.trim()}
             data-testid={`${testId}-preview`}
             onClick={(event) => {
               event.stopPropagation();
@@ -197,6 +201,12 @@ const REQUEST_STATES = { open: "waiting for", answered: "answered by", refused: 
  * A request a Norn program made, in place of its reference: what was asked,
  * of whom and how it stands. A reader who cannot read its conversation sees
  * only that it is a request.
+ *
+ * The chip says how the request starts; a task is often a long paragraph, and
+ * the whole of it is read in the preview, which scrolls.
+ *
+ * Its mark is a task sheet. A question mark in a circle read as "unknown" or
+ * "something went wrong" beside a task that is simply under way.
  */
 const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span: RequestReferenceSpan }) {
   const scope = useContext(PageReferenceContext);
@@ -218,18 +228,19 @@ const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span
       </span>
     );
   }
-  const asked = found?.text.split("\n")[0]?.trim() ?? "";
+  const asked = found ? requestSummary(referencePreview(found.text, catalog)) : "";
   const stands = found ? `${REQUEST_STATES[found.state]} ${found.holder}` : "";
   return (
     <ReferenceChip
-      icon={<MessageCircleQuestion aria-hidden="true" />}
+      icon={<ClipboardList aria-hidden="true" />}
       label={found ? asked : "…"}
-      title={asked}
+      title="Request"
       badge={found ? stands : null}
       preview={found ? <InlineRowPreview text={[found.text, found.reply ? `${found.holder}: ${found.reply}` : `It is ${stands}.`].join("\n\n")} />
         : <ContentSkeleton label="Loading request" lines={2} />}
       ariaLabel={`Open the request: ${asked}`}
       testId="request-reference"
+      popupClassName="app-request-reference-popup"
       data={{ "data-request-state": found?.state }}
       onOpen={() => { if (found) catalog?.onOpenChannel(found.channelId); }}
     />
