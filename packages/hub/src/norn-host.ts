@@ -338,6 +338,19 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
   };
 }
 
+/**
+ * Each `norn run` block of a text that does not run as written, and why:
+ * what whoever just wrote the text is told at once.
+ */
+export function nornProgramProblems(body: string): { source: string; problem: string }[] {
+  const blocks = nornBlocks(body);
+  return blocks.flatMap(block => {
+    const checked = blocks.filter(other => other.name === block.name).length > 1
+      ? { refusal: `Two blocks are named ${block.name}; rename one.` } : checkNornProgram(block.source);
+    return "refusal" in checked ? [{ source: `\`\`\`norn run ${block.name}`, problem: checked.refusal }] : [];
+  });
+}
+
 /** The ledger a program starts from. */
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);
 

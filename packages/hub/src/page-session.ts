@@ -14,6 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
+import { nornProgramProblems } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -882,8 +883,8 @@ export class PageSession {
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label }));
       return { ...result, removedSections: pageRemovedSections(current, target),
-        scheduleProblems: pageSchedules(target).flatMap((line) => line.error
-          ? [{ source: line.source, problem: line.error }] : []) } as PageEditResult;
+        scheduleProblems: [...pageSchedules(target).flatMap((line) => line.error
+          ? [{ source: line.source, problem: line.error }] : []), ...nornProgramProblems(target)] } as PageEditResult;
     });
   }
 
