@@ -8756,15 +8756,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
    the plain paper laid on the slip, written on like the composer: the words
    and the buttons that send them share the strip, the field grows with what
    is written, and nothing else marks it (Daniel 2026-11-13: 这输入框太丑了,
-   the bare underline on a grey well). Focus darkens its hairline. */
+   the bare underline on a grey well). The paper's colour alone stands it off
+   the slip: no edge, at rest or in focus (Daniel 2026-11-13: 不要有边框). */
 .xmatrix-app .app-ask-answer {
   border-radius: 8px;
   background: var(--app-panel-paper, oklch(0.976 0.005 85));
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.12);
-  transition: box-shadow 120ms ease;
-}
-.xmatrix-app .app-ask-answer:focus-within {
-  box-shadow: 0 0 0 1px oklch(0.35 0.07 60 / 0.4);
 }
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-ask-answer.app-ask-answer textarea {
   background: transparent !important;
