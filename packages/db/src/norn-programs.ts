@@ -33,7 +33,12 @@ export interface NornProgramWrite {
   /** What the program said in this step (`say`), to be posted to its conversation. */
   notices: { noticeId: string; recipient: string; body: string }[];
 }
-export type NornStep<T> = (state: NornProgramState) => { write: NornProgramWrite | null; result: T };
+/**
+ * A pass that could not be made here and is to be tried again: the program
+ * is left exactly as it is, and only the time of its next pass moves.
+ */
+export interface NornProgramRetry { retryAtMs: number }
+export type NornStep<T> = (state: NornProgramState) => { write: NornProgramWrite | NornProgramRetry | null; result: T };
 
 interface Scope { requestId: string; channelId: string; programId: string }
 
@@ -144,13 +149,18 @@ export class PostgresNornProgramRepository {
       nowMs: Number(rows[0]!.now_millis), stopReason: program.stop_reason === null ? null : String(program.stop_reason),
       requests: rows.filter(row => row.request_id !== null).map(requestRow) });
     if (!write) return result;
+    if ("retryAtMs" in write) {
+      await tx.query({ name: "norn_program_retry_v1", text: `UPDATE data.norn_programs SET next_due_at=$3,updated_at=clock_timestamp()
+        WHERE space_id=$1 AND program_id=$2`, values: [...scope, new Date(write.retryAtMs).toISOString()], maxRows: 0 });
+      return result;
+    }
     await tx.query({ name: "norn_program_write_v2", text: `UPDATE data.norn_programs SET ledger_json=$3::jsonb,state=$4,
         next_due_at=$5,waits_json=$6::jsonb,stop_reason=NULL,revision=revision+1,updated_at=clock_timestamp()
       WHERE space_id=$1 AND program_id=$2`, values: [...scope, JSON.stringify(write.ledger), write.state,
       write.nextDueMs === null || write.state !== "running" ? null : new Date(write.nextDueMs).toISOString(),
       write.state === "running" && write.waits.length ? JSON.stringify(write.waits) : null], maxRows: 0 });
     // A new holding (another epoch) is delivered again; an unchanged one keeps its delivery.
-    await tx.query({ name: "norn_request_write_v2", text: `INSERT INTO data.norn_requests
+    await tx.query({ name: "norn_request_write_v3", text: `INSERT INTO data.norn_requests
         (space_id,channel_id,program_id,request_id,request_ref,epoch,holder,delivery_message_id,settled_at)
       SELECT $1,$3,$2,entry.request_id,entry.request_ref,entry.epoch,entry.holder,entry.delivery_message_id,
         CASE WHEN entry.settled THEN clock_timestamp() END
@@ -161,6 +171,7 @@ export class PostgresNornProgramRepository {
           ELSE 'norn:'||norn_requests.request_ref||':'||EXCLUDED.epoch END,
         delivered_at=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.delivered_at END,
         instance_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.instance_id END,
+        holder_user_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.holder_user_id END,
         settled_at=COALESCE(norn_requests.settled_at,EXCLUDED.settled_at)`,
       values: [...scope, String(program.channel_id), JSON.stringify(write.requests.map(request => ({
         request_id: request.requestId, request_ref: request.requestRef, epoch: request.epoch, holder: request.holder,

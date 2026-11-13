@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a Hub build that cannot read a Norn program does not end it
+
+A pass that could not check a program's text stopped the program for good
+("The program no longer checks"). Text is checked where it is written, so
+that only happened across builds: a Durable Object still on the previous
+build during a rollout, or the whole Hub after a rollback, would end every
+program that used a newer word of the language. Such a pass now leaves the
+program and its ledger untouched and tries again five minutes later; a stop
+is still taken. A request handed to another holder also no longer keeps the
+person it was first delivered to. Hub only. Recovery is a CI-validated beta
+Hub reverting this change.
+
 ## Unreleased: a request a changed Norn program no longer makes is called off
 
 When a Norn program's text changed while one of its requests was out, the
