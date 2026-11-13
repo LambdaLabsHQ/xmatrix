@@ -145,19 +145,25 @@ function summonConditions(request: LedgerRequest): { words: string[]; refusal?: 
  * The message that delivers a request to its holder. What the program wrote
  * is quoted as literal text, so nothing in it summons or commands anyone;
  * the only summon is the holder's own, on the first line.
+ *
+ * What is asked comes first and how to answer after it, from `answerFrom`
+ * on: the holder reads all of it, a person reading the conversation only
+ * what is asked.
  */
-export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to: {
+export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   /** The Instance already there that the request goes to, by its address; without one the holder's summon starts a Run. */
   there?: string;
   /** Its Instance stays for the program's next request, instead of ending with this one. */
-  kept?: boolean } = {}): string {
+  kept?: boolean } = {}): { body: string; answerFrom: number } {
   const [answer, ...types] = answerText(request).split("\n");
-  return [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
-    `**Request \`${requestRef}\`** from a program. Your answer goes back to the program, not to this conversation.`, "",
+  const asked = [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", to.kept ? "End this turn with exactly one of these, and say nothing else in the conversation. The program may ask you again here:"
+  ].join("\n");
+  const answering = ["", "",
+    `This is request \`${requestRef}\` from a program. Your answer goes back to the program, not to this conversation.`,
+    to.kept ? "End this turn with exactly one of these, and say nothing else in the conversation. The program may ask you again here:"
       : "End this turn with exactly one of these. It ends your Run, so say nothing in the conversation and do it last:", "",
     `- \`xmatrix reply ${requestRef} '<answer>'\` when it is done. The answer must be ${answer}`,
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),
@@ -165,6 +171,7 @@ export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to:
     `- \`xmatrix broke ${requestRef} '<why>'\` when you tried and could not.`,
     "", `A turn that ends without one of these is recorded as failed.${request.by === null ? "" : ` The request closes at ${new Date(request.by).toISOString()}.`}`,
   ].join("\n");
+  return { body: asked + answering, answerFrom: asked.length };
 }
 /**
  * A request of a person as its card shows it (`appMetadata.nornRequest`): what
@@ -335,7 +342,7 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
           const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
             : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
             : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
-              ?? (utf8ByteLength(nornDeliveryBody(request, reference())) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
+              ?? (utf8ByteLength(nornDelivery(request, reference()).body) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
           if (reason === null) continue;
           settle(ledger, request.id, request.holder, { tag: "Broke", reason }, now, request.epoch);
           undelivered = true;

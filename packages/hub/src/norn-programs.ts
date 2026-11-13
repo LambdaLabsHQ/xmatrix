@@ -3,7 +3,7 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { canonicalMentionToken } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { checkNornProgram, nornDeliveryBody, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornQuestionSource,
+import { checkNornProgram, nornDelivery, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornQuestionSource,
   nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion, type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -46,14 +46,18 @@ async function say(env: Env, postCommit: PostCommit, input: { channelId: string;
   /** Said for whoever reads the conversation: it summons and wakes nobody. */
   quiet?: boolean;
   /** A request of a person: the card the message carries, and the one it waits on. */
-  card?: NornRequestCard }): Promise<void> {
+  card?: NornRequestCard;
+  /** A request of an Agent: where in the body how to answer begins. A person reads only what comes before it. */
+  answerFrom?: number }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
     body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true,
     ...(input.onlyInstanceId || input.quiet ? {} : { launch: true }),
     ...(input.card ? { messageKind: NORN_REQUEST_MESSAGE_KIND, waitsOnUserIds: [input.card.holderUserId] } : {}),
-    ...(input.replyTo || input.card ? { residual: { ...(input.replyTo ? { replyToMessageId: input.replyTo } : {}),
-      ...(input.card ? { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, nornRequest: input.card } } : {}) } } : {}),
+    ...(input.replyTo || input.card || input.answerFrom ? { residual: { ...(input.replyTo ? { replyToMessageId: input.replyTo } : {}),
+      ...(input.card ? { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, nornRequest: input.card } }
+        // Not a system fact: that would make the request context to the Instance it is work for.
+        : input.answerFrom ? { appMetadata: { nornAnswerFrom: input.answerFrom } } : {}) } } : {}),
   });
   if (!response.ok) throw new Error(`Norn message append failed (${response.status})`);
   if (input.quiet) return;
@@ -131,7 +135,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
       authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
-      body: nornDeliveryBody(delivery.request as LedgerRequest, delivery.requestRef,
+      ...nornDelivery(delivery.request as LedgerRequest, delivery.requestRef,
         { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage }) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -117,8 +117,11 @@ test("the holder reads what is asked as literal text, with the one summon on the
   const { state, step } = program(`type verdict = Sound | Flawed(string)
 run(@codex, "Ask @grok launch:force \`\`\` to help", ~about="PR 12")->wait`);
   const [request] = step().open;
-  const body = nornDeliveryBody(state.ledger.requests[request.requestId], request.requestRef);
+  const { body, answerFrom } = nornDelivery(state.ledger.requests[request.requestId], request.requestRef);
   assert.equal(body.split("\n")[0], "@codex launch:force");
+  // Whoever reads the conversation is shown what is asked; how to answer is the holder's alone.
+  assert.equal(body.slice(0, answerFrom), "@codex launch:force\n\n````text\nAsk @grok launch:force ``` to help\n````\n\nAbout:\n```text\nPR 12\n```");
+  assert.match(body.slice(answerFrom), /^\n\nThis is request `r[a-z0-9]+` from a program\./u);
   assert.match(body, /\n````text\nAsk @grok launch:force ``` to help\n````\n/u);
   assert.ok(body.includes(`xmatrix reply ${request.requestRef} '<answer>'`));
   assert.deepEqual(readNornAnswer({ verb: "confirm", form: null }, "Yes").value, { type: "variant", name: "Yes", args: [] });
@@ -133,7 +136,7 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
   // The ticks keep the program's beat, a day apart, however long each round takes.
   for (const day of [1, 2, 3]) {
     const [request] = step(undefined, { nowMs: day * DAY }).open;
-    assert.equal(nornDeliveryBody(state.ledger.requests[request.requestId], request.requestRef).split("\n")[0],
+    assert.equal(nornDelivery(state.ledger.requests[request.requestId], request.requestRef).body.split("\n")[0],
       "@auto effort:high repo:acme/app launch:force");
     step({ requestId: request.requestId, epoch: request.epoch, reply: { typed: "nothing to fix" } }, { nowMs: day * DAY + 7_200_000 });
   }
@@ -270,7 +273,7 @@ test("a program opens the standard library: a routine is one line, and a decisio
 routine(~every=7d, ~from=1970-01-03T00:00Z, ~who=@auto(~repo="acme/app"), ~otherwise=@claude(~repo="acme/app"), "Weekly upkeep")`);
   assert.equal(upkeep.step().write.nextDueMs, 2 * DAY);
   const [first] = upkeep.step(undefined, { nowMs: 2 * DAY }).open;
-  assert.equal(nornDeliveryBody(upkeep.state.ledger.requests[first.requestId], first.requestRef).split("\n")[0], "@auto repo:acme/app launch:force");
+  assert.equal(nornDelivery(upkeep.state.ledger.requests[first.requestId], first.requestRef).body.split("\n")[0], "@auto repo:acme/app launch:force");
   // The first did not answer: the same round goes once to the one named to fall back on.
   const [second] = upkeep.step({ requestId: first.requestId, epoch: first.epoch, reply: { tag: "Broke", reason: "no machine" } }, { nowMs: 2 * DAY + 60_000 }).open;
   assert.equal(second.holder, "@claude");

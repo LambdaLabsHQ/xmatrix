@@ -56,3 +56,24 @@ test("everyone else reads whom it waits for, and afterwards how it ended", async
   await expect(ended).toContainText("@E2E Tester answered: No", { timeout: 20_000 });
   await expect(ended.getByRole("button")).toHaveCount(0);
 });
+
+test("a request of an Agent reads as what is asked, without how the Agent answers it", async ({ page }) => {
+  const asked = "@claude repo:acme/app launch:force\n\n```text\nRecord why the next iOS build needs a device recording.\n```";
+  const answering = "\n\nThis is request `rabcdefgh23` from a program. Your answer goes back to the program, not to this conversation.\n"
+    + "End this turn with exactly one of these:\n\n- `xmatrix reply rabcdefgh23 '<answer>'` when it is done.";
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { hasMore: false, messages: [
+    { messageId: "norn:rabcdefgh23:0", channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+      body: asked + answering, metadata: { nornAnswerFrom: asked.length } },
+    // The mark is the Hub's: the same words from anyone else are shown as they wrote them.
+    { messageId: "lookalike", channelId: CHANNEL.id, sequence: 2, sentAt: E2E_NOW,
+      from: { kind: "user", identityId: "user:someone-else", userId: "someone-else", email: "", label: "Mallory", name: "Mallory" },
+      body: "Visible start. Hidden end: xmatrix reply nothing", metadata: { nornAnswerFrom: 14 } }] });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const timeline = page.locator("main");
+  await expect(timeline).toContainText("Record why the next iOS build needs a device recording.", { timeout: 20_000 });
+  await expect(timeline).toContainText("Hidden end: xmatrix reply nothing");
+  await expect(timeline).not.toContainText("xmatrix reply rabcdefgh23");
+  await expect(timeline).not.toContainText("from a program");
+  await page.screenshot({ path: test.info().outputPath("norn-agent-request.png") });
+});
