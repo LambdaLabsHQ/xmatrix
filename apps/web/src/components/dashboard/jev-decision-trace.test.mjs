@@ -130,6 +130,9 @@ test("the placement reason names the trade-off routing made", () => {
   assert.equal(placementReason([at("claude", "warm", 1 / 3, 0.4), failed(at("grok", "mac", 1 / 3, 0.9))], true),
     "grok on mac failed to start in the last 30 minutes, so it goes last");
   assert.equal(placementReason([at("claude", "warm", 0.68, 0.4), failed(at("grok", "mac", 1 / 3, 0.9))], true), "Best suited, with 40% room");
+  const silent = item => ({ ...item, unansweredAt: "2026-11-13T09:10:00.000Z" });
+  assert.equal(placementReason([at("claude", "warm", 1 / 3, 0.4), silent(at("cursor", "studio", 1 / 3, 0.9))], true),
+    "cursor on studio ended its last summons at once without a reply, so it goes last");
   assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
   assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
 });

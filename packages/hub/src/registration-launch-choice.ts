@@ -211,7 +211,8 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
       sides, balance, utility: balance + 0.001 * (fit + room) };
   });
-  const tripped = (candidate: T) => candidate.startupFailedAt !== undefined;
+  // The breakers: an environment that just failed to start, or whose last summons all ended at once without a reply.
+  const tripped = (candidate: T) => candidate.startupFailedAt !== undefined || candidate.unansweredAt !== undefined;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
     tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
     other.room >= item.room && other.quotaPace >= item.quotaPace && other.networkQuality >= item.networkQuality &&
@@ -449,7 +450,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
         ...(item.candidate.responseLatencyMs !== undefined ? { responseLatencyMs: item.candidate.responseLatencyMs,
           responseQuality: round(item.responseQuality!) } : {}),
         described: Boolean(item.candidate.description),
-        ...(item.candidate.startupFailedAt ? { startupFailedAt: item.candidate.startupFailedAt } : {}) })) },
+        ...(item.candidate.startupFailedAt ? { startupFailedAt: item.candidate.startupFailedAt } : {}),
+        ...(item.candidate.unansweredAt ? { unansweredAt: item.candidate.unansweredAt } : {}) })) },
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }
         : summon ? { intent: { source: "author" as const } } : {}),
       selections: { ...(model ? { model: model.model } : {}), ...(effort ? { effort } : {}),

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: an Agent that connects and does nothing is asked last
+
+A harness that started and connected but ended every turn in about nine
+seconds, saying nothing and reporting no error, kept taking `@auto` work:
+routing saw no failure. In our Space a Cursor did this to 24 summons in a
+row over two days, among them the daily scheduled jobs sent to it, which
+therefore did nothing. An environment whose last three summons all ended
+that way (first turn under 30 seconds, no reply), the latest within 24
+hours, now ranks after every environment that answers, the same way an
+environment that just failed to start does; the summon's reason says so.
+An answer to a Norn request now counts as the Run's first reply. Hub and
+Web. Recovery is a CI-validated beta Hub and Web reverting this change.
+
 ## Unreleased: a Hub build that cannot read a Norn program does not end it
 
 A pass that could not check a program's text stopped the program for good

@@ -285,6 +285,19 @@ unrecoverably, the same message is handed once to the next-ranked environment
 conditions still apply, and the retry gets no fallback of its own. An Agent the
 author named is never replaced.
 
+A harness can also start, connect and do nothing: each turn ends in seconds
+with no reply and no error, so nothing above notices. An environment whose
+last three summons in the Space all went that way (`SILENT_SUMMONS`; the first
+turn completed in under 30 seconds and the Run never replied, in the
+conversation or to a program's request), the latest of them within 24 hours
+(`SILENT_SUMMON_WINDOW_HOURS`), ranks after every environment that answers,
+as a failed start does. If it is the only option it is still asked, and the
+summon reason says it ended its last summons without a reply. After 24 hours
+it is tried again; one more silent summon puts it last again, and a summon
+it answers clears it. An answer to a Norn request counts as the Run's first
+reply (`recordAgentLaunchFirstReply`), as a message in the conversation
+does.
+
 A harness that its machine reports as signed out, or that refused a start or
 turn as signed out within the last 24 hours with no later report answering it
 (`SIGNED_OUT_FAILURE_WINDOW_HOURS`), is not offered, like a harness that is too
