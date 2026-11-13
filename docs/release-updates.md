@@ -15,6 +15,26 @@ USD`): an App event can now carry its message in each language a Space can
 choose, and delivery posts the one the Space is set to. Hub only, no schema
 change; messages already posted keep their text. Recovery is a
 CI-validated beta Hub reverting this change.
+## Unreleased: a used-up provider account's resting Instances stay resting
+
+When an Agent's provider account ran out, its failure notice woke that
+Agent's other resting Instances in the conversation. Each used the same
+empty account, failed within a second and posted its own failure card and
+handoff: a new Windows user saw three cards for one message. A registration
+whose quota pool reads empty now leaves its resting Instances asleep
+(`registration_quota_exhausted`), and the first message after the reset
+wakes them. The hold is also recorded before the failure notice commits.
+Hub only; no schema change (#1578). Recovery is a CI-validated Hub release
+reverting this change.
+
+## Unreleased: A handoff refused for a signed-out successor shows the sign-in notice
+
+When `handoff:@auto` (or a named handoff) found its successor's program signed
+out on its machine, the only trace was a line under the handoff message ending
+in `(registration_harness_signed_out)`. It now posts the same sign-in notice a
+refused summon gets, naming the program and machine, and the handoff goes
+again once the owner signs in. Hub only; no schema change. Recovery is a
+CI-validated Hub release reverting the notice.
 
 ## Unreleased: an Agent's startup error on Windows reads as Windows wrote it
 
