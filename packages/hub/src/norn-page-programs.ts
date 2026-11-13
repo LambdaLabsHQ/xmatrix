@@ -1,5 +1,5 @@
-import { PostgresNornProgramRepository, PostgresPageRepository, readPageNornPrograms } from "@xmatrix/db";
-import type { PageProgramStatus } from "@xmatrix/protocol";
+import { PostgresNornProgramRepository, PostgresPageRepository, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
+import type { NornRequestView, PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
 import { deterministicConversationId } from "./deterministic-id";
@@ -9,7 +9,7 @@ import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
-import type { Ledger } from "./vendor/norn/runtime/ledger";
+import type { Ledger, LedgerRequest } from "./vendor/norn/runtime/ledger";
 import { show, type Value } from "./vendor/norn/runtime/value";
 
 /**
@@ -99,6 +99,21 @@ const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoR
 /** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
 const answerText = (value: Value): string =>
   value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
+
+/**
+ * What a `request:<ref>` shows in place of the reference: the request itself,
+ * for whoever can read its conversation. Undefined for anyone else, and for
+ * a reference that names nothing.
+ */
+export async function nornRequestView(env: Env, input: { spaceId: string; requestRef: string; userId: string }): Promise<NornRequestView | undefined> {
+  const found = await readNornRequest(database(env), { requestId: crypto.randomUUID(), ...input });
+  const request = found?.request as LedgerRequest | null | undefined;
+  if (!found || !request) return undefined;
+  return { ref: input.requestRef, channelId: found.channelId, holder: request.holder, text: request.text,
+    state: request.reply === null ? "open" : OUTCOMES[request.reply.tag],
+    reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
+      : "reason" in request.reply ? request.reply.reason : null };
+}
 
 /** A program's result: what it answered with, without the `Answered(…)` around it. */
 const resultText = (value: Value): string =>

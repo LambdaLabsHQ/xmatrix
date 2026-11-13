@@ -79,8 +79,11 @@ const ICONS = {
     + '<line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>',
 } as const;
 
+/** The references a page draws as chips: its pages and conversations. A request reads as its program's steps there. */
+type PageSideReference = Exclude<MessageReferenceSpan, { kind: "request" }>;
+
 /** Missing targets still hide their locator; editing the source remains an explicit caret action. */
-function referenceLabel(span: MessageReferenceSpan, targets: PageReferenceTargets): string {
+function referenceLabel(span: PageSideReference, targets: PageReferenceTargets): string {
   if (span.kind === "channel") return targets.channelName(span.channelId) || "Channel";
   const title = targets.pageTitle(span.pageId) || "Page";
   const heading = span.blockId ? `${title} › ${span.blockId}` : title;
@@ -88,7 +91,7 @@ function referenceLabel(span: MessageReferenceSpan, targets: PageReferenceTarget
 }
 
 /** The message chip's markup (page-reference-chip.tsx), built for a place React does not draw. */
-function referenceChip(span: MessageReferenceSpan, label: string, targets: PageReferenceTargets): HTMLSpanElement {
+function referenceChip(span: PageSideReference, label: string, targets: PageReferenceTargets): HTMLSpanElement {
   // A span, not a <button>: a button is always an atomic inline box, so a label that wraps
   // (a narrow table column) became one tall pill instead of a capsule per line.
   const chip = document.createElement("span");
@@ -205,6 +208,7 @@ interface TextChip { start: number; end: number; key: string; draw: () => HTMLEl
 function textChips(value: string, targets: PageReferenceTargets): TextChip[] {
   const chips: TextChip[] = [];
   for (const span of messageReferenceSpans(value)) {
+    if (span.kind === "request") continue;
     const label = referenceLabel(span, targets);
     chips.push({ start: span.start, end: span.end, key: `reference:${span.text}:${label}`,
       draw: () => referenceChip(span, label, targets) });

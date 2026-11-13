@@ -10,6 +10,15 @@ what is written, holds Send and a quiet Decline in its corner, and sends
 with Cmd or Ctrl and Enter. A choice shows only its options until one that
 takes words is picked. Web only. Recovery is a CI-validated beta Web
 reverting this change.
+## Unreleased: a request's reference reads as the request
+
+Messages about a Norn request named it by its reference (`rhqycstuhxc`),
+which tells a reader nothing. A reference is now written `request:<ref>`
+and the Web draws it as the request itself: what is asked, of whom, and
+whether it waits or how it ended, for whoever can read the request's
+conversation. The card a person is asked on carries no reference in its
+text. Agents still answer by the bare reference. Hub and Web. Recovery is
+a CI-validated beta Hub and Web reverting this change.
 
 ## Unreleased: a request card says what it asks where conversations are listed
 

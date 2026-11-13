@@ -445,6 +445,24 @@ class NornSpaceError extends ControlError {
  * Space, because a Page's programs each work in a conversation of their own.
  * The caller has read the Page as whoever asks.
  */
+/**
+ * A request by its reference, as `userId` may see it: only if they can read
+ * its conversation. Undefined otherwise, the same for "no such request".
+ */
+export async function readNornRequest(database: AuthorityDatabase, input: { requestId: string; spaceId: string; requestRef: string; userId: string }) {
+  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.request", spaceId: input.spaceId }, NornSpaceError,
+    async tx => {
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_view_v1", text: `SELECT r.channel_id,r.holder,
+          p.ledger_json->'requests'->r.request_id AS request_json
+        FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=r.channel_id
+        WHERE r.space_id=$1 AND r.request_ref=$2 AND ${channelCapabilityPredicate({ capability: "message_content_read",
+          channelAlias: "c", principalKindSql: "'user'", principalIdSql: "$3" })} LIMIT 1`,
+        values: [input.spaceId, input.requestRef, input.userId], maxRows: 1 });
+      return row ? { channelId: String(row.channel_id), holder: String(row.holder), request: row.request_json as unknown } : undefined;
+    });
+}
+
 export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
   return inActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
     async tx => (await tx.query<QueryResultRow>({
