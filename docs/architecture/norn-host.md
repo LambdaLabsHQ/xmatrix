@@ -40,6 +40,13 @@ restored revision), as whoever wrote it:
 - A block changed after its program ended runs again.
 - A removed block, or a removed Page, stops its program.
 
+A person who deletes a program's conversation ends the program: it goes with
+the conversation, whose identity is never used again. Its block stays on the
+Page and runs nothing; the Page says so, and renaming the block makes it
+another program with a conversation of its own. Every block is tried in a
+sync: one that cannot be brought up to date fails the sync without keeping
+the others from starting.
+
 The sync is owed from the commit until it is made. The Page's session stores
 what it owes (`programsDue`) before the work and clears it when the work is
 done, and the event that committed the revision waits for it. A sync that

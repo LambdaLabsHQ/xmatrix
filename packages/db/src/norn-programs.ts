@@ -525,6 +525,17 @@ export async function readNornRequest(database: AuthorityDatabase, input: { requ
     });
 }
 
+/**
+ * Which of these conversations were deleted. A deleted conversation's
+ * identity is never used again, and the program that worked in it went with it.
+ */
+export async function readDeletedConversations(database: AuthorityDatabase, input: { requestId: string; spaceId: string; channelIds: string[] }) {
+  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.deleted-conversations", spaceId: input.spaceId }, NornSpaceError,
+    async tx => new Set((await tx.query<QueryResultRow>({ name: "norn_deleted_conversations_v1", text: `SELECT d.channel_id
+        FROM data.channel_deletions d WHERE d.space_id=$1 AND d.channel_id=ANY($2::text[]) LIMIT 1000`,
+      values: [input.spaceId, input.channelIds.slice(0, 1000)], maxRows: 1000 })).map(row => String(row.channel_id))));
+}
+
 export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
   return inActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
     async tx => (await tx.query<QueryResultRow>({
