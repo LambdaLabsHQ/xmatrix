@@ -191,7 +191,7 @@ export function nornPersonBody(request: LedgerRequest, requestRef: string): stri
   // What is asked comes first: a list of conversations shows the start of the message, and that is what its
   // reader needs. The first line is plain words; the rest of a longer question follows as the program wrote it.
   const [first = "", ...more] = request.text.split("\n");
-  return [`${request.holder} ${first.replace(/[`*_\[\]]/gu, "").trim()}`,
+  return [`${request.holder} ${first.replace(/[`*_[\]]/gu, "").trim()}`,
     ...(more.join("").trim() ? ["", fence(request.text)] : []),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
