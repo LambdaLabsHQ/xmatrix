@@ -44,5 +44,5 @@ export function eventCardOf(metadata: unknown): EventCard | undefined {
     ...(typeof record.value === "string" && record.value ? { value: record.value } : {}),
     ...(note ? { note } : {}),
     meta: Array.isArray(record.meta) ? record.meta.map(words).filter((item): item is EventCardWords => Boolean(item)) : [],
-    ...(typeof link?.url === "string" && /^https:\/\//u.test(link.url) && label ? { link: { url: link.url, label } } : {}) };
+    ...(typeof link?.url === "string" && link.url.startsWith("https://") && label ? { link: { url: link.url, label } } : {}) };
 }
