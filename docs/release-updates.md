@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: an Agent that works for half an hour and says nothing is asked last too
+
+The breaker for an Agent that connects and does nothing counted only first
+turns under 30 seconds. A Grok on the same machine took 28 and 43 minutes
+over its last two summons and ended both without a reply; it was chosen in
+place of the Cursor the breaker had just moved back. Over seven days no
+healthy environment ended two summons in a row unanswered, so the time
+limit is gone: three summons in a row that end without a reply, the latest
+within 24 hours, put the environment last. Hub and Web. Recovery is a
+CI-validated beta Hub and Web reverting this change.
+
 ## Unreleased: an Agent that connects and does nothing is asked last
 
 A harness that started and connected but ended every turn in about nine

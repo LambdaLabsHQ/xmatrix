@@ -142,7 +142,7 @@ export interface RegistrationLaunchCandidate {
   /** The latest Run of this environment in the Space that failed to start
    * within the last STARTUP_FAILURE_WINDOW_MINUTES; routing ranks it last. */
   startupFailedAt?: string;
-  /** When this environment last took a summon and ended its turn at once with
+  /** When this environment last took a summon and ended its turn with
    * no reply, within SILENT_SUMMON_WINDOW_HOURS, each of its last
    * SILENT_SUMMONS summons in the Space having gone that way; routing ranks it last. */
   unansweredAt?: string;
@@ -178,9 +178,9 @@ const RECONNECT_WAIT_UNTIL_SQL = (alias: string) =>
 /** How long a failed start keeps an environment behind every other (the breaker). */
 export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
 /**
- * A harness that starts and connects but does no work ends each turn in
- * seconds without a word and without an error: nothing fails, so nothing
- * else notices. When an environment's last SILENT_SUMMONS summons all ended
+ * A harness that starts and connects but does no work ends its turn without
+ * a word and without an error, in seconds or after half an hour: nothing
+ * fails, so nothing else notices. When an environment's last SILENT_SUMMONS summons all ended
  * that way, the latest of them within SILENT_SUMMON_WINDOW_HOURS, automatic
  * assignment tries every other environment first. It is tried again once
  * that window has passed, and one more silent summon puts it last again; a
@@ -190,8 +190,6 @@ export const SILENT_SUMMONS = 3;
 export const SILENT_SUMMON_WINDOW_HOURS = 24;
 /** How far back its summons are read. */
 export const SILENT_SUMMON_HISTORY_DAYS = 7;
-/** A first turn shorter than this that says nothing did no work. */
-export const SILENT_SUMMON_TURN_MS = 30_000;
 /** How long a start or turn refused as signed out keeps its registration out
  * of routing, unless its machine reports its harnesses again sooner. */
 export const SIGNED_OUT_FAILURE_WINDOW_HOURS = 24;
@@ -1148,13 +1146,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
             AND (run.metadata_json->'spawnResult'->>'ok'='false'
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE
-        -- Its latest summons whose first turn has ended, newest first. Silent: the turn completed in seconds and
-        -- the Run never replied, in the conversation or to a program's request.
+        -- Its latest summons whose first turn has ended, newest first. Silent: the turn completed and the Run
+        -- never replied, in the conversation or to a program's request, however long it took.
         LEFT JOIN LATERAL (SELECT CASE WHEN count(*)=${SILENT_SUMMONS} AND bool_and(recent.silent)
             AND max(recent.connected_at)>=statement_timestamp()-interval '${SILENT_SUMMON_WINDOW_HOURS} hours' THEN max(recent.connected_at) END AS unanswered_at
-          FROM (SELECT launch.connected_at,(launch.first_reply_at IS NULL AND turn.took_ms<${SILENT_SUMMON_TURN_MS}) AS silent
+          FROM (SELECT launch.connected_at,launch.first_reply_at IS NULL AS silent
             FROM data.run_agent_registrations r JOIN data.agent_launches launch ON launch.run_id=r.run_id
-              JOIN LATERAL (SELECT execution.finished_at_millis-execution.started_at_millis AS took_ms
+              JOIN LATERAL (SELECT 1 AS ended
                 FROM data.agent_message_executions execution
                 WHERE execution.run_id=launch.run_id AND execution.source_message_id=launch.trigger_id
                   AND execution.state='completed' AND execution.finished_at_millis IS NOT NULL

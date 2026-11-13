@@ -799,8 +799,8 @@ test('an environment that failed to start in the last 30 minutes goes after ever
   assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
 });
 
-test('an environment whose latest summons all ended at once without a reply goes after every one that answers', async () => {
-  // 2026-11-13: a Cursor that connected and ended every turn in nine seconds, saying nothing, took `@auto` work for two days.
+test('an environment whose latest summons all ended without a reply goes after every one that answers', async () => {
+  // 2026-11-13: a Cursor that connected and ended every turn saying nothing took `@auto` work for two days.
   const machine = (id, unansweredAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id }, ...(unansweredAt ? { unansweredAt } : {}),
     observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
       quota: { remainingPercent: 100, assumed: true } } });
