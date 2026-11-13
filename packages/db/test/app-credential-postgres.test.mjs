@@ -302,7 +302,7 @@ integration("event routes are the configured connection's Channels subscribed to
     [at, space]);
     assert.deepEqual(await apps.connectorEventRoutes({ requestId: "routes-1", connectionId: `${space}:webhook`,
       sourceRef: "Webhook:Deploys", limit: 10 }), [{ spaceId: space, channelId: `${space}:a`,
-      authorityRootUserId: "owner", features: ["delivery"] }]);
+      authorityRootUserId: "owner", spaceMetadata: {}, features: ["delivery"] }]);
     const creators = async (sourceRef) => (await apps.connectorEventRoutes({ requestId: crypto.randomUUID(),
       connectionId: `${space}:webhook`, sourceRef, limit: 10 })).map(route => route.authorityRootUserId);
     assert.deepEqual(await creators("webhook:other"), ["member"]);

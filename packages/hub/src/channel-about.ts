@@ -1,4 +1,5 @@
 import { ControlError } from "@xmatrix/db";
+import { spaceLanguage, type SpaceLanguage } from "./space-language";
 import { automaticConversationName, splitDiscussionHead, utf8ByteLength, withoutDiscussionHeads, type TextTaskResult } from "@xmatrix/protocol";
 import { mangledChannelAboutText } from "./channel-about-text";
 import { channelMessageHistory } from "./channel-messages";
@@ -14,27 +15,6 @@ import type { Env } from "./types";
  * can only describe this one. The Hub writes its answer unless the About changed after the
  * reading; like a page's summary it is not a Run, and its machine command is its only record.
  */
-
-/** The languages the Space setting offers for what xMatrix writes, the About among it. */
-type SpaceLanguage = "zh" | "en";
-
-/**
- * The Space's language setting, never a guess from the conversation or a model: the About is
- * written in it. The earlier `preferredLanguage` key is still read; with neither, English.
- */
-export function spaceLanguage(metadata: unknown): SpaceLanguage {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return "en";
-  const record = metadata as Record<string, unknown>;
-  const locale = record.locale;
-  if (locale && typeof locale === "object" && !Array.isArray(locale)) {
-    const defaultLocale = (locale as Record<string, unknown>).defaultLocale;
-    if (typeof defaultLocale === "string") {
-      if (defaultLocale.toLowerCase().startsWith("zh")) return "zh";
-      if (defaultLocale.toLowerCase().startsWith("en")) return "en";
-    }
-  }
-  return record.preferredLanguage === "zh" ? "zh" : "en";
-}
 
 const SUMMARY_MAX_CHARACTERS = 240;
 const NAME_MAX_CHARACTERS = 40;

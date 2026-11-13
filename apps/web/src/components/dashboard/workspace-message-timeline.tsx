@@ -30,6 +30,7 @@ import {
 } from "./workspace-shell-message-model";
 
 import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
+import { EventCard } from "./event-card";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { SettingsCard } from "./settings-card";
 import { RealtimeChannelsContext, RealtimeEventsContext, useChannelWithInstanceIdentities,
@@ -298,7 +299,7 @@ import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-ou
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
 import { QuotaRetryNotice } from "./quota-retry-notice";
-import { quotaRetryOfferId } from "@xmatrix/protocol";
+import { eventCardOf, quotaRetryOfferId } from "@xmatrix/protocol";
 import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
@@ -1928,6 +1929,8 @@ export const MessageRow = memo(function MessageRow({
   // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
   const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"
     && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string";
+  const eventCard = useMemo(() => message.senderKind === "app" ? eventCardOf(message.metadata) : undefined,
+    [message.senderKind, message.metadata]);
   const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
     : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
     : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
@@ -2657,6 +2660,8 @@ export const MessageRow = memo(function MessageRow({
   ) : turnFailure ? (
     <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
       spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : eventCard ? (
+    <EventCard card={eventCard} spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
   ) : connectorReceipt ? (
     <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
       <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}

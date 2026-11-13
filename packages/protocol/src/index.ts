@@ -630,6 +630,7 @@ export {
 } from "./read-bounded-stream.js";
 export * from "./setup-intent.js";
 export * from "./onboarding-message.js";
+export * from "./event-card.js";
 export * from "./onboarding-funnel.js";
 export * from "./startup-timing.js";
 export * from "./faces.js";

@@ -6,6 +6,7 @@ import { ProviderRequestError } from "../src/connectors/http.ts";
 import { deliveryProven } from "../src/connectors/delivery-proof.ts";
 import { connectorEvent, parseJsonObject, record } from "../src/connectors/event-format.ts";
 import { sentryInstallationClient, validateSentryInstallationCredentials } from "../src/connectors/sentry-installation.ts";
+import * as spaceLanguageModule from "../src/space-language.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 const env = { CONNECTOR_SENTRY_CLIENT_ID: "fixture-client", CONNECTOR_SENTRY_CLIENT_SECRET: "fixture-secret",
@@ -84,7 +85,7 @@ function drainer() {
     [{ channelId: "channel", authorityRootUserId: "owner", features: ["issue.created", "alert"] }]; } };
   const { deliverEvent } = ingressModule(name => ({ "../app-connectors": {}, "../index-shared": {},
     "../automation-triggers": {}, "../product-message-append": {}, "./credentials": {}, "@xmatrix/protocol": {},
-    "./oauth": {}, "./event-format": {} })[name]);
+    "./oauth": {}, "./event-format": {}, "../space-language": spaceLanguageModule })[name]);
   const dependencies = { receipts: () => receipts, credentials: () => ({ resolve: async () => { if (state.failCredentials) throw new Error("PRIVATE_TOKEN"); return ({ connectionId: job.connectionId,
     status: "configured", version: state.resolvedVersion, values: fields }); } }), refresh: async () => { calls.refreshes++;
       if (state.failRefresh) throw new ProviderRequestError(503, "PRIVATE_TOKEN"); return fields; },

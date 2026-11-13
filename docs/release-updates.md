@@ -20,6 +20,23 @@ show the same. Expand-only migration 0249; usage before it appears as one
 "counted before itemizing began" row. Recovery is a CI-validated Hub and Web
 release reverting the change; the table may stay.
 
+## Unreleased: a Stripe notification is a card
+
+A Stripe event in a Channel was five lines of record: the account id twice,
+the amount as `1000 USD (minor units)`, most events by their API type
+(`customer.subscription.deleted`) and a status repeating the title. It is now
+a card: the event in words with the amount in the currency's own units
+(`Payment succeeded`, `10.00 USD`; zero- and three-decimal currencies
+included), Stripe's reason under a failed payment, a dispute or a canceled
+subscription, then the status when it adds something, the account, and a link
+to the object's Stripe Dashboard page. The card reads in each reader's own
+language, English or Chinese. The message text under it, which Agents, search
+and notifications read, is two lines saying the same, written in the Space's
+language setting. Any App event can carry such a card
+(`xmatrixEventCard` on the message). Hub and Web, no schema change; a Web
+older than the Hub shows the text. Messages already posted keep theirs.
+Recovery is a CI-validated beta Hub and Web reverting this change.
+
 ## Unreleased: `xmatrix goal` works inside a Claude run
 
 `xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is

@@ -786,8 +786,9 @@ export class PostgresAppRepository {
     }
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.connector-event-routes" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v12", text: `SELECT
-        r.space_id,r.channel_id,r.created_by,r.features_json
+      const rows = await tx.query<QueryResultRow>({ name: "app_connector_event_routes_v13", text: `SELECT
+        r.space_id,r.channel_id,r.created_by,r.features_json,
+        (SELECT s.metadata_json FROM data.spaces s WHERE s.space_id=r.space_id) AS space_metadata_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id AND channel.space_id=r.space_id
@@ -840,6 +841,8 @@ export class PostgresAppRepository {
         chat ? "Google Chat event routing exceeds its bound" : "Sentry event routing exceeds its bound", true);
       return rows.map((row) => ({ spaceId: String(row.space_id), channelId: String(row.channel_id),
         authorityRootUserId: String(row.created_by),
+        /** The Space's settings, its language among them: a notification is written in it. */
+        spaceMetadata: (row.space_metadata_json ?? {}) as Record<string, unknown>,
         features: Array.isArray(row.features_json) ? (row.features_json as unknown[]).map(String) : [] }));
     });
   }
