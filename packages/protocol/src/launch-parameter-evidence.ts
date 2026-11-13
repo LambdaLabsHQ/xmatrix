@@ -26,7 +26,7 @@ export interface LaunchPlacementCandidate {
   /** When it last failed to start within the breaker window: it was ranked
    * after every environment that had not. */
   startupFailedAt?: string;
-  /** When it last ended a summon at once without a reply, its latest summons
+  /** When it last ended a summon without a reply, its latest summons
    * all having gone that way: it was ranked after every environment that had not. */
   unansweredAt?: string;
 }

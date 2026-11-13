@@ -211,7 +211,7 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
       sides, balance, utility: balance + 0.001 * (fit + room) };
   });
-  // The breakers: an environment that just failed to start, or whose last summons all ended at once without a reply.
+  // The breakers: an environment that just failed to start, or whose last summons all ended without a reply.
   const tripped = (candidate: T) => candidate.startupFailedAt !== undefined || candidate.unansweredAt !== undefined;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
     tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
