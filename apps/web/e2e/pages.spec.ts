@@ -1569,7 +1569,7 @@ test("a page's program is its code block, and joined under it is its flow: who w
   const closes = new Date(Date.now() + 24 * 60_000 + 20_000).toISOString();
   // What the Hub reads off the program from here on: the request that is out, then each way the review can go.
   const step = (holder: string, text: string, change: Record<string, unknown> = {}) => ({ kind: "ask", verb: "run", holder, conditions: {},
-    text, options: [], open: false, by: null, within: 30 * 60_000, then: "answered",
+    text, options: [], open: false, by: null, within: 30 * 60_000, main: "answered",
     otherwise: [{ when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }], ...change });
   await fixtureJson(browser, "page-programs", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/p-relay\/programs$/u, { programs: [
     { name: "review", channelId: E2E_CHANNEL.id, state: "running", requests: [
@@ -1577,7 +1577,7 @@ test("a page's program is its code block, and joined under it is its flow: who w
       asked("@grok", "Find where this design does not hold", { outcome: "answered", reply: "Flawed(no owner when the person leaves)", settledAt: NOW }),
       asked("@claude", "Revise the design", { by: closes })],
     next: [step("@claude", "Revise the design", { open: true, by: closes, within: null }),
-      step("@grok", "Find where this design does not hold", { then: "Sound", otherwise: [
+      step("@grok", "Find where this design does not hold", { main: "Sound", otherwise: [
         { when: "Flawed", steps: [step("@claude", "Revise the design"), { kind: "again", text: "Find where this design does not hold" }] },
         { when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }] }),
       { kind: "end", failed: false, result: "the answer" }] },

@@ -422,7 +422,7 @@ export type PageProgramStep =
       /** How long whoever is asked has, in milliseconds, for a request not made yet. */
       within: number | null;
       /** The answer the steps after this one follow, when another way it can end leads elsewhere. */
-      then: string | null;
+      main: string | null;
       /** The other ways it can end, where they lead somewhere else. */
       otherwise: { when: string; steps: PageProgramStep[] }[] }
   /** It tells someone something and goes on. */

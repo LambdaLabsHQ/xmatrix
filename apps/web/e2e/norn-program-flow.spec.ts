@@ -11,7 +11,7 @@ const ONCE = ['let task = "' + TASK + '"', "after(2026-11-17T02:00:00Z)->wait",
   'switch run(@auto(~repo="acme/router"), task, ~by=8h)->wait {', "| Answered(report) => Answered(report)",
   '| _ => run(@claude(~repo="acme/router"), task, ~by=8h)->wait', "}"].join("\n");
 const ask = (holder: string, text: string, extra: Record<string, unknown> = {}) => ({ kind: "ask", verb: "run", holder,
-  conditions: { repo: "acme/router" }, text, options: [], open: false, by: null, within: 8 * 3_600_000, then: null,
+  conditions: { repo: "acme/router" }, text, options: [], open: false, by: null, within: 8 * 3_600_000, main: null,
   otherwise: [], ...extra });
 const message = (messageId: string, sequence: number, body: string) => ({ messageId, channelId: CHANNEL.id, sequence, sentAt: E2E_NOW,
   from: XMATRIX, body });
@@ -27,8 +27,8 @@ test("a program's message draws the program as its flow: what it waits for now, 
   await fixtureJson(page, "program", "**/api/xmatrix/spaces/*/norn-programs/norn-page%3Aonce", { program: { name: "check-price-history",
     channelId: CHANNEL.id, state: "running", requests: [], next: [
       { kind: "wait", at: new Date(Date.now() + 3 * day + 60_000).toISOString(), on: [], repeats: false, every: null },
-      ask("@auto", TASK, { then: "answered", otherwise: [{ when: "otherwise", steps: [
-        ask("@claude", TASK, { then: "answered", otherwise: [{ when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }] }),
+      ask("@auto", TASK, { main: "answered", otherwise: [{ when: "otherwise", steps: [
+        ask("@claude", TASK, { main: "answered", otherwise: [{ when: "otherwise", steps: [{ kind: "end", failed: true, result: "" }] }] }),
         { kind: "end", failed: false, result: "the answer" }] }] }),
       { kind: "end", failed: false, result: "the answer" }] } });
   await fixtureJson(page, "no-program", "**/api/xmatrix/spaces/*/norn-programs/shown", { program: null });

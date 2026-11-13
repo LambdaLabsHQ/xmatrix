@@ -153,7 +153,7 @@ function flow(reading: Reading, ledger: Ledger, from: number, path: Path): PageP
     if (!open && asked.includes(asking)) return [...steps, { kind: "again", text: request.text }];
     const ask: Ask = { kind: "ask", verb: request.verb, holder: request.holder, conditions: request.conditions ?? {}, text: request.text,
       options: (request.options ?? []).map(show), open, by: open && request.by !== null ? new Date(request.by).toISOString() : null,
-      within: open || request.by === null ? null : request.by - request.openedAt, then: null, otherwise: [] };
+      within: open || request.by === null ? null : request.by - request.openedAt, main: null, otherwise: [] };
     const late = [request.by, until].filter((each): each is number => each !== null);
     const ways: Way[] = [
       ...answers(request).map(answer => ({ label: answer.label, failure: false, reply: { tag: "Answered" as const, value: answer.value } })),
@@ -175,7 +175,7 @@ function flow(reading: Reading, ledger: Ledger, from: number, path: Path): PageP
       else groups.push({ same, ways: [way], steps: led });
     }
     const [main, ...others] = groups;
-    ask.then = others.length ? waysText(main!.ways, ways) : null;
+    ask.main = others.length ? waysText(main!.ways, ways) : null;
     ask.otherwise = others.map(group => ({ when: waysText(group.ways, ways), steps: group.steps }));
     return [...steps, ask, ...main!.steps];
   }

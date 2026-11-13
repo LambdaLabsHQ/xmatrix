@@ -54,7 +54,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
       message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");
     // Its flow is what it does from here: the request that is out, and where another ending than an answer leads.
     const [asked, ends] = running.next;
-    assert.deepEqual([asked.holder, asked.open, asked.then, asked.otherwise.map(way => [way.when, way.steps.map(step => step.kind)]), ends.kind],
+    assert.deepEqual([asked.holder, asked.open, asked.main, asked.otherwise.map(way => [way.when, way.steps.map(step => step.kind)]), ends.kind],
       ["@codex", true, "answered", [["otherwise", ["end"]]], "end"]);
     const history = await channelHistory(worker, MOCK_TOKEN, running.channelId, 20);
     assert.match(history.messages[0].body, /^```norn\n/u);

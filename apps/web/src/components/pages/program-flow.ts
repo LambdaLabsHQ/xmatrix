@@ -172,10 +172,10 @@ export function drawProgramFlow(program: PageProgramStatus | undefined, options:
           conditions ? el("program-flow-meta", conditions) : null,
           note(each.open ? left(each.by, now, "working") : each.within ? `within ${span(each.within)}` : "")],
         words, offered ? el("program-flow-meta program-flow-offered", offered) : null, ...branches));
-        if (each.then) {
+        if (each.main) {
           const then = el("program-flow-step");
           then.dataset.kind = "then";
-          then.append(el("program-flow-when", each.then));
+          then.append(el("program-flow-when", each.main));
           into.append(then);
         }
       } else if (each.kind === "say") {

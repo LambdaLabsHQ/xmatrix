@@ -357,7 +357,7 @@ const flowOf = (source, ledger, now = Date.parse("2026-11-13T18:00:00Z")) => nor
 const outline = (steps, indent = "") => steps.flatMap(step => {
   if (step.kind === "wait") return [`${indent}wait ${[step.at, ...step.on, step.repeats ? `repeats ${step.every}` : ""].filter(Boolean).join(" | ")}`];
   if (step.kind === "ask") return [`${indent}${step.verb} ${step.holder}${step.open ? " (open)" : ""}: ${step.text}`,
-    ...step.otherwise.flatMap(way => [`${indent}  [${way.when}]`, ...outline(way.steps, `${indent}    `)]), ...(step.then ? [`${indent}[${step.then}]`] : [])];
+    ...step.otherwise.flatMap(way => [`${indent}  [${way.when}]`, ...outline(way.steps, `${indent}    `)]), ...(step.main ? [`${indent}[${step.main}]`] : [])];
   if (step.kind === "say") return [`${indent}say ${step.to}: ${step.text}`];
   if (step.kind === "end") return [`${indent}${step.failed ? "stop" : "end"} ${step.result}`.trimEnd()];
   return [`${indent}${step.kind}${step.text ? ` ${step.text}` : ""}`];
