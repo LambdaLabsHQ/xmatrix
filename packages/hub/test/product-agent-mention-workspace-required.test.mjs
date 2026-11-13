@@ -367,6 +367,21 @@ test("a handoff that cannot start says why, once", async () => {
   }
 });
 
+test("a handoff refused because its successor is signed out gives the sign-in notice, not a coded line", async () => {
+  // Production 11-13: three `@opencode:N:handoff:@auto` were refused because Codex
+  // was signed out, and the only trace was "(registration_harness_signed_out)".
+  const signedOut = { harness: "codex", program: "Codex", machineId: "machine:pc", machineName: "PC" };
+  const cards = [];
+  const port = basePort({ getRebornTarget: repoSource(),
+    async handOff() { throw Object.assign(new Error("signed out"), { code: "registration_harness_signed_out", signedOut }); },
+    async signedOutNotice(input) { cards.push(input); } });
+  const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "m-9",
+    body: "@claude:2:handoff:@auto", actorUserId: "user-1", port });
+  assert.equal(result.spawned, 0);
+  assert.deepEqual(port.notices, []);
+  assert.deepEqual(cards, [{ channelId: "ch-1", signedOut, sourceMention: "@claude:2:handoff:@auto" }]);
+});
+
 test("a new conversation's first message asks Jev which harness to summon and a no summons nothing", async () => {
   const decisions = [];
   const diagnostics = [];

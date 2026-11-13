@@ -13,7 +13,7 @@ export type { ProductRebornInstanceMention, ProductHandoffInstanceMention };
  */
 
 import type { HandoffSuccessor } from "./handoff-successor";
-import { agentPresetForLauncher, isAutoHandoffSuccessor, parseLaunchConditions, sha256Hex,
+import { agentPresetForLauncher, isAutoHandoffSuccessor, parseLaunchConditions, sha256Hex, type HarnessSignedOut,
   type ChannelAttachment } from "@xmatrix/protocol";
 
 export interface ProductRebornTarget {
@@ -87,6 +87,10 @@ export interface ProductAgentMentionPort {
   /** Why a reborn or handoff was refused, recorded on the address that asked
    * (`key` names it) rather than posted as a message. */
   recordResult?(channelId: string, text: string, key: string): Promise<void>;
+  /** A handoff whose successor's program is signed out on its machine: the
+   * same sign-in notice a refused summon gets, so the owner signs in where
+   * they read it and the handoff (`sourceMention`) goes again. */
+  signedOutNotice?(input: { channelId: string; signedOut: HarnessSignedOut; sourceMention: string }): Promise<void>;
   /** Bounded operational diagnostics; must not include message or command payloads. */
   reportDiagnostic?(input: {
     stage: "summon" | "system_notice";
@@ -356,6 +360,18 @@ async function orchestrateProductAgentHandoffMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_handoff_failed";
+      const signedOut = code === "registration_harness_signed_out"
+        ? (error as { signedOut?: HarnessSignedOut }).signedOut : undefined;
+      if (signedOut && input.port.signedOutNotice) {
+        try {
+          await input.port.signedOutNotice({ channelId: input.channelId, signedOut,
+            sourceMention: input.body.slice(mention.start, mention.end) });
+          continue;
+        } catch (noticeError) {
+          input.port.reportDiagnostic?.({ stage: "system_notice", channelId: input.channelId, messageId: input.messageId,
+            error: noticeError instanceof Error ? noticeError.message : "signed-out notice failed" });
+        }
+      }
       const pending = code === "handoff_source_stop_pending"
         ? " The source stop awaits its daemon's confirmation; no successor started. Retry after exit is confirmed." : "";
       notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (${code}).${pending}`));
