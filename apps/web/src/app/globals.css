@@ -8634,15 +8634,24 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-settings-card:is(
 .xmatrix-app .app-settings-card-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
 
 /* An App event (event-card.tsx: a payment, a canceled subscription) is the same rounded slip of tinted
-   paper as a setting card, with no rail. Only its icon carries how it ended: the alert ink when someone
-   has to act, the body's ink otherwise. */
+   paper as a setting card, with no rail. The slip's colour says how it ended (Daniel 2026-11-13:
+   加点颜色区分): green when money arrived, the alert red when someone has to act, plain paper for the
+   rest. The icon wears the same ink at full strength; the words stay in the body's ink. */
 .xmatrix-app .app-event-card {
+  --app-event-ink: var(--m-ink-settled, var(--muted-foreground));
   padding: 10px 14px 11px;
   border-radius: 10px;
   background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
 }
-.xmatrix-app .app-event-card-icon { color: var(--m-ink-settled, var(--muted-foreground)); }
-.xmatrix-app .app-event-card[data-event-card="bad"] .app-event-card-icon { color: var(--m-ink-alert, var(--destructive)); }
+.xmatrix-app .app-event-card[data-event-card="good"] {
+  --app-event-ink: oklch(0.55 0.14 152);
+  background: color-mix(in oklab, var(--app-event-ink) 11%, transparent);
+}
+.xmatrix-app .app-event-card[data-event-card="bad"] {
+  --app-event-ink: var(--m-ink-alert, var(--destructive));
+  background: color-mix(in oklab, var(--app-event-ink) 9%, transparent);
+}
+.xmatrix-app .app-event-card-icon { color: var(--app-event-ink); }
 .xmatrix-app .app-event-card-link { color: inherit; text-decoration: none; }
 
 /* A problem the reader can fix is a sheet of the paper, with the alert ink
