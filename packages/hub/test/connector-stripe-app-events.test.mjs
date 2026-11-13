@@ -295,3 +295,19 @@ test("a Space set to Chinese gets the Stripe notification in Chinese", async () 
   assert.match(zh("charge.dispute.created", { id: "dp_1", amount: 500, currency: "eur", status: "needs_response", reason: "brand_new_reason" }),
     /^\*\*收到争议\*\* — 5\.00 EUR\n.* · 待回应\n原因：brand new reason$/u);
 });
+
+test("a Stripe event carries the card the Web draws, in both languages", async () => {
+  const f = fixture();
+  const payload = { id: "evt_card", type: "payment_intent.payment_failed", account, created: Math.floor(Date.now() / 1000),
+    data: { object: { id: "pi_3UafOfRMzTj9NjJj1umQQqnb", amount: 2000, currency: "usd", status: "requires_payment_method",
+      last_payment_error: { message: "Your card was declined." } } } };
+  assert.deepEqual(await (await send(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+  assert.deepEqual(f.appends[0].residual.appMetadata.xmatrixEventCard, {
+    tone: "bad", title: { en: "Payment failed", zh: "付款失败" }, value: "20.00 USD",
+    note: { en: "Your card was declined.", zh: "Your card was declined." },
+    meta: [{ en: "Requires payment method", zh: "需要付款方式" }, { en: account, zh: account }],
+    link: { url: `https://dashboard.stripe.com/${account}/payments/pi_3UafOfRMzTj9NjJj1umQQqnb`, label: { en: "Open in Stripe", zh: "在 Stripe 中查看" } },
+  });
+  const tone = type => stripeEvent({ id: "evt_t", type, account, data: { object: { id: "sub_1" } } }).card.tone;
+  assert.deepEqual(["invoice.paid", "charge.dispute.created", "customer.subscription.updated"].map(tone), ["good", "bad", "plain"]);
+});

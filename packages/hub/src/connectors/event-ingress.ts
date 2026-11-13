@@ -5,7 +5,7 @@ import { fireConnectorAutomationTriggers } from "../automation-triggers";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import type { Env } from "../types";
 import { connectorAppRepository, connectorCredentialRepository, INGRESS_KEY_FIELD } from "./credentials";
-import { timingSafeEqual } from "@xmatrix/protocol";
+import { EVENT_CARD_METADATA_KEY, timingSafeEqual } from "@xmatrix/protocol";
 import type { ConnectorDeliveryResult, ConnectorEvent, ConnectorProvider } from "./provider";
 import { trimmedConnectorEnv } from "./connector-env";
 import { oauthClient } from "./oauth";
@@ -232,7 +232,8 @@ export async function appendToRoutes(
         body: (spaceLanguage(route.spaceMetadata) === "zh" ? event.localizedBody?.zh : undefined) ?? event.body,
         principal: { kind: "user", id: route.authorityRootUserId },
         appAuthorId: providerId,
-        ...(appMetadata ? { residual: { appMetadata } } : {}),
+        ...(appMetadata || event.card ? { residual: { appMetadata: { ...appMetadata,
+          ...(event.card ? { [EVENT_CARD_METADATA_KEY]: event.card } : {}) } } } : {}),
       }).catch(() => undefined);
       return response?.ok ? 1 : 0;
     }));

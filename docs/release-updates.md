@@ -1,20 +1,21 @@
 # Release Updates
 
-## Unreleased: a Stripe notification reads as a sentence, not a record
+## Unreleased: a Stripe notification is a card
 
-A Stripe event in a Channel repeated the account id twice, gave the amount as
-`1000 USD (minor units)`, named most events by their API type
-(`customer.subscription.deleted`) and repeated the status the title already
-said. It is now two lines: the event in words with the amount in the
-currency's own units (`Payment succeeded — 10.00 USD`, zero- and
-three-decimal currencies included), then the object linked to its Stripe
-Dashboard page, the account, and the status only when it adds something. A
-failed payment, a dispute and a canceled subscription add Stripe's reason.
-A Space whose language is Chinese gets it in Chinese (`付款成功 — 10.00
-USD`): an App event can now carry its message in each language a Space can
-choose, and delivery posts the one the Space is set to. Hub only, no schema
-change; messages already posted keep their text. Recovery is a
-CI-validated beta Hub reverting this change.
+A Stripe event in a Channel was five lines of record: the account id twice,
+the amount as `1000 USD (minor units)`, most events by their API type
+(`customer.subscription.deleted`) and a status repeating the title. It is now
+a card: the event in words with the amount in the currency's own units
+(`Payment succeeded`, `10.00 USD`; zero- and three-decimal currencies
+included), Stripe's reason under a failed payment, a dispute or a canceled
+subscription, then the status when it adds something, the account, and a link
+to the object's Stripe Dashboard page. The card reads in each reader's own
+language, English or Chinese. The message text under it, which Agents, search
+and notifications read, is two lines saying the same, written in the Space's
+language setting. Any App event can carry such a card
+(`xmatrixEventCard` on the message). Hub and Web, no schema change; a Web
+older than the Hub shows the text. Messages already posted keep theirs.
+Recovery is a CI-validated beta Hub and Web reverting this change.
 
 ## Unreleased: a used-up provider account's resting Instances stay resting
 

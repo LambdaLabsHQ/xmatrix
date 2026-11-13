@@ -29,13 +29,16 @@ Company webhooks select `invoice.paid` for paid subscription invoices,
 Use `@stripe:subscribe:* events` in a Channel to receive these from every
 retained account. Invoice and payment events are separate Stripe events, so
 one purchase can produce both. Subscription creation preserves its actual
-status (including `incomplete`) and does not claim payment. A notification
-reads as the event in words and its amount in the currency's own units
-(`Payment succeeded — 10.00 USD`), then the object linked to its Stripe
-Dashboard page, the account, a status the first line does not already say, and
-Stripe's reason for a failure, dispute or cancellation. It is written in the
-Space's language setting, English or Chinese; an event type, status or reason
-Stripe adds later keeps Stripe's own name. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
+status (including `incomplete`) and does not claim payment.
+
+A notification is drawn as a card: the event in words with its amount in the
+currency's own units (`Payment succeeded` · `10.00 USD`), Stripe's reason for
+a failure, dispute or cancellation, then a status the title does not already
+say, the account, and a link to the object's Stripe Dashboard page. The card
+reads in each reader's own language, English or Chinese. The message body
+under it, which Agents, search and notifications read, says the same in text,
+in the Space's language setting. An event type, status or reason Stripe adds
+later keeps Stripe's own name. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
 and [payment status](https://docs.stripe.com/payments/payment-intents/verifying-status).
 
 All retained accounts share the Space connection's subscriptions, such as

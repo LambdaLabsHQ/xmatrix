@@ -8633,6 +8633,18 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-settings-card:is(
 }
 .xmatrix-app .app-settings-card-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
 
+/* An App event (event-card.tsx: a payment, a canceled subscription) is the same rounded slip of tinted
+   paper as a setting card, with no rail. Only its icon carries how it ended: the alert ink when someone
+   has to act, the body's ink otherwise. */
+.xmatrix-app .app-event-card {
+  padding: 10px 14px 11px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .app-event-card-icon { color: var(--m-ink-settled, var(--muted-foreground)); }
+.xmatrix-app .app-event-card[data-event-card="bad"] .app-event-card-icon { color: var(--m-ink-alert, var(--destructive)); }
+.xmatrix-app .app-event-card-link { color: inherit; text-decoration: none; }
+
 /* A problem the reader can fix is a sheet of the paper, with the alert ink
    on its rail and its icon: it says something stopped, and the rest of the
    card is plain instructions. Paper has no rounded corners (user 2026-10-26:

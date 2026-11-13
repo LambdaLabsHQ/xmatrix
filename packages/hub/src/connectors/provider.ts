@@ -1,4 +1,4 @@
-import type { ConnectorReceiptFix } from "@xmatrix/protocol";
+import type { ConnectorReceiptFix, EventCard } from "@xmatrix/protocol";
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 import type { XActionCapability } from "./x-accounts";
@@ -165,6 +165,8 @@ export interface ConnectorEvent {
   body: string;
   /** The same message in another language a Space can choose; a Space set to it gets this instead of `body`. */
   localizedBody?: { zh?: string };
+  /** What the Web draws in place of `body` (EVENT_CARD_METADATA_KEY); `body` stays what Agents, search and notifications read. */
+  card?: EventCard;
   url?: string;
   /**
    * The provider object the event is about, for a provider whose one delivery

@@ -1,4 +1,5 @@
 import { connectorEvent, eventMessage, oneLine, record, sourceToken, text } from "./event-format";
+import type { EventCard } from "@xmatrix/protocol";
 import type { ConnectorEvent } from "./provider";
 
 /*
@@ -60,6 +61,16 @@ function dashboardUrl(id: string, account: string | undefined, livemode: unknown
   return `https://dashboard.stripe.com/${account ? `${account}/` : ""}${livemode === false ? "test/" : ""}${section}/${id}`;
 }
 
+/* What a card says at a glance: money arrived, or someone has to act. */
+const GOOD = new Set(["invoice.paid", "payment_intent.succeeded", "charge.dispute.funds_reinstated"]);
+const BAD = new Set(["invoice.payment_failed", "payment_intent.payment_failed", "charge.dispute.created", "charge.dispute.funds_withdrawn"]);
+
+/** `acct_1SbH3vRMzTj9NjJj` reads `acct_…NjJj`: enough to tell two apart, and the link holds the rest. */
+function shortId(value: string): string {
+  const match = /^([a-z]+_)[A-Za-z0-9]{9,}([A-Za-z0-9]{4})$/u.exec(value);
+  return match ? `${match[1]}…${match[2]}` : oneLine(value, 40);
+}
+
 /** A code in words: [`requires payment method`, `需要付款方式`]. Free text stays as Stripe wrote it. */
 function codeWords(value: string): Words {
   const en = oneLine(/^[a-z_]+$/u.test(value) ? value.replace(/_/gu, " ") : value);
@@ -84,11 +95,22 @@ export function stripeEvent(payload: Record<string, unknown>): ConnectorEvent {
   const message = (language: 0 | 1) => ({ provider: label[language], title: amount ?? "", details: [
     [url ? `[${id}](${url})` : oneLine(id), account, status?.[language]].filter(Boolean).join(" · "),
     reason ? `${language ? "原因：" : "Reason: "}${reason[language]}` : undefined] });
+  const same = (value: string) => ({ en: value, zh: value });
+  const pair = (value: Words) => ({ en: value[0], zh: value[1] });
+  // On a card a status or reason stands alone, so it starts as a sentence does.
+  const line = (value: Words) => ({ en: value[0].charAt(0).toUpperCase() + value[0].slice(1), zh: value[1] });
+  const card: EventCard = {
+    tone: BAD.has(type) ? "bad" : GOOD.has(type) ? "good" : "plain",
+    title: pair(label), ...(amount ? { value: amount } : {}), ...(reason ? { note: line(reason) } : {}),
+    // The link is the object; its id is spelled out only when there is no page to open.
+    meta: [...(status ? [line(status)] : []), ...(account ? [same(shortId(account))] : []), ...(url || !id ? [] : [same(shortId(id))])],
+    ...(url ? { link: { url, label: { en: "Open in Stripe", zh: "在 Stripe 中查看" } } } : {}),
+  };
   return { ...connectorEvent({
     eventId: `stripe:${text(payload.id)}`,
     sourceRef: `stripe:${sourceToken(type.split(".")[0]) || "*"}`,
     feature: "events",
     summary: `${label[0]}${amount ? ` ${amount}` : ""} ${id}${account ? ` (${account})` : ""}`,
     ...message(0),
-  }), localizedBody: { zh: eventMessage(message(1)) } };
+  }), localizedBody: { zh: eventMessage(message(1)) }, card };
 }
