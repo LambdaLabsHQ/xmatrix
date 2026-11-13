@@ -36,6 +36,9 @@ pub(crate) enum LossyText {
     /// Two or more `?` in a row while the shell's code page cannot carry
     /// non-ASCII text.
     QuestionMarkRun { code_page: u32 },
+    /// Three or more `?` in a row on Windows in text with no non-ASCII
+    /// character left: whatever wrote it replaced all of them.
+    AsciiOnlyQuestionMarks,
 }
 
 /// The process's Windows ANSI code page, or `None` off Windows.
@@ -55,6 +58,12 @@ pub(crate) fn ansi_code_page() -> Option<u32> {
 ///
 /// Conservative by design: `??` is only suspicious when a non-UTF-8 Windows
 /// code page could have produced it, and never in text read from a file.
+///
+/// The code page does not see every lossy writer. Windows PowerShell pipes
+/// through an ASCII `$OutputEncoding` under any code page, and
+/// `Set-Content`/`Out-File -Encoding ascii` save `?` into a file that is
+/// then valid UTF-8. Both leave pure ASCII, so on Windows a `???` run in
+/// text without one non-ASCII character is refused from every source.
 pub(crate) fn detect_lossy_text(
     text: &str,
     source: TextSource,
@@ -63,9 +72,12 @@ pub(crate) fn detect_lossy_text(
     if text.contains(char::REPLACEMENT_CHARACTER) {
         return Some(LossyText::ReplacementCharacter);
     }
-    let code_page = code_page.filter(|code_page| *code_page != UTF8_CODE_PAGE)?;
-    if source != TextSource::File && text.contains("??") {
+    let code_page = code_page?;
+    if code_page != UTF8_CODE_PAGE && source != TextSource::File && text.contains("??") {
         return Some(LossyText::QuestionMarkRun { code_page });
+    }
+    if text.is_ascii() && text.contains("???") {
+        return Some(LossyText::AsciiOnlyQuestionMarks);
     }
     None
 }
@@ -103,11 +115,14 @@ fn lossy_text_message(field: &str, problem: LossyText, routes: TextRoutes<'_>) -
         LossyText::QuestionMarkRun { code_page } => format!(
             "The {field} contains \"??\" and this Windows shell uses ANSI code page {code_page}, not UTF-8: non-ASCII characters (for example Chinese) were most likely replaced with `?` before xmatrix received them."
         ),
+        LossyText::AsciiOnlyQuestionMarks => format!(
+            "The {field} contains \"???\" and not one non-ASCII character: its non-ASCII characters (for example Chinese) were most likely replaced with `?` before xmatrix received them, by a PowerShell pipe whose `$OutputEncoding` is not UTF-8 or by a file saved as ASCII."
+        ),
     };
     let mut ways = Vec::new();
     if let Some(flag) = routes.file_flag {
         ways.push(format!(
-            "write the text to a UTF-8 file and pass `{flag} <path>`"
+            "write the text to a UTF-8 file (in PowerShell `Set-Content -Encoding utf8`, never `-Encoding ascii`) and pass `{flag} <path>`"
         ));
     }
     if routes.stdin {
@@ -229,10 +244,31 @@ mod tests {
             detect_lossy_text(mangled, TextSource::Stdin, Some(1252)),
             Some(LossyText::QuestionMarkRun { code_page: 1252 })
         );
-        // Linux/macOS (no code page) and Windows with the UTF-8 code page.
+        // Linux/macOS have no code page to lose characters in.
         assert_eq!(detect_lossy_text(mangled, TextSource::Argument, None), None);
+        assert_eq!(detect_lossy_text(mangled, TextSource::File, None), None);
+    }
+
+    /// What grok on a Windows machine published: the body went through a
+    /// writer that kept only ASCII, by a route the code page does not see.
+    #[test]
+    fn ascii_only_question_mark_runs_are_refused_on_windows_from_every_source() {
+        let mangled = "?????????????? guardrails?????????? CLI admin aggregate pool get ? D1";
+        for (source, code_page) in [
+            (TextSource::File, GBK),
+            (TextSource::File, Some(UTF8_CODE_PAGE)),
+            (TextSource::Stdin, Some(UTF8_CODE_PAGE)),
+            (TextSource::Argument, Some(UTF8_CODE_PAGE)),
+        ] {
+            assert_eq!(
+                detect_lossy_text(mangled, source, code_page),
+                Some(LossyText::AsciiOnlyQuestionMarks),
+                "{source:?} {code_page:?}"
+            );
+        }
+        // Text that still carries non-ASCII characters was not flattened.
         assert_eq!(
-            detect_lossy_text(mangled, TextSource::Stdin, Some(UTF8_CODE_PAGE)),
+            detect_lossy_text("真的吗??? 好", TextSource::File, Some(UTF8_CODE_PAGE)),
             None
         );
     }
@@ -244,6 +280,10 @@ mod tests {
             None
         );
         assert_eq!(detect_lossy_text("really??", TextSource::File, GBK), None);
+        assert_eq!(
+            detect_lossy_text("a ?? b", TextSource::Stdin, Some(UTF8_CODE_PAGE)),
+            None
+        );
         assert_eq!(
             detect_lossy_text("频道 About", TextSource::Argument, GBK),
             None
@@ -291,6 +331,24 @@ mod tests {
         assert!(stdin_only.contains("$OutputEncoding = [System.Text.UTF8Encoding]::new($false)"));
         assert!(stdin_only.contains("`--stdin`"));
         assert!(!stdin_only.contains("UTF-8 file"));
+
+        let ascii_only = lossy_text_message(
+            "message",
+            LossyText::AsciiOnlyQuestionMarks,
+            TextRoutes {
+                stdin: true,
+                file_flag: Some("--file"),
+            },
+        );
+        assert!(
+            ascii_only.contains("not one non-ASCII character"),
+            "{ascii_only}"
+        );
+        assert!(
+            ascii_only.contains("Set-Content -Encoding utf8"),
+            "{ascii_only}"
+        );
+        assert!(ascii_only.contains("Nothing was sent"), "{ascii_only}");
 
         let neither = lossy_text_message("channel name", mangled, TextRoutes::default());
         assert!(neither.contains("shell whose code page is UTF-8"));
