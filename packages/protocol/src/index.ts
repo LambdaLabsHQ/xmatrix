@@ -514,10 +514,10 @@ export {
 export type { PageSchedule, PageScheduleStatus } from "./page-schedules.js";
 export {
   channelReferenceSpans, channelReferenceToken, loneMessageReference,
-  messageReferenceLabels, messageReferenceSpans,
+  messageReferenceLabels, messageReferenceSpans, requestReferenceSpans, requestReferenceToken,
 } from "./message-references.js";
 export type {
-  ChannelReferenceSpan, MessageReferenceSpan,
+  ChannelReferenceSpan, MessageReferenceSpan, NornRequestView, RequestReferenceSpan,
 } from "./message-references.js";
 export {
   PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,

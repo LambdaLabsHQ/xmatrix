@@ -4,7 +4,7 @@ import {
   type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
-  type PageProgramStatus,
+  type NornRequestView, type PageProgramStatus,
   type SerializedAutomation,
 } from "@xmatrix/protocol";
 
@@ -153,6 +153,10 @@ export const pageApi = {
   automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
       webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
+  // What a `request:<ref>` reference shows in its place.
+  request: (spaceId: string, requestRef: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ request: NornRequestView }>({ hubPath: HUB_ROUTES.space_norn_request(spaceId, requestRef),
+      webUrl: WEB_PROXY_ROUTES.space_norn_request(spaceId, requestRef), token, signal }).then((result) => result.request),
   // How each `norn run` block of a page stands.
   programs: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ programs: PageProgramStatus[] }>({ hubPath: hubPage(spaceId, pageId, "programs"),

@@ -2,6 +2,7 @@ import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
+import { nornRequestView } from "./norn-page-programs";
 import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, openNornRequests } from "./norn-programs";
 import type { Env } from "./types";
 
@@ -53,6 +54,15 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
       agentName: run.agentName }, { verb, who, question, ...(by ? { by } : {}), ...(otherwise ? { otherwise } : {}),
       ...(Array.isArray(body?.options) ? { options: body.options.filter((option): option is string => typeof option === "string") } : {}) });
     return c.json(asked, asked.refusal ? 400 : 200, NO_STORE);
+  }));
+  // What a request reference shows in its place, for a person who can read the request's conversation.
+  const view = HUB_ROUTES.space_norn_request(":spaceId", ":requestRef").replace("%3AspaceId", ":spaceId").replace("%3ArequestRef", ":requestRef");
+  app.get(view, c => jsonErrors(c, async () => {
+    const auth = await requireAuth(c.req.raw, c.env);
+    const requestRef = c.req.param("requestRef") ?? "";
+    if (auth.agentRun || !/^r[a-z0-9]{6,40}$/u.test(requestRef)) return c.json({ error: "No such request" }, 404, NO_STORE);
+    const request = await nornRequestView(c.env, { spaceId: c.req.param("spaceId") ?? "", requestRef, userId: auth.id });
+    return request ? c.json({ request }, 200, NO_STORE) : c.json({ error: "No such request" }, 404, NO_STORE);
   }));
   // A person answers the request on its card. Whoever they are, they hold it only if it was delivered to them.
   const personAnswer = HUB_ROUTES.channel_norn_request_answer(":channelId", ":requestRef")
