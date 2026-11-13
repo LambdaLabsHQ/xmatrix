@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: a Norn program can tell someone something
+
+`say(@who, "…")` in a Norn program was computed and dropped: nothing reached
+anyone. What a program says is now stored with the step that says it (expand
+migration 0250, `norn_notices`) and posted to the program's conversation as
+xMatrix, naming whom it is for. With `after(<time>)` this is a dated reminder
+written as a program. Hub only. Recovery is a CI-validated beta Hub reverting
+this change; the table then stays unused.
+
 ## Unreleased: a message in the conversation no longer fails a Norn request in progress
 
 A newer message in a conversation interrupts the turns in progress there. The

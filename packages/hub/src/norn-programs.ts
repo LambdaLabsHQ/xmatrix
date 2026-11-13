@@ -101,6 +101,12 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });
   }
+  // What a program says goes to its conversation as xMatrix, naming whom it is for; it starts and wakes nobody.
+  for (const notice of work.notices) {
+    await say(env, postCommit, { channelId, messageId: `norn-say:${notice.noticeId}`, authorityUserId: notice.authorityUserId,
+      body: `${notice.recipient} ${notice.body}`, quiet: true, ...(notice.onPage ? {} : { replyTo: notice.programId }) });
+    await programs.noticed({ requestId, channelId, programId: notice.programId, noticeId: notice.noticeId });
+  }
   for (const report of work.reports) {
     // An Agent that started the program is told by its address, so it wakes to read the result.
     await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300),

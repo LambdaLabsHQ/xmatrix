@@ -15,7 +15,7 @@ const VERIFY_PHASES = new Set(["caught_up", "final_copied"]);
 // the classification test fail until its shard semantics are decided.
 export const MOVABLE_SPACE_TABLES = Object.freeze([
   "norn_shadow_comparisons", "norn_shadow_observations", "norn_shadow_transitions",
-  "norn_programs", "norn_requests",
+  "norn_programs", "norn_requests", "norn_notices",
   "agent_message_executions",
   "blob_upload_intents",
   "channel_access",

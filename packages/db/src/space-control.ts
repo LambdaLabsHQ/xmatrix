@@ -731,6 +731,11 @@ async function moveChannelSpaceFacts(
       values, maxRows: 0,
     });
     await transaction.query({
+      name: "channel_move_norn_notices_v1",
+      text: `UPDATE data.norn_notices ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
+    await transaction.query({
       name: "channel_move_channel_message_sequences_v1",
       text: `UPDATE data.channel_message_sequences ${CHANNEL_MOVE_FACT_SQL}`,
       values, maxRows: 0,
