@@ -13,7 +13,6 @@ import { GOOGLE_PLAY_OPERATION_ACTIONS, playOutput } from "./google-play-operati
 
 const EDIT_ID = /^[A-Za-z0-9_-]{1,100}$/u;
 const RELEASE_FIELDS = ["track", "versionCodes", "status", "userFraction", "name", "releaseNotes", "inAppUpdatePriority", "changesNotSentForReview"];
-type Credentials = Readonly<Record<string, string>>;
 
 function app(statement: ConnectorActionStatement): { packageName: string; editId?: string } | undefined {
   const [packageName = "", editId, extra] = statement.target.split("/");
@@ -21,13 +20,8 @@ function app(statement: ConnectorActionStatement): { packageName: string; editId
   return { packageName, ...(editId ? { editId } : {}) };
 }
 
-/** A temporary edit, always discarded: Google lists tracks only inside one. */
-async function inEdit<T>(credentials: Credentials, packageName: string, use: (editId: string) => Promise<T>): Promise<T> {
-  const editId = text((await play(credentials, "edits.insert", { path: { packageName }, body: {} })).id);
-  if (!EDIT_ID.test(editId)) throw new ProviderRequestError(502, "Google Play did not open an edit");
-  try { return await use(editId); }
-  finally { await play(credentials, "edits.delete", { path: { packageName, editId } }).catch(() => undefined); }
-}
+const STANDARD_TRACKS = ["production", "beta", "alpha", "internal"];
+const TRACK = /^[A-Za-z0-9][A-Za-z0-9:_.-]{0,99}$/u;
 
 function releaseRequest(statement: ConnectorActionStatement): Record<string, string> | string {
   const target = app(statement);
@@ -79,15 +73,32 @@ export const GOOGLE_PLAY_ACTIONS: Record<string, ConnectorAction> = {
   tracks: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => {
-      const target = app(statement);
-      return target && !target.editId && !statement.text.trim() ? target : "use @googleplay:tracks:<package name>";
+      const target = app(statement), named = statement.text.trim().split(/\s+/u).filter(Boolean);
+      if (!target || named.length > 10 || named.some(track => !TRACK.test(track)) || (target.editId && named.length)) {
+        return "use @googleplay:tracks:<package name> [custom track…], or <package name>/<editId> to read inside your own edit";
+      }
+      return { ...target, tracks: JSON.stringify([...new Set([...STANDARD_TRACKS, ...named])]) };
     },
+    /*
+     * A Google account has one open edit: opening another deletes the one somebody is uploading into. So a read
+     * never opens an edit. It reads each track's releases directly, or the edit the caller names.
+     */
     async execute({ credentials }, input) {
-      const tracks = await inEdit(credentials, input.packageName!, editId => play(credentials, "edits.tracks.list", { path: { packageName: input.packageName!, editId } }));
-      const rows = (Array.isArray(tracks.tracks) ? tracks.tracks : []).map(record).map(track => ({ track: track.track,
-        releases: (Array.isArray(track.releases) ? track.releases : []).map(record).map(release => ({ name: release.name, status: release.status,
-          versionCodes: release.versionCodes, ...(release.userFraction === undefined ? {} : { userFraction: release.userFraction }) })) }));
-      return { summary: `${input.packageName} tracks (read in a temporary edit, then discarded):\n${playOutput(rows)}` };
+      const packageName = input.packageName!;
+      if (input.editId) {
+        const listed = await play(credentials, "edits.tracks.list", { path: { packageName, editId: input.editId } });
+        const rows = (Array.isArray(listed.tracks) ? listed.tracks : []).map(record).map(track => ({ track: track.track,
+          releases: (Array.isArray(track.releases) ? track.releases : []).map(record).map(release => ({ name: release.name, status: release.status,
+            versionCodes: release.versionCodes, ...(release.userFraction === undefined ? {} : { userFraction: release.userFraction }) })) }));
+        return { summary: `${packageName} tracks as edit ${input.editId} holds them:\n${playOutput(rows)}` };
+      }
+      const rows = await Promise.all((JSON.parse(input.tracks!) as string[]).map(async track => {
+        const listed = await play(credentials, "applications.tracks.releases.list", { path: { parent: `applications/${packageName}/tracks/${track}` } });
+        return { track, releases: (Array.isArray(listed.releases) ? listed.releases : []).map(record).map(release => ({ name: release.releaseName,
+          state: text(release.releaseLifecycleState).replace("RELEASE_LIFECYCLE_STATE_", ""),
+          versionCodes: (Array.isArray(release.activeArtifacts) ? release.activeArtifacts : []).map(artifact => record(artifact).versionCode) })) };
+      }));
+      return { summary: `${packageName} releases per track (no edit opened; name a custom track to include it):\n${playOutput(rows)}` };
     },
   },
   base_plans: {

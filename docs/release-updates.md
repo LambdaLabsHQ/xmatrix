@@ -13,6 +13,37 @@ show the same. Expand-only migration 0249; usage before it appears as one
 "counted before itemizing began" row. Recovery is a CI-validated Hub and Web
 release reverting the change; the table may stay.
 
+## Unreleased: `xmatrix goal` works inside a Claude run
+
+`xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is
+bound to this shell", so a Claude Agent could not set the goal its runtime
+says it supports. The wrapper starts the Claude process before it binds the
+goal inbox, and exported the inbox to the child only when it was already
+bound. The child now gets the inbox of the run's own Instance, which is the
+file the wrapper binds and drains. CLI only. Recovery is a CI-validated beta
+CLI reverting this change.
+
+## Unreleased: a Norn program can carry work that repeats
+
+Moving the company's scheduled work onto Norn programs needed three things. A
+program's participant may carry conditions, `@auto(~repo="acme/app",
+~effort="high")`, which the delivery writes into its summon (`repo`, `pwd`,
+`machine`, `harness`, `model`, `effort`); an unknown one ends the request with
+the reason. `every(d)` now keeps the program's beat instead of drifting by the
+length of each round (norn-lang/norn#33). And a Run started for a request
+reads that request and the linked Pages, not the conversation's history, so a
+daily program does not hand each new Run a longer history. An automatically
+chosen Agent is chosen anew for each request. Hub only; Norn is re-vendored at
+e2ad669. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: reading Google Play tracks no longer deletes an upload in progress
+
+`@googleplay:tracks` opened a temporary edit to list tracks. A Google account
+has one open edit, so that deleted the edit another Agent was uploading an
+app bundle into ("This Edit has been deleted"). It now reads each track's
+releases directly and opens no edit; with an edit ID it reads that edit. The
+guide states the one-open-edit rule for `release` and `edits.insert`. Hub and
+protocol; no schema change. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a used-up provider account's resting Instances stay resting
 
 When an Agent's provider account ran out, its failure notice woke that

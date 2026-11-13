@@ -255,7 +255,11 @@ pub(crate) fn start_claude_stream_process(
     }
     // Set after the sandbox env rebuild so nested `xmatrix goal` calls from the
     // model's own tools reach this instance's inbox in both env modes.
-    if let Some(inbox) = crate::bound_goal_inbox_path() {
+    // The child is started before the wrapper binds and drains the inbox, so the
+    // path is taken from this run's instance when nothing is bound yet: both
+    // name the same file.
+    if let Some(inbox) = crate::bound_goal_inbox_path().or_else(crate::goal_inbox_path_of_this_run)
+    {
         command.env(crate::GOAL_INBOX_ENV, inbox);
     }
     label_claude_entrypoint(&mut command);
