@@ -104,11 +104,11 @@ The coordinator posts one message per holding, as xMatrix, in reply to the
 program's message. Its id is `norn:<reference>:<epoch>`, so a repeat appends
 nothing. Its first line is the holder's summon. Everything the program wrote
 (the task, `~about`, `~context`) is quoted in fenced text, which never
-summons or commands anyone. After what is asked, the message states the form
-the answer must have and the three commands that end the request. That part
-is for the holder alone: the message marks where it begins
-(`metadata.nornAnswerFrom`), and a person reading the conversation is shown
-only what comes before it.
+summons or commands anyone. The message states the form the answer must have
+and the three commands that end the request. All of that is for the holder
+alone: the message marks where it begins (`metadata.nornAnswerFrom`), and a
+person reading the conversation is shown only what comes before it, the
+summon and the request's reference drawn as the request.
 
 The delivery message may start a Run for the program's authority and nobody
 else (`NORN_DELIVERY_SOURCE_SQL`, used by the launch source rule and by the
@@ -172,6 +172,17 @@ authority. Its result is the reply itself (`Answered(Yes)`, `Refused(…)`,
 `--otherwise` is what silence means: the answer taken when `--by` passes.
 What xMatrix says for such a program is not threaded under the program's
 message, because that message is xMatrix's own and takes no reply.
+
+## A reference shows the request
+
+Where a request is named to people, they are shown the request, not its
+reference. A message names one as `request:<ref>` (the delivery to an Agent
+does, in its heading), and the Web draws that as a chip: the first line of
+what is asked, of whom, and how it stands, read from
+`GET /api/spaces/:space/norn-requests/:ref` by whoever can read the
+request's conversation; anyone else sees only "a request". A card for a
+person carries no reference in its text at all. An Agent still answers by
+the bare reference, which its commands take.
 
 ## Never silent
 

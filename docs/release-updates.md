@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a request's reference reads as the request
+
+Messages about a Norn request named it by its reference (`rhqycstuhxc`),
+which tells a reader nothing. A reference is now written `request:<ref>`
+and the Web draws it as the request itself: what is asked, of whom, and
+whether it waits or how it ended, for whoever can read the request's
+conversation. The card a person is asked on carries no reference in its
+text. Agents still answer by the bare reference. Hub and Web. Recovery is
+a CI-validated beta Hub and Web reverting this change.
+
 ## Unreleased: a request card says what it asks where conversations are listed
 
 A request a Norn program made of a person read, in the list of

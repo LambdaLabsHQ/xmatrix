@@ -12,7 +12,7 @@ const request = (extra: Record<string, unknown> = {}) => ({ ref: "rabcdefgh23", 
   by: "2026-11-20T09:00:00.000Z", ...extra });
 const card = (nornRequest: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ messageId: "norn:rabcdefgh23:0",
   channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX, messageKind: "xmatrix.system.norn-request",
-  body: "@E2E Tester\n\n**Request `rabcdefgh23`** from a program, for you.",
+  body: "@E2E Tester Ship release 4.2 to everyone?\n\nAnswer on this card: Yes or No. A program asks.",
   metadata: { nornRequest, xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" }, ...extra });
 
 async function openCard(page: Parameters<typeof openWorkspaceWithStubs>[0], message: ReturnType<typeof card>) {
@@ -57,10 +57,10 @@ test("everyone else reads whom it waits for, and afterwards how it ended", async
   await expect(ended.getByRole("button")).toHaveCount(0);
 });
 
-test("a request of an Agent reads as what is asked, without how the Agent answers it", async ({ page }) => {
-  const asked = "@claude repo:acme/app launch:force\n\n```text\nRecord why the next iOS build needs a device recording.\n```";
-  const answering = "\n\nThis is request `rabcdefgh23` from a program. Your answer goes back to the program, not to this conversation.\n"
-    + "End this turn with exactly one of these:\n\n- `xmatrix reply rabcdefgh23 '<answer>'` when it is done.";
+test("a request of an Agent reads as the request, without the Agent's copy of the task or how it answers", async ({ page }) => {
+  const asked = "@claude repo:acme/app launch:force\n\n**Request** `request:rabcdefgh23`";
+  const answering = "\n\n```text\nRecord why the next iOS build needs a device recording.\nKeep the whole task here.\n```\n\n"
+    + "The request is from a program. End this turn with exactly one of these:\n\n- `xmatrix reply rabcdefgh23 '<answer>'` when it is done.";
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { hasMore: false, messages: [
     { messageId: "norn:rabcdefgh23:0", channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
@@ -69,11 +69,29 @@ test("a request of an Agent reads as what is asked, without how the Agent answer
     { messageId: "lookalike", channelId: CHANNEL.id, sequence: 2, sentAt: E2E_NOW,
       from: { kind: "user", identityId: "user:someone-else", userId: "someone-else", email: "", label: "Mallory", name: "Mallory" },
       body: "Visible start. Hidden end: xmatrix reply nothing", metadata: { nornAnswerFrom: 14 } }] });
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@claude", text: "Record why the next iOS build needs a device recording.\nKeep the whole task here.", state: "open" } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
   const timeline = page.locator("main");
   await expect(timeline).toContainText("Record why the next iOS build needs a device recording.", { timeout: 20_000 });
   await expect(timeline).toContainText("Hidden end: xmatrix reply nothing");
   await expect(timeline).not.toContainText("xmatrix reply rabcdefgh23");
   await expect(timeline).not.toContainText("from a program");
+  await expect(timeline).not.toContainText("Keep the whole task here.");
   await page.screenshot({ path: test.info().outputPath("norn-agent-request.png") });
+});
+
+test("a request's reference in a message reads as the request: what is asked, of whom, how it stands", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
+    channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+    body: "@codex launch:force\n\n**Request** `request:rabcdefgh23` from a program. Your answer goes back to the program." }], hasMore: false });
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@codex", text: "Audit the day's merges\nand the changelog", state: "answered", reply: "nothing to fix" } });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const chip = page.getByTestId("request-reference-chip");
+  await expect(chip).toContainText("Audit the day's merges", { timeout: 20_000 });
+  await expect(chip).toHaveAttribute("data-request-state", "answered");
+  await expect(page.locator('[id="message:delivery"]')).not.toContainText("rabcdefgh23");
+  await page.screenshot({ path: test.info().outputPath("norn-request-reference.png") });
 });

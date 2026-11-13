@@ -40,7 +40,7 @@ switch run(@codex, "Review the design")->wait {
 }`))).message;
     const delivery = await until(async () => (await messages()).find(message =>
       message.replyToMessageId === sent.messageId && message.body.startsWith("@codex launch:force")), "the delivery");
-    const requestRef = /Request `(r[a-z0-9]+)`/u.exec(delivery.body)?.[1];
+    const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)?.[1];
     assert.ok(requestRef, delivery.body);
     assert.match(delivery.body, /verdict = Sound \| Flawed\(string\)/u);
     const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&

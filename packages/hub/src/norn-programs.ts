@@ -47,7 +47,7 @@ async function say(env: Env, postCommit: PostCommit, input: { channelId: string;
   quiet?: boolean;
   /** A request of a person: the card the message carries, and the one it waits on. */
   card?: NornRequestCard;
-  /** A request of an Agent: where in the body how to answer begins. A person reads only what comes before it. */
+  /** A request of an Agent: where in the body the holder's own part begins. A person reads only what comes before it. */
   answerFrom?: number }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
@@ -127,7 +127,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         continue;
       }
       await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
-        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, delivery.requestRef),
+        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest),
         card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!) });
       await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
       continue;
