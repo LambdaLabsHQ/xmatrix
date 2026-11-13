@@ -134,6 +134,12 @@ that was refused, a process that never started, a Run that was stopped or
 exited, and a turn that ended without one of the three commands. The next
 pass settles the request `Broke`, and the program decides what follows.
 
+A turn that was interrupted, because a newer message arrived in the
+conversation, has not ended the work: its Instance goes on in its next turn
+and may still answer, so the request stays with it while that Instance takes
+messages. Once the Instance has ended a later turn without answering, the
+request is abandoned.
+
 The daemon's execution report tells the Hub when a finished turn left a
 request open, and the Hub wakes the Channel's coordinator. A Run that ends
 wakes it already.

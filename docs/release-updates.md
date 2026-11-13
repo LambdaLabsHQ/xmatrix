@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a message in the conversation no longer fails a Norn request in progress
+
+A newer message in a conversation interrupts the turns in progress there. The
+Norn host read an interrupted turn as a turn that ended without an answer:
+it settled the request `Broke` and stopped the Agent, 19 minutes into a
+diagnosis in the case that showed it. An interrupted turn now leaves the
+request with its Instance, which goes on in its next turn and may still
+answer; the request is abandoned only once that Instance has ended a later
+turn without answering, or is gone. Hub only. Recovery is a CI-validated beta
+Hub reverting this change.
+
 ## Unreleased: a used-up Google Play quota is called a quota
 
 When Google refused a Play call because its quota was used up (403 or 429),

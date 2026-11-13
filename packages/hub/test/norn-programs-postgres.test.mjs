@@ -73,8 +73,21 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     const open = await programs.openRequests({ requestId: randomUUID(), channelId: "channel", runId: "channel:2#1", instanceId: "channel:2" });
     assert.deepEqual(open.map(row => [row.requestRef, row.held, row.asked, row.text]), [[delivery.requestRef, true, false, "Review the design"]]);
 
+    // A newer message interrupts the turn: the work is not over while its Instance is there to go on with it.
+    await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+      VALUES ('channel:2','channel:2#1','channel',2,'idle',1,now(),now())`);
+    await sql("UPDATE data.agent_message_executions SET state='interrupted',revision=2,updated_at_millis=2,finished_at_millis=2");
+    assert.equal(await due(), null);
+    assert.deepEqual((await programs.channelWork(scope())).passes, []);
+    // Once that Instance has ended a later turn without answering, the request is left behind.
+    await sql(`INSERT INTO data.agent_message_executions(binding_id,space_id,channel_id,run_id,instance_id,agent_name,
+      channel_instance_id,execution_id,revision,binding_digest,report_digest,source_message_id,source_entity_version,
+      source_body_hash,source_sequence,source_count,state,started_at_millis,updated_at_millis,finished_at_millis,created_at,observed_at,expires_at)
+      VALUES ('later','space','channel','channel:2#1','channel:2','codex','2','later',1,repeat('d',64),repeat('e',64),'program',1,
+        repeat('a',64),1,1,'completed',3,4,4,now(),now(),now()+interval '1 day')`);
+    assert.equal(await due(), true);
     // The turn ends with no answer: the request is abandoned, its program is due, and the pass ends it Broke.
-    await sql("UPDATE data.agent_message_executions SET state='completed',revision=2,updated_at_millis=2,finished_at_millis=2");
+    await sql("UPDATE data.agent_message_executions SET state='completed',revision=3 WHERE binding_id='binding'");
     assert.equal(await due(), true);
     assert.deepEqual((await programs.channelWork(scope())).passes, ["program"]);
     assert.equal((await programs.advance(scope(), nornStep())).status, "completed");

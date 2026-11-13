@@ -48,6 +48,13 @@ const requestInstance = (r: string) => `COALESCE(${r}.instance_id,(SELECT launch
 const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_executions execution
       WHERE execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id
         AND execution.state IN ('accepted','running'))
+    -- A turn that was interrupted (a newer message arrived) has not ended the work: its Instance goes on in its
+    -- next turn and may still answer. Only once that Instance has ended a later turn is the request left behind.
+    OR EXISTS (SELECT 1 FROM data.agent_message_executions cut JOIN data.instances going ON going.instance_id=cut.instance_id
+      WHERE cut.channel_id=r.channel_id AND cut.source_message_id=r.delivery_message_id AND cut.state='interrupted'
+        AND ${instanceTakesMessages("going")}
+        AND NOT EXISTS (SELECT 1 FROM data.agent_message_executions later WHERE later.instance_id=cut.instance_id
+          AND later.started_at_millis>cut.started_at_millis AND later.state IN ('completed','failed','unknown')))
     OR EXISTS (SELECT 1 FROM data.registration_launch_intents intent
       WHERE intent.channel_id=r.channel_id AND intent.source_message_id=r.delivery_message_id AND intent.state='preparing')
     OR EXISTS (SELECT 1 FROM data.agent_quota_retries quota
