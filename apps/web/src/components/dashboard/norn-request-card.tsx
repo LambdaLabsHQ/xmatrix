@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Check, Loader2, MessageCircleQuestion, X } from "lucide-react";
+import { ArrowUp, Loader2, MessageCircleQuestion, Pencil, X } from "lucide-react";
 
 import { AskCard, AskError } from "./ask-card";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
@@ -109,6 +109,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
       kind={request.about ?? undefined}
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
+      aside={open && decline}
       question={request.text}
       detail={<>
         {request.context && <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request.context}</div>}
@@ -136,16 +137,18 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
                   {choice}
                 </button>
               ))}
-              {!writing && decline}
             </div>
           )}
           {writing && (
-            <div className="app-ask-answer">
+            <div className="app-ask-answer flex min-w-0 items-start gap-3">
+              <span className="app-tool-state-icon mt-[3px]" data-state={words.trim() ? "running" : "offline"} aria-hidden="true">
+                <Pencil className="size-4" />
+              </span>
               <textarea
                 ref={field}
                 value={words}
                 disabled={busy}
-                rows={2}
+                rows={1}
                 onChange={(event) => setWords(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && words.trim()) {
@@ -153,22 +156,20 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
                     void send("answered", words.trim());
                   }
                 }}
-                placeholder={picked ? "Complete the option you picked" : "Your answer"}
+                placeholder={picked ? "Complete the option you picked" : "Write your answer…"}
                 aria-label="Your answer"
-                className="block max-h-60 min-h-[3.25rem] w-full min-w-0 resize-none px-3 pt-2.5 pb-1 text-sm leading-relaxed field-sizing-content placeholder:text-muted-foreground"
+                className="block max-h-60 min-h-0 min-w-0 flex-1 resize-none p-0 py-[3px] text-sm leading-relaxed field-sizing-content placeholder:text-muted-foreground"
               />
-              <div className="flex items-center justify-end gap-1.5 px-2 pb-2">
-                {decline}
-                <button
-                  type="button"
-                  disabled={busy || !words.trim()}
-                  onClick={() => void send("answered", words.trim())}
-                  className={actionClass({ variant: "primary", size: "sm" })}
-                >
-                  {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                  Send
-                </button>
-              </div>
+              <button
+                type="button"
+                title="Send"
+                aria-label="Send"
+                disabled={busy || !words.trim()}
+                onClick={() => void send("answered", words.trim())}
+                className={actionClass({ variant: "primary", size: "icon-sm" }, "rounded-full")}
+              >
+                {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <ArrowUp className="size-4" />}
+              </button>
             </div>
           )}
         </div>

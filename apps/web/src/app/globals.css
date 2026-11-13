@@ -8752,16 +8752,11 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   accent-color: currentColor;
 }
 
-/* An answer the reader writes on an ask (norn-request-card.tsx) is a strip of
-   the plain paper laid on the slip, written on like the composer: the words
-   and the buttons that send them share the strip, the field grows with what
-   is written, and nothing else marks it (Daniel 2026-11-13: 这输入框太丑了,
-   the bare underline on a grey well). The paper's colour alone stands it off
-   the slip: no edge, at rest or in focus (Daniel 2026-11-13: 不要有边框). */
-.xmatrix-app .app-ask-answer {
-  border-radius: 8px;
-  background: var(--app-panel-paper, oklch(0.976 0.005 85));
-}
+/* An answer the reader writes on an ask (norn-request-card.tsx) is written
+   on the slip itself, not into a box (Daniel 2026-11-13: 这输入框太丑了, then
+   不要有边框): the questionnaire's own answer line, a pencil and the words,
+   with the composer's round Send at its end. Nothing marks where it is but
+   the pencil and the words waiting there. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-ask-answer.app-ask-answer textarea {
   background: transparent !important;
   border: 0 !important;
