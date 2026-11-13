@@ -14,6 +14,7 @@ const COMPONENTS = ["cli", "desktop", "android"];
 export const STABLE_RELEASES_KEPT = 10;
 export const RECENT_RELEASE_MS = 7 * 24 * 60 * 60 * 1000;
 const DELETE_CONCURRENCY = 8;
+const DELETE_ATTEMPTS = 4;
 const RELEASE_PREFIX = /^(releases\/(cli|desktop|android)-v([^/]+))\//u;
 
 function required(value, name) {
@@ -93,7 +94,13 @@ async function forEachLimited(items, limit, operation) {
   await Promise.all(workers);
 }
 
-export async function pruneR2ReleaseAssets({ accountId, cloudflareToken, fetchImpl = fetch, now = Date.now() }) {
+export async function pruneR2ReleaseAssets({
+  accountId,
+  cloudflareToken,
+  fetchImpl = fetch,
+  now = Date.now(),
+  retryDelayMs = 1000,
+}) {
   accountId = required(accountId, "CLOUDFLARE_ACCOUNT_ID");
   cloudflareToken = required(cloudflareToken, "CLOUDFLARE_API_TOKEN");
   const cfBase = `https://api.cloudflare.com/client/v4/accounts/${accountId}/r2/buckets/${BUCKET}`;
@@ -130,6 +137,20 @@ export async function pruneR2ReleaseAssets({ accountId, cloudflareToken, fetchIm
     cursor = body.result_info?.is_truncated ? body.result_info.cursor : undefined;
   } while (cursor);
 
+  // The API now and then answers a delete with an empty body; a delete is
+  // idempotent, so it is asked again before the run gives up.
+  const deleteObject = async (key) => {
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        const response = await fetchImpl(`${cfBase}/objects/${objectPath(key)}`, { method: "DELETE", headers: cfHeaders });
+        return await jsonResponse(response, `R2 object delete ${key}`);
+      } catch (error) {
+        if (attempt >= DELETE_ATTEMPTS) throw error;
+        await new Promise((resolve) => setTimeout(resolve, retryDelayMs * attempt));
+      }
+    }
+  };
+
   const releases = selectPrunableReleases({ objects, currentPrefixes, prunableComponents, now });
   const deleted = [];
   let bytes = 0;
@@ -141,11 +162,7 @@ export async function pruneR2ReleaseAssets({ accountId, cloudflareToken, fetchIm
     const manifests = release.objects.filter((object) => object.key === manifestKey);
     for (const batch of [files, manifests]) {
       await forEachLimited(batch, DELETE_CONCURRENCY, async (object) => {
-        const response = await fetchImpl(`${cfBase}/objects/${objectPath(object.key)}`, {
-          method: "DELETE",
-          headers: cfHeaders,
-        });
-        await jsonResponse(response, `R2 object delete ${object.key}`);
+        await deleteObject(object.key);
         deleted.push(object.key);
         bytes += Number(object.size) || 0;
       });

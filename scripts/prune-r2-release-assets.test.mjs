@@ -51,3 +51,22 @@ test("a component whose stable channel is unreadable is not pruned, nor is an un
   const objects = [...release("android-v1.0.0-beta.1"), ...release("cli-v1.0.0-rc.1"), ...release("cli-v1.0.0-beta.1")];
   assert.deepEqual(prunedTags(objects, { prunableComponents: new Set(["cli"]) }), ["cli-v1.0.0-beta.1"]);
 });
+
+test("a delete answered with an empty body is asked again", async () => {
+  const { pruneR2ReleaseAssets } = await import("./prune-r2-release-assets.mjs");
+  const objects = release("cli-v1.0.0-beta.1");
+  const pointer = (component, channel) => ({ component, channel, prefix: `releases/${component}-v9.0.0` });
+  const deletes = new Map();
+  const json = (body) => new Response(JSON.stringify(body), { status: 200 });
+  const fetchImpl = async (url) => {
+    const channel = /channels\/(\w+)\/(\w+)\.json$/u.exec(url);
+    if (channel) return json(pointer(channel[1], channel[2] === "dev" ? "dev" : "stable"));
+    if (url.includes("/objects?")) return json({ success: true, result: objects, result_info: { is_truncated: false } });
+    const seen = (deletes.get(url) ?? 0) + 1;
+    deletes.set(url, seen);
+    return seen === 1 ? new Response("", { status: 502 }) : json({ success: true, result: {} });
+  };
+  const deleted = await pruneR2ReleaseAssets({ accountId: "a", cloudflareToken: "t", fetchImpl, now, retryDelayMs: 0 });
+  assert.deepEqual(deleted.sort(), objects.map((object) => object.key).sort());
+  assert.ok([...deletes.values()].every((count) => count === 2));
+});
