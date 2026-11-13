@@ -290,7 +290,7 @@ test("a pre-spawn failure still owes a notice when launch update already failed 
     machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" } };
   const context = { run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
     agent_name: "Codex", harness: "codex", status: "failed", startup_failed: true, metadata_json: run.metadata_json };
-  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v9: [context],
+  const db = lifecycleDatabase(run, { machine_lifecycle_notice_context_v10: [context],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }] });
   const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("spawn-failed", "machine_spawn_result",
     { ...spawnedPayload, ok: false, error: "base_ref_unresolved" }));
@@ -308,7 +308,7 @@ for (const [status, recoverableLaunchFailure, executionCancellation] of [["stopp
   test(`late spawn failure does not announce ${executionCancellation ? "cancelled" : status} as a new startup failure`, async () => {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1", executionCancellation };
     const db = lifecycleDatabase({ status, version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -323,7 +323,7 @@ for (const cancelled of [false, true]) {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
       ...(cancelled ? { executionCancellation: { reason: "timeout", processCleanup: { status: "pending" } } } : {}) };
     const db = lifecycleDatabase({ status: "failed", version: 3, metadata_json: body }, {
-      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status: "failed", startup_failed: true, metadata_json: body }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 15 }],
     });
@@ -342,7 +342,7 @@ for (const channelCommand of [false, true]) {
     const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
       ...(channelCommand ? { stopRequest: { sourceMessageId: "message-1", requestedAt: "2026-10-06T08:46:35.000Z" } } : {}) };
     const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-      machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+      machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
         agent_name: "Codex", status: "stopping", metadata_json: body }],
       machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
       machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -357,7 +357,7 @@ for (const channelCommand of [false, true]) {
 test("a stop from a withdrawn registration carries why and who withdrew it", async () => {
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "claude", status: "stopping", metadata_json: body, stop_reason_code: "registration_disabled",
       access_actor_name: "Daniel", owner_name: "Daniel", launcher_name: null }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
@@ -373,7 +373,7 @@ test("a stop from a deleted Instance says the Instance was deleted", async () =>
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     instanceDeletion: { schemaVersion: 1, state: "pending" } };
   const db = lifecycleDatabase({ status: "running", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "claude", status: "running", metadata_json: body, owner_name: "Ada" }],
     machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
@@ -387,7 +387,7 @@ test("a failed channel stop still posts because acceptance is not termination", 
   const body = { machineId: "machine-1", hostId: "host-1", executionKey: "execution-1",
     stopRequest: { sourceMessageId: "message-1" } };
   const db = lifecycleDatabase({ status: "stopping", version: 4, metadata_json: body, finished_at: null, instance_id: null }, {
-    machine_lifecycle_notice_context_v9: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+    machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
       agent_name: "Codex", status: "stopping", metadata_json: body }],
     machine_lifecycle_head_advance_v1: [{ commit_sequence: 16 }],
   });
@@ -465,6 +465,33 @@ test("persistent wrapper startup failure retires PostgreSQL Instance presence", 
   assert.deepEqual(offline.values.slice(1), ["instance-1", "run-1", 7]);
 });
 
+test("a start its program refused as signed out is noticed as that, with its summon only when a summon started it", async () => {
+  const refused = { invocationProgress: { operationFailure: { code: "harness_signed_out" } }, sourceMention: "@codex fix it" };
+  const context = async (metadata, summoned) => {
+    const db = lifecycleDatabase({ status: "running", version: 2, metadata_json: {
+      machineId: "machine-1", hostId: "host-1", executionKey: "execution-1" }, finished_at: null }, {
+      machine_lifecycle_run_update_v1: [{ run_id: "run-1" }],
+      machine_lifecycle_notice_context_v10: [{ run_id: "run-1", channel_id: "channel-1", owner_user_id: "user-1",
+        agent_name: "Codex", harness: "codex", status: "exited", summon_message_id: "message-1", summoned,
+        metadata_json: metadata }],
+      machine_lifecycle_head_advance_v1: [{ commit_sequence: 12 }] });
+    const value = await new PostgresMachineLifecycleRepository(db).apply(machineReport("signed-out-start", "machine_run_exited",
+      { type: "machine_run_exited", runId: "run-1", executionKey: "execution-1", status: "exit code: 1",
+        statusPhase: "codex_app_starting", completed: true, delivered: false }));
+    return value.startupFailureNoticeContext;
+  };
+  const summoned = await context(refused, true);
+  assert.equal(summoned.signedOut, true);
+  assert.equal(summoned.sourceMention, "@codex fix it");
+  assert.equal(summoned.sourceMessageId, "message-1");
+  // "Start" pressed again, a handoff's successor or a fallback: the sign-in, and nothing to send again.
+  const other = await context(refused, false);
+  assert.equal(other.signedOut, true);
+  assert.equal(other.sourceMention, undefined);
+  // Any other failed start is not a sign-in.
+  assert.equal((await context({ sourceMention: "@codex fix it" }, true)).signedOut, undefined);
+});
+
 for (const eventType of ["machine_spawn_result", "machine_run_exited", "machine_stop_result"]) {
   test(`cancelled execution cannot be revived by late ${eventType}`, async () => {
     const cancelledAt = "2026-09-13T08:00:00.000Z";
@@ -530,7 +557,7 @@ for (const ok of [true, false]) test(`an applied ${ok ? "successful" : "recovera
     { controlId: "control-1", ok, at: undefined });
 });
 
-for (const rejectionCode of ['registration_harness_signed_out', 'routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
+for (const rejectionCode of ['routing_no_eligible', 'routing_selection_failed', 'routing_parameter_selection_failed',
   'routing_parameter_constraints_invalid', 'routing_parameter_models_empty', 'routing_parameter_workspaces_empty',
   'routing_parameter_catalog_invalid', 'routing_parameter_catalog_unavailable', 'routing_parameter_invalid_answer',
   'routing_parameter_jev_aborted', 'routing_parameter_jev_invalid_input', 'routing_parameter_jev_customer_verification_required',
@@ -562,8 +589,6 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
         questionKey: 'workspace', issue: 'choice_not_offered', private: 'must-not-store' } } : {}),
       ...(rejectionCode === 'registration_harness_outdated' ? { tooOld: { program: 'Cursor CLI', version: '2025.09.12-4852336',
         minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update', private: 'must-not-store' } } : {}),
-      ...(rejectionCode === 'registration_harness_signed_out' ? { signedOut: { harness: 'codex', program: 'Codex',
-        machineId: 'machine-a', machineName: 'mac-mini', private: 'must-not-store' } } : {}),
       routingDecision: {
       source: 'deterministic', evaluatedAt: '2026-09-22T18:00:00Z', candidateCount: 1, secret: 'must-not-store',
       rows: [{ harness: 'codex', machineId: 'machine-a', activeRuns: 1,
@@ -577,11 +602,6 @@ test(`routing rejection ${rejectionCode} binds publication, replays once, and ne
   if (rejectionCode === 'registration_harness_outdated') assert.equal(view.rejections[0].message,
     'Cursor CLI on Laptop is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later. ' +
     'Run "cursor-agent update" there, then try again. No launch was allocated.');
-  if (rejectionCode === 'registration_harness_signed_out') {
-    assert.equal(view.rejections[0].message, "Codex on mac-mini is not signed in, so it can't take work. " +
-      'Sign it in from here, then the message goes to it. No launch was allocated.');
-    assert.deepEqual(view.rejections[0].signedOut, { harness: 'codex', program: 'Codex', machineId: 'machine-a', machineName: 'mac-mini' });
-  } else assert.equal(view.rejections[0].signedOut, undefined);
   assert.doesNotMatch(JSON.stringify(view.rejections), /must-not-store/);
   assert.equal(value.rejected[0].routingDecision.rows[0].quotaObservation.status, 'stale');
   assert.doesNotMatch(JSON.stringify(saved), /must-not-store/);
