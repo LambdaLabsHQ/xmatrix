@@ -55,7 +55,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
     const history = await channelHistory(worker, MOCK_TOKEN, running.channelId, 20);
     assert.match(history.messages[0].body, /^The program `review` of page:/u);
     const delivery = history.messages.find(message => message.body.startsWith("@codex launch:force"));
-    const requestRef = /Request `(r[a-z0-9]+)`/u.exec(delivery.body)[1];
+    const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
 
     // An edit that leaves the program's text alone changes nothing; the same request stands.
     await edit(`# Design\n\nA note.\n\n${block(REVIEW)}\n`);
@@ -80,7 +80,7 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     const program = async () => (await call(`${pages}/${page.pageId}/programs`)).programs[0];
     const running = await until(async () => { const now = await program(); return now?.requests.length ? now : null; }, "the first request");
     const deliveries = async () => (await channelHistory(worker, MOCK_TOKEN, running.channelId, 30)).messages
-      .filter(message => /Request `r[a-z0-9]+`/u.test(message.body));
+      .filter(message => /`request:r[a-z0-9]+`/u.test(message.body));
     const spawn = await daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
       message.channelId === running.channelId && isSpawnOf(message, scenario.registration), "the holder's spawn");
     const runToken = await mintAgentRunToken(worker, daemon, spawn, running.channelId);
@@ -88,7 +88,7 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     await inTestTransaction(tx => tx.query({ text: "UPDATE data.instances SET status='idle' WHERE run_id=$1", values: [spawn.runId] }));
     const [first] = await deliveries();
     assert.match(first.body, /The program may ask you again here/u);
-    assert.equal((await run(worker, runToken, ["reply", /Request `(r[a-z0-9]+)`/u.exec(first.body)[1], "A long draft"])).exitCode, 0);
+    assert.equal((await run(worker, runToken, ["reply", /`request:(r[a-z0-9]+)`/u.exec(first.body)[1], "A long draft"])).exitCode, 0);
 
     // The second request goes to that Instance by its address: no new Run starts, and the same Run answers it.
     const second = await until(async () => (await deliveries())[1], "the second delivery");
@@ -97,7 +97,7 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     await assert.rejects(daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.runId !== spawn.runId,
       "a second spawn", 1_500), /waiting for a second spawn/u);
     const held = await run(worker, runToken, ["requests"]);
-    const requestRef = /Request `(r[a-z0-9]+)`/u.exec(second.body)[1];
+    const requestRef = /`request:(r[a-z0-9]+)`/u.exec(second.body)[1];
     assert.match(held.stdout, new RegExp(`You hold:\\n  ${requestRef}\\t`, "u"));
     assert.equal((await run(worker, runToken, ["reply", requestRef, "Short"])).exitCode, 0);
     assert.equal((await until(async () => { const now = await program(); return now.state === "completed" ? now : null; }, "the end")).result, "Short");

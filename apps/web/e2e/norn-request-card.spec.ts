@@ -12,7 +12,7 @@ const request = (extra: Record<string, unknown> = {}) => ({ ref: "rabcdefgh23", 
   by: "2026-11-20T09:00:00.000Z", ...extra });
 const card = (nornRequest: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({ messageId: "norn:rabcdefgh23:0",
   channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX, messageKind: "xmatrix.system.norn-request",
-  body: "@E2E Tester\n\n**Request `rabcdefgh23`** from a program, for you.",
+  body: "@E2E Tester Ship release 4.2 to everyone?\n\nAnswer on this card: Yes or No. A program asks.",
   metadata: { nornRequest, xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" }, ...extra });
 
 async function openCard(page: Parameters<typeof openWorkspaceWithStubs>[0], message: ReturnType<typeof card>) {
@@ -55,4 +55,19 @@ test("everyone else reads whom it waits for, and afterwards how it ended", async
   const ended = await openCard(page, card(request(), { commandResult: { notes: [{ id: "note", text: "@E2E Tester answered: No", at: E2E_NOW }] } }));
   await expect(ended).toContainText("@E2E Tester answered: No", { timeout: 20_000 });
   await expect(ended.getByRole("button")).toHaveCount(0);
+});
+
+test("a request's reference in a message reads as the request: what is asked, of whom, how it stands", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
+    channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+    body: "@codex launch:force\n\n**Request** `request:rabcdefgh23` from a program. Your answer goes back to the program." }], hasMore: false });
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@codex", text: "Audit the day's merges\nand the changelog", state: "answered", reply: "nothing to fix" } });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const chip = page.getByTestId("request-reference-chip");
+  await expect(chip).toContainText("Audit the day's merges", { timeout: 20_000 });
+  await expect(chip).toHaveAttribute("data-request-state", "answered");
+  await expect(page.locator('[id="message:delivery"]')).not.toContainText("rabcdefgh23");
+  await page.screenshot({ path: test.info().outputPath("norn-request-reference.png") });
 });

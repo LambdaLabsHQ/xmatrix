@@ -123,7 +123,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         continue;
       }
       await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
-        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, delivery.requestRef),
+        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest),
         card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!) });
       await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
       continue;

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Inline `page:<id>` and `channel:<id>` references in messages
+ * Inline `page:<id>`, `channel:<id>` and `request:<ref>` references in messages
  * (pages-and-conversations.md §4.3): a chip with the page title (and section)
  * or the channel name, a hover preview of what it says now, and a click that
  * opens it. The header's page bookmarks are the same chip, listed under the
@@ -9,14 +9,16 @@
  */
 import { createContext, Fragment, memo, useContext, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Hash, Lock } from "lucide-react";
+import { FileText, Hash, Lock, MessageCircleQuestion } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import {
   messageReferenceSpans,
   pageBlocks,
   type ChannelReferenceSpan,
   type MessageReferenceSpan,
+  type NornRequestView,
   type PageReferenceSpan,
+  type RequestReferenceSpan,
 } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
@@ -82,7 +84,8 @@ export const PageReferenceRichText = memo(function PageReferenceRichText({ text 
 });
 
 export function MessageReferenceChip({ span }: { span: MessageReferenceSpan }) {
-  return span.kind === "channel" ? <ChannelReferenceChip span={span} /> : <PageReferenceChip span={span} />;
+  return span.kind === "channel" ? <ChannelReferenceChip span={span} />
+    : span.kind === "request" ? <RequestReferenceChip span={span} /> : <PageReferenceChip span={span} />;
 }
 
 /** The chip and its hover preview, shared by page and channel references. */
@@ -94,7 +97,7 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
   badge?: string | null;
   preview: ReactNode;
   ariaLabel: string;
-  testId: "page-reference" | "channel-reference" | "conversation-page";
+  testId: "page-reference" | "channel-reference" | "conversation-page" | "request-reference";
   data: Record<`data-${string}`, string | undefined>;
   onOpen: () => void;
   className?: string;
@@ -183,6 +186,52 @@ const ChannelReferenceChip = memo(function ChannelReferenceChip({ span }: { span
       testId="channel-reference"
       data={{ "data-channel-id": span.channelId }}
       onOpen={() => catalog.onOpenChannel(channel.id)}
+    />
+  );
+});
+
+const REQUEST_STATES = { open: "waiting for", answered: "answered by", refused: "declined by", broke: "could not be done by",
+  no_reply: "not answered in time by", cancelled: "withdrawn from", revoked: "withdrawn from" } as const;
+
+/**
+ * A request a Norn program made, in place of its reference: what was asked,
+ * of whom and how it stands. A reader who cannot read its conversation sees
+ * only that it is a request.
+ */
+const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span: RequestReferenceSpan }) {
+  const scope = useContext(PageReferenceContext);
+  const catalog = useMessageReferenceCatalog();
+  const { user } = useAuth();
+  const request = useQuery<NornRequestView>({
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "norn-request", [scope?.spaceId ?? "", span.requestRef]),
+    enabled: Boolean(scope?.spaceId && scope.token && user?.id), retry: false,
+    // An open request is read again so its chip says when it has been answered; an ended one does not change.
+    staleTime: 15_000, refetchInterval: (query) => (query.state.data?.state === "open" ? 30_000 : false),
+    queryFn: ({ signal }) => pageApi.request(scope!.spaceId, span.requestRef, scope!.token, signal),
+  });
+  const found = request.data;
+  if (!scope || request.isError || (!found && !request.isLoading)) {
+    return (
+      <span className="app-page-reference-chip app-page-reference-chip-unavailable" data-testid="request-reference-chip">
+        <span className="app-page-reference-chip-icon" aria-hidden="true"><Lock /></span>
+        <span className="app-page-reference-chip-label">a request</span>
+      </span>
+    );
+  }
+  const asked = found?.text.split("\n")[0]?.trim() ?? "";
+  const stands = found ? `${REQUEST_STATES[found.state]} ${found.holder}` : "";
+  return (
+    <ReferenceChip
+      icon={<MessageCircleQuestion aria-hidden="true" />}
+      label={found ? asked : "…"}
+      title={asked}
+      badge={found ? stands : null}
+      preview={found ? <InlineRowPreview text={[found.text, found.reply ? `${found.holder}: ${found.reply}` : `It is ${stands}.`].join("\n\n")} />
+        : <ContentSkeleton label="Loading request" lines={2} />}
+      ariaLabel={`Open the request: ${asked}`}
+      testId="request-reference"
+      data={{ "data-request-state": found?.state }}
+      onOpen={() => { if (found) catalog?.onOpenChannel(found.channelId); }}
     />
   );
 });

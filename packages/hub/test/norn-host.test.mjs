@@ -224,13 +224,14 @@ switch choose(@Daniel, "How risky is this release?", [Low, High("say why")], ~by
   const card = nornRequestCard(asked, open.requestRef, "user-1");
   assert.deepEqual([card.verb, card.holderUserId, card.options, card.about, card.by], ["choose", "user-1", ["Low", "High(say why)"], "4.2",
     new Date(asked.by).toISOString()]);
-  const body = nornPersonBody(asked, open.requestRef).split("\n");
+  const body = nornPersonBody(asked).split("\n");
   // What is asked leads the message: it is what a list of conversations shows of it.
   assert.deepEqual([body[0], body.at(-1)], ["@Daniel How risky is this release?",
-    `Answer on this card: one of: Low, High(say why). It closes at ${card.by}. A program asks (request \`${open.requestRef}\`).`]);
+    `Answer on this card: one of: Low, High(say why). It closes at ${card.by}. A program asks.`]);
+  assert.doesNotMatch(body.join("\n"), new RegExp(open.requestRef, "u"));
   const long = program(`ask(@Daniel, "Pay the **fee**?\\nTwo invoices disagree.")->wait`);
   const [asked2] = long.step().open;
-  assert.deepEqual(nornPersonBody(long.state.ledger.requests[asked2.requestId], asked2.requestRef).split("\n").slice(0, 3),
+  assert.deepEqual(nornPersonBody(long.state.ledger.requests[asked2.requestId]).split("\n").slice(0, 3),
     ["@Daniel Pay the fee?", "", "```text"]);
   // A person's request is not an Agent's: conditions on where to run do not apply, and silence is not an answer.
   const conditioned = program(`switch ask(@Daniel(~repo="acme/app"), "Which?")->wait { | Broke(why) => why | other => fail(other) }`);

@@ -32,15 +32,48 @@ export function channelReferenceSpans(text: string): ChannelReferenceSpan[] {
   }));
 }
 
+/**
+ * A request a Norn program made, named by its reference: `request:<ref>`. A
+ * reader sees what was asked, of whom and how it stands, never the reference.
+ */
+const REQUEST_REFERENCE_SPAN = /\brequest:(r[a-z0-9]{6,40})\b/gu;
+
+/** The text a message carries to refer to a request. */
+export function requestReferenceToken(requestRef: string): string {
+  return `request:${requestRef}`;
+}
+
+export interface RequestReferenceSpan { requestRef: string; start: number; end: number; text: string }
+
+export function requestReferenceSpans(text: string): RequestReferenceSpan[] {
+  return [...text.matchAll(REQUEST_REFERENCE_SPAN)].map((match) => ({
+    requestRef: match[1]!, start: match.index!, end: match.index! + match[0].length, text: match[0],
+  }));
+}
+
+/** A request as whoever can read its conversation sees it in place of its reference. */
+export interface NornRequestView {
+  ref: string;
+  channelId: string;
+  holder: string;
+  text: string;
+  /** How it stands: open, or how it ended. */
+  state: "open" | "answered" | "refused" | "broke" | "no_reply" | "cancelled" | "revoked";
+  /** The answer, or the reason it was refused or could not be done. */
+  reply: string | null;
+}
+
 export type MessageReferenceSpan =
   | ({ kind: "page" } & PageReferenceSpan)
-  | ({ kind: "channel" } & ChannelReferenceSpan);
+  | ({ kind: "channel" } & ChannelReferenceSpan)
+  | ({ kind: "request" } & RequestReferenceSpan);
 
-/** Every page and channel reference in text order. */
+/** Every page, channel and request reference in text order. */
 export function messageReferenceSpans(text: string): MessageReferenceSpan[] {
   return [
     ...pageReferenceSpans(text).map((span) => ({ kind: "page" as const, ...span })),
     ...channelReferenceSpans(text).map((span) => ({ kind: "channel" as const, ...span })),
+    ...requestReferenceSpans(text).map((span) => ({ kind: "request" as const, ...span })),
   ].sort((a, b) => a.start - b.start);
 }
 
@@ -60,6 +93,7 @@ export function loneMessageReference(text: string): MessageReferenceSpan | null 
 export function messageReferenceLabels(text: string, names: {
   page?: (pageId: string) => string | undefined;
   channel?: (channelId: string) => string | undefined;
+  request?: (requestRef: string) => string | undefined;
 }): string {
   let result = "";
   let cursor = 0;
@@ -69,6 +103,8 @@ export function messageReferenceLabels(text: string, names: {
       result += names.page?.(span.pageId)?.trim() || "Page";
       if (span.blockId) result += " › Section";
       if (span.revision != null) result += ` (r${span.revision})`;
+    } else if (span.kind === "request") {
+      result += names.request?.(span.requestRef)?.trim() || "a request";
     } else {
       result += names.channel?.(span.channelId)?.trim() || "Channel";
     }

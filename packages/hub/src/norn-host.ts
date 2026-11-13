@@ -1,4 +1,4 @@
-import { parseHarnessCapabilityMentions, parseMarkdown, utf8ByteLength } from "@xmatrix/protocol";
+import { parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
 import type { NornProgramState, NornProgramWrite, NornStep } from "@xmatrix/db";
 import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
 import { NORN_STD } from "./vendor/norn/std";
@@ -153,7 +153,8 @@ export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to:
   kept?: boolean } = {}): string {
   const [answer, ...types] = answerText(request).split("\n");
   return [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
-    `**Request \`${requestRef}\`** from a program. Your answer goes back to the program, not to this conversation.`, "",
+    // The reference in its own code span is what a person's client draws as the request itself.
+    `**Request** \`${requestReferenceToken(requestRef)}\` from a program. Your answer goes back to the program, not to this conversation.`, "",
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
@@ -185,9 +186,10 @@ export const nornRequestCard = (request: LedgerRequest, requestRef: string, hold
   by: request.by === null ? null : new Date(request.by).toISOString() });
 /**
  * The same request in words, for whoever reads the conversation without the
- * card: the person's name first, so it tells them as a mention does.
+ * card: the person's name first, so it tells them as a mention does. A person
+ * is shown what is asked, never the request's reference; the card carries it.
  */
-export function nornPersonBody(request: LedgerRequest, requestRef: string): string {
+export function nornPersonBody(request: LedgerRequest): string {
   // What is asked comes first: a list of conversations shows the start of the message, and that is what its
   // reader needs. The first line is plain words; the rest of a longer question follows as the program wrote it.
   const [first = "", ...more] = request.text.split("\n");
@@ -195,7 +197,7 @@ export function nornPersonBody(request: LedgerRequest, requestRef: string): stri
     ...(more.join("").trim() ? ["", fence(request.text)] : []),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`} A program asks (request \`${requestRef}\`).`,
+    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`} A program asks.`,
   ].join("\n");
 }
 /** How a person's request ended, in a line under its card. */

@@ -170,6 +170,17 @@ authority. Its result is the reply itself (`Answered(Yes)`, `Refused(…)`,
 What xMatrix says for such a program is not threaded under the program's
 message, because that message is xMatrix's own and takes no reply.
 
+## A reference shows the request
+
+Where a request is named to people, they are shown the request, not its
+reference. A message names one as `request:<ref>` (the delivery to an Agent
+does, in its heading), and the Web draws that as a chip: the first line of
+what is asked, of whom, and how it stands, read from
+`GET /api/spaces/:space/norn-requests/:ref` by whoever can read the
+request's conversation; anyone else sees only "a request". A card for a
+person carries no reference in its text at all. An Agent still answers by
+the bare reference, which its commands take.
+
 ## Never silent
 
 A delivered request is abandoned when it is unanswered and nothing works on
