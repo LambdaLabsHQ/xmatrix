@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: an Agent whose name is not ASCII starts
+
+An Agent named `牛马` exited seconds after every summon. The Hub accepts any
+display name and binds the Run to it, but the wrapper took the name as given
+only when it was ASCII letters, digits and `._-`, and folded any other name
+into `xmatrix-agent`; the Hub then refused the handshake because the name did
+not match the credential. The wrapper now sends the name the Hub bound the Run
+to, and the sender hint keeps names over 64 bytes that the Hub allows. CLI
+only. Recovery is a CI-validated beta CLI reverting this change.
+
 ## Unreleased: a Norn program can tell someone something
 
 `say(@who, "…")` in a Norn program was computed and dropped: nothing reached
