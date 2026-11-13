@@ -8752,6 +8752,19 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
   accent-color: currentColor;
 }
 
+/* An answer the reader writes on an ask (norn-request-card.tsx) is written
+   on the slip itself, not into a box (Daniel 2026-11-13: 这输入框太丑了, then
+   不要有边框): the questionnaire's own answer line, a pencil and the words,
+   with the composer's round Send at its end. Nothing marks where it is but
+   the pencil and the words waiting there. */
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-ask-answer.app-ask-answer textarea {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
 /* The Pending approvals dock is one such block, and the asks inside it are
    its lines, not blocks of their own. */
 html[data-app-theme] .xmatrix-app.xmatrix-app .app-agent-work-dock .app-channel-approvals {

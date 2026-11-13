@@ -13,7 +13,7 @@ import { statusChipClass, type StatusTone } from "@/components/ui/status-tone";
  * covers, and the answer's controls last. The block is brass while it waits on the
  * reader; once answered it fades to a plain tint and a label says how it ended.
  */
-export function AskCard({ who, kind, icon, open, question, detail, status, children }: {
+export function AskCard({ who, kind, icon, open, question, detail, status, aside, children }: {
   /** The Agent or harness asking. */
   who: string;
   /** What the ask is about, in a word or two. */
@@ -25,6 +25,8 @@ export function AskCard({ who, kind, icon, open, question, detail, status, child
   detail?: ReactNode;
   /** Where it stands when that is not "waiting on you": who decides, or how it ended. */
   status?: { tone: StatusTone; label: string } | false | null;
+  /** A quiet way out of the ask (Decline), at the end of the line saying who asks. */
+  aside?: ReactNode;
   children?: ReactNode;
 }) {
   return (
@@ -36,6 +38,7 @@ export function AskCard({ who, kind, icon, open, question, detail, status, child
           <span className="min-w-0 truncate">{[`${who} asks`, kind].filter(Boolean).join(" · ")}</span>
         </span>
         {status ? <span className={statusChipClass(status.tone, "shrink-0")}>{status.label}</span> : null}
+        {aside ? <span className="-my-1 ml-auto shrink-0">{aside}</span> : null}
       </div>
       {detail ? <div className="mt-0.5 text-[13px] leading-[1.45] text-muted-foreground">{detail}</div> : null}
       {children}

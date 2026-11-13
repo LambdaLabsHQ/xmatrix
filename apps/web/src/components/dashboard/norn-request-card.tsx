@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { Check, Loader2, MessageCircleQuestion, X } from "lucide-react";
+import { ArrowUp, Loader2, MessageCircleQuestion, Pencil, X } from "lucide-react";
 
 import { AskCard, AskError } from "./ask-card";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
@@ -61,7 +61,15 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
   const isHolder = request.holderUserId === userId;
   const open = isHolder && !outcome && sent === null;
   const choices = request.verb === "confirm" ? ["Yes", "No"] : request.verb === "choose" ? request.options : [];
-  const writes = choices.length === 0 || choices.some(takesWords);
+  // The field is there from the start when the answer is words; for a choice, once an option that takes words is picked.
+  const [picked, setPicked] = useState<string | null>(null);
+  const writing = choices.length === 0 || picked !== null;
+  const field = useRef<HTMLTextAreaElement>(null);
+  const pick = (choice: string) => {
+    setPicked(choice);
+    setWords(choice);
+    requestAnimationFrame(() => field.current?.focus());
+  };
 
   async function send(result: "answered" | "refused", text: string) {
     setBusy(true);
@@ -83,12 +91,25 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
     }
   }
 
+  const decline = (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void send("refused", words.trim() || "Declined")}
+      className={actionClass({ variant: "quiet", size: "sm" })}
+    >
+      <X className="size-3.5" />
+      Decline
+    </button>
+  );
+
   return (
     <AskCard
       who="A program"
       kind={request.about ?? undefined}
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
+      aside={open && decline}
       question={request.text}
       detail={<>
         {request.context && <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request.context}</div>}
@@ -101,51 +122,56 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
       <AskError error={error} loadError={null} action="Couldn't send your answer" onRetry={() => setError(null)} />
       {open && (
         <div className="mt-3 flex flex-col gap-2">
-          {writes && (
-            <textarea
-              value={words}
-              disabled={busy}
-              rows={2}
-              onChange={(event) => setWords(event.target.value)}
-              placeholder={choices.length ? "Complete the option you picked" : "Your answer"}
-              aria-label="Your answer"
-              className="w-full min-w-0 resize-y border-b border-border bg-transparent py-1.5 text-sm outline-none placeholder:text-muted-foreground"
-            />
+          {choices.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              {choices.map((choice, index) => (
+                <button
+                  key={choice}
+                  type="button"
+                  disabled={busy}
+                  aria-pressed={takesWords(choice) ? picked === choice : undefined}
+                  // An option that takes words opens the field to be completed; a plain one is the answer.
+                  onClick={() => (takesWords(choice) ? pick(choice) : void send("answered", choice))}
+                  className={actionClass({ variant: index === 0 || picked === choice ? "primary" : "secondary", size: "sm" })}
+                >
+                  {choice}
+                </button>
+              ))}
+            </div>
           )}
-          <div className="flex flex-wrap items-center gap-2">
-            {choices.map((choice, index) => (
-              <button
-                key={choice}
-                type="button"
+          {writing && (
+            <div className="app-ask-answer flex min-w-0 items-start gap-3">
+              <span className="app-tool-state-icon mt-[3px]" data-state={words.trim() ? "running" : "offline"} aria-hidden="true">
+                <Pencil className="size-4" />
+              </span>
+              <textarea
+                ref={field}
+                value={words}
                 disabled={busy}
-                // An option that takes words goes to the field to be completed; a plain one is the answer.
-                onClick={() => (takesWords(choice) ? setWords(choice) : void send("answered", choice))}
-                className={actionClass({ variant: index === 0 ? "primary" : "secondary", size: "sm" })}
-              >
-                {choice}
-              </button>
-            ))}
-            {writes && (
+                rows={1}
+                onChange={(event) => setWords(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && (event.metaKey || event.ctrlKey) && words.trim()) {
+                    event.preventDefault();
+                    void send("answered", words.trim());
+                  }
+                }}
+                placeholder={picked ? "Complete the option you picked" : "Write your answer…"}
+                aria-label="Your answer"
+                className="block max-h-60 min-h-0 min-w-0 flex-1 resize-none p-0 py-[3px] text-sm leading-relaxed field-sizing-content placeholder:text-muted-foreground"
+              />
               <button
                 type="button"
+                title="Send"
+                aria-label="Send"
                 disabled={busy || !words.trim()}
                 onClick={() => void send("answered", words.trim())}
-                className={actionClass({ variant: choices.length ? "secondary" : "primary", size: "sm" })}
+                className={actionClass({ variant: "primary", size: "icon-sm" }, "rounded-full")}
               >
-                {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                Send
+                {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <ArrowUp className="size-4" />}
               </button>
-            )}
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void send("refused", words.trim() || "Declined")}
-              className={actionClass({ variant: "secondary", size: "sm" })}
-            >
-              <X className="size-3.5" />
-              Decline
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       )}
     </AskCard>
