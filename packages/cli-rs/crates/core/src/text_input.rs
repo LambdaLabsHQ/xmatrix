@@ -132,7 +132,12 @@ fn lossy_text_message(field: &str, problem: LossyText, routes: TextRoutes<'_>) -
         );
     }
     if ways.is_empty() {
-        ways.push("run the command again from a shell whose code page is UTF-8".to_string());
+        ways.push(match problem {
+            LossyText::AsciiOnlyQuestionMarks => {
+                "pass it to the command as an argument from a UTF-8 PowerShell, not through an ASCII pipe, file or variable".to_string()
+            }
+            _ => "run the command again from a shell whose code page is UTF-8".to_string(),
+        });
     }
     format!(
         "{cause} Nothing was sent. Resend the original text without retyping it into command arguments: {}.",
@@ -352,6 +357,12 @@ mod tests {
 
         let neither = lossy_text_message("channel name", mangled, TextRoutes::default());
         assert!(neither.contains("shell whose code page is UTF-8"));
+        let argument_only = lossy_text_message(
+            "command argument",
+            LossyText::AsciiOnlyQuestionMarks,
+            TextRoutes::default(),
+        );
+        assert!(argument_only.contains("as an argument from a UTF-8 PowerShell"), "{argument_only}");
     }
 
     #[test]
