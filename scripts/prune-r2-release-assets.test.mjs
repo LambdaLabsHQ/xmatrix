@@ -58,7 +58,7 @@ test("a delete answered with an empty body is asked again", async () => {
   const pointer = (component, channel) => ({ component, channel, prefix: `releases/${component}-v9.0.0` });
   const deletes = new Map();
   const json = (body) => new Response(JSON.stringify(body), { status: 200 });
-  const fetchImpl = async (url, options = {}) => {
+  const fetchImpl = async (url) => {
     const channel = /channels\/(\w+)\/(\w+)\.json$/u.exec(url);
     if (channel) return json(pointer(channel[1], channel[2] === "dev" ? "dev" : "stable"));
     if (url.includes("/objects?")) return json({ success: true, result: objects, result_info: { is_truncated: false } });
