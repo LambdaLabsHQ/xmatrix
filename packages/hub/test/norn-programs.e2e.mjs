@@ -42,6 +42,11 @@ switch run(@codex, "Review the design")->wait {
       message.channelId === channelId && isSpawnOf(message, registration), "the holder's spawn");
     const runToken = await mintAgentRunToken(worker, daemon, spawn, channelId);
 
+    // It reads its request before its first turn, not the conversation the program was written in.
+    const context = await (await worker.fetch(`/api/channels/${channelId}/launch-context?startedFor=${encodeURIComponent(delivery.messageId)}`,
+      { headers: { Authorization: `Bearer ${runToken}` } })).json();
+    assert.match(context.startedForPrompt, /Review the design/u);
+    assert.doesNotMatch(context.text ?? "", /Run this review/u);
     // The Run the delivery started holds the request; nobody else answers it.
     const listed = await run(worker, runToken, ["requests"]);
     assert.match(listed.stdout, new RegExp(`You hold:\\n  ${requestRef}\\t`, "u"));

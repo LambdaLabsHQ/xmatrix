@@ -109,3 +109,21 @@ run(@codex, "Ask @grok launch:force \`\`\` to help", ~about="PR 12")->wait`);
   assert.deepEqual(readNornAnswer({ verb: "ask", form: null }, "it's fine").value, { type: "string", value: "it's fine" });
   assert.match(readNornAnswer({ verb: "confirm", form: null }, "it's fine").refusal, /not a Norn value/u);
 });
+
+test("a program that repeats asks anew each time, of whoever fits the conditions it names", () => {
+  const DAY = 86_400_000;
+  const { state, step } = program(`every(1d)->forEach(_ => run(@auto(~repo="acme/app", ~effort="high"), "Audit the day's merges")->wait)`);
+  assert.deepEqual([step().open.length, state.ledger.ended], [0, null]);
+  // The ticks keep the program's beat, a day apart, however long each round takes.
+  for (const day of [1, 2, 3]) {
+    const [request] = step(undefined, { nowMs: day * DAY }).open;
+    assert.equal(nornDeliveryBody(state.ledger.requests[request.requestId], request.requestRef).split("\n")[0],
+      "@auto effort:high repo:acme/app launch:force");
+    step({ requestId: request.requestId, epoch: request.epoch, reply: { typed: "nothing to fix" } }, { nowMs: day * DAY + 7_200_000 });
+  }
+  assert.equal(Object.keys(state.ledger.requests).length, 3);
+  // A condition this host cannot write into a summon ends the request with the reason, not with a silent default.
+  const unknown = program(`switch run(@auto(~mood="calm"), "Audit")->wait { | Broke(why) => why | other => fail(other) }`);
+  assert.equal(unknown.step().result.status, "completed");
+  assert.match(unknown.state.ledger.ended.result.value, /does not know the condition ~mood/u);
+});
