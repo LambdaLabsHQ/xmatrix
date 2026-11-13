@@ -47,7 +47,7 @@ use runtime_run_loop_input::{
 mod runtime_goal_inbox;
 use runtime_goal_inbox::{
     GOAL_INBOX_ENV, bind_goal_inbox_path, bound_goal_inbox_path, cmd_goal,
-    publish_bound_goal_state, spawn_goal_inbox_poller,
+    goal_inbox_path_of_this_run, publish_bound_goal_state, spawn_goal_inbox_poller,
 };
 mod runtime_daemon_harness_action;
 pub use runtime_daemon_harness_action::{apply_local, local_inventory};
