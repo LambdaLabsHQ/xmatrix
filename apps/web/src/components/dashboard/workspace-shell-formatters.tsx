@@ -48,7 +48,7 @@ import {
 } from "lucide-react";
 
 import { NonOperationalMentions, renderMentionChildren } from "@/components/dashboard/mention-read-chip";
-import { MessageReferenceChip } from "@/components/dashboard/page-reference-chip";
+import { MessageReferenceChip, RequestReferenceBlock } from "@/components/dashboard/page-reference-chip";
 import { loneMessageReference, withoutDiscussionHeads } from "@xmatrix/protocol";
 
 import {
@@ -102,9 +102,13 @@ export function createMessageMarkdownComponents(
   h6: ({ children, node }) => <h6 className="mt-4 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h6>,
   // Mentions carry read state, so body text runs pass through the mention
   // renderer. Code spans keep their children untouched.
-  p: ({ children, node }) => (
-    <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>
-  ),
+  p: ({ children, node }) => {
+    // A delivery's "**Request** `request:<ref>`" line is the request itself: it is shown in full, as paragraphs.
+    const delivered = /^Request\s+(request:\S+)$/u.exec(markdownTextContent(children).trim());
+    const span = delivered && node?.children.length === 3 ? loneMessageReference(delivered[1]!) : undefined;
+    if (span?.kind === "request") return <RequestReferenceBlock requestRef={span.requestRef} />;
+    return <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>;
+  },
   blockquote: ({ children }) => (
     <blockquote className="message-quote mt-4 first:mt-0">
       <NonOperationalMentions>{children}</NonOperationalMentions>

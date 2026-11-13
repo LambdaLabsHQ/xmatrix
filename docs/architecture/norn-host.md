@@ -195,9 +195,11 @@ message, because that message is xMatrix's own and takes no reply.
 
 Where a request is named to people, they are shown the request, not its
 reference. A message names one as `request:<ref>` (the delivery to an Agent
-does, in its heading), and the Web draws that as a chip: how what is asked
-starts, cut at a sentence or a word so a long task stays a chip, with the
-whole request, of whom it is asked and how it stands in the chip's preview, read from
+does, in its heading). The Web draws a delivery's own "Request" line as the
+request in full: the paragraphs it was written in, as body text, under a line
+saying of whom it is asked and how it stands. A reference inside a sentence is
+a chip: how what is asked starts, cut at a sentence or a word, with the whole
+request in the chip's preview. Both are read from
 `GET /api/spaces/:space/norn-requests/:ref` by whoever can read the
 request's conversation; anyone else sees only "a request". A card for a
 person carries no reference in its text at all. An Agent still answers by
