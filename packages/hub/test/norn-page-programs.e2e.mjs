@@ -118,3 +118,21 @@ test("what a program says is posted to its conversation, for whom it names", () 
     .find(message => message.body === "@codex The renewal is due on Friday"), "what it said");
   assert.equal(said.from.kind, "system");
 }));
+
+test("work on a page's program that breaks off is handed on once; failing again, its saver is told where it stopped and waited on", () => pageScene("norn-broke", async ({ worker, call, pages, until }) => {
+  // No Machine by that name runs the Agent, so no Run ever takes the request.
+  const { page } = await call(pages, "POST", { title: "Cleanup", body: block(`run(@codex(~machine="absent"), "Delete the old builds")->wait`, "norn run cleanup") });
+  const failed = await until(async () => (await call(`${pages}/${page.pageId}/programs`)).programs.find(program => program.state === "failed"), "the failure");
+  const end = await until(async () => (await channelHistory(worker, MOCK_TOKEN, failed.channelId, 30)).messages
+    .find(message => message.body.includes("This stopped before it was finished")), "the program's end");
+  const { messages } = await channelHistory(worker, MOCK_TOKEN, failed.channelId, 30);
+  // The same request was delivered twice, the second time with what the first attempt left to read.
+  const deliveries = messages.filter(message => /`request:r[a-z0-9]+`/u.test(message.body));
+  assert.deepEqual(deliveries.map(message => /An earlier attempt at this request broke off/u.test(message.body)), [false, true]);
+  assert.equal(new Set(deliveries.map(message => /`request:(r[a-z0-9]+)`/u.exec(message.body)[1])).size, 1);
+  assert.match(end.body, /This stopped before it was finished: codex, asked “Delete the old builds”, did not finish: .*the second time on a new Instance\. Nothing more happens by itself: say here what to do next\.$/u);
+  // Nobody answered a card of this program, so whoever saved it is the one it waits on.
+  const waits = await inTestTransaction(tx => tx.query({ text: `SELECT a.subject_id,a.awaiting_response FROM data.message_attention a
+    WHERE a.message_id=$1`, values: [end.messageId ?? end.id] }));
+  assert.deepEqual(waits.map(wait => [wait.subject_id.startsWith("user:norn-broke-"), wait.awaiting_response]), [[true, true]]);
+}));

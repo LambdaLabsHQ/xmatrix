@@ -62,6 +62,8 @@ async function say(env: Env, postCommit: PostCommit, input: { channelId: string;
         // Not a system fact: that would make the request context to the Instance it is work for.
         : input.answerFrom ? { appMetadata: { nornAnswerFrom: input.answerFrom } } : {}) } } : {}),
   });
+  // Someone to be waited on can no longer read the conversation: what is said is said all the same, to whoever can.
+  if (!response.ok && input.waitsOn?.length && !input.card) return say(env, postCommit, { ...input, waitsOn: [] });
   if (!response.ok) throw new Error(`Norn message append failed (${response.status})`);
   if (input.quiet) return;
   if (input.onlyInstanceId) {
