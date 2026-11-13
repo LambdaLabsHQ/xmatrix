@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a used-up provider account's resting Instances stay resting
+
+When an Agent's provider account ran out, its failure notice woke that
+Agent's other resting Instances in the conversation. Each used the same
+empty account, failed within a second and posted its own failure card and
+handoff: a new Windows user saw three cards for one message. A registration
+whose quota pool reads empty now leaves its resting Instances asleep
+(`registration_quota_exhausted`), and the first message after the reset
+wakes them. The hold is also recorded before the failure notice commits.
+Hub only; no schema change (#1578). Recovery is a CI-validated Hub release
+reverting this change.
+
 ## Unreleased: A handoff refused for a signed-out successor shows the sign-in notice
 
 When `handoff:@auto` (or a named handoff) found its successor's program signed
