@@ -116,8 +116,10 @@ recipe or control for one; anything else is refused when issued.
   another Machine. The one action an Agent Run may issue there is `refresh` of
   its own Machine (a read-only probe, issued as its owner): after any harness
   change it makes, and before `xmatrix request sign-in`, the CLI asks the daemon
-  to look again, so the Hub's view of that Machine (routing, sign-in) shows the
-  change at once instead of at the next six-hourly probe.
+  to look again, so the Hub's view of that Machine (installed versions, and the
+  sign-in its pages show) has the change at once instead of at the next
+  six-hourly probe. Routing does not read that sign-in
+  ([space-agent-routing](architecture/space-agent-routing.md)).
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,
