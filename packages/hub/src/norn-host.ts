@@ -305,9 +305,10 @@ function unanswered(reply: Reply): string {
  * How a Page's program ended, as its conversation reads it, and whom that
  * waits on. What an Agent answered stands in the conversation under its name
  * already, so a result that is that answer is not said again. A program that
- * failed by itself names the people who answered it (or, with none, whoever
- * saved it) and says where it stopped: nothing goes on by itself from there,
- * and the Agent that stayed in the conversation takes what they say next.
+ * failed on an Agent's work or on its own error names the people who answered
+ * it (or, with none, whoever saved it) and says where it stopped: nothing goes
+ * on by itself from there, and the Agent that stayed in the conversation takes
+ * what they say next.
  */
 export function nornPageEnd(program: { ended: Ledger["ended"]; requests: Record<string, LedgerRequest> | null;
   people: { userId: string; name: string }[]; authority: { userId: string; name: string | null } }): { body: string; waitsOn: string[] } {
@@ -319,9 +320,11 @@ export function nornPageEnd(program: { ended: Ledger["ended"]; requests: Record<
     return { body: told || !result ? "Finished." : `Finished: ${result}`, waitsOn: [] };
   }
   if (!ended || (ended.error !== null && ENDED_FROM_OUTSIDE.test(ended.error))) return { body: nornEndBody(ended, true), waitsOn: [] };
+  const last = requests.filter(request => request.reply !== null && !["Answered", "Cancelled"].includes(request.reply.tag)).at(-1);
+  // A person who declined, or let their own request close, ended it themselves: they are not then waited on for it.
+  if (ended.error === null && last && personHolder(last.holder)) return { body: nornEndBody(ended, true), waitsOn: [] };
   const people = program.people.length ? program.people
     : [{ userId: program.authority.userId, name: program.authority.name ? `@${program.authority.name}` : "" }];
-  const last = requests.filter(request => request.reply !== null && !["Answered", "Cancelled"].includes(request.reply.tag)).at(-1);
   const asked = last?.text.split("\n")[0]?.replace(/[`*_[\]]/gu, "").trim() ?? "";
   const where = ended.error !== null ? `the program stopped: ${ended.error}`
     // The holder's name is written without its @: this tells people, and summons nobody.

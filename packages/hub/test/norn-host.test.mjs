@@ -111,6 +111,12 @@ run(@claude, "Do what Daniel answered: " ++ answer)->wait`);
   step({ requestId: work.requestId, epoch: work.epoch, reply: { tag: "Broke", reason: "its sign-in expired" } });
   assert.deepEqual(page(), { waitsOn: ["u-daniel"], body: "@Daniel This stopped before it was finished: claude, asked “Do what Daniel answered: Yes, delete”, " +
     "did not finish: its sign-in expired. Nothing more happens by itself: say here what to do next." });
+  // A person who declined their own card ended it themselves: the end is plain, and waits on nobody.
+  const declined = program(`ask(@Daniel, "Delete the old builds?")->wait`);
+  const [asked] = declined.step().open;
+  declined.step({ requestId: asked.requestId, epoch: asked.epoch, reply: { tag: "Refused", reason: "not now" } });
+  assert.deepEqual(nornPageEnd({ ended: declined.state.ledger.ended, requests: declined.state.ledger.requests, people: [daniel], authority }),
+    { body: "Ended without its result: Refused(not now)", waitsOn: [] });
   // With nobody who answered, whoever saved the program is told.
   assert.deepEqual(nornPageEnd({ ended: state.ledger.ended, requests: state.ledger.requests, people: [], authority }).waitsOn, ["u-owner"]);
   // A program taken off its page was ended by someone: nobody is waited on.

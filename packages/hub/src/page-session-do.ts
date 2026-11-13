@@ -43,6 +43,8 @@ const REVALIDATE_MS = 60_000;
 /** How long one sync of a page's programs may take, and how long after a failed one the next is made (doubling). */
 const PROGRAMS_SYNC_MS = 45_000;
 const PROGRAMS_RETRY_MS = 30_000;
+/** How long a whole-document edit's answer waits for the programs it changed. */
+const PROGRAMS_ANSWER_MS = 20_000;
 /** The sync of its programs a page is owed: as whom, and how many times it has failed. */
 interface ProgramsDue { userId: string; attempt: number }
 const MAX_CONNECTIONS = 64;
@@ -283,8 +285,11 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await this.session.submitEdit(body.principal, body);
           await this.settle();
-          // The programs this revision changed are started before its writer is answered, so the answer can say when they were not.
-          await this.programsSyncing;
+          // The programs this revision changed are started before its writer is answered, so the answer can say when
+          // they were not. A sync of many programs is not waited out: it goes on, owed, and the writer is answered.
+          let waited: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([this.programsSyncing, new Promise<void>(resolve => { waited = setTimeout(resolve, PROGRAMS_ANSWER_MS); })]);
+          clearTimeout(waited);
           if (this.programsProblem && Array.isArray(result.scheduleProblems)) {
             result.scheduleProblems.push({ source: "```norn run", problem:
               `The page's programs could not be brought up to date just now (${this.programsProblem}). xMatrix tries again by itself; check with xmatrix page read.` });
