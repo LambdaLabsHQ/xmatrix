@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: an Agent's startup error on Windows reads as Windows wrote it
+
+When an Agent failed to start on a Chinese Windows, its card showed the last
+lines it wrote as mojibake: `cmd.exe`, running an npm `.cmd` shim, writes
+messages such as 「系统找不到指定的路径。」 in the console's OEM code page, and
+the stderr tail read them as UTF-8. A line that is not UTF-8 is now read in
+the OEM code page, then the ANSI one (#1576). CLI only; Recovery is a
+CI-validated beta CLI reverting this change.
+
 ## Unreleased: a page's Norn program asks the same Agent again instead of starting another
 
 Every request of a Norn program started a new Run, so a review of three
