@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a machine can be asked, now, whether one program is signed in
+
+The only way to learn whether a harness is signed in from xMatrix was the
+machine's whole inventory: every preset probed, every registry read, each
+status-less ACP harness started. That takes many seconds (16 on a server with
+four harnesses), so pages showed the reading from the daemon's last probe,
+up to six hours old. The daemon now answers a `check` for one preset: its
+status command (Claude Code 0.3 s, Codex 0.1 s), or for an ACP harness with
+none, one start the way a launch starts it. It changes nothing. Nothing uses
+it yet: the pages that show a sign-in move to it next, and then the stored
+reading goes. CLI and Hub. A daemon without `machine_harness_check_v1` is
+never issued or leased a `check`. Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: a summon reaches its machine, and the program says whether it is signed in
 
 On 2026-11-13 summons to Claude Code on a signed-in machine were refused as
