@@ -9,7 +9,7 @@
  */
 import { createContext, Fragment, memo, useContext, useMemo, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, Hash, Lock, MessageCircleQuestion } from "lucide-react";
+import { ClipboardList, FileText, Hash, Lock } from "lucide-react";
 import { Popover } from "@base-ui/react/popover";
 import {
   messageReferenceSpans,
@@ -204,6 +204,9 @@ const REQUEST_STATES = { open: "waiting for", answered: "answered by", refused: 
  *
  * The chip says how the request starts; a task is often a long paragraph, and
  * the whole of it is read in the preview, which scrolls.
+ *
+ * Its mark is a task sheet. A question mark in a circle read as "unknown" or
+ * "something went wrong" beside a task that is simply under way.
  */
 const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span: RequestReferenceSpan }) {
   const scope = useContext(PageReferenceContext);
@@ -229,7 +232,7 @@ const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span
   const stands = found ? `${REQUEST_STATES[found.state]} ${found.holder}` : "";
   return (
     <ReferenceChip
-      icon={<MessageCircleQuestion aria-hidden="true" />}
+      icon={<ClipboardList aria-hidden="true" />}
       label={found ? asked : "…"}
       title="Request"
       badge={found ? stands : null}

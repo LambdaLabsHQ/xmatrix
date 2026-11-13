@@ -32,8 +32,9 @@ program's task is often one long paragraph, so its delivery message drew
 the entire task as a wall of highlighted lines that nobody could read. The
 chip now says how the request starts, stopping at a sentence or a word,
 and its preview shows the whole request as body text in a wider panel that
-scrolls. Web only. Recovery is a CI-validated beta Web reverting this
-change.
+scrolls. The chip's mark is a task sheet instead of a question mark in a
+bubble, which read as a fault beside a task that is under way. Web only.
+Recovery is a CI-validated beta Web reverting this change.
 
 ## Unreleased: a request's reference reads as the request
 
