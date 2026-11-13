@@ -5,13 +5,13 @@ test.use(E2E_DESKTOP_CONTEXT);
 const CHANNEL = { ...E2E_CHANNEL, messageCount: 2, lastMessageSequence: 2, updatedAt: E2E_NOW };
 const XMATRIX = { kind: "system", identityId: "system:xmatrix", userId: "", email: "", label: "xMatrix", name: "xMatrix",
   avatarUrl: "/brand/xmatrix-management-icon.png" };
-const TASK = "Check that the agent-router price snapshots are all removed (background: the page's section on price history). "
+const TASK = "Check that the router price snapshots are all removed (background: the page's section on price history). "
   + "Count what is left in the table, and delete the cleanup job once nothing is.";
 const ONCE = ['let task = "' + TASK + '"', "after(2026-11-17T02:00:00Z)->wait",
-  'switch run(@auto(~repo="LambdaLabsHQ/agent-router"), task, ~by=8h)->wait {', "| Answered(report) => Answered(report)",
-  '| _ => run(@claude(~repo="LambdaLabsHQ/agent-router"), task, ~by=8h)->wait', "}"].join("\n");
+  'switch run(@auto(~repo="acme/router"), task, ~by=8h)->wait {', "| Answered(report) => Answered(report)",
+  '| _ => run(@claude(~repo="acme/router"), task, ~by=8h)->wait', "}"].join("\n");
 const ask = (holder: string, text: string, extra: Record<string, unknown> = {}) => ({ kind: "ask", verb: "run", holder,
-  conditions: { repo: "LambdaLabsHQ/agent-router" }, text, options: [], open: false, by: null, within: 8 * 3_600_000, then: null,
+  conditions: { repo: "acme/router" }, text, options: [], open: false, by: null, within: 8 * 3_600_000, then: null,
   otherwise: [], ...extra });
 const message = (messageId: string, sequence: number, body: string) => ({ messageId, channelId: CHANNEL.id, sequence, sentAt: E2E_NOW,
   from: XMATRIX, body });
