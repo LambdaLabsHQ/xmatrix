@@ -48,6 +48,9 @@ whoever can read the Page, how each block stands: its state, why it does not
 run as written, and each request with its holder, outcome, reply and times.
 The Page draws that as the program's steps, joined under the block
 (`page-program-chips.ts`).
+`xmatrix page read` prints the same under `programs:` in its header, one
+line a block: its state, its conversation, how many requests it made and how
+the latest stands.
 
 ## State
 
