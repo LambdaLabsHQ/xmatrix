@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useQuery } from "@tanstack/react-query";
 import type { PageProgramStatus } from "@xmatrix/protocol";
@@ -44,16 +44,24 @@ export function MessageProgramFlow({ spaceId, programId, token, userId, render }
   const host = useRef<HTMLDivElement>(null);
   const [texts, setTexts] = useState<DrawnProgramFlow["texts"]>([]);
   const found = program.data ?? null;
+  // The time a step has left is told to the minute, so a program that runs is drawn again as the minutes pass.
+  const running = found?.state === "running";
+  const [minute, setMinute] = useState(0);
+  useEffect(() => {
+    if (!running) return;
+    const tick = window.setInterval(() => setMinute((count) => count + 1), 60_000);
+    return () => window.clearInterval(tick);
+  }, [running]);
   useLayoutEffect(() => {
     if (!host.current) return;
     if (!found) { host.current.replaceChildren(); setTexts([]); return; }
     const drawn = drawProgramFlow(found, { richText: true });
     host.current.replaceChildren(drawn.root);
     setTexts(drawn.texts);
-  }, [found]);
+  }, [found, minute]);
   return (
     <div ref={host} className="message-program-flow" data-testid="message-program-flow">
-      {texts.map((place) => createPortal(render(place.text), place.at))}
+      {texts.map((place, index) => createPortal(render(place.text), place.at, String(index)))}
     </div>
   );
 }
