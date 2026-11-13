@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Agents are taught Norn programs, and told when one does not run
+
+An Agent's launch prompt, the onboarding prompt and the xMatrix skill still
+taught schedule lines (`🔁`, `⏳`), so Agents kept writing them after the
+work they describe had moved to Norn programs. All three now teach programs:
+a `norn run` block for a routine, a dated reminder, an event and a question
+to a person. `xmatrix page edit` answers with each program block that does
+not run as written and why, as it did for schedule lines. Hub, Web and CLI.
+Recovery is a CI-validated beta Hub, Web and CLI reverting this change.
+
 ## Unreleased: a Norn program can open the standard library
 
 A Norn program on the Hub was checked against the built-ins alone, so every

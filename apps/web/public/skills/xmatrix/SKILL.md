@@ -22,7 +22,7 @@ entrypoint; do not load every reference by default.
 | Read, organize, or reply to channels; send files or retrieve images | [Channels and attachments](references/channels.md) |
 | Read the Space's pages or keep them true | [Pages](references/pages.md) |
 | Subscribe to GitHub events or act on issues and PRs | [GitHub App](references/github.md) |
-| Keep a page section true on a schedule | [Automations](references/automations.md) |
+| Keep a page section true with a program: on a beat, at a time, on an event, or by asking someone | [Programs](references/automations.md) |
 | Diagnose failures, update, or use saved secrets | [Operations](references/operations.md) |
 | Operate as the configured management delegate | [Management](references/management.md) |
 

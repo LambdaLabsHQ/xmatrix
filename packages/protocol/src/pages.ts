@@ -63,12 +63,12 @@ export interface PageRevision {
   createdAt: string;
 }
 
-/** A schedule line that does not run as written, and why (docs/design/pages-live-document.md §6.1). */
+/** A schedule line or a `norn run` block that does not run as written, and why. */
 export interface PageScheduleProblem { source: string; problem: string }
 
 /**
  * A whole-document page edit as committed, and what it did besides its text:
- * the schedule lines it left that cannot run as written, and the top sections
+ * the schedule lines and programs it left that cannot run as written, and the top sections
  * it removed. The writer is told at once, as either is otherwise silent.
  */
 export interface PageEditResult {

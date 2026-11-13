@@ -51,6 +51,9 @@ The Page draws that as the program's steps, joined under the block
 `xmatrix page read` prints the same under `programs:` in its header, one
 line a block: its state, its conversation, how many requests it made and how
 the latest stands.
+A whole-document edit answers with each block that does not run as written
+and why (`nornProgramProblems`, in the edit's `scheduleProblems`), so an
+Agent that writes a program reads the checker's words at once.
 
 ## State
 

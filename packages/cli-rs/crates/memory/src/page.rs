@@ -170,7 +170,7 @@ fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
     }
     for schedule in &edited.schedule_problems {
         out.push_str(&format!(
-            "⚠ This schedule does not run as written: {}\n    {}\n",
+            "⚠ This does not run as written: {}\n    {}\n",
             schedule.problem, schedule.source
         ));
     }
@@ -1282,7 +1282,7 @@ mod page_tests {
         assert_eq!(
             render_edit_effects("roadmap", 224, &edited),
             "⚠ Removed section \"Releases\" and everything under it. If that was not meant, see it with: xmatrix page read roadmap --revision 224\n\
-             ⚠ This schedule does not run as written: 🔁 starts with every and a cadence\n    - [ ] Sweep 🔁 every month\n"
+             ⚠ This does not run as written: 🔁 starts with every and a cadence\n    - [ ] Sweep 🔁 every month\n"
         );
     }
 

@@ -671,13 +671,15 @@ test("random Agents' edits, people's typing and commits always end on one page e
   }
 });
 
-test("an Agent edit answers which sections it removed and which schedule lines cannot run", async () => {
+test("an Agent edit answers which sections it removed and which schedule lines and programs cannot run", async () => {
   const h = harness();
   const ann = await annConnected(h);
   const result = await h.session.submitEdit(agent, { baseRevision: 1,
-    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 3 months\n", conversationIds: [] });
+    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 3 months\n\n```norn run sweep\nopen Std\nroutine(~every=1d, \"Sweep\")\n```\n\n" +
+      "```norn run fine\nafter(1h)->wait\n```\n", conversationIds: [] });
   assert.deepEqual(result.removedSections, ["Notes"]);
-  assert.deepEqual(result.scheduleProblems.map((line) => line.source), ["- [ ] Sweep 🔁 every 3 months"]);
+  assert.deepEqual(result.scheduleProblems.map((line) => line.source), ["- [ ] Sweep 🔁 every 3 months", "```norn run sweep"]);
+  assert.match(result.scheduleProblems[1].problem, /from/u);
   assert.doesNotMatch(ann.text.toString(), /## Notes/u);
 });
 
