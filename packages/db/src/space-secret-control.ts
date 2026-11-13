@@ -256,6 +256,29 @@ export class PostgresSpaceSecretRepository {
   }
 
   /**
+   * A Run whose owner is a Space admin makes a held secret `ask`: fewer Runs
+   * read it, which its owner may do by hand, and it is audited. Opening one
+   * up to `auto`, or changing its value, stays with a person.
+   */
+  async runAsk(run: RunSecretCaller, secretRef: string) {
+    const ref = secretRefOf(secretRef);
+    return this.inSpace(run.spaceId, "space-secret.run-ask", async (tx) => {
+      const spaceId = await liveRunSpace(tx, run, "write");
+      await requireRole(tx, spaceId, run.ownerUserId, SECRET_ADMINS, "changes how its secrets are read");
+      const rows = await tx.query({ name: "space_secret_run_ask_v1", text: `UPDATE data.space_secrets
+        SET access='ask',updated_by_user_id=$3,version=version+(access<>'ask')::int,
+          updated_at=CASE WHEN access<>'ask' THEN GREATEST(clock_timestamp(),created_at) ELSE updated_at END
+        WHERE space_id=$1 AND secret_ref=$2 RETURNING *`, values: [spaceId, ref, run.ownerUserId], maxRows: 1 });
+      if (!rows[0]) throw new SpaceSecretError("secret_not_found", 404, `Secret ${ref} is not saved in this Space`);
+      await tx.query({ name: "space_secret_run_ask_audit_v1", text: `INSERT INTO
+        data.secret_grant_audit (command_id,grant_id,owner_user_id,action,machine_id,space_id,secret_refs_json,created_at)
+        VALUES ($1,$2,$3,'space_ask',NULL,$4,$5::jsonb,clock_timestamp())`, values: [crypto.randomUUID(),
+        `run:${run.runId}`.slice(0, 300), run.ownerUserId, spaceId, JSON.stringify([ref])], maxRows: 0 });
+      return { secret: entry(rows[0]) };
+    });
+  }
+
+  /**
    * A Space admin answers a Run's request card: saves the value when the
    * Space has no such secret yet (or a new one is typed), and lets that Run
    * read it. Repeating it is harmless.
@@ -341,7 +364,7 @@ export class PostgresSpaceSecretRepository {
     const current = (await tx.query({ name: "space_secret_write_read_v1", text: `SELECT * FROM data.space_secrets
       WHERE space_id=$1 AND secret_ref=$2`, values: [spaceId, ref], maxRows: 1 }))[0];
     if (current && mode === "create") throw new SpaceSecretError("secret_already_exists", 409,
-      "This Space already has a secret with this alias");
+      "This Space already has a secret with this alias: an Agent Run makes it ask first with `--access ask` alone; a Space admin changes its value or opens it up");
     if (!current && value === undefined) throw new SpaceSecretError("secret_value_required", 400, "A new secret needs its value");
     const envName = input.envName !== undefined ? envNameOf(input.envName) : current ? String(current.env_name) : defaultSecretEnvName(ref);
     const description = input.description !== undefined ? descriptionOf(input.description) : current?.description ?? null;
