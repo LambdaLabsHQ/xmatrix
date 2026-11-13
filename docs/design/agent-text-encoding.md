@@ -50,6 +50,10 @@ through an ASCII `$OutputEncoding` under any code page, and a body saved with
 leave pure ASCII, so on Windows a `???` run in text with no non-ASCII character
 is refused from arguments, stdin and files alike.
 
+Commands the Hub defines (`reply`, `refuse`, `broke`, `ask`, `confirm`, `choose`)
+take their text only as arguments. The CLI applies the same refusal to those
+arguments before the command line leaves for the Hub.
+
 ## Verification
 
 Regression tests exercise inherited non-UTF-8 overrides and case-insensitive
