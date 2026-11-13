@@ -202,32 +202,67 @@ const REQUEST_STATES = { open: "waiting for", answered: "answered by", refused: 
  * of whom and how it stands. A reader who cannot read its conversation sees
  * only that it is a request.
  *
- * The chip says how the request starts; a task is often a long paragraph, and
- * the whole of it is read in the preview, which scrolls.
+ * This is a reference inside a sentence. The chip says how the request starts;
+ * a task is often a long paragraph, and the whole of it is read in the
+ * preview, which scrolls. The delivery message's own request is not a chip:
+ * it is RequestReferenceBlock.
  *
  * Its mark is a task sheet. A question mark in a circle read as "unknown" or
  * "something went wrong" beside a task that is simply under way.
  */
-const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span: RequestReferenceSpan }) {
+/** The request a reference names, for whoever can read its conversation; `unavailable` for anyone else. */
+function useNornRequest(requestRef: string) {
   const scope = useContext(PageReferenceContext);
-  const catalog = useMessageReferenceCatalog();
   const { user } = useAuth();
   const request = useQuery<NornRequestView>({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "norn-request", [scope?.spaceId ?? "", span.requestRef]),
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "norn-request", [scope?.spaceId ?? "", requestRef]),
     enabled: Boolean(scope?.spaceId && scope.token && user?.id), retry: false,
-    // An open request is read again so its chip says when it has been answered; an ended one does not change.
+    // An open request is read again so it says when it has been answered; an ended one does not change.
     staleTime: 15_000, refetchInterval: (query) => (query.state.data?.state === "open" ? 30_000 : false),
-    queryFn: ({ signal }) => pageApi.request(scope!.spaceId, span.requestRef, scope!.token, signal),
+    queryFn: ({ signal }) => pageApi.request(scope!.spaceId, requestRef, scope!.token, signal),
   });
   const found = request.data;
-  if (!scope || request.isError || (!found && !request.isLoading)) {
-    return (
-      <span className="app-page-reference-chip app-page-reference-chip-unavailable" data-testid="request-reference-chip">
-        <span className="app-page-reference-chip-icon" aria-hidden="true"><Lock /></span>
-        <span className="app-page-reference-chip-label">a request</span>
-      </span>
-    );
-  }
+  return { found, unavailable: !scope || request.isError || (!found && !request.isLoading) };
+}
+
+function UnavailableRequest() {
+  return (
+    <span className="app-page-reference-chip app-page-reference-chip-unavailable" data-testid="request-reference-chip">
+      <span className="app-page-reference-chip-icon" aria-hidden="true"><Lock /></span>
+      <span className="app-page-reference-chip-label">a request</span>
+    </span>
+  );
+}
+
+/**
+ * The request a delivery message is about, in place of its "Request" line:
+ * the whole of what was asked, as the paragraphs it was written in and in the
+ * message's own body text, under a line saying whom it waits for or how it
+ * ended. A task is something to read, so none of it is cut and none of it is
+ * drawn as a chip.
+ */
+export const RequestReferenceBlock = memo(function RequestReferenceBlock({ requestRef }: { requestRef: string }) {
+  const { found, unavailable } = useNornRequest(requestRef);
+  if (unavailable) return <p className="app-request-block-unavailable"><strong>Request</strong> <UnavailableRequest /></p>;
+  const paragraphs = found?.text.split(/\n\s*\n/u).map((paragraph) => paragraph.trim()).filter(Boolean) ?? [];
+  return (
+    <div className="app-request-block" data-testid="request-reference-block" data-request-state={found?.state}>
+      <p className="app-request-block-head">
+        <ClipboardList aria-hidden="true" />
+        <strong>Request</strong>
+        {found && <span>{REQUEST_STATES[found.state]} {found.holder}</span>}
+      </p>
+      {found ? paragraphs.map((paragraph, index) => <p key={index} className="app-request-block-paragraph"><InlineRowPreview text={paragraph} /></p>)
+        : <ContentSkeleton label="Loading request" lines={2} />}
+      {found?.reply && <p className="app-request-block-reply"><strong>{found.holder}</strong> <InlineRowPreview text={found.reply} /></p>}
+    </div>
+  );
+});
+
+const RequestReferenceChip = memo(function RequestReferenceChip({ span }: { span: RequestReferenceSpan }) {
+  const catalog = useMessageReferenceCatalog();
+  const { found, unavailable } = useNornRequest(span.requestRef);
+  if (unavailable) return <UnavailableRequest />;
   const asked = found ? requestSummary(referencePreview(found.text, catalog)) : "";
   const stands = found ? `${REQUEST_STATES[found.state]} ${found.holder}` : "";
   return (

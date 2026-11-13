@@ -37,6 +37,16 @@ asks. A choice shows only its options until one that takes words is
 picked. Web only. Recovery is a CI-validated beta Web reverting this
 change.
 
+## Unreleased: a delivered request is read in full, as paragraphs
+
+Cutting a delivered request down to a one-line chip hid the task behind a
+hover. The delivery message now shows the whole request in place: the
+paragraphs it was written in, in the message's own body text with no
+highlight, under a small line saying whom it waits for or how it ended, and
+the answer once there is one. A reference to a request inside a sentence is
+still the short chip. Web only. Recovery is a CI-validated beta Web
+reverting this change.
+
 ## Unreleased: a long request stays a short chip
 
 A request's chip carried the whole first line of what was asked. A

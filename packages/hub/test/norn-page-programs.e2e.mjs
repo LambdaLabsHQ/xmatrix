@@ -144,3 +144,24 @@ test("work on a page's program that breaks off is handed on once; failing again,
     WHERE a.message_id=$1`, values: [end.messageId ?? end.id] }));
   assert.deepEqual(waits.map(wait => [wait.subject_id.startsWith("user:norn-broke-"), wait.awaiting_response]), [[true, true]]);
 }));
+
+test("a program whose conversation a person deleted stays ended, says so on the page, and keeps no other block from starting", () => pageScene("norn-deleted", async ({ call, pages, until }) => {
+  const wait = name => block("after(1d)->wait", `norn run ${name}`);
+  const { page } = await call(pages, "POST", { title: "Reminders", body: `# Reminders\n\n${wait("one")}\n` });
+  const programs = async () => (await call(`${pages}/${page.pageId}/programs`)).programs;
+  const edit = async body => call(`${pages}/${page.pageId}`, "PUT", { body, baseRevision: (await call(`${pages}/${page.pageId}`)).page.headRevision });
+  const one = await until(async () => (await programs()).find(program => program.state === "running"), "the first program");
+  // The person deletes the program's conversation: the program goes with it, and its block stays on the page.
+  await call(`${pages.replace(/\/pages$/u, "")}/channels/${one.channelId}/deletion`, "POST", { confirmation: "DELETE", acknowledge: true, name: "Reminders · one" });
+  await until(async () => (await programs()).find(program => program.name === "one" && program.state === "not_started"), "the program's removal");
+  // The next save starts the new block, and does not bring the deleted one back.
+  const saved = await edit(`# Reminders\n\n${wait("one")}\n\n${wait("two")}\n`);
+  assert.deepEqual(saved.scheduleProblems, []);
+  const now = await until(async () => { const all = await programs(); return all.some(program => program.name === "two" && program.state === "running") ? all : null; }, "the second program");
+  assert.deepEqual(now.map(program => [program.name, program.state, program.problem]),
+    [["one", "not_started", "This program's conversation was deleted, which ended it. Rename the block to run it again."], ["two", "running", undefined]]);
+  // Renamed, the block is another program, with a conversation of its own.
+  await edit(`# Reminders\n\n${wait("uno")}\n\n${wait("two")}\n`);
+  const renamed = await until(async () => (await programs()).find(program => program.name === "uno" && program.state === "running"), "the renamed program");
+  assert.notEqual(renamed.channelId, one.channelId);
+}));

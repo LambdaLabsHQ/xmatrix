@@ -40,6 +40,13 @@ restored revision), as whoever wrote it:
 - A block changed after its program ended runs again.
 - A removed block, or a removed Page, stops its program.
 
+A person who deletes a program's conversation ends the program: it goes with
+the conversation, whose identity is never used again. Its block stays on the
+Page and runs nothing; the Page says so, and renaming the block makes it
+another program with a conversation of its own. Every block is tried in a
+sync: one that cannot be brought up to date fails the sync without keeping
+the others from starting.
+
 The sync is owed from the commit until it is made. The Page's session stores
 what it owes (`programsDue`) before the work and clears it when the work is
 done, and the event that committed the revision waits for it. A sync that
@@ -226,9 +233,11 @@ message, because that message is xMatrix's own and takes no reply.
 
 Where a request is named to people, they are shown the request, not its
 reference. A message names one as `request:<ref>` (the delivery to an Agent
-does, in its heading), and the Web draws that as a chip: how what is asked
-starts, cut at a sentence or a word so a long task stays a chip, with the
-whole request, of whom it is asked and how it stands in the chip's preview, read from
+does, in its heading). The Web draws a delivery's own "Request" line as the
+request in full: the paragraphs it was written in, as body text, under a line
+saying of whom it is asked and how it stands. A reference inside a sentence is
+a chip: how what is asked starts, cut at a sentence or a word, with the whole
+request in the chip's preview. Both are read from
 `GET /api/spaces/:space/norn-requests/:ref` by whoever can read the
 request's conversation; anyone else sees only "a request". A card for a
 person carries no reference in its text at all. An Agent still answers by

@@ -1,4 +1,4 @@
-import { PostgresNornProgramRepository, PostgresPageRepository, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
+import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { effectivelyRestricted } from "./automation-occurrence-conversation";
@@ -33,6 +33,21 @@ function pageBlocks(body: string) {
   return blocks.map(block => ({ ...block, duplicate: count.get(block.name)! > 1 }));
 }
 
+/** The one conversation a block works in for its whole life. */
+const blockConversation = (pageId: string, name: string): Promise<string> => deterministicConversationId("norn-page-program", pageId, name);
+/**
+ * The blocks whose conversation a person deleted. Deleting it ended the
+ * program, and its identity is never used again: the block stays as it is
+ * until it is renamed, which makes it another program with another conversation.
+ */
+async function deletedBlocks(db: ReturnType<typeof database>, spaceId: string, pageId: string, names: string[]): Promise<Set<string>> {
+  if (!names.length) return new Set();
+  const conversations = await Promise.all(names.map(async name => [name, await blockConversation(pageId, name)] as const));
+  const deleted = await readDeletedConversations(db, { requestId: crypto.randomUUID(), spaceId, channelIds: conversations.map(([, id]) => id) });
+  return new Set(conversations.filter(([, id]) => deleted.has(id)).map(([name]) => name));
+}
+const DELETED_PROBLEM = "This program's conversation was deleted, which ended it. Rename the block to run it again.";
+
 /** What decides whether a revision changed the Page's programs. */
 export const pageProgramsKey = (body: string): string => JSON.stringify(nornBlocks(body));
 
@@ -41,6 +56,8 @@ export const pageProgramsKey = (body: string): string => JSON.stringify(nornBloc
  * starts a program, a changed one revises the program it names, a removed one
  * stops it, and a block changed after its program ended runs again. A block
  * that does not check changes nothing; the Page's program status says why.
+ * Every block is tried: one that cannot be brought up to date fails the sync,
+ * which is then made again, without keeping the others from starting.
  */
 export async function syncPagePrograms(env: Env, input: { spaceId: string; pageId: string; userId: string }): Promise<void> {
   const { spaceId, pageId, userId } = input;
@@ -56,25 +73,33 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
   const repository = async (channelId: string, requestId: string) =>
     new PostgresNornProgramRepository(db, await postgresMessageRoute(env, channelId, requestId, { database: db }));
 
+  const failures: string[] = [];
+  const each = async (name: string, work: () => Promise<void>) => {
+    try { await work(); } catch (error) { failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`); }
+  };
+  // A deleted conversation is cleared away over minutes, and its program's row with it: the program is gone at once.
+  const deleted = await deletedBlocks(db, spaceId, pageId, [...new Set([...blocks, ...programs].map(item => item.name))]);
   for (const program of programs) {
-    if (program.state !== "running" || blocks.some(block => block.name === program.name)) continue;
-    const requestId = `norn-page-remove:${program.programId}`;
-    await (await repository(program.channelId, requestId)).remove({ requestId, channelId: program.channelId, programId: program.programId });
-    await wakeAgentLaunchCoordinator(env, program.channelId, ["norn"]);
+    if (program.state !== "running" || deleted.has(program.name) || blocks.some(block => block.name === program.name)) continue;
+    await each(program.name, async () => {
+      const requestId = `norn-page-remove:${program.programId}`;
+      await (await repository(program.channelId, requestId)).remove({ requestId, channelId: program.channelId, programId: program.programId });
+      await wakeAgentLaunchCoordinator(env, program.channelId, ["norn"]);
+    });
   }
 
-  for (const block of blocks) {
+  for (const block of blocks) await each(block.name, async () => {
     const current = programs.find(program => program.name === block.name);
-    if (block.duplicate || current?.source === block.source || "refusal" in checkNornProgram(block.source)) continue;
+    if (block.duplicate || current?.source === block.source || deleted.has(block.name) || "refusal" in checkNornProgram(block.source)) return;
     if (current?.state === "running") {
       const requestId = `norn-page-revise:${current.programId}:${crypto.randomUUID()}`;
       await (await repository(current.channelId, requestId)).revise({ requestId, channelId: current.channelId,
         programId: current.programId, source: block.source, authorityUserId: userId }, nornStep());
       await wakeAgentLaunchCoordinator(env, current.channelId, ["norn"]);
-      continue;
+      return;
     }
     // One conversation for the block's whole life; each run of its program is a message there.
-    const channelId = await deterministicConversationId("norn-page-program", pageId, block.name);
+    const channelId = await blockConversation(pageId, block.name);
     await openConversation(env, { spaceId, channelId, name: `${page.title} · ${block.name}`,
       mode: await effectivelyRestricted(env, spaceId, pageId, userId) ? "closed" : "open",
       metadata: { createdBy: "norn-page-program", nornPageId: pageId, nornProgramName: block.name }, userId });
@@ -92,7 +117,8 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
     await (await repository(channelId, requestId)).start({ requestId, channelId, programId, authorKind: "user", authorId: userId,
       authorityUserId: userId, source: block.source, page: { pageId, name: block.name }, ledger: nornStartLedger }, nornStep());
     await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
-  }
+  });
+  if (failures.length) throw new Error(failures.join("; "));
 }
 
 const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoReply: "no_reply", Cancelled: "cancelled",
@@ -143,9 +169,14 @@ function programStatus(name: string, source: string, problem: string | undefined
 
 /** How each program block of a Page stands, for whoever can read the Page. The caller has read `body` as them. */
 export async function pageProgramStatus(env: Env, input: { spaceId: string; pageId: string; body: string }): Promise<PageProgramStatus[]> {
-  const programs = await readPageNornPrograms(database(env), { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
-  return pageBlocks(input.body).map(block => programStatus(block.name, block.source,
-    block.duplicate ? `Two blocks are named ${block.name}; rename one.` : undefined, programs.find(candidate => candidate.name === block.name)));
+  const db = database(env);
+  const programs = await readPageNornPrograms(db, { requestId: crypto.randomUUID(), spaceId: input.spaceId, pageId: input.pageId });
+  const blocks = pageBlocks(input.body);
+  const deleted = await deletedBlocks(db, input.spaceId, input.pageId, blocks.map(block => block.name));
+  return blocks.map(block => programStatus(block.name, block.source,
+    block.duplicate ? `Two blocks are named ${block.name}; rename one.` : deleted.has(block.name) ? DELETED_PROBLEM : undefined,
+    // A deleted conversation is cleared away over minutes: its program is gone from the page at once.
+    deleted.has(block.name) ? undefined : programs.find(candidate => candidate.name === block.name)));
 }
 
 /**
