@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["my-agents-registrations", "time-display"]);
-const { registrationActions, registrationActivity, registrationSwitch,
+const { machineSwitch, registrationActions, registrationActivity, registrationSwitch,
   registrationListed, registrationRowTitle, registrationStatus } = compiled.exports;
 
 test.after(compiled.dispose);
@@ -93,6 +93,18 @@ test("an agent its owner turned off on its machine shows off, and its owner's sw
     { on: false, changes: ["space-enable", "enable"] });
   assert.deepEqual(registrationSwitch(registration({ ...machineOff, canConfigureSpace: true })), { on: false, changes: [] },
     "only its owner can turn its machine back on");
+});
+
+test("only an agent's owner turns it off on its machine, and only one that is on and set up there", () => {
+  assert.deepEqual(machineSwitch(registration(), "owner"), { off: false, canTurnOff: true });
+  assert.deepEqual(machineSwitch(registration(), "someone-else"), { off: false, canTurnOff: false });
+  assert.deepEqual(machineSwitch(undefined, "owner"), { off: false, canTurnOff: false }, "no agent here, nothing to turn off");
+  assert.deepEqual(machineSwitch(registration({ routingReady: false, routingBlocker: "owner_environment_disabled" }), "owner"),
+    { off: true, canTurnOff: false }, "already off there");
+  assert.deepEqual(machineSwitch(registration({ routingReady: false, routingBlocker: "owner_environment_missing" }), "owner"),
+    { off: false, canTurnOff: false }, "not set up there, so it has no switch");
+  assert.deepEqual(machineSwitch(registration({ state: "disabled" }), "owner"), { off: false, canTurnOff: false },
+    "off in this Space already takes no work here");
 });
 
 test("an agent removed from the Space is added back only by its owner", () => {

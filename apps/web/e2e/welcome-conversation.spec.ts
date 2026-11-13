@@ -109,6 +109,8 @@ test.describe("desktop", () => {
     await expect(agentsIn).toContainText("Claude Code on Workstation is not signed in, so it cannot take work yet.",
       { timeout: 20_000 });
     await expect(agentsIn.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
+    // A person who does not mean to use it turns it off instead.
+    await expect(agentsIn.getByRole("button", { name: "Turn off", exact: true })).toBeVisible();
     await expect(agentsIn).not.toContainText("is in. Mention it here");
   });
 

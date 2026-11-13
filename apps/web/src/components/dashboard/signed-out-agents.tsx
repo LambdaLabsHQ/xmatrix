@@ -6,7 +6,8 @@ import { HarnessSignedOutBody } from "./harness-sign-in";
 
 /* An agent brought in whose own program is signed out on its machine looks
    ready and answers nothing. Onboarding names the program and the machine and
-   offers the sign-in in the same place (signedOutRegistrations). */
+   offers the sign-in in the same place (signedOutRegistrations), or turning
+   it off there for a person who does not mean to use it. */
 export function SignedOutAgents({ registrations, token, userId, copy }: {
   registrations: readonly AgentRegistrationSummary[]; token: string | null | undefined; userId: string | undefined;
   copy: OnboardingCopy;
@@ -16,7 +17,7 @@ export function SignedOutAgents({ registrations, token, userId, copy }: {
     <div key={JSON.stringify(registration.key)} className="mt-3" data-testid="signed-out-agent">
       <HarnessSignedOutBody registration={registration} token={token} userId={userId} copy={copy}
         program={agentPresetById(registration.key.harness)?.displayName ?? registration.displayName}
-        machine={registration.machineName} />
+        machine={registration.machineName} agent={registration} />
     </div>
   ));
 }

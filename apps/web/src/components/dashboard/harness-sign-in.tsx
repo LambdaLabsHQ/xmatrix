@@ -1,7 +1,7 @@
 "use client";
 
 import { AnimatedIcon } from "@/components/ui/animated-icon";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Copy, ExternalLink, Loader2, LogIn } from "lucide-react";
 import {
@@ -15,6 +15,7 @@ import { noticeClass } from "@/components/ui/status-tone";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import type { OnboardingCopy } from "@/lib/onboarding-copy";
+import { AgentTurnOffButton, AgentTurnedOff, useAgentTurnOff } from "./agent-turn-off";
 import { queueHarnessAction, readHarnessAction, refreshHarnessInventory } from "./machine-harness-api";
 import { ToolDetailSection } from "./tool-split";
 import { fetchMachineDaemons } from "./workspace-admin-views";
@@ -72,7 +73,7 @@ export function signedOutRegistrations(registrations: readonly AgentRegistration
     harnessSignInView({ registration, userId, daemons }).state === "signed_out");
 }
 
-export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in", onSignedIn }: {
+export function HarnessSignInSection({ registration, token, userId, bare = false, signInLabel = "Sign in", onSignedIn, otherChoice }: {
   registration: HarnessSignInTarget; token: string; userId: string;
   /** Called once a sign-in started here finishes signed in. */
   onSignedIn?: () => void;
@@ -80,6 +81,8 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
   bare?: boolean;
   /** The button's word in the caller's language. */
   signInLabel?: string;
+  /** What its owner may do instead of signing in, beside the button until a sign-in starts. */
+  otherChoice?: ReactNode;
 }) {
   const queryClient = useQueryClient();
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
@@ -172,13 +175,14 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
             {view.state ? LOGIN_STATE_LABEL[view.state] : "Not checked yet"}
             <span className="text-muted-foreground"> · the harness&apos;s own account on {registration.machineName}</span>
           </p>}
-          {!prompt && (
+          {!prompt && <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}
               onClick={() => queue.mutate({ step: "start" })}>
               {starting ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : <LogIn />}
               {starting ? "Starting sign-in…" : operation ? "Sign-in pending" : view.state === "signed_in" ? "Sign in again" : signInLabel}
             </Button>
-          )}
+            {!busy && otherChoice}
+          </div>}
         </div>
         {operation && !prompt && view.canCancelStart && <Button size="sm" variant="ghost"
           disabled={queue.isPending || operation.step === "cancel"}
@@ -271,41 +275,56 @@ async function checkHarnessAgain(token: string, daemon: { machineId?: string; ho
 }
 
 /** What an owner reads about an agent whose program cannot take work on its
- * machine, and the one thing to do: sign it in from here, or, for a program
- * set up only on its machine, its own words and a check after setting it up. */
-export function HarnessSignedOutBody({ registration, token, userId, copy, program, machine, onSignedIn }: {
+ * machine, and what to do: sign it in from here, or, for a program set up
+ * only on its machine, its own words and a check after setting it up. With
+ * `agent`, the owner may instead turn that Agent off (agent-turn-off.tsx),
+ * and one already off says so and nothing else. */
+export function HarnessSignedOutBody({ registration, token, userId, copy, program, machine, onSignedIn, agent }: {
   registration: HarnessSignInTarget; token: string; userId: string; copy: OnboardingCopy;
   program: string; machine: string; onSignedIn?: () => void;
+  /** The viewer's own Agent for this program in this Space, where its switch is not already beside this. */
+  agent?: AgentRegistrationSummary;
 }) {
   const queryClient = useQueryClient();
+  const turn = useAgentTurnOff(agent, token, userId);
+  // Once it takes work from here, there is no second choice left to make.
+  const [takesWork, setTakesWork] = useState(false);
+  const signedIn = () => { setTakesWork(true); onSignedIn?.(); };
   const view = harnessSignInView({ registration, userId, daemons: useOwnerDaemons(token, userId).data });
   const check = useMutation({
     mutationFn: () => checkHarnessAgain(token, view.daemon ?? {}, registration.key.harness),
     onSuccess: (ready) => {
       void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain({ userId }, "machine-daemons", []) });
-      if (ready) onSignedIn?.();
+      if (ready) signedIn();
     },
   });
+  if (agent && turn.off) return <AgentTurnedOff agent={agent} copy={copy} program={program} machine={machine} />;
+  const mayTurnOff = turn.offered && !takesWork;
+  const turnOff = mayTurnOff ? <AgentTurnOffButton turn={turn} copy={copy} /> : null;
+  const turnOffFailed = turn.error && <p role="status" className="mt-2 text-[13px] text-destructive">{turn.error}</p>;
   if (!view.setUpThere) {
     return <>
-      <p>{copy.signedOut(program, machine)}</p>
+      <p>{mayTurnOff ? copy.signedOutOrOff(program, machine) : copy.signedOut(program, machine)}</p>
       <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
-        signInLabel={copy.signIn} onSignedIn={onSignedIn} /></div>
+        signInLabel={copy.signIn} onSignedIn={signedIn} otherChoice={turnOff} /></div>
+      {turnOffFailed}
     </>;
   }
   const command = agentPresetById(registration.key.harness)?.runtime ?? registration.key.harness;
   return <>
     <p>{copy.cannotTakeWork(program, machine)}</p>
     {view.detail && <p className="mt-1 text-muted-foreground">{copy.itSays} <q>{view.detail}</q></p>}
-    <p className="mt-1">{copy.setUpThere(command)}</p>
-    <div className="mt-2 flex items-center gap-2">
+    <p className="mt-1">{copy.setUpThere(command)}{mayTurnOff ? <>{copy.gap}{copy.orTurnOff}</> : null}</p>
+    <div className="mt-2 flex flex-wrap items-center gap-2">
       <Button size="sm" variant="outline" disabled={check.isPending || !view.daemon} onClick={() => check.mutate()}>
         {check.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.checkAgain}
       </Button>
+      {turnOff}
       {check.data === false && <p role="status" className="text-[13px] text-muted-foreground">{copy.stillCannot}</p>}
       {check.isError && <p role="status" className="text-[13px] text-destructive">
         {userErrorMessage(check.error, "Couldn't send that to the machine")}</p>}
     </div>
+    {turnOffFailed}
   </>;
 }
 

@@ -46,6 +46,15 @@ const en = {
   signedOut: (program: string, machine: string) =>
     `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
   signIn: "Sign in",
+  /** The same, for an owner who may turn that Agent off instead. */
+  signedOutOrOff: (program: string, machine: string) =>
+    `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here, or turn it off so nothing is sent to it:`,
+  turnOff: "Turn off",
+  /** After the way to set it up there, for the same owner. */
+  orTurnOff: "Or turn it off, so nothing is sent to it.",
+  turnedOff: (program: string, machine: string) => `${program} on ${machine} is off in every Space, so nothing is sent to it.`,
+  /** Around the link to Agents. */
+  turnOnAgain: ["Turn it on again in ", "Agents", "."],
   /** A program that is set up on its own machine, not signed in from here. */
   cannotTakeWork: (program: string, machine: string) => `${program} on ${machine} can't take work yet.`,
   itSays: "It says:",
@@ -181,6 +190,12 @@ const zh: OnboardingCopy = {
   nothingUntilUpdated: "更新之前不会给它派活。",
   signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
   signIn: "登录",
+  signedOutOrOff: (program, machine) =>
+    `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录；不用它就关掉，关掉后不会给它派活：`,
+  turnOff: "关掉",
+  orTurnOff: "不用它也可以关掉，关掉后不会给它派活。",
+  turnedOff: (program, machine) => `${machine} 上的 ${program} 已关掉，所有 Space 都不会给它派活。`,
+  turnOnAgain: ["要再用它，到 ", "Agents", " 里打开。"],
   cannotTakeWork: (program, machine) => `${machine} 上的 ${program} 还不能接活。`,
   itSays: "它说：",
   setUpThere: (command) => `在那台电脑的终端里运行 ${command}，按提示设置好，然后再查一次。`,

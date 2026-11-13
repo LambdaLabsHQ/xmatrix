@@ -108,8 +108,9 @@ export function registrationActions(registration: AgentRegistrationSummary): MyA
 /** The agent's one on/off switch in this Space, for a Space owner/admin and
  * for the agent's owner. Off stops its running work here and takes no new
  * work; on lets it work again. `changes` are the commands that reach the
- * other position: an agent its owner turned off on its machine (before the
- * switch was per Space) is turned on there too. */
+ * other position: an agent its owner turned off on its machine (from a card
+ * about its program there, `machineSwitch`, or before the switch was per
+ * Space) is turned on there too. */
 export interface RegistrationSwitch {
   on: boolean;
   changes: Array<"space-disable" | "space-enable" | "enable">;
@@ -125,4 +126,14 @@ export function registrationSwitch(registration: AgentRegistrationSummary): Regi
     ...(registration.state === "disabled" ? ["space-enable" as const] : []),
     ...(machineOff && registration.canManageOwnerGrant ? ["enable" as const] : []),
   ] };
+}
+
+/** The owner's switch for an agent on its machine, in every Space, as a card
+ * about the program there reads it: whether it is off, and whether there is
+ * one for this viewer to turn off (their own agent, on in this Space and set
+ * up on its machine). Only its owner holds it. */
+export function machineSwitch(registration: AgentRegistrationSummary | undefined, userId: string): { off: boolean; canTurnOff: boolean } {
+  if (!registration || registration.key.ownerUserId !== userId) return { off: false, canTurnOff: false };
+  const off = registration.routingBlocker === "owner_environment_disabled";
+  return { off, canTurnOff: !off && registration.state === "enabled" && registration.routingBlocker !== "owner_environment_missing" };
 }
