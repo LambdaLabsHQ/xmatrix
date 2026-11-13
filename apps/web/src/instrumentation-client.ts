@@ -45,10 +45,15 @@ async function startErrorReporting(dsn: string) {
   removeEventListener("error", holdError);
   removeEventListener("unhandledrejection", holdRejection);
   for (const held of early.splice(0)) {
-    const located = held.where.script !== undefined || held.where.line !== undefined || held.where.column !== undefined;
+    const extra: Record<string, string | number> = {};
+    if (held.where.script !== undefined) extra.script = held.where.script;
+    if (held.where.line !== undefined) extra.line = held.where.line;
+    if (held.where.column !== undefined) extra.column = held.where.column;
+    // `mechanism` and `extra` are exclusive on this capture call. The location
+    // is capture context, which is what a later report shows.
     captureException(held.error, {
       mechanism: { type: "onerror", handled: false },
-      ...(located ? { extra: held.where } : {}),
+      ...(Object.keys(extra).length > 0 ? { captureContext: { extra } } : {}),
     });
   }
 }
