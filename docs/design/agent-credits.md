@@ -89,7 +89,27 @@ past-due Space in its read-only grace, every commit is refused the same way and
 its text stays pending until the plan admits it. A refused commit never stops the session from
 re-authorizing open connections.
 
-Settings → Billing shows the month's usage, the pack balance and the grace.
+Settings → Billing shows the month's usage, the pack balance and the grace,
+who used it, and how credits are counted.
+
+## Who used it
+
+`data.space_credit_usage` itemizes every counted write by month, meter
+(`credit` or `free`), author and kind (message or page revision), advanced in
+the same statement that counts the write, so the items never drift from the
+counters. An Agent is named by its registration name and owner, an app by its
+id, a person by their user id. The core hands the policy the author's owner
+(`$15`) and name (`$16`) beside the author kind. The operator's own Space,
+whose credits are waived, records what it would have used, so its Billing
+shows real consumption marked "not charged" rather than zero. Paid X calls are
+read from `data.paid_call_receipts` by the person who made them.
+
+Billing lists, for a paid Space, this month's credits by Agent, app and
+person's X calls, and for a Free Space every write it has made; each person
+sees the total for themself and their own Agents. Writes counted before the
+ledger existed (2026-11) show as one "counted before itemizing began" row, so
+the items always add up to the meter. A deployment that meters nothing writes
+no ledger.
 
 A Free Space posts no notice when it nears or reaches its 500 writes. Instead
 an ask card, the same brass slip as an approval, docks above the composer where
