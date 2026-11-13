@@ -50,6 +50,29 @@ integration("concurrent Agent saves of one alias leave exactly one secret, reada
   } finally { await f.close(); }
 });
 
+integration("a Run whose owner is a Space admin makes a secret ask first; it cannot open one up or replace it", async () => {
+  const f = await spaceSecretFixture();
+  try {
+    await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin, secretRef: "open-key", value: "open-value", access: "auto" });
+    await assert.rejects(f.secret.runAsk(f.run, "open-key"), (error) => error.code === "forbidden",
+      "a member's Run does not change how the Space's secrets are read");
+    await f.client.query("UPDATE data.space_members SET role='admin' WHERE space_id=$1 AND user_id=$2",
+      [f.ids.space, f.ids.owner]);
+    await assert.rejects(f.secret.runAsk(f.run, "absent-key"), (error) => error.code === "secret_not_found");
+    assert.equal((await f.secret.runAsk(f.run, "open-key")).secret.access, "ask");
+    assert.equal((await f.secret.runAsk(f.run, "open-key")).secret.access, "ask", "repeating it is harmless");
+    await assert.rejects(f.secret.runRead(f.run, ["open-key"]), (error) => error.code === "secret_approval_required",
+      "the Run that closed it asks like any other");
+    await assert.rejects(f.secret.runCreate(f.run, { secretRef: "open-key", value: "other", access: "auto" }),
+      (error) => error.code === "secret_already_exists");
+    const [row] = (await f.client.query("SELECT access,version FROM data.space_secrets WHERE space_id=$1", [f.ids.space])).rows;
+    assert.deepEqual([row.access, Number(row.version)], ["ask", 2], "the value is kept and one change is counted");
+    const audit = await f.client.query(`SELECT grant_id,secret_refs_json FROM data.secret_grant_audit
+      WHERE owner_user_id=$1 AND action='space_ask'`, [f.ids.owner]);
+    assert.deepEqual(audit.rows[0], { grant_id: `run:${f.ids.run}`, secret_refs_json: ["open-key"] });
+  } finally { await f.close(); }
+});
+
 integration("a Space creates and reads past 128 secrets without truncating aliases, values or approvals", async () => {
   const f = await spaceSecretFixture();
   try {
