@@ -10,14 +10,14 @@ permissions:
 
 jobs:
   prune:
-    name: prune verified historical R2 releases
+    name: prune R2 releases past retention
     runs-on: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && fromJSON('["self-hosted","xmatrix-us-release"]') || 'ubuntu-24.04' }}
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v6
         with:
           node-version: "22"
-      - name: Preserve current channels and prune only verified 90-day GitHub archives
+      - name: Keep the channels' releases, the newest 10 stable and the last week; prune the rest
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
