@@ -1,6 +1,10 @@
 import { ControlError, PostgresNornProgramRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { checkNornProgram, nornDeliveryBody, nornEndBody, nornProgramIn, nornStartLedger, nornStep, type NornPassResult } from "./norn-host";
+import { canonicalMentionToken } from "@xmatrix/protocol";
+import { markCardAnswered } from "./channel-messages";
+import { recordCommandResult } from "./command-result";
+import { checkNornProgram, nornDeliveryBody, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornRequestCard,
+  nornStartLedger, nornStep, personHolder, type NornPassResult, type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -9,6 +13,9 @@ import { wakeRestingInstances } from "./registration-launch-dispatch";
 import type { ProductMessagePostCommitInput } from "./product-message-post-commit";
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
+
+/** The message that carries a request of a person as a card. */
+const NORN_REQUEST_MESSAGE_KIND = "xmatrix.system.norn-request";
 
 /** After a message xMatrix wrote for a program is committed: its summon starts, its mention wakes. */
 type PostCommit = (input: ProductMessagePostCommitInput) => Promise<unknown>;
@@ -31,12 +38,16 @@ async function say(env: Env, postCommit: PostCommit, input: { channelId: string;
   /** The one Instance the message is for. It alone is woken if it rests; nobody else in the conversation is. */
   onlyInstanceId?: string;
   /** Said for whoever reads the conversation: it summons and wakes nobody. */
-  quiet?: boolean }): Promise<void> {
+  quiet?: boolean;
+  /** A request of a person: the card the message carries, and the one it waits on. */
+  card?: NornRequestCard }): Promise<void> {
   const response = await dispatchProductMessageAppend(env, input.channelId, {
     commandId: `norn-message:${input.messageId}`.slice(0, 200), messageId: input.messageId, channelId: input.channelId,
     body: input.body, principal: { kind: "user", id: input.authorityUserId }, xmatrixAuthor: true,
     ...(input.onlyInstanceId || input.quiet ? {} : { launch: true }),
-    ...(input.replyTo ? { residual: { replyToMessageId: input.replyTo } } : {}),
+    ...(input.card ? { messageKind: NORN_REQUEST_MESSAGE_KIND, waitsOnUserIds: [input.card.holderUserId] } : {}),
+    ...(input.replyTo || input.card ? { residual: { ...(input.replyTo ? { replyToMessageId: input.replyTo } : {}),
+      ...(input.card ? { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, nornRequest: input.card } } : {}) } } : {}),
   });
   if (!response.ok) throw new Error(`Norn message append failed (${response.status})`);
   if (input.quiet) return;
@@ -92,7 +103,25 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await programs.advance({ requestId, channelId, programId }, nornStep());
   }
   const work = await programs.channelWork({ requestId, channelId });
+  let undeliverable = false;
   for (const delivery of work.deliveries) {
+    if (personHolder(delivery.holder)) {
+      // A person is found by name among those who can read the conversation, as a mention finds them.
+      const named = canonicalMentionToken(delivery.holder.slice(1));
+      const people = await programs.people({ requestId, channelId, matches: name => canonicalMentionToken(name) === named });
+      const scope = { requestId, channelId, programId: delivery.programId };
+      if (people.length !== 1) {
+        await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: { tag: "Broke",
+          reason: people.length ? `More than one person here is named ${delivery.holder}` : `Nobody named ${delivery.holder} can read this conversation` } }));
+        undeliverable = true;
+        continue;
+      }
+      await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
+        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, delivery.requestRef),
+        card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!) });
+      await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
+      continue;
+    }
     // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
       authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
@@ -100,6 +129,15 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage }) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });
+  }
+  // A request nobody could be found for ended in this pass: what its program does next is due now.
+  if (undeliverable) await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
+  // A person's request that ended says how under its card, and no longer waits on them.
+  for (const closing of work.closings) {
+    if (closing.reply) await recordCommandResult(env, { channelId, messageId: closing.deliveryMessageId, key: "norn-request",
+      entry: { note: { text: nornOutcomeText(closing.holder, closing.reply as Reply) } } });
+    await markCardAnswered(env, channelId, closing.deliveryMessageId, closing.holderUserId);
+    await programs.released({ requestId, channelId, programId: closing.programId, ledgerRequestId: closing.requestId });
   }
   // What a program says goes to its conversation as xMatrix, naming whom it is for; it starts and wakes nobody.
   for (const notice of work.notices) {
@@ -145,6 +183,26 @@ export async function answerNornRequest(env: Env, input: { channelId: string; ru
     nornStep({ requestId: held.requestId, epoch: held.epoch, reply }));
   if (!result) return { status: "failed", refusal: "The request has already ended" };
   // What the answer opened, or the program's end, is the coordinator's to deliver.
+  if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  return result;
+}
+
+/**
+ * The person a request was delivered to answers it or declines. Only that
+ * person holds it: the request is found by their id, never by a name. Returns
+ * undefined when they hold no such open request.
+ */
+export async function answerNornRequestAsPerson(env: Env, input: { channelId: string; userId: string; requestRef: string;
+  outcome: "answered" | "refused"; text: string }): Promise<NornPassResult | undefined> {
+  const requestId = `norn-answer:${input.requestRef}:${crypto.randomUUID()}`;
+  const programs = await repository(env, input.channelId, requestId);
+  const held = await programs.personRequest({ requestId, requestRef: input.requestRef, userId: input.userId });
+  if (!held || held.channelId !== input.channelId) return undefined;
+  const result = await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
+    nornStep({ requestId: held.ledgerRequestId, epoch: held.epoch,
+      reply: input.outcome === "answered" ? { typed: input.text } : { tag: "Refused", reason: input.text } }));
+  if (!result) return undefined;
+  // The card is closed and what the answer opened is delivered by the coordinator.
   if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
   return result;
 }

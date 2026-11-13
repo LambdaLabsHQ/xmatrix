@@ -3,6 +3,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { ControlError } from "./control-error.js";
 import { inActiveSpace } from "./page-control.js";
+import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 
 /**
  * Norn programs (docs/architecture/norn-host.md). A program's request ledger
@@ -49,7 +50,12 @@ const instanceTakesMessages = (instance: string) => `((${instance}.status IN ('o
 /** The Instance that holds request `r`: the one it was handed to, or the one its delivery started. */
 const requestInstance = (r: string) => `COALESCE(${r}.instance_id,(SELECT launch.instance_id FROM data.agent_launches launch
     WHERE launch.channel_id=${r}.channel_id AND launch.trigger_id=${r}.delivery_message_id LIMIT 1))`;
-const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_executions execution
+/** The person who holds request `r` can still read its conversation. A person's request needs nothing working on it. */
+const NORN_REQUEST_HELD_BY_PERSON_SQL = `(r.holder_user_id IS NOT NULL AND EXISTS (SELECT 1 FROM data.channels held_in
+      WHERE held_in.space_id=r.space_id AND held_in.channel_id=r.channel_id
+        AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "held_in",
+          principalKindSql: "'user'", principalIdSql: "r.holder_user_id" })}))`;
+const NORN_REQUEST_WORKED_SQL = `(${NORN_REQUEST_HELD_BY_PERSON_SQL} OR EXISTS (SELECT 1 FROM data.agent_message_executions execution
       WHERE execution.channel_id=r.channel_id AND execution.source_message_id=r.delivery_message_id
         AND execution.state IN ('accepted','running'))
     -- A turn that was interrupted (a newer message arrived) has not ended the work: its Instance goes on in its
@@ -79,8 +85,10 @@ const NORN_REQUEST_WORKED_SQL = `(EXISTS (SELECT 1 FROM data.agent_message_execu
  * a shared conversation lets each go at once.
  */
 const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL
-    AND NOT EXISTS (SELECT 1 FROM data.norn_programs kept WHERE kept.space_id=r.space_id AND kept.program_id=r.program_id
+    AND r.holder_user_id IS NULL AND NOT EXISTS (SELECT 1 FROM data.norn_programs kept WHERE kept.space_id=r.space_id AND kept.program_id=r.program_id
       AND kept.page_id IS NOT NULL AND kept.state='running'))`;
+/** A request a person held that has ended: its card still says it waits on them. */
+const NORN_REQUEST_UNCLOSED_SQL = "(r.settled_at IS NOT NULL AND r.holder_user_id IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
 
 /**
@@ -97,6 +105,7 @@ export const NORN_CHANNEL_DUE_SQL = `LEAST(
       WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL),
     (SELECT MIN(r.delivered_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_ABANDONED_SQL}),
     (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL}),
+    (SELECT MIN(r.settled_at) FROM data.norn_requests r WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNCLOSED_SQL}),
     (SELECT MIN(n.created_at) FROM data.norn_notices n WHERE n.channel_id=$1 AND n.posted_at IS NULL))`;
 /** The Channels with any program still running or unreported: `p` is the program. */
 export const NORN_PROGRAM_OPEN_SQL = "(p.state='running' OR p.reported_at IS NULL)";
@@ -275,11 +284,19 @@ export class PostgresNornProgramRepository {
                 AND registration.harness=binding.harness
             WHERE instance.instance_id=${requestInstance("r")} LIMIT 1) started ON TRUE
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
+      // A person's request that has ended: its card is told how, and stops waiting on them.
+      const closings = await tx.query<QueryResultRow>({ name: "norn_channel_closings_v1", text: `SELECT r.program_id,r.request_id,
+          r.holder,r.holder_user_id,r.delivery_message_id,p.ledger_json->'requests'->r.request_id->'reply' AS reply_json
+        FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+        WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNCLOSED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       const notices = await tx.query<QueryResultRow>({ name: "norn_channel_notices_v1", text: `SELECT n.program_id,n.notice_id,
           n.recipient,n.body,p.authority_user_id,p.page_id
         FROM data.norn_notices n JOIN data.norn_programs p ON p.space_id=n.space_id AND p.program_id=n.program_id
         WHERE n.channel_id=$1 AND n.posted_at IS NULL ORDER BY n.created_at,n.notice_id LIMIT 200`, values, maxRows: 200 });
       return {
+        closings: closings.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
+          holder: String(row.holder), holderUserId: String(row.holder_user_id), deliveryMessageId: String(row.delivery_message_id),
+          reply: row.reply_json as unknown })),
         notices: notices.map(row => ({ programId: String(row.program_id), noticeId: String(row.notice_id),
           recipient: String(row.recipient), body: String(row.body), authorityUserId: String(row.authority_user_id),
           onPage: row.page_id !== null })),
@@ -304,11 +321,43 @@ export class PostgresNornProgramRepository {
   /** The delivery message of this holding was appended and its launch dispatched. */
   async delivered(input: Scope & { ledgerRequestId: string; epoch: number;
     /** The Instance the request was handed to, when it went to one already there. */
-    instanceId?: string }): Promise<void> {
-    await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v2", text: `UPDATE
-      data.norn_requests SET delivered_at=clock_timestamp(),instance_id=$5 WHERE space_id=$1 AND program_id=$2 AND request_id=$3
-        AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.epoch,
-        input.instanceId ?? null], maxRows: 0 }));
+    instanceId?: string;
+    /** The person the request went to. */
+    holderUserId?: string }): Promise<void> {
+    await this.transaction(input.requestId, "delivered", tx => tx.query({ name: "norn_request_delivered_v3", text: `UPDATE
+      data.norn_requests SET delivered_at=clock_timestamp(),instance_id=$5,holder_user_id=$6 WHERE space_id=$1 AND program_id=$2
+        AND request_id=$3 AND epoch=$4 AND delivered_at IS NULL`, values: [this.placement.spaceId, input.programId,
+        input.ledgerRequestId, input.epoch, input.instanceId ?? null, input.holderUserId ?? null], maxRows: 0 }));
+  }
+
+  /**
+   * The people a name addresses in this conversation: each member who can
+   * read it and whose name or handle is `matches`. The caller delivers only
+   * when that is exactly one person.
+   */
+  async people(input: { requestId: string; channelId: string; matches: (name: string) => boolean }): Promise<string[]> {
+    return this.transaction(input.requestId, "people", async tx => {
+      const rows = await tx.query<QueryResultRow>({ name: "norn_channel_people_v1", text: `SELECT m.user_id,
+          COALESCE(NULLIF(h.name,''),m.display_name,'') AS name,h.handle
+        FROM data.channels c JOIN data.space_members m ON m.space_id=c.space_id LEFT JOIN control.auth_users h ON h.id=m.user_id
+        WHERE c.space_id=$1 AND c.channel_id=$2 AND ${channelCapabilityPredicate({ capability: "message_content_read",
+          channelAlias: "c", principalKindSql: "'user'", principalIdSql: "m.user_id" })}
+        ORDER BY m.user_id LIMIT 10000`, values: [this.placement.spaceId, input.channelId], maxRows: 10_000 });
+      return rows.filter(row => [row.name, row.handle].some(name => typeof name === "string" && name && input.matches(name)))
+        .map(row => String(row.user_id));
+    });
+  }
+
+  /** The open request this person holds by its reference; undefined when there is none. */
+  async personRequest(input: { requestId: string; requestRef: string; userId: string }) {
+    return this.transaction(input.requestId, "person-request", async tx => {
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_person_v1", text: `SELECT r.channel_id,r.program_id,
+          r.request_id,r.epoch,r.delivery_message_id FROM data.norn_requests r
+        WHERE r.space_id=$1 AND r.request_ref=$2 AND r.holder_user_id=$3 AND r.settled_at IS NULL AND r.delivered_at IS NOT NULL
+        LIMIT 1`, values: [this.placement.spaceId, input.requestRef, input.userId], maxRows: 1 });
+      return row ? { channelId: String(row.channel_id), programId: String(row.program_id), ledgerRequestId: String(row.request_id),
+        epoch: Number(row.epoch), deliveryMessageId: String(row.delivery_message_id) } : undefined;
+    });
   }
 
   /** The Instance this ended request started was stopped or retired, or had already gone. */

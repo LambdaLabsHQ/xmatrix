@@ -1,4 +1,4 @@
-import { createPgSpawnableScenario, isSpawnOf, runHubCommand as run, startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
+import { createPgSpawnableScenario, inTestTransaction, isSpawnOf, runHubCommand as run, startPgHubWorker } from "./agent-launch-postgres.fixture.mjs";
 import { assert, channelHistory, mintAgentRunToken, MOCK_TOKEN, postChannelMessage, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
 
 const program = source => `Run this review.\n\n\`\`\`norn run\n${source}\n\`\`\``;
@@ -64,6 +64,43 @@ switch run(@codex, "Review the design")->wait {
     // The Run was started for that one request: once it has ended, its Machine is told to stop it.
     const stop = await daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId, "the holder's stop");
     assert.equal(stop.runId, spawn.runId);
+
+    // A request of a person is a card that waits on them: found by name, answered by them alone, closed with its outcome.
+    // Mock authentication creates no account row, and a person is found by the name their account carries.
+    await inTestTransaction(tx => tx.query({ text: `INSERT INTO control.auth_users (id,name,email,handle,profile_version,created_at,updated_at)
+      VALUES ($1,'Norn','norn@example.com','norn',1,now(),now()) ON CONFLICT (id) DO NOTHING`, values: [ownerId] }));
+    const asked = (await postChannelMessage(worker, MOCK_TOKEN, channelId, program(`switch confirm(@Norn, "Ship the release?", ~about="4.2")->wait {
+| Answered(Yes) => "shipped"
+| Answered(No) => "held"
+| other => fail(other)
+}`))).message;
+    const card = await until(async () => (await messages()).find(message =>
+      message.replyToMessageId === asked.messageId && message.messageResidual?.appMetadata?.nornRequest), "the request card");
+    const request = card.messageResidual.appMetadata.nornRequest;
+    assert.deepEqual([request.verb, request.holder, request.holderUserId, request.text, request.about, card.body.split("\n")[0]],
+      ["confirm", "@Norn", ownerId, "Ship the release?", "4.2", "@Norn"]);
+    const answer = (ref, body, token = MOCK_TOKEN) => worker.fetch(`/api/channels/${channelId}/norn-requests/${ref}/answer`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+    // An Agent Run does not answer for a person, and an answer of the wrong kind is refused with the request left open.
+    assert.ok([401, 403].includes((await answer(request.ref, { outcome: "answered", text: "Yes" }, runToken)).status));
+    assert.match((await (await answer(request.ref, { outcome: "answered", text: "Maybe" })).json()).refusal, /Yes/u);
+    assert.equal((await (await answer(request.ref, { outcome: "answered", text: "Yes" })).json()).status, "completed");
+    assert.equal((await answer(request.ref, { outcome: "answered", text: "No" })).status, 404);
+    const shipped = await until(async () => (await messages()).find(message =>
+      message.replyToMessageId === asked.messageId && message.body.startsWith("The program finished")), "the program's end");
+    assert.equal(shipped.body, "The program finished: shipped");
+    const closed = await until(async () => (await messages()).find(message =>
+      message.messageId === card.messageId && message.commandResult?.notes?.length), "the card's outcome");
+    assert.equal(closed.commandResult.notes[0].text, "@Norn answered: Yes");
+
+    // A name nobody here answers to ends the request at once, with the reason, and the program goes on from that.
+    const nobody = (await postChannelMessage(worker, MOCK_TOKEN, channelId, program(`switch ask(@Nemo, "Anyone?")->wait {
+| Broke(why) => why
+| other => fail(other)
+}`))).message;
+    const unreached = await until(async () => (await messages()).find(message =>
+      message.replyToMessageId === nobody.messageId && message.body.startsWith("The program finished")), "the unreachable request's end");
+    assert.equal(unreached.body, "The program finished: Nobody named @Nemo can read this conversation");
   } finally {
     daemon?.ws.close();
     await worker.stop();

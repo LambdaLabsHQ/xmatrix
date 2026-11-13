@@ -127,6 +127,31 @@ the request wants text, what was typed is the answer. An answer that does not
 have the form the program reads is refused and kept as evidence in the
 ledger; the request stays open.
 
+## Asking a person
+
+A holder that is no harness and no Instance address is a person:
+`confirm(@Daniel, "Ship 4.2?", ~by=1d)`. Who that is is read where the request
+is delivered, among those who can read the conversation, by name or handle
+as a mention reads them. Nobody by that name, or more than one, settles the
+request `Broke` with the reason, and the program goes on from that.
+
+The delivery is a message from xMatrix that names the person and carries the
+request as a card (`appMetadata.nornRequest`: what is asked, about what,
+what `choose` offers, when it closes). It declares a wait on them, so it
+shows where what needs them shows. The Web draws the controls from the
+request's verb: Yes and No, the options, or a field for words; Decline
+refuses with a reason. Only that person's answer is taken
+(`POST /api/channels/:channel/norn-requests/:ref/answer`, by their id in
+`norn_requests.holder_user_id`, expand migration 0252), and it is read
+against the request's type as an Agent's is.
+
+A person's request needs nothing working on it. It stays open until they
+answer, its `~by` passes (`NoReply`: silence is not consent), the program
+ends, or they can no longer read the conversation (`Broke`, by the same
+`message_content_read` rule that lets them read it). When it ends, the Hub
+records how on the card's message as a command result and the wait on them
+ends.
+
 ## Never silent
 
 A delivered request is abandoned when it is unanswered and nothing works on
@@ -257,7 +282,7 @@ addresses that Instance, so it wakes to read the result.
 
 ## Not in this version
 
-- Requests to people, and to an existing Instance.
+- Requests to an existing Instance by its address.
 - Facts from outside that hold once (a given pull request merged, a release
   that contains it) and the standard library.
 - A preview of what an edit to a Page's program would change before it is saved.

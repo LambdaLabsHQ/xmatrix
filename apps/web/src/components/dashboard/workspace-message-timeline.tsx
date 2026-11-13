@@ -293,6 +293,7 @@ import { useSystemBackHandler } from "./use-system-back";
 import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
 import { MessageAskLine } from "./message-ask-line";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
@@ -1949,6 +1950,7 @@ export const MessageRow = memo(function MessageRow({
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const quotaRetryId = quotaRetryOfferId(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
+  const nornRequest = nornRequestMetadata(hubMetadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);
   const settingsRequest = settingsCardOf(hubMetadata);
@@ -2620,6 +2622,10 @@ export const MessageRow = memo(function MessageRow({
       token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")}
     />
+  ) : nornRequest && channel ? (
+    <NornRequestCard request={nornRequest} channelId={channel.id} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      {...(message.commandNotices?.[0]?.body ? { outcome: message.commandNotices[0].body } : {})} />
   ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
     <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
       userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}

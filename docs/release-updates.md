@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a Norn program can ask a person
+
+A Norn program could ask Agents only: a request of `@Daniel` ended at once
+as undeliverable, so anything that waits on a person stayed a `--wait`
+message or a line of prose. A holder that names a person is now found among
+those who can read the conversation, and the request is delivered as a card
+that waits on them: Yes and No for `confirm`, the options for `choose`, a
+field for `ask`, and Decline. Only that person's answer is taken, and it is
+checked against the request's type. The request stays open until they
+answer, its deadline passes (`NoReply`), the program ends, or they lose
+access to the conversation; the card then says how it ended. Expand
+migration 0252 adds `norn_requests.holder_user_id`. Hub and Web. Recovery is
+a CI-validated beta Hub and Web reverting this change; an open request of a
+person is then settled as abandoned at its program's next pass.
+
 ## Unreleased: a repeating Norn program can keep a time of the day or the week
 
 `every(7d)` in a Norn program ticked a whole number of periods after the

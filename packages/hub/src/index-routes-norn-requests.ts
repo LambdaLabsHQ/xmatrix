@@ -2,7 +2,7 @@ import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
-import { answerNornRequest, openNornRequests } from "./norn-programs";
+import { answerNornRequest, answerNornRequestAsPerson, openNornRequests } from "./norn-programs";
 import type { Env } from "./types";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -35,5 +35,23 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId, instanceId: run.instanceId,
       requestRef: body.requestRef, outcome, text: body.text.trim() }), 200, NO_STORE);
+  }));
+  // A person answers the request on its card. Whoever they are, they hold it only if it was delivered to them.
+  const personAnswer = HUB_ROUTES.channel_norn_request_answer(":channelId", ":requestRef")
+    .replace("%3AchannelId", ":channelId").replace("%3ArequestRef", ":requestRef");
+  app.post(personAnswer, c => jsonErrors(c, async () => {
+    const auth = await requireAuth(c.req.raw, c.env);
+    if (auth.agentRun) return c.json({ error: "A request of a person is answered by that person" }, 403, NO_STORE);
+    const bytes = await readBoundedRequestBody(c.req.raw, 64 * 1024);
+    let body: { outcome?: unknown; text?: unknown } | null = null;
+    try { body = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null; } catch { /* refused below */ }
+    const outcome = (["answered", "refused"] as const).find(value => value === body?.outcome);
+    const requestRef = c.req.param("requestRef") ?? "", channelId = c.req.param("channelId") ?? "";
+    if (!body || !/^r[a-z0-9]{6,40}$/u.test(requestRef) || !outcome || typeof body.text !== "string" || !body.text.trim()) {
+      return c.json({ error: "Give the answer, or the reason you decline" }, 400, NO_STORE);
+    }
+    const result = await answerNornRequestAsPerson(c.env, { channelId, userId: auth.id,
+      requestRef, outcome, text: body.text.trim() });
+    return result ? c.json(result, 200, NO_STORE) : c.json({ error: "This request is not open for you" }, 404, NO_STORE);
   }));
 }

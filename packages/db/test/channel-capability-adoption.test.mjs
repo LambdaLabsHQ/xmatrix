@@ -36,6 +36,9 @@ const migratedAuthorities = [
   // The visible live-agent list names Channels through
   // channelCapabilityPredicate("catalog_read"), then loads those Instances.
   "channel-agent-presence.ts",
+  // A Norn request of a person is theirs while message_content_read lets
+  // them read its conversation, and a name finds only people it lets read.
+  "norn-programs.ts",
 ];
 
 const exactOrLifecycleOwnerAuthorities = [

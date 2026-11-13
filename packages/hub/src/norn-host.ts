@@ -64,14 +64,21 @@ export function checkNornProgram(source: string): Checked {
     targets: [...new Set((checked.effects ?? []).flatMap(effect => effect.targets))].sort() };
 }
 
+/** A holder that names an Agent this host starts: a harness by its name, or `@auto`. */
+const agentHolder = (holder: string): boolean =>
+  holder === "@auto" || (!holder.includes(":") && parseHarnessCapabilityMentions(holder).length === 1);
 /**
- * Whom this host can deliver a request to: a harness by its name, or `@auto`.
- * Each delivery starts a new Run of it. People, and an Instance by its
- * address, are not delivered to yet.
+ * A holder that can only be a person: a name that is no harness and no
+ * Instance address. Who that is, and whether anyone is, is known only where
+ * the request is delivered: the conversation's people are read there.
  */
-function deliverable(holder: string): boolean {
-  return holder === "@auto" || (!holder.includes(":") && parseHarnessCapabilityMentions(holder).length === 1);
-}
+export const personHolder = (holder: string): boolean => holder.startsWith("@") && !holder.includes(":") && !agentHolder(holder);
+/**
+ * Whom this host can deliver a request to: a harness by its name or `@auto`,
+ * each delivery starting a new Run of it, or a person by name. An Instance by
+ * its address is not delivered to yet.
+ */
+const deliverable = (holder: string): boolean => agentHolder(holder) || personHolder(holder);
 
 const typeText = (form: Form): string => form.kind === "base" || form.kind === "named" ? form.name
   : form.kind === "list" ? `list<${typeText(form.element)}>` : form.kind === "tuple" ? `(${form.elements.map(typeText).join(", ")})` : "_";
@@ -156,6 +163,45 @@ export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to:
     "", `A turn that ends without one of these is recorded as failed.${request.by === null ? "" : ` The request closes at ${new Date(request.by).toISOString()}.`}`,
   ].join("\n");
 }
+/**
+ * A request of a person as its card shows it (`appMetadata.nornRequest`): what
+ * is asked, what an answer may be, and until when. The Web draws the controls
+ * from `verb` and `options`; the answer comes back by the request's reference.
+ */
+export interface NornRequestCard {
+  ref: string; verb: string; holder: string; holderUserId: string; text: string;
+  about: string | null; context: string | null;
+  /** What `choose` offers, as Norn writes each option. */
+  options: string[];
+  /** When the request closes by itself. */
+  by: string | null;
+}
+export const nornRequestCard = (request: LedgerRequest, requestRef: string, holderUserId: string): NornRequestCard => ({
+  ref: requestRef, verb: request.verb, holder: request.holder, holderUserId, text: request.text, about: request.about,
+  context: request.context, options: (request.options ?? []).map(show),
+  by: request.by === null ? null : new Date(request.by).toISOString() });
+/**
+ * The same request in words, for whoever reads the conversation without the
+ * card: the person's name first, so it tells them as a mention does.
+ */
+export function nornPersonBody(request: LedgerRequest, requestRef: string): string {
+  return [request.holder, "", `**Request \`${requestRef}\`** from a program, for you.`, "", fence(request.text),
+    ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
+    ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
+    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`}`,
+  ].join("\n");
+}
+/** How a person's request ended, in a line under its card. */
+export function nornOutcomeText(holder: string, reply: Reply): string {
+  switch (reply.tag) {
+    case "Answered": return `${holder} answered: ${reply.value.type === "string" ? reply.value.value : show(reply.value)}`;
+    case "Refused": return `${holder} declined: ${reply.reason}`;
+    case "NoReply": return "It closed without an answer.";
+    case "Cancelled": return "The program no longer asks this.";
+    case "Revoked": return "The program lost the authority to ask this.";
+    default: return reply.reason;
+  }
+}
 /** Message bodies are refused above this size, so a request that cannot fit is never delivered. */
 const MAX_DELIVERY_BYTES = 60 * 1024;
 
@@ -209,7 +255,8 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
       for (const row of state.requests) {
         const request = ledger.requests[row.requestId];
         if (row.abandoned && request?.reply === null && request.epoch === row.epoch) {
-          settle(ledger, request.id, request.holder, { tag: "Broke", reason: "The Agent's work on this request ended without an answer" }, now, row.epoch);
+          settle(ledger, request.id, request.holder, { tag: "Broke", reason: personHolder(request.holder)
+            ? `${request.holder} can no longer read this conversation` : "The Agent's work on this request ended without an answer" }, now, row.epoch);
         }
       }
       // Each round ends at least one request this host cannot deliver, so the rounds end.
@@ -229,7 +276,8 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
           const taker = request.candidates?.find(deliverable);
           if (taker) take(ledger, request.id, taker, now);
           const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
-            : summonConditions(request).refusal
+            : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
+            : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
               ?? (utf8ByteLength(nornDeliveryBody(request, reference())) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
           if (reason === null) continue;
           settle(ledger, request.id, request.holder, { tag: "Broke", reason }, now, request.epoch);
