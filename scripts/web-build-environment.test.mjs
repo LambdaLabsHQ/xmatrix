@@ -8,7 +8,7 @@ import { WEB_E2E_FIXTURE_ENV } from "../apps/web/e2e/fixture-env.mjs";
 test("browser build fixtures reach only the Next child, not its parent or sibling", () => {
   const parent = { ...process.env };
   for (const key of Object.keys(WEB_E2E_FIXTURE_ENV)) delete parent[key];
-  delete parent.NEXT_TEST_WASM;
+  parent.NEXT_TEST_WASM = "1";
   parent.XMATRIX_ENV_TEST_SENTINEL = "preserved";
   const before = { ...parent };
   const readEnv = (env) => {
@@ -27,7 +27,7 @@ test("browser build fixtures reach only the Next child, not its parent or siblin
       for (const [key, value] of Object.entries(WEB_E2E_FIXTURE_ENV)) {
         assert.equal(child[key], value);
       }
-      assert.equal(child.NEXT_TEST_WASM, "1");
+      assert.equal(child.NEXT_TEST_WASM, undefined);
       assert.equal(child.XMATRIX_ENV_TEST_SENTINEL, "preserved");
       return { status: 0 };
     },
@@ -36,7 +36,7 @@ test("browser build fixtures reach only the Next child, not its parent or siblin
   assert.deepEqual(parent, before);
   const sibling = readEnv(parent);
   for (const key of Object.keys(WEB_E2E_FIXTURE_ENV)) assert.equal(sibling[key], undefined);
-  assert.equal(sibling.NEXT_TEST_WASM, undefined);
+  assert.equal(sibling.NEXT_TEST_WASM, "1");
 });
 
 test("a failed or interrupted Next build cannot become a passing gate", () => {

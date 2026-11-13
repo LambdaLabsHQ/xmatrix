@@ -298,7 +298,6 @@ function browserTestStages() {
       ...playwrightRuntimeEnv,
       ...playwrightFixtureEnv,
       CI: "1",
-      NEXT_TEST_WASM: "1",
       PLAYWRIGHT_PORT: String(playwrightPortBase),
       PLAYWRIGHT_PREBUILT: "1",
     },
