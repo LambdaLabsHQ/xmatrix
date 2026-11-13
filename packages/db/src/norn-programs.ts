@@ -101,7 +101,8 @@ const requestRow = (row: QueryResultRow): NornRequestRow => ({ requestId: String
 const unavailable = () => new ControlError("norn_request_unavailable", 404, "No such request");
 
 /** The message that delivers one holding of a request. A handover is a new holding, so a new message. */
-export const nornDeliveryMessageId = (requestRef: string, epoch: number) => `norn:${requestRef}:${epoch}`;
+export const NORN_DELIVERY_PREFIX = "norn:";
+export const nornDeliveryMessageId = (requestRef: string, epoch: number) => `${NORN_DELIVERY_PREFIX}${requestRef}:${epoch}`;
 
 export class PostgresNornProgramRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly placement: DatabasePlacementContext) {}
@@ -224,7 +225,8 @@ export class PostgresNornProgramRepository {
                 AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
                 AND registration.harness=binding.harness
             WHERE p.page_id IS NOT NULL AND earlier.space_id=r.space_id AND earlier.program_id=r.program_id
-              AND earlier.holder=r.holder AND earlier.settled_at IS NOT NULL AND instance.channel_id=r.channel_id
+              -- Whoever fits is chosen anew each time: only a participant asked for by name is asked again where it is.
+              AND r.holder<>'@auto' AND earlier.holder=r.holder AND earlier.settled_at IS NOT NULL AND instance.channel_id=r.channel_id
               AND ${instanceTakesMessages("instance")}
             ORDER BY earlier.settled_at DESC LIMIT 1) there ON TRUE
         WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL

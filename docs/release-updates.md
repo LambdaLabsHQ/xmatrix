@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a Norn program can carry work that repeats
+
+Moving the company's scheduled work onto Norn programs needed three things. A
+program's participant may carry conditions, `@auto(~repo="acme/app",
+~effort="high")`, which the delivery writes into its summon (`repo`, `pwd`,
+`machine`, `harness`, `model`, `effort`); an unknown one ends the request with
+the reason. `every(d)` now keeps the program's beat instead of drifting by the
+length of each round (norn-lang/norn#33). And a Run started for a request
+reads that request and the linked Pages, not the conversation's history, so a
+daily program does not hand each new Run a longer history. An automatically
+chosen Agent is chosen anew for each request. Hub only; Norn is re-vendored at
+e2ad669. Recovery is a CI-validated beta Hub reverting this change.
 ## Unreleased: reading Google Play tracks no longer deletes an upload in progress
 
 `@googleplay:tracks` opened a temporary edit to list tracks. A Google account

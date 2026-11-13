@@ -97,6 +97,22 @@ const fence = (body: string): string => {
   const ticks = "`".repeat(Math.max(3, ...[...body.matchAll(/`+/gu)].map(run => run[0].length + 1)));
   return `${ticks}text\n${body}\n${ticks}`;
 };
+/** What a program may ask of the participant a request starts: where it runs and with what. */
+const CONDITIONS = ["repo", "pwd", "machine", "harness", "model", "effort"];
+/**
+ * The conditions a program put on its participant (`@auto(~repo="acme/app")`),
+ * as a summon writes them (`repo:acme/app`), or why they cannot be written.
+ */
+function summonConditions(request: LedgerRequest): { words: string[]; refusal?: string } {
+  const words: string[] = [];
+  for (const [label, value] of Object.entries(request.conditions ?? {})) {
+    if (!CONDITIONS.includes(label)) return { words, refusal: `This host does not know the condition ~${label}; it knows ${CONDITIONS.map(each => `~${each}`).join(", ")}` };
+    if (!value || /["\n]/u.test(value)) return { words, refusal: `The condition ~${label} cannot be written in a summon` };
+    words.push(`${label}:${/\s/u.test(value) ? `"${value}"` : value}`);
+  }
+  return { words };
+}
+
 /**
  * The message that delivers a request to its holder. What the program wrote
  * is quoted as literal text, so nothing in it summons or commands anyone;
@@ -108,7 +124,7 @@ export function nornDeliveryBody(request: LedgerRequest, requestRef: string, to:
   /** Its Instance stays for the program's next request, instead of ending with this one. */
   kept?: boolean } = {}): string {
   const [answer, ...types] = answerText(request).split("\n");
-  return [to.there ?? `${request.holder} launch:force`, "",
+  return [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
     `**Request \`${requestRef}\`** from a program. Your answer goes back to the program, not to this conversation.`, "",
     fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
@@ -182,7 +198,8 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
           const taker = request.candidates?.find(deliverable);
           if (taker) take(ledger, request.id, taker, now);
           const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
-            : utf8ByteLength(nornDeliveryBody(request, reference())) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null;
+            : summonConditions(request).refusal
+              ?? (utf8ByteLength(nornDeliveryBody(request, reference())) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
           if (reason === null) continue;
           settle(ledger, request.id, request.holder, { tag: "Broke", reason }, now, request.epoch);
           undelivered = true;
