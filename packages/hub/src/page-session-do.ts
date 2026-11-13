@@ -40,6 +40,11 @@ const PAGE_SESSION_HEARTBEAT_PONG = "pong";
 const TICKET_TTL_MS = 60_000;
 const COMMIT_IDLE_MS = 5_000;
 const REVALIDATE_MS = 60_000;
+/** How long one sync of a page's programs may take, and how long after a failed one the next is made (doubling). */
+const PROGRAMS_SYNC_MS = 45_000;
+const PROGRAMS_RETRY_MS = 30_000;
+/** The sync of its programs a page is owed: as whom, and how many times it has failed. */
+interface ProgramsDue { userId: string; attempt: number }
 const MAX_CONNECTIONS = 64;
 
 interface Attachment {
@@ -278,6 +283,12 @@ export class RelayPageSession extends DurableObject<Env> {
         try {
           const result = await this.session.submitEdit(body.principal, body);
           await this.settle();
+          // The programs this revision changed are started before its writer is answered, so the answer can say when they were not.
+          await this.programsSyncing;
+          if (this.programsProblem && Array.isArray(result.scheduleProblems)) {
+            result.scheduleProblems.push({ source: "```norn run", problem:
+              `The page's programs could not be brought up to date just now (${this.programsProblem}). xMatrix tries again by itself; check with xmatrix page read.` });
+          }
           this.later(this.summaryDue());
           return Response.json(result);
         } catch (error) {
@@ -444,25 +455,65 @@ export class RelayPageSession extends DurableObject<Env> {
   /**
    * The page's programs are its `norn run` blocks: a revision that changed
    * them is synced as whoever wrote it, after the commit, one sync at a time.
+   * The event that committed the revision waits for its sync, so the sync runs
+   * while the session is certainly alive, and whoever saved is told when the
+   * programs could not be started.
    */
   private programsSynced: string | null = null;
   private programsSyncing: Promise<void> = Promise.resolve();
+  /** Why the page's programs are not yet what its text says; null once a sync succeeded. */
+  private programsProblem: string | null = null;
 
   private programsChanged(principal: PageSessionPrincipal, body: string): void {
     // The first revision this session commits is synced whatever it holds: a block removed while
     // the session was away is seen only by reading the page's programs. After that, only a change syncs.
     const key = pageProgramsKey(body);
     if (key === this.programsSynced) return;
-    this.programsSynced = key;
     const userId = principal.kind === "agent" ? principal.ownerUserId ?? "" : principal.id;
     if (!userId) return;
-    this.programsSyncing = this.programsSyncing.then(() => syncPagePrograms(this.env, {
-      spaceId: this.need("space"), pageId: this.need("page"), userId })).then(() => undefined, (error) => {
-      this.programsSynced = null;
-      console.error("Page programs did not sync", { pageId: this.pageId,
-        error: error instanceof Error ? error.message : String(error) });
-    });
+    this.programsSynced = key;
+    this.programsSyncing = this.programsSyncing.then(() => this.syncPrograms(userId, 0));
     this.later(this.programsSyncing);
+  }
+
+  /**
+   * Makes the page's programs what its saved text says. What is owed is
+   * stored before the work and cleared only when it is done, with an alarm
+   * set: a sync that failed, that hung, or that the session did not live to
+   * finish is made again from the alarm until it succeeds. Syncing twice
+   * starts nothing twice. Never rejects.
+   */
+  private async syncPrograms(userId: string, attempt: number): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await this.ctx.storage.put("programsDue", { userId, attempt } satisfies ProgramsDue);
+      await this.scheduleAlarm(PROGRAMS_SYNC_MS + PROGRAMS_RETRY_MS);
+      await Promise.race([
+        syncPagePrograms(this.env, { spaceId: this.need("space"), pageId: this.need("page"), userId }),
+        new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("The sync did not finish in time")), PROGRAMS_SYNC_MS); }),
+      ]);
+      await this.ctx.storage.delete("programsDue");
+      this.programsProblem = null;
+    } catch (error) {
+      // The next revision that touches a program syncs again, and so does the alarm.
+      this.programsSynced = null;
+      this.programsProblem = error instanceof Error ? error.message : String(error);
+      console.error("Page programs did not sync", { pageId: this.pageId, attempt, error: this.programsProblem });
+      await this.scheduleAlarm(Math.min(PROGRAMS_RETRY_MS * 2 ** Math.min(attempt, 6), 15 * 60_000)).catch(() => undefined);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  /** The sync a session owes from before: one that failed, or one it did not live to finish. */
+  private async programsOwed(): Promise<void> {
+    const due = await this.ctx.storage.get<ProgramsDue>("programsDue");
+    if (!due) return;
+    this.programsSyncing = this.programsSyncing.then(async () => {
+      // A sync made meanwhile, by a newer revision, has settled what was owed.
+      if (await this.ctx.storage.get<ProgramsDue>("programsDue")) await this.syncPrograms(due.userId, due.attempt + 1);
+    });
+    await this.programsSyncing;
   }
 
   /** Work that outlives the call that started it; a test's context may not retain it. */
@@ -579,7 +630,7 @@ export class RelayPageSession extends DurableObject<Env> {
     await this.commitPending();
     // A Hub that used to end co-writing when people left may still have that alarm stored.
     await this.ctx.storage.delete("peopleLeft");
-    if (!this.session.hasPendingEdits) await this.ctx.storage.deleteAlarm();
+    if (!this.session.hasPendingEdits && !(await this.ctx.storage.get("programsDue"))) await this.ctx.storage.deleteAlarm();
   }
 
   /**
@@ -594,6 +645,8 @@ export class RelayPageSession extends DurableObject<Env> {
       console.error("Page session commit failed", { pageId: this.pageId,
         error: error instanceof Error ? error.message : String(error) });
     }
+    // The event that committed waits for the programs the revision changed.
+    await this.programsSyncing;
   }
 
   /**
@@ -635,6 +688,7 @@ export class RelayPageSession extends DurableObject<Env> {
     }
     await this.ready();
     await this.commitPending();
+    await this.programsOwed();
     await this.ctx.storage.delete("peopleLeft");
     // Access changes reach open connections: re-authorize each distinct principal.
     // Access is the read check without the page's text, which a verdict never needs.
