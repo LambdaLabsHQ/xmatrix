@@ -10,6 +10,7 @@ import type { ConnectorDeliveryResult, ConnectorEvent, ConnectorProvider } from 
 import { trimmedConnectorEnv } from "./connector-env";
 import { oauthClient } from "./oauth";
 import { parseJsonObject } from "./event-format";
+import { spaceLanguage } from "../space-language";
 import { linearEventVisible } from "./linear-visibility";
 import { slackRetirement } from "./slack-events";
 
@@ -215,7 +216,8 @@ export async function appendToRoutes(
   append: typeof dispatchProductMessageAppend,
   providerId: string,
   event: ConnectorEvent,
-  routes: { channelId: string; authorityRootUserId: string }[],
+  /** `spaceMetadata` carries the Space's language setting: a localized event is posted in it. */
+  routes: { channelId: string; authorityRootUserId: string; spaceMetadata?: unknown }[],
   /** Hub-written facts about the event the Web draws from, e.g. its private result's owner. */
   appMetadata?: Record<string, unknown>,
 ): Promise<number> {
@@ -227,7 +229,7 @@ export async function appendToRoutes(
         commandId: `product:connector-event:${key}`.slice(0, 200),
         messageId: connectorEventMessageId(providerId, event.eventId, route.channelId),
         channelId: route.channelId,
-        body: event.body,
+        body: (spaceLanguage(route.spaceMetadata) === "zh" ? event.localizedBody?.zh : undefined) ?? event.body,
         principal: { kind: "user", id: route.authorityRootUserId },
         appAuthorId: providerId,
         ...(appMetadata ? { residual: { appMetadata } } : {}),

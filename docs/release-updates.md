@@ -10,7 +10,10 @@ currency's own units (`Payment succeeded — 10.00 USD`, zero- and
 three-decimal currencies included), then the object linked to its Stripe
 Dashboard page, the account, and the status only when it adds something. A
 failed payment, a dispute and a canceled subscription add Stripe's reason.
-Hub only; messages already posted keep their text. Recovery is a
+A Space whose language is Chinese gets it in Chinese (`付款成功 — 10.00
+USD`): an App event can now carry its message in each language a Space can
+choose, and delivery posts the one the Space is set to. Hub only, no schema
+change; messages already posted keep their text. Recovery is a
 CI-validated beta Hub reverting this change.
 
 ## Unreleased: an Agent's startup error on Windows reads as Windows wrote it

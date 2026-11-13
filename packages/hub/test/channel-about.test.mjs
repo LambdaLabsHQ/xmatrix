@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { channelAboutAnswer, channelAboutInput, channelAboutRequest, spaceLanguage } from "../src/channel-about.ts";
+import { channelAboutAnswer, channelAboutInput, channelAboutRequest } from "../src/channel-about.ts";
+import { spaceLanguage } from "../src/space-language.ts";
 
 const message = (sequence, body, extra = {}) => ({ sequence, body, sentAt: `2026-10-15T10:0${sequence % 10}:00.000Z`,
   from: { label: sequence % 2 ? "Daniel" : "claude", kind: sequence % 2 ? "user" : "agent" }, ...extra });

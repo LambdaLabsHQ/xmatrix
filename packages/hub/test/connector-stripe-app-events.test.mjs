@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { test } from "node:test";
 import { handleStripeAppDelivery } from "../src/connectors/stripe-app-ingress.ts";
 import { handleStripePublisherDelivery } from "../src/connectors/stripe-publisher-ingress.ts";
-import { stripeEvent } from "../src/connectors/wave2-events.ts";
+import { stripeEvent } from "../src/connectors/stripe-event.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { AppControlError } from "@xmatrix/db";
 
@@ -24,9 +24,9 @@ function sign(raw, key = signing, at = Math.floor(Date.now() / 1000)) {
 function fixture() {
   const queries = [], appends = [], retirements = [], automations = [];
   const state = { connections: [{ connectionId: "space-a:stripe", spaceId: "space-a", credentialVersion: 2,
-    grantGeneration: "11111111-1111-4111-8111-111111111111" }], beforeRoutes: () => {} };
+    grantGeneration: "11111111-1111-4111-8111-111111111111" }], beforeRoutes: () => {}, spaceMetadata: {} };
   const apps = {
-    async connectorEventRoutes(input) { state.beforeRoutes(); return [{ channelId: `${input.connectionId}:ch`, authorityRootUserId: "owner", features: ["events"] }]; },
+    async connectorEventRoutes(input) { state.beforeRoutes(); return [{ channelId: `${input.connectionId}:ch`, authorityRootUserId: "owner", features: ["events"], spaceMetadata: state.spaceMetadata }]; },
   };
   const accounts = {
     async eventConnections(input) { queries.push(input); return state.connections.map(connection => ({ ...connection })); },
@@ -278,4 +278,20 @@ test("a Stripe event reads as an amount, a Dashboard link, the account and the r
   assert.match(body("payment_intent.succeeded", { id: "pi_3", amount: 1500, currency: "kwd" }), /— 1\.500 KWD\n/);
   // An unknown type keeps Stripe's name, and an id that is no Dashboard object is not linked.
   assert.equal(body("charge.refunded", { id: "weird id" }), `**charge.refunded**\nweird id · ${account}`);
+});
+
+test("a Space set to Chinese gets the Stripe notification in Chinese", async () => {
+  const f = fixture();
+  f.state.spaceMetadata = { locale: { defaultLocale: "zh-CN" } };
+  const payload = { id: "evt_zh", type: "payment_intent.payment_failed", account, created: Math.floor(Date.now() / 1000),
+    data: { object: { id: "pi_zh", amount: 2000, currency: "usd", status: "requires_payment_method", last_payment_error: { message: "Your card was declined." } } } };
+  assert.deepEqual(await (await send(payload, f)).json(), { ok: true, events: 1, delivered: 1 });
+  assert.equal(f.appends[0].body, "**付款失败** — 20.00 USD" +
+    `\n[pi_zh](https://dashboard.stripe.com/${account}/payments/pi_zh) · ${account} · 需要付款方式\n原因：Your card was declined.`);
+  // Codes Stripe sends are words in both languages; one it adds later keeps its name.
+  const zh = (type, object) => stripeEvent({ id: "evt_y", type, account, data: { object } }).localizedBody.zh;
+  assert.match(zh("customer.subscription.deleted", { id: "sub_1", status: "canceled", cancellation_details: { reason: "cancellation_requested" } }),
+    /^\*\*订阅已取消\*\*\n.*acct_fixtureA\n原因：客户取消$/u);
+  assert.match(zh("charge.dispute.created", { id: "dp_1", amount: 500, currency: "eur", status: "needs_response", reason: "brand_new_reason" }),
+    /^\*\*收到争议\*\* — 5\.00 EUR\n.* · 待回应\n原因：brand new reason$/u);
 });

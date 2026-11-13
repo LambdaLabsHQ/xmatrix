@@ -1,6 +1,7 @@
 import { hmacBytes, sha256Hex, timingSafeEqual } from "@xmatrix/protocol";
 import { createSignedJsonReceiver, STRIPE_SIGNATURE, TELEGRAM_SECRET_TOKEN } from "./delivery-proof";
-import { connectorEvent, excerpt, lowerHeader, oneLine, record, safeUrl, sourceToken, text } from "./event-format";
+import { stripeEvent } from "./stripe-event";
+import { connectorEvent, excerpt, lowerHeader, record, safeUrl, sourceToken, text } from "./event-format";
 
 /*
  * Second-wave event providers (docs/design/connector-platform.md §4). Each
@@ -77,70 +78,6 @@ export const receiveBuildkiteDelivery = createSignedJsonReceiver({ name: "Buildk
     title: `Build #${text(build.number)} ${state} on ${text(build.branch)}`, url, details: [excerpt(build.message, 300)],
   })] };
 });
-
-const STRIPE_LABELS: Record<string, string> = {
-  "invoice.paid": "Invoice paid", "invoice.payment_failed": "Invoice payment failed",
-  "payment_intent.succeeded": "Payment succeeded", "payment_intent.payment_failed": "Payment failed",
-  "charge.dispute.created": "Dispute opened", "charge.dispute.updated": "Dispute updated",
-  "charge.dispute.closed": "Dispute closed", "charge.dispute.funds_withdrawn": "Dispute funds withdrawn",
-  "charge.dispute.funds_reinstated": "Dispute funds returned",
-  "customer.subscription.created": "Subscription created", "customer.subscription.updated": "Subscription updated",
-  "customer.subscription.deleted": "Subscription canceled", "customer.subscription.paused": "Subscription paused",
-  "customer.subscription.resumed": "Subscription resumed",
-};
-/* A status the label already says is not repeated under it. */
-const STRIPE_IMPLIED_STATUS: Record<string, string> = { "invoice.paid": "paid", "payment_intent.succeeded": "succeeded",
-  "customer.subscription.deleted": "canceled", "customer.subscription.paused": "paused" };
-/* Stripe's own exceptions to two decimal places (docs.stripe.com/currencies):
-   ISK and UGX stay two-decimal in the API although they have no minor unit. */
-const STRIPE_ZERO_DECIMAL = new Set(["BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "VND", "VUV", "XAF", "XOF", "XPF"]);
-const STRIPE_THREE_DECIMAL = new Set(["BHD", "JOD", "KWD", "OMR", "TND"]);
-const STRIPE_DASHBOARD_SECTION: Record<string, string> = { pi: "payments", ch: "payments", py: "payments", in: "invoices",
-  sub: "subscriptions", dp: "disputes", du: "disputes" };
-
-/** `1000` + `usd` reads `10.00 USD`: Stripe sends an integer in the currency's smallest unit. */
-function stripeAmount(value: unknown, currency: unknown): string | undefined {
-  const code = text(currency).toUpperCase();
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || !/^[A-Z]{3}$/u.test(code)) return undefined;
-  const digits = STRIPE_ZERO_DECIMAL.has(code) ? 0 : STRIPE_THREE_DECIMAL.has(code) ? 3 : 2;
-  const amount = (value / 10 ** digits).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  return `${amount} ${code}`;
-}
-
-/** The object's page in the Stripe Dashboard of the account that owns it. */
-function stripeDashboardUrl(id: string, account: string | undefined, livemode: unknown): string | undefined {
-  const section = STRIPE_DASHBOARD_SECTION[/^([a-z]+)_[A-Za-z0-9]+$/u.exec(id)?.[1] ?? ""];
-  if (!section) return undefined;
-  return `https://dashboard.stripe.com/${account ? `${account}/` : ""}${livemode === false ? "test/" : ""}${section}/${id}`;
-}
-
-/** Both Stripe's signed webhook and its authenticated event API use this representation. */
-export function stripeEvent(payload: Record<string, unknown>) {
-  const type = text(payload.type);
-  const object = record(record(payload.data).object);
-  const id = text(object.id);
-  const account = /^acct_[A-Za-z0-9]{1,64}$/u.test(text(payload.account)) ? text(payload.account) : undefined;
-  const label = STRIPE_LABELS[type] ?? type;
-  const amount = stripeAmount(type === "invoice.paid" ? object.amount_paid
-    : type === "invoice.payment_failed" ? object.amount_due ?? object.amount : object.amount, object.currency);
-  const status = text(object.status);
-  const url = stripeDashboardUrl(id, account, payload.livemode);
-  // Why it failed, was disputed or ended, in Stripe's words.
-  const reason = text(record(object.last_payment_error).message) || text(record(object.cancellation_details).reason) ||
-    (type.startsWith("charge.dispute.") ? text(object.reason) : "");
-  return connectorEvent({
-    eventId: `stripe:${text(payload.id)}`,
-    sourceRef: `stripe:${sourceToken(type.split(".")[0]) || "*"}`,
-    feature: "events",
-    summary: `${label}${amount ? ` ${amount}` : ""} ${id}${account ? ` (${account})` : ""}`,
-    provider: label, title: amount ?? "",
-    details: [
-      [url ? `[${id}](${url})` : oneLine(id), account,
-        status && status !== STRIPE_IMPLIED_STATUS[type] ? oneLine(status.replace(/_/gu, " ")) : undefined]
-        .filter(Boolean).join(" · "),
-      reason ? `Reason: ${oneLine(reason.replace(/_/gu, " "))}` : undefined],
-  });
-}
 
 export const receiveStripeDelivery = createSignedJsonReceiver({ name: "Stripe", secretField: "signingSecret", proof: STRIPE_SIGNATURE },
   (_, payload) => ({ ok: true, events: [stripeEvent(payload)] }));

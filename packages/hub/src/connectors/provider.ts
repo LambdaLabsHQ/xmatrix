@@ -163,6 +163,8 @@ export interface ConnectorEvent {
   summary: string;
   /** Bounded markdown posted to subscribed Channels. Untrusted content. */
   body: string;
+  /** The same message in another language a Space can choose; a Space set to it gets this instead of `body`. */
+  localizedBody?: { zh?: string };
   url?: string;
   /**
    * The provider object the event is about, for a provider whose one delivery

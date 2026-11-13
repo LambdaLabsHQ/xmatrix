@@ -33,7 +33,9 @@ status (including `incomplete`) and does not claim payment. A notification
 reads as the event in words and its amount in the currency's own units
 (`Payment succeeded — 10.00 USD`), then the object linked to its Stripe
 Dashboard page, the account, a status the first line does not already say, and
-Stripe's reason for a failure, dispute or cancellation. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
+Stripe's reason for a failure, dispute or cancellation. It is written in the
+Space's language setting, English or Chinese; an event type, status or reason
+Stripe adds later keeps Stripe's own name. See [subscription events](https://docs.stripe.com/billing/subscriptions/webhooks)
 and [payment status](https://docs.stripe.com/payments/payment-intents/verifying-status).
 
 All retained accounts share the Space connection's subscriptions, such as
