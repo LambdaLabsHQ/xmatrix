@@ -14,8 +14,9 @@ const source = `switch run(@codex, "Review the design")->wait {
 | other => fail(other)
 }`;
 
-integration("a program's ledger, its delivery and its holder live in PostgreSQL, and an abandoned request is never silent", async () => {
-  const f = await isolatedPostgres("norn_programs");
+/** One conversation of an owned Space in its own database, with the repository over it. */
+async function conversation(prefix, body) {
+  const f = await isolatedPostgres(prefix);
   const sql = async (text, values = []) => (await f.client.query(text, values)).rows;
   let database;
   try {
@@ -26,16 +27,40 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
       entity_version,author_kind,author_id,message_kind,content_hash,payload_kind,payload_ref,sent_at,updated_at,search_rank_sequence,
       body_hash,created_at) VALUES ('space','channel',$1,$2,1,$3,$4,'xmatrix.message.text',repeat('a',64),'inline','fixture',
         now(),now(),$1,repeat('a',64),now())`, [id, sequence, kind, author]);
-    await message("program", 1, "user", "owner");
     database = createAuthorityDatabase({ connectionString: f.url.toString(), shardId: "shard-0",
       clientFactory: config => new Client({ ...config, options: `-c role=${f.role}` }), statementTimeoutMs: 5000,
       transactionTimeoutMs: 10000, lockTimeoutMs: 2000 }).openSession();
     const programs = new PostgresNornProgramRepository(database, placement);
     const scope = (programId = "program") => ({ requestId: randomUUID(), channelId: "channel", programId });
+    /** A turn of an Instance on a message, as the daemon's execution report records it. */
+    const execution = (binding, instance, messageId, state, at = 1) => sql(`INSERT INTO data.agent_message_executions(binding_id,space_id,
+      channel_id,run_id,instance_id,agent_name,channel_instance_id,execution_id,revision,binding_digest,report_digest,source_message_id,
+      source_entity_version,source_body_hash,source_sequence,source_count,state,started_at_millis,updated_at_millis,finished_at_millis,
+      created_at,observed_at,expires_at)
+      VALUES ($1,'space','channel',$2,$3,'codex',split_part($3,':',2),$1,1,repeat('b',64),repeat('c',64),$4,1,repeat('a',64),1,1,$5,
+        $6,$6,CASE WHEN $5 IN ('accepted','running') THEN NULL ELSE $6::bigint END,now(),now(),now()+interval '1 day')`,
+    [binding, `${instance}#1`, instance, messageId, state, at]);
+    /** An Instance in the conversation with its live Run. */
+    const instance = async id => {
+      await sql(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,created_at,updated_at)
+        VALUES ($1,'owner','channel','running',1,now(),now()) ON CONFLICT (run_id) DO NOTHING`, [`${id}#1`]);
+      await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
+        VALUES ($1,$2,'channel',split_part($1,':',2)::int,'idle',1,now(),now())`, [id, `${id}#1`]);
+    };
+    const due = async () => (await sql(`SELECT ${NORN_CHANNEL_DUE_SQL} <= clock_timestamp() AS due`, ["channel"]))[0].due;
+    const inTransaction = work => database.transaction({ requestId: randomUUID(), operation: "norn.test", placement }, work);
+    await body({ sql, message, programs, scope, execution, instance, due, inTransaction, database });
+  } finally {
+    await database?.close?.();
+    await f.close();
+  }
+}
+
+integration("a program's ledger, its delivery and its holder live in PostgreSQL, and an abandoned request is never silent", () =>
+  conversation("norn_programs", async ({ sql, message, programs, scope, execution, instance, due, inTransaction, database }) => {
+    await message("program", 1, "user", "owner");
     const start = (programId = "program") => programs.start({ ...scope(programId), authorKind: "user", authorId: "owner",
       authorityUserId: "owner", source, ledger: nornStartLedger }, nornStep());
-    const due = async () => (await sql(`SELECT ${NORN_CHANNEL_DUE_SQL} <= clock_timestamp() AS due`, ["channel"]))[0].due;
-    const inTransaction = body => database.transaction({ requestId: randomUUID(), operation: "norn.test", placement }, body);
 
     // The message is the program: it starts once, and a message that is not there starts nothing.
     assert.equal((await start()).status, "running");
@@ -58,11 +83,7 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     // While a turn works on the delivery the request is held; only that Run answers it.
     await sql(`INSERT INTO data.runs(run_id,owner_user_id,channel_id,status,version,created_at,updated_at)
       VALUES ('channel:2#1','owner','channel','running',1,now(),now()),('channel:3#1','owner','channel','running',1,now(),now())`);
-    await sql(`INSERT INTO data.agent_message_executions(binding_id,space_id,channel_id,run_id,instance_id,agent_name,
-      channel_instance_id,execution_id,revision,binding_digest,report_digest,source_message_id,source_entity_version,
-      source_body_hash,source_sequence,source_count,state,started_at_millis,updated_at_millis,created_at,observed_at,expires_at)
-      VALUES ('binding','space','channel','channel:2#1','channel:2','codex','2','execution',1,repeat('b',64),repeat('c',64),$1,1,
-        repeat('a',64),2,1,'running',1,1,now(),now(),now()+interval '1 day')`, [delivery.deliveryMessageId]);
+    await execution("binding", "channel:2", delivery.deliveryMessageId, "running");
     await programs.delivered({ ...scope(), ledgerRequestId: delivery.requestId, epoch: 0 });
     work = await programs.channelWork(scope());
     assert.deepEqual([work.passes, work.deliveries], [[], []]);
@@ -74,17 +95,12 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     assert.deepEqual(open.map(row => [row.requestRef, row.held, row.asked, row.text]), [[delivery.requestRef, true, false, "Review the design"]]);
 
     // A newer message interrupts the turn: the work is not over while its Instance is there to go on with it.
-    await sql(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at)
-      VALUES ('channel:2','channel:2#1','channel',2,'idle',1,now(),now())`);
+    await instance("channel:2");
     await sql("UPDATE data.agent_message_executions SET state='interrupted',revision=2,updated_at_millis=2,finished_at_millis=2");
     assert.equal(await due(), null);
     assert.deepEqual((await programs.channelWork(scope())).passes, []);
     // Once that Instance has ended a later turn without answering, the request is left behind.
-    await sql(`INSERT INTO data.agent_message_executions(binding_id,space_id,channel_id,run_id,instance_id,agent_name,
-      channel_instance_id,execution_id,revision,binding_digest,report_digest,source_message_id,source_entity_version,
-      source_body_hash,source_sequence,source_count,state,started_at_millis,updated_at_millis,finished_at_millis,created_at,observed_at,expires_at)
-      VALUES ('later','space','channel','channel:2#1','channel:2','codex','2','later',1,repeat('d',64),repeat('e',64),'program',1,
-        repeat('a',64),1,1,'completed',3,4,4,now(),now(),now()+interval '1 day')`);
+    await execution("later", "channel:2", "program", "completed", 3);
     assert.equal(await due(), true);
     // The turn ends with no answer: the request is abandoned, its program is due, and the pass ends it Broke.
     await sql("UPDATE data.agent_message_executions SET state='completed',revision=3 WHERE binding_id='binding'");
@@ -175,8 +191,59 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     const [ended] = (await programs.channelWork(scope())).reports;
     assert.deepEqual([ended.programId, ended.ended.error], ["second", "Stopped in the conversation"]);
     assert.deepEqual(await sql("SELECT count(*)::int AS open FROM data.norn_requests WHERE settled_at IS NULL"), [{ open: 0 }]);
-  } finally {
-    await database?.close?.();
-    await f.close();
-  }
-});
+  }));
+
+integration("work that broke off is handed on once, and in a Page program's conversation the Agent that worked last stays", () =>
+  conversation("norn_page_stays", async ({ sql, message, programs, scope, execution, instance, due }) => {
+    await message("page-program", 1, "system", "xmatrix");
+    await programs.start({ ...scope("page-program"), authorKind: "user", authorId: "owner", authorityUserId: "owner",
+      page: { pageId: "page", name: "main" }, ledger: nornStartLedger,
+      source: `run(@codex, "First")->wait?\nrun(@claude, "Second")->wait` }, nornStep());
+    const work = () => programs.channelWork(scope());
+    const deliver = async (to, programId = "page-program") => {
+      const [delivery] = (await work()).deliveries.filter(each => each.programId === programId);
+      await instance(to);
+      await programs.delivered({ ...scope(programId), ledgerRequestId: delivery.requestId, epoch: delivery.epoch, instanceId: to });
+      return delivery;
+    };
+    const answer = (delivery, programId = "page-program") => programs.advance(scope(programId),
+      nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: { typed: "done" } }));
+    const ended = id => sql("UPDATE data.runs SET status='stopped' WHERE run_id=$1", [`${id}#1`]);
+
+    // The first Agent's turn fails: no answer, and nothing works on the request any more.
+    const first = await deliver("channel:5");
+    assert.equal(first.handedOn, false);
+    await execution("failed-turn", "channel:5", first.deliveryMessageId, "failed");
+    await ended("channel:5");
+    assert.deepEqual((await work()).passes, ["page-program"]);
+    // The program is not told yet: the same request is held anew, and delivered again as another message.
+    assert.equal((await programs.advance(scope("page-program"), nornStep())).status, "running");
+    const again = await deliver("channel:6");
+    assert.deepEqual([again.requestId, again.epoch, again.deliveryMessageId, again.handedOn],
+      [first.requestId, first.epoch + 1, `norn:${first.requestRef}:${first.epoch + 1}`, true]);
+    await answer(again);
+    // While the program runs, whoever answered it stays for its next request.
+    assert.deepEqual((await work()).releases, []);
+    const second = await deliver("channel:7");
+    assert.equal((await answer(second)).status, "completed");
+    await programs.reported(scope("page-program"));
+    // The program over, the Agent that worked last stays where a person can reach it; the one before is let go.
+    assert.deepEqual((await work()).releases.map(release => release.requestId), [first.requestId]);
+    await programs.released({ ...scope("page-program"), ledgerRequestId: first.requestId });
+    assert.deepEqual([(await work()).releases, await due()], [[], null]);
+
+    // An Agent that asked a question while it held a request stays until the question is answered, though its request has ended.
+    await message("in-message", 2, "user", "owner");
+    await programs.start({ ...scope("in-message"), authorKind: "user", authorId: "owner", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `run(@codex, "Third")->wait` }, nornStep());
+    const third = await deliver("channel:8", "in-message");
+    await message("question", 3, "system", "xmatrix");
+    await programs.start({ ...scope("question"), authorKind: "agent", authorId: "channel:8", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `ask(@claude, "Which bucket?")->wait` }, nornStep());
+    assert.equal((await answer(third, "in-message")).status, "completed");
+    await programs.reported(scope("in-message"));
+    assert.deepEqual((await work()).releases, []);
+    const [question] = (await work()).deliveries;
+    await programs.advance(scope("question"), nornStep({ requestId: question.requestId, epoch: question.epoch, reply: { tag: "Refused", reason: "no" } }));
+    assert.deepEqual((await work()).releases.map(release => release.requestId), [third.requestId]);
+  }));

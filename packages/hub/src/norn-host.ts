@@ -1,5 +1,5 @@
 import { parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
-import type { NornProgramState, NornProgramWrite, NornStep } from "@xmatrix/db";
+import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
 import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
@@ -155,7 +155,11 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   /** The Instance already there that the request goes to, by its address; without one the holder's summon starts a Run. */
   there?: string;
   /** Its Instance stays for the program's next request, instead of ending with this one. */
-  kept?: boolean } = {}): { body: string; answerFrom: number } {
+  kept?: boolean;
+  /** An earlier holding of the request broke off: this holder goes on from what that one did. */
+  handedOn?: boolean;
+  /** A person takes part in the program, so the holder says in the conversation what it does. */
+  withPerson?: boolean } = {}): { body: string; answerFrom: number } {
   const [answer, ...types] = answerText(request).split("\n");
   const asked = [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
     // The reference in its own code span is what a person's client draws as the request itself.
@@ -163,9 +167,14 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   const answering = ["", "", fence(request.text),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", "The request is from a program. Your answer goes back to the program, not to this conversation.",
-    to.kept ? "End this turn with exactly one of these, and say nothing else in the conversation. The program may ask you again here:"
-      : "End this turn with exactly one of these. It ends your Run, so say nothing in the conversation and do it last:", "",
+    ...(to.handedOn ? ["", "An earlier attempt at this request broke off before it answered. First read this conversation (`xmatrix channel history`) and the pages the request names for what that attempt already did, and go on from there: do not do again what is done."] : []),
+    "", "The request is from a program. xMatrix posts your answer in this conversation under your name and gives it to the program.",
+    // Agents that work for one another alone keep the conversation to their answers; where a person takes part, they follow the work here.
+    to.withPerson ? "A person takes part in this program and reads this conversation: say here what you are doing, as you would on a task they gave you."
+      : "Say nothing else in the conversation.",
+    "What is left for a person to do or decide goes to them as a card before you answer: `xmatrix ask @name …`, `xmatrix confirm @name …` or `xmatrix choose @name …`. Words in your answer alone ask nobody; the card's answer comes back to you here.",
+    to.kept ? "End this turn with exactly one of these. You stay in this conversation afterwards: the program may ask you again here, and a person who writes here reaches you:"
+      : "End this turn with exactly one of these. It ends your Run, so do it last:", "",
     `- \`xmatrix reply ${requestRef} '<answer>'\` when it is done. The answer must be ${answer}`,
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),
     `- \`xmatrix refuse ${requestRef} '<why>'\` when you will not do it.`,
@@ -270,6 +279,62 @@ export function nornEndBody(ended: Ledger["ended"], onPage = false): string {
   return ended.error ? `${stopped}: ${ended.error}` : `${lost}: ${ended.result ? show(ended.result) : "failed"}`;
 }
 
+/** An answer as a reader takes it in: a report is its text, anything else is written as Norn writes it. */
+export const plainAnswer = (value: Value): string =>
+  value.type === "record" && Object.keys(value.fields).length === 1 && value.fields.text?.type === "string" ? value.fields.text.value : show(value);
+/** A program's result: what it answered with, without the `Answered(…)` around it. */
+export const plainResult = (value: Value): string =>
+  value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? plainAnswer(value.args[0]!) : show(value);
+
+/** What a holder's own ending of a request reads as, in the message xMatrix posts under the holder's name. */
+export const nornAnswerBody = (outcome: "answered" | "refused" | "broke", words: string): string =>
+  outcome === "answered" ? words : `${outcome === "refused" ? "I will not do this" : "I could not do this"}: ${words}`;
+
+/** A program ended from outside, by whoever may stop it: nobody is to be told that it stopped by itself. */
+const ENDED_FROM_OUTSIDE = /^(?:Stopped in the conversation|Removed (?:from|with) its page)$/u;
+/** How a request ended without an answer, after its holder's name. */
+function unanswered(reply: Reply): string {
+  switch (reply.tag) {
+    case "Broke": return `did not finish: ${reply.reason}`;
+    case "Refused": return `declined: ${reply.reason}`;
+    case "NoReply": return "did not answer in time";
+    default: return "was not answered";
+  }
+}
+/**
+ * How a Page's program ended, as its conversation reads it, and whom that
+ * waits on. What an Agent answered stands in the conversation under its name
+ * already, so a result that is that answer is not said again. A program that
+ * failed on an Agent's work or on its own error names the people who answered
+ * it (or, with none, whoever saved it) and says where it stopped: nothing goes
+ * on by itself from there, and the Agent that stayed in the conversation takes
+ * what they say next.
+ */
+export function nornPageEnd(program: { ended: Ledger["ended"]; requests: Record<string, LedgerRequest> | null;
+  people: { userId: string; name: string }[]; authority: { userId: string; name: string | null } }): { body: string; waitsOn: string[] } {
+  const { ended } = program;
+  const requests = Object.values(program.requests ?? {}).sort((a, b) => (a.settledAt ?? 0) - (b.settledAt ?? 0));
+  if (ended?.status === "completed") {
+    const result = ended.result ? plainResult(ended.result) : "";
+    const told = requests.some(request => !personHolder(request.holder) && request.reply?.tag === "Answered" && plainAnswer(request.reply.value) === result);
+    return { body: told || !result ? "Finished." : `Finished: ${result}`, waitsOn: [] };
+  }
+  if (!ended || (ended.error !== null && ENDED_FROM_OUTSIDE.test(ended.error))) return { body: nornEndBody(ended, true), waitsOn: [] };
+  const last = requests.filter(request => request.reply !== null && !["Answered", "Cancelled"].includes(request.reply.tag)).at(-1);
+  // A person who declined, or let their own request close, ended it themselves: they are not then waited on for it.
+  if (ended.error === null && last && personHolder(last.holder)) return { body: nornEndBody(ended, true), waitsOn: [] };
+  const people = program.people.length ? program.people
+    : [{ userId: program.authority.userId, name: program.authority.name ? `@${program.authority.name}` : "" }];
+  const asked = last?.text.split("\n")[0]?.replace(/[`*_[\]]/gu, "").trim() ?? "";
+  const where = ended.error !== null ? `the program stopped: ${ended.error}`
+    // The holder's name is written without its @: this tells people, and summons nobody.
+    : last ? `${last.holder.replace(/^@/u, "")}, asked “${asked.length > 200 ? `${asked.slice(0, 200)}…` : asked}”, ${unanswered(last.reply!)}`
+    : nornEndBody(ended, true);
+  const names = [...new Set(people.map(person => person.name).filter(name => /^@[^\s@]+$/u.test(name)))].join(" ");
+  return { body: `${names ? `${names} ` : ""}This stopped before it was finished: ${where}. Nothing more happens by itself: say here what to do next.`,
+    waitsOn: [...new Set(people.map(person => person.userId))] };
+}
+
 /** How long a pass waits before trying again a program this build cannot check. */
 const NORN_RECHECK_MS = 5 * 60_000;
 export interface NornPassResult {
@@ -319,10 +384,20 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
       if (occurred) occur(ledger, occurred.stream as Value, text(occurred.what), now);
       for (const row of state.requests) {
         const request = ledger.requests[row.requestId];
-        if (row.abandoned && request?.reply === null && request.epoch === row.epoch) {
-          settle(ledger, request.id, request.holder, { tag: "Broke", reason: personHolder(request.holder)
-            ? `${request.holder} can no longer read this conversation` : "The Agent's work on this request ended without an answer" }, now, row.epoch);
+        if (!row.abandoned || request?.reply !== null || request.epoch !== row.epoch) continue;
+        const person = personHolder(request.holder);
+        const handedOn = ledger.evidence.some(entry => entry.request === request.id && entry.reason === NORN_HANDED_ON_REASON);
+        // Work that broke off (a turn that failed, a Run that never started) is not the Agent giving up: the request
+        // goes once to a new Instance, as a new holding, which is delivered again. What the first one left is evidence.
+        if (!person && row.brokeOff && !handedOn) {
+          ledger.evidence.push({ request: request.id, holder: request.holder, at: now, reason: NORN_HANDED_ON_REASON,
+            reply: { tag: "Broke", reason: "The Agent's work on this request broke off without an answer" } });
+          request.epoch++;
+          continue;
         }
+        settle(ledger, request.id, request.holder, { tag: "Broke", reason: person ? `${request.holder} can no longer read this conversation`
+          : handedOn ? "The Agent's work on this request ended without an answer, the second time on a new Instance"
+          : "The Agent's work on this request ended without an answer" }, now, row.epoch);
       }
       // Each round ends at least one request this host cannot deliver, so the rounds end.
       for (let undelivered = true; undelivered;) {

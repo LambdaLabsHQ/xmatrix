@@ -111,3 +111,37 @@ test("an open page re-checks each viewer's access without reading its text, and 
   assert.deepEqual(checked, ["editor", "revoked"], "one check per distinct viewer");
   assert.deepEqual(sockets.map((s) => s.closed.map((close) => close.code)), [[], [4003], []]);
 });
+
+test("a sync of a page's programs that fails is owed until it is made: stored, told to whoever saves, and made again from the alarm", async (t) => {
+  // The database cannot be reached, so every sync fails before it reads anything.
+  t.mock.method(Pool.prototype, "connect", async () => { throw new Error("test checkout intercepted"); });
+  t.mock.method(console, "error", () => undefined);
+  const stored = new Map();
+  let alarm = null;
+  const object = Object.create(RelayPageSession.prototype);
+  Object.assign(object, {
+    spaceId: "space", pageId: "page", rehydrated: Promise.resolve(), programsSynced: null, programsSyncing: Promise.resolve(), programsProblem: null,
+    env: { RELAY_POSTGRES_SHARD_ID: "test", RELAY_POSTGRES: { connectionString: "postgresql://localhost/unused" } },
+    ctx: { getWebSockets: () => [], waitUntil: () => undefined, storage: {
+      get: async key => stored.get(key), put: async (key, value) => stored.set(key, value), delete: async key => stored.delete(key),
+      getAlarm: async () => alarm, setAlarm: async at => { alarm = at; }, deleteAlarm: async () => { alarm = null; },
+    } },
+  });
+  const body = "# Page\n\n```norn run check\nafter(1d)->wait\n```\n";
+  object.programsChanged({ kind: "agent", id: "agent", label: "claude", ownerUserId: "owner" }, body);
+  await object.programsSyncing;
+  // What is owed outlives the session, with an alarm to make it; the next save is told, and syncs again.
+  assert.deepEqual(stored.get("programsDue"), { userId: "owner", attempt: 0 });
+  assert.match(object.programsProblem, /test checkout intercepted/u);
+  assert.equal(object.programsSynced, null);
+  assert.ok(alarm > Date.now() && alarm <= Date.now() + 30_000);
+  // The alarm makes it again, and keeps what is owed while it still fails; the wait before the next try grows.
+  alarm = null;
+  await object.programsOwed();
+  assert.deepEqual(stored.get("programsDue"), { userId: "owner", attempt: 1 });
+  assert.ok(alarm > Date.now() + 30_000);
+  // A page with a sync owed keeps its alarm when the last connection leaves.
+  object.session = { hasPendingEdits: false, commit: async () => null };
+  await object.settle();
+  assert.notEqual(alarm, null);
+});

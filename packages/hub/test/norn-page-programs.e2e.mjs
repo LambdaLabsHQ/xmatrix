@@ -74,7 +74,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
       .some(message => message.body === "Stopped: Removed from its page"), "the stop");
 }));
 
-test("a page's program asks the same participant again where it already is, and lets it go when the program ends", () => pageScene("norn-reuse", async ({ worker, scenario, daemon, call, pages, until }) => {
+test("a page's program asks the same participant again where it already is, and that Agent stays when the program ends", () => pageScene("norn-reuse", async ({ worker, scenario, daemon, call, pages, until }) => {
     const { page } = await call(pages, "POST", { title: "Two steps", body: block(`let draft = ask(@codex, "Draft it")->wait?
 ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     const program = async () => (await call(`${pages}/${page.pageId}/programs`)).programs[0];
@@ -87,7 +87,7 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     // Its Instance is there and takes messages, as a connected one is.
     await inTestTransaction(tx => tx.query({ text: "UPDATE data.instances SET status='idle' WHERE run_id=$1", values: [spawn.runId] }));
     const [first] = await deliveries();
-    assert.match(first.body, /The program may ask you again here/u);
+    assert.match(first.body, /You stay in this conversation afterwards/u);
     assert.equal((await run(worker, runToken, ["reply", /`request:(r[a-z0-9]+)`/u.exec(first.body)[1], "A long draft"])).exitCode, 0);
 
     // The second request goes to that Instance by its address: no new Run starts, and the same Run answers it.
@@ -101,8 +101,14 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     assert.match(held.stdout, new RegExp(`You hold:\\n  ${requestRef}\\t`, "u"));
     assert.equal((await run(worker, runToken, ["reply", requestRef, "Short"])).exitCode, 0);
     assert.equal((await until(async () => { const now = await program(); return now.state === "completed" ? now : null; }, "the end")).result, "Short");
-    // Kept while the program ran, its Instance is let go now.
-    await daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId, "the holder's stop");
+    // What it answered stands in the conversation under its own name, and the end does not say it again.
+    const { messages } = await channelHistory(worker, MOCK_TOKEN, running.channelId, 30);
+    assert.deepEqual(messages.filter(message => message.from.kind === "agent").map(message => message.body), ["A long draft", "Short"]);
+    await until(async () => (await channelHistory(worker, MOCK_TOKEN, running.channelId, 30)).messages
+      .find(message => message.body === "Finished."), "the program's end");
+    // The Agent that worked last stays in the conversation: whoever writes there next reaches it.
+    await assert.rejects(daemon.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === spawn.runId,
+      "the holder's stop", 2_000), /waiting for the holder's stop/u);
 }));
 
 test("what a program says is posted to its conversation, for whom it names", () => pageScene("norn-say", async ({ worker, call, pages, until }) => {
