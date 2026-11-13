@@ -62,7 +62,9 @@ pub(crate) fn ansi_code_page() -> Option<u32> {
 /// The code page does not see every lossy writer. Windows PowerShell pipes
 /// through an ASCII `$OutputEncoding` under any code page, and
 /// `Set-Content`/`Out-File -Encoding ascii` save `?` into a file that is
-/// then valid UTF-8. Both leave pure ASCII, so on Windows a `???` run in
+/// then valid UTF-8. So does a script that assigns `$OutputEncoding` with
+/// `New-Object` below the global scope: the variable reads as UTF-8 and the
+/// pipe still writes ASCII (PowerShell/PowerShell#5763). All leave pure ASCII, so on Windows a `???` run in
 /// text without one non-ASCII character is refused from every source.
 pub(crate) fn detect_lossy_text(
     text: &str,
@@ -116,7 +118,7 @@ fn lossy_text_message(field: &str, problem: LossyText, routes: TextRoutes<'_>) -
             "The {field} contains \"??\" and this Windows shell uses ANSI code page {code_page}, not UTF-8: non-ASCII characters (for example Chinese) were most likely replaced with `?` before xmatrix received them."
         ),
         LossyText::AsciiOnlyQuestionMarks => format!(
-            "The {field} contains \"???\" and not one non-ASCII character: its non-ASCII characters (for example Chinese) were most likely replaced with `?` before xmatrix received them, by a PowerShell pipe whose `$OutputEncoding` is not UTF-8 or by a file saved as ASCII."
+            "The {field} contains \"???\" and not one non-ASCII character: its non-ASCII characters (for example Chinese) were most likely replaced with `?` before xmatrix received them, by a PowerShell pipe that wrote ASCII or by a file saved as ASCII."
         ),
     };
     let mut ways = Vec::new();
@@ -127,7 +129,7 @@ fn lossy_text_message(field: &str, problem: LossyText, routes: TextRoutes<'_>) -
     }
     if routes.stdin {
         ways.push(
-            "in PowerShell run `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)`, then pipe the text to the command with `--stdin`"
+            "in PowerShell run `$OutputEncoding = [System.Text.UTF8Encoding]::new($false)` (never `New-Object`: Windows PowerShell then pipes ASCII), then pipe the text to the command with `--stdin`"
                 .to_string(),
         );
     }
@@ -335,6 +337,7 @@ mod tests {
         assert!(stdin_only.contains("U+FFFD"));
         assert!(stdin_only.contains("$OutputEncoding = [System.Text.UTF8Encoding]::new($false)"));
         assert!(stdin_only.contains("`--stdin`"));
+        assert!(stdin_only.contains("never `New-Object`"), "{stdin_only}");
         assert!(!stdin_only.contains("UTF-8 file"));
 
         let ascii_only = lossy_text_message(
