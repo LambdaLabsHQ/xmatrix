@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: rewording a repeating Norn program does not rerun its past rounds
+
+A repeating Norn program was evaluated from its first round on every pass.
+Rewording its task on the Page changed the identity of every past round, so
+the program asked each of them again in the new words, one after another: a
+loop three rounds old ran three extra rounds at once, and one a month old
+would have run thirty. Norn is vendored at norn-lang/norn#36: when a round's
+handler finishes, the ledger keeps where the loop stands, and later passes
+begin there. Evaluation no longer grows with the program's age. Hub only.
+Recovery is a CI-validated beta Hub reverting this change; ledgers written
+meanwhile carry one extra entry that the older runtime ignores.
+
 ## Unreleased: a Norn program can map an event stream
 
 A Norn program that waited on a mapped stream (`ciFailed(…)->map(…)`) ended
