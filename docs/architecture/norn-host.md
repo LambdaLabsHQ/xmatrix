@@ -233,6 +233,10 @@ marks it posted. The message is appended without being interpreted, so it
 starts and wakes nobody: whoever is named is told the way a mention tells
 them.
 
+A round of a repeating program whose handler ends in anything but an answer
+is told the same way, once, naming nobody: the loop goes on, and the
+conversation keeps why that round did not succeed.
+
 ## Deadlines and stop
 
 A request's `~by` and a timer are the ledger's: a pass records the earliest

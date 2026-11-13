@@ -219,6 +219,10 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         nextDue = pass.nextDue;
         waits = (pass.waiting?.targets ?? []).flatMap(target => target.kind === "stream" ? [target.source] : []);
         said.push(...pass.said);
+        // A round whose handler ended in anything but an answer is told in the program's conversation, once.
+        for (const entry of pass.log) {
+          if (entry.kind === "handlerFailed") said.push({ to: "", text: `A round of this program did not succeed: ${show(entry.reply)}` });
+        }
         for (const request of Object.values(ledger.requests)) {
           if (request.reply !== null) continue;
           // One of a group takes the request for the group: the first this host can reach.
