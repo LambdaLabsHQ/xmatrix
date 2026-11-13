@@ -189,6 +189,9 @@ export function placementReason(ranking: readonly LaunchPlacementCandidate[], co
   // The breaker: an environment that just failed to start is tried after every other.
   const failed = !chosen.startupFailedAt && ranking.find(item => item.startupFailedAt && item.fit >= chosen.fit);
   if (failed) return `${failed.harness}${failed.machineName ? ` on ${failed.machineName}` : ""} failed to start in the last 30 minutes, so it goes last`;
+  // The other breaker: an environment whose latest summons all ended at once without a reply.
+  const silent = !chosen.unansweredAt && ranking.find(item => item.unansweredAt && item.fit >= chosen.fit);
+  if (silent) return `${silent.harness}${silent.machineName ? ` on ${silent.machineName}` : ""} ended its last summons at once without a reply, so it goes last`;
   // Measured reply time: a harness that fits as well but answers slower lost on it.
   const slower = chosen.responseLatencyMs !== undefined && ranking.find(item => item.harness !== chosen.harness &&
     item.fit >= chosen.fit && item.responseLatencyMs !== undefined && item.responseLatencyMs > chosen.responseLatencyMs! * 1.5);

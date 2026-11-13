@@ -10,6 +10,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { wakeRestingInstances } from "./registration-launch-dispatch";
+import { runtimeRepository } from "./runtime";
 import type { ProductMessagePostCommitInput } from "./product-message-post-commit";
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
@@ -172,7 +173,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
 }
 
 /** The Run that holds a request answers it; the program reads the answer in the same step. */
-export async function answerNornRequest(env: Env, input: { channelId: string; runId: string; instanceId: string; requestRef: string;
+export async function answerNornRequest(env: Env, input: { channelId: string; runId: string; instanceId: string; ownerUserId: string; requestRef: string;
   outcome: "answered" | "refused" | "broke"; text: string }): Promise<NornPassResult> {
   const requestId = `norn-answer:${input.requestRef}:${crypto.randomUUID()}`;
   const programs = await repository(env, input.channelId, requestId);
@@ -187,8 +188,17 @@ export async function answerNornRequest(env: Env, input: { channelId: string; ru
   const result = await programs.advance({ requestId, channelId: input.channelId, programId: held.programId },
     nornStep({ requestId: held.requestId, epoch: held.epoch, reply }));
   if (!result) return { status: "failed", refusal: "The request has already ended" };
-  // What the answer opened, or the program's end, is the coordinator's to deliver.
-  if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  if (!result.refusal) {
+    // An answer to the request that started the Run is the Run's reply, as a message in the conversation is:
+    // its launch is measured and judged by it. Best effort; the answer is already in the ledger.
+    await runtimeRepository(env).recordAgentLaunchFirstReply({ requestId: crypto.randomUUID(), channelId: input.channelId,
+      runId: input.runId, actorUserId: input.ownerUserId, at: new Date().toISOString() }).catch((error: unknown) => {
+      console.warn("Norn answer could not be recorded as the Run's first reply", { channelId: input.channelId, runId: input.runId,
+        error: error instanceof Error ? error.message : String(error) });
+    });
+    // What the answer opened, or the program's end, is the coordinator's to deliver.
+    await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  }
   return result;
 }
 

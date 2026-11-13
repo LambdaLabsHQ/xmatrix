@@ -142,6 +142,10 @@ export interface RegistrationLaunchCandidate {
   /** The latest Run of this environment in the Space that failed to start
    * within the last STARTUP_FAILURE_WINDOW_MINUTES; routing ranks it last. */
   startupFailedAt?: string;
+  /** When this environment last took a summon and ended its turn at once with
+   * no reply, within SILENT_SUMMON_WINDOW_HOURS, each of its last
+   * SILENT_SUMMONS summons in the Space having gone that way; routing ranks it last. */
+  unansweredAt?: string;
   /** The harness's median time from a connected Run to its first reply,
    * across every launch in the last RESPONSE_LATENCY_WINDOW_DAYS; absent with
    * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
@@ -173,6 +177,21 @@ const RECONNECT_WAIT_UNTIL_SQL = (alias: string) =>
 
 /** How long a failed start keeps an environment behind every other (the breaker). */
 export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
+/**
+ * A harness that starts and connects but does no work ends each turn in
+ * seconds without a word and without an error: nothing fails, so nothing
+ * else notices. When an environment's last SILENT_SUMMONS summons all ended
+ * that way, the latest of them within SILENT_SUMMON_WINDOW_HOURS, automatic
+ * assignment tries every other environment first. It is tried again once
+ * that window has passed, and one more silent summon puts it last again; a
+ * summon it answers clears it.
+ */
+export const SILENT_SUMMONS = 3;
+export const SILENT_SUMMON_WINDOW_HOURS = 24;
+/** How far back its summons are read. */
+export const SILENT_SUMMON_HISTORY_DAYS = 7;
+/** A first turn shorter than this that says nothing did no work. */
+export const SILENT_SUMMON_TURN_MS = 30_000;
 /** How long a start or turn refused as signed out keeps its registration out
  * of routing, unless its machine reports its harnesses again sooner. */
 export const SIGNED_OUT_FAILURE_WINDOW_HOURS = 24;
@@ -1102,7 +1121,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const modelReads = singleReadStatements(this.database, { requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement });
     const observed = await modelReads.query({
-      name: "registration_launch_model_catalog_v4", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
+      name: "registration_launch_model_catalog_v5", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -1129,6 +1148,20 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
             AND (run.metadata_json->'spawnResult'->>'ok'='false'
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE
+        -- Its latest summons whose first turn has ended, newest first. Silent: the turn completed in seconds and
+        -- the Run never replied, in the conversation or to a program's request.
+        LEFT JOIN LATERAL (SELECT CASE WHEN count(*)=${SILENT_SUMMONS} AND bool_and(recent.silent)
+            AND max(recent.connected_at)>=statement_timestamp()-interval '${SILENT_SUMMON_WINDOW_HOURS} hours' THEN max(recent.connected_at) END AS unanswered_at
+          FROM (SELECT launch.connected_at,(launch.first_reply_at IS NULL AND turn.took_ms<${SILENT_SUMMON_TURN_MS}) AS silent
+            FROM data.run_agent_registrations r JOIN data.agent_launches launch ON launch.run_id=r.run_id
+              JOIN LATERAL (SELECT execution.finished_at_millis-execution.started_at_millis AS took_ms
+                FROM data.agent_message_executions execution
+                WHERE execution.run_id=launch.run_id AND execution.source_message_id=launch.trigger_id
+                  AND execution.state='completed' AND execution.finished_at_millis IS NOT NULL
+                ORDER BY execution.started_at_millis LIMIT 1) turn ON TRUE
+            WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+              AND launch.connected_at>=statement_timestamp()-interval '${SILENT_SUMMON_HISTORY_DAYS} days'
+            ORDER BY launch.connected_at DESC LIMIT ${SILENT_SUMMONS}) recent) silent ON TRUE
         LEFT JOIN LATERAL (SELECT max(GREATEST(
             CASE WHEN pg_input_is_valid(run.metadata_json->>'signedOutAt','timestamp with time zone')
               THEN (run.metadata_json->>'signedOutAt')::timestamptz END,
@@ -1247,8 +1280,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ? harnessParameterObservation(observation?.parameters, observation?.parameters_observed_at,
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
+        const unansweredAt = observation?.unanswered_at ? new Date(observation.unanswered_at).toISOString() : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
-          ...(startupFailedAt ? { startupFailedAt } : {}),
+          ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
           ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),

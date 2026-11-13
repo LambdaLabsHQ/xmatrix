@@ -34,7 +34,7 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
       return c.json({ error: "Name the request and give its answer or the reason" }, 400, NO_STORE);
     }
     return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId, instanceId: run.instanceId,
-      requestRef: body.requestRef, outcome, text: body.text.trim() }), 200, NO_STORE);
+      ownerUserId: run.ownerUserId, requestRef: body.requestRef, outcome, text: body.text.trim() }), 200, NO_STORE);
   }));
   // An Agent Run asks one question; the Hub writes its program and the Run's Instance is its author.
   app.post(HUB_ROUTES.norn_request_ask, c => jsonErrors(c, async () => {

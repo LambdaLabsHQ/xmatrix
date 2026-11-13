@@ -799,6 +799,24 @@ test('an environment that failed to start in the last 30 minutes goes after ever
   assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
 });
 
+test('an environment whose latest summons all ended at once without a reply goes after every one that answers', async () => {
+  // 2026-11-13: a Cursor that connected and ended every turn in nine seconds, saying nothing, took `@auto` work for two days.
+  const machine = (id, unansweredAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id }, ...(unansweredAt ? { unansweredAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true } } });
+  const silent = machine('silent', '2026-11-13T09:10:00.000Z'), answering = machine('answering');
+  assert.deepEqual(jointRanking([silent, answering], candidate => candidate === silent ? 1 : 1 / 3).map(item => item.candidate.key.machineId),
+    ['answering', 'silent']);
+  // With nothing else to ask, it is still asked: whoever summoned it reads what comes of it.
+  assert.equal(jointRanking([silent], () => 1)[0].candidate, silent);
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...silent, key: candidates[0].key }, { ...candidates[1], observations: answering.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].unansweredAt, '2026-11-13T09:10:00.000Z');
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+});
+
 test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {
   // 2026-10-17 production medians, connected Run to first reply: Claude 22 s, Grok 60 s, OpenCode 160 s.
   const harness = (name, responseLatencyMs) => ({ ...candidates[0],
