@@ -133,6 +133,10 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
   const told = step({ requestId: failing.requestId, epoch: failing.epoch, reply: { tag: "Refused", reason: "no quota today" } }, { nowMs: 5 * DAY + 60_000 });
   assert.deepEqual(told.write.notices.map(notice => [notice.recipient, notice.body]), [["", "A round of this program did not succeed: Refused(no quota today)"]]);
   assert.deepEqual([step(undefined, { nowMs: 5 * DAY + 120_000 }).write.notices, state.ledger.ended], [[], null]);
+  // A beat counted from a time: the first round is at that time, not a period after the program started.
+  const weekly = program(`every(7d, ~from=1970-01-03T00:00Z)->forEach(_ => run(@auto, "Weekly round")->wait)`);
+  assert.equal(weekly.step().write.nextDueMs, 2 * DAY);
+  assert.equal(weekly.step(undefined, { nowMs: 2 * DAY }).open.length, 1);
   // A condition this host cannot write into a summon ends the request with the reason, not with a silent default.
   const unknown = program(`switch run(@auto(~mood="calm"), "Audit")->wait { | Broke(why) => why | other => fail(other) }`);
   assert.equal(unknown.step().result.status, "completed");

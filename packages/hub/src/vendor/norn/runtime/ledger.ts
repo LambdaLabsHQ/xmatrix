@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@186f2084b147284f08a133ffa7f4987569796f2e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@1dd36e4e31d002a62e9a61864a9d9d4b9695b16c; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -247,14 +247,18 @@ function targetsOf(ledger: Ledger, waited: Value, began: number): Target[] {
     else if (source.name === "map") pending.push({ source: source.args[0], path });
     else if (source.name === "filter") throw new ProgramError("Stream filter is not implemented by the reference host yet");
     else if (source.name === "after" || source.name === "every") {
-      if (source.args.length !== 1 || Object.keys(source.labels).length) throw new ProgramError("A timer needs one positional argument");
+      const { from, ...unknown } = source.labels;
+      if (source.args.length !== 1 || Object.keys(unknown).length || (from && (source.name !== "every" || from.type !== "time"))) {
+        throw new ProgramError("A timer needs one positional argument; every also takes ~from, a time");
+      }
       const when = source.args[0];
       if (!(source.name === "after" && when.type === "time") && (when.type !== "duration" || BigInt(when.value) <= 0n)) throw new ProgramError("A relative timer needs a positive duration");
-      // `after` counts from when the wait began. `every` keeps the program's beat: its ticks fall a whole number
-      // of periods after the program started, so work between two waits does not push the next tick back, and
-      // ticks that passed while it worked are not made up.
+      // `after` counts from when the wait began. `every` keeps a beat: its ticks fall a whole number of periods
+      // after the program started, or after `~from` (the first of them at `~from` itself), so work between two
+      // waits does not push the next tick back, and ticks that passed while it worked are not made up.
       const period = source.name === "every" ? Number(when.value) : 0;
-      const at = period > 0 ? ledger.startedAt + (Math.floor((began - ledger.startedAt) / period) + 1) * period : instant(when, began)!;
+      const anchor = from ? Number(from.value) : ledger.startedAt;
+      const at = period <= 0 ? instant(when, began)! : began < anchor ? anchor : anchor + (Math.floor((began - anchor) / period) + 1) * period;
       if (!Number.isSafeInteger(at)) throw new ProgramError("A deadline lies outside the clock's range");
       targets.push({ kind: "timer", at, path });
     } else if (source.name !== "never") targets.push({ kind: source.kind, source, path });

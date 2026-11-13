@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@186f2084b147284f08a133ffa7f4987569796f2e; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@1dd36e4e31d002a62e9a61864a9d9d4b9695b16c; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * What every program sees without declaring it: the base types, `list`,
  * `option`, `result`, `reply`, `yesno`, `either`, the three source types, and
@@ -121,7 +121,7 @@ export function builtinValues(): Builtin[] {
     // A reply may be set aside on purpose; a request may not (§6a).
     ["ignore", null, () => fun([newVar(GENERIC, null, false, null, true)], [], t.unit)],
     ["fail", null, () => fun([t.reply(g())], [], g())],
-    ["every", null, () => fun([t.duration], [], t.stream(t.time))],
+    ["every", null, () => fun([t.duration], [optional("from", t.time)], t.stream(t.time))],
     ["after", null, () => fun([g("deadline")], [], t.stream(t.time))],
     ["never", null, () => fun([], [], t.stream(g()))],
     ["or", null, () => {

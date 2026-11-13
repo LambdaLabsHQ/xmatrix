@@ -148,7 +148,8 @@ wakes it already.
 
 A program repeats with `every(1d)->forEach(_ => run(…)->wait)`. Its ticks
 keep the program's beat, a whole number of periods after it started, and each
-round asks anew. The conditions a program puts on its participant
+round asks anew. `every(7d, ~from=2026-11-16T09:00Z)` counts the beat from
+that time instead: the first round is then, and every week after. The conditions a program puts on its participant
 (`@auto(~repo="acme/app", ~effort="high")`; `repo`, `pwd`, `machine`,
 `harness`, `model`, `effort`) are written into the delivery's summon. A
 condition this host does not know settles the request `Broke` with the
