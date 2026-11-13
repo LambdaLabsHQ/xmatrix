@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { ArrowUp, Loader2, MessageCircleQuestion, Pencil, X } from "lucide-react";
 
@@ -45,8 +45,20 @@ export function nornRequestMetadata(metadata: Record<string, unknown> | undefine
 /** An option the person completes before sending: `High(say why)` takes words of their own. */
 const takesWords = (option: string) => option.includes("(");
 
-export function NornRequestCard({ request, channelId, outcome, token, userId }: {
+/**
+ * What is asked, apart from the rest of what the program wrote: the first
+ * paragraph is the question the card leads with, and what follows a blank
+ * line (how to answer, what the answer is for) reads under it as text.
+ */
+export function nornRequestWords(text: string): { asked: string; more: string } {
+  const [asked = "", ...more] = text.trim().split(/\n[ \t]*\n/u);
+  return { asked: asked.trim(), more: more.join("\n\n").trim() };
+}
+
+export function NornRequestCard({ request, channelId, outcome, token, userId, render = (text) => text }: {
   request: NornRequestMetadata;
+  /** Draws the program's words as the conversation draws a message's: a Page or Channel it names is a link. */
+  render?: (text: string) => ReactNode;
   channelId: string;
   /** How the request ended, once the Hub has said so on its message. */
   outcome?: string;
@@ -65,6 +77,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
   const [picked, setPicked] = useState<string | null>(null);
   const writing = choices.length === 0 || picked !== null;
   const field = useRef<HTMLTextAreaElement>(null);
+  const { asked, more } = nornRequestWords(request.text);
   const pick = (choice: string) => {
     setPicked(choice);
     setWords(choice);
@@ -110,14 +123,17 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
       aside={open && decline}
-      question={request.text}
+      question={<div className="app-ask-question">{render(asked)}</div>}
       detail={<>
+        {more && <div className="app-ask-more">{render(more)}</div>}
         {request.context && <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request.context}</div>}
         {request.by && !outcome && <div>Closes {new Date(request.by).toLocaleString()}. Without an answer by then it counts as no reply.</div>}
       </>}
       status={outcome ? { tone: "settled", label: outcome }
         : sent ? { tone: "settled", label: sent }
-        : !isHolder && { tone: "secondary", label: `Waiting for ${request.holder}` }}
+        : !isHolder ? { tone: "secondary", label: `Waiting for ${request.holder}` }
+        // Buttons say an answer is wanted; a line to write on has to be told.
+        : choices.length === 0 && { tone: "attention", label: "Waiting for your answer" }}
     >
       <AskError error={error} loadError={null} action="Couldn't send your answer" onRetry={() => setError(null)} />
       {open && (
@@ -141,7 +157,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
           )}
           {writing && (
             <div className="app-ask-answer flex min-w-0 items-start gap-3">
-              <span className="app-tool-state-icon mt-[3px]" data-state={words.trim() ? "running" : "offline"} aria-hidden="true">
+              <span className="app-tool-state-icon mt-[3px]" data-state={words.trim() ? "running" : "attention"} aria-hidden="true">
                 <Pencil className="size-4" />
               </span>
               <textarea
@@ -156,9 +172,9 @@ export function NornRequestCard({ request, channelId, outcome, token, userId }: 
                     void send("answered", words.trim());
                   }
                 }}
-                placeholder={picked ? "Complete the option you picked" : "Write your answer…"}
+                placeholder={picked ? "Complete the option you picked" : "Write your answer here…"}
                 aria-label="Your answer"
-                className="block max-h-60 min-h-0 min-w-0 flex-1 resize-none p-0 py-[3px] text-sm leading-relaxed field-sizing-content placeholder:text-muted-foreground"
+                className="block max-h-60 min-h-0 min-w-0 flex-1 resize-none p-0 py-[3px] text-sm leading-relaxed field-sizing-content"
               />
               <button
                 type="button"

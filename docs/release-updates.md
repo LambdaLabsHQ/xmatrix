@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a request card says it waits for the reader's answer
+
+A request card that takes a written answer did not tell the person asked
+that an answer was wanted: the line to write on was a grey pencil and grey
+words, the whole of the program's text ran together as one bold headline
+with a Page's raw reference in it, and the message carried the tag
+"system fact". The card now leads with the first paragraph of what is
+asked and sets the rest under it as text, with a Page or Channel it names
+drawn as a link; the person asked reads "Waiting for your answer", and the
+line to write on is in the card's brass until they write. The message
+carries no "system fact" tag. Web only. Recovery is a CI-validated beta
+Web reverting this change.
+
 ## Unreleased: a program's question is answered on the card itself
 
 The field on a request card a Norn program sends was a bare underline over

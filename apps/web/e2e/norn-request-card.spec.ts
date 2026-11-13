@@ -38,6 +38,20 @@ test("the person a program asks answers on its card, and the card says what they
   await expect.poll(() => fixtureRequestBodies(page, "answer")).toEqual([{ outcome: "answered", text: "Yes" }]);
 });
 
+test("a request for words says it waits for the reader's answer, and leads with what is asked", async ({ page }) => {
+  const asked = await openCard(page, card(request({ verb: "ask", by: null, about: "使用验证",
+    text: "使用验证：在常在线服务器建独立 QA profile，准备 Provider 身份 · page:fbfd3bc1-c3db-598f-8030-c2abd7ce3042#使用验证\n\n办完了、定了，或者不办，都在这里写一句；需要 Agent 接着做的也写在这里。" })));
+  await expect(asked.getByRole("heading")).toContainText("准备 Provider 身份", { timeout: 20_000 });
+  // The question is the first paragraph alone; how to answer reads under it, not in the headline.
+  await expect(asked.getByRole("heading")).not.toContainText("写一句");
+  await expect(asked).toContainText("都在这里写一句");
+  await expect(asked.getByRole("heading")).not.toContainText("page:fbfd3bc1");
+  await expect(asked).toContainText("Waiting for your answer");
+  await expect(asked.getByPlaceholder("Write your answer here…")).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("system fact");
+  await page.screenshot({ path: test.info().outputPath("norn-request-words.png") });
+});
+
 test("an option that takes words is completed before it is sent, and a request can be declined with a reason", async ({ page }) => {
   const asked = await openCard(page, card(request({ verb: "choose", options: ["Low", "High(say why)"], by: null })));
   await asked.getByRole("button", { name: "High(say why)" }).click({ timeout: 20_000 });
