@@ -205,7 +205,9 @@ A loop does not go back over the rounds it has handled: when a round's
 handler finishes, the ledger keeps where the loop stands, and a later pass
 begins there. Rewording the task on its Page therefore asks nothing again;
 the next round is asked in the new words. A round that is out when the text
-changes is asked again in the new words.
+changes is asked again in the new words, and the request in the old words is
+called off (`Cancelled`): its Agent is let go, and a person's card says the
+program no longer asks.
 
 A Run started for a request reads that request and the conversation's linked
 Pages before its first turn, not the conversation's history: the request
