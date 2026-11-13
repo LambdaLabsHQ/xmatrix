@@ -23,10 +23,15 @@ pub(crate) const AGENT_SIGNED_OUT_LIFECYCLE_REASON: &str = "harness_signed_out";
 /// vendors' wording, as observed: Claude Code's "Failed to authenticate: OAuth
 /// session expired and could not be refreshed" and "Please run /login", Codex's
 /// "Not logged in", API key and 401 refusals (Qwen Code: "Missing API key").
+///
+/// Claude Code's "Failed to authenticate" alone names the step, not the cause:
+/// "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare" is
+/// a network block in front of the API while the program is still signed in.
+/// Only the refusal itself (a 401, an expired or missing credential) counts.
 pub(crate) fn harness_signed_out_error(detail: &str) -> bool {
     let text = detail.to_ascii_lowercase();
     [
-        "failed to authenticate",
+        "api error: 401",
         "oauth session expired",
         "oauth token has expired",
         "not logged in",

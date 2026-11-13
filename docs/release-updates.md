@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a blocked network is not a signed-out Claude Code
+
+A signed-in Claude Code failed turns with `Failed to authenticate. API Error:
+403 Attention Required! | Cloudflare`, a block in front of the API. The
+wrapper read the bare "failed to authenticate" as a sign-out, so the
+conversation got "not signed in" cards and routing stopped choosing that
+machine. Only a refused credential (a 401, an expired or missing one) counts
+now; other failures show as the turn failure they are. CLI only. Recovery is a
+CI-validated beta CLI reverting this change.
+
 ## Unreleased: an Agent whose name is not ASCII starts
 
 An Agent named `牛马` exited seconds after every summon. The Hub accepts any
