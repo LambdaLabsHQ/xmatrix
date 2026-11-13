@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornRequestCard, personHolder, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornBlocks, nornOutcomeText, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDeliveryBody, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -204,4 +204,25 @@ switch choose(@Daniel, "How risky is this release?", [Low, High("say why")], ~by
   assert.deepEqual([nornOutcomeText("@Daniel", { tag: "Answered", value: { type: "variant", name: "Low", args: [] } }),
     nornOutcomeText("@Daniel", { tag: "Refused", reason: "not mine" }), nornOutcomeText("@Daniel", { tag: "NoReply" })],
     ["@Daniel answered: Low", "@Daniel declined: not mine", "It closed without an answer."]);
+});
+
+test("a question asked with a command is its program: the request, waited on, with what silence means", () => {
+  assert.deepEqual(nornQuestionSource({ verb: "ask", who: "@Daniel", question: 'Which "address"?\nThe billing one.' }),
+    { source: 'ask(@Daniel, "Which \\"address\\"?\\nThe billing one.")->wait' });
+  assert.deepEqual(nornQuestionSource({ verb: "choose", who: "@Daniel", question: "Which?", options: ["Approve", "Reject"], by: "2d", otherwise: "Reject" }),
+    { source: "type choice = Approve | Reject\nswitch choose(@Daniel, \"Which?\", [Approve, Reject], ~by=2d)->wait {\n| NoReply => Answered(Reject)\n| other => other\n}" });
+  // The program it writes runs: asked, unanswered at its time, it ends with the answer the asker gave for silence.
+  const built = nornQuestionSource({ verb: "confirm", who: "@Daniel", question: "Ship?", by: "1h", otherwise: "No" });
+  const asked = program(built.source);
+  assert.equal(asked.step().open.length, 1);
+  asked.step(undefined, { nowMs: asked.state.nowMs + 2 * 3_600_000 });
+  assert.deepEqual([asked.state.ledger.ended.result.name, asked.state.ledger.ended.result.args[0].name], ["Answered", "No"]);
+  for (const [input, why] of [[{ verb: "ask", who: "Daniel", question: "?" }, /Name whom to ask/u],
+    [{ verb: "choose", who: "@Daniel", question: "?", options: ["yes", "no"] }, /capitalised word/u],
+    [{ verb: "choose", who: "@Daniel", question: "?", options: ["Go", "Go"] }, /different options/u],
+    [{ verb: "confirm", who: "@Daniel", question: "?", by: "soon" }, /--by is a duration/u],
+    [{ verb: "confirm", who: "@Daniel", question: "?", otherwise: "Yes" }, /needs --by/u],
+    [{ verb: "confirm", who: "@Daniel", question: "?", by: "1d", otherwise: "Maybe" }, /one of Yes, No/u]]) {
+    assert.match(nornQuestionSource(input).refusal, why);
+  }
 });

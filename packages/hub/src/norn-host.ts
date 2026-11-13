@@ -202,6 +202,43 @@ export function nornOutcomeText(holder: string, reply: Reply): string {
     default: return reply.reason;
   }
 }
+/** One question an Agent asks with a command instead of writing its program (`xmatrix confirm`, `choose`, `ask`). */
+export interface NornQuestion {
+  verb: "ask" | "confirm" | "choose"; who: string; question: string;
+  /** What `choose` offers: capitalised words. */
+  options?: string[];
+  /** When it closes without an answer: a duration (`1d`) or a time (`2026-11-20T09:00Z`). */
+  by?: string;
+  /** The answer taken when it closes unanswered; without one, the asker reads that nobody replied. */
+  otherwise?: string;
+}
+/**
+ * The program for one question: the request, waited on, with what silence
+ * means when the asker said so. Its result is the reply itself, so the asker
+ * reads `Answered(…)`, `Refused(…)` or `NoReply`. Returns why it cannot be asked.
+ */
+export function nornQuestionSource(input: NornQuestion): { source: string } | { refusal: string } {
+  if (!/^@[^\s@:()]{1,80}(?::[1-9]\d{0,8})?$/u.test(input.who)) return { refusal: "Name whom to ask, as in @Daniel" };
+  if (input.by !== undefined && !/^(?:[1-9]\d{0,3}(?:m|h|d)|\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z)$/u.test(input.by)) {
+    return { refusal: "--by is a duration such as 4h or 2d, or a UTC time such as 2026-11-20T09:00Z" };
+  }
+  const options = input.verb === "choose" ? input.options ?? [] : input.verb === "confirm" ? ["Yes", "No"] : [];
+  if (input.verb === "choose" && (options.length < 2 || new Set(options).size !== options.length || options.some(option => !/^[A-Z][A-Za-z0-9]{0,40}$/u.test(option)
+    || ["Yes", "No", "Answered", "Refused", "Broke", "NoReply", "Cancelled", "Revoked", "Some", "None", "Ok", "Error", "First", "Second"].includes(option)))) {
+    return { refusal: "Give two or more different options, each one capitalised word, as in Approve Reject Later" };
+  }
+  if (input.otherwise !== undefined && (!options.includes(input.otherwise) || input.by === undefined)) {
+    return { refusal: options.length ? `--otherwise is one of ${options.join(", ")}, and needs --by: it is the answer taken when that time passes`
+      : "--otherwise needs a question with options, and --by" };
+  }
+  const request = `${input.verb}(${input.who}, ${JSON.stringify(input.question)}${input.verb === "choose" ? `, [${options.join(", ")}]` : ""}${
+    input.by === undefined ? "" : `, ~by=${input.by}`})->wait`;
+  const source = [...(input.verb === "choose" ? [`type choice = ${options.join(" | ")}`] : []),
+    ...(input.otherwise === undefined ? [request] : [`switch ${request} {`, `| NoReply => Answered(${input.otherwise})`, "| other => other", "}"])].join("\n");
+  const checked = checkNornProgram(source);
+  return "refusal" in checked ? { refusal: checked.refusal } : { source };
+}
+
 /** Message bodies are refused above this size, so a request that cannot fit is never delivered. */
 const MAX_DELIVERY_BYTES = 60 * 1024;
 

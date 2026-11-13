@@ -434,6 +434,7 @@ export function agentRunHttpRouteAllowed(
   // Norn requests in its own Channel: the route proves the Run holds the one it answers.
   if (request.method === "GET" && path === HUB_ROUTES.norn_requests) return true;
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_answer) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_ask) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;

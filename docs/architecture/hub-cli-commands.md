@@ -56,6 +56,12 @@ commands keep working.
   that holds a request of a Norn program ends it, and reads the open requests it holds or waits
   on ([Norn host](norn-host.md)).
 
+- `confirm <who> <question>…`, `choose <who> <question> <options>…` and `ask <who> <question>…`
+  (`cli-commands-requests.ts`) are new Hub-defined commands. An Agent Run asks a person or an Agent
+  one question without writing its program: the Hub writes the program into the Run's
+  conversation, and the answer comes back to the Run as the program's result. `--by` closes it at
+  a time, and `--otherwise` names the answer taken then ([Norn host](norn-host.md)).
+
 Moving another command: add it to the Hub table with the same options and
 output, delete its clap definition and handler from the CLI. Older CLIs keep
 their compiled copy.

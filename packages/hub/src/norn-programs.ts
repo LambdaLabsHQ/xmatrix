@@ -3,8 +3,8 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { canonicalMentionToken } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { checkNornProgram, nornDeliveryBody, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornRequestCard,
-  nornStartLedger, nornStep, personHolder, type NornPassResult, type NornRequestCard } from "./norn-host";
+import { checkNornProgram, nornDeliveryBody, nornEndBody, nornOutcomeText, nornPersonBody, nornProgramIn, nornQuestionSource,
+  nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion, type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -14,6 +14,11 @@ import type { ProductMessagePostCommitInput } from "./product-message-post-commi
 import type { Env } from "./types";
 import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
 
+/** A program xMatrix wrote for an Agent Run's question: its message is xMatrix's own, which takes no reply. */
+const NORN_ASK_PREFIX = "norn-ask:";
+/** What xMatrix says for a program is a reply to the program's message, where a person or an Agent wrote that message. */
+const replyTo = (program: { programId: string; onPage: boolean }): { replyTo?: string } =>
+  program.onPage || program.programId.startsWith(NORN_ASK_PREFIX) ? {} : { replyTo: program.programId };
 /** The message that carries a request of a person as a card. */
 const NORN_REQUEST_MESSAGE_KIND = "xmatrix.system.norn-request";
 
@@ -116,14 +121,14 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         undeliverable = true;
         continue;
       }
-      await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
+      await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
         authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, delivery.requestRef),
         card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!) });
       await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
       continue;
     }
     // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
-    await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...(delivery.onPage ? {} : { replyTo: delivery.programId }),
+    await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
       authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
       body: nornDeliveryBody(delivery.request as LedgerRequest, delivery.requestRef,
         { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage }) });
@@ -142,14 +147,14 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   // What a program says goes to its conversation as xMatrix, naming whom it is for; it starts and wakes nobody.
   for (const notice of work.notices) {
     await say(env, postCommit, { channelId, messageId: `norn-say:${notice.noticeId}`, authorityUserId: notice.authorityUserId,
-      body: `${notice.recipient} ${notice.body}`.trim(), quiet: true, ...(notice.onPage ? {} : { replyTo: notice.programId }) });
+      body: `${notice.recipient} ${notice.body}`.trim(), quiet: true, ...replyTo(notice) });
     await programs.noticed({ requestId, channelId, programId: notice.programId, noticeId: notice.noticeId });
   }
   for (const report of work.reports) {
     // An Agent that started the program is told by its address, so it wakes to read the result.
     await say(env, postCommit, { channelId, messageId: `norn-end:${report.programId}`.slice(0, 300),
       // A page's program ends in its own conversation, where only its Instances rest, about to be let go.
-      ...(report.onPage ? { quiet: true } : { replyTo: report.programId }),
+      ...(report.onPage ? { quiet: true } : replyTo(report)),
       authorityUserId: report.authorityUserId,
       body: `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(report.ended as Ledger["ended"])}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
@@ -205,6 +210,26 @@ export async function answerNornRequestAsPerson(env: Env, input: { channelId: st
   // The card is closed and what the answer opened is delivered by the coordinator.
   if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
   return result;
+}
+
+/**
+ * An Agent Run asks one question without writing its program. xMatrix writes
+ * the program into the Run's conversation, where everyone reads what is asked
+ * of whom, and the Run's Instance is its author: the answer comes back to it
+ * as the program's result. Returns why the question cannot be asked.
+ */
+export async function askNornQuestion(env: Env, run: { channelId: string; instanceId: string; ownerUserId: string; agentName: string },
+  question: NornQuestion): Promise<{ refusal?: string }> {
+  const built = nornQuestionSource(question);
+  if ("refusal" in built) return built;
+  const messageId = `${NORN_ASK_PREFIX}${crypto.randomUUID()}`, requestId = `norn-start:${messageId}`;
+  // The name is written without its @: the request's own message tells whoever is asked, once.
+  await say(env, async () => undefined, { channelId: run.channelId, messageId, authorityUserId: run.ownerUserId, quiet: true,
+    body: `${run.agentName} asks ${question.who.slice(1)}:\n\n\`\`\`norn run\n${built.source}\n\`\`\`` });
+  await (await repository(env, run.channelId, requestId)).start({ requestId, channelId: run.channelId, programId: messageId,
+    authorKind: "agent", authorId: run.instanceId, authorityUserId: run.ownerUserId, source: built.source, ledger: nornStartLedger }, nornStep());
+  await wakeAgentLaunchCoordinator(env, run.channelId, ["norn"]);
+  return {};
 }
 
 /** The open requests a Run holds and those its Instance's programs wait on. */

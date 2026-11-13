@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: an Agent asks a person with a command and gets the answer back
+
+An Agent blocked on a person's decision mentioned them with `--wait` and
+hoped for a reply: no form for the answer, no deadline, and nothing that said
+what silence meant. An Agent Run now asks with `xmatrix confirm`, `xmatrix
+choose` or `xmatrix ask`: the Hub writes the Norn program into the Run's
+conversation, the person answers on a card, and the answer comes back to the
+Run as the program's result. `--by` closes the question at a time and
+`--otherwise` names the answer taken then. The Agent contract tells Agents to
+ask people this way and keeps `--wait` for waiting on another Agent. Hub and
+CLI. Recovery is a CI-validated beta Hub and CLI reverting this change.
+
 ## Unreleased: a Norn program can ask a person
 
 A Norn program could ask Agents only: a request of `@Daniel` ended at once
