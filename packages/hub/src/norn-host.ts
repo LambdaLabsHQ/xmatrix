@@ -1,6 +1,7 @@
 import { parseHarnessCapabilityMentions, parseMarkdown, utf8ByteLength } from "@xmatrix/protocol";
 import type { NornProgramState, NornProgramWrite, NornStep } from "@xmatrix/db";
-import { checkSource, elaborate, hostSources, readInterface, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
+import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
+import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
 import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Reply } from "./vendor/norn/runtime/ledger";
@@ -51,16 +52,18 @@ external appEvent: (string, ~feature: string=?) => stream<string>
 `;
 const HOST = readInterface(NORN_HOST_INTERFACE, "xmatrix.norn");
 const SOURCES = hostSources(HOST);
+/** The standard library, for a program that writes `open Std`: `routine`, `decide`, `remind`, `followUp`, `schedule`, `all`. */
+const STD = readLibrary(NORN_STD, "std.norn", HOST);
 
 type Checked = { code: Code; targets: string[] } | { refusal: string };
 /** Checks a program against this host: the built-ins alone, with no standard library and no facts yet. */
 export function checkNornProgram(source: string): Checked {
-  const checked = checkSource(source, { host: HOST, std: null });
+  const checked = checkSource(source, { host: HOST, std: STD });
   const errors = checked.diagnostics.filter(diagnostic => diagnostic.severity === "error");
   if (!checked.ok || !checked.program || errors.length) {
     return { refusal: errors.slice(0, 20).map(({ message, span }) => `${span.start.line}:${span.start.column} ${message}`).join("\n") };
   }
-  return { code: compile(elaborate(checked.program, checked.reports), { sources: SOURCES }),
+  return { code: compile(elaborate(checked.program, checked.reports), { std: STD.program, sources: SOURCES }),
     targets: [...new Set((checked.effects ?? []).flatMap(effect => effect.targets))].sort() };
 }
 
