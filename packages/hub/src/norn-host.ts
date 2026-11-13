@@ -258,11 +258,16 @@ export function nornQuestionSource(input: NornQuestion): { source: string } | { 
 /** Message bodies are refused above this size, so a request that cannot fit is never delivered. */
 const MAX_DELIVERY_BYTES = 60 * 1024;
 
-/** How a program ended, as its Channel reads it. */
-export function nornEndBody(ended: Ledger["ended"]): string {
-  if (!ended) return "The program ended.";
-  if (ended.status === "completed") return `The program finished: ${ended.result ? show(ended.result) : "()"}`;
-  return ended.error ? `The program stopped: ${ended.error}` : `The program ended without its result: ${ended.result ? show(ended.result) : "failed"}`;
+/**
+ * How a program ended, as its Channel reads it. A page's program ends in the
+ * conversation that is the program, so there it is the outcome alone.
+ */
+export function nornEndBody(ended: Ledger["ended"], onPage = false): string {
+  const [finished, stopped, lost] = onPage ? ["Finished", "Stopped", "Ended without its result"]
+    : ["The program finished", "The program stopped", "The program ended without its result"];
+  if (!ended) return onPage ? "Ended." : "The program ended.";
+  if (ended.status === "completed") return `${finished}: ${ended.result ? show(ended.result) : "()"}`;
+  return ended.error ? `${stopped}: ${ended.error}` : `${lost}: ${ended.result ? show(ended.result) : "failed"}`;
 }
 
 /** How long a pass waits before trying again a program this build cannot check. */
