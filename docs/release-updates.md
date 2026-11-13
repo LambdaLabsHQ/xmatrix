@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: `xmatrix page read` says how a Page's Norn programs stand
+
+An Agent that read a Page saw its `norn run` blocks as text only: whether a
+program was running, where its work was discussed and how its latest request
+ended showed only in the Web. `page read` now prints a `programs:` section in
+its header, one line a block, from the route the Page's steps are drawn from.
+CLI only. Recovery is a CI-validated beta CLI reverting this change.
+
+## Unreleased: a failed round of a repeating Norn program is told in its conversation
+
+When a round of a repeating Norn program ended in anything but an answer
+(refused, broke, nobody replied), the loop went on and nothing was posted:
+the failure showed only in the steps under the program on its Page. The
+round's outcome is now posted once to the program's conversation as xMatrix,
+naming nobody, through the same notices a program's `say` uses. Hub only.
+Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: rewording a repeating Norn program does not rerun its past rounds
 
 A repeating Norn program was evaluated from its first round on every pass.

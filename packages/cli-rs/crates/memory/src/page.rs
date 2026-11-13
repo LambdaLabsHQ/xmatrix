@@ -762,16 +762,19 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let url = with_route(hub_url, &route);
             let response: PageResponse = http::request_json(&url, "GET", Some(token), None).await?;
             // The head is read with who is on what; an older revision stands alone.
-            let (awareness, automations): (Option<PageAwareness>, _) = if revision.is_none() {
+            let (awareness, automations, programs): (Option<PageAwareness>, _, _) = if revision
+                .is_none()
+            {
                 let route = format!("{}/awareness", page_route(&space, &page));
                 (
                     http::request_json(&with_route(hub_url, &route), "GET", Some(token), None)
                         .await
                         .ok(),
                     crate::page_automation::page_automations(hub_url, token, &space, &page).await,
+                    crate::page_program::page_programs(hub_url, token, &space, &page).await,
                 )
             } else {
-                (None, Vec::new())
+                (None, Vec::new(), Vec::new())
             };
             let mut page_read = response.page;
             page_read.body = page_text_for_agent(
@@ -785,6 +788,8 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let response = PageResponse { page: page_read };
             // A page's Automations are live references: the header says what each one is now.
             let mut header = crate::page_automation::render_page_automations_header(&automations);
+            // Its Norn programs run from its text: the header says how each one stands.
+            header.push_str(&crate::page_program::render_page_programs_header(&programs));
             // A Run's reply goes into a page as it is written (runtime_page_stream_write).
             if run_conversation().is_some()
                 && response.page.summary.can_edit
