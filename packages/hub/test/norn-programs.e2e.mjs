@@ -21,6 +21,11 @@ test("a program in a message asks an Agent, takes its typed answer, and tells th
     ({ daemon } = scenario);
     const { channelId, registration } = scenario;
     const messages = async () => (await channelHistory(worker, MOCK_TOKEN, channelId, 50)).messages;
+    // Mock authentication creates no account row, and a person is found by the name their account carries.
+    await inTestTransaction(tx => tx.query({ text: `INSERT INTO control.auth_users (id,name,email,handle,profile_version,created_at,updated_at)
+      VALUES ($1,'Norn','norn@example.com','norn',1,now(),now()) ON CONFLICT (id) DO NOTHING`, values: [ownerId] }));
+    const answer = (ref, body, token = MOCK_TOKEN) => worker.fetch(`/api/channels/${channelId}/norn-requests/${ref}/answer`,
+      { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
 
     // A program that does not check starts nothing, and its author reads where it is wrong.
     const wrong = (await postChannelMessage(worker, MOCK_TOKEN, channelId, program(`run(@codex, "Review")`))).message;
@@ -54,6 +59,17 @@ switch run(@codex, "Review the design")->wait {
     const outside = await run(worker, runToken, ["reply", requestRef, "Fine"]);
     assert.equal(outside.exitCode, 1);
     assert.match(outside.stderr, /The report must be verdict/u);
+    // The Run asks a person with a command instead of a program of its own: the question is a card for them,
+    // silence has the meaning the Run gave it, and the answer comes back to the Run by its address.
+    assert.match((await run(worker, runToken, ["choose", "@Norn", "Which path?", "fast"])).stderr, /two or more different options/u);
+    assert.match((await run(worker, runToken, ["confirm", "@Norn", "Use", "the", "fast", "path?", "--by", "1d", "--otherwise", "No"])).stdout, /^Asked\./u);
+    const question = await until(async () => (await messages()).find(message =>
+      message.messageResidual?.appMetadata?.nornRequest?.text === "Use the fast path?"), "the Run's question");
+    assert.equal((await (await answer(question.messageResidual.appMetadata.nornRequest.ref, { outcome: "answered", text: "Yes" })).json()).status, "completed");
+    const back = await until(async () => (await messages()).find(message => /^@codex:\d+ The program finished: Answered\(Yes\)$/u.test(message.body)),
+      "the answer coming back to the Run");
+    assert.ok((await messages()).some(message => message.body.startsWith("codex asks Norn:\n\n```norn run\nswitch confirm")), back.body);
+
     const answered = await run(worker, runToken, ["reply", requestRef, "Flawed(\"no owner on failure\")"]);
     assert.deepEqual([answered.exitCode, answered.stdout], [0, "Recorded. The request is closed, and its program has ended.\n"]);
     assert.match((await run(worker, runToken, ["reply", requestRef, "Sound"])).stderr, /already ended/u);
@@ -66,9 +82,6 @@ switch run(@codex, "Review the design")->wait {
     assert.equal(stop.runId, spawn.runId);
 
     // A request of a person is a card that waits on them: found by name, answered by them alone, closed with its outcome.
-    // Mock authentication creates no account row, and a person is found by the name their account carries.
-    await inTestTransaction(tx => tx.query({ text: `INSERT INTO control.auth_users (id,name,email,handle,profile_version,created_at,updated_at)
-      VALUES ($1,'Norn','norn@example.com','norn',1,now(),now()) ON CONFLICT (id) DO NOTHING`, values: [ownerId] }));
     const asked = (await postChannelMessage(worker, MOCK_TOKEN, channelId, program(`switch confirm(@Norn, "Ship the release?", ~about="4.2")->wait {
 | Answered(Yes) => "shipped"
 | Answered(No) => "held"
@@ -79,8 +92,6 @@ switch run(@codex, "Review the design")->wait {
     const request = card.messageResidual.appMetadata.nornRequest;
     assert.deepEqual([request.verb, request.holder, request.holderUserId, request.text, request.about, card.body.split("\n")[0]],
       ["confirm", "@Norn", ownerId, "Ship the release?", "4.2", "@Norn"]);
-    const answer = (ref, body, token = MOCK_TOKEN) => worker.fetch(`/api/channels/${channelId}/norn-requests/${ref}/answer`,
-      { method: "POST", headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
     // An Agent Run does not answer for a person, and an answer of the wrong kind is refused with the request left open.
     assert.ok([401, 403].includes((await answer(request.ref, { outcome: "answered", text: "Yes" }, runToken)).status));
     assert.match((await (await answer(request.ref, { outcome: "answered", text: "Maybe" })).json()).refusal, /Yes/u);

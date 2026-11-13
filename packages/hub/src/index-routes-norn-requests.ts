@@ -2,7 +2,7 @@ import { HUB_ROUTES } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
-import { answerNornRequest, answerNornRequestAsPerson, openNornRequests } from "./norn-programs";
+import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, openNornRequests } from "./norn-programs";
 import type { Env } from "./types";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -35,6 +35,24 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
     }
     return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId, instanceId: run.instanceId,
       requestRef: body.requestRef, outcome, text: body.text.trim() }), 200, NO_STORE);
+  }));
+  // An Agent Run asks one question; the Hub writes its program and the Run's Instance is its author.
+  app.post(HUB_ROUTES.norn_request_ask, c => jsonErrors(c, async () => {
+    const run = (await requireAuth(c.req.raw, c.env)).agentRun;
+    if (!run?.instanceId) return c.json({ error: "A question is asked by an Agent Run" }, 403, NO_STORE);
+    await requireAgentRunChannelDelegation(c.env, run, []);
+    const bytes = await readBoundedRequestBody(c.req.raw, 64 * 1024);
+    let body: Record<string, unknown> | null = null;
+    try { body = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null; } catch { /* refused below */ }
+    const verb = (["ask", "confirm", "choose"] as const).find(value => value === body?.verb);
+    const text = (value: unknown) => typeof value === "string" && value.trim() ? value.trim() : undefined;
+    const who = text(body?.who), question = text(body?.question);
+    if (!verb || !who || !question) return c.json({ error: "Name whom to ask and what" }, 400, NO_STORE);
+    const by = text(body?.by), otherwise = text(body?.otherwise);
+    const asked = await askNornQuestion(c.env, { channelId: run.channelId, instanceId: run.instanceId, ownerUserId: run.ownerUserId,
+      agentName: run.agentName }, { verb, who, question, ...(by ? { by } : {}), ...(otherwise ? { otherwise } : {}),
+      ...(Array.isArray(body?.options) ? { options: body.options.filter((option): option is string => typeof option === "string") } : {}) });
+    return c.json(asked, asked.refusal ? 400 : 200, NO_STORE);
   }));
   // A person answers the request on its card. Whoever they are, they hold it only if it was delivered to them.
   const personAnswer = HUB_ROUTES.channel_norn_request_answer(":channelId", ":requestRef")

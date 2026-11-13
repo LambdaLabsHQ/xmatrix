@@ -224,6 +224,8 @@ export const HUB_ROUTES = {
   norn_requests: "/api/norn/requests",
   /** The Run that holds a Norn request answers it. */
   norn_request_answer: "/api/norn/requests/answer",
+  /** An Agent Run asks a person or an Agent something, as a Norn program it becomes the author of. */
+  norn_request_ask: "/api/norn/requests/ask",
   /** The person a Norn request was delivered to answers it, from its card. */
   channel_norn_request_answer: (channelId: string, requestRef: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,

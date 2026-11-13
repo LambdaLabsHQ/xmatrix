@@ -152,6 +152,20 @@ ends, or they can no longer read the conversation (`Broke`, by the same
 records how on the card's message as a command result and the wait on them
 ends.
 
+## Asking with a command
+
+An Agent Run that needs one answer does not have to write a program:
+`xmatrix confirm @Daniel Ship 4.2 now? --by 1d --otherwise No`,
+`xmatrix choose @Daniel "Which plan?" Monthly Yearly`, `xmatrix ask @codex …`.
+The Hub writes the program (`nornQuestionSource`), posts it to the Run's
+conversation as xMatrix, where everyone reads what is asked of whom, and
+starts it with the Run's Instance as its author and the Run's owner as its
+authority. Its result is the reply itself (`Answered(Yes)`, `Refused(…)`,
+`NoReply`), told to the Instance by its address, so it wakes to read it.
+`--otherwise` is what silence means: the answer taken when `--by` passes.
+What xMatrix says for such a program is not threaded under the program's
+message, because that message is xMatrix's own and takes no reply.
+
 ## Never silent
 
 A delivered request is abandoned when it is unanswered and nothing works on
