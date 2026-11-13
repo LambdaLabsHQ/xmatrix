@@ -1,12 +1,13 @@
 # Norn snapshot
 
-Source: https://github.com/norn-lang/norn/tree/1dd36e4e31d002a62e9a61864a9d9d4b9695b16c
+Source: https://github.com/norn-lang/norn/tree/4ea1312845432b288450bcf42411efe29d421882
 
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
 evaluates it from the top against a ledger the host keeps.
-The file reader (`frontend/check/node.ts`), the simulated team, the browser
-entry, the CLI and the standard library text are not included.
+The standard library's text is `std.ts`. The file reader
+(`frontend/check/node.ts`), the simulated team, the browser entry and the
+CLI are not included.
 Refresh with `node scripts/vendor-norn-core.mjs <local-norn-checkout>`.
 
 ## Files

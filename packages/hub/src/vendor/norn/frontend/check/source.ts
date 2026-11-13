@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@1dd36e4e31d002a62e9a61864a9d9d4b9695b16c; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@4ea1312845432b288450bcf42411efe29d421882; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Checking from source text: host interfaces, the standard library and
  * programs. Nothing here reads a file, so a browser can run it on text it

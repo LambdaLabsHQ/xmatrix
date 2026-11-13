@@ -240,6 +240,26 @@ text whichever stream occurred:
 The streams are compiled into the program from the host's interface
 (`hostSources`), so a name another host supplies is refused by the checker.
 
+## The standard library
+
+A program that writes `open Std` has Norn's standard library
+(`vendor/norn/std.ts`, the text of `std/std.norn`): `routine`, `decide`,
+`remind`, `followUp`, `schedule`, `all`. A repeating operation is one call:
+
+```norn
+open Std
+routine(~every=7d, ~from=2026-11-16T09:00Z, ~who=@auto(~repo="acme/app"),
+  ~otherwise=@claude(~repo="acme/app"), "Weekly upkeep")
+```
+
+A round every week from that time, asked of whoever fits; when that does not
+end in an answer, asked once of the one named; a round that still fails is
+told in the conversation. `~on` adds a round when a stream occurs.
+`decide(who, question, ~options, ~recommend, ~by)` is a choice whose default
+is taken only when nobody answered in time. The library is linked into the
+program when it is compiled, so a later version of it reaches a running
+program at its next pass.
+
 ## Asking the same participant again
 
 A program on a Page that asks the same participant again asks the Instance
@@ -298,7 +318,7 @@ addresses that Instance, so it wakes to read the result.
 
 - Requests to an existing Instance by its address.
 - Facts from outside that hold once (a given pull request merged, a release
-  that contains it) and the standard library.
+  that contains it).
 - A preview of what an edit to a Page's program would change before it is saved.
 - Moving `--wait`, cards, Automations and pull request subscriptions onto
   the ledger.

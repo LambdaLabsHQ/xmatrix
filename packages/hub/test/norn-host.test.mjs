@@ -226,3 +226,26 @@ test("a question asked with a command is its program: the request, waited on, wi
     assert.match(nornQuestionSource(input).refusal, why);
   }
 });
+
+test("a program opens the standard library: a routine is one line, and a decision has its default", () => {
+  const DAY = 86_400_000;
+  const upkeep = program(`open Std
+routine(~every=7d, ~from=1970-01-03T00:00Z, ~who=@auto(~repo="acme/app"), ~otherwise=@claude(~repo="acme/app"), "Weekly upkeep")`);
+  assert.equal(upkeep.step().write.nextDueMs, 2 * DAY);
+  const [first] = upkeep.step(undefined, { nowMs: 2 * DAY }).open;
+  assert.equal(nornDeliveryBody(upkeep.state.ledger.requests[first.requestId], first.requestRef).split("\n")[0], "@auto repo:acme/app launch:force");
+  // The first did not answer: the same round goes once to the one named to fall back on.
+  const [second] = upkeep.step({ requestId: first.requestId, epoch: first.epoch, reply: { tag: "Broke", reason: "no machine" } }, { nowMs: 2 * DAY + 60_000 }).open;
+  assert.equal(second.holder, "@claude");
+  upkeep.step({ requestId: second.requestId, epoch: second.epoch, reply: { typed: "done" } }, { nowMs: 2 * DAY + 120_000 });
+  assert.deepEqual([upkeep.state.ledger.ended, upkeep.step().write.nextDueMs], [null, 9 * DAY]);
+  const decision = program(`open Std
+type plan = Monthly | Yearly
+decide(@Daniel, "Which billing plan?", ~options=[Monthly, Yearly], ~recommend=Yearly, ~by=2d)`);
+  const [asked] = decision.step().open;
+  assert.match(decision.state.ledger.requests[asked.requestId].text, /^Which billing plan\?\nRecommended: Yearly\./u);
+  decision.step(undefined, { nowMs: decision.state.nowMs + 3 * DAY });
+  assert.equal(decision.state.ledger.ended.result.name, "Yearly");
+  // A word the library does not have is refused where the program is written.
+  assert.match(checkNornProgram(`open Std\nreminder(@Daniel, "x", ~at=1h)`).refusal, /reminder/u);
+});

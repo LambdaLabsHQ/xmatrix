@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "1dd36e4e31d002a62e9a61864a9d9d4b9695b16c";
+const revision = "4ea1312845432b288450bcf42411efe29d421882";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
 const root = fileURLToPath(new URL("../packages/hub/src/vendor/norn/", import.meta.url));
@@ -42,6 +42,10 @@ for (const file of [...files, "LICENSE"]) {
     `// Vendored from norn-lang/norn@${revision}; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.\n` +
       portable);
 }
+// The standard library is Norn text; a host reads it as a module of its own.
+writeFileSync(resolve(root, "std.ts"),
+  `// Vendored from norn-lang/norn@${revision} (std/std.norn); Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.\n` +
+    `/** The standard library, opened with \`open Std\`. */\nexport const NORN_STD = ${JSON.stringify(git("show", `${revision}:std/std.norn`))};\n`);
 writeFileSync(resolve(root, "README.md"), `# Norn snapshot
 
 Source: https://github.com/norn-lang/norn/tree/${revision}
@@ -49,8 +53,9 @@ Source: https://github.com/norn-lang/norn/tree/${revision}
 Apache-2.0; see LICENSE. The parser, the checker, the compiler, the evaluator and
 the request ledger are included. A program stores no state of its own: each pass
 evaluates it from the top against a ledger the host keeps.
-The file reader (\`frontend/check/node.ts\`), the simulated team, the browser
-entry, the CLI and the standard library text are not included.
+The standard library's text is \`std.ts\`. The file reader
+(\`frontend/check/node.ts\`), the simulated team, the browser entry and the
+CLI are not included.
 Refresh with \`node scripts/vendor-norn-core.mjs <local-norn-checkout>\`.
 
 ## Files

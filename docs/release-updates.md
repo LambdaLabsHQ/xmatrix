@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a Norn program can open the standard library
+
+A Norn program on the Hub was checked against the built-ins alone, so every
+repeating operation moved to Norn wrote out the same loop: its beat, the
+round, and the fallback when the first participant did not answer. `open Std`
+now gives a program Norn's standard library, vendored at norn-lang/norn#38:
+`routine` is that loop in one call, `decide` a choice whose default is taken
+only when nobody answered in time, with `remind`, `followUp`, `schedule` and
+`all`. Programs that do not open it are unchanged. Hub only. Recovery is a
+CI-validated beta Hub reverting this change; a program that opens the
+library is then refused at its next pass with the unknown name.
+
 ## Unreleased: an Agent asks a person with a command and gets the answer back
 
 An Agent blocked on a person's decision mentioned them with `--wait` and
