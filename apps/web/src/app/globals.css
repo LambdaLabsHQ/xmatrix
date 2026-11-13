@@ -9136,6 +9136,25 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   -webkit-line-clamp: 3;
 }
 
+/* A request's preview is the request itself, in full: wide enough to read a
+   paragraph, as body text and not a muted status line, and scrolling inside the
+   panel when the task is long. */
+.xmatrix-app .app-page-reference-popup.app-request-reference-popup {
+  width: min(460px, calc(100vw - 24px));
+}
+
+.xmatrix-app .app-request-reference-popup .app-page-reference-popup-body {
+  display: block;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
+}
+
 /* A handoff, drawn as what it does: the work leaves one Agent and arrives at
    the other. Both ends are ordinary invocation chips in their own tones; only
    the arrow between them is the handoff's, and it carries the motion. */
