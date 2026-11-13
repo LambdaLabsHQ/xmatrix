@@ -1334,6 +1334,21 @@ fn an_expired_claude_sign_in_reads_as_signed_out_without_a_success_prefix() {
 }
 
 #[test]
+fn a_network_block_while_authenticating_is_not_a_sign_out() {
+    // What Claude Code returned on a signed-in machine when Cloudflare blocked
+    // the request: the step that failed, not a refused credential.
+    assert!(!crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"
+    ));
+    assert!(crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"
+    ));
+    assert!(crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 401 Unauthorized"
+    ));
+}
+
+#[test]
 fn provider_quota_merge_keeps_windows_and_observation_metadata_together() {
     use crate::merge_llm_usage;
     let old = protocol::LlmUsage {
