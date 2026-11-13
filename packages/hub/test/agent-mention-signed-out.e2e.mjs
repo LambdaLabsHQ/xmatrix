@@ -1,8 +1,9 @@
 import { assert, json, MOCK_TOKEN, postChannelMessage, randomUUID, sleep, test } from "./agent-mention-spawn.fixture.mjs";
 import {
   channelSpaceId, connectDaemon, createClosedChannel, createWorkspace, inTestTransaction, registerTestAgent,
-  startPgHubWorker, testMachine,
+  startPgHubWorker, testMachine, testPostgresUrl,
 } from "./agent-launch-postgres.fixture.mjs";
+import { createAuthorityDatabase, PostgresRuntimeRepository } from "@xmatrix/db";
 
 /** The machine's harness report, as its daemon stores it. */
 const reporting = (capturedAt, login) => JSON.stringify({ schemaVersion: 1, capturedAt,
@@ -27,7 +28,7 @@ test("a summon reaches its machine whatever was last said about its program's si
         const value = await json(await worker.fetch(`/api/channels/${encodeURIComponent(channelId)}/agent-launches/query`, {
           method: "POST", headers: { Authorization: `Bearer ${MOCK_TOKEN}`, "content-type": "application/json" },
           body: JSON.stringify({ sourceMessageIds: [messageId], pageSize: 20 }) }));
-        if (value?.rejections?.length || value?.launches?.length) return value;
+        if (value?.rejections?.length || value?.launches?.length) return { ...value, messageId };
         await sleep(50);
       }
       throw new Error("the summon settled neither way");
@@ -36,6 +37,7 @@ test("a summon reaches its machine whatever was last said about its program's si
       const value = await summoned(body);
       assert.deepEqual((value.rejections ?? []).map(item => item.code), []);
       assert.equal(value.launches.length, 1);
+      return { messageId: value.messageId, runId: value.launches[0].runId };
     };
     const mention = `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" fix the build`;
 
@@ -44,7 +46,27 @@ test("a summon reaches its machine whatever was last said about its program's si
     await inTestTransaction(tx => tx.query({ text: `UPDATE data.machine_daemons
       SET metadata_json=jsonb_set(metadata_json,'{harnesses}',$2::jsonb) WHERE machine_id=$1`,
     values: [machineId, reporting(new Date().toISOString(), "signed_out")] }));
-    await launched(mention);
+    const first = await launched(mention);
+
+    // When that Run's program refuses its first turn as signed out, its notice
+    // names the program and machine and carries the summon to send again; once
+    // the Run has replied, a later refusal answers no summon. Nothing is written.
+    const runtime = new PostgresRuntimeRepository(createAuthorityDatabase({ connectionString: testPostgresUrl(), shardId: "shard-0" }));
+    const refused = () => runtime.signedOutRunHarness({ requestId: randomUUID(), runId: first.runId, actorUserId: userId });
+    // The Run's route is published just after its launch commits.
+    let unanswered;
+    for (let attempt = 0; attempt < 100 && !(unanswered = await refused()); attempt += 1) await sleep(50);
+    assert.equal(unanswered.signedOut.harness, "codex");
+    assert.equal(unanswered.signedOut.program, "Codex");
+    assert.equal(unanswered.signedOut.machineId, machineId);
+    assert.equal(unanswered.summon.sourceMessageId, first.messageId);
+    assert.ok(mention.startsWith(unanswered.summon.sourceMention), unanswered.summon.sourceMention);
+    await inTestTransaction(tx => tx.query({ text: `UPDATE data.agent_launches SET first_reply_at=now() WHERE run_id=$1`,
+      values: [first.runId] }));
+    assert.deepEqual(await refused(), { signedOut: unanswered.signedOut });
+    const marked = await inTestTransaction(tx => tx.query({ text: `SELECT metadata_json ? 'signedOutAt' AS marked
+      FROM data.runs WHERE run_id=$1`, values: [first.runId] }));
+    assert.equal(marked[0].marked, false);
 
     // A Run of the same Agent whose program refused as signed out a moment ago
     // says nothing about now either: the next summon is given to it again.
