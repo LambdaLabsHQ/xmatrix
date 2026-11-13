@@ -105,7 +105,10 @@ program's message. Its id is `norn:<reference>:<epoch>`, so a repeat appends
 nothing. Its first line is the holder's summon. Everything the program wrote
 (the task, `~about`, `~context`) is quoted in fenced text, which never
 summons or commands anyone. The message states the form the answer must have
-and the three commands that end the request.
+and the three commands that end the request. All of that is for the holder
+alone: the message marks where it begins (`metadata.nornAnswerFrom`), and a
+person reading the conversation is shown only what comes before it, the
+summon and the request's reference drawn as the request.
 
 The delivery message may start a Run for the program's authority and nobody
 else (`NORN_DELIVERY_SOURCE_SQL`, used by the launch source rule and by the

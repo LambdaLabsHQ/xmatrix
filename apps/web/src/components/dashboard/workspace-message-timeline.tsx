@@ -1892,8 +1892,11 @@ export const MessageRow = memo(function MessageRow({
     : null;
   // A page discussion's first message shows only what was written where its thread's head shows the
   // passage; anywhere else the passage and its link back open the conversation.
+  // A program's request of an Agent carries how to answer after what it asks: that part is for the Agent alone.
+  const answerFrom = message.senderKind === "system" ? message.metadata?.nornAnswerFrom : undefined;
   const displayBody = normalizeMessageBodyForDisplay(
-    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
+    foldsDiscussionHead ? foldedDiscussionBody(message.body)
+      : typeof answerFrom === "number" && answerFrom > 0 ? message.body.slice(0, answerFrom) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
