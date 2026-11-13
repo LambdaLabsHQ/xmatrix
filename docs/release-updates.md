@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: code draws in Cascadia Code, a Norn pipe as a spaced arrow
+
+Code named a monospace font the app never shipped, so it drew in each
+machine's own (SF Mono on a Mac), and a Norn program read as
+`after(2027-06-04T00:00Z)->wait`: the pipe jammed between two words and the
+time split into a number, a dash and loose digits. Code now draws in Cascadia
+Code, self-hosted like Inter, whose ligatures join `->`, `=>`, `>=` and `!=`
+into one sign each; a Norn pipe written tight is drawn with a character's
+room on each side, as `=>` is written, and a date or UTC time takes one ink.
+The program's text and a copy of it are unchanged. Web only. Recovery is a
+CI-validated beta Web reverting this change.
+
 ## Unreleased: a request card says it waits for the reader's answer
 
 A request card that takes a written answer did not tell the person asked
