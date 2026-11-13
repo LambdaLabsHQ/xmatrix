@@ -26,9 +26,6 @@ export default function norn(hljs: HLJSApi): Language {
       { className: "attr", begin: /~[a-z][A-Za-z0-9_]*/ },
       // A moment is one value, so it takes one ink: 2026-11-03T01:00Z, not a number, a dash and loose digits.
       { className: "number", begin: /\b\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?Z)?/ },
-      // The pipe between steps: `after(…)->wait`. It is drawn with room on either side (page-document.css), the
-      // way a reader says it, while the program's text keeps it tight.
-      { className: "pipe", begin: /->/ },
       // A duration (30m, 2d) or a number.
       { className: "number", begin: /\b\d+(?:\.\d+)?(?:ms|s|m|h|d|w)?\b/ },
       // A constructor or a module: Answered, Flawed, Std.

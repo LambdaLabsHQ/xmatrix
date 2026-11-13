@@ -117,10 +117,6 @@
 .page-document pre .hljs-emphasis { font-style: italic; }
 .xmatrix-app .rich-message .message-code-block .hljs-strong,
 .page-document pre .hljs-strong { font-weight: 700; }
-/* A Norn pipe (norn-grammar.ts) stands apart from the steps it joins, as `->` would with a space on each side,
-   without a space in the text a reader copies. */
-.xmatrix-app .rich-message .message-code-block .hljs-pipe,
-.page-document pre .hljs-pipe { margin-inline: 0.5ch; }
 /* A quote is a piece of tinted paper, as an ask is in a conversation: no rule beside it, its words in full ink,
    the place a page keeps a summary such as where it stands. */
 .page-document blockquote {
