@@ -242,35 +242,42 @@ fn harness_own_words(detail: &str) -> String {
 pub(crate) async fn refresh_readiness() -> bool {
     let mut changed = false;
     for preset in agent_presets() {
-        let has_status = preset
-            .management
-            .as_ref()
-            .and_then(|management| management.login.as_ref())
-            .is_some_and(|login| login.status.is_some());
-        if has_status || !matches!(preset.backend.as_str(), "acp" | "grok-acp") {
-            continue;
-        }
-        let state = match resolve_launcher(preset) {
-            None => None,
-            Some(launcher) => match crate::acp_harness_readiness(preset, &launcher).await {
-                Some(Ok(())) => Some(("signed_in", None)),
-                Some(Err(reason)) => {
-                    eprintln!("{} cannot take work: {reason}", preset.display_name);
-                    Some(("signed_out", Some(harness_own_words(&reason))))
-                }
-                None => None,
-            },
-        };
-        let Ok(mut answers) = READINESS.lock() else {
-            return changed;
-        };
-        let previous = match state.clone() {
-            Some(state) => answers.insert(preset.id.clone(), state),
-            None => answers.remove(&preset.id),
-        };
-        changed |= previous != state;
+        changed |= refresh_readiness_of(preset).await;
     }
     changed
+}
+
+/// The same for one preset: a harness with a status command is asked by that
+/// command when probed, so only a status-less ACP harness is started here.
+/// True when its answer changed.
+pub(crate) async fn refresh_readiness_of(preset: &AgentPreset) -> bool {
+    let has_status = preset
+        .management
+        .as_ref()
+        .and_then(|management| management.login.as_ref())
+        .is_some_and(|login| login.status.is_some());
+    if has_status || !matches!(preset.backend.as_str(), "acp" | "grok-acp") {
+        return false;
+    }
+    let state = match resolve_launcher(preset) {
+        None => None,
+        Some(launcher) => match crate::acp_harness_readiness(preset, &launcher).await {
+            Some(Ok(())) => Some(("signed_in", None)),
+            Some(Err(reason)) => {
+                eprintln!("{} cannot take work: {reason}", preset.display_name);
+                Some(("signed_out", Some(harness_own_words(&reason))))
+            }
+            None => None,
+        },
+    };
+    let Ok(mut answers) = READINESS.lock() else {
+        return false;
+    };
+    let previous = match state.clone() {
+        Some(state) => answers.insert(preset.id.clone(), state),
+        None => answers.remove(&preset.id),
+    };
+    previous != state
 }
 
 pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {

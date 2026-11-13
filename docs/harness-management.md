@@ -105,9 +105,17 @@ there reads the code's text without the program's name.
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
-`auto_update_off`, `refresh`, `release`, and the sign-in actions `login_start`,
+`auto_update_off`, `refresh`, `release`, `check`, and the sign-in actions `login_start`,
 `login_finish` and `login_cancel` (see [Remote sign-in](#remote-sign-in)). `harnessActionAvailable` says whether a preset has an official
 recipe or control for one; anything else is refused when issued.
+
+`check` asks one preset's program, now, whether it is installed and signed in,
+and answers with what it says: its status command, or for an ACP harness with
+none, a start the way a launch starts it. It changes nothing and needs a daemon
+with `machine_harness_check_v1`. Whether a program is signed in is its own to
+say and nothing announces a change, so a page that shows it asks when it is
+looked at; `refresh` re-probes every preset and reads every registry, which
+takes many seconds and is not for that.
 
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
   `POST /api/machine-daemons/harness-actions { machineId, hostId?, presetId,

@@ -1,7 +1,7 @@
 import { integration, isolatedPostgres } from "./postgres-database.fixture.mjs";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY } from "@xmatrix/protocol";
+import { MACHINE_HARNESS_CHECK_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY } from "@xmatrix/protocol";
 import { PostgresMachineControlRepository, readHarnessActionStatus, readRecentHarnessActions } from "../dist/index.js";
 
 
@@ -34,6 +34,8 @@ integration("harness actions need the owner and a capable daemon, answer exactly
     await assert.rejects(issue(id(), { presetId: "grok", action: "uninstall" }), error => error.code === "invalid_harness_action");
     await assert.rejects(issue(id(), { action: "uninstall" }), error => error.code === "harness_action_unavailable");
     await assert.rejects(issue(id(), { command: "rm -rf /" }), error => error.code === "invalid_harness_action");
+    // Asking a program whether it is signed in needs a daemon that knows the question.
+    await assert.rejects(issue(id(), { action: "check" }), error => error.code === "harness_action_unavailable");
 
     await assert.rejects(issue(id(), { presetId: "cursor" }), error => error.code === "harness_action_unavailable");
 
@@ -140,6 +142,18 @@ integration("harness actions need the owner and a capable daemon, answer exactly
     const leased = await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
       principal, connectionEpoch: capable.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
     assert.deepEqual(leased.commands.map(command => command.payload.requestId), [uninstallId]);
+
+    // And a `check` is issued to, and leased by, only a daemon that can answer it.
+    const checkId = id();
+    await connect(["machine_harness_action_v1", MACHINE_HARNESS_CHECK_CAPABILITY]);
+    await issue(checkId, { action: "check" });
+    const deaf = await connect(["machine_harness_action_v1"]);
+    assert.equal((await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: deaf.connectionEpoch, commandTypes: ["harness_action"], payload: {} })).commands.length, 0);
+    const asking = await connect(["machine_harness_action_v1", MACHINE_HARNESS_CHECK_CAPABILITY]);
+    assert.deepEqual((await controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: asking.connectionEpoch, commandTypes: ["harness_action"], payload: {} }))
+      .commands.map(command => command.payload.requestId), [checkId]);
   } finally { await fixture.close(); }
 });
 

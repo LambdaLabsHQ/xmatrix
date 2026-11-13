@@ -3,7 +3,7 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, MACHINE_HARNESS_CHECK_CAPABILITY, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
@@ -1118,6 +1118,14 @@ export class PostgresMachineControlRepository {
         if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
           "Update this machine's daemon before signing in to harnesses from here");
       }
+      if (payload.action === "check") {
+        const capable = await tx.query({ name: "machine_harness_check_v1", text: `SELECT 1
+          FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+            AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+        values: [ownerUserId, machineId, MACHINE_HARNESS_CHECK_CAPABILITY], maxRows: 1 });
+        if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
+          "Update this machine's daemon before checking a harness's sign-in from here");
+      }
       if (payload.action === "release") {
         const capable = await tx.query({ name: "machine_harness_release_v1", text: `SELECT 1
           FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
@@ -1346,7 +1354,7 @@ export class PostgresMachineControlRepository {
       WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
         AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
     values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v10", text: `SELECT
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v11", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1370,12 +1378,14 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'presetId'<>'cursor' OR command.payload_json->>'action'<>'update' OR $7::boolean) AND
           (command.payload_json->>'action'<>'uninstall' OR $8::boolean) AND
           (command.payload_json->>'action'<>'release' OR $9::boolean) AND
-          (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
+          (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean) AND
+          (command.payload_json->>'action'<>'check' OR $15::boolean)))
         AND (command.command_type<>'worktree_action' OR $11::boolean)
         AND (command.command_type<>'text_task' OR $12::boolean)
         AND (command.command_type<>'sleep' OR $13::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY), LEASE_RENEW_SKEW_MS],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY), LEASE_RENEW_SKEW_MS,
+        Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CHECK_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
