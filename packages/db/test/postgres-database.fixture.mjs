@@ -99,7 +99,6 @@ export async function registrationChannelTables(client, schema) {
 
 /** Commands in a schema test roll back to a savepoint while its outer fixture remains. */
 export function savepointDatabase(client, rewrite, checkContext = () => {}) {
-<<<<<<< Updated upstream
   return { cacheMode: "disabled", async transaction(context, callback) {
     checkContext(context);
     await client.query("SAVEPOINT command");
@@ -112,25 +111,6 @@ export function savepointDatabase(client, rewrite, checkContext = () => {}) {
       throw error;
     }
   }, async close() {}, openSession() { return this; } };
-=======
-  const database = { cacheMode: "disabled",
-    // Lock-free reads open a session on this same connection. A new connection
-    // would not see the fixture's uncommitted rows.
-    openSession: () => ({ ...database, close: async () => {} }),
-    async transaction(context, callback) {
-      checkContext(context);
-      await client.query("SAVEPOINT command");
-      try {
-        const result = await callback(boundedPostgresTransaction(client, rewrite));
-        await client.query("RELEASE SAVEPOINT command");
-        return result;
-      } catch (error) {
-        await client.query("ROLLBACK TO SAVEPOINT command");
-        throw error;
-      }
-    } };
-  return database;
->>>>>>> Stashed changes
 }
 
 export async function applyTestMigrations(client, files, rewrite) {

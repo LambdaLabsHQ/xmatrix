@@ -18,22 +18,17 @@ integration("page.read recovers a lost BEGIN without replaying a commit (XMATRIX
     "SELECT count(*)::int AS n FROM data.page_links WHERE space_id=$1 AND page_id=$2",
     [f.ids.space, page.pageId]);
   try {
-<<<<<<< Updated upstream
     ({ page } = await pages.create({ ...input, body: "Recovered body" }));
-=======
-    ({ page } = await pages.create({ ...input, title: "Read recovery", body: "Recovered body" }));
-    const body = "# Read recovery\n\nRecovered body";
->>>>>>> Stashed changes
     const read = () => pages.read({ ...input, pageId: page.pageId });
     const expected = await read();
-    assert.equal(expected.page.body, body);
+    assert.equal(expected.page.body, "Recovered body");
     assert.equal((await links()).rows[0].n, 0);
 
     for (const matches of [/SELECT role FROM data\.space_members/u,
       /FROM data\.page_revisions WHERE space_id=\$1 AND page_id=\$2 AND revision=\$3/u]) {
       const before = clients.length;
       fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
-      assert.equal((await read()).page.body, body);
+      assert.equal((await read()).page.body, "Recovered body");
       assert.equal(fault.checkouts.length, 1);
       assert.equal(fault.checkouts[0].ended, true);
       assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1);
@@ -56,7 +51,7 @@ integration("page.read recovers a lost BEGIN without replaying a commit (XMATRIX
     const beforeBegin = count(clients, /^BEGIN/u);
     const beforeCommit = count(clients, /^COMMIT$/u);
     fault = { matches: /^BEGIN/u, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
-    assert.equal((await linked()).page.body, body);
+    assert.equal((await linked()).page.body, "Recovered body");
     assert.equal(fault.checkouts.length, 1);
     assert.equal(fault.checkouts[0].ended, true);
     assert.ok(fault.checkouts[0].queries.some((sql) => sql.startsWith("BEGIN")));
