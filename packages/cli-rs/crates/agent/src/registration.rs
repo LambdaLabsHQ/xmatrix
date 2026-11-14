@@ -352,12 +352,9 @@ fn online_label(registration: &Value) -> &'static str {
 /// The provider quota left while the reading is current: the share of its
 /// tightest window, or the money on a prepaid account, which has no window.
 fn quota_label(registration: &Value) -> String {
-    let quota = &registration["live"]["quota"];
-    let credits = &quota["account"]["credits"];
-    let windowless = quota["windows"].as_array().is_none_or(Vec::is_empty);
-    if windowless
-        && let (Some(balance), Some(currency)) =
-            (credits["balance"].as_f64(), credits["currency"].as_str())
+    let balance = &registration["live"]["balance"];
+    if let (Some(balance), Some(currency)) =
+        (balance["amount"].as_f64(), balance["currency"].as_str())
     {
         return match currency {
             "CNY" => format!("¥{balance:.2}"),
@@ -365,7 +362,7 @@ fn quota_label(registration: &Value) -> String {
             _ => format!("{balance:.2} {currency}"),
         };
     }
-    quota["remainingPercent"]
+    registration["live"]["quota"]["remainingPercent"]
         .as_f64()
         .map(|percent| format!("{}%", percent.round()))
         .unwrap_or_else(|| "-".to_string())
@@ -862,8 +859,7 @@ mod tests {
         assert!(!on_machine(&row, "Workstation"));
         // A prepaid account has no window: the money left is the reading.
         let prepaid = |currency: &str| {
-            serde_json::json!({"live":{"quota":{"remainingPercent":100,
-            "account":{"allowed":true,"credits":{"balance":12.3,"currency":currency}}}}})
+            serde_json::json!({"live":{"balance":{"amount":12.3,"currency":currency,"allowed":true}}})
         };
         assert_eq!(quota_label(&prepaid("CNY")), "¥12.30");
         assert_eq!(quota_label(&prepaid("USD")), "$12.30");

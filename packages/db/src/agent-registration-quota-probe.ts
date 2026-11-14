@@ -1,5 +1,5 @@
-import { digestCanonicalCloneCborV1, parseLlmQuotaAccount, routingQuotaObservation,
-  routingQuotaProbeObservations, type LlmQuotaAccount,
+import { digestCanonicalCloneCborV1, parseLlmQuotaAccount, quotaAccountBalance, routingQuotaObservation,
+  routingQuotaProbeObservations, type AgentRegistrationLiveState, type LlmQuotaAccount,
   type RoutingQuotaProbeRequest, type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -67,6 +67,23 @@ export function registrationQuotaReading(row: {
   return Number.isFinite(remaining) && remaining >= 0 && remaining <= 100 && Number.isFinite(observed) && Number.isFinite(expires)
     ? { remainingPercent: remaining, observedAt: new Date(observed).toISOString(), expiresAt: new Date(expires).toISOString() }
     : undefined;
+}
+
+/**
+ * How a current reading is listed for a registration. A prepaid account has no
+ * window, so it is listed as `balance` (money) and never as `quota`: a client
+ * that predates balances draws any `quota` as a percentage, and "100%" beside
+ * an account with a few yuan left is wrong. Such a client reads nothing.
+ */
+export function registrationLiveQuota(reading: ReturnType<typeof registrationQuotaReading>,
+  windows: readonly RoutingQuotaWindow[], account: LlmQuotaAccount | undefined): Pick<AgentRegistrationLiveState, "quota" | "balance"> {
+  if (!reading) return {};
+  const money = windows.length ? undefined : quotaAccountBalance(account);
+  if (money) {
+    return { balance: { ...money, ...(account?.allowed === undefined ? {} : { allowed: account.allowed }),
+      observedAt: reading.observedAt, expiresAt: reading.expiresAt } };
+  }
+  return { quota: { ...reading, ...(windows.length ? { windows: [...windows] } : {}), ...(account ? { account } : {}) } };
 }
 
 export interface RegistrationQuotaProbeTarget {

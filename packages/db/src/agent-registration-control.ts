@@ -11,7 +11,7 @@ import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { enrollGlobalRegistration } from "./agent-registration-enrollment.js";
-import { currentRegistrationQuotaJoin, registrationQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaReading } from "./agent-registration-quota-probe.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { writeRegistrationOwnerGrant } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationAccess, registrationKeyValues, registrationOwnerGrant, spaceState } from "./agent-registration-rows.js";
@@ -487,15 +487,16 @@ export class PostgresAgentRegistrationRepository {
       const windows = currentRoutingQuotaWindows(label?.windows_json, Date.now());
       const account = parseLlmQuotaAccount(label?.account_json);
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
-      const quota = (row.canConfigureSpace || row.canManageOwnerGrant) && reading
-        ? { ...reading, ...(windows.length ? { windows } : {}), ...(account ? { account } : {}) } : undefined;
+      const { quota, balance } = row.canConfigureSpace || row.canManageOwnerGrant
+        ? registrationLiveQuota(reading, windows, account) : {};
       const resolved = environment ? agentLaunchAccess(environment.launch, agentPresetById(row.key.harness)) : undefined;
       const access = resolved ? { ...resolved.access, confirmed: resolved.confirmed } : undefined;
       return { ...row, ...(access ? { access } : {}), models, modelCatalog: reported, ...(nativeModels ? { nativeModels: true as const } : {}), routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
         machineName: String(label?.name || row.machineName),
         live: { machine: { online: label?.online === true, ...(lastSeenAt ? { lastSeenAt } : {}),
           ...(resources ? { resources } : {}), ...(platform ? { platform } : {}) },
-          running: row.live?.running ?? [], ...(quota ? { quota } : {}) } };
+          running: row.live?.running ?? [], ...(quota ? { quota } : {}),
+          ...(balance ? { balance } : {}) } };
     }) };
   }
 }

@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["agent-quota-usage"]);
-const { agentUsageReadings, agentUsageGlance, formatResetIn } = compiled.exports;
+const { agentBalanceReadings, agentUsageReadings, agentUsageGlance, formatResetIn } = compiled.exports;
 
 test.after(compiled.dispose);
 
@@ -74,13 +74,12 @@ test("list glance keeps all measured windows with compact labels and reset conte
 });
 
 test("a prepaid account reads as the money left, not as a window", () => {
-  const prepaid = (balance, allowed) => ({ remainingPercent: allowed ? 100 : 0, observedAt: at(-1), expiresAt: at(10),
-    account: { allowed, credits: { balance, currency: "CNY" } } });
-  assert.deepEqual(agentUsageReadings(prepaid(12.3, true), now),
+  const prepaid = (amount, allowed) => ({ amount, currency: "CNY", allowed, observedAt: at(-1), expiresAt: at(10) });
+  assert.deepEqual(agentBalanceReadings(undefined), []);
+  assert.deepEqual(agentBalanceReadings(prepaid(12.3, true)),
     [{ key: "balance", label: "Balance", value: "¥12.30 left", high: false }]);
-  assert.deepEqual(agentUsageReadings(prepaid(0, false), now).map(({ label, value, high }) => ({ label, value, high })), [
+  assert.deepEqual(agentBalanceReadings(prepaid(0, false)).map(({ label, value, high }) => ({ label, value, high })), [
     { label: "Provider", value: "Refusing requests", high: true },
     { label: "Balance", value: "¥0.00 left", high: true },
   ]);
-  assert.deepEqual(agentUsageGlance(prepaid(12.3, true), now), []);
 });

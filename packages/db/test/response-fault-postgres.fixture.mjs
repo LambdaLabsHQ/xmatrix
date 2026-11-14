@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresSpaceControlRepository } from "../dist/index.js";
+import { createAuthorityDatabase, PostgresPageRepository, PostgresSpaceControlRepository } from "../dist/index.js";
 import { connectionString } from "./postgres-database.fixture.mjs";
+import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 
 /** Lose a real SQL response after PostgreSQL executed it, preserving transaction ownership. */
 export function recoveringDatabase(getFault) {
@@ -50,4 +51,13 @@ export function recoveringDatabase(getFault) {
 export function recoveringSpaceControl(getFault) {
   const { database, clients } = recoveringDatabase(getFault);
   return { spaces: new PostgresSpaceControlRepository(database, "shard-0"), clients };
+}
+
+/** A Space's page repository and its owner's read input, through the response-loss client. */
+export async function recoveringPageRepository(getFault) {
+  const f = await spaceSecretFixture();
+  const { database, clients } = recoveringDatabase(getFault);
+  return { f, database, clients, pages: new PostgresPageRepository(database),
+    input: { requestId: crypto.randomUUID(), spaceId: f.ids.space,
+      principal: { kind: "user", id: f.ids.owner } } };
 }

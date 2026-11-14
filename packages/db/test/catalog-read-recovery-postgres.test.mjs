@@ -3,7 +3,7 @@ import { PostgresAutomationRepository, PostgresBillingRepository, PostgresChanne
   PostgresPageRepository } from "../dist/index.js";
 import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
-import { recoveringDatabase, recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
+import { recoveringDatabase, recoveringPageRepository, recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
 
 async function assertReadRecovery(read, expected, clients, injectFault) {
@@ -143,12 +143,8 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
 // Healthy awareness/blame tests and generic client retry tests cannot catch
 // these repositories opening BEGIN or losing a later history/body response.
 integration("page awareness and blame recover lost reads with access and placement fences (XMATRIX-HUB-AS)", async () => {
-  const f = await spaceSecretFixture();
   let fault;
-  const { database, clients } = recoveringDatabase(() => fault);
-  const pages = new PostgresPageRepository(database);
-  const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
-    principal: { kind: "user", id: f.ids.owner } };
+  const { f, clients, pages, input } = await recoveringPageRepository(() => fault);
   const accessRead = /SELECT p\.page_id,p\.parent_page_id/u;
   const bodyRead = /SELECT revision, body FROM data\.page_revisions/u;
   try {
