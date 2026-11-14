@@ -106,8 +106,68 @@ integration("a machine-name read recovers once without opening a transaction (XM
     assert.equal(state.fault.checkouts.length, 1, "an answered failure is final, never replayed");
   } finally {
     try {
-      await f.client.query("DELETE FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2",
+      await f.client.query(`DELETE FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
         [f.ids.owner, f.ids.machine]);
+    } finally { await f.close(); }
+  }
+});
+
+// Every other lock-free single-row read on the launch path takes the same
+// route: settings before the commit, the host after it, and the two recovery
+// origins. A stalled first round trip there must not fail work that never
+// opened a transaction (XMATRIX-HUB-CW).
+integration("launch settings, host and fallback reads recover once without opening a transaction (XMATRIX-HUB-CW)", async () => {
+  const { f, state, clients, launches, lose } = await recoveringLaunches();
+  const request = { commandId: "recovery-launch", key: {
+    spaceId: f.ids.space, ownerUserId: f.ids.owner, machineId: f.ids.machine, harness: "claude" },
+  requirements: { model: "observed-model" } };
+  const recover = async (matches, read) => {
+    state.fault = undefined;
+    const before = clients.length;
+    lose(matches);
+    const value = await read();
+    assert.equal(state.fault.checkouts.length, 1);
+    assert.ok(state.fault.checkouts[0].ended);
+    assert.ok(clients.indexOf(state.fault.checkouts[0]) < clients.length - 1, "recovery uses a fresh connection");
+    assert.ok(clients.slice(before).every(c => c.ended && !c.queries.some(sql => /^(BEGIN|COMMIT)/u.test(sql))),
+      "the read runs and recovers without transaction round trips");
+    return value;
+  };
+  try {
+    await f.client.query(`INSERT INTO control.machine_execution_capacity VALUES ($1,$2,2,1,now())`,
+      [f.ids.owner, f.ids.machine]);
+    await f.client.query(`INSERT INTO control.agent_registration_environments VALUES ($1,$2,'claude',$3,1,now())`,
+      [f.ids.owner, f.ids.machine, { schemaVersion: 1, enabled: true, models: [],
+        availability: "interactive", maxConcurrent: 2, capabilities: [], description: "" }]);
+    assert.equal(await launches.launchSettings(request, 1), undefined);
+    assert.equal(await recover(/FROM control\.agent_registration_environments/u,
+      () => launches.launchSettings(request, 1)), undefined);
+
+    assert.deepEqual(await launches.withHost("recovery-host", { launchId: "missing-launch" }),
+      { launchId: "missing-launch", hostId: "" });
+    assert.deepEqual(await recover(/FROM data\.agent_launches WHERE launch_id/u,
+      () => launches.withHost("recovery-host", { launchId: "missing-launch" })),
+    { launchId: "missing-launch", hostId: "" });
+
+    const fallback = { commandId: "recovery-fallback", channelId: f.ids.channel, runId: f.ids.run,
+      readBody: async () => undefined };
+    assert.equal(await launches.startupFallbackOrigin(fallback), undefined);
+    assert.equal(await recover(/FROM data\.registration_launch_intents intent JOIN data\.messages message/u,
+      () => launches.startupFallbackOrigin(fallback)), undefined);
+
+    const handoff = { commandId: "recovery-handoff", channelId: f.ids.channel, runId: f.ids.run };
+    assert.equal(await launches.handoffFallbackOrigin(handoff), undefined);
+    assert.equal(await recover(/launch\.spawn_payload_json->>'prompt'/u,
+      () => launches.handoffFallbackOrigin(handoff)), undefined);
+
+    lose(/FROM data\.agent_launches WHERE launch_id/u, { remaining: 2,
+      error: Object.assign(new Error("statement timeout"), { code: "57014" }) });
+    await assert.rejects(launches.withHost("recovery-host", { launchId: "missing-launch" }), /statement timeout/u);
+    assert.equal(state.fault.checkouts.length, 1, "an answered failure is final, never replayed");
+  } finally {
+    try {
+      await f.client.query("DELETE FROM control.agent_registration_environments WHERE owner_user_id=$1", [f.ids.owner]);
+      await f.client.query("DELETE FROM control.machine_execution_capacity WHERE owner_user_id=$1", [f.ids.owner]);
     } finally { await f.close(); }
   }
 });
