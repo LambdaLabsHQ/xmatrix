@@ -36,6 +36,23 @@ async fn list_machine_daemons_api(
     Ok(response.daemons)
 }
 
+/// A preset's `access` block: per access level, what xMatrix adds to the
+/// launch, exactly as written. The launch code has no per-harness branch.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccess {
+    #[serde(default)]
+    pub full: AgentPresetAccessLevel,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccessLevel {
+    /// Environment variables set on the harness's own process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+}
+
 /// One harness in the shared registry (`packages/protocol/src/agent-presets.json`).
 /// The JSON is the single source of truth for launcher aliases, backends,
 /// config directories, and install hints; Rust and TypeScript both read it, so
@@ -59,6 +76,9 @@ pub struct AgentPreset {
     /// already speaks ACP with no subcommand; absent defaults to `["acp"]`.
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
+    /// What xMatrix adds to this harness's launch to give it full access.
+    #[serde(default)]
+    pub access: AgentPresetAccess,
     #[serde(default)]
     pub avatar_url: String,
     pub launcher_names: Vec<String>,
@@ -590,6 +610,7 @@ mod tests {
             default_args: vec![],
             backend: "claude-print".to_string(),
             acp_args: None,
+            access: Default::default(),
             avatar_url: String::new(),
             launcher_names: vec!["definitely-not-a-real-binary-xyz".to_string()],
             classic_config_dirs: vec![],
