@@ -52,6 +52,9 @@ pub struct AgentPreset {
     #[serde(default)]
     pub agent_type: Option<String>,
     pub default_args: Vec<String>,
+    /// What xMatrix adds to this harness's launch per access mode.
+    #[serde(default)]
+    pub access: PresetAccess,
     pub backend: String,
     /// Subcommand/args appended to the runtime for the generic ACP backend
     /// (e.g. `["acp"]` → `kimi acp`). Forwarded to daemon spawns as the
@@ -70,7 +73,38 @@ pub struct AgentPreset {
     pub management: Option<management::HarnessManagement>,
 }
 
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PresetAccess {
+    #[serde(default)]
+    pub full: PresetAccessAdds,
+}
+
+/// What one access mode adds (`AgentPresetAccess` in `@xmatrix/protocol`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct PresetAccessAdds {
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+}
+
 impl AgentPreset {
+    /// The grant of a launch in `full` access (`agentAccessGrant` in
+    /// `@xmatrix/protocol`): what a launch runs with when no Hub grant reached it.
+    pub fn full_access_grant(
+        &self,
+    ) -> xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+            mode: "full".into(),
+            args: self.access.full.args.clone(),
+            env: self.access.full.env.clone(),
+            session: self.access.full.session.clone(),
+            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp"),
+        }
+    }
+
     /// The legacy `agentType` string this harness registers with the Hub.
     pub fn agent_type(&self) -> &str {
         self.agent_type.as_deref().unwrap_or(&self.id)
@@ -588,6 +622,7 @@ mod tests {
             runtime: "claude".to_string(),
             agent_type: None,
             default_args: vec![],
+            access: crate::PresetAccess::default(),
             backend: "claude-print".to_string(),
             acp_args: None,
             avatar_url: String::new(),

@@ -5,6 +5,8 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
 import {
+  agentAccessArgs,
+  agentAccessGrant,
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
   formatAutoLaunchMention,
@@ -289,10 +291,23 @@ function registrationLaunchRuntime(launch: AgentRegistrationLaunch | undefined, 
  * requires to name the registration's harness; a declared runtime (e.g. an
  * absolute path) need not resolve to a preset, so the harness names it. */
 export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | undefined, harness: string) {
+  // A registration added before its owner confirmed a mode launches as it
+  // always did, with full access.
+  const preset = agentPresetById(harness) ?? agentPresetForLauncher(harness), mode = launch?.access ?? "full";
+  const access = agentAccessGrant(preset, mode);
+  // The grant's args travel in the argv the daemon already starts: a daemon
+  // that predates the grant reads them only there. That daemon adds Grok's
+  // itself, so Grok's stay in the grant alone.
+  const inArgv = (args: readonly string[]) => preset?.backend === "grok-acp" ? [...args] : agentAccessArgs(args, preset, mode);
+  // The generic ACP backend starts the ACP argv unless the launch declares its own.
+  const acp = (launch?.backend ?? preset?.backend) === "acp" && !launch?.runtimeArgs.length;
+  const runtimeArgs = acp ? [] : inArgv(launch?.runtimeArgs.length ? launch.runtimeArgs : preset?.defaultArgs ?? []);
+  const acpArgs = acp ? inArgv(launch?.acpArgs?.length ? launch.acpArgs : preset?.acpArgs ?? ["acp"]) : launch?.acpArgs ?? [];
   return { runtime: registrationLaunchRuntime(launch, harness), agentPresetId: harness,
-    ...(launch?.runtimeArgs.length ? { runtimeArgs: launch.runtimeArgs } : {}),
+    ...(runtimeArgs.length ? { runtimeArgs } : {}),
     ...(launch?.backend ? { agentBackend: launch.backend } : {}),
-    ...(launch?.acpArgs?.length ? { agentAcpArgs: launch.acpArgs } : {}),
+    ...(acpArgs.length ? { agentAcpArgs: acpArgs } : {}),
+    access,
     // A daemon released before the sandbox was retired sandboxes unless told not to.
     sandboxMode: "off" as const };
 }

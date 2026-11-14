@@ -1659,18 +1659,20 @@ impl ZcodeAppSession {
         cwd: Option<&str>,
     ) -> error::Result<Option<protocol::AgentGoalStatus>> {
         let workspace_path = app_server_workspace_path(cwd)?;
-        let mode = std::env::var("XMATRIX_ZCODE_APP_MODE").unwrap_or_else(|_| "yolo".to_string());
+        // The session mode is the launch's access grant.
         let result = self
             .request(
                 "session/create",
-                serde_json::json!({
-                    "workspace": {
-                        "workspacePath": workspace_path.clone(),
-                        "workspaceKey": workspace_path,
-                    },
-                    "persistence": "deferred",
-                    "mode": mode,
-                }),
+                with_access_session(
+                    serde_json::json!({
+                        "workspace": {
+                            "workspacePath": workspace_path.clone(),
+                            "workspaceKey": workspace_path,
+                        },
+                        "persistence": "deferred",
+                    }),
+                    &launch_access(),
+                ),
             )
             .await?;
         let session_id = result
@@ -3064,9 +3066,9 @@ impl AcpVendorConfig {
 
     fn acp_spawn_args(&self, cmd_args: &[String]) -> Vec<String> {
         match self.flavor {
-            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args),
+            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args, &launch_access()),
             AcpVendorFlavor::Generic => {
-                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref())
+                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref(), &launch_access())
             }
         }
     }
@@ -3119,7 +3121,11 @@ fn acp_tool_stem(tool: &str) -> String {
 /// XMATRIX_ACP_ARGS JSON array, then the preset's own `acpArgs` (an explicit
 /// `[]` for a launcher that already speaks ACP), finally the ACP community
 /// convention of an `acp` subcommand (e.g. `kimi acp`).
-fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]>) -> Vec<String> {
+fn generic_acp_spawn_args(
+    cmd_args: &[String],
+    preset_acp_args: Option<&[String]>,
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> Vec<String> {
     if !cmd_args.is_empty() {
         return cmd_args.to_vec();
     }
@@ -3128,10 +3134,9 @@ fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]
     {
         return args;
     }
-    if let Some(args) = preset_acp_args {
-        return args.to_vec();
-    }
-    vec!["acp".to_string()]
+    // No daemon passed an argv, so the launch's access args are not in one yet.
+    let args = preset_acp_args.map_or_else(|| vec!["acp".to_string()], <[String]>::to_vec);
+    access.with_args(&args)
 }
 
 fn acp_args_from_json(raw: &str) -> Option<Vec<String>> {

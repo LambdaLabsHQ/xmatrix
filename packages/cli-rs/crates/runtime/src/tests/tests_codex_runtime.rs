@@ -381,12 +381,7 @@ fn codex_thread_status_helpers_read_notifications_and_responses() {
 
 #[test]
 fn codex_thread_resume_excludes_turns_from_the_restore_payload() {
-    let params = super::codex_thread_resume_params(
-        "thread-377",
-        Some("/tmp/workspace"),
-        "never",
-        "danger-full-access",
-    );
+    let params = super::codex_thread_resume_params("thread-377", Some("/tmp/workspace"));
     assert_eq!(params["threadId"], "thread-377");
     assert_eq!(params["excludeTurns"], true);
     assert!(params.get("turns").is_none());
@@ -1515,6 +1510,7 @@ fn daemon_test_spawn_request() -> super::DaemonSpawnRequest {
         agent_preset_id: None,
         harness: None,
         agent_acp_args: vec![],
+        access: None,
         agent_name: "codex-a".to_string(),
         identity_id: None,
         role_initial_prompt: None,

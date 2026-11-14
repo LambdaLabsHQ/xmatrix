@@ -974,20 +974,20 @@ fn acp_is_session_load_replay(request: &Value, message: &Value) -> bool {
             })
 }
 
-fn grok_acp_spawn_args(cmd_args: &[String]) -> Vec<String> {
+fn grok_acp_spawn_args(
+    cmd_args: &[String],
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> Vec<String> {
     // Prefer an explicit agent-mode argv when callers already pass one.
     if cmd_args.iter().any(|arg| arg == "stdio") {
-        let mut args = cmd_args.to_vec();
+        // The grant's args are agent options too, wherever the argv carries them.
+        let mut args: Vec<String> =
+            cmd_args.iter().filter(|arg| !access.args.contains(arg)).cloned().collect();
         if !args.iter().any(|arg| arg == "agent") {
             args.insert(0, "agent".to_string());
         }
-        if !args
-            .iter()
-            .any(|arg| arg == "--always-approve" || arg == "--yolo")
-        {
-            let idx = args.iter().position(|arg| arg == "stdio").unwrap_or(args.len());
-            args.insert(idx, "--always-approve".to_string());
-        }
+        let idx = args.iter().position(|arg| arg == "stdio").unwrap_or(args.len());
+        args.splice(idx..idx, access.args.iter().cloned());
         return args;
     }
 
@@ -999,10 +999,9 @@ fn grok_acp_spawn_args(cmd_args: &[String]) -> Vec<String> {
             args.push(model.to_string());
         }
     }
-    // User-supplied flags go before the transport subcommand:
-    // `grok agent [agent-opts] stdio`.
-    args.extend(cmd_args.iter().cloned());
-    args.push("--always-approve".to_string());
+    // The launch's flags, its access args among them, go before the transport
+    // subcommand: `grok agent [agent-opts] stdio`.
+    args.extend(access.with_args(cmd_args));
     args.push("stdio".to_string());
     args
 }
@@ -1184,12 +1183,12 @@ async fn acp_handle_server_request(
     let result = if method == "elicitation/create" {
         // Outside a turn there is no channel to ask in.
         serde_json::json!({ "action": "cancel" })
-    } else if method.contains("permission") {
-        // Auto-approve tool execution when the agent still asks (belt and suspenders
-        // with --always-approve on the spawn line). Option selection is driven by
-        // the ACP `kind` semantics so each vendor's wording works; when the request
-        // carries no selectable option, fall back to the vendor's historical
-        // optionId (Grok: allow-always) or reject with -32601.
+    } else if method.contains("permission") && launch_access().approves_requests {
+        // Full access answers the agent's permission requests with allow.
+        // Option selection is driven by the ACP `kind` semantics so each
+        // vendor's wording works; when the request carries no selectable
+        // option, fall back to the vendor's historical optionId (Grok:
+        // allow-always) or reject with -32601.
         let options = message
             .get("params")
             .and_then(|params| params.get("options"))

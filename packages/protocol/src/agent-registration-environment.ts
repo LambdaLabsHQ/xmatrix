@@ -1,7 +1,7 @@
 import { utf8ByteLength } from "./hex.js";
 import { parseAgentRegistrationKey, type AgentRegistrationKey } from "./agent-registration.js";
 import { parseAgentRoutingDeclaration, type AgentRoutingDeclaration } from "./agent-routing.js";
-import { AGENT_PRESET_BACKENDS, type AgentPresetBackend } from "./agent-presets.js";
+import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, type AgentAccessMode, type AgentPresetBackend } from "./agent-presets.js";
 import { hasControlCharacter } from "./field-validation.js";
 
 /** How the Hub starts this harness on this machine. The Hub maintains it; the
@@ -12,6 +12,10 @@ export interface AgentRegistrationLaunch {
   runtimeArgs: string[];
   backend?: AgentPresetBackend;
   acpArgs?: string[];
+  /** The access mode the machine's owner confirmed when adding the Agent.
+   * Absent on a registration added before the confirmation existed, which
+   * launches as `full`: what every launch was until then. */
+  access?: AgentAccessMode;
 }
 
 /** Physical declarations belong to the machine owner. Workspace choice and
@@ -45,7 +49,7 @@ const RETIRED_LAUNCH_FIELDS = ["requestReviewer", "sandboxMode"];
 export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationLaunch {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid registration launch");
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).some(field => !["runtime", "runtimeArgs", "backend", "acpArgs", ...RETIRED_LAUNCH_FIELDS].includes(field))) {
+  if (Object.keys(row).some(field => !["runtime", "runtimeArgs", "backend", "acpArgs", "access", ...RETIRED_LAUNCH_FIELDS].includes(field))) {
     throw new Error("Invalid registration launch fields");
   }
   const backend = row.backend === undefined ? undefined : launchText(row.backend, 40, "backend");
@@ -54,10 +58,14 @@ export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationL
   }
   const acpArgs = row.acpArgs === undefined ? undefined : launchArgs(row.acpArgs, "acpArgs");
   if (acpArgs?.length && backend !== "acp") throw new Error("Registration launch ACP arguments require the ACP backend");
+  if (row.access !== undefined && !AGENT_ACCESS_MODES.includes(row.access as AgentAccessMode)) {
+    throw new Error("Invalid registration launch access");
+  }
   return { runtime: launchText(row.runtime, 4_000, "runtime"),
     runtimeArgs: row.runtimeArgs === undefined ? [] : launchArgs(row.runtimeArgs, "runtimeArgs"),
     ...(backend ? { backend: backend as AgentPresetBackend } : {}),
-    ...(acpArgs?.length ? { acpArgs } : {}) };
+    ...(acpArgs?.length ? { acpArgs } : {}),
+    ...(row.access === undefined ? {} : { access: row.access as AgentAccessMode }) };
 }
 
 export interface AgentEnvironmentCommand {

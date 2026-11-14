@@ -65,3 +65,35 @@ test('a route refusal names an offline daemon, but keeps the original cause othe
   assert.equal(await refusal({ hostname: 'host' }, { online: '0', known: '1' }, workspaceRoute), 'registration_daemon_offline');
   assert.equal(await refusal(undefined, { online: '0', known: '1' }, workspaceRoute), fallback, 'the Workspace is not registered');
 });
+
+test('a launch adds exactly the access grant of its confirmed mode', () => {
+  const fields = (harness, launch) => registrationLaunchSpawnFields(launch, harness);
+  // No confirmed mode is the full access every launch had: the grant, and its
+  // args in the argv a daemon that predates the grant starts.
+  const claude = fields('claude');
+  assert.deepEqual(claude.access, { mode: 'full', args: ['--dangerously-skip-permissions'], env: {}, session: {}, approvesRequests: false });
+  assert.deepEqual(claude.runtimeArgs, ['--dangerously-skip-permissions']);
+  // A launch saved with the flag before the modes existed does not repeat it,
+  // and loses it once its owner chooses `ask`.
+  const saved = { runtime: 'claude', runtimeArgs: ['--model', 'opus', '--dangerously-skip-permissions'] };
+  assert.deepEqual(fields('claude', saved).runtimeArgs, ['--model', 'opus', '--dangerously-skip-permissions']);
+  const asked = fields('claude', { ...saved, access: 'ask' });
+  assert.deepEqual(asked.runtimeArgs, ['--model', 'opus']);
+  assert.deepEqual(asked.access, { mode: 'ask', args: [], env: {}, session: {}, approvesRequests: false });
+  // The generic ACP backend takes them in its ACP argv, and the bridge's
+  // answer to permission requests is part of the grant.
+  const antigravity = fields('antigravity');
+  assert.deepEqual(antigravity.agentAcpArgs, ['acp', '--dangerously-skip-permissions']);
+  assert.equal(antigravity.runtimeArgs, undefined);
+  assert.equal(antigravity.access.approvesRequests, true);
+  assert.equal(fields('antigravity', { runtime: 'agy', runtimeArgs: [], backend: 'acp', access: 'ask' }).access.approvesRequests, false);
+  assert.deepEqual(fields('antigravity', { runtime: 'agy', runtimeArgs: [], backend: 'acp', access: 'ask' }).agentAcpArgs, ['acp']);
+  // A harness xMatrix adds no parameter to still has its requests answered.
+  assert.deepEqual(fields('opencode').access, { mode: 'full', args: [], env: {}, session: {}, approvesRequests: true });
+  // An older daemon adds Grok's flag itself; a second one must not reach it.
+  const grok = fields('grok');
+  assert.deepEqual(grok.access.args, ['--always-approve']);
+  assert.equal(grok.runtimeArgs, undefined);
+  assert.deepEqual(fields('codex').access.session, { sandbox: 'danger-full-access', approvalPolicy: 'never' });
+  assert.deepEqual(fields('deepseek').access.env, { DSH_PERMISSION_MODE: 'danger-full-access' });
+});

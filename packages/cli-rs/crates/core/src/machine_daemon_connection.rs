@@ -489,6 +489,37 @@ pub struct AgentHarnessSpec {
     pub install_hint: Option<String>,
 }
 
+/// Exactly what one launch adds for its access mode (`AgentAccessGrant` in
+/// `@xmatrix/protocol`): the Hub resolves it from the harness preset and the
+/// mode the machine's owner confirmed, and the owner is shown the same data.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessGrant {
+    /// `full` or `ask`.
+    pub mode: String,
+    /// Joined to the launcher's argv.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Set on the harness process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+    /// xMatrix answers the harness's permission requests with allow.
+    #[serde(default)]
+    pub approves_requests: bool,
+}
+
+impl AgentAccessGrant {
+    /// `args` followed by this grant's, none repeated.
+    pub fn with_args(&self, args: &[String]) -> Vec<String> {
+        let mut all = args.to_vec();
+        all.extend(self.args.iter().filter(|arg| !args.contains(arg)).cloned());
+        all
+    }
+}
+
 /// Hub control intents understood by a Machine Daemon.
 ///
 /// This protocol contains no Human presence or Agent Instance channel
@@ -534,6 +565,10 @@ pub enum MachineDaemonCommand {
         harness: Option<AgentHarnessSpec>,
         #[serde(default)]
         agent_acp_args: Option<Vec<String>>,
+        /// What this launch adds for its access mode. A Hub that predates the
+        /// grant sends none, and the launch is the preset's full access.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<AgentAccessGrant>,
         agent_name: String,
         #[serde(default)]
         identity_id: Option<String>,

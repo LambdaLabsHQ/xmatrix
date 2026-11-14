@@ -48,6 +48,10 @@ export interface AgentRegistrationSummary {
   canDescribe?: boolean;
   /** Where it stands right now. Absent from a Hub that does not report it. */
   live?: AgentRegistrationLiveState;
+  /** Exactly what a launch of it adds for its access mode. `confirmed` is false
+   * while it runs on the `full` it had before its owner was asked. Absent
+   * without an owner environment, and from a Hub that does not report it. */
+  access?: import("./agent-presets.js").AgentAccessGrant & { confirmed: boolean };
 }
 
 /**
