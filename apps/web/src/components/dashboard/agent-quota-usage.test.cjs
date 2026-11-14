@@ -72,3 +72,15 @@ test("list glance keeps all measured windows with compact labels and reset conte
   assert.deepEqual(agentUsageGlance({ ...quota(undefined), account: { credits: { unlimited: true } } }, now),
     [{ key: "quota", label: "Quota", percent: 86, detail: "Quota: 86% used" }]);
 });
+
+test("a prepaid account reads as the money left, not as a window", () => {
+  const prepaid = (balance, allowed) => ({ remainingPercent: allowed ? 100 : 0, observedAt: at(-1), expiresAt: at(10),
+    account: { allowed, credits: { balance, currency: "CNY" } } });
+  assert.deepEqual(agentUsageReadings(prepaid(12.3, true), now),
+    [{ key: "balance", label: "Balance", value: "¥12.30 left", high: false }]);
+  assert.deepEqual(agentUsageReadings(prepaid(0, false), now).map(({ label, value, high }) => ({ label, value, high })), [
+    { label: "Provider", value: "Refusing requests", high: true },
+    { label: "Balance", value: "¥0.00 left", high: true },
+  ]);
+  assert.deepEqual(agentUsageGlance(prepaid(12.3, true), now), []);
+});

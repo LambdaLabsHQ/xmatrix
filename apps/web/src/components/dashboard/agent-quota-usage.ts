@@ -4,7 +4,7 @@
  * a window without a name is shown without inventing one.
  */
 
-import { currentRoutingQuotaWindows, type AgentRegistrationLiveState } from "@xmatrix/protocol";
+import { currentRoutingQuotaWindows, formatQuotaBalance, quotaAccountBalance, type AgentRegistrationLiveState } from "@xmatrix/protocol";
 
 import type { MeterReading } from "./machine-load-panel";
 
@@ -49,7 +49,9 @@ function accountReadings(account: NonNullable<AgentRegistrationLiveState["quota"
   const credits = account?.credits;
   const readings: MeterReading[] = [];
   if (account?.allowed === false) readings.push({ key: "account", label: "Provider", value: "Refusing requests", high: true });
-  if (credits?.unlimited) readings.push({ key: "credits", label: "Credits", value: "Unlimited", high: false });
+  const money = quotaAccountBalance(account);
+  if (money) readings.push({ key: "balance", label: "Balance", value: `${formatQuotaBalance(money)} left`, high: money.amount <= 0 });
+  else if (credits?.unlimited) readings.push({ key: "credits", label: "Credits", value: "Unlimited", high: false });
   else if (credits?.balance !== undefined) {
     readings.push({ key: "credits", label: "Credits", value: `${credits.balance.toLocaleString("en-US", { maximumFractionDigits: 0 })} left`, high: false });
   }
@@ -58,6 +60,8 @@ function accountReadings(account: NonNullable<AgentRegistrationLiveState["quota"
 
 function windowReadings(quota: NonNullable<AgentRegistrationLiveState["quota"]>, now: number): MeterReading[] {
   const windows = currentRoutingQuotaWindows(quota.windows, now);
+  // A prepaid account has no window: its balance is the whole reading.
+  if (!windows.length && quotaAccountBalance(quota.account)) return [];
   if (!windows.length) {
     // A reading from before windows were stored: only its tightest share is known.
     const used = 100 - quota.remainingPercent;

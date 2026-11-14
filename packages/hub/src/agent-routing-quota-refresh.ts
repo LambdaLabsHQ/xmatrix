@@ -58,7 +58,7 @@ export async function issueRegistrationQuotaProbes(input: {
       const requestId = `quota:${crypto.randomUUID()}`;
       const probe: RoutingQuotaProbeRequest = { requestId, connectionEpoch: first.connectionEpoch,
         targets: batch.map(entry => ({ targetId: entry.targetId, configurationDigest: entry.configurationDigest })),
-        windowLabels: true, quotaAccount: true, ...(input.fresh ? { fresh: true as const } : {}) };
+        windowLabels: true, quotaAccount: true, accountBalance: true, ...(input.fresh ? { fresh: true as const } : {}) };
       const route = { ownerUserId: first.ownerUserId, machineId: first.machineId, hostId: first.hostId };
       try {
         const { daemon } = await machines.getDaemon({ requestId, ...route });

@@ -2,7 +2,7 @@ import { plainRecord } from "./plain-record.js";
 import { cleanAgentModelCatalog as cleanModelCatalog, cleanAgentCommands as cleanCommands,
   cleanAgentCapabilities, cleanAgentPresentationText as cleanText,
   cleanAgentPresentationTextList as cleanTextList } from "./agent-instance-catalogs.js";
-import { parseLlmQuotaAccount, parseQuotaObservedAt, localLlmUsage,
+import { hasProviderQuotaReading, parseLlmQuotaAccount, parseQuotaObservedAt, localLlmUsage, quotaAccountBalance,
   type LlmQuotaUsage, type LlmUsage } from "./authority-runtime.js";
 import { parseHarnessParameters, harnessParameterEnabled, harnessParameterKind, harnessParameterValueLabel,
   type HarnessParameter } from "./harness-parameters.js";
@@ -351,7 +351,7 @@ function mergeUsagePreferringQuotas(
   incoming = withoutUntrustedQuotaUsage(incoming);
   if (!incoming || Object.keys(incoming).length === 0) return current;
   if (!current) return incoming;
-  if (incoming.quotaUsages?.length) {
+  if (hasProviderQuotaReading(incoming)) {
     const previousTime = Date.parse(current.quotaObservedAt ?? "");
     const incomingTime = Date.parse(incoming.quotaObservedAt ?? "");
     // Concurrent turn/periodic frames can reach the wire out of order. Local
@@ -369,7 +369,7 @@ function mergeUsagePreferringQuotas(
 
 function withoutUntrustedQuotaUsage(usage: LlmUsage | undefined): LlmUsage | undefined {
   if (!usage) return undefined;
-  if (usage.quotaSource === "provider_api" && usage.quotaUsages?.length) return usage;
+  if (hasProviderQuotaReading(usage)) return usage;
   return localLlmUsage(usage);
 }
 
@@ -540,12 +540,13 @@ function cleanUsage(value: unknown): LlmUsage | undefined {
   } else if (value.quotaSource === "provider_api") {
     if (value.quotaState === "observed" || value.quotaState === "exhausted") usage.quotaState = value.quotaState;
     const quotaUsages = cleanQuotaUsages(value.quotaUsages);
-    if (quotaUsages) {
+    const quotaAccount = parseLlmQuotaAccount(value.quotaAccount);
+    // A prepaid account has no window: its balance alone is the reading.
+    if (quotaUsages || quotaAccountBalance(quotaAccount)) {
       usage.quotaSource = "provider_api";
-      usage.quotaUsages = quotaUsages;
+      if (quotaUsages) usage.quotaUsages = quotaUsages;
       const quotaObservedAt = parseQuotaObservedAt(value.quotaObservedAt);
       if (quotaObservedAt) usage.quotaObservedAt = quotaObservedAt;
-      const quotaAccount = parseLlmQuotaAccount(value.quotaAccount);
       if (quotaAccount) usage.quotaAccount = quotaAccount;
     }
   }

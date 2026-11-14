@@ -742,7 +742,7 @@ fn merge_llm_usage(
             if next.context_usage_percent.is_some() {
                 current.context_usage_percent = next.context_usage_percent;
             }
-            if next.quota_usages.is_some() {
+            if next.quota_usages.is_some() || next.has_account_quota() {
                 // Provider-account quota is a snapshot, not additive turn
                 // telemetry. Windows, source and observation time belong to
                 // the same read and must be replaced together.

@@ -1,5 +1,5 @@
 "use client";
-import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttributes } from "@xmatrix/protocol";
+import { usageWithoutQuota, accountQuotaUsageFromCandidates, formatQuotaBalance, mergeUsageAttributes, quotaAccountBalance } from "@xmatrix/protocol";
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { directMediaLink } from "./attachment-media-type";
@@ -433,6 +433,11 @@ export function tagsFromUsage(usage: LlmUsage): Tag[] {
     percent: quotaPercent(quota),
     resetLabel: quotaResetLabel(quota),
   }));
+  const balance = providerAccountBalance(usage);
+  if (balance) {
+    const left = formatQuotaBalance(balance);
+    tags.push({ key: BALANCE_TAG_KEY, label: left, title: `Provider balance: ${left} left` });
+  }
   if (usage.quotaState === "exhausted") {
     tags.push({ key: "quota:exhausted", label: "Quota exhausted", title: "Provider quota exhausted", percent: 100 });
   }
@@ -473,6 +478,14 @@ export function tagsFromUsage(usage: LlmUsage): Tag[] {
   }
 
   return tags;
+}
+
+/** The tag of a prepaid account's balance: an amount, so it has no meter. */
+export const BALANCE_TAG_KEY = "quota:balance";
+
+/** Money left on a prepaid account, shown only from a provider API read. */
+function providerAccountBalance(usage?: LlmUsage) {
+  return usage?.quotaSource === "provider_api" ? quotaAccountBalance(usage.quotaAccount) : undefined;
 }
 
 /** React identity follows the quota window, not its rolling reset clock. */
@@ -675,7 +688,7 @@ export function hasQuotaMeterUsage(usage?: LlmUsage): boolean {
 export function accountQuotaUsage(usage?: LlmUsage): LlmUsage | undefined {
   if (usage?.quotaState === "exhausted") return { quotaState: "exhausted", quotaObservedAt: usage.quotaObservedAt };
   const quotaUsages = providerQuotaUsages(usage);
-  if (quotaUsages.length === 0) return undefined;
+  if (quotaUsages.length === 0 && !providerAccountBalance(usage)) return undefined;
   const quotaObservedAt = usage?.quotaObservedAt;
   return {
     quotaSource: "provider_api",

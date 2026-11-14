@@ -48,6 +48,9 @@ pub(crate) async fn execute_machine_quota_probe(
     if !probe.quota_account {
         strip_quota_account(&mut results);
     }
+    if !(probe.quota_account && probe.account_balance) {
+        drop_windowless_readings(&mut results);
+    }
     MachineDaemonReport::MachineQuotaProbeResult {
         request_id,
         probe: MachineQuotaProbeResultProbe {
@@ -111,6 +114,10 @@ enum QuotaAccount {
     ClaudeDefault,
     /// Cursor subscription of the default Cursor Agent login.
     CursorDefault,
+    /// OpenCode Go or ChatGPT login stored by the OpenCode CLI.
+    OpenCodeDefault,
+    /// Prepaid balance of the API key DeepSeek Harness holds.
+    DeepSeekDefault,
 }
 
 impl QuotaAccount {
@@ -120,6 +127,8 @@ impl QuotaAccount {
             Self::Grok(home) => ("grok", home.to_string_lossy().into_owned()),
             Self::ClaudeDefault => ("claude", "default-login".to_string()),
             Self::CursorDefault => ("cursor", "default-login".to_string()),
+            Self::OpenCodeDefault => ("opencode", "default-login".to_string()),
+            Self::DeepSeekDefault => ("deepseek", "default-login".to_string()),
         }
     }
 }
@@ -244,6 +253,10 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
             // account a default registered spawn bills.
             QuotaAccount::CursorDefault
         }
+        // Both readers resolve the key their CLI would: its stored credential
+        // file first, then the environment the spawn inherits from this daemon.
+        "opencode" => QuotaAccount::OpenCodeDefault,
+        "deepseek" => QuotaAccount::DeepSeekDefault,
         _ => return Resolution::Unsupported,
     };
     let (provider_tag, location) = account.digest_parts();
@@ -268,6 +281,8 @@ async fn read_account(account: QuotaAccount, fresh: bool) -> Option<LlmUsage> {
         QuotaAccount::Grok(home) => (Provider::Grok, Account::Home(home)),
         QuotaAccount::ClaudeDefault => (Provider::Claude, Account::DefaultLogin),
         QuotaAccount::CursorDefault => (Provider::Cursor, Account::DefaultLogin),
+        QuotaAccount::OpenCodeDefault => (Provider::OpenCode, Account::Process),
+        QuotaAccount::DeepSeekDefault => (Provider::DeepSeek, Account::Process),
     };
     quota::read(
         provider,
@@ -353,7 +368,11 @@ fn observed_result(
         })
         .take(MAX_PROBE_WINDOWS)
         .collect();
-    if quota_usages.is_empty()
+    // A prepaid account has no window: its reading is the balance alone.
+    let balance_only = quota_usages.is_empty()
+        && usage.quota_usages.as_deref().unwrap_or_default().is_empty()
+        && usage.has_account_quota();
+    if (quota_usages.is_empty() && !balance_only)
         || usage.quota_source.as_deref() != Some("provider_api")
         || usage.quota_observed_at.is_none()
     {
@@ -385,6 +404,25 @@ fn strip_window_labels(results: &mut [MachineQuotaProbeTargetResult]) {
 fn strip_quota_account(results: &mut [MachineQuotaProbeTargetResult]) {
     for result in results {
         result.quota_account = None;
+    }
+}
+
+/// A Hub that did not ask for balance-only readings rejects the whole response
+/// for one observed result without a window.
+fn drop_windowless_readings(results: &mut [MachineQuotaProbeTargetResult]) {
+    for result in results {
+        if result.status == "observed" && result.quota_usages.is_empty() {
+            *result = MachineQuotaProbeTargetResult {
+                target_id: std::mem::take(&mut result.target_id),
+                configuration_digest: std::mem::take(&mut result.configuration_digest),
+                status: "unavailable".to_string(),
+                quota_source: None,
+                quota_observed_at: None,
+                quota_usages: Vec::new(),
+                quota_account: None,
+                reason: Some("provider_unavailable".to_string()),
+            };
+        }
     }
 }
 
@@ -431,6 +469,7 @@ mod tests {
             window_labels: false,
             quota_account: false,
             fresh: false,
+            account_balance: false,
         };
         let report = execute_machine_quota_probe("cmd-1".to_string(), probe, None).await;
         let MachineDaemonReport::MachineQuotaProbeResult {
@@ -496,6 +535,40 @@ mod tests {
             Some("1790423712")
         );
         assert_eq!(result.quota_usages[0].label.as_deref(), Some("1w"));
+    }
+
+    #[test]
+    fn a_balance_only_reading_travels_only_when_the_hub_asked() {
+        let usage = LlmUsage {
+            quota_source: Some("provider_api".to_string()),
+            quota_observed_at: Some("2026-09-21T18:00:00Z".to_string()),
+            quota_account: Some(xmatrix_cli_core::protocol::LlmQuotaAccount {
+                allowed: Some(true),
+                credits: Some(xmatrix_cli_core::protocol::LlmQuotaCredits {
+                    balance: Some(12.34),
+                    currency: Some("CNY".to_string()),
+                    unlimited: false,
+                }),
+            }),
+            ..LlmUsage::default()
+        };
+        let mut results = vec![observed_result(
+            &target("registration:deepseek", "d"),
+            usage,
+        )];
+        let wire = serde_json::to_value(&results[0]).expect("observed json");
+        assert_eq!(wire["status"], "observed");
+        assert!(wire.get("quotaUsages").is_none());
+        assert_eq!(wire["quotaAccount"]["credits"]["balance"], 12.34);
+        assert_eq!(wire["quotaAccount"]["credits"]["currency"], "CNY");
+
+        drop_windowless_readings(&mut results);
+        let wire = serde_json::to_value(&results[0]).expect("unavailable json");
+        assert_eq!(
+            wire,
+            serde_json::json!({ "targetId": "registration:deepseek", "configurationDigest": "d",
+                "status": "unavailable", "reason": "provider_unavailable" })
+        );
     }
 
     #[test]
@@ -571,13 +644,19 @@ mod tests {
         }))
         .expect("probe");
         assert!(probe.window_labels);
-        assert!(!probe.fresh, "a probe that does not ask may answer from the cache");
+        assert!(
+            !probe.fresh,
+            "a probe that does not ask may answer from the cache"
+        );
         let probe: MachineQuotaProbeRequest = serde_json::from_value(serde_json::json!({
             "requestId": "quota:1", "connectionEpoch": 3, "fresh": true,
             "targets": [{ "targetId": "registration:claude", "configurationDigest": "d" }],
         }))
         .expect("probe");
-        assert!(probe.fresh, "a probe that checks a refusal reads the provider now");
+        assert!(
+            probe.fresh,
+            "a probe that checks a refusal reads the provider now"
+        );
     }
 
     #[test]

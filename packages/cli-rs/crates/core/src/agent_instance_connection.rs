@@ -303,12 +303,7 @@ fn merge_usage(current: &mut Option<LlmUsage>, incoming: &LlmUsage) {
         &mut current.context_usage_percent,
         &incoming.context_usage_percent,
     );
-    if incoming
-        .quota_usages
-        .as_ref()
-        .is_some_and(|entries| !entries.is_empty())
-        && !quota_observation_regresses(current, incoming)
-    {
+    if incoming.has_account_quota() && !quota_observation_regresses(current, incoming) {
         current.quota_usages = incoming.quota_usages.clone();
         current.quota_source = incoming.quota_source.clone();
         current.quota_observed_at = incoming.quota_observed_at.clone();

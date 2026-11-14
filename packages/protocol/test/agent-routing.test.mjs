@@ -33,6 +33,20 @@ test('a persisted provider quota reading survives an idle environment up to the 
   assert.equal(quota.source, 'provider');
 });
 
+test('a prepaid account has no window: its balance and the provider verdict are the headroom', () => {
+  const observedAt = '2026-09-19T19:55:00Z';
+  const prepaid = (allowed, balance, currency = 'CNY') => routingQuotaObservation({ quotaSource: 'provider_api',
+    quotaObservedAt: observedAt, quotaAccount: { ...(allowed === undefined ? {} : { allowed }),
+      credits: { balance, ...(currency ? { currency } : {}) } } }, now);
+  assert.equal(prepaid(true, 12.34).value, 100);
+  assert.equal(prepaid(true, 12.34).expiresAt, new Date(Date.parse(observedAt) + ROUTING_QUOTA_MAX_AGE_MS).toISOString());
+  assert.equal(prepaid(false, 12.34).value, 0);
+  assert.equal(prepaid(undefined, 0).value, 0);
+  assert.equal(prepaid(undefined, 3).value, 100);
+  // Credit units without a currency are not a prepaid balance, and say nothing without a window.
+  assert.equal(prepaid(true, 40, null), undefined);
+});
+
 test('the provider verdict on the account outranks its windows', () => {
   const observedAt = '2026-09-19T19:55:00Z';
   const week = { quotaSource: 'provider_api', quotaObservedAt: observedAt,

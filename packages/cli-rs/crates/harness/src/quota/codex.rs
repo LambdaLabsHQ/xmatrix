@@ -230,6 +230,7 @@ fn codex_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
                         other => other.as_f64(),
                     })
                     .filter(|balance| balance.is_finite() && *balance >= 0.0),
+                currency: None,
                 unlimited,
             })
         });
@@ -554,6 +555,7 @@ mod tests {
                 allowed: Some(true),
                 credits: Some(LlmQuotaCredits {
                     balance: Some(137.5),
+                    currency: None,
                     unlimited: false
                 }),
             })

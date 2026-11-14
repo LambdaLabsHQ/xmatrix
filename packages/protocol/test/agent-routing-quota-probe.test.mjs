@@ -161,3 +161,24 @@ test('quota pace is the remaining share over the share of the window still to ru
   // A window whose reset has passed no longer counts.
   assert.equal(pace(60, [{ label: '5h', usedPercent: 100, resetAt: at(-1) }, { label: '1w', usedPercent: 40, resetAt: at(84) }]), 1.2);
 });
+
+test('a prepaid balance is a reading without a window, only on a probe that asked for it', () => {
+  const account = { allowed: true, credits: { balance: 12.34, currency: 'CNY' } };
+  const { quotaUsages: _windows, ...windowless } = observed;
+  const balance = { ...windowless, quotaObservedAt: '2026-09-21T19:55:00Z', quotaAccount: account };
+  const asked = { ...request, quotaAccount: true, accountBalance: true };
+  assert.deepEqual(parseRoutingQuotaProbeRequest(asked), asked);
+  assert.throws(() => parseRoutingQuotaProbeRequest({ ...request, accountBalance: true }), 'a balance is an account fact');
+  assert.throws(() => parseRoutingQuotaProbeResponse(response(balance), { ...request, quotaAccount: true }, now),
+    'a probe that did not ask rejects a currency');
+  assert.deepEqual(parseRoutingQuotaProbeResponse(response(balance), asked, now).results[0].quotaAccount, account);
+  const [reading] = routingQuotaProbeObservations(response(balance), asked, now);
+  assert.deepEqual([reading.observation.value, reading.windows, reading.account], [100, [], account]);
+  const spent = { ...balance, quotaAccount: { allowed: false, credits: { balance: 0, currency: 'CNY' } } };
+  assert.equal(routingQuotaProbeObservations(response(spent), asked, now)[0].observation.value, 0);
+  for (const quotaAccount of [undefined, { allowed: true }, { credits: { balance: 5 } },
+    { credits: { balance: 5, currency: 'yuan' } }]) {
+    assert.throws(() => parseRoutingQuotaProbeResponse(response({ ...balance, quotaAccount }), asked, now));
+  }
+  assert.throws(() => parseRoutingQuotaProbeResponse(response({ ...balance, quotaUsages: [] }), asked, now));
+});
