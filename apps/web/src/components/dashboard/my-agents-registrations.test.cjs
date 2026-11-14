@@ -42,6 +42,11 @@ test("a row says what the location is doing, or why it cannot take work", () => 
   assert.equal(activity({ live: live({ quota: { remainingPercent: 14.2, observedAt: "", expiresAt: "" } }) }).line,
     "Ready · 14% quota left");
   assert.equal(activity({ live: live({ quota: { remainingPercent: 60, observedAt: "", expiresAt: "" } }) }).line, "Ready");
+  // A prepaid account reads as money: fine while the provider serves it, attention once it cannot pay.
+  const balance = (amount, allowed) => ({ amount, currency: "CNY", allowed, observedAt: "", expiresAt: "" });
+  assert.equal(activity({ live: live({ balance: balance(6.57, true) }) }).line, "Ready");
+  assert.deepEqual(activity({ live: live({ balance: balance(0, false) }) }),
+    { state: "attention", line: "Out of balance", rank: 2 });
   assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 0, observedAt: "", expiresAt: "" } }) }),
     { state: "attention", line: "Out of quota · window unavailable", rank: 2 });
   assert.deepEqual(activity({ live: live(), routingReady: false, routingBlocker: "owner_environment_missing" }),

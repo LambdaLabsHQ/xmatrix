@@ -38,7 +38,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
 import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
-import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
+import { AGENT_USAGE_REFRESH_MS, agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
@@ -182,8 +182,8 @@ export function MyAgentsView({
     const seen = formatRelativeAge(live?.machine.lastSeenAt, now);
     const machineState = !live ? null : live.machine.online ? "online" : seen ? `offline, seen ${seen}` : "offline";
     const running = live?.running ?? [];
-    const usage = agentUsageReadings(live?.quota, now);
-    const checked = formatRelativeAge(live?.quota?.observedAt, now);
+    const usage = [...agentUsageReadings(live?.quota, now), ...agentBalanceReadings(live?.balance)];
+    const checked = formatRelativeAge(live?.quota?.observedAt ?? live?.balance?.observedAt, now);
     detail = (
       <ToolDetail
         key={id}
