@@ -312,8 +312,8 @@ droid, prime, trae, autohand, amp, reasonix and deepseek have no CLI sign-in
 (in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
 reads `DEEPSEEK_API_KEY`).
 
-A preset's `launchEnv` lists the environment variables xMatrix sets on the
-harness process, as written. DeepSeek Harness takes its permission mode from
+A preset's `access.full.env` lists the environment variables xMatrix sets on
+the harness process, as written. DeepSeek Harness takes its permission mode from
 one: `DSH_PERMISSION_MODE=danger-full-access` lets it write outside the
 workspace and stops its per-command approval, as the full-access arguments of
 the other presets do. Left at its own default (`workspace-write`), its shell

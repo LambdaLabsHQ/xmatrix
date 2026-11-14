@@ -76,12 +76,13 @@ export interface AgentPreset {
    */
   acpArgs?: string[];
   /**
-   * Environment variables xMatrix sets on this harness's own process at
-   * launch, exactly as written. A harness whose permission mode is an
-   * environment variable gets full access here (`DSH_PERMISSION_MODE`), so
-   * what a person is shown and what the launch sets are the same data.
+   * What xMatrix adds to this harness's launch to give it full access, exactly
+   * as written. `full.env` is set on the harness's own process: a harness
+   * whose permission mode is an environment variable gets it here
+   * (`DSH_PERMISSION_MODE`), so what a person is shown and what the launch
+   * sets are the same data.
    */
-  launchEnv?: Record<string, string>;
+  access?: { full?: { env?: Record<string, string> } };
   launcherNames: string[];
   classicConfigDirs: string[];
   /** One-line upstream installer, shown when the runtime binary is missing. */

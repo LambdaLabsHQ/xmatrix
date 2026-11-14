@@ -8,7 +8,7 @@ Agent ran there stopped at `Operation not permitted (os error 1)` unless the
 Agent raised its permission for that one call. xMatrix now starts it with
 `DSH_PERMISSION_MODE=danger-full-access`: it may write outside the workspace
 and no longer asks before each command, as the other harnesses already run.
-The variable is listed in the preset (`launchEnv`), the same data the launch
+The variable is listed in the preset (`access.full.env`), the same data the launch
 reads. The harness also removes `XMATRIX_EXECUTION_KEY` from every command it
 runs, which made `send --final-for` refuse; the CLI now reads the key from
 the daemon's record of the Run whose request capability the command holds. A

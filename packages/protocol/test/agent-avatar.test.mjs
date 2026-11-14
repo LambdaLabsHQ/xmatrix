@@ -109,8 +109,8 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
   }
   // DeepSeek Harness takes its permission mode from the environment; it is
   // the only preset whose launch sets any.
-  assert.deepEqual(agentPresetById("deepseek")?.launchEnv, { DSH_PERMISSION_MODE: "danger-full-access" });
-  assert.deepEqual(AGENT_PRESETS.filter(preset => preset.launchEnv).map(preset => preset.id), ["deepseek"]);
+  assert.deepEqual(agentPresetById("deepseek")?.access, { full: { env: { DSH_PERMISSION_MODE: "danger-full-access" } } });
+  assert.deepEqual(AGENT_PRESETS.filter(preset => preset.access).map(preset => preset.id), ["deepseek"]);
   // The vibe preset launches the ACP entrypoint, so a bare `vibe` harness key
   // still resolves to `vibe-acp` rather than the interactive TUI.
   assert.equal(normalizeAgentPresetRuntime("vibe"), "vibe");
