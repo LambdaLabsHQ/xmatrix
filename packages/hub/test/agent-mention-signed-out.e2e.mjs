@@ -3,7 +3,7 @@ import {
   channelSpaceId, connectDaemon, createClosedChannel, createWorkspace, inTestTransaction, registerTestAgent,
   startPgHubWorker, testMachine, testPostgresUrl,
 } from "./agent-launch-postgres.fixture.mjs";
-import { createAuthorityDatabase, PostgresRuntimeRepository } from "@xmatrix/db";
+import { createAuthorityDatabase, PostgresRegistrationLaunchRepository, PostgresRuntimeRepository } from "@xmatrix/db";
 
 /** The machine's harness report, as its daemon stores it. */
 const reporting = (capturedAt, login) => JSON.stringify({ schemaVersion: 1, capturedAt,
@@ -65,6 +65,10 @@ test("a summon reaches its machine whatever was last said about its program's si
       values: [first.runId] }));
     assert.equal(unanswered.unanswered, true);
     assert.deepEqual(await refused(), { signedOut: unanswered.signedOut, unanswered: false });
+    // A summon's Run is no handoff's: the handoff fallback reads the real schema and finds nothing to move.
+    const authority = createAuthorityDatabase({ connectionString: testPostgresUrl(), shardId: "shard-0" });
+    assert.equal(await new PostgresRegistrationLaunchRepository(authority, authority, { spaceId, shardId: "shard-0", placementEpoch: 1 })
+      .handoffFallbackOrigin({ commandId: `startup-fallback:${first.runId}`, channelId, runId: first.runId }), undefined);
     const marked = await inTestTransaction(tx => tx.query({ text: `SELECT metadata_json ? 'signedOutAt' AS marked
       FROM data.runs WHERE run_id=$1`, values: [first.runId] }));
     assert.equal(marked[0].marked, false);

@@ -81,7 +81,7 @@ test("the retry excludes the environment that failed, whoever owns it", async ()
 });
 
 test("a handoff's successor that failed to start hands the same handoff on, never to one it tried", async () => {
-  const request = { launchConditions: { machine: "mac", harness: "antigravity", launch: "force" }, presentationMessageId: "handoff-message",
+  const request = { launchConditions: { machine: "mac", launch: "force" }, presentationMessageId: "handoff-message",
     runMetadata: { handoffSourceInstanceId: "channel:1", sourceMention: "@claude:1:handoff:@auto",
       handoffFallbackFailed: [{ ...failed, harness: "codex" }] } };
   const rows = [];
@@ -101,6 +101,10 @@ test("a handoff's successor that failed to start hands the same handoff on, neve
   assert.deepEqual(await origin(), { actorUserId: "actor", body: row.prompt, tags: { machine: "mac" },
     failed: [{ ...failed, harness: "codex" }, failed], sourceInstanceId: "channel:1",
     presentationMessageId: "handoff-message", sourceMention: "@claude:1:handoff:@auto", handoffContext: { session: "s" } });
+  // `handoff:@codex` named its successor: nobody else takes it.
+  request.launchConditions.harness = "codex";
+  assert.equal(await origin(), undefined);
+  delete request.launchConditions.harness;
   // After three successors that could not start, the handoff stops with its notices.
   request.runMetadata.handoffFallbackFailed = ["codex", "cursor", "opencode"].map(harness => ({ ...failed, harness }));
   assert.equal(await origin(), undefined);

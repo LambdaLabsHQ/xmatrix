@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a handoff whose successor cannot start goes on to the next Agent
+
+On 2026-11-13 an Agent that ran out of quota handed its work off with
+`handoff:@auto`; routing chose a harness that was not signed in on its
+machine, its start failed with the sign-in notice, and the work stayed with
+nobody for eleven hours. Since routing stopped keeping a record of sign-ins
+(#1630), nothing kept a handoff away from such a harness, and unlike an
+`@auto` summon a handoff had no second try. A handoff's successor that fails
+to start, or refuses its first turn as signed out, now passes the same
+handoff (its prompt, the predecessor's conversation and the author's
+conditions) to the next Agent, never one it already tried or its source, up
+to three times. A handoff to a harness its author named is not replaced.
+Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: a summon reaches its machine, and the program says whether it is signed in
 
 On 2026-11-13 summons to Claude Code on a signed-in machine were refused as

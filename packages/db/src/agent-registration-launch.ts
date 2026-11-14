@@ -1055,8 +1055,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
    * itself: its prompt and the predecessor's conversation from its spawn
    * payload, its conditions from the request it was prepared with. `failed`
    * is every environment this handoff has tried, so a retry of a retry never
-   * returns to one; undefined after HANDOFF_FALLBACK_ATTEMPTS of them, and for
-   * a Run no handoff started.
+   * returns to one; undefined after HANDOFF_FALLBACK_ATTEMPTS of them, for a
+   * handoff to a harness its author named, and for a Run no handoff started.
    */
   async handoffFallbackOrigin(input: { commandId: string; channelId: string; runId: string }): Promise<{
     actorUserId: string; body: string; tags: AutoLaunchTags; sourceInstanceId: string; presentationMessageId?: string;
@@ -1078,9 +1078,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     });
     const failed = [...tried, parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
       machineId: row.machine_id, harness: row.harness })];
-    if (failed.length > HANDOFF_FALLBACK_ATTEMPTS) return undefined;
-    // The author's own conditions bind the next choice; the harness the failed one was is not one of them.
-    const { launch: _launch, harness: _harness, ...tags } = (request.launchConditions ?? {}) as AutoLaunchTags;
+    const { launch: _launch, ...tags } = (request.launchConditions ?? {}) as AutoLaunchTags;
+    // A successor its author named is not replaced, as a named summon is not.
+    if (tags.harness || failed.length > HANDOFF_FALLBACK_ATTEMPTS) return undefined;
     const context = row.handoff_context;
     return { actorUserId: String(row.actor_user_id), body: row.prompt, tags, failed,
       sourceInstanceId: String(metadata.handoffSourceInstanceId),
