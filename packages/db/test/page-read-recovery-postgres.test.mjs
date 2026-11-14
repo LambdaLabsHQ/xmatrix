@@ -18,7 +18,7 @@ integration("page.read recovers a lost BEGIN without replaying a commit (XMATRIX
     "SELECT count(*)::int AS n FROM data.page_links WHERE space_id=$1 AND page_id=$2",
     [f.ids.space, page.pageId]);
   try {
-    ({ page } = await pages.create({ ...input, title: "Read recovery", body: "Recovered body" }));
+    ({ page } = await pages.create({ ...input, body: "Recovered body" }));
     const read = () => pages.read({ ...input, pageId: page.pageId });
     const expected = await read();
     assert.equal(expected.page.body, "Recovered body");

@@ -110,7 +110,7 @@ export function savepointDatabase(client, rewrite, checkContext = () => {}) {
       await client.query("ROLLBACK TO SAVEPOINT command");
       throw error;
     }
-  } };
+  }, async close() {}, openSession() { return this; } };
 }
 
 export async function applyTestMigrations(client, files, rewrite) {
