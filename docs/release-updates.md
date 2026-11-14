@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: an execution report the Hub can never store is answered once
+
+A daemon keeps each execution report until the Hub gives it a receipt and
+sends it again every five seconds until then. A report whose Run is gone was
+answered 403, and one that conflicts with what the Hub already holds 409, so
+those reports came back forever: about 400,000 of the Hub's 470,000 requests
+a day, each one a Postgres transaction. The Hub now answers both once with a
+final receipt (`source_unavailable` / `superseded`, with a reason). Released
+daemons already accept those, so their queues drain without a client
+update. Nothing is stored for those reports. Hub only. Recovery is a
+CI-validated beta that reverts this change.
+
 ## Unreleased: On a Mac or PC, bringing agents in starts with the app
 
 Most new people left within half a minute of being shown a terminal command.
