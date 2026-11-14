@@ -37,6 +37,7 @@ import {
    NaturalKeyError, reserveNaturalKey } from "./natural-keys.js";
 import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 /** Runtime catalogs an Instance report keeps from the row when it omits them, each with its observation stamp. */
@@ -1211,7 +1212,14 @@ export class PostgresRuntimeRepository {
     if (sourceMessageIds.length === 0) return { launches: [], ...(paginated ? { nextCursor: null } : {}) };
     const placement = await this.channelPlacement(requestId, channelId,
       "runtime.agent-launches.channel.locate", "runtime.agent-launches.placement");
-    return this.spaces.transaction(requestId, "runtime.agent-launches.query", placement, async (tx) => {
+    // Only database reads and the current Channel capability check happen here,
+    // so a connection lost before COMMIT cannot have changed anything: one
+    // fresh session replays it (XMATRIX-HUB-C6).
+    return retryTransactionBeforeCommit(this.database, {
+      requestId, operation: "runtime.agent-launches.query",
+      placement: { spaceId: placement.spaceId, shardId: placement.shardId,
+        placementEpoch: placement.placementEpoch },
+    }, async (tx) => {
       await runtimeChannelCapability(tx, channelId,
         text(input.actorUserId, "actorUserId", 300), "runtime_history_read");
       const rows = position.launch === null ? [] : await tx.query<QueryResultRow>({ name: "runtime_agent_launches_query_v5", text: `SELECT
