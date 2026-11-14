@@ -520,7 +520,7 @@ export type {
   ChannelReferenceSpan, MessageReferenceSpan, NornRequestView, RequestReferenceSpan,
 } from "./message-references.js";
 export {
-  PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
+  PAGE_DOCUMENT_FRAGMENT, nornRunBlockName, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
 export { pagePositionBetween, PagePositionError } from "./page-position.js";
 

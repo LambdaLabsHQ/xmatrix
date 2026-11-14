@@ -1,4 +1,4 @@
-import { parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
+import { nornRunBlockName, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
 import { NORN_STD } from "./vendor/norn/std";
@@ -22,9 +22,8 @@ import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 export function nornBlocks(body: string): { name: string; source: string }[] {
   const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
   return (root.children ?? []).flatMap(node => {
-    const [run, name, ...rest] = (node.meta ?? "").trim().split(/\s+/u);
-    return node.type === "code" && node.lang === "norn" && run === "run" && !rest.length && /^\p{L}[\p{L}\p{N}_-]{0,39}$/u.test(name ?? "main")
-      ? [{ name: name ?? "main", source: node.value ?? "" }] : [];
+    const name = nornRunBlockName([node.lang, node.meta].filter(Boolean).join(" "));
+    return node.type === "code" && name !== null ? [{ name, source: node.value ?? "" }] : [];
   });
 }
 

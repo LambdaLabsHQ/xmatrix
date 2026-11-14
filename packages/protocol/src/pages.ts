@@ -377,6 +377,20 @@ export interface PageMigrationApplied {
 /** The Yjs shared type a page's live document lives in, in the page session and every editor. */
 export const PAGE_DOCUMENT_FRAGMENT = "prosemirror";
 
+/**
+ * The name a fenced block's info string gives its program: the word after
+ * `norn run`, or `main` without one; null for any other block. A name is a
+ * word in any language, up to 40 characters, and may carry digits, `_` and `-`
+ * after its first letter. The Hub starts a block by this rule and the Page
+ * editor draws one by it, so a block drawn under a program is one the Hub runs.
+ */
+export function nornRunBlockName(info: string): string | null {
+  const [language, run, name, ...rest] = info.trim().split(/\s+/u);
+  if (language !== "norn" || run !== "run" || rest.length) return null;
+  const program = name ?? "main";
+  return /^\p{L}[\p{L}\p{N}_-]{0,39}$/u.test(program) ? program : null;
+}
+
 /** One request of a Page's program: who holds it, what was asked, and how it ended. */
 export interface PageProgramRequest {
   holder: string;

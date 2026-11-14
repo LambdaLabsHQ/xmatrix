@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
+const { nornRunBlockName } = require("@xmatrix/protocol");
 const { problemRange, programBlockName } = require("./page-program-chips.ts");
 const { againText, conditionsText, endText, programFooter, programStep, waitText } = require("./program-flow.ts");
 
@@ -11,6 +12,11 @@ const request = (change) => ({ holder: "@codex", text: "Review the design", aske
 test("a norn run block names its program, and any other block names none", () => {
   assert.deepEqual(["norn run", "norn run review", "norn", "norn run two words", "ts"].map(programBlockName),
     ["main", "review", null, null, null]);
+  // The editor names a block by the Hub's rule: a block drawn as a program is one the Hub starts.
+  for (const tag of ["norn run 2nd", `norn run ${"a".repeat(41)}`, "norn run _review", "norn run 物业费", "norn run a_b-2"]) {
+    assert.equal(programBlockName(tag), nornRunBlockName(tag), tag);
+  }
+  assert.deepEqual(["norn run 2nd", "norn run _review"].map(programBlockName), [null, null]);
 });
 
 test("a request is a step: working with the time it has left, its answer, or how it failed", () => {

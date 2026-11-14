@@ -1,4 +1,4 @@
-import type { PageProgramStatus } from "@xmatrix/protocol";
+import { nornRunBlockName, type PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { pressOpens } from "./page-automation-chips";
@@ -18,8 +18,7 @@ export const programsKey = new PluginKey<{ programs: Map<string, PageProgramStat
 
 /** The name a `norn run` block gives its program, or null for any other block. */
 export function programBlockName(language: unknown): string | null {
-  const [lang, run, name, ...rest] = String(language ?? "").trim().split(/\s+/u);
-  return lang === "norn" && run === "run" && !rest.length ? name ?? "main" : null;
+  return nornRunBlockName(String(language ?? ""));
 }
 
 /** Where a problem that names its place (`3:14 …`) is in the block's text, to the end of that word. */
