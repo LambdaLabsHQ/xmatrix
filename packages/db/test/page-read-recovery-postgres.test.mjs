@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
-import { DatabaseCommitUnknownError, PostgresPageRepository } from "../dist/index.js";
+import { DatabaseCommitUnknownError } from "../dist/index.js";
 import { integration } from "./postgres-database.fixture.mjs";
-import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
-import { recoveringDatabase } from "./response-fault-postgres.fixture.mjs";
+import { recoveringPageRepository } from "./response-fault-postgres.fixture.mjs";
 
 function count(clients, pattern) {
   return clients.reduce((total, client) => total + client.queries.filter((sql) => pattern.test(sql)).length, 0);
@@ -12,12 +11,8 @@ function count(clients, pattern) {
 // conversation link is lock-free. A read that records a link replays once
 // before COMMIT and does not replay an unknown COMMIT or an answered error.
 integration("page.read recovers a lost BEGIN without replaying a commit (XMATRIX-HUB-CX)", async () => {
-  const f = await spaceSecretFixture();
   let fault;
-  const { database, clients } = recoveringDatabase(() => fault);
-  const pages = new PostgresPageRepository(database);
-  const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
-    principal: { kind: "user", id: f.ids.owner } };
+  const { f, clients, pages, input } = await recoveringPageRepository(() => fault);
   let page;
   const links = () => f.client.query(
     "SELECT count(*)::int AS n FROM data.page_links WHERE space_id=$1 AND page_id=$2",
