@@ -492,6 +492,50 @@ impl AcpSession {
         }
     }
 
+    /// In `ask` access a permission request waits on a person: show it as a
+    /// card with the answers the agent offers and park it. A plain `xmatrix`
+    /// command is allowed at once, and with no channel to ask in, or no
+    /// answer to offer, the request is cancelled.
+    async fn park_acp_permission(
+        &mut self,
+        message: &Value,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+        channel_id: Option<&str>,
+    ) -> error::Result<()> {
+        use crate::runtime_harness_questions as questions;
+        let id = message.get("id").cloned().unwrap_or(Value::Null);
+        let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let options = params.get("options").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+        if questions::acp_permission_command(&params).is_some_and(|command| questions::is_plain_xmatrix_command(&command))
+            && let Some(option_id) = acp_select_permission_option_id(options)
+        {
+            let allowed = serde_json::json!({ "outcome": { "outcome": "selected", "optionId": option_id } });
+            return self.write_message(&acp_result(id, allowed)).await;
+        }
+        match (relay, channel_id, questions::acp_permission_question(&params)) {
+            (Some(relay), Some(channel_id), Some(question)) => {
+                let key = format!("acp-permission-{}", uuid::Uuid::new_v4());
+                let card = questions::publish_questionnaire(
+                    relay,
+                    channel_id,
+                    questions::questionnaire_message(
+                        &self.config.trace_source,
+                        &self.config.display_name,
+                        &key,
+                        &[question],
+                    ),
+                );
+                self.questions.park(key, (id, params), card);
+                Ok(())
+            }
+            _ => {
+                let cancelled = questions::acp_permission_outcome(&params, None)
+                    .unwrap_or_else(|| serde_json::json!({ "outcome": { "outcome": "cancelled" } }));
+                self.write_message(&acp_result(id, cancelled)).await
+            }
+        }
+    }
+
     async fn submit_turn(
         &mut self,
         text: &str,
@@ -610,6 +654,16 @@ impl AcpSession {
                 && message.get("id").is_some()
             {
                 self.park_acp_question(&message, trace_relay, trace_channel_id)
+                    .await?;
+                continue;
+            }
+            if message.get("method").and_then(Value::as_str).is_some_and(|method| method.contains("permission"))
+                && message.get("id").is_some()
+                && message.get("result").is_none()
+                && message.get("error").is_none()
+                && !launch_access().approves_requests
+            {
+                self.park_acp_permission(&message, trace_relay, trace_channel_id)
                     .await?;
                 continue;
             }
@@ -1183,7 +1237,10 @@ async fn acp_handle_server_request(
     let result = if method == "elicitation/create" {
         // Outside a turn there is no channel to ask in.
         serde_json::json!({ "action": "cancel" })
-    } else if method.contains("permission") && launch_access().approves_requests {
+    } else if method.contains("permission") && !launch_access().approves_requests {
+        // `ask` access outside a turn: there is no channel to ask a person in.
+        serde_json::json!({ "outcome": { "outcome": "cancelled" } })
+    } else if method.contains("permission") {
         // Full access answers the agent's permission requests with allow.
         // Option selection is driven by the ACP `kind` semantics so each
         // vendor's wording works; when the request carries no selectable

@@ -83,7 +83,7 @@ test("an Agent's page says what it runs with, and its owner confirms an access t
     "Answers every permission request Codex makes with allow"]) await expect(access).toContainText(line);
   await page.screenshot({ path: test.info().outputPath("agent-access.png") });
   await access.getByRole("button", { name: "Review and confirm" }).click();
-  await page.getByRole("dialog", { name: "Codex: full access on this machine?" }).getByRole("button", { name: "Confirm full access" }).click();
+  await page.getByRole("dialog", { name: "Codex: full access on this machine?" }).getByRole("button", { name: "Confirm with full access" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "environment-command")).toEqual([expect.objectContaining({
     expectedVersion: 5, environment: { ...environment, launch: { ...launch, access: "full" } } })]);
 });

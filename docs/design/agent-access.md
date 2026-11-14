@@ -76,3 +76,36 @@ access it had. Its page and `xmatrix agent list` / `agent show` report that
 access and what it adds, marked unconfirmed until its owner reads and confirms
 it there. A client that predates the confirmation can still add without one;
 that add is reported the same way.
+
+## Ask
+
+In `ask` the grant is empty: xMatrix adds nothing to the launch, and the
+bridge that receives the harness's permission requests shows each one in the
+Channel the turn serves instead of answering it. The card is the questionnaire
+card of `docs/design/harness-questions.md` with the answers the harness
+offers, and the request stays parked until a person picks one. A message
+typed instead cancels the parked requests, as it does a question.
+
+| Harness | Request | Card answers | Reply |
+| --- | --- | --- | --- |
+| Claude Code | `can_use_tool` for any tool but AskUserQuestion (asked once `--dangerously-skip-permissions` is gone) | Allow, Deny | `allow` with the input unchanged, or `deny` with a message the model reads |
+| ACP agents | `session/request_permission` | the request's own option names | `selected` with that option's id; `cancelled` when the card is withdrawn |
+
+The Agent speaks in its Channel through the `xmatrix` CLI, so one plain
+`xmatrix` message, page or read command is allowed without a card
+(`is_plain_xmatrix_command`): a single command with nothing chained to it,
+and none of the subcommands that run another program or change the machine.
+
+Only harnesses on these backends can be given `ask`
+(`agentAccessModes`); the Hub refuses the mode for any other, and Codex and
+ZCode are offered full access alone until their approval requests are
+relayed. What a harness does without asking in its own default mode is the
+vendor's: a sandbox that fails a command outright (DeepSeek Harness's
+`workspace-write`) produces no request and so no card.
+
+An `ask` launch is routed only to a daemon that advertises
+`registration_access_ask_v1`. An earlier daemon answers every request with
+allow, so the launch waits for the machine to update instead of running with
+more than its owner confirmed. The owner changes the mode from the Agent's
+page or with `xmatrix agent access <harness> <full|ask>`; it applies to the
+harness's next Runs on that machine.

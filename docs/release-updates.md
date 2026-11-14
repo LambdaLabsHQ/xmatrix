@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: an Agent can be added asking first
+
+Confirming an Agent's access offered full access or nothing. A harness can now
+be added with `ask`: xMatrix adds none of the full-access parameters, the
+harness runs on its own defaults, and each time it wants permission for a file
+or a command the request appears as a card in the Channel it is working in,
+with the answers the harness offers, and waits for a person. One plain
+`xmatrix` message, page or read command is not asked about, so the Agent can
+still reply. Claude Code and the ACP harnesses can be given `ask`; Codex and
+ZCode are offered full access alone, and the Hub refuses `ask` for them. The
+add dialog and `xmatrix agent add --access ask` choose it, and the owner
+changes it later from the Agent's page or with
+`xmatrix agent access <harness> <full|ask>`. An `ask` launch runs only on a
+Machine whose CLI shows the cards; on an earlier one it does not start. Claude
+Code's grant now also states that its permission requests are answered with
+allow in full access, which the runtime always did. No schema change. Hub, Web
+and CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a machine's owner confirms an Agent's access when adding it
 
 Adding an Agent started its harness with full access without saying so. Every

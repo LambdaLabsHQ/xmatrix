@@ -142,3 +142,26 @@ test("declining the access question adds nothing, and a harness confirmed earlie
   expect(create!.environment.launch.access).toBeUndefined();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("a harness whose permission requests can be shown is added asking first when its owner chooses that", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
+  await page.goto("/app/personal-sspaceperso/agents");
+  const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
+  await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
+  await fixtureJson(page, "enabled-catalog", CATALOG, catalog(["claude"]));
+  await fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, { version: 0, environment: null, accessModes: ["full", "ask"],
+    fullAccess: { mode: "full", args: ["--dangerously-skip-permissions"], env: {}, session: {}, approvesRequests: true } },
+  { method: "POST" });
+  await list.getByRole("switch", { name: "Enabled: Claude Code on Remote server" }).click();
+  const confirmation = page.getByRole("dialog", { name: "Claude Code: access on this machine" });
+  // Full access is the default; the other mode says what it means before it is chosen.
+  await expect(confirmation.getByRole("radio", { name: "Full access" })).toBeChecked();
+  await expect(confirmation.getByRole("button", { name: "Add with full access" })).toBeVisible();
+  await confirmation.getByRole("radio", { name: /^Ask first/u }).check();
+  await page.screenshot({ path: test.info().outputPath("access-ask-choice.png") });
+  await confirmation.getByRole("button", { name: "Add, asking first" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
+    expect.objectContaining({ action: "create", key: key("claude"),
+      environment: expect.objectContaining({ launch: expect.objectContaining({ access: "ask" }) }) }),
+  ]);
+});

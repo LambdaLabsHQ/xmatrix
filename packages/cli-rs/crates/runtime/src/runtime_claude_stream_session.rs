@@ -121,10 +121,12 @@ pub(crate) struct ClaudeSessionControls {
     pub(crate) questions: PendingQuestions<ClaudeParkedQuestion>,
 }
 
-/// The `can_use_tool` request an AskUserQuestion card answers.
+/// The `can_use_tool` request a card answers: an AskUserQuestion, or in `ask`
+/// access a tool Claude wants permission for.
 pub(crate) struct ClaudeParkedQuestion {
     pub(crate) request_id: String,
     pub(crate) input: Value,
+    pub(crate) permission: bool,
 }
 
 impl ClaudeSessionControls {
@@ -344,10 +346,18 @@ impl ClaudeStreamInterrupter {
         let Some(parked) = self.controls.questions.take(&reply.request_key) else {
             return false;
         };
-        let input = claude_answered_input(&parked.input, &reply.answers);
+        let decision = if !parked.permission {
+            Ok(claude_answered_input(&parked.input, &reply.answers))
+        } else if crate::runtime_harness_questions::permission_answer(&reply.answers)
+            == Some(crate::runtime_harness_questions::PERMISSION_ALLOW)
+        {
+            Ok(parked.input)
+        } else {
+            Err("A person declined this on its permission card. Do not retry it; continue without it or say what you need.")
+        };
         write_claude_control_line(
             &self.stdin,
-            &claude_permission_response(&parked.request_id, Ok(input)),
+            &claude_permission_response(&parked.request_id, decision),
         )
         .await
     }

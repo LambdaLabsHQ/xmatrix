@@ -86,7 +86,7 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   }
   const agent = fixture({ id: "agent-run:run", agentRun: run }, { launch: { runtime: "codex", runtimeArgs: [], access: "full" } });
   const added = await agent.request({ ...create, environment: { ...create.environment,
-    launch: { runtime: "codex", runtimeArgs: [], access: "ask" } } });
+    launch: { runtime: "codex", runtimeArgs: [], access: "full" } } });
   assert.equal(added.status, 200, await added.clone().text());
   assert.deepEqual([agent.calls[0].input.actorUserId, agent.calls[0].input.byAgent], ["owner", true],
     "it acts as its owner, without an admin's creation exception");
@@ -99,6 +99,22 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   assert.equal(agent.calls.length, 1);
   const elsewhere = fixture({ id: "agent-run:run", agentRun: { ...run, spaceId: "other" } });
   assert.equal((await elsewhere.request(create)).status, 403, "only in its own Space");
+});
+
+test("a mode is confirmed only for a harness whose permission requests xMatrix can show", async () => {
+  const create = harness => ({ action: "create", key: { ...key, harness }, commandId: "create", displayName: harness, environment: {
+    schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
+    launch: { runtime: harness, runtimeArgs: [], access: "ask" } } });
+  const owner = fixture();
+  // Codex's approvals do not reach the bridge, so it is given full access or not added.
+  const refused = await owner.request(create("codex"));
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /codex can only be given full access/u);
+  assert.equal(owner.calls.length, 0);
+  for (const harness of ["claude", "cursor", "grok"]) assert.equal((await owner.request(create(harness))).status, 200, harness);
+  const { spaceId: _spaceId, ...physicalKey } = key;
+  const change = { key: physicalKey, commandId: "environment", expectedVersion: 1, environment: create("codex").environment };
+  assert.equal((await owner.request(change, "commands", true)).status, 400);
 });
 
 test("Agent Runs, spoofed principals, oversized input and cross-Space selections never reach authority", async () => {

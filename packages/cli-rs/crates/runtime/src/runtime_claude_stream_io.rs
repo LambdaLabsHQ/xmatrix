@@ -504,7 +504,7 @@ pub(crate) async fn claude_stream_reader(
 
         // AskUserQuestion waits on its person: park it and show its card in
         // the channel the turn serves. Any other tool runs as before.
-        match claude_tool_permission(&value) {
+        let permission = match claude_tool_permission(&value, crate::launch_access().approves_requests) {
             Some(ClaudeToolPermission::Allow(response)) => {
                 let _ = write_claude_control_line(&control_stdin, &response).await;
                 continue;
@@ -513,7 +513,17 @@ pub(crate) async fn claude_stream_reader(
                 request_id,
                 tool_use_id,
                 input,
-            }) => {
+            }) => Some((request_id, tool_use_id, input, None)),
+            Some(ClaudeToolPermission::Permit {
+                request_id,
+                tool_use_id,
+                what,
+                input,
+            }) => Some((request_id, tool_use_id, input, Some(what))),
+            None => None,
+        };
+        if let Some((request_id, tool_use_id, input, what)) = permission {
+            {
                 let channel = active
                     .lock()
                     .await
@@ -521,7 +531,16 @@ pub(crate) async fn claude_stream_reader(
                     .map(|turn| turn.channel_id.clone())
                     .or_else(|| cli_turn.as_ref().map(|(channel, _)| channel.clone()))
                     .or_else(|| last_channel_id.clone());
-                let questions = claude_questions(&input);
+                let questions = match &what {
+                    Some(what) => vec![crate::runtime_harness_questions::permission_question(
+                        what,
+                        &[
+                            crate::runtime_harness_questions::PERMISSION_ALLOW,
+                            crate::runtime_harness_questions::PERMISSION_DENY,
+                        ],
+                    )],
+                    None => claude_questions(&input),
+                };
                 match channel.filter(|_| !questions.is_empty()) {
                     Some(channel) => {
                         let card = publish_questionnaire(
@@ -536,7 +555,11 @@ pub(crate) async fn claude_stream_reader(
                         );
                         model_state.questions.park(
                             tool_use_id,
-                            ClaudeParkedQuestion { request_id, input },
+                            ClaudeParkedQuestion {
+                                request_id,
+                                input,
+                                permission: what.is_some(),
+                            },
                             card,
                         );
                     }
@@ -552,7 +575,6 @@ pub(crate) async fn claude_stream_reader(
                 }
                 continue;
             }
-            None => {}
         }
         if let Some(request_id) = claude_cancelled_control_request(&value) {
             model_state

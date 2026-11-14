@@ -14,6 +14,7 @@ import {
 import {
   WEB_PROXY_ROUTES,
   AGENT_PRESETS,
+  agentAccessModes,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
@@ -35,7 +36,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AgentAccessLines, FULL_ACCESS_EFFECT, confirmAccessForAdd } from "./agent-access";
+import { ASK_ACCESS_EFFECT, AgentAccessLines, FULL_ACCESS_EFFECT, chooseHeldAccess } from "./agent-access";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
 import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
@@ -307,18 +308,22 @@ export function MyAgentsView({
         {registration.access && (
           <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
             <div className="space-y-2 text-sm" data-testid="agent-access">
-              <p>xMatrix starts {harnessName} like this:</p>
-              <AgentAccessLines grant={registration.access} name={harnessName} />
-              {registration.access.mode === "full" && <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>}
-              {/* Added before its owner was asked: it runs as it always did until they read this and confirm. */}
-              {!registration.access.confirmed && (registration.canManageOwnerGrant && token ? (
-                <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
-                  const key = registration.key;
-                  const confirmed = await confirmAccessForAdd(token, [{ key, name: harnessName }], "Confirm full access");
-                  const mode = confirmed?.get(key.harness);
-                  if (mode) void command.run(key, { kind: "access", mode });
-                }}>Review and confirm</Button>
-              ) : <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>)}
+              {registration.access.mode === "full" ? <>
+                <p>xMatrix starts {harnessName} like this:</p>
+                <AgentAccessLines grant={registration.access} name={harnessName} />
+                <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>
+              </> : <p>{ASK_ACCESS_EFFECT}</p>}
+              {/* Added before its owner was asked, it runs as it always did until they read this
+                  and confirm; once confirmed, its owner changes the mode here. */}
+              {registration.canManageOwnerGrant && token
+                ? (!registration.access.confirmed || agentAccessModes(AGENT_PRESETS.find((preset) => preset.id === harness)).length > 1) && (
+                  <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
+                    const mode = await chooseHeldAccess(token, registration.key, harnessName);
+                    if (mode && (mode !== registration.access?.mode || !registration.access.confirmed)) {
+                      void command.run(registration.key, { kind: "access", mode });
+                    }
+                  }}>{registration.access.confirmed ? "Change" : "Review and confirm"}</Button>
+                ) : !registration.access.confirmed && <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>}
             </div>
           </ToolDetailSection>
         )}

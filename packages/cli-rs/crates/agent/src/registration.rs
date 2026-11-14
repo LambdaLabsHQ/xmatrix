@@ -148,6 +148,7 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             // Its Runs start on this machine, so its daemon must be up.
             ensure_local_daemon_started(hub_url, token).await
         }
+        AgentCommand::Access { harness, mode } => machine_access(hub_url, token, harness, mode).await,
         AgentCommand::Show {
             harness,
             space,
@@ -584,14 +585,7 @@ async fn confirm_access(
     preset: &AgentPreset,
     access: Option<String>,
 ) -> error::Result<Option<String>> {
-    let held: Value = http::request_json(
-        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_QUERY_ROUTE),
-        "POST",
-        Some(token),
-        Some(serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
-            "harness": key["harness"] })),
-    )
-    .await?;
+    let held = held_environment(hub_url, token, key).await?;
     if let Some(mode) = held["environment"]["launch"]["access"].as_str() {
         println!(
             "Access on this machine: {mode}, as its owner confirmed for {} earlier",
@@ -602,6 +596,10 @@ async fn confirm_access(
     for line in access_disclosure(&preset.display_name, &held["fullAccess"]) {
         eprintln!("{line}");
     }
+    let asks = offers_ask(&held);
+    if asks {
+        eprintln!("{}", ask_disclosure(&preset.display_name));
+    }
     if access.is_some() {
         return Ok(access);
     }
@@ -610,15 +608,102 @@ async fn confirm_access(
             "Nothing was added. This machine's owner confirms the access above first: show it to them, and once they agree run the same command with --access full".into(),
         ));
     }
-    eprint!("Add {} with full access on this machine? [y/N] ", preset.display_name);
+    if asks {
+        eprint!("Access for {} on this machine? [full/ask/none] ", preset.display_name);
+    } else {
+        eprint!("Add {} with full access on this machine? [y/N] ", preset.display_name);
+    }
     std::io::stderr().flush()?;
     let mut answer = String::new();
     std::io::stdin().read_line(&mut answer)?;
-    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
-        Ok(Some("full".into()))
-    } else {
-        Err(CliError::Launch("Nothing was added".into()))
+    match answer.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" | "full" => Ok(Some("full".into())),
+        "ask" if asks => Ok(Some("ask".into())),
+        _ => Err(CliError::Launch("Nothing was added".into())),
     }
+}
+
+/// The machine owner's environment for a harness, with what full access adds
+/// to its launch and the modes it can be given, as the Hub resolves them.
+async fn held_environment(hub_url: &str, token: &str, key: &Value) -> error::Result<Value> {
+    http::request_json(
+        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_QUERY_ROUTE),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
+            "harness": key["harness"] })),
+    )
+    .await
+}
+
+fn offers_ask(held: &Value) -> bool {
+    held["accessModes"]
+        .as_array()
+        .is_some_and(|modes| modes.iter().any(|mode| mode == "ask"))
+}
+
+fn ask_disclosure(name: &str) -> String {
+    format!(
+        "With ask access (--access ask), xMatrix adds none of that: {name} runs on its own defaults, and each time it wants permission for a file or a command it asks in the Channel it is working in and waits. Plain xmatrix commands are not asked about."
+    )
+}
+
+/// Show what a harness's Agents may do on this machine, or change it. The
+/// change is the owner's environment command against the version just read.
+async fn machine_access(
+    hub_url: &str,
+    token: &str,
+    harness: String,
+    mode: Option<String>,
+) -> error::Result<()> {
+    let owner_user_id = config::load_session_for_hub(hub_url)
+        .await
+        .ok_or_else(|| CliError::Auth("Log in as the machine owner first".into()))?
+        .user
+        .id;
+    let preset = concrete_preset(&harness)?;
+    let key = serde_json::json!({ "ownerUserId": owner_user_id,
+        "machineId": config::get_or_create_machine_id(hub_url).await?, "harness": preset.id });
+    let held = held_environment(hub_url, token, &key).await?;
+    let launch = &held["environment"]["launch"];
+    if !launch.is_object() {
+        return Err(CliError::Launch(format!(
+            "{} is not added on this machine yet: `xmatrix agent add {} --space <id>`",
+            preset.display_name, preset.id
+        )));
+    }
+    let Some(mode) = mode else {
+        match launch["access"].as_str() {
+            Some(current) => println!("{} on this machine: {current} access", preset.display_name),
+            None => println!(
+                "{} on this machine: full access, which its owner has not confirmed yet",
+                preset.display_name
+            ),
+        }
+        for line in access_disclosure(&preset.display_name, &held["fullAccess"]) {
+            println!("{line}");
+        }
+        if offers_ask(&held) {
+            println!("{}", ask_disclosure(&preset.display_name));
+        }
+        return Ok(());
+    };
+    let mut environment = held["environment"].clone();
+    environment["launch"]["access"] = Value::String(mode.clone());
+    let _: Value = http::request_json(
+        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_COMMAND_ROUTE),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "key": key, "commandId": format!("registration-access:{}", uuid::Uuid::new_v4()),
+            "expectedVersion": held["version"], "environment": environment })),
+    )
+    .await?;
+    println!(
+        "{} {} on this machine now has {mode} access; it applies to its next Runs",
+        "✓".green(),
+        preset.display_name
+    );
+    Ok(())
 }
 
 /// The Hub's `create` command: declare the harness on this machine, offer it
