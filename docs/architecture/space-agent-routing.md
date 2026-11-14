@@ -308,7 +308,9 @@ answers by taking the work or refusing it. A start or turn it refuses as signed
 out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed, with a
 notice that is its sign-in (`HARNESS_SIGNED_OUT_NOTICE_KIND`). What follows
 belongs to that one request: when the Run never answered an `@auto` summon, the
-message goes on to the next-ranked Agent, once (`dispatchStartupFallback`);
+message goes on to the next-ranked Agent, once (`dispatchStartupFallback`),
+and a `handoff:@auto` whose successor could not start goes on the same way, up
+to three successors, never back to one it tried (`handoffFallbackOrigin`);
 otherwise the notice carries the summon and sends it again once the program is
 signed in. The owner who does not want that program used turns the Agent off,
 which is the only thing that keeps routing away from it.

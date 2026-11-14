@@ -13,6 +13,28 @@ it yet: the pages that show a sign-in move to it next, and then the stored
 reading goes. CLI and Hub. A daemon without `machine_harness_check_v1` is
 never issued or leased a `check`. Recovery is a CI-validated beta reverting
 this change.
+## Unreleased: a handoff whose successor cannot start goes on to the next Agent
+
+On 2026-11-13 an Agent that ran out of quota handed its work off with
+`handoff:@auto`; routing chose a harness that was not signed in on its
+machine, its start failed with the sign-in notice, and the work stayed with
+nobody for eleven hours. Since routing stopped keeping a record of sign-ins
+(#1630), nothing kept a handoff away from such a harness, and unlike an
+`@auto` summon a handoff had no second try. A handoff's successor that fails
+to start, or refuses its first turn as signed out, now passes the same
+handoff (its prompt, the predecessor's conversation and the author's
+conditions) to the next Agent, never one it already tried or its source, up
+to three times. A handoff to a harness its author named is not replaced.
+Hub only. Recovery is a CI-validated Hub beta reverting this change.
+## Unreleased: A turn that makes no progress is said in its conversation
+
+An Agent that accepted a message and then neither replied nor failed left the
+person looking at nothing: the host already reported the stall (no progress
+for five minutes), but only as a small badge on the Agent. The Hub now says it
+under the message the turn is answering, once per stall, in the failure
+notice's style: which Agent, for how long, and that it can be waited for,
+stopped (`@name:N:stop`) or another Agent asked. Hub only; no protocol or
+schema change. Recovery is a CI-validated Hub release reverting the notice.
 
 ## Unreleased: a summon reaches its machine, and the program says whether it is signed in
 

@@ -102,8 +102,8 @@ interface RegistrationInputLaunch {
 interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
-  /** Exclude an environment that just failed to start this work. */
-  excludeRegistration?: SpaceAgentRegistrationKey;
+  /** Exclude environments that just failed to start this work. */
+  excludeRegistrations?: readonly SpaceAgentRegistrationKey[];
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
   runId?: string; instanceId?: string;
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
@@ -414,10 +414,10 @@ export async function dispatchStartupFallback(env: Env, input: { channelId: stri
       const message = page.messages.map(postgresProductMessage).find(item => item.sequence === sourceSequence);
       return typeof message?.body === "string" ? message.body : undefined;
     } });
-  if (!origin) return undefined;
+  if (!origin) return handoffFallback(env, input, commandId, repository, dispatch);
   try {
     const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
-      body: origin.body, tags: origin.tags, excludeRegistration: origin.failed,
+      body: origin.body, tags: origin.tags, excludeRegistrations: [origin.failed],
       // The retry answers the same message and is drawn on its summon, like the launch it replaces.
       initialMessageId: origin.sourceMessageId, presentationMessageId: origin.sourceMessageId,
       runMetadata: { sourceMention: origin.sourceMention } });
@@ -425,6 +425,30 @@ export async function dispatchStartupFallback(env: Env, input: { channelId: stri
   } catch (error) {
     // Nothing else can take the work, or routing could not choose now: the
     // failure notice stands on its own rather than a retry arriving late.
+    if (error instanceof RegistrationAccessError) return undefined;
+    throw error;
+  }
+}
+
+/** A handoff's successor that failed to start: the handoff goes to the next
+ * Agent, never to one it already tried or back to its source
+ * (handoffFallbackOrigin). Undefined when the Run is no handoff's, or nothing
+ * else can take it. */
+async function handoffFallback(env: Env, input: { channelId: string; runId: string }, commandId: string,
+  repository: Awaited<ReturnType<typeof channelLaunchRepository>>["repository"],
+  dispatch: typeof dispatchRegistrationInput): Promise<{ agentName: string } | undefined> {
+  const origin = await repository.handoffFallbackOrigin({ commandId, channelId: input.channelId, runId: input.runId });
+  if (!origin) return undefined;
+  try {
+    const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
+      body: origin.body, tags: origin.tags, excludeRegistrations: origin.failed,
+      excludeSourceInstanceId: origin.sourceInstanceId,
+      ...(origin.handoffContext ? { handoffContext: origin.handoffContext } : {}),
+      ...(origin.presentationMessageId ? { presentationMessageId: origin.presentationMessageId } : {}),
+      runMetadata: { handoffSourceInstanceId: origin.sourceInstanceId, handoffFallbackFailed: origin.failed,
+        ...(origin.sourceMention ? { sourceMention: origin.sourceMention } : {}) } });
+    return { agentName: launched.agentName };
+  } catch (error) {
     if (error instanceof RegistrationAccessError) return undefined;
     throw error;
   }

@@ -7,7 +7,6 @@
     },
     "ci:build": {
       "dependsOn": ["^build"],
-      "env": ["NEXT_TEST_WASM"],
       "outputs": []
     },
     "e2e:build": {

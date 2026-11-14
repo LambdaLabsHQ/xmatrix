@@ -53,15 +53,21 @@ test("a Run that never answered its `@auto` summon hands the message to the next
     handedOn: async (_env, input) => { calls.push(["handed", input.agentName, input.sourceMessageId]); },
   });
   // Another Agent took it: the notice offers the sign-in alone.
-  assert.deepEqual(await signedOutTurn({}, run, dependencies({ signedOut, summon }, { agentName: "grok" })), { signedOut });
+  const unanswered = { signedOut, unanswered: true, summon };
+  assert.deepEqual(await signedOutTurn({}, run, dependencies(unanswered, { agentName: "grok" })), { signedOut });
   assert.deepEqual(calls, [["read", "run-1", "owner"], ["fallback", "run-1"], ["handed", "grok", "message-1"]]);
   // Nothing else could take it (or it named this Agent): the summon is sent again once signed in.
   calls.length = 0;
-  assert.deepEqual(await signedOutTurn({}, run, dependencies({ signedOut, summon }, undefined)), { signedOut, summon });
+  assert.deepEqual(await signedOutTurn({}, run, dependencies(unanswered, undefined)), unanswered);
   assert.deepEqual(calls.map(call => call[0]), ["read", "fallback"]);
+  // A handoff's successor has no summon of its own, and its work still goes on to the next Agent.
+  calls.length = 0;
+  assert.deepEqual(await signedOutTurn({}, run, dependencies({ signedOut, unanswered: true }, { agentName: "grok" })), { signedOut });
+  assert.deepEqual(calls.at(-1), ["handed", "grok", undefined]);
   // A Run that already answered, or that no summon started, moves no message.
   calls.length = 0;
-  assert.deepEqual(await signedOutTurn({}, run, dependencies({ signedOut }, { agentName: "grok" })), { signedOut });
+  assert.deepEqual(await signedOutTurn({}, run, dependencies({ signedOut, unanswered: false }, { agentName: "grok" })),
+    { signedOut, unanswered: false });
   assert.deepEqual(calls.map(call => call[0]), ["read"]);
   assert.equal(await signedOutTurn({}, run, dependencies(undefined, undefined)), undefined);
 });

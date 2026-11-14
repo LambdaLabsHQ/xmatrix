@@ -1720,13 +1720,14 @@ export class PostgresRuntimeRepository {
   }
 
   /** The program and machine of a Run whose program refused a turn as signed
-   * out, for the sign-in its notice offers, and, while the Run has not replied,
-   * the summon it was started for, to send again once it is signed in.
+   * out, for the sign-in its notice offers; whether the Run has yet to reply
+   * (`unanswered`: the work it was started for is still nobody's); and, when a
+   * message's own summon started it, that summon, to send again once signed in.
    * Nothing is recorded: only the program knows whether its provider accepts
    * it, and it says so each time it is given work.
    * Undefined for a Run without a registration. */
   async signedOutRunHarness(input: { requestId: string; runId: string; actorUserId: string }): Promise<{
-    signedOut: HarnessSignedOut; summon?: { sourceMessageId: string; sourceMention: string } } | undefined> {
+    signedOut: HarnessSignedOut; unanswered: boolean; summon?: { sourceMessageId: string; sourceMention: string } } | undefined> {
     const requestId = text(input.requestId, "requestId", 200);
     const runId = text(input.runId, "runId", 300);
     const route = await this.entityDirectory.resolve(
@@ -1754,7 +1755,8 @@ export class PostgresRuntimeRepository {
       machineId: String(row.machine_id), ...(machineName ? { machineName } : {}) });
     if (!signedOut) return undefined;
     const sourceMention = typeof row.source_mention === "string" ? row.source_mention : "";
-    return { signedOut, ...(row.replied !== true && typeof row.source_message_id === "string" && /^[@＠]/u.test(sourceMention)
+    return { signedOut, unanswered: row.replied !== true,
+      ...(row.replied !== true && typeof row.source_message_id === "string" && /^[@＠]/u.test(sourceMention)
       ? { summon: { sourceMessageId: row.source_message_id, sourceMention } } : {}) };
   }
 
