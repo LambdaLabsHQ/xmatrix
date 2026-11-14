@@ -13,6 +13,7 @@ import { useCopyToClipboard } from "@/lib/use-copy-to-clipboard";
 import { cn } from "@/lib/utils";
 import { CommandBlock } from "./command-block";
 import { useNow } from "./agent-work-intent";
+import { detectIntelMac, detectPlatform, downloads, macDownloads, type Platform } from "../landing/download-recommendation";
 import {
   connectStep, defaultInstallPlatform, setupInstallCommand, terminalInstallPlatform,
   type ConnectStep, type InstallPlatform,
@@ -49,6 +50,17 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
 }) {
   // Read once, before a setup command would be prepared for this screen.
   const [phone] = useState(() => phoneShell || onboardingDevice() === "phone");
+  // Inside the desktop App the App connects its own computer; on a Mac or PC
+  // browser the App is the way in and the terminal is the alternative.
+  const [inApp] = useState(() => !phone && onboardingDevice() === "desktop_app");
+  const [os, setOs] = useState<Platform>("unknown");
+  const [intelMac, setIntelMac] = useState(false);
+  const [useTerminal, setUseTerminal] = useState(false);
+  useEffect(() => {
+    const detected = detectPlatform();
+    setOs(detected);
+    if (detected === "macOS") void detectIntelMac().then(setIntelMac, () => undefined);
+  }, []);
   const intent = useSetupIntent(phone ? null : spaceId, token ?? undefined, userId);
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
@@ -65,7 +77,9 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 shrink-0 animate-spin" />;
   const machines = listNames([...new Set([...enabled, ...fleet.candidates].map((item) => item.machineName))]);
   const count = useOnboardingSteps(token, surface);
-  useEffect(() => { if (stage === 1 && command) count("command_shown"); }, [stage, command, count]);
+  const app = os === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"] : os === "Windows" ? downloads(copy).Windows : null;
+  const appFirst = !phone && !useTerminal && (inApp || Boolean(app));
+  useEffect(() => { if (stage === 1 && command && !appFirst) count("command_shown"); }, [stage, command, count, appFirst]);
   useEffect(() => { if (step?.kind === "approval") count("terminal_seen"); }, [step?.kind, count]);
 
   return (
@@ -80,7 +94,23 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
               {spinner} {copy.waitingForComputer}</p>}
           </SetupRow>
         )}
-        {!phone && <SetupRow n={1} state={state(1)} title={copy.runCommand}
+        {appFirst && <SetupRow n={1} state={state(1)} title={inApp ? copy.settingUpHere : copy.getApp}
+          aside={stage > 1 && machines ? machines : null}>
+          {stage === 1 && <>
+            {inApp
+              ? <p role="status" className="flex items-center gap-1.5 text-[13px] leading-5 text-muted-foreground">
+                {spinner} {copy.settingUpHereDoes}</p>
+              : <>
+                <a href={app!.href} onClick={() => count("download_clicked")}
+                  className={actionClass({ variant: "primary", size: "sm" })}>{app!.label}</a>
+                <p className="mt-1.5 text-[13px] leading-5 text-muted-foreground">{copy.appDoes}</p>
+              </>}
+            <button type="button" onClick={() => setUseTerminal(true)}
+              className="mt-1 text-[13px] leading-5 text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">
+              {copy.useTerminal}</button>
+          </>}
+        </SetupRow>}
+        {!phone && !appFirst && <SetupRow n={1} state={state(1)} title={copy.runCommand}
           aside={stage === 1 ? (
             <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
               className="underline-offset-2 hover:text-foreground hover:underline">
@@ -97,7 +127,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
           </>}
         </SetupRow>}
 
-        {!phone && <SetupRow n={2} state={state(2)} title={copy.approveHere}
+        {!phone && !appFirst && <SetupRow n={2} state={state(2)} title={copy.approveHere}
           aside={step?.kind === "connecting" ? <span className="flex items-center gap-1.5">{spinner} {copy.signingIn}</span>
             : null}>
           {step?.kind === "approval" && (
@@ -115,7 +145,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
           )}
         </SetupRow>}
 
-        <SetupRow n={phone ? 2 : 3} state={state(3)} title={copy.turnOnFound}
+        <SetupRow n={phone || appFirst ? 2 : 3} state={state(3)} title={copy.turnOnFound}
           aside={stage === 4 ? listNames(enabled.map((registration) => registration.displayName))
             : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} {copy.looking}</span> : null}>
           {stage === 3 && found && (
@@ -155,7 +185,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
       {intent.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">{intent.error}{" "}
         <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}
           className="font-semibold underline-offset-2 hover:underline">{copy.tryAgain}</button></p>}
-      {stage < 4 && (
+      {stage < 4 && !appFirst && (
         <p className="mt-3 text-[13px] leading-5 text-muted-foreground">
           {copy.noTerminal}{copy.gap}
           {phone

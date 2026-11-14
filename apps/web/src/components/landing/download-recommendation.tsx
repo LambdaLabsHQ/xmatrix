@@ -6,9 +6,9 @@ import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
 
-type Platform = "macOS" | "Windows" | "Android" | "iOS" | "Linux" | "unknown";
+export type Platform = "macOS" | "Windows" | "Android" | "iOS" | "Linux" | "unknown";
 
-function detectPlatform(): Platform {
+export function detectPlatform(): Platform {
   const { userAgent, platform, maxTouchPoints } = navigator;
   // iPadOS can report a desktop Mac user agent.
   if (/iPhone|iPad|iPod/i.test(userAgent) || (platform === "MacIntel" && maxTouchPoints > 1)) return "iOS";
@@ -22,7 +22,7 @@ function detectPlatform(): Platform {
 // Every Mac browser reports "Intel Mac OS X"; only Chromium can tell the CPU
 // apart, through User-Agent Client Hints. Elsewhere Apple Silicon is the default
 // and the Intel build is one link away.
-async function detectIntelMac() {
+export async function detectIntelMac() {
   const uaData = (navigator as Navigator & {
     userAgentData?: { getHighEntropyValues(hints: string[]): Promise<{ architecture?: string }> };
   }).userAgentData;
@@ -31,12 +31,12 @@ async function detectIntelMac() {
   return architecture === "x86";
 }
 
-const macDownloads = (copy: OnboardingCopy) => ({
+export const macDownloads = (copy: OnboardingCopy) => ({
   arm64: { name: "Apple Silicon", href: "/api/desktop/releases/stable/latest-arm64.dmg", label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
   x64: { name: "Intel", href: "/api/desktop/releases/stable/latest-x64.dmg", label: copy.downloadFor("macOS"), detail: copy.intelDetail },
 });
 
-const downloads = (copy: OnboardingCopy) => ({
+export const downloads = (copy: OnboardingCopy) => ({
   Windows: { href: "/api/desktop/releases/stable/latest-x64.exe", label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
   Android: { href: "/api/android/releases/stable/latest.apk", label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
