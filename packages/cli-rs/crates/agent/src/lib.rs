@@ -48,9 +48,15 @@ pub struct AgentPresetAccess {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentPresetAccessLevel {
+    /// Joined to the launcher's argv (the ACP argv for the generic ACP backend).
+    #[serde(default)]
+    pub args: Vec<String>,
     /// Environment variables set on the harness's own process.
     #[serde(default)]
     pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
 }
 
 /// One harness in the shared registry (`packages/protocol/src/agent-presets.json`).
@@ -91,6 +97,20 @@ pub struct AgentPreset {
 }
 
 impl AgentPreset {
+    /// The grant of a launch in `full` access (`agentAccessGrant` in
+    /// `@xmatrix/protocol`): what a launch runs with when no Hub grant reached it.
+    pub fn full_access_grant(
+        &self,
+    ) -> xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+            mode: "full".into(),
+            args: self.access.full.args.clone(),
+            env: self.access.full.env.clone(),
+            session: self.access.full.session.clone(),
+            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp"),
+        }
+    }
+
     /// The legacy `agentType` string this harness registers with the Hub.
     pub fn agent_type(&self) -> &str {
         self.agent_type.as_deref().unwrap_or(&self.id)

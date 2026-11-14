@@ -23,6 +23,7 @@ export {
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
+  type AgentAccessGrant,
   type AgentHarnessSpec,
   type AgentPreset,
   type AgentPresetBackend,

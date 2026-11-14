@@ -1,5 +1,27 @@
 # Release Updates
 
+## Unreleased: what xMatrix adds to a harness launch is declared once and reported
+
+xMatrix starts each harness so it stops asking before it touches files or runs
+a command, and did so from five places: Claude Code's
+`--dangerously-skip-permissions` in its preset's default arguments,
+Antigravity's in its ACP arguments, Grok's `--always-approve`, Codex's
+`sandbox=danger-full-access` and `approvalPolicy=never` and ZCode's
+`mode=yolo` hard-coded in the daemon, and the ACP bridges answering every
+permission request with allow. Each preset now declares its own under
+`access.full`, DeepSeek Harness's `DSH_PERMISSION_MODE=danger-full-access`
+among them, and the Hub resolves them into one grant per launch
+(`docs/design/agent-access.md`). The daemon applies that grant and nothing of
+its own, and the registration catalog reports it, so what is shown is what
+runs. A registration launch may carry `access` (`full` or `ask`); none is
+`full`, so every existing Agent launches with exactly the parameters it had.
+The undocumented `XMATRIX_CODEX_APP_SANDBOX`, `XMATRIX_CODEX_APP_APPROVAL` and
+`XMATRIX_ZCODE_APP_MODE` overrides are gone. No schema change: the launch is
+a JSON declaration. Hub and CLI; a Machine on an earlier CLI keeps its
+hard-coded behaviour and receives Claude Code's and Antigravity's flags in
+the arguments the Hub sends. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a DeepSeek Agent can run xmatrix from its own shell
 
 DeepSeek Harness kept its own default permission mode, `workspace-write`, so

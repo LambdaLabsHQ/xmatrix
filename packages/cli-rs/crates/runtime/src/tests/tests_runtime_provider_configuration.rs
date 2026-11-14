@@ -215,17 +215,26 @@ fn grok_runtime_detection_and_spawn_args() {
     assert!(!is_grok_tool("node"));
 
     // Grok speaks ACP over stdio: no serve port, bind address or server key.
-    let args = grok_acp_spawn_args(&[]);
-    assert_eq!(args, vec!["agent", "--always-approve", "stdio"]);
+    // Its approval flag is the launch's access grant, never a default of the
+    // bridge: an `ask` launch starts without it.
+    let full = xmatrix_cli_agent::agent_preset_by_id("grok").unwrap().full_access_grant();
+    let ask = xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        mode: "ask".into(),
+        ..Default::default()
+    };
+    assert_eq!(grok_acp_spawn_args(&[], &full), vec!["agent", "--always-approve", "stdio"]);
+    assert_eq!(grok_acp_spawn_args(&[], &ask), vec!["agent", "stdio"]);
 
-    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()]);
+    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()], &full);
     assert_eq!(flags, vec!["agent", "--effort", "high", "--always-approve", "stdio"]);
+    // The daemon already joined the grant's args to the argv it passes.
+    let joined = grok_acp_spawn_args(&["--always-approve".to_string()], &full);
+    assert_eq!(joined, vec!["agent", "--always-approve", "stdio"]);
 
-    let custom = grok_acp_spawn_args(&["stdio".to_string()]);
-    assert_eq!(custom, vec!["agent", "--always-approve", "stdio"]);
-
-    let approved = grok_acp_spawn_args(&["agent".to_string(), "--yolo".to_string(), "stdio".to_string()]);
-    assert_eq!(approved, vec!["agent", "--yolo", "stdio"]);
+    let custom = grok_acp_spawn_args(&["stdio".to_string()], &ask);
+    assert_eq!(custom, vec!["agent", "stdio"]);
+    let declared = grok_acp_spawn_args(&["stdio".to_string(), "--always-approve".to_string()], &full);
+    assert_eq!(declared, vec!["agent", "--always-approve", "stdio"]);
 
     let tail = StderrTail::default();
     assert_eq!(with_stderr_tail("closed".into(), &tail), "closed");
@@ -539,7 +548,7 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             "agy",
             "antigravity",
             "Google Antigravity",
-            &["acp", "--dangerously-skip-permissions"][..],
+            &["acp"][..],
             ".gemini/antigravity-cli",
         ),
         (
@@ -582,23 +591,10 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             "{tool}"
         );
         assert_eq!(
-            generic_acp_spawn_args(&[], config.preset_acp_args.as_deref()),
+            generic_acp_spawn_args(&[], config.preset_acp_args.as_deref(), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()),
             expected_args,
             "{tool}"
         );
-        // DeepSeek Harness takes its permission mode from the environment;
-        // no other preset here sets any.
-        let launch_env: Vec<(&str, &str)> = config
-            .preset_launch_env
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.as_str()))
-            .collect();
-        let expected_env: &[(&str, &str)] = if id == "deepseek" {
-            &[("DSH_PERMISSION_MODE", "danger-full-access")]
-        } else {
-            &[]
-        };
-        assert_eq!(launch_env, expected_env, "{tool}");
         // DeepSeek Harness bills a prepaid balance its API can state.
         assert_eq!(config.quota_usage.is_some(), id == "deepseek", "{tool}");
         assert_eq!(agent_type_for_preset_or_runtime(None, tool), id, "{tool}");
@@ -1079,17 +1075,17 @@ fn cursor_reasoning_control_is_effort_and_boolean_thinking_is_not() {
 #[test]
 fn generic_acp_spawn_args_default_to_acp_subcommand() {
     // Explicit CLI args always win and never touch the env.
-    let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None);
+    let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None, &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default());
     assert_eq!(explicit, vec!["acp".to_string(), "--verbose".to_string()]);
     // Community convention: bare `acp` subcommand (e.g. `kimi acp`).
-    assert_eq!(generic_acp_spawn_args(&[], None), vec!["acp".to_string()]);
+    assert_eq!(generic_acp_spawn_args(&[], None, &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()), vec!["acp".to_string()]);
     // The preset's acpArgs decide the subcommand: `[]` is a launcher that
     // already speaks ACP (pi-acp), so nothing is appended.
     assert_eq!(
-        generic_acp_spawn_args(&[], Some(&["acp".to_string()])),
+        generic_acp_spawn_args(&[], Some(&["acp".to_string()]), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()),
         vec!["acp".to_string()]
     );
-    assert_eq!(generic_acp_spawn_args(&[], Some(&[])), Vec::<String>::new());
+    assert_eq!(generic_acp_spawn_args(&[], Some(&[]), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()), Vec::<String>::new());
     assert_eq!(
         acp_args_from_json("[\"acp\", \"--verbose\"]"),
         Some(vec!["acp".to_string(), "--verbose".to_string()])

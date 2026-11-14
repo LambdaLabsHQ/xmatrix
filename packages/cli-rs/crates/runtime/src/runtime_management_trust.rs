@@ -337,6 +337,8 @@ struct DaemonSpawnRequest {
     agent_preset_id: Option<String>,
     harness: Option<xmatrix_cli_core::machine_daemon_connection::AgentHarnessSpec>,
     agent_acp_args: Vec<String>,
+    /// What the launch adds for its access mode (see `MachineSpawnAgent`).
+    access: Option<xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant>,
     agent_name: String,
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
@@ -396,6 +398,7 @@ impl DaemonSpawnRequest {
             agent_preset_id,
             harness,
             agent_acp_args,
+            access,
             agent_name,
             identity_id,
             role_initial_prompt,
@@ -446,6 +449,7 @@ impl DaemonSpawnRequest {
             agent_preset_id,
             harness,
             agent_acp_args: agent_acp_args.unwrap_or_default(),
+            access,
             agent_name,
             identity_id,
             role_initial_prompt,

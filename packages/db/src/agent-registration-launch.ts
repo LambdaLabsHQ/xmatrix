@@ -5,6 +5,7 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
 import {
+  agentLaunchAccess,
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
   formatAutoLaunchMention,
@@ -289,10 +290,12 @@ function registrationLaunchRuntime(launch: AgentRegistrationLaunch | undefined, 
  * requires to name the registration's harness; a declared runtime (e.g. an
  * absolute path) need not resolve to a preset, so the harness names it. */
 export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | undefined, harness: string) {
+  const { access, runtimeArgs, acpArgs } = agentLaunchAccess(launch, agentPresetById(harness) ?? agentPresetForLauncher(harness));
   return { runtime: registrationLaunchRuntime(launch, harness), agentPresetId: harness,
-    ...(launch?.runtimeArgs.length ? { runtimeArgs: launch.runtimeArgs } : {}),
+    ...(runtimeArgs.length ? { runtimeArgs } : {}),
     ...(launch?.backend ? { agentBackend: launch.backend } : {}),
-    ...(launch?.acpArgs?.length ? { agentAcpArgs: launch.acpArgs } : {}),
+    ...(acpArgs.length ? { agentAcpArgs: acpArgs } : {}),
+    access,
     // A daemon released before the sandbox was retired sandboxes unless told not to.
     sandboxMode: "off" as const };
 }
