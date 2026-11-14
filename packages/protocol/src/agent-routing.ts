@@ -51,6 +51,21 @@ export function routingModelOptionNamed(option: RoutingModelOption, written: str
   return Boolean(wanted) && [option.model, ...option.names ?? []].some(name => name.toLowerCase() === wanted);
 }
 
+/**
+ * What a completion writes after `model:` for a catalog entry. A runtime's
+ * model id can be an opaque selector that needs quoting (DeepSeek Harness
+ * selects `["deepseek-official","deepseek-flash"]`); the entry's own catalog
+ * name (`DeepSeek-V4.1-Flash`) is then written instead, when it names no
+ * other entry: a one-word name first, else one that only needs quotes around
+ * it (`"DeepSeek V4 Pro"`). Otherwise the id is written as it is.
+ */
+export function routingModelWrittenName(option: RoutingModelOption, catalog: readonly RoutingModelOption[]): string {
+  if (!/[\s"]/u.test(option.model)) return option.model;
+  const own = (option.names ?? []).filter(name => !name.includes('"') &&
+    catalog.filter(other => routingModelOptionNamed(other, name)).length === 1);
+  return own.find(name => !/\s/u.test(name)) ?? own[0] ?? option.model;
+}
+
 /** A received catalog is an observation, not permission or a fabricated default. */
 export function routingModelCatalogObservation(value: unknown, observedAt: unknown, now: number): RoutingObservation<RoutingModelOption[]> | undefined {
   const at = typeof observedAt === "string" ? Date.parse(observedAt) : NaN;

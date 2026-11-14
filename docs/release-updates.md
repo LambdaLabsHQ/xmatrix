@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a summon names its model by the model's name, not its selector
+
+Picking a model for a summon wrote the id its harness selects the model with.
+DeepSeek Harness selects with a JSON pair, so the message read
+`model:"[""deepseek-official"",""deepseek-flash""]"`. The composer now writes
+the name that harness's own catalog gives the model
+(`model:DeepSeek-V4.1-Flash`) whenever the id would need quoting and no other
+model in that catalog carries the name; otherwise it writes the id as before. The Hub already resolved a written name to its model, so
+the launch is unchanged, and a message already sent keeps the text it was
+written with. Only a registration that uses the runtime's own catalog is
+affected; an owner-declared model list is still matched exactly. Beta Web
+only. Recovery is a CI-validated Web release reverting this change.
+
 ## Unreleased: a DeepSeek Agent shows the balance left on its API key
 
 A DeepSeek Agent's card and its `xmatrix agent list` row said nothing about

@@ -324,3 +324,31 @@ test("a fresh @ offers a condition by its value, and picking it opens the summon
   const next = completeLaunchFragment("@machine:Laptop ", { start: 16, tokenEnd: 16 }, { effort: "high" });
   assert.equal(next.value, "@machine:Laptop effort:high ");
 });
+
+test("a native model whose id is an opaque selector is written by its catalog name", () => {
+  // DeepSeek Harness selects a model with a JSON pair; the summon must not carry it quoted.
+  const selector = model => JSON.stringify(["deepseek-official", model]);
+  const registration = { key: { machineId: "mac", harness: "deepseek" }, machineName: "Mac",
+    models: [], nativeModels: true, state: "enabled", routingReady: true,
+    modelCatalog: [
+      { model: selector("deepseek-flash"), names: ["DeepSeek-V4.1-Flash"], efforts: [{ value: "high" }] },
+      { model: selector("deepseek-v4-pro"), names: ["DeepSeek V4 Pro"], efforts: [] },
+      { model: selector("a"), names: ["Shared"], efforts: [] },
+      { model: selector("b"), names: ["Shared"], efforts: [] },
+      { model: "plain-id", names: ["Plain"], efforts: [] },
+    ] };
+  const tags = (rows, field) => rows.filter(item => item.launchField === field).map(item => item.launchTags[field]);
+  assert.deepEqual(tags(autoLaunchCandidates(undefined, {}, [registration]), "model"), [
+    "DeepSeek-V4.1-Flash",
+    "DeepSeek V4 Pro", // quoted as written, still read as the name
+    selector("a"), selector("b"), // a name two entries share names neither
+    "plain-id",
+  ]);
+  const body = "@deepseek model:";
+  assert.equal(completeLaunchFragment(body, { start: 10, tokenEnd: body.length }, { model: "DeepSeek-V4.1-Flash" }).value,
+    "@deepseek model:DeepSeek-V4.1-Flash ");
+  assert.equal(completeLaunchFragment(body, { start: 10, tokenEnd: body.length }, { model: "DeepSeek V4 Pro" }).value,
+    '@deepseek model:"DeepSeek V4 Pro" ');
+  assert.deepEqual(tags(autoLaunchCandidates(undefined, { model: "DeepSeek-V4.1-Flash" }, [registration]), "effort"), ["high"],
+    "the written name still selects its own entry's efforts");
+});
