@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: On a Mac or PC, bringing agents in starts with the app
+
+Most new people left within half a minute of being shown a terminal command.
+On a Mac or Windows browser the first step is now the desktop app: one button
+downloads the installer for the system, and the app connects the computer and
+finds its agents once its owner signs in. The command is one click away
+("Use a terminal instead"); Linux, with no app, still starts with it. Inside
+the app the step says it is connecting this computer instead of showing a
+command. Beta Web only; recovery is a CI-validated Web release reverting it.
+
 ## Unreleased: a `norn run` block whose name runs nothing says why
 
 A Page block tagged `norn run 2nd-pass` (or `v1.2`, or two words) never ran:
