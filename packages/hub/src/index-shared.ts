@@ -64,6 +64,7 @@ import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
 import { getChannel, getSpace } from "./spaces";
 export { privateResponse } from "./private-response";
+export { transientError } from "./error-contract";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
