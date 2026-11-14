@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a client that predates balances no longer draws a prepaid account as "100%"
+
+A DeepSeek account's reading was listed under `live.quota` with a full share
+of headroom, so a CLI or Web older than the balance display printed "100%"
+beside an account holding a few yuan. A prepaid reading is now listed as
+`live.balance` (amount, currency, the provider's verdict) and no `quota`:
+older clients read nothing and show `-`; this CLI and Web show the money.
+Routing is unchanged. Hub, Web and CLI; a 4.2.1-beta.22 CLI shows `-` for the
+account until it updates. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: what xMatrix adds to a harness launch is declared once and reported
 
 xMatrix starts each harness so it stops asking before it touches files or runs
