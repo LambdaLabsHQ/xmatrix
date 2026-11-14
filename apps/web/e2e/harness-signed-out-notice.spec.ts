@@ -56,10 +56,10 @@ async function signInFromNotice(page: Parameters<typeof openWorkspaceWithStubs>[
 
 test("a summon refused for a signed-out program is signed in from its notice, then sent to it again", async ({ page }) => {
   const notice = await openRefusedSummon(page);
-  // Its owner has two answers: sign it in, or turn the Agent off.
-  await expect(notice).toContainText("Claude Code on mac-mini is not signed in, so it cannot take work yet. " +
-    "Sign it in here, or turn it off so nothing is sent to it:", { timeout: 20_000 });
-  const turnOff = notice.getByRole("button", { name: "Turn off", exact: true });
+  // Its owner has two answers, each a button whose word says what it does: Sign in, or Disable.
+  await expect(notice).toContainText("Claude Code on mac-mini is not signed in, so it cannot take work yet. Sign it in here:",
+    { timeout: 20_000 });
+  const turnOff = notice.getByRole("button", { name: "Disable", exact: true });
   await expect(turnOff).toBeVisible();
   await signInFromNotice(page, notice);
   await expect(notice).toContainText("Your message went to it again.");
@@ -78,8 +78,8 @@ test("its owner turns the Agent off from the notice instead, on its machine, and
     launch: { runtime: "claude", runtimeArgs: [] } };
   await fixtureJson(page, "environment", "**/api/xmatrix/agent-environments/query", { key, version: 3, environment }, { method: "POST" });
   await fixtureJson(page, "turn-off", "**/api/xmatrix/agent-environments/commands", {}, { method: "POST" });
-  await notice.getByRole("button", { name: "Turn off", exact: true }).click();
-  await expect(notice).toHaveText("Claude Code on mac-mini is off in every Space, so nothing is sent to it. Turn it on again in Agents.",
+  await notice.getByRole("button", { name: "Disable", exact: true }).click();
+  await expect(notice).toHaveText("Claude Code on mac-mini is disabled in every Space. Turn it on again in Agents.",
     { timeout: 20_000 });
   // Agents, opened on this Agent, is where its switch turns it on again.
   await expect(notice.getByRole("link", { name: "Agents", exact: true })).toHaveAttribute("href", `/app/${E2E_SPACE.id}/agents?${
@@ -119,7 +119,7 @@ test("an Agent's sign-in request is signed in on its card by the machine's owner
   await expect(notice).toContainText("claude asks to sign in Claude Code on mac-mini: the nightly build needs it", { timeout: 20_000 });
   // A request is for the sign-in alone, and this owner has no Agent here to turn off.
   await expect(notice).toContainText("Sign it in here:");
-  await expect(notice.getByRole("button", { name: "Turn off", exact: true })).toHaveCount(0);
+  await expect(notice.getByRole("button", { name: "Disable", exact: true })).toHaveCount(0);
   await signInFromNotice(page, notice);
   await expect(notice).toContainText("Signed in. Tell claude to go on.");
   // The request answers no summon: nothing is sent again.
@@ -134,9 +134,8 @@ test("a program set up only on its machine shows its own words, and a check afte
     { id: "qwen", installed: true, probeStatus: "ok", version: "0.26.0", login: "signed_out", loginDetail: refusal });
   await expect(notice).toContainText("Qwen Code on mac-mini can't take work yet.", { timeout: 20_000 });
   await expect(notice).toContainText(refusal);
-  await expect(notice).toContainText("Run qwen in a terminal on that computer, set it up as it asks, then check again. " +
-    "Or turn it off, so nothing is sent to it.");
-  await expect(notice.getByRole("button", { name: "Turn off", exact: true })).toBeVisible();
+  await expect(notice).toContainText("Run qwen in a terminal on that computer, set it up as it asks, then check again.");
+  await expect(notice.getByRole("button", { name: "Disable", exact: true })).toBeVisible();
   await expect(notice.getByRole("button", { name: "Sign in", exact: true })).toHaveCount(0);
   // The machine starts Qwen Code again the way a launch does, and now it opens a session.
   await fixtureJson(page, "check-again", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {

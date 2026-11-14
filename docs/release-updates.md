@@ -5,10 +5,11 @@
 The card for a program that could not take work because it is not signed in
 on its machine offered one thing, the sign-in. A person who does not mean to
 use that program there had no way to say so, and work kept being sent to it.
-The card now gives its owner two answers: sign it in, or turn that Agent off.
-Turning it off is the owner's existing switch for the Agent on its machine,
-in every Space, so nothing more is sent to it; the card then says it is off
-and links to Agents, where the same switch turns it on again. The welcome
+The card now gives its owner two buttons, Sign in and Disable, with no
+sentence explaining the second. Disable is the owner's existing switch for the
+Agent on its machine, in every Space, so nothing more is sent to it; the card
+then says it is disabled and links to Agents, where the same switch turns it
+on again. The welcome
 conversation's sign-in row offers the same. An Agent's own request for a
 sign-in, and a machine with no Agent in the Space, keep the sign-in alone.
 Web only. Recovery is a CI-validated beta Web reverting this change.

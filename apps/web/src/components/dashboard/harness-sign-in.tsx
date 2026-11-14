@@ -304,7 +304,7 @@ export function HarnessSignedOutBody({ registration, token, userId, copy, progra
   const turnOffFailed = turn.error && <p role="status" className="mt-2 text-[13px] text-destructive">{turn.error}</p>;
   if (!view.setUpThere) {
     return <>
-      <p>{mayTurnOff ? copy.signedOutOrOff(program, machine) : copy.signedOut(program, machine)}</p>
+      <p>{copy.signedOut(program, machine)}</p>
       <div className="mt-2"><HarnessSignInSection registration={registration} token={token} userId={userId} bare
         signInLabel={copy.signIn} onSignedIn={signedIn} otherChoice={turnOff} /></div>
       {turnOffFailed}
@@ -314,7 +314,7 @@ export function HarnessSignedOutBody({ registration, token, userId, copy, progra
   return <>
     <p>{copy.cannotTakeWork(program, machine)}</p>
     {view.detail && <p className="mt-1 text-muted-foreground">{copy.itSays} <q>{view.detail}</q></p>}
-    <p className="mt-1">{copy.setUpThere(command)}{mayTurnOff ? <>{copy.gap}{copy.orTurnOff}</> : null}</p>
+    <p className="mt-1">{copy.setUpThere(command)}</p>
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <Button size="sm" variant="outline" disabled={check.isPending || !view.daemon} onClick={() => check.mutate()}>
         {check.isPending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.checkAgain}
