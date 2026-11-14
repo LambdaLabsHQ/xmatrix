@@ -657,10 +657,14 @@ impl AcpSession {
                     self.presentation.model = Some(model);
                 }
                 let cancellation_detail = acp_turn_cancellation_detail(&display_name, &result);
-                // A turn the agent ended before finishing its work is a failed turn.
+                // A turn the agent ended before finishing its work is a failed turn,
+                // and so is one the program answered with its account's refusal.
                 let incomplete_detail = cancellation_detail
                     .is_none()
-                    .then(|| acp_turn_incomplete_detail(&display_name, &result))
+                    .then(|| {
+                        acp_turn_incomplete_detail(&display_name, &result)
+                            .or_else(|| acp_account_refusal_detail(&display_name, &output))
+                    })
                     .flatten();
                 if latest_goal.is_none() {
                     latest_goal = self
@@ -1080,6 +1084,24 @@ fn acp_turn_incomplete_detail(display_name: &str, result: &Value) -> Option<Stri
     Some(format!(
         "{display_name} stopped this turn before finishing: {why} (stopReason {reason})"
     ))
+}
+
+/// The program's own account refusal, sent as the turn's whole reply text
+/// with an ordinary `end_turn`. Observed: Cursor CLI answers every prompt with
+/// "Add a payment method to continue" when its account has no payment method
+/// or credit left. That text stayed local, so the Channel saw nothing at all.
+/// Only a short reply that is the refusal counts, never a model discussing it.
+fn acp_account_refusal_detail(display_name: &str, output: &str) -> Option<String> {
+    const REFUSALS: &[&str] = &["add a payment method to continue"];
+    let reply = output.trim();
+    if reply.is_empty() || reply.chars().count() > 300 {
+        return None;
+    }
+    let lower = reply.to_ascii_lowercase();
+    REFUSALS
+        .iter()
+        .any(|refusal| lower.contains(refusal))
+        .then(|| format!("{display_name} refused the turn for its account: {reply}"))
 }
 
 fn acp_turn_result_is_cancelled(turn: &CodexTurnResult) -> bool {

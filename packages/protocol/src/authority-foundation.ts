@@ -901,7 +901,9 @@ export function agentUsageLimitFromError(error: string | undefined | null): { re
     "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded",
     // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
     // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
-    "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足"]
+    "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足",
+    // Cursor CLI's whole reply when its account has no payment method or credit left.
+    "add a payment method to continue"]
     .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
   if (!limited) return undefined;
   // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.
