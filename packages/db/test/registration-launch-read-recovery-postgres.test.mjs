@@ -29,6 +29,15 @@ async function recoveringLaunches() {
   return { f, state, clients, launches, lose, recovered };
 }
 
+/** The Machine capacity row and the claude environment a launch reads. */
+async function launchEnvironment(f) {
+  await f.client.query(`INSERT INTO control.machine_execution_capacity VALUES ($1,$2,2,1,now())`,
+    [f.ids.owner, f.ids.machine]);
+  await f.client.query(`INSERT INTO control.agent_registration_environments VALUES ($1,$2,'claude',$3,1,now())`,
+    [f.ids.owner, f.ids.machine, { schemaVersion: 1, enabled: true, models: [],
+      availability: "interactive", maxConcurrent: 2, capabilities: [], description: "" }]);
+}
+
 // Healthy launch tests own selection and commit reconciliation. They bypass
 // the real client's recovery; generic client tests cannot catch this caller
 // retaining a transaction around the model catalog (HUB-BZ).
@@ -42,11 +51,7 @@ integration("launch candidate reads recover once without preparing work (XMATRIX
       return { key: candidates[0].key, model: "", useRuntimeDefaultModel: true };
     });
   try {
-    await f.client.query(`INSERT INTO control.machine_execution_capacity VALUES ($1,$2,2,1,now())`,
-      [f.ids.owner, f.ids.machine]);
-    await f.client.query(`INSERT INTO control.agent_registration_environments VALUES ($1,$2,'claude',$3,1,now())`,
-      [f.ids.owner, f.ids.machine, { schemaVersion: 1, enabled: true, models: [],
-        availability: "interactive", maxConcurrent: 2, capabilities: [], description: "" }]);
+    await launchEnvironment(f);
     await f.client.query(`UPDATE data.machine_daemons SET capabilities_json=$2 WHERE daemon_id=$1`,
       [f.ids.daemon, JSON.stringify(["registration_launch_v3", "registration_managed_v1", "registration_optional_model_v1"])]);
     await f.client.query(`UPDATE data.instances SET presentation_json=$2 WHERE instance_id=$1`,
@@ -121,11 +126,7 @@ integration("launch settings, host and fallback reads recover once without openi
     spaceId: f.ids.space, ownerUserId: f.ids.owner, machineId: f.ids.machine, harness: "claude" },
   requirements: { model: "observed-model" } };
   try {
-    await f.client.query(`INSERT INTO control.machine_execution_capacity VALUES ($1,$2,2,1,now())`,
-      [f.ids.owner, f.ids.machine]);
-    await f.client.query(`INSERT INTO control.agent_registration_environments VALUES ($1,$2,'claude',$3,1,now())`,
-      [f.ids.owner, f.ids.machine, { schemaVersion: 1, enabled: true, models: [],
-        availability: "interactive", maxConcurrent: 2, capabilities: [], description: "" }]);
+    await launchEnvironment(f);
     assert.equal(await launches.launchSettings(request, 1), undefined);
     assert.equal(await recovered(/FROM control\.agent_registration_environments/u,
       () => launches.launchSettings(request, 1)), undefined);
