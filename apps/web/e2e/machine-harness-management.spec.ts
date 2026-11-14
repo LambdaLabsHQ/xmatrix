@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies,
+import { E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureUnconfirmedAccess,
   fixtureRule, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_MOBILE_CONTEXT);
@@ -225,10 +225,6 @@ test.describe("desktop automatic update status", () => {
 
 const CATALOG = "**/api/xmatrix/spaces/*/agent-registrations";
 const COMMANDS = "**/api/xmatrix/spaces/*/agent-registrations/commands";
-const ENVIRONMENT = "**/api/xmatrix/agent-environments/query";
-/** What the Hub answers for a harness its owner has not confirmed on the machine. */
-const unconfirmed = (args: string[] = []) => ({ version: 0, environment: null,
-  fullAccess: { mode: "full", args, env: {}, session: { sandbox: "danger-full-access" }, approvesRequests: false } });
 const spaceKey = (harness: string) => ({ spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: MACHINE, harness });
 const spaceRegistration = (harness: string, state = "enabled") => ({ key: spaceKey(harness), displayName: harness,
   ownerName: "E2E", machineName: "Harness machine", version: 1, state, models: [], routingReady: true,
@@ -245,7 +241,7 @@ test("an installed harness is summoned in this Space once its owner turns it on"
   await expect(panel.getByRole("switch", { name: "Enabled: Claude Code" })).toHaveCount(0);
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("codex"), version: 1 }, { method: "POST" });
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("codex")]));
-  await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
+  await fixtureUnconfirmedAccess(page);
   await codex.click();
   await page.getByRole("button", { name: "Add with full access" }).click();
   await expect(codex).toHaveAttribute("aria-checked", "true");
@@ -279,7 +275,7 @@ test("a harness installed from here is turned on in this Space", async ({ page }
       item: { id: "claude", installed: true, probeStatus: "ok", version: "2.0.0", autoUpdate: "unknown" } } });
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("claude"), version: 1 }, { method: "POST" });
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("claude")]));
-  await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(["--dangerously-skip-permissions"]), { method: "POST" });
+  await fixtureUnconfirmedAccess(page, ["--dangerously-skip-permissions"]);
   const panel = page.getByTestId("machine-harness-panel");
   await panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true }).click();
   // Installed, it is added once its owner read what full access adds.

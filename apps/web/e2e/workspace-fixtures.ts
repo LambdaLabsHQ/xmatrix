@@ -29,6 +29,14 @@ export {
 
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
+export const AGENT_ENVIRONMENT_QUERY = "**/api/xmatrix/agent-environments/query";
+/** The Hub's answer for a harness whose owner has not confirmed its access on the machine. */
+export function fixtureUnconfirmedAccess(page: Page, args: string[] = []): Promise<void> {
+  return fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, { version: 0, environment: null,
+    fullAccess: { mode: "full", args, env: {}, session: { sandbox: "danger-full-access" }, approvesRequests: false } },
+  { method: "POST" });
+}
+
 export type WorkspaceStubFixtures = {
   /** People's and Agent Instances' pictures, keyed `user:<id>` / `agent:<instanceId>`, as the faces read answers them. */
   faces?: Record<string, string>;

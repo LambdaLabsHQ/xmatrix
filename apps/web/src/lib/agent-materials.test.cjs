@@ -42,7 +42,9 @@ test("agent materials carry secret guidance", () => {
   }
 
   assert.match(agentOnboardingPrompt, /agent add <harness> --space <space-id>/);
-  assert.doesNotMatch(agentOnboardingPrompt, /agent (create|approve|requests|edit)\b|Agent Profile|--access /);
+  // `agent add --access full` is the owner's confirmation; the retired Profile flag took other values.
+  assert.doesNotMatch(agentOnboardingPrompt, /agent (create|approve|requests|edit)\b|Agent Profile|--access (?!full\b)/);
+  assert.match(agentOnboardingPrompt, /Never pass `--access full` on your own judgment/);
   assert.match(agentOnboardingPrompt, /its own included/);
   assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /decides when (to stop|its work is complete)|stop work complete|stop itself/);
   assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /page automation (create|edit|attach)|xmatrix:automation\//);
