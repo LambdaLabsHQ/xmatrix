@@ -53,8 +53,8 @@ const en = {
   signedOut: (program: string, machine: string) =>
     `${program} on ${machine} is not signed in, so it cannot take work yet. Sign it in here:`,
   signIn: "Sign in",
-  /** Beside the sign-in, for an owner who would rather not use that Agent. The button names what it disables. */
-  turnOff: (program: string) => `Disable ${program}`,
+  /** Beside the sign-in, for an owner who would rather not use that Agent. The button names what it disables, and on which machine. */
+  turnOff: (program: string, machine: string) => `Disable ${program} on ${machine}`,
   turnedOff: (program: string, machine: string) => `${program} on ${machine} is disabled in every Space.`,
   /** Around the link to Agents. */
   turnOnAgain: ["Turn it on again in ", "Agents", "."],
@@ -198,7 +198,7 @@ const zh: OnboardingCopy = {
   nothingUntilUpdated: "更新之前不会给它派活。",
   signedOut: (program, machine) => `${machine} 上的 ${program} 还没登录，登录之前接不了活。在这里登录：`,
   signIn: "登录",
-  turnOff: (program) => `禁用 ${program}`,
+  turnOff: (program, machine) => `禁用 ${machine} 上的 ${program}`,
   turnedOff: (program, machine) => `${machine} 上的 ${program} 已在所有 Space 禁用。`,
   turnOnAgain: ["要再用它，到 ", "Agents", " 里启用。"],
   cannotTakeWork: (program, machine) => `${machine} 上的 ${program} 还不能接活。`,
