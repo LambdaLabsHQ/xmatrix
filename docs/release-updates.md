@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: typing a `norn run` fence on a Page keeps its name
+
+Typing a fence that starts `norn` and then a space on a Page opened a code
+block tagged only `norn`, and the name never landed, so the block was not a
+program and the Page said nothing. A space still opens an ordinary language
+such as `ts`.
+Enter opens a fence whose info has a space in it, and the block keeps the
+whole string `nornRunBlock` reads, including a name in any language. Web.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a `norn run` block whose name runs nothing says why
 
 A Page block tagged `norn run 2nd-pass` (or `v1.2`, or two words) never ran:

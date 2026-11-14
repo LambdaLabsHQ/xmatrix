@@ -32,7 +32,9 @@ and nor does a block whose name is not a name. What a block's info string
 makes of it is one function, `nornRunBlock` in protocol, which the Hub and
 the Page editor both read, so no block is drawn as a program the Hub passes
 over: every block tagged `norn run` is listed, and one that runs nothing
-carries why.
+carries why. Typing the fence keeps that whole string. A space opens an
+ordinary one-word language (`` ```ts ``). Enter opens a fence whose info has a
+space in it (`` ```norn run review ``, `` ```norn run 物业费 ``).
 
 A saved revision is synced like the Page's schedule lines
 (`syncPagePrograms`, from the Page session's commit, a new Page, and a

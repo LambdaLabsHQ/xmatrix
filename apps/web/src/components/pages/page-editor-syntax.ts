@@ -241,8 +241,29 @@ export const typoraDelete: Command = (state, dispatch) => {
 };
 
 export function typoraKeymap(): Plugin {
-  return keymap({ Backspace: typoraBackspace, Delete: typoraDelete });
+  return keymap({ Backspace: typoraBackspace, Delete: typoraDelete, Enter: openFence });
 }
+
+/**
+ * Enter on a fence line opens the code block with its whole info string.
+ * A space still opens an ordinary one-word language (` ```ts `). It does not
+ * open ` ```norn `, because that space is the start of `norn run <name>`,
+ * and `nornRunBlock` reads the whole string (`norn run 物业费` included).
+ */
+export const openFence: Command = (state, dispatch) => {
+  const { $from, empty } = state.selection;
+  if (!empty || $from.parent.type !== nodes.paragraph) return false;
+  const match = /^```(.*)$/u.exec($from.parent.textContent);
+  if (!match) return false;
+  const start = $from.start();
+  const $start = state.doc.resolve(start);
+  if (!$start.node(-1).canReplaceWith($start.index(-1), $start.indexAfter(-1), nodes.code_block)) return false;
+  if (dispatch) {
+    dispatch(state.tr.delete(start, $from.end()).setBlockType(start, start, nodes.code_block,
+      { language: match[1].trim() }).scrollIntoView());
+  }
+  return true;
+};
 
 function markRule(pattern: RegExp, type: MarkType | MarkType[]): InputRule {
   return new InputRule(pattern, (state, match, start, end) => {
@@ -287,7 +308,8 @@ export function markdownShortcuts(): Plugin {
     wrappingInputRule(/^\s*([-+*])\s$/u, nodes.bullet_list),
     wrappingInputRule(/^(\d+)\.\s$/u, nodes.ordered_list, (match) => ({ order: Number(match[1]) }),
       (match, node) => node.childCount + (node.attrs.order as number) === Number(match[1])),
-    textblockTypeInputRule(/^```([\w-]*)\s$/u, nodes.code_block, (match) => ({ language: match[1] ?? "" })),
+    // `norn` is not finished by this space: the name follows (`norn run <name>`), and Enter keeps it (`openFence`).
+    textblockTypeInputRule(/^```(?!norn\s)([\w-]*)\s$/u, nodes.code_block, (match) => ({ language: match[1] ?? "" })),
     // Three dashes become a divider. Three stars stay text so bold italic can close.
     new InputRule(/^---$/u, (state, _match, start, end) => {
       const $start = state.doc.resolve(start);
