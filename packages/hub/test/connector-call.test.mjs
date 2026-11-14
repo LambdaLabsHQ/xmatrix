@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import * as protocol from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import { AuthFailure, PermissionFailure } from "../src/index-shared.ts";
+import { transientError } from "../src/error-contract.ts";
 import { readBoundedRequestBody } from "../src/request-body.ts";
 import { privateResponse } from "../src/private-response.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
@@ -31,7 +32,7 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
 function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false, retry,
-  receiptRefusal, providerId = "gmail", stored } = {}) {
+  receiptRefusal, appendError, providerId = "gmail", stored } = {}) {
   const checks = [], reports = [], refused = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
@@ -41,6 +42,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
   ]) }) };
   const append = async (_env, channelId, command) => {
     assert.equal(channelId, run.channelId); appends.push(command);
+    if (appendError && appends.length === 1) throw appendError;
     return receiptRefusal && appends.length > 1 ? receiptRefusal() : Response.json({});
   };
   const support = loadSupport(name => ({
@@ -74,6 +76,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "./apps": { appExecutionRetry: async (_env, input) => {
       assert.deepEqual(input, { spaceId: "space", executionId: "execution-1", actorUserId: "member" }); return retry; } },
     "./index-shared": { AuthFailure, PermissionFailure, readBoundedRequestBody, requireHumanAuth: user => user,
+      transientError,
       requireAuth: async request => request.headers.get("authorization") === "Bearer human" ? { id: "member" }
         : { id: "member", agentRun: run },
       requestErrorResponse: (c, error) => { reports.push(error.message); refused.push(error);
@@ -288,6 +291,24 @@ test("XMATRIX-HUB-AH: a receipt the message authority refused as retryable stays
   assert.equal(error.code, "postgres_message_authority_unavailable");
   assert.equal(error.retryable, true);
   assert.doesNotMatch(error.message, /654321|fixture-private/);
+});
+
+test("XMATRIX-HUB-AH: a connector write that met a retryable PostgreSQL outage keeps its retryable answer", async () => {
+  const outage = new Error("Query read timeout");
+  const f = fixture({ appendError: outage });
+  await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(f.refused.length, 1);
+  assert.equal(f.refused[0], outage, "a retryable outage is not masked as an unexplained private failure");
+  assert.ok(!f.reports.includes("Private connector call failed"));
+});
+
+test("XMATRIX-HUB-AH: an unexpected connector failure names its class, never its text", async () => {
+  const f = fixture({ appendError: new TypeError(privateText) });
+  await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(f.refused.length, 1);
+  assert.equal(f.refused[0].message, "Private connector call failed");
+  assert.equal(f.refused[0].name, "PrivateConnectorCallError(TypeError)");
+  assert.ok(f.reports.every(report => !report.includes("654321") && !report.includes("fixture-private")));
 });
 
 test("a write whose result is the caller's own capability runs only as a call and is always masked in the Channel", async () => {

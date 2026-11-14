@@ -3,7 +3,7 @@ import { ControlError } from "@xmatrix/db";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
-import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse } from "./index-shared";
+import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse, transientError } from "./index-shared";
 import { privateResponse } from "./private-response";
 import { parseActionCommand } from "./connectors/action-parse";
 import { connectorActionCatalog } from "./connectors/action-catalog";
@@ -19,6 +19,18 @@ import type { Env } from "./types";
 import { readConnectorPrivateResult, writeConnectorPrivateResult } from "./connectors/private-result-content";
 
 const NO_STORE = { "cache-control": "private, no-store" };
+
+/** The class a masked failure came from, when it is a short code-defined name
+ * or code; never its message, which may carry private content. */
+function maskedConnectorFailure(error: unknown): Error {
+  const masked = new Error("Private connector call failed");
+  const field = (key: "name" | "code"): string =>
+    error && typeof error === "object" && key in error ? String((error as Record<string, unknown>)[key] ?? "") : "";
+  const classified = [field("name"), field("code")]
+    .filter(value => value !== "" && value !== "Error" && /^[A-Za-z0-9_.:-]{1,60}$/u.test(value));
+  if (classified.length) masked.name = `PrivateConnectorCallError(${classified.join(":")})`;
+  return masked;
+}
 
 /** Recorded calls keep their invocation visible. A private result crosses
  * the calling response and the Human owner’s protected view; shared history receives a mask. */
@@ -65,6 +77,8 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       if (error instanceof ReceiptUnsaved) return c.json({ error: error.message }, 503, NO_STORE);
       // Provider errors may contain private data too. The receipt applies its
       // chosen visibility; raw exceptions never reach shared error reporting.
+      // A PostgreSQL or Durable Object outage a replay can survive keeps the
+      // Hub's retryable refusal instead of becoming an unexplained 500.
       if (error instanceof ProviderRequestError && authorizeCaller) {
         try { await authorizeCaller(); }
         catch (denied) { return privateResponse(requestErrorResponse(c,
@@ -73,7 +87,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       if (error instanceof ProviderRequestError) return c.json({ error: error.message },
         (error.status >= 400 && error.status <= 599 ? error.status : 502) as ContentfulStatusCode, NO_STORE);
       const safe = error instanceof ControlError || error instanceof AuthFailure || error instanceof PermissionFailure
-        ? error : new Error("Private connector call failed");
+        ? error : transientError(error) ? error : maskedConnectorFailure(error);
       return privateResponse(requestErrorResponse(c, safe));
     }
   });
