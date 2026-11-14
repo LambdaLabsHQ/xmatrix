@@ -300,7 +300,7 @@ export function HarnessSignedOutBody({ registration, token, userId, copy, progra
   });
   if (agent && turn.off) return <AgentTurnedOff agent={agent} copy={copy} program={program} machine={machine} />;
   const mayTurnOff = turn.offered && !takesWork;
-  const turnOff = mayTurnOff ? <AgentTurnOffButton turn={turn} copy={copy} /> : null;
+  const turnOff = mayTurnOff ? <AgentTurnOffButton turn={turn} copy={copy} program={program} /> : null;
   const turnOffFailed = turn.error && <p role="status" className="mt-2 text-[13px] text-destructive">{turn.error}</p>;
   if (!view.setUpThere) {
     return <>

@@ -40,10 +40,12 @@ export function useAgentTurnOff(agent: AgentRegistrationSummary | undefined, tok
 }
 
 /** The quiet choice beside the sign-in, where it is offered. */
-export function AgentTurnOffButton({ turn, copy }: { turn: ReturnType<typeof useAgentTurnOff>; copy: OnboardingCopy }) {
+export function AgentTurnOffButton({ turn, copy, program }: {
+  turn: ReturnType<typeof useAgentTurnOff>; copy: OnboardingCopy; program: string;
+}) {
   return (
     <Button size="sm" variant="ghost" disabled={turn.pending} data-testid="turn-agent-off" onClick={() => void turn.turnOff()}>
-      {turn.pending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.turnOff}
+      {turn.pending ? <AnimatedIcon icon={Loader2} className="animate-spin" /> : null}{copy.turnOff(program)}
     </Button>
   );
 }

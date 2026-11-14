@@ -5,8 +5,8 @@
 The card for a program that could not take work because it is not signed in
 on its machine offered one thing, the sign-in. A person who does not mean to
 use that program there had no way to say so, and work kept being sent to it.
-The card now gives its owner two buttons, Sign in and Disable, with no
-sentence explaining the second. Disable is the owner's existing switch for the
+The card now gives its owner two buttons, Sign in and one that names what it
+disables ("Disable Claude Code"), with no sentence explaining it. It is the owner's existing switch for the
 Agent on its machine, in every Space, so nothing more is sent to it; the card
 then says it is disabled and links to Agents, where the same switch turns it
 on again. The welcome
