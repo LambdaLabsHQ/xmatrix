@@ -70,3 +70,44 @@ integration("launch candidate reads recover once without preparing work (XMATRIX
     await f.close();
   }
 });
+
+// A `machine:` condition reads the owner's name for that Machine on the
+// directory authority. It is a lock-free single-row read, so it must run as
+// single_read and recover once from a stalled first round trip instead of
+// failing the launch (XMATRIX-HUB-CW).
+integration("a machine-name read recovers once without opening a transaction (XMATRIX-HUB-CW)", async () => {
+  const f = await spaceSecretFixture();
+  let fault;
+  const { database, clients } = recoveringDatabase(() => fault);
+  const placement = { spaceId: f.ids.space, shardId: "shard-0", placementEpoch: 1 };
+  const launches = new PostgresRegistrationLaunchRepository(database, database, placement);
+  const name = "recovery-box";
+  // TypeScript private methods are ordinary prototype methods at runtime; this
+  // exercises the same read the launch preparation performs.
+  const read = () => launches.machineKnownAs(f.ids.owner, f.ids.machine, name);
+  const lose = (matches, extra = {}) => fault = { matches, remaining: 1,
+    error: new Error("Query read timeout"), checkouts: [], ...extra };
+  try {
+    await f.client.query(`INSERT INTO data.machines (owner_user_id,machine_id,name) VALUES ($1,$2,$3)`,
+      [f.ids.owner, f.ids.machine, name]);
+    assert.equal(await read(), true);
+    assert.equal(await launches.machineKnownAs(f.ids.owner, f.ids.machine, "someone-else"), false);
+    const machineRead = /FROM data\.machines WHERE owner_user_id/u;
+    const before = clients.length;
+    lose(machineRead);
+    assert.equal(await read(), true);
+    assert.equal(fault.checkouts.length, 1);
+    assert.ok(fault.checkouts[0].ended);
+    assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1, "recovery uses a fresh connection");
+    assert.ok(clients.slice(before).every(c => c.ended && !c.queries.some(sql => /^(BEGIN|COMMIT)/u.test(sql))),
+      "the read runs and recovers without transaction round trips");
+    lose(machineRead, { remaining: 2, error: Object.assign(new Error("statement timeout"), { code: "57014" }) });
+    await assert.rejects(read(), /statement timeout/u);
+    assert.equal(fault.checkouts.length, 1, "an answered failure is final, never replayed");
+  } finally {
+    try {
+      await f.client.query("DELETE FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2",
+        [f.ids.owner, f.ids.machine]);
+    } finally { await f.close(); }
+  }
+});

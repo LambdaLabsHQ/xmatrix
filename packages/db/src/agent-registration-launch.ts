@@ -459,7 +459,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   private async machineKnownAs(ownerUserId: string, machineId: string, tag: string): Promise<boolean> {
     if (tag === machineId) return true;
     const rows = await this.directory.transaction({ requestId: `registration-machine-name:${machineId}`,
-      operation: "registration.launch.machine-name" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
+      operation: "registration.launch.machine-name", statement: "single_read" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
       text: `SELECT name FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
       values: [ownerUserId, machineId], maxRows: 1 }));
     return machineTagSelects(tag, machineId, String(rows[0]?.name ?? ""));
