@@ -649,6 +649,18 @@ fn an_acp_turn_the_agent_ended_unfinished_is_a_failed_turn() {
 }
 
 #[test]
+fn an_acp_turn_answered_with_the_account_refusal_is_a_failed_turn() {
+    assert_eq!(
+        super::acp_account_refusal_detail("Cursor", "\nAdd a payment method to continue\n").as_deref(),
+        Some("Cursor refused the turn for its account: Add a payment method to continue")
+    );
+    assert!(super::acp_account_refusal_detail("Cursor", "Done: sent the report.").is_none());
+    assert!(super::acp_account_refusal_detail("Cursor", "").is_none());
+    let discussion = format!("The checkout says: add a payment method to continue. {}", "x".repeat(300));
+    assert!(super::acp_account_refusal_detail("Cursor", &discussion).is_none());
+}
+
+#[test]
 fn daemon_managed_workspace_cwd_leaf_is_short_and_portable() {
     // Every Run path is rendered under this leaf, and on Windows the whole
     // path has 260 characters. Composite keys reach ~88 characters, so the leaf

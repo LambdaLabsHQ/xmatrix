@@ -129,6 +129,7 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     "402 Insufficient credits. Add more using https://openrouter.ai/settings/credits",
     "Your credit balance is too low to access the Anthropic API.",
     "账户余额不足，请充值后重试",
+    "Cursor refused the turn for its account: Add a payment method to continue",
   ]) assert.ok(agentUsageLimitFromError(error), error);
   for (const error of [
     "Claude API error 429 (rate_limit_error); retry 3/10 in 8s",
