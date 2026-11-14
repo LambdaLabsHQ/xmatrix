@@ -185,8 +185,21 @@ export function normalizeAgentPresetRuntime(
  * behind; the install hint travels because the daemon shows it when the
  * launcher is missing.
  */
-/** The ACP bridges answer `session/request_permission` themselves in `full`. */
-const REQUEST_APPROVING_BACKENDS = new Set<AgentPresetBackend>(["acp", "grok-acp"]);
+/** The backends whose bridge receives the harness's permission requests
+ * (ACP `session/request_permission`, Claude `can_use_tool`): in `full` it
+ * answers them with allow, in `ask` it shows each as a card in the Channel
+ * and waits. A harness on another backend can only be given `full`. */
+const REQUEST_RELAYING_BACKENDS = new Set<AgentPresetBackend>(["acp", "grok-acp", "claude-print"]);
+
+/** The access modes a harness can be added with, the default first. */
+export function agentAccessModes(preset: AgentPreset | undefined): AgentAccessMode[] {
+  return preset && REQUEST_RELAYING_BACKENDS.has(preset.backend) ? ["full", "ask"] : ["full"];
+}
+
+/** A daemon with this capability shows an `ask` launch's permission requests
+ * in its Channel. An earlier one answers them all with allow, so an `ask`
+ * launch is never routed to it. */
+export const REGISTRATION_ACCESS_ASK_CAPABILITY = "registration_access_ask_v1";
 
 export function agentAccessGrant(preset: AgentPreset | undefined, mode: AgentAccessMode): AgentAccessGrant {
   const added = mode === "full" ? preset?.access?.full : undefined;
@@ -195,7 +208,7 @@ export function agentAccessGrant(preset: AgentPreset | undefined, mode: AgentAcc
     args: [...(added?.args ?? [])],
     env: { ...added?.env },
     session: { ...added?.session },
-    approvesRequests: mode === "full" && preset !== undefined && REQUEST_APPROVING_BACKENDS.has(preset.backend),
+    approvesRequests: mode === "full" && preset !== undefined && REQUEST_RELAYING_BACKENDS.has(preset.backend),
   };
 }
 

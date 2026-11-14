@@ -1,4 +1,4 @@
-import type { AgentPreset, AgentRegistrationSummary, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AgentAccessMode, AgentPreset, AgentRegistrationSummary, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import { registrationSwitch, type RegistrationSwitch } from "./my-agents-registrations";
 
 /**
@@ -43,7 +43,7 @@ export function harnessSpaceSwitch(registration: AgentRegistrationSummary | unde
  * mode its owner confirmed for this add; a harness confirmed earlier on the
  * machine has none to write. */
 export function harnessSpaceCreateCommand(key: SpaceAgentRegistrationKey, preset: AgentPreset,
-  access?: "full"): Record<string, unknown> {
+  access?: AgentAccessMode): Record<string, unknown> {
   return {
     action: "create",
     commandId: `registration-create:${crypto.randomUUID()}`,

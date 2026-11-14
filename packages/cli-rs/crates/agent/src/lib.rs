@@ -107,7 +107,7 @@ impl AgentPreset {
             args: self.access.full.args.clone(),
             env: self.access.full.env.clone(),
             session: self.access.full.session.clone(),
-            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp"),
+            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp" | "claude-print"),
         }
     }
 

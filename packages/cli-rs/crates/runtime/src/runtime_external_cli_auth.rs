@@ -2872,7 +2872,8 @@ impl AcpInterrupter {
         let Some((id, params)) = self.questions.take(&reply.request_key) else {
             return false;
         };
-        let result = crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers);
+        let result = crate::runtime_harness_questions::acp_permission_outcome(&params, Some(&reply.answers))
+            .unwrap_or_else(|| crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers));
         write_acp_message(&self.write, &acp_result(id, result))
             .await
             .is_ok()
@@ -2880,12 +2881,10 @@ impl AcpInterrupter {
 
     /// Cancel every parked elicitation: the person typed a message instead.
     pub(crate) async fn cancel_questions(&self) {
-        for (id, _) in self.questions.drain() {
-            let _ = write_acp_message(
-                &self.write,
-                &acp_result(id, serde_json::json!({ "action": "cancel" })),
-            )
-            .await;
+        for (id, params) in self.questions.drain() {
+            let cancelled = crate::runtime_harness_questions::acp_permission_outcome(&params, None)
+                .unwrap_or_else(|| serde_json::json!({ "action": "cancel" }));
+            let _ = write_acp_message(&self.write, &acp_result(id, cancelled)).await;
         }
     }
 

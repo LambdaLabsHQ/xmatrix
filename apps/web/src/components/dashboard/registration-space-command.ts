@@ -1,5 +1,6 @@
 import type {
   AgentRegistrationDetails, AgentRegistrationEnvironment, AgentWorkingMode, SpaceAgentRegistrationKey,
+  AgentAccessMode,
 } from "@xmatrix/protocol";
 import { UserFacingProblem } from "../../lib/user-facing-error";
 
@@ -50,7 +51,7 @@ export function registrationSpaceCommand(key: SpaceAgentRegistrationKey, current
 
 /** The owner turns an agent off or on for its machine, in every Space, or
  * confirms what it may do there. */
-export type EnvironmentChange = { kind: "disable" } | { kind: "enable" } | { kind: "access"; mode: "full" };
+export type EnvironmentChange = { kind: "disable" } | { kind: "enable" } | { kind: "access"; mode: AgentAccessMode };
 
 export type EnvironmentState = { key: { ownerUserId: string; machineId: string; harness: string }; version: number;
   environment: AgentRegistrationEnvironment | null };

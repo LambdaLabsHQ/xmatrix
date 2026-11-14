@@ -241,7 +241,7 @@ test("an installed harness is summoned in this Space once its owner turns it on"
   await expect(panel.getByRole("switch", { name: "Enabled: Claude Code" })).toHaveCount(0);
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("codex"), version: 1 }, { method: "POST" });
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("codex")]));
-  await fixtureUnconfirmedAccess(page);
+  await fixtureUnconfirmedAccess(page, "codex");
   await codex.click();
   await page.getByRole("button", { name: "Add with full access" }).click();
   await expect(codex).toHaveAttribute("aria-checked", "true");
@@ -275,11 +275,11 @@ test("a harness installed from here is turned on in this Space", async ({ page }
       item: { id: "claude", installed: true, probeStatus: "ok", version: "2.0.0", autoUpdate: "unknown" } } });
   await fixtureJson(page, "space-command", COMMANDS, { key: spaceKey("claude"), version: 1 }, { method: "POST" });
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("claude")]));
-  await fixtureUnconfirmedAccess(page, ["--dangerously-skip-permissions"]);
+  await fixtureUnconfirmedAccess(page, "claude");
   const panel = page.getByTestId("machine-harness-panel");
   await panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true }).click();
   // Installed, it is added once its owner read what full access adds.
-  const confirmation = page.getByRole("dialog", { name: "Claude Code: full access on this machine?" });
+  const confirmation = page.getByRole("dialog", { name: "Claude Code: access on this machine" });
   await expect(confirmation.getByTestId("agent-access-lines")).toContainText("Adds the argument --dangerously-skip-permissions");
   await confirmation.getByRole("button", { name: "Add with full access" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "space-command")).toEqual([

@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { agentAccessGrant, agentAccessModes, agentPresetById } from "@xmatrix/protocol";
 
 import {
   CREATED_CHANNEL_ID,
@@ -30,11 +31,20 @@ export {
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
 export const AGENT_ENVIRONMENT_QUERY = "**/api/xmatrix/agent-environments/query";
-/** The Hub's answer for a harness whose owner has not confirmed its access on the machine. */
-export function fixtureUnconfirmedAccess(page: Page, args: string[] = []): Promise<void> {
-  return fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, { version: 0, environment: null,
-    fullAccess: { mode: "full", args, env: {}, session: { sandbox: "danger-full-access" }, approvesRequests: false } },
-  { method: "POST" });
+/** The Hub's answer for a harness whose owner has not confirmed its access on
+ * the machine: the grant and modes of the real preset, as the Hub resolves them. */
+export function unconfirmedAccess(harness: string) {
+  const preset = agentPresetById(harness);
+  return { version: 0, environment: null, fullAccess: agentAccessGrant(preset, "full"), accessModes: agentAccessModes(preset) };
+}
+/** Several harnesses asked about in one go, answered in the order they are read. */
+export function fixtureUnconfirmedAccessEach(page: Page, harnesses: string[]): Promise<void> {
+  return fixtureRule(page, { id: "environment", pattern: AGENT_ENVIRONMENT_QUERY, method: "POST",
+    responder: { kind: "sequence", responses: harnesses.map((harness) => ({ json: unconfirmedAccess(harness) })) } });
+}
+/** One harness is asked about per fixture; a later call answers for the next. */
+export function fixtureUnconfirmedAccess(page: Page, harness: string): Promise<void> {
+  return fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, unconfirmedAccess(harness), { method: "POST" });
 }
 
 export type WorkspaceStubFixtures = {

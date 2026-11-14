@@ -1631,9 +1631,20 @@ pub enum AgentCommand {
         workspace: Option<PathBuf>,
         /// Confirm, as this machine's owner, what the Agent may do on it:
         /// `full` starts the harness with what xMatrix adds so it works without
-        /// asking, which the command prints first. Asked at a terminal when omitted
-        #[arg(long, value_parser = ["full"])]
+        /// asking, which the command prints first; `ask` adds none of it and
+        /// asks in the Channel each time the harness wants permission. Asked
+        /// at a terminal when omitted
+        #[arg(long, value_parser = ["full", "ask"])]
         access: Option<String>,
+    },
+    /// Show what a harness's Agents may do on this machine, or change it:
+    /// `full` or `ask`. Its owner only; it applies to its next Runs in every Space
+    Access {
+        /// Harness id, for example codex or claude
+        harness: String,
+        /// The mode to change to. Omit to show the current one
+        #[arg(value_parser = ["full", "ask"])]
+        mode: Option<String>,
     },
     /// Show one Agent's Space configuration and access
     Show {

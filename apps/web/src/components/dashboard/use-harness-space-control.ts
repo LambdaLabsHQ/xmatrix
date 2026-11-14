@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { WEB_PROXY_ROUTES, type AgentPreset, type SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, type AgentAccessMode, type AgentPreset, type SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { harnessSpaceCreateCommand, harnessSpaceRegistration, harnessSpaceSwitch } from "./harness-space-switch";
@@ -29,7 +29,7 @@ export function useHarnessSpaceControl(spaceId?: string | null, token?: string |
 
   /** `confirmed` carries the answer of a `confirmAdds` that already asked for this harness. */
   async function set(key: SpaceAgentRegistrationKey, preset: AgentPreset, on: boolean,
-    confirmed?: ReadonlyMap<string, "full">): Promise<boolean> {
+    confirmed?: ReadonlyMap<string, AgentAccessMode>): Promise<boolean> {
     if (!ready || !catalog.isSuccess || locked.current || key.spaceId !== spaceId || key.ownerUserId !== userId) return false;
     locked.current = true;
     setPending({ key, on });

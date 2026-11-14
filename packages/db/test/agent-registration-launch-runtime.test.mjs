@@ -71,7 +71,7 @@ test('a launch adds exactly the access grant of its confirmed mode', () => {
   // No confirmed mode is the full access every launch had: the grant, and its
   // args in the argv a daemon that predates the grant starts.
   const claude = fields('claude');
-  assert.deepEqual(claude.access, { mode: 'full', args: ['--dangerously-skip-permissions'], env: {}, session: {}, approvesRequests: false });
+  assert.deepEqual(claude.access, { mode: 'full', args: ['--dangerously-skip-permissions'], env: {}, session: {}, approvesRequests: true });
   assert.deepEqual(claude.runtimeArgs, ['--dangerously-skip-permissions']);
   // A launch that declared its own arguments before its owner was asked
   // starts with exactly those: without the flag it never had full access, and

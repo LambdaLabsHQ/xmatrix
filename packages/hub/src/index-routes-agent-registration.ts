@@ -1,7 +1,8 @@
 import type { Context, Hono } from "hono";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
-  parseAgentEnvironmentCommand, parseAgentRegistrationKey, type AgentRegistrationSummary } from "@xmatrix/protocol";
+  parseAgentEnvironmentCommand, parseAgentRegistrationKey, agentAccessModes, agentPresetById, agentPresetForLauncher,
+  type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
 import { failureResponse } from "./error-contract";
@@ -100,6 +101,11 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
           return c.json({ error: "An Agent Run adds Agents only for its owner, on its own Machine, in its own Space" }, 403);
         }
         if (scope === "physical" && key.ownerUserId !== user.id) return c.json({ error: "Registration not found" }, 404);
+        // A mode is confirmed only for a harness whose permission requests xMatrix can show.
+        const access = command && "environment" in command ? command.environment.launch?.access : undefined;
+        if (access && !agentAccessModes(agentPresetById(key.harness) ?? agentPresetForLauncher(key.harness)).includes(access)) {
+          return c.json({ error: `${key.harness} can only be given full access: xMatrix cannot show its permission requests in a Channel` }, 400);
+        }
         // An Agent Run adds an Agent as its owner, without an admin's creation exception.
         const actorUserId = user.id;
         // What an Agent may do on a machine is its owner's to confirm, so a Run

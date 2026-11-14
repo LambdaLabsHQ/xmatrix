@@ -52,6 +52,7 @@ impl HubRoutes {
 
 /// A machine owner's harness environment: its launch and confirmed access.
 pub const AGENT_ENVIRONMENT_QUERY_ROUTE: &str = "/api/agent-environments/query";
+pub const AGENT_ENVIRONMENT_COMMAND_ROUTE: &str = "/api/agent-environments/commands";
 
 /// A Space's Agents: its registration catalog, one registration's details, and
 /// the commands that change them.

@@ -18,6 +18,8 @@ import { agentFaceUrl } from "./faces.js";
 export {
   AGENT_PRESETS,
   agentAccessGrant,
+  agentAccessModes,
+  REGISTRATION_ACCESS_ASK_CAPABILITY,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
@@ -25,6 +27,7 @@ export {
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
   type AgentAccessGrant,
+  type AgentAccessMode,
   type AgentHarnessSpec,
   type AgentPreset,
   type AgentPresetBackend,
