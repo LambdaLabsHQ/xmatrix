@@ -3041,12 +3041,14 @@ impl AcpVendorConfig {
             goal_turn_input: None,
             goal_status_from_update: None,
             goal_status_from_text: None,
-            // OpenCode (Go subscription or ChatGPT login) and Cursor expose
-            // account quota behind their own stored credentials; every other generic ACP peer has no quota
+            // OpenCode (Go subscription or ChatGPT login), Cursor and DeepSeek
+            // (prepaid API balance) expose account quota behind their own
+            // stored credentials; every other generic ACP peer has no quota
             // source here.
             quota_usage: match stem.as_str() {
                 "opencode" => Some(opencode_quota_hook),
                 "cursor" => Some(cursor_quota_hook),
+                "deepseek" => Some(deepseek_quota_hook),
                 _ => None,
             },
             resume_namespace: format!("acp-resume-{stem}"),
@@ -3082,6 +3084,13 @@ fn opencode_quota_hook(
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
     Box::pin(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
+}
+
+fn deepseek_quota_hook(
+    force: bool,
+    model: Option<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
+    Box::pin(async move { read_deepseek_balance_for_model(force, model.as_deref()).await })
 }
 
 fn cursor_quota_hook(

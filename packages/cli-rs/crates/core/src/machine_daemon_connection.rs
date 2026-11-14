@@ -859,6 +859,10 @@ pub struct MachineQuotaProbeRequest {
     /// from a recent cached reading, which could only repeat what refused.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub fresh: bool,
+    /// The Hub accepts an observed result with no windows (a prepaid account:
+    /// only its balance and currency) only when it sets this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_balance: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3566,8 +3570,12 @@ mod tests {
 
     #[test]
     fn an_edge_pong_does_not_prove_the_hub_session() {
-        assert!(!frame_proves_hub_session(&Message::Ping(Default::default())));
-        assert!(!frame_proves_hub_session(&Message::Pong(Default::default())));
+        assert!(!frame_proves_hub_session(
+            &Message::Ping(Default::default())
+        ));
+        assert!(!frame_proves_hub_session(
+            &Message::Pong(Default::default())
+        ));
         assert!(frame_proves_hub_session(&Message::Text(
             r#"{"type":"pong","requestId":"probe-1"}"#.into(),
         )));
@@ -3855,7 +3863,9 @@ mod tests {
             machine_resources: None,
             machine_resource_history: Vec::new(),
             harness_inventory: None,
-            cli_update: Some(serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" })),
+            cli_update: Some(
+                serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" }),
+            ),
             runs: Vec::new(),
         };
         let value = serde_json::to_value(&report).expect("snapshot serializes");

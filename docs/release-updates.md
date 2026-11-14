@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a DeepSeek Agent shows the balance left on its API key
+
+A DeepSeek Agent's card and its `xmatrix agent list` row said nothing about
+quota, because DeepSeek has no window to meter: an API key is billed against
+a prepaid balance. The runtime now reads DeepSeek's balance endpoint with the
+key DeepSeek Harness already holds and reports the money left with its
+currency: a tag on the card (`¥12.34`), "Balance" on the Agents page, and the
+QUOTA column of `agent list`. An account DeepSeek says can no longer pay for
+a request reads as out of quota, so routing passes it over. A missing or
+refused key leaves the reading absent, as before. The daemon's pre-launch
+quota read also covers OpenCode, whose quota was only known while one of its
+Instances ran. No schema change. Hub, Web and CLI; the balance appears once a
+Machine runs this CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an execution report the Hub can never store is answered once
 
 A daemon keeps each execution report until the Hub gives it a receipt and

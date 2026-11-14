@@ -742,7 +742,8 @@ export interface LlmUsage {
   /** Actual provider read time; retransmission must preserve it. */
   quotaObservedAt?: string;
   quotaUsages?: LlmQuotaUsage[];
-  /** Read with `quotaUsages`: whether the provider still serves the account. */
+  /** Read with `quotaUsages`: whether the provider still serves the account.
+   * A prepaid account has no window and is read from this alone. */
   quotaAccount?: LlmQuotaAccount;
   cachedInputTokens?: number;
   cacheCreationInputTokens?: number;
@@ -799,7 +800,31 @@ export interface LlmQuotaUsage {
  */
 export interface LlmQuotaAccount {
   allowed?: boolean;
-  credits?: { balance?: number; unlimited?: boolean };
+  /** `currency` (ISO 4217) says `balance` is money: a prepaid account, which
+   * has no window. Without it the balance counts the provider's credit units. */
+  credits?: { balance?: number; currency?: string; unlimited?: boolean };
+}
+
+/** The money a prepaid account has left, when the provider stated an amount and its currency. */
+export function quotaAccountBalance(account: LlmQuotaAccount | undefined): { amount: number; currency: string } | undefined {
+  const credits = account?.credits;
+  return credits?.balance !== undefined && credits.currency
+    ? { amount: credits.balance, currency: credits.currency } : undefined;
+}
+
+const BALANCE_CURRENCY_SIGN: Record<string, string> = { CNY: "¥", USD: "$" };
+
+/** `¥12.34`, `$3.50`; a currency without a sign here is written after the amount. */
+export function formatQuotaBalance(balance: { amount: number; currency: string }): string {
+  const sign = BALANCE_CURRENCY_SIGN[balance.currency];
+  const amount = balance.amount.toFixed(2);
+  return sign ? `${sign}${amount}` : `${amount} ${balance.currency}`;
+}
+
+/** Whether a usage carries a provider's account reading: windows, or a prepaid balance. */
+export function hasProviderQuotaReading(usage: LlmUsage | undefined): boolean {
+  return usage?.quotaSource === "provider_api"
+    && (Boolean(usage.quotaUsages?.length) || quotaAccountBalance(usage.quotaAccount) !== undefined);
 }
 
 /** The account state a provider read carried, or none. Unknown keys are dropped. */
@@ -810,9 +835,12 @@ export function parseLlmQuotaAccount(value: unknown): LlmQuotaAccount | undefine
     ? row.credits as Record<string, unknown> : undefined;
   const balance = typeof credits?.balance === "number" && Number.isFinite(credits.balance) && credits.balance >= 0
     ? credits.balance : undefined;
+  const currency = typeof credits?.currency === "string" && /^[A-Z]{3}$/u.test(credits.currency)
+    ? credits.currency : undefined;
   const account: LlmQuotaAccount = {
     ...(typeof row.allowed === "boolean" ? { allowed: row.allowed } : {}),
     ...(credits ? { credits: { ...(balance !== undefined ? { balance } : {}),
+      ...(currency ? { currency } : {}),
       ...(credits.unlimited === true ? { unlimited: true } : {}) } } : {}),
   };
   return Object.keys(account).length ? account : undefined;

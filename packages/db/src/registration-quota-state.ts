@@ -1,4 +1,4 @@
-import { currentRoutingQuotaWindows, parseLlmQuotaAccount, routingQuotaObservation, routingQuotaResetTime,
+import { currentRoutingQuotaWindows, parseLlmQuotaAccount, quotaAccountBalance, routingQuotaObservation, routingQuotaResetTime,
   type LlmUsage, type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase } from "./contracts.js";
@@ -105,11 +105,12 @@ function presentedQuotaReading(row: QueryResultRow): RegistrationQuotaReading {
       ? { quotaObservedAt: new Date(observed).toISOString() } : {}) } };
   }
   const windows: RoutingQuotaWindow[] = currentRoutingQuotaWindows(row.windows_json, Date.now());
+  const quotaAccount = parseLlmQuotaAccount(row.account_json);
   // Usage-limit holds are authoritative too, even when the provider gave no named window.
+  // A prepaid balance has no window to show: the account carries the reading.
   const quotaUsages = windows.length ? windows.map(({ label, usedPercent, resetAt }) =>
     ({ ...(label ? { label } : {}), percent: usedPercent, ...(resetAt ? { resetAt } : {}) }))
-    : [{ percent: 100 - Number(row.remaining) }];
-  const quotaAccount = parseLlmQuotaAccount(row.account_json);
+    : quotaAccountBalance(quotaAccount) ? [] : [{ percent: 100 - Number(row.remaining) }];
   return { registration, usage: {
     quotaState: (row.source === "daemon" || !windows.length) && Number(row.remaining) <= 0 ? "exhausted" : "observed",
     quotaSource: "provider_api", quotaObservedAt: new Date(row.observed_at as string).toISOString(), quotaUsages,

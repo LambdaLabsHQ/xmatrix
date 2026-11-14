@@ -85,8 +85,27 @@ pub struct LlmQuotaAccount {
 pub struct LlmQuotaCredits {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub balance: Option<f64>,
+    /// ISO 4217 code when `balance` is money (a prepaid account); absent when
+    /// it counts the provider's own credit units.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub currency: Option<String>,
     #[serde(skip_serializing_if = "std::ops::Not::not", default)]
     pub unlimited: bool,
+}
+
+impl LlmUsage {
+    /// Whether the report carries an account-quota reading: provider windows,
+    /// or the balance of an account that has no windows (prepaid billing).
+    pub fn has_account_quota(&self) -> bool {
+        self.quota_usages
+            .as_ref()
+            .is_some_and(|items| !items.is_empty())
+            || self
+                .quota_account
+                .as_ref()
+                .and_then(|account| account.credits.as_ref())
+                .is_some_and(|credits| credits.balance.is_some())
+    }
 }
 
 /// Whether a usage report carries any fact at all.
@@ -97,11 +116,7 @@ pub fn has_llm_usage(usage: &LlmUsage) -> bool {
         || usage.context_used_tokens.is_some()
         || usage.context_window_tokens.is_some()
         || usage.context_usage_percent.is_some()
-        || usage
-            .quota_usages
-            .as_ref()
-            .map(|items| !items.is_empty())
-            .unwrap_or(false)
+        || usage.has_account_quota()
         || usage.cached_input_tokens.is_some()
         || usage.cache_creation_input_tokens.is_some()
         || usage.cache_read_input_tokens.is_some()
@@ -138,6 +153,7 @@ mod tests {
                 allowed: Some(true),
                 credits: Some(LlmQuotaCredits {
                     balance: Some(42.5),
+                    currency: Some("CNY".to_string()),
                     unlimited: false,
                 }),
             }),
@@ -170,7 +186,7 @@ mod tests {
                 "percent": 87.5,
                 "resetAt": "1900000000"
             }],
-            "quotaAccount": { "allowed": true, "credits": { "balance": 42.5 } },
+            "quotaAccount": { "allowed": true, "credits": { "balance": 42.5, "currency": "CNY" } },
             "cachedInputTokens": 9,
             "cacheCreationInputTokens": 10,
             "cacheReadInputTokens": 11,

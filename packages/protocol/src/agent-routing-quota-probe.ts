@@ -1,6 +1,6 @@
 import { utf8ByteLength } from "./hex.js";
 import { routingQuotaObservation, routingQuotaResetTime, type RoutingObservation } from "./agent-routing.js";
-import { parseLlmQuotaAccount, type LlmQuotaAccount } from "./authority-runtime.js";
+import { parseLlmQuotaAccount, quotaAccountBalance, type LlmQuotaAccount } from "./authority-runtime.js";
 
 /** A bounded read of already registered environments, never a launch or an access grant.
  * `targetId` names the harness to read (`registration:<harness>`). */
@@ -27,6 +27,10 @@ export interface RoutingQuotaProbeRequest {
    * than the one that refused can change anything. A daemon that predates it
    * ignores the field and may answer from its cache. */
   fresh?: true;
+  /** Accepts an observed result with no windows: a prepaid account, read as
+   * its balance and currency alone. Only with `quotaAccount`. A daemon that
+   * predates it ignores the field and reports such a harness unsupported. */
+  accountBalance?: true;
 }
 
 export interface RoutingQuotaProbeWindow {
@@ -170,7 +174,11 @@ function target(row: Record<string, unknown>): RoutingQuotaProbeTarget {
 }
 
 export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbeRequest {
-  const row = record(value, ["requestId", "connectionEpoch", "targets", "windowLabels", "quotaAccount", "fresh"]);
+  const row = record(value, ["requestId", "connectionEpoch", "targets", "windowLabels", "quotaAccount", "fresh",
+    "accountBalance"]);
+  if (row.accountBalance !== undefined && (row.accountBalance !== true || row.quotaAccount !== true)) {
+    throw new Error("Invalid quota probe balance request");
+  }
   if (row.windowLabels !== undefined && row.windowLabels !== true) throw new Error("Invalid quota probe window labels");
   if (row.quotaAccount !== undefined && row.quotaAccount !== true) throw new Error("Invalid quota probe account request");
   if (row.fresh !== undefined && row.fresh !== true) throw new Error("Invalid quota probe freshness");
@@ -186,7 +194,8 @@ export function parseRoutingQuotaProbeRequest(value: unknown): RoutingQuotaProbe
   return { requestId, connectionEpoch: Number(row.connectionEpoch), targets,
     ...(row.windowLabels === true ? { windowLabels: true as const } : {}),
     ...(row.quotaAccount === true ? { quotaAccount: true as const } : {}),
-    ...(row.fresh === true ? { fresh: true as const } : {}) };
+    ...(row.fresh === true ? { fresh: true as const } : {}),
+    ...(row.accountBalance === true ? { accountBalance: true as const } : {}) };
 }
 
 /** Validate at the authenticated daemon boundary; no caller-supplied owner or account identity is accepted. */
@@ -222,10 +231,15 @@ export function parseRoutingQuotaProbeResponse(value: unknown, expected: Routing
     const quotaObservedAt = text(result.quotaObservedAt, 40);
     const observed = Date.parse(quotaObservedAt);
     if (!Number.isFinite(observed) || observed > now) throw new Error("Invalid quota probe observation time");
-    if (!Array.isArray(result.quotaUsages) || !result.quotaUsages.length || result.quotaUsages.length > ROUTING_QUOTA_MAX_WINDOWS) {
+    const quotaAccount = result.quotaAccount === undefined ? undefined
+      : quotaProbeAccount(result.quotaAccount, request.accountBalance === true);
+    // Without a window the reading is a prepaid balance, and only when asked for.
+    const windows = result.quotaUsages === undefined && quotaAccountBalance(quotaAccount) ? [] : result.quotaUsages;
+    if (!Array.isArray(windows) || (!windows.length && result.quotaUsages !== undefined)
+        || windows.length > ROUTING_QUOTA_MAX_WINDOWS) {
       throw new Error("Invalid quota probe window count");
     }
-    const quotaUsages = result.quotaUsages.map((value): RoutingQuotaProbeWindow => {
+    const quotaUsages = windows.map((value): RoutingQuotaProbeWindow => {
       const window = record(value, request.windowLabels ? ["percent", "resetAt", "label"] : ["percent", "resetAt"]);
       if (typeof window.percent !== "number" || !Number.isFinite(window.percent) ||
           window.percent < 0 || window.percent > 100) throw new Error("Invalid quota probe percentage");
@@ -235,19 +249,19 @@ export function parseRoutingQuotaProbeResponse(value: unknown, expected: Routing
     });
     // Preserve original observation time, including cached/expired readings.
     // Routing freshness policy, not transport receipt time, decides eligibility.
-    const quotaAccount = result.quotaAccount === undefined ? undefined : quotaProbeAccount(result.quotaAccount);
     return { ...identity, status: "observed", quotaSource: "provider_api", quotaObservedAt, quotaUsages,
       ...(quotaAccount ? { quotaAccount } : {}) };
   });
   return { requestId: request.requestId, connectionEpoch: request.connectionEpoch, results };
 }
 
-function quotaProbeAccount(value: unknown): LlmQuotaAccount | undefined {
+function quotaProbeAccount(value: unknown, money: boolean): LlmQuotaAccount | undefined {
   const row = record(value, ["allowed", "credits"]);
   if (row.allowed !== undefined && typeof row.allowed !== "boolean") throw new Error("Invalid quota probe account");
   if (row.credits !== undefined) {
-    const credits = record(row.credits, ["balance", "unlimited"]);
-    if ((credits.balance !== undefined && (typeof credits.balance !== "number" || !Number.isFinite(credits.balance) ||
+    const credits = record(row.credits, money ? ["balance", "unlimited", "currency"] : ["balance", "unlimited"]);
+    if ((credits.currency !== undefined && (typeof credits.currency !== "string" || !/^[A-Z]{3}$/u.test(credits.currency))) ||
+        (credits.balance !== undefined && (typeof credits.balance !== "number" || !Number.isFinite(credits.balance) ||
         credits.balance < 0)) || (credits.unlimited !== undefined && typeof credits.unlimited !== "boolean")) {
       throw new Error("Invalid quota probe credits");
     }

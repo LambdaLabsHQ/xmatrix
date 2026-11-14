@@ -3,7 +3,7 @@ import { machineNetworkObservation } from "./machine-network.js";
 import { configurationFields } from "./configuration-fields.js";
 import { parseLaunchParameterEvidence, type LaunchParameterEvidence } from "./launch-parameter-evidence.js";
 import { canonicalRegistrationHarness } from "./agent-registration.js";
-import { parseLlmQuotaAccount } from "./authority-runtime.js";
+import { parseLlmQuotaAccount, quotaAccountBalance } from "./authority-runtime.js";
 import { hasControlCharacter, replaceControlCharacters } from "./field-validation.js";
 
 /** Owner declarations describe an environment; they never grant access. */
@@ -556,7 +556,15 @@ export function routingQuotaObservation(usage: unknown, now: number,
     const expires = Math.min(observed + maxAge, hasReset ? reset : Infinity);
     if (expires > now) readings.push({ remaining: 100 - window.percent, expires });
   }
-  if (!readings.length) return undefined;
+  if (!readings.length) {
+    // A prepaid account has no window: the provider's verdict on it, else
+    // whether any money is left, is all the headroom there is to read.
+    const balance = quotaAccountBalance(parseLlmQuotaAccount(row.quotaAccount));
+    const expires = observed + ROUTING_QUOTA_MAX_AGE_MS;
+    if (windows.length || !balance || expires <= now) return undefined;
+    return { value: (allowed ?? balance.amount > 0) ? 100 : 0, observedAt: new Date(observed).toISOString(),
+      expiresAt: new Date(expires).toISOString(), source: "provider" };
+  }
   // Cursor dual pools without a model: the better pool is the headroom, and its
   // own expiry — a full API pool must not pin the Auto reading until the API reset.
   // With a preferred label (or any other provider): the tightest selected window;

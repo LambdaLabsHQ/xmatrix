@@ -36,6 +36,7 @@ import {
   formatPercent,
   Tag,
   tagsFromUsage,
+  BALANCE_TAG_KEY,
   UsageLimitSummary,
 } from "./workspace-shell-formatters";
 
@@ -1947,6 +1948,7 @@ const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   // update cannot make the live instance card look as if it has no usage.
   const usageMeterTags = instance.usage
     ? tagsFromUsage(instance.usage).filter((tag) => {
+        if (tag.key === BALANCE_TAG_KEY) return true;
         if (tag.percent === undefined) return false;
         const statusChipId = tag.key === "ctx" ? "ctx" : `quota:${tag.label.toLowerCase()}`;
         return !statusChipIds.has(statusChipId);
