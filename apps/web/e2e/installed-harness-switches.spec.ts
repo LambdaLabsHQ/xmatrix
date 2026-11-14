@@ -1,6 +1,6 @@
 import { expect, test } from "./fixtures";
 import { AGENT_ENVIRONMENT_QUERY, E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_SPACE, E2E_NOW, fixtureJson,
-  fixtureRule, fixtureRequestBodies, fixtureUnconfirmedAccess, openWorkspaceWithStubs } from "./workspace-fixtures";
+  fixtureRule, fixtureRequestBodies, fixtureUnconfirmedAccess, fixtureUnconfirmedAccessEach, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 const machine = { id: "daemon-installed", userId: "e2e-user", name: "Remote server", machineName: "Remote server",
   machineId: "machine-remote", email: "e2e@xmatrix.test", status: "online", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
@@ -28,11 +28,13 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
       expect(await fixtureRequestBodies(page, "enable-command")).toEqual([]);
       await fixtureJson(page, "enabled-catalog", CATALOG, catalog(["codex"]));
-      await fixtureUnconfirmedAccess(page);
+      await fixtureUnconfirmedAccess(page, "codex");
       await codex.click();
       // Its owner reads what full access adds before anything is written.
       const confirmation = page.getByRole("dialog", { name: "Codex: full access on this machine?" });
-      await expect(confirmation.getByTestId("agent-access-lines")).toContainText("Starts each session with sandbox=danger-full-access");
+      // Both settings Codex's session starts with are named, each as written.
+      await expect(confirmation.getByTestId("agent-access-lines").getByRole("listitem")).toHaveText([
+        "Starts each session with sandbox=danger-full-access", "Starts each session with approvalPolicy=never"]);
       expect(await fixtureRequestBodies(page, "enable-command")).toEqual([]);
       await page.screenshot({ path: test.info().outputPath(`access-confirmation-${name}.png`) });
       await confirmation.getByRole("button", { name: "Add with full access" }).click();
@@ -57,7 +59,7 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
       await fixtureRule(page, { id: "enabled-catalog", pattern: CATALOG, responder: { kind: "sequence",
         responses: [catalog(["claude"]), catalog(["claude", "codex"])].map((json) => ({ json })) } });
-      await fixtureUnconfirmedAccess(page);
+      await fixtureUnconfirmedAccessEach(page, ["claude", "codex"]);
       await bring.click();
       // One question covers every harness about to be added.
       await page.getByRole("dialog", { name: "Full access on this machine?" }).getByRole("button", { name: "Add 2 with full access" }).click();
@@ -82,7 +84,7 @@ test("a refused owner switch stays off and reports the server failure", async ({
     responder: { kind: "static", status: 403, json: { error: "Machine owner access was revoked" } } });
   const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   const codex = list.getByRole("switch", { name: "Enabled: Codex on Remote server" });
-  await fixtureUnconfirmedAccess(page);
+  await fixtureUnconfirmedAccess(page, "codex");
   await codex.click();
   await page.getByRole("button", { name: "Add with full access" }).click();
   await expect(list.getByRole("alert")).toHaveText("Couldn't save the harness switch. Machine owner access was revoked.");
@@ -103,13 +105,14 @@ test("bulk failure stays visible and retry continues with the remaining pair", a
   await fixtureRule(page, { id: "partial-enable", pattern: COMMANDS, method: "POST", responder: { kind: "sequence",
     responses: [{ json: { version: 1 } }, { status: 409, json: { error: "Space policy changed. Try again." } }] } });
   await fixtureJson(page, "partial-catalog", CATALOG, catalog(["claude"]));
-  await fixtureUnconfirmedAccess(page);
+  await fixtureUnconfirmedAccessEach(page, ["claude", "codex"]);
   await bring.click();
   await page.getByRole("button", { name: "Add 2 with full access" }).click();
   await expect(page.getByTestId("installed-harness-switches").getByRole("alert")).toHaveText("Couldn't save the harness switch. Space policy changed. Try again.");
   await expect(bring).toBeVisible();
   await fixtureJson(page, "retry-enable", COMMANDS, { version: 1 }, { method: "POST" });
   await fixtureJson(page, "retry-catalog", CATALOG, catalog(["claude", "codex"]));
+  await fixtureUnconfirmedAccess(page, "codex");
   await bring.click();
   await page.getByRole("button", { name: "Add with full access" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "retry-enable")).toEqual([
@@ -124,7 +127,7 @@ test("declining the access question adds nothing, and a harness confirmed earlie
   const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   const codex = list.getByRole("switch", { name: "Enabled: Codex on Remote server" });
   await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
-  await fixtureUnconfirmedAccess(page);
+  await fixtureUnconfirmedAccess(page, "codex");
   await codex.click();
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
@@ -149,9 +152,7 @@ test("a harness whose permission requests can be shown is added asking first whe
   const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
   await fixtureJson(page, "enabled-catalog", CATALOG, catalog(["claude"]));
-  await fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, { version: 0, environment: null, accessModes: ["full", "ask"],
-    fullAccess: { mode: "full", args: ["--dangerously-skip-permissions"], env: {}, session: {}, approvesRequests: true } },
-  { method: "POST" });
+  await fixtureUnconfirmedAccess(page, "claude");
   await list.getByRole("switch", { name: "Enabled: Claude Code on Remote server" }).click();
   const confirmation = page.getByRole("dialog", { name: "Claude Code: access on this machine" });
   // Full access is the default; the other mode says what it means before it is chosen.
