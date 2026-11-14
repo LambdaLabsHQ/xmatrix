@@ -68,7 +68,7 @@ test("the retry excludes the environment that failed, whoever owns it", async ()
   repository.prepare = async request => request;
   repository.withHost = async (_commandId, prepared) => prepared;
   const input = { commandId: "startup-fallback:run-1", actorUserId: "actor", channelId: "channel", body: "@auto fix it",
-    excludeRegistration: failed };
+    excludeRegistrations: [failed] };
   const result = await repository.dispatchInput(input, async ({ candidates }) => {
     assert.deepEqual(candidates.map(candidate => candidate.key), [other]);
     return { key: other, model: "model" };
@@ -78,4 +78,30 @@ test("the retry excludes the environment that failed, whoever owns it", async ()
     blocked: [], offlineOnly: false });
   await assert.rejects(repository.dispatchInput(input, async () => assert.fail("nothing else can take it")),
     error => error.code === "registration_not_found");
+});
+
+test("a handoff's successor that failed to start hands the same handoff on, never to one it tried", async () => {
+  const request = { launchConditions: { machine: "mac", harness: "antigravity", launch: "force" }, presentationMessageId: "handoff-message",
+    runMetadata: { handoffSourceInstanceId: "channel:1", sourceMention: "@claude:1:handoff:@auto",
+      handoffFallbackFailed: [{ ...failed, harness: "codex" }] } };
+  const rows = [];
+  const database = { cacheMode: "disabled", async transaction(_context, callback) {
+    return callback({ async query(statement) {
+      assert.equal(statement.name, "registration_launch_handoff_fallback_origin_v1");
+      assert.deepEqual(statement.values, ["run-1", "channel", "space"]);
+      return rows;
+    } });
+  } };
+  const repository = new PostgresRegistrationLaunchRepository(database, database, placement);
+  const origin = () => repository.handoffFallbackOrigin({ commandId: "startup-fallback:run-1", channelId: "channel", runId: "run-1" });
+  assert.equal(await origin(), undefined, "a Run no handoff started");
+  const row = { actor_user_id: "actor", owner_user_id: failed.ownerUserId, machine_id: failed.machineId, harness: failed.harness,
+    launch_request_json: request, prompt: "You were started by an xMatrix handoff", handoff_context: { session: "s" } };
+  rows.push(row);
+  assert.deepEqual(await origin(), { actorUserId: "actor", body: row.prompt, tags: { machine: "mac" },
+    failed: [{ ...failed, harness: "codex" }, failed], sourceInstanceId: "channel:1",
+    presentationMessageId: "handoff-message", sourceMention: "@claude:1:handoff:@auto", handoffContext: { session: "s" } });
+  // After three successors that could not start, the handoff stops with its notices.
+  request.runMetadata.handoffFallbackFailed = ["codex", "cursor", "opencode"].map(harness => ({ ...failed, harness }));
+  assert.equal(await origin(), undefined);
 });

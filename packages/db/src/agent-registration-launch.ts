@@ -188,6 +188,8 @@ export const SILENT_SUMMONS = 3;
 export const SILENT_SUMMON_WINDOW_HOURS = 24;
 /** How far back its summons are read. */
 export const SILENT_SUMMON_HISTORY_DAYS = 7;
+/** How many successors one handoff tries when each fails to start. */
+export const HANDOFF_FALLBACK_ATTEMPTS = 3;
 export type RegistrationLaunchChooser = (input: {
   message: string; sourceSequence?: number; tags: AutoLaunchTags; candidates: RegistrationLaunchCandidate[];
   /** Registrations seen but not offered, so an empty list can name the real cause. */
@@ -907,8 +909,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   async dispatchInput(input: {
     /** The predecessor's stable Agent registration cannot receive its own work. */
     excludeSourceInstanceId?: string;
-    /** An environment that cannot take this work (it just failed to start it). */
-    excludeRegistration?: SpaceAgentRegistrationKey;
+    /** Environments that cannot take this work (each just failed to start it). */
+    excludeRegistrations?: readonly SpaceAgentRegistrationKey[];
     commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
     runId?: string; instanceId?: string;
     initialMessageId?: string; presentationMessageId?: string;
@@ -965,7 +967,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const listed = await this.candidatesFor({ managedWorkspace: true, requiredHostCapabilities }, repositoryCatalog);
     const candidates = listed.offered
       .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded))
-      .filter(candidate => !input.excludeRegistration || !sameAgentRegistration(candidate.key, input.excludeRegistration));
+      .filter(candidate => !input.excludeRegistrations?.some(failed => sameAgentRegistration(candidate.key, failed)));
     if (!candidates.length) {
       // Say which requirement left nothing, rather than that nothing exists.
       if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
@@ -1044,6 +1046,47 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     return { actorUserId, sourceMessageId, body, sourceMention: body.slice(selection.start, options.end), tags,
       failed: parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
         machineId: row.machine_id, harness: row.harness }) };
+  }
+
+  /**
+   * A handoff's successor that failed to start: the same handoff, for the
+   * next Agent. The source has already stopped, so a successor that cannot
+   * take the work must not be the end of it. Read from the failed launch
+   * itself: its prompt and the predecessor's conversation from its spawn
+   * payload, its conditions from the request it was prepared with. `failed`
+   * is every environment this handoff has tried, so a retry of a retry never
+   * returns to one; undefined after HANDOFF_FALLBACK_ATTEMPTS of them, and for
+   * a Run no handoff started.
+   */
+  async handoffFallbackOrigin(input: { commandId: string; channelId: string; runId: string }): Promise<{
+    actorUserId: string; body: string; tags: AutoLaunchTags; sourceInstanceId: string; presentationMessageId?: string;
+    sourceMention?: string; handoffContext?: Record<string, unknown>; failed: SpaceAgentRegistrationKey[] } | undefined> {
+    const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
+    const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.handoff-fallback-origin",
+      placement: this.placement }, tx => tx.query({ name: "registration_launch_handoff_fallback_origin_v1", text: `SELECT
+        intent.actor_user_id,intent.owner_user_id,intent.machine_id,intent.harness,intent.launch_request_json,
+        launch.spawn_payload_json->>'prompt' AS prompt,launch.spawn_payload_json->'handoffContext' AS handoff_context
+        FROM data.registration_launch_intents intent JOIN data.agent_launches launch ON launch.run_id=intent.run_id
+        WHERE intent.run_id=$1 AND intent.channel_id=$2 AND intent.space_id=$3 AND intent.state='committed'
+          AND intent.launch_request_json->'runMetadata'->>'handoffSourceInstanceId' IS NOT NULL`,
+      values: [runId, channelId, this.placement.spaceId], maxRows: 1 })))[0];
+    const request = row?.launch_request_json;
+    if (!row || !request || typeof request !== "object" || Array.isArray(request) || typeof row.prompt !== "string") return undefined;
+    const metadata = request.runMetadata && typeof request.runMetadata === "object" ? request.runMetadata as Record<string, unknown> : {};
+    const tried = (Array.isArray(metadata.handoffFallbackFailed) ? metadata.handoffFallbackFailed : []).flatMap(key => {
+      try { return [parseSpaceAgentRegistrationKey(key)]; } catch { return []; }
+    });
+    const failed = [...tried, parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
+      machineId: row.machine_id, harness: row.harness })];
+    if (failed.length > HANDOFF_FALLBACK_ATTEMPTS) return undefined;
+    // The author's own conditions bind the next choice; the harness the failed one was is not one of them.
+    const { launch: _launch, harness: _harness, ...tags } = (request.launchConditions ?? {}) as AutoLaunchTags;
+    const context = row.handoff_context;
+    return { actorUserId: String(row.actor_user_id), body: row.prompt, tags, failed,
+      sourceInstanceId: String(metadata.handoffSourceInstanceId),
+      ...(typeof request.presentationMessageId === "string" ? { presentationMessageId: request.presentationMessageId } : {}),
+      ...(typeof metadata.sourceMention === "string" ? { sourceMention: metadata.sourceMention } : {}),
+      ...(context && typeof context === "object" && !Array.isArray(context) ? { handoffContext: context as Record<string, unknown> } : {}) };
   }
 
   /** A message that summons nobody: the harness Jev reads its author wants

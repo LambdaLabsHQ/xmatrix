@@ -63,7 +63,8 @@ test("a summon reaches its machine whatever was last said about its program's si
     assert.ok(mention.startsWith(unanswered.summon.sourceMention), unanswered.summon.sourceMention);
     await inTestTransaction(tx => tx.query({ text: `UPDATE data.agent_launches SET first_reply_at=now() WHERE run_id=$1`,
       values: [first.runId] }));
-    assert.deepEqual(await refused(), { signedOut: unanswered.signedOut });
+    assert.equal(unanswered.unanswered, true);
+    assert.deepEqual(await refused(), { signedOut: unanswered.signedOut, unanswered: false });
     const marked = await inTestTransaction(tx => tx.query({ text: `SELECT metadata_json ? 'signedOutAt' AS marked
       FROM data.runs WHERE run_id=$1`, values: [first.runId] }));
     assert.equal(marked[0].marked, false);
