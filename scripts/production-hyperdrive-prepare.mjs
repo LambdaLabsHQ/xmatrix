@@ -24,11 +24,13 @@ export function originUserMatches(actual, role) {
 }
 
 // Credential-free expectations shared by preparation and release readback.
-// Both shards share one PlanetScale origin with max_connections 50 (3 kept for
-// superusers); the provider's own admin and exporter sessions hold about 4 more.
-// Hyperdrive's limits are soft: on 2026-10-08 the primary pool held 36 against
-// a limit of 30, which with 40 configured left no slot for release verification
-// or migrations. The limits total 32 so an overshoot of that size still fits.
+// Both shards share one PlanetScale origin. Its max_connections is the
+// provider's to set: 50 until the 2026-11-14 maintenance restart, 25 since (3
+// kept for superusers); the provider's own admin and exporter sessions hold
+// about 4 more. Hyperdrive's limits are soft: on 2026-10-08 the primary pool
+// held 36 against a limit of 30. The limits total 13, so an overshoot of that
+// size (16) plus the provider's 4 still leaves slots for release verification
+// and migrations.
 export function productionHyperdrivePolicy(expectedOrigin = productionPostgresOrigin()) {
   const origin = {
     scheme: "postgresql", host: expectedOrigin.host, port: Number(expectedOrigin.port),
@@ -39,13 +41,13 @@ export function productionHyperdrivePolicy(expectedOrigin = productionPostgresOr
       name: "xmatrix-prod-fresh",
       origin: { ...origin },
       caching: { disabled: true }, mtls: { sslmode: "require" },
-      origin_connection_limit: 24,
+      origin_connection_limit: 8,
     },
     RELAY_POSTGRES_SHARD_1: {
       name: "xmatrix-prod-shard-1-fresh",
       origin: { ...origin, database: "xmatrix_prod_shard_1", user: "xmatrix_prod_shard_1_runtime" },
       caching: { disabled: true }, mtls: { sslmode: "require" },
-      origin_connection_limit: 8,
+      origin_connection_limit: 5,
     },
   };
 }
