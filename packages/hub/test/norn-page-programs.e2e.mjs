@@ -154,14 +154,22 @@ test("a program whose conversation a person deleted stays ended, says so on the 
   // The person deletes the program's conversation: the program goes with it, and its block stays on the page.
   await call(`${pages.replace(/\/pages$/u, "")}/channels/${one.channelId}/deletion`, "POST", { confirmation: "DELETE", acknowledge: true, name: "Reminders · one" });
   await until(async () => (await programs()).find(program => program.name === "one" && program.state === "not_started"), "the program's removal");
-  // The next save starts the new block, and does not bring the deleted one back.
+  // The next save starts the new block, does not bring the deleted one back, and tells whoever saved why it does not run.
+  const deleted = "This program's conversation was deleted, which ended it. Rename the block to run it again.";
   const saved = await edit(`# Reminders\n\n${wait("one")}\n\n${wait("two")}\n`);
-  assert.deepEqual(saved.scheduleProblems, []);
+  assert.deepEqual(saved.scheduleProblems, [{ source: "```norn run one", problem: deleted }]);
   const now = await until(async () => { const all = await programs(); return all.some(program => program.name === "two" && program.state === "running") ? all : null; }, "the second program");
   assert.deepEqual(now.map(program => [program.name, program.state, program.problem]),
-    [["one", "not_started", "This program's conversation was deleted, which ended it. Rename the block to run it again."], ["two", "running", undefined]]);
+    [["one", "not_started", deleted], ["two", "running", undefined]]);
   // Renamed, the block is another program, with a conversation of its own.
   await edit(`# Reminders\n\n${wait("uno")}\n\n${wait("two")}\n`);
   const renamed = await until(async () => (await programs()).find(program => program.name === "uno" && program.state === "running"), "the renamed program");
   assert.notEqual(renamed.channelId, one.channelId);
+  // Renamed to a name that names no program, the block says so where it is saved and where the page shows it, never "starting".
+  const misnamed = await edit(`# Reminders\n\n${wait("uno")}\n\n${wait("2nd")}\n`);
+  assert.deepEqual(misnamed.scheduleProblems.map(problem => problem.source), ["```norn run 2nd"]);
+  assert.match(misnamed.scheduleProblems[0].problem, /names no program/u);
+  const shown = await programs();
+  assert.deepEqual(shown.map(program => [program.name, program.state, /names no program/u.test(program.problem ?? "")]),
+    [["uno", "running", false], ["2nd", "not_started", true]]);
 }));
