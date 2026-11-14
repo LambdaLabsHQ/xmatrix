@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: an Agent's `page read` shows the Page's programs
+
+`xmatrix page read` printed no `programs:` section when an Agent ran it: the
+route it reads was not among those an Agent Run's credential may call, and
+the CLI prints nothing when that read is refused. A person's CLI showed it.
+The route is now allowed for an Agent Run, read-only. Hub only. Recovery is
+a CI-validated beta Hub reverting this change.
+
 ## Unreleased: an Instance whose first start never became ready is not started again by each message
 
 A harness that refused to start because it was not signed in left its new

@@ -8,6 +8,9 @@ test("an Agent Run reads, edits, links and arranges pages as its owner may", () 
   assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1"), true);
   assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1/history"), true);
   assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1/awareness"), true);
+  // An Agent reads how a page's programs stand, as `page read` prints them.
+  assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1/programs"), true);
+  assert.equal(allowed("POST", "/api/spaces/space-1/pages/page-1/programs"), false);
   assert.equal(allowed("GET", "/api/spaces/space-1/pages/page-1/changes"), true);
   assert.equal(allowed("GET", `/api/spaces/space-1/pages/page-1/media/${"a".repeat(64)}.png`), true,
     "an Agent reads a file pasted into the page, as `page read` saves it");
