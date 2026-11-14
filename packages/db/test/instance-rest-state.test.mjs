@@ -30,6 +30,11 @@ test("a Run's end decides its Instance's rest", () => {
   assert.equal(end({ metadata: { ...resumable, stopRequest: { sourceMessageId: "kill" } } }), "stopped");
   assert.equal(end({ previousRunStatus: "starting" }), null, "a Run that never connected failed at startup");
   assert.equal(end({ nextRunStatus: "completed" }), null);
+  // Its first Run connected, and its program then refused to start (signed out): no message should start it again.
+  assert.equal(end({ runId: "channel:7#1", statusPhase: "acp_app_starting" }), null);
+  assert.equal(end({ runId: "channel:7#1", statusPhase: "turn_running" }), "interrupted");
+  // An Instance that has worked and fails a later start stays wakeable: a message after the sign-in resumes it.
+  assert.equal(end({ runId: "channel:7#2", statusPhase: "acp_app_starting" }), "interrupted");
 });
 
 function lifecycleDatabase(run) {

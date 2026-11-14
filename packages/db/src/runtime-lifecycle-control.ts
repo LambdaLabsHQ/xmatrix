@@ -558,8 +558,9 @@ export class PostgresMachineLifecycleRepository {
     // A Run that ended for good waits on nobody. An Instance a message can still
     // wake (sleeping, interrupted) keeps its waits: the answer is what wakes it.
     if (run.instance_id && input.eventType === "machine_run_exited" && status &&
-        !["sleeping", "interrupted"].includes(String(runEndRestState({ metadata: body,
-          previousRunStatus: String(run.status), nextRunStatus: status, restReason: input.payload.restReason })))) {
+        !["sleeping", "interrupted"].includes(String(runEndRestState({ metadata: body, runId,
+          previousRunStatus: String(run.status), nextRunStatus: status, restReason: input.payload.restReason,
+          statusPhase: input.payload.statusPhase })))) {
       await releaseDeclaredWaits(tx, { spaceId: input.spaceId, channelId: input.channelId, authorKind: "agent",
         authorIds: [String(run.instance_id)], at: input.at });
     }
@@ -594,8 +595,8 @@ export class PostgresMachineLifecycleRepository {
     let rest: InstanceRestState | null = null;
     let refineOnly = false;
     if (input.eventType === "machine_run_exited" && nextRunStatus) {
-      rest = runEndRestState({ metadata: body, previousRunStatus, nextRunStatus,
-        restReason: input.payload.restReason });
+      rest = runEndRestState({ metadata: body, previousRunStatus, nextRunStatus, runId,
+        restReason: input.payload.restReason, statusPhase: input.payload.statusPhase });
     } else if (input.eventType === "machine_run_exited" && input.payload.restReason === "sleeping" &&
         previousRunStatus === "exited" && resumableChannelRun(body)) {
       rest = "sleeping";
