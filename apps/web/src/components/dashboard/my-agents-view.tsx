@@ -35,6 +35,7 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
+import { AgentAccessLines, FULL_ACCESS_EFFECT, confirmAccessForAdd } from "./agent-access";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
 import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
@@ -173,6 +174,7 @@ export function MyAgentsView({
   } else if (chosen) {
     const { registration, id, activity, harness, title, machineInLine } = chosen;
     const status = registrationStatus(registration);
+    const harnessName = AGENT_PRESETS.find((preset) => preset.id === harness)?.displayName ?? harness;
     const ownerPreset = registration.key.ownerUserId === currentUserId
       ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
     const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
@@ -302,6 +304,24 @@ export function MyAgentsView({
             </p>
           )}
         </ToolDetailSection>
+        {registration.access && (
+          <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
+            <div className="space-y-2 text-sm" data-testid="agent-access">
+              <p>xMatrix starts {harnessName} like this:</p>
+              <AgentAccessLines grant={registration.access} name={harnessName} />
+              {registration.access.mode === "full" && <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>}
+              {/* Added before its owner was asked: it runs as it always did until they read this and confirm. */}
+              {!registration.access.confirmed && (registration.canManageOwnerGrant && token ? (
+                <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
+                  const key = registration.key;
+                  const confirmed = await confirmAccessForAdd(token, [{ key, name: harnessName }], "Confirm full access");
+                  const mode = confirmed?.get(key.harness);
+                  if (mode) void command.run(key, { kind: "access", mode });
+                }}>Review and confirm</Button>
+              ) : <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>)}
+            </div>
+          </ToolDetailSection>
+        )}
       </ToolDetail>
     );
   } else if (catalog.data && rows.length === 0 && newCandidates.length === 0 && !addsOnThisMachine) {

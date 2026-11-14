@@ -1629,6 +1629,11 @@ pub enum AgentCommand {
         /// on this machine first when it is not one yet.
         #[arg(long)]
         workspace: Option<PathBuf>,
+        /// Confirm, as this machine's owner, what the Agent may do on it:
+        /// `full` starts the harness with what xMatrix adds so it works without
+        /// asking, which the command prints first. Asked at a terminal when omitted
+        #[arg(long, value_parser = ["full"])]
+        access: Option<String>,
     },
     /// Show one Agent's Space configuration and access
     Show {
@@ -2568,6 +2573,7 @@ mod registration_argument_tests {
                     runtime: None,
                     args,
                     workspace,
+                    access: None,
                 },
         }) = cli.command
         else {

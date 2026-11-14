@@ -159,9 +159,15 @@ export class PostgresAgentRegistrationRepository {
       await tx.query({ name: "registration_create_capacity_v1", text: `INSERT INTO control.machine_execution_capacity
         (owner_user_id,machine_id,max_concurrent,version) VALUES ($1,$2,1,1)
         ON CONFLICT (owner_user_id,machine_id) DO NOTHING`, values: [key.ownerUserId, key.machineId], maxRows: 0 });
-      await tx.query({ name: "registration_create_environment_v1", text: `INSERT INTO control.agent_registration_environments
+      // An existing declaration is kept. The one thing an add writes onto it is
+      // the access mode its owner confirms with this add, when it holds none.
+      await tx.query({ name: "registration_create_environment_v2", text: `INSERT INTO control.agent_registration_environments AS held
         (owner_user_id,machine_id,harness,declaration_json,version) VALUES ($1,$2,$3,$4::jsonb,1)
-        ON CONFLICT (owner_user_id,machine_id,harness) DO NOTHING`,
+        ON CONFLICT (owner_user_id,machine_id,harness) DO UPDATE SET
+          declaration_json=jsonb_set(held.declaration_json,'{launch,access}',EXCLUDED.declaration_json->'launch'->'access'),
+          version=held.version+1,updated_at=clock_timestamp()
+        WHERE jsonb_typeof(held.declaration_json->'launch')='object' AND NOT (held.declaration_json->'launch' ? 'access')
+          AND EXCLUDED.declaration_json->'launch' ? 'access'`,
       values: [key.ownerUserId, key.machineId, key.harness, JSON.stringify(environment)], maxRows: 0 });
       const rows = await tx.query({ name: "registration_create_workspaces_v1", text: `SELECT workspace_id,canonical_cwd
         FROM data.workspaces WHERE owner_user_id=$1 AND machine_id=$2 ORDER BY workspace_id LIMIT 101`,

@@ -49,3 +49,30 @@ the preset's full grant for a Hub that sends none.
 The registration catalog reports the same grant as
 `AgentRegistrationSummary.access`, with `confirmed` false while the
 registration still runs on its unasked `full`.
+
+## Confirmation
+
+What an Agent may do on a machine is its owner's to confirm, once per harness
+on that machine, when the Agent is added. Every add path shows the grant the
+Hub resolves for full access (`fullAccess` on the environment query) before it
+writes anything, and writes the confirmed mode with the add:
+
+- `xmatrix agent add` prints the grant's lines. `--access full` confirms; at a
+  terminal the command asks; anywhere else it adds nothing and says what to
+  show the owner.
+- The Web asks in one dialog (`agent-access.tsx`) from the New agent page, a
+  harness switch, an install that turns its harness on, and "Bring them in",
+  which asks once for every harness it is about to add.
+- An Agent Run never confirms for its owner. Its add is accepted only for a
+  harness already confirmed on that machine and never writes a mode; otherwise
+  the Hub refuses and names the command the owner runs.
+
+`create` keeps an existing declaration and writes one thing onto it: the
+confirmed mode, when the declaration holds none. A harness confirmed on a
+machine is not asked about again when it is added to another Space.
+
+An Agent added before the confirmation existed keeps running with the full
+access it had. Its page and `xmatrix agent list` / `agent show` report that
+access and what it adds, marked unconfirmed until its owner reads and confirms
+it there. A client that predates the confirmation can still add without one;
+that add is reported the same way.

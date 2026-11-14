@@ -285,6 +285,23 @@ integration("composite registration commands preserve identity, configuration an
     assert.deepEqual(createdAccess.grant_limits.workspaces, ["ws-1", "ws-2"]);
     assert.equal((await client.query(`SELECT declaration_json->'launch'->>'runtime' AS runtime FROM
       ${schema}.agent_registration_environments WHERE harness='gemini'`)).rows[0].runtime, "gemini");
+    // Its owner was not asked what it may do on the machine, so the catalog
+    // reports the full access it runs with as unconfirmed. An add that carries
+    // a confirmed mode writes it onto the kept declaration, and only once: the
+    // rest of the declaration and a mode already held are never overwritten.
+    const launchAccess = async () => (await repo.list(listing)).registrations.find(row => row.key.harness === "gemini").access;
+    assert.deepEqual([(await launchAccess()).mode, (await launchAccess()).confirmed, (await launchAccess()).approvesRequests], ["full", false, true]);
+    const confirming = { ...creation, commandId: "create-gemini-confirm", environment: { ...creation.environment,
+      models: [], launch: { runtime: "other-gemini", access: "full" } } };
+    await repo.create(confirming);
+    const held = async () => (await client.query(`SELECT declaration_json AS declaration,version FROM
+      ${schema}.agent_registration_environments WHERE harness='gemini'`)).rows[0];
+    assert.deepEqual([(await held()).declaration.launch, (await held()).declaration.models, Number((await held()).version)],
+      [{ runtime: "gemini", runtimeArgs: [], access: "full" }, ["model-g"], 2]);
+    assert.equal((await launchAccess()).confirmed, true);
+    await repo.create({ ...confirming, commandId: "create-gemini-ask", environment: { ...confirming.environment,
+      launch: { runtime: "gemini", access: "ask" } } });
+    assert.deepEqual([(await held()).declaration.launch.access, Number((await held()).version)], ["full", 2]);
     // A Workspace registered after the Agent was added reaches it when the owner
     // adds it again (#3162): configured, granted and allowed by the Space.
     await client.query(`INSERT INTO ${schema}.workspaces VALUES ('ws-3','owner','machine','/repo/three')`);

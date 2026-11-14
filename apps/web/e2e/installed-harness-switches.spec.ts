@@ -14,6 +14,10 @@ const catalog = (harnesses: string[]) => ({ registrations: harnesses.map(registr
   ({ harness, models: [], locations: [registration(harness)] })) });
 const CATALOG = /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?[^#]*)?$/u;
 const COMMANDS = "**/api/xmatrix/spaces/*/agent-registrations/commands";
+const ENVIRONMENT = "**/api/xmatrix/agent-environments/query";
+/** What the Hub answers for a harness its owner has not confirmed on the machine. */
+const unconfirmed = (args: string[] = []) => ({ version: 0, environment: null,
+  fullAccess: { mode: "full", args, env: {}, session: { sandbox: "danger-full-access" }, approvesRequests: false } });
 
 function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT | typeof E2E_MOBILE_CONTEXT) {
   test.describe(name, () => {
@@ -28,9 +32,17 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
       expect(await fixtureRequestBodies(page, "enable-command")).toEqual([]);
       await fixtureJson(page, "enabled-catalog", CATALOG, catalog(["codex"]));
+      await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
       await codex.click();
+      // Its owner reads what full access adds before anything is written.
+      const confirmation = page.getByRole("dialog", { name: "Codex: full access on this machine?" });
+      await expect(confirmation.getByTestId("agent-access-lines")).toContainText("Starts each session with sandbox=danger-full-access");
+      expect(await fixtureRequestBodies(page, "enable-command")).toEqual([]);
+      await page.screenshot({ path: test.info().outputPath(`access-confirmation-${name}.png`) });
+      await confirmation.getByRole("button", { name: "Add with full access" }).click();
       await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
-        expect.objectContaining({ action: "create", key: key("codex") }),
+        expect.objectContaining({ action: "create", key: key("codex"),
+          environment: expect.objectContaining({ launch: expect.objectContaining({ access: "full" }) }) }),
       ]);
       await expect(list.getByRole("switch")).toHaveCount(1);
       await expect(page.getByTestId("agent-row").filter({ hasText: "Remote server" })).toBeVisible();
@@ -49,7 +61,10 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
       await fixtureRule(page, { id: "enabled-catalog", pattern: CATALOG, responder: { kind: "sequence",
         responses: [catalog(["claude"]), catalog(["claude", "codex"])].map((json) => ({ json })) } });
+      await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
       await bring.click();
+      // One question covers every harness about to be added.
+      await page.getByRole("dialog", { name: "Full access on this machine?" }).getByRole("button", { name: "Add 2 with full access" }).click();
       await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toEqual([
         expect.objectContaining({ action: "create", key: key("claude") }),
         expect.objectContaining({ action: "create", key: key("codex") }),
@@ -71,7 +86,9 @@ test("a refused owner switch stays off and reports the server failure", async ({
     responder: { kind: "static", status: 403, json: { error: "Machine owner access was revoked" } } });
   const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
   const codex = list.getByRole("switch", { name: "Enabled: Codex on Remote server" });
+  await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
   await codex.click();
+  await page.getByRole("button", { name: "Add with full access" }).click();
   await expect(list.getByRole("alert")).toHaveText("Couldn't save the harness switch. Machine owner access was revoked.");
   await expect(codex).toHaveAttribute("aria-checked", "false");
 });
@@ -90,14 +107,42 @@ test("bulk failure stays visible and retry continues with the remaining pair", a
   await fixtureRule(page, { id: "partial-enable", pattern: COMMANDS, method: "POST", responder: { kind: "sequence",
     responses: [{ json: { version: 1 } }, { status: 409, json: { error: "Space policy changed. Try again." } }] } });
   await fixtureJson(page, "partial-catalog", CATALOG, catalog(["claude"]));
+  await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
   await bring.click();
+  await page.getByRole("button", { name: "Add 2 with full access" }).click();
   await expect(page.getByTestId("installed-harness-switches").getByRole("alert")).toHaveText("Couldn't save the harness switch. Space policy changed. Try again.");
   await expect(bring).toBeVisible();
   await fixtureJson(page, "retry-enable", COMMANDS, { version: 1 }, { method: "POST" });
   await fixtureJson(page, "retry-catalog", CATALOG, catalog(["claude", "codex"]));
   await bring.click();
+  await page.getByRole("button", { name: "Add with full access" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "retry-enable")).toEqual([
     expect.objectContaining({ action: "create", key: key("codex") }),
   ]);
   await expect(bring).toHaveCount(0);
+});
+
+test("declining the access question adds nothing, and a harness confirmed earlier is not asked again", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
+  await page.goto("/app/personal-sspaceperso/agents");
+  const list = page.getByRole("region", { name: "Agents", exact: true }).getByTestId("installed-harness-switches");
+  const codex = list.getByRole("switch", { name: "Enabled: Codex on Remote server" });
+  await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
+  await fixtureJson(page, "environment", ENVIRONMENT, unconfirmed(), { method: "POST" });
+  await codex.click();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(codex).toHaveAttribute("aria-checked", "false");
+  await expect(list.getByRole("alert")).toHaveCount(0);
+  expect(await fixtureRequestBodies(page, "enable-command")).toEqual([]);
+  // Confirmed for this machine in another Space: the add writes no mode and asks nothing.
+  await fixtureJson(page, "environment-confirmed", ENVIRONMENT, { ...unconfirmed(), version: 2,
+    environment: { schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
+      launch: { runtime: "codex", runtimeArgs: [], access: "full" } } }, { method: "POST" });
+  await fixtureJson(page, "enabled-catalog", CATALOG, catalog(["codex"]));
+  await codex.click();
+  await expect.poll(() => fixtureRequestBodies(page, "enable-command")).toHaveLength(1);
+  const [create] = await fixtureRequestBodies(page, "enable-command") as Array<{ environment: { launch: Record<string, unknown> } }>;
+  expect(create!.environment.launch.access).toBeUndefined();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
 });

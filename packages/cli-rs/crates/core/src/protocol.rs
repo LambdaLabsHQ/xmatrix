@@ -50,6 +50,9 @@ impl HubRoutes {
     pub const CROSS_SPACE_READ_REQUESTS: &str = "/api/cross-space-read/requests";
 }
 
+/// A machine owner's harness environment: its launch and confirmed access.
+pub const AGENT_ENVIRONMENT_QUERY_ROUTE: &str = "/api/agent-environments/query";
+
 /// A Space's Agents: its registration catalog, one registration's details, and
 /// the commands that change them.
 pub fn space_agent_registrations_route(space_id: &str) -> String {

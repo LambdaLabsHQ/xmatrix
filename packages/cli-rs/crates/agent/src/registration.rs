@@ -1,4 +1,5 @@
 use super::*;
+use std::io::{IsTerminal, Write};
 use xmatrix_cli_core::protocol;
 
 /// A field of the registration of the Run this CLI runs inside.
@@ -66,7 +67,9 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             runtime,
             args,
             workspace,
+            access,
         } => {
+            let in_run = run_owner.is_some();
             let owner_user_id = match run_owner {
                 Some(owner) => owner,
                 None => {
@@ -109,6 +112,14 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
                 ),
                 None => None,
             };
+            // What the Agent may do on this machine is its owner's to confirm,
+            // once per harness here. Inside a Run the Hub decides: a Run never
+            // confirms for its owner.
+            let access = if in_run {
+                None
+            } else {
+                confirm_access(hub_url, token, &key, preset, access).await?
+            };
             let body = add_command(
                 &key,
                 name.unwrap_or_else(|| preset.id.clone()),
@@ -120,6 +131,7 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
                         args
                     },
                     backend: preset.backend.clone(),
+                    access,
                 },
                 default_workspace,
             );
@@ -145,6 +157,23 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
         } => {
             let key = resolve_key(hub_url, &space, owner, machine, harness).await?;
             let mut value = details(hub_url, token, &space, &key).await?;
+            // What a launch of it adds on its machine, as the Hub resolves it.
+            let catalog: Value = http::request_json(
+                &with_route(hub_url, &protocol::space_agent_registrations_route(&space)),
+                "GET",
+                Some(token),
+                None,
+            )
+            .await?;
+            if let Some(listed) = catalog["registrations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|listed| listed["key"] == key)
+                && !listed["access"].is_null()
+            {
+                value["launchAccess"] = listed["access"].clone();
+            }
             if connections {
                 let route = format!(
                     "/api/spaces/{}/app-connections",
@@ -276,24 +305,27 @@ async fn list(
         .max()
         .unwrap_or(7);
     println!(
-        "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
+        "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {:<6} {}",
         "MACHINE".bold(),
         "ONLINE".bold(),
         "HARNESS".bold(),
         "NAME".bold(),
         "STATE".bold(),
         "QUOTA".bold(),
+        "ACCESS".bold(),
         "OWNER".bold()
     );
     for registration in &registrations {
         println!(
-            "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
+            "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {:<6} {}",
             text(&registration["machineName"]),
             online_label(registration),
             text(&registration["key"]["harness"]),
             text(&registration["displayName"]),
             state_label(registration),
             quota_label(registration),
+            // What its launches may do on its Machine; `agent show` lists what that adds.
+            text(&registration["access"]["mode"]),
             text(&registration["ownerName"])
         );
     }
@@ -508,6 +540,88 @@ struct AgentLaunch {
     runtime: String,
     args: Vec<String>,
     backend: String,
+    /// The access mode its owner confirmed with this add.
+    access: Option<String>,
+}
+
+/// What full access adds to a harness's launch, word for word as the Hub
+/// resolves it (`AgentAccessGrant`), then what that means on the machine.
+fn access_disclosure(name: &str, grant: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for arg in grant["args"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        lines.push(format!("  adds the argument               {arg}"));
+    }
+    for (key, value) in grant["env"].as_object().into_iter().flatten() {
+        lines.push(format!(
+            "  sets the environment variable    {key}={}",
+            value.as_str().unwrap_or_default()
+        ));
+    }
+    for (key, value) in grant["session"].as_object().into_iter().flatten() {
+        lines.push(format!(
+            "  starts each session with         {key}={}",
+            value.as_str().unwrap_or_default()
+        ));
+    }
+    if lines.is_empty() {
+        lines.push("  adds no argument or environment variable to its launch".into());
+    }
+    if grant["approvesRequests"].as_bool() == Some(true) {
+        lines.push(format!("  answers every permission request {name} makes with allow"));
+    }
+    lines.insert(0, format!("With full access, xMatrix starts {name} like this:"));
+    lines.push(format!(
+        "{name} then works without asking before it changes a file or runs a command, and xMatrix sets no limit on which files it reaches."
+    ));
+    lines
+}
+
+/// The access mode this add confirms, or none when the owner already
+/// confirmed one for this harness on this machine. The disclosure is printed
+/// before anything is written; without `--access` a person at a terminal is
+/// asked, and anything else is refused with what to show the owner.
+async fn confirm_access(
+    hub_url: &str,
+    token: &str,
+    key: &Value,
+    preset: &AgentPreset,
+    access: Option<String>,
+) -> error::Result<Option<String>> {
+    let held: Value = http::request_json(
+        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_QUERY_ROUTE),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
+            "harness": key["harness"] })),
+    )
+    .await?;
+    if let Some(mode) = held["environment"]["launch"]["access"].as_str() {
+        println!(
+            "Access on this machine: {mode}, as its owner confirmed for {} earlier",
+            preset.display_name
+        );
+        return Ok(None);
+    }
+    for line in access_disclosure(&preset.display_name, &held["fullAccess"]) {
+        eprintln!("{line}");
+    }
+    if access.is_some() {
+        return Ok(access);
+    }
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        return Err(CliError::Launch(
+            "Nothing was added. This machine's owner confirms the access above first: show it to them, and once they agree run the same command with --access full".into(),
+        ));
+    }
+    eprint!("Add {} with full access on this machine? [y/N] ", preset.display_name);
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "y" | "yes") {
+        Ok(Some("full".into()))
+    } else {
+        Err(CliError::Launch("Nothing was added".into()))
+    }
 }
 
 /// The Hub's `create` command: declare the harness on this machine, offer it
@@ -524,6 +638,9 @@ fn add_command(
     });
     if !launch.backend.trim().is_empty() {
         launch_json["backend"] = Value::String(launch.backend);
+    }
+    if let Some(access) = launch.access {
+        launch_json["access"] = Value::String(access);
     }
     let mut body = serde_json::json!({
         "action": "create",
@@ -622,6 +739,7 @@ mod tests {
                 runtime: "codex".into(),
                 args: vec!["--full-auto".into()],
                 backend: "codex-app".into(),
+                access: Some("full".into()),
             },
             Some("/repo".into()),
         );
@@ -631,7 +749,7 @@ mod tests {
         assert_eq!(body["defaultWorkspace"], "/repo");
         assert_eq!(
             body["environment"]["launch"],
-            serde_json::json!({"runtime":"codex","runtimeArgs":["--full-auto"],"backend":"codex-app"})
+            serde_json::json!({"runtime":"codex","runtimeArgs":["--full-auto"],"backend":"codex-app","access":"full"})
         );
         assert_eq!(body["environment"]["enabled"], true);
         let no_backend = add_command(
@@ -641,11 +759,41 @@ mod tests {
                 runtime: "x".into(),
                 args: vec![],
                 backend: " ".into(),
+                access: None,
             },
             None,
         );
         assert!(no_backend["environment"]["launch"].get("backend").is_none());
+        // Without a confirmation the add writes no mode: a Run never confirms
+        // for its owner, and a harness confirmed earlier keeps its mode.
+        assert!(no_backend["environment"]["launch"].get("access").is_none());
         assert!(no_backend.get("defaultWorkspace").is_none());
+    }
+
+    #[test]
+    fn the_access_disclosure_names_everything_the_grant_adds() {
+        let lines = access_disclosure(
+            "DeepSeek Harness",
+            &serde_json::json!({"mode":"full","args":["--flag"],"env":{"DSH_PERMISSION_MODE":"danger-full-access"},
+                "session":{"sandbox":"danger-full-access"},"approvesRequests":true}),
+        )
+        .join("\n");
+        for written in [
+            "--flag",
+            "DSH_PERMISSION_MODE=danger-full-access",
+            "sandbox=danger-full-access",
+            "answers every permission request DeepSeek Harness makes with allow",
+        ] {
+            assert!(lines.contains(written), "{written}");
+        }
+        // A harness xMatrix passes nothing to is said to get nothing, not left blank.
+        let bare = access_disclosure(
+            "OpenCode",
+            &serde_json::json!({"mode":"full","args":[],"env":{},"session":{},"approvesRequests":true}),
+        )
+        .join("\n");
+        assert!(bare.contains("adds no argument or environment variable"));
+        assert!(bare.contains("answers every permission request OpenCode makes with allow"));
     }
 
     #[test]

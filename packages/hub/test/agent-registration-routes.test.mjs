@@ -9,12 +9,13 @@ import { getAgentRegistration, refreshAgentRegistrationQuota } from "../src/agen
 const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const body = { action: "offer", key, commandId: "offer", displayName: "codex" };
 
-function fixture(user = { id: "owner" }) {
+function fixture(user = { id: "owner" }, environment = undefined) {
   const calls = [], app = new Hono();
   const record = name => async (_env, input) => { calls.push({ name, input }); return { key }; };
   registerAgentRegistrationRoutes(app, { authenticate: async () => user,
     control: record("control"), get: record("get"), describe: record("describe"),
-    changeEnvironment: record("changeEnvironment"), getEnvironment: record("getEnvironment") });
+    changeEnvironment: record("changeEnvironment"),
+    getEnvironment: environment === undefined ? record("getEnvironment") : async () => ({ key, version: 1, environment }) });
   return { calls, request: (payload = body, action = "commands", physical = false) => app.request(
     `${physical ? "/api/agent-environments" : "/api/spaces/space/agent-registrations"}/${action}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }, {}) };
@@ -72,11 +73,24 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   const create = { action: "create", key, commandId: "create", displayName: "codex", environment: {
     schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
     launch: { runtime: "codex", runtimeArgs: [], sandboxMode: "off", requestReviewer: "low-risk-auto" } } };
-  const agent = fixture({ id: "agent-run:run", agentRun: run });
-  const added = await agent.request(create);
+  // What an Agent may do on a machine is its owner's to confirm. A Run adds
+  // only a harness whose access its owner confirmed there, and the refusal
+  // names what the owner runs.
+  for (const held of [null, { launch: { runtime: "codex", runtimeArgs: [] } }]) {
+    const unconfirmed = fixture({ id: "agent-run:run", agentRun: run }, held);
+    const refused = await unconfirmed.request({ ...create, environment: { ...create.environment,
+      launch: { runtime: "codex", runtimeArgs: [], access: "full" } } });
+    assert.equal(refused.status, 403);
+    assert.match((await refused.json()).error, /xmatrix agent add codex --space space/u);
+    assert.equal(unconfirmed.calls.length, 0, "nothing is written, whatever mode the Run sent");
+  }
+  const agent = fixture({ id: "agent-run:run", agentRun: run }, { launch: { runtime: "codex", runtimeArgs: [], access: "full" } });
+  const added = await agent.request({ ...create, environment: { ...create.environment,
+    launch: { runtime: "codex", runtimeArgs: [], access: "ask" } } });
   assert.equal(added.status, 200, await added.clone().text());
   assert.deepEqual([agent.calls[0].input.actorUserId, agent.calls[0].input.byAgent], ["owner", true],
     "it acts as its owner, without an admin's creation exception");
+  assert.equal(agent.calls[0].input.command.environment.launch.access, undefined, "a Run never writes a mode of its own");
   for (const [payload, why] of [[body, "only adding"], [{ ...create, key: { ...key, machineId: "other" } }, "only its Machine"],
     [{ ...create, key: { ...key, ownerUserId: "someone" } }, "only for its owner"]]) {
     assert.equal((await agent.request(payload)).status, 403, why);

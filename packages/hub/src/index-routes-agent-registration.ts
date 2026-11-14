@@ -102,6 +102,18 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
         if (scope === "physical" && key.ownerUserId !== user.id) return c.json({ error: "Registration not found" }, 404);
         // An Agent Run adds an Agent as its owner, without an admin's creation exception.
         const actorUserId = user.id;
+        // What an Agent may do on a machine is its owner's to confirm, so a Run
+        // adds only a harness whose access its owner already confirmed there,
+        // and never writes a mode of its own.
+        if (run && command && "action" in command && command.action === "create") {
+          const physical = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
+          const held = await port.getEnvironment(c.env, { actorUserId, key: physical });
+          if (!held.environment?.launch?.access) {
+            return c.json({ error: `The owner of this machine confirms what ${key.harness} may do on it before it is added. ` +
+              `Ask them to run \`xmatrix agent add ${key.harness} --space ${spaceId}\` on it, or to add it in the app` }, 403);
+          }
+          if (command.environment.launch) delete command.environment.launch.access;
+        }
         const result = scope === "space"
           ? command ? await port.control(c.env, { actorUserId,
             command: command as ReturnType<typeof parseAgentRegistrationCommand>, byAgent: run !== undefined })

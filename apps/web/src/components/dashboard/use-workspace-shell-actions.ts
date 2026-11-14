@@ -170,6 +170,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
+import { confirmAccessForAdd } from "./agent-access";
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
 import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
@@ -2403,12 +2404,17 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setAgentsError(null);
     try {
       const routing = s.agentConfigForm.routing;
+      const harness = canonicalRegistrationHarness(preset.id === "custom" ? runtime : preset.id);
+      // The machine's owner confirms what the Agent may do here before it is written.
+      const confirmed = await confirmAccessForAdd(s.token, [{ key: { ownerUserId: s.user.id, machineId, harness },
+        name: preset.id === "custom" ? name : preset.displayName }]);
+      if (!confirmed) return;
       await xmatrixApiRequest({
         url: WEB_PROXY_ROUTES.space_agent_registration_command(targetSpace.id), token: s.token, method: "POST",
         body: {
           action: "create",
           commandId: `registration-create:${crypto.randomUUID()}`,
-          key: { spaceId: targetSpace.id, ownerUserId: s.user.id, machineId, harness: canonicalRegistrationHarness(preset.id === "custom" ? runtime : preset.id) },
+          key: { spaceId: targetSpace.id, ownerUserId: s.user.id, machineId, harness },
           displayName: name,
           environment: {
             schemaVersion: 1,
@@ -2421,6 +2427,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
               runtime: agentLaunchExecutable(runtime),
               runtimeArgs: parseConfigList(s.agentConfigForm.argsText),
               ...(preset.backend ? { backend: preset.backend } : {}),
+              ...(confirmed.get(harness) ? { access: confirmed.get(harness) } : {}),
             },
           },
           ...(routing?.defaultWorkspace ? { defaultWorkspace: routing.defaultWorkspace } : {}),
