@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: an Instance whose first start never became ready is not started again by each message
+
+A harness that refused to start because it was not signed in left its new
+Instance "interrupted", so every later message in that conversation woke it,
+failed the same way and posted the sign-in notice again: five notices in
+three minutes on 2026-11-14. Such Instances have existed since routing
+stopped refusing these launches beforehand (#1630). An Instance's first Run
+that connects and then ends before its agent is ready now leaves nothing to
+wake, like a Run that never connected. An Instance that has worked and fails
+a later start stays wakeable, so the first message after the sign-in resumes
+it. Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: a machine can be asked, now, whether one program is signed in
 
 The only way to learn whether a harness is signed in from xMatrix was the
