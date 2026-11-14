@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
+import { AgentAccessConfirmationHost } from "./agent-access";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -428,10 +429,14 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     bringingLocalLock.current = true;
     setBringingLocal(true);
     try {
-      for (const presetId of presetIds) {
+      const adds = presetIds.flatMap((presetId) => {
         const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
-        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
-      }
+        return preset ? [{ key: harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId!, presetId), preset }] : [];
+      });
+      // One question for everything about to be added, not one per harness.
+      const confirmed = await installedFleet.confirmAdds(adds);
+      if (!confirmed) return;
+      for (const add of adds) if (!(await installedFleet.set(add.key, add.preset, true, confirmed))) break;
     } finally { bringingLocalLock.current = false; setBringingLocal(false); }
   }
   const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
@@ -1510,6 +1515,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    <AgentAccessConfirmationHost />
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <FaceSpaceContext.Provider value={currentSpaceId}>

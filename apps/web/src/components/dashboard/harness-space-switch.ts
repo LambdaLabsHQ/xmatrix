@@ -39,8 +39,11 @@ export function harnessSpaceSwitch(registration: AgentRegistrationSummary | unde
 }
 
 /** The command that writes the registration from the preset's own launch,
- * as `xmatrix agent add` does. It is named after the harness. */
-export function harnessSpaceCreateCommand(key: SpaceAgentRegistrationKey, preset: AgentPreset): Record<string, unknown> {
+ * as `xmatrix agent add` does. It is named after the harness. `access` is the
+ * mode its owner confirmed for this add; a harness confirmed earlier on the
+ * machine has none to write. */
+export function harnessSpaceCreateCommand(key: SpaceAgentRegistrationKey, preset: AgentPreset,
+  access?: "full"): Record<string, unknown> {
   return {
     action: "create",
     commandId: `registration-create:${crypto.randomUUID()}`,
@@ -48,7 +51,8 @@ export function harnessSpaceCreateCommand(key: SpaceAgentRegistrationKey, preset
     displayName: preset.id,
     environment: {
       schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
-      launch: { runtime: preset.runtime, runtimeArgs: preset.defaultArgs, ...(preset.backend ? { backend: preset.backend } : {}) },
+      launch: { runtime: preset.runtime, runtimeArgs: preset.defaultArgs, ...(preset.backend ? { backend: preset.backend } : {}),
+        ...(access ? { access } : {}) },
     },
   };
 }

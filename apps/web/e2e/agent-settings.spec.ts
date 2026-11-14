@@ -63,3 +63,27 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   await expect.poll(() => fixtureRequestBodies(page, "profile")).toEqual([
     { harness: "codex", description: prose, expectedRevision: 2 }]);
 });
+
+test("an Agent's page says what it runs with, and its owner confirms an access they were never asked about", async ({ page }) => {
+  const grant = { mode: "full", args: ["--dangerously-skip-permissions"], env: { DSH_PERMISSION_MODE: "danger-full-access" },
+    session: {}, approvesRequests: true };
+  const held = { ...registration, access: { ...grant, confirmed: false } };
+  const launch = { runtime: "codex", runtimeArgs: [] };
+  const environment = { schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [], launch };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  await fixtureJson(page, "catalog", CATALOG, { registrations: [held], capabilities: [{ harness: "codex", models: [], locations: [held] }] });
+  await fixtureJson(page, "environment", "**/api/xmatrix/agent-environments/query",
+    { key, version: 5, environment, fullAccess: grant }, { method: "POST" });
+  await fixtureJson(page, "environment-command", "**/api/xmatrix/agent-environments/commands", { key, version: 6 }, { method: "POST" });
+  await page.goto("/app/personal-sspaceperso/agents");
+  await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).click();
+  const access = page.getByTestId("agent-access");
+  // Every line is what the launch adds, as written; none is summarized.
+  for (const line of ["Adds the argument --dangerously-skip-permissions", "Sets the environment variable DSH_PERMISSION_MODE=danger-full-access",
+    "Answers every permission request Codex makes with allow"]) await expect(access).toContainText(line);
+  await page.screenshot({ path: test.info().outputPath("agent-access.png") });
+  await access.getByRole("button", { name: "Review and confirm" }).click();
+  await page.getByRole("dialog", { name: "Codex: full access on this machine?" }).getByRole("button", { name: "Confirm full access" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "environment-command")).toEqual([expect.objectContaining({
+    expectedVersion: 5, environment: { ...environment, launch: { ...launch, access: "full" } } })]);
+});

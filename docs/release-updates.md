@@ -1,5 +1,23 @@
 # Release Updates
 
+## Unreleased: a machine's owner confirms an Agent's access when adding it
+
+Adding an Agent started its harness with full access without saying so. Every
+add now shows, word for word, what xMatrix adds to that harness's launch
+(arguments, environment variables, session settings, and whether its
+permission requests are answered with allow) and writes nothing until the
+machine's owner confirms. `xmatrix agent add` prints the lines and takes
+`--access full`; at a terminal it asks, and anywhere else it stops and says
+what to show the owner. The Web asks in one dialog from the New agent page, a
+harness switch, an install that turns its harness on, and "Bring them in". The
+confirmation is kept per harness on a machine, so adding the same harness to
+another Space does not ask again. An Agent Run cannot confirm for its owner:
+it adds only a harness already confirmed there. Agents added earlier keep
+running as they were; their page, `agent list` (new ACCESS column) and
+`agent show` report the access they run with, and their owner can confirm it
+from the page. No schema change. Hub, Web and CLI. A CLI or Web released
+before this adds without the confirmation, reported as unconfirmed. Recovery
+is a CI-validated beta reverting this change.
 ## Unreleased: a client that predates balances no longer draws a prepaid account as "100%"
 
 A DeepSeek account's reading was listed under `live.quota` with a full share
