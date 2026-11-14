@@ -36,6 +36,29 @@ async fn list_machine_daemons_api(
     Ok(response.daemons)
 }
 
+/// A preset's `access` block: per access level, what xMatrix adds to the
+/// launch, exactly as written. The launch code has no per-harness branch.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccess {
+    #[serde(default)]
+    pub full: AgentPresetAccessLevel,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccessLevel {
+    /// Joined to the launcher's argv (the ACP argv for the generic ACP backend).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variables set on the harness's own process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+}
+
 /// One harness in the shared registry (`packages/protocol/src/agent-presets.json`).
 /// The JSON is the single source of truth for launcher aliases, backends,
 /// config directories, and install hints; Rust and TypeScript both read it, so
@@ -52,9 +75,6 @@ pub struct AgentPreset {
     #[serde(default)]
     pub agent_type: Option<String>,
     pub default_args: Vec<String>,
-    /// What xMatrix adds to this harness's launch per access mode.
-    #[serde(default)]
-    pub access: PresetAccess,
     pub backend: String,
     /// Subcommand/args appended to the runtime for the generic ACP backend
     /// (e.g. `["acp"]` → `kimi acp`). Forwarded to daemon spawns as the
@@ -62,6 +82,9 @@ pub struct AgentPreset {
     /// already speaks ACP with no subcommand; absent defaults to `["acp"]`.
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
+    /// What xMatrix adds to this harness's launch to give it full access.
+    #[serde(default)]
+    pub access: AgentPresetAccess,
     #[serde(default)]
     pub avatar_url: String,
     pub launcher_names: Vec<String>,
@@ -71,23 +94,6 @@ pub struct AgentPreset {
     pub install_hint: Option<String>,
     #[serde(default)]
     pub management: Option<management::HarnessManagement>,
-}
-
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct PresetAccess {
-    #[serde(default)]
-    pub full: PresetAccessAdds,
-}
-
-/// What one access mode adds (`AgentPresetAccess` in `@xmatrix/protocol`).
-#[derive(Debug, Clone, Default, Deserialize)]
-pub struct PresetAccessAdds {
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub env: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    pub session: std::collections::BTreeMap<String, String>,
 }
 
 impl AgentPreset {
@@ -622,9 +628,9 @@ mod tests {
             runtime: "claude".to_string(),
             agent_type: None,
             default_args: vec![],
-            access: crate::PresetAccess::default(),
             backend: "claude-print".to_string(),
             acp_args: None,
+            access: Default::default(),
             avatar_url: String::new(),
             launcher_names: vec!["definitely-not-a-real-binary-xyz".to_string()],
             classic_config_dirs: vec![],

@@ -27,6 +27,20 @@ const ISSUE_FEATURES: Record<string, string> = { created: "issue.created", resol
   assigned: "issue.assigned", ignored: "issue.ignored", archived: "issue.ignored" };
 type DrainStage = "binding" | "refresh" | "credentials" | "installation" | "project" | "channel" | "automation";
 
+/** A short code-defined class or code, never a message that may carry private content. */
+function failureClass(error: unknown): string | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const field = (key: "name" | "code"): string => {
+    const value = (error as Record<string, unknown>)[key];
+    return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,60}$/u.test(value) ? value : "";
+  };
+  // ProviderRequestError already reports its provider status; the generic
+  // Error name says nothing about what failed.
+  const classified = [field("name"), field("code")]
+    .filter(value => value !== "" && value !== "Error" && value !== "ProviderRequestError");
+  return classified.length ? classified.join(":") : undefined;
+}
+
 /** Bounded, durable claim. Both post-commit wake and minute recovery use this same primary App owner. */
 export async function drainSentryEvents(env: Env, dependencies: SentryDrainDependencies = defaults): Promise<void> {
   const client = sentryInstallationClient(env);
@@ -46,7 +60,9 @@ export async function drainSentryEvents(env: Env, dependencies: SentryDrainDepen
       outcome = await deliverSentryJob(env, job, shared, progress) ? "done" : "obsolete";
     } catch (error) {
       // Never log provider error strings, private responses, identities or credentials.
+      const classified = failureClass(error);
       console.error("Sentry event attempt failed", { stage: progress.stage,
+        ...(classified ? { errorClass: classified } : {}),
         ...(error instanceof ProviderRequestError && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599
           ? { providerStatus: error.status } : {}) });
     }

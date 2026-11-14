@@ -15,13 +15,28 @@ among them, and the Hub resolves them into one grant per launch
 its own, and the registration catalog reports it, so what is shown is what
 runs. A registration launch may carry `access` (`full` or `ask`); none is
 `full`, so every existing Agent launches with exactly the parameters it had.
-DeepSeek Harness now starts with full access like the others. The
-undocumented `XMATRIX_CODEX_APP_SANDBOX`, `XMATRIX_CODEX_APP_APPROVAL` and
+The undocumented `XMATRIX_CODEX_APP_SANDBOX`, `XMATRIX_CODEX_APP_APPROVAL` and
 `XMATRIX_ZCODE_APP_MODE` overrides are gone. No schema change: the launch is
 a JSON declaration. Hub and CLI; a Machine on an earlier CLI keeps its
 hard-coded behaviour and receives Claude Code's and Antigravity's flags in
 the arguments the Hub sends. Recovery is a CI-validated beta reverting this
 change.
+
+## Unreleased: a DeepSeek Agent can run xmatrix from its own shell
+
+DeepSeek Harness kept its own default permission mode, `workspace-write`, so
+its shell could not write `~/.config/xmatrix` and every `xmatrix` command an
+Agent ran there stopped at `Operation not permitted (os error 1)` unless the
+Agent raised its permission for that one call. xMatrix now starts it with
+`DSH_PERMISSION_MODE=danger-full-access`: it may write outside the workspace
+and no longer asks before each command, as the other harnesses already run.
+The variable is listed in the preset (`access.full.env`), the same data the launch
+reads. The harness also removes `XMATRIX_EXECUTION_KEY` from every command it
+runs, which made `send --final-for` refuse; the CLI now reads the key from
+the daemon's record of the Run whose request capability the command holds. A
+refused write to the profile lock names the file. CLI and Hub (the registry
+a Machine receives); it applies to DeepSeek Runs started after a Machine
+runs this CLI. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: a summon names its model by the model's name, not its selector
 

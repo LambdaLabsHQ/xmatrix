@@ -17,14 +17,13 @@ import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
-  agentAccessArgs,
-  agentAccessGrant,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
+  type AgentAccessGrant,
   type AgentHarnessSpec,
   type AgentPreset,
   type AgentPresetBackend,

@@ -2186,6 +2186,7 @@ fn a_registration_launch_adds_exactly_its_access_grant() {
         let mut wire = serde_json::json!({
             "type":"machine_spawn_agent", "requestId":"command", "spaceId":"space", "channelId":"channel",
             "runId":"run", "instanceId":"instance", "identityId":"instance", "runtime":harness["runtime"],
+            "runtimeArgs":harness.get("declaredArgs").cloned().unwrap_or(serde_json::json!([])),
             "harness":harness, "agentName":"Agent", "prompt":"task", "context":{},
             "workspace":{"ownerUserId":"owner","machineId":"machine","hostId":"host","canonicalCwd":"/repo",
                 "displayName":"Repo","visibility":"private","createdAt":"now","updatedAt":"now","lastSeenAt":"now"},
@@ -2213,6 +2214,13 @@ fn a_registration_launch_adds_exactly_its_access_grant() {
     // full access, as every launch was.
     let legacy = wire(grok, None);
     assert_eq!(legacy.runtime_args, ["--always-approve"]);
+    // An argv the registration declared started as declared, so that Hub's
+    // launch gains no flag it never had.
+    let mut claude = serde_json::json!({"id":"claude","runtime":"claude","agentType":"claude_code","backend":"claude-print",
+        "defaultArgs":[],"launcherNames":["claude"],"classicConfigDirs":[]});
+    assert_eq!(wire(claude.clone(), None).runtime_args, ["--dangerously-skip-permissions"]);
+    claude["declaredArgs"] = serde_json::json!(["--model", "opus"]);
+    assert_eq!(wire(claude, None).runtime_args, ["--model", "opus"]);
     // A generic ACP harness takes the grant's args in its ACP argv and its
     // environment on the process, alongside the grant itself for the wrapper.
     let full = serde_json::json!({"mode":"full","args":["--flag"],"env":{"DSH_PERMISSION_MODE":"danger-full-access"},

@@ -100,7 +100,9 @@ export interface AgentPreset {
   agentType?: string;
   avatarUrl?: string;
   defaultArgs: string[];
-  /** What xMatrix adds to this harness's launch per access mode; see `agentAccessGrant`. */
+  /** What xMatrix adds to this harness's launch per access mode, exactly as
+   * written: what a person is shown and what the launch sets are the same
+   * data. See `agentAccessGrant`. */
   access?: { full?: AgentPresetAccess };
   backend: AgentPresetBackend;
   /**
@@ -195,15 +197,6 @@ export function agentAccessGrant(preset: AgentPreset | undefined, mode: AgentAcc
     session: { ...added?.session },
     approvesRequests: mode === "full" && preset !== undefined && REQUEST_APPROVING_BACKENDS.has(preset.backend),
   };
-}
-
-/** A launch's args in its access mode: without any other mode's args a stored
- * launch still carries (Claude's were saved with it before the modes existed),
- * then the mode's own, none repeated. */
-export function agentAccessArgs(args: readonly string[], preset: AgentPreset | undefined, mode: AgentAccessMode): string[] {
-  const full = preset?.access?.full?.args ?? [], added = agentAccessGrant(preset, mode).args;
-  const kept = args.filter(arg => !full.includes(arg));
-  return [...kept, ...added];
 }
 
 export interface AgentHarnessSpec {

@@ -73,10 +73,19 @@ test('a launch adds exactly the access grant of its confirmed mode', () => {
   const claude = fields('claude');
   assert.deepEqual(claude.access, { mode: 'full', args: ['--dangerously-skip-permissions'], env: {}, session: {}, approvesRequests: false });
   assert.deepEqual(claude.runtimeArgs, ['--dangerously-skip-permissions']);
-  // A launch saved with the flag before the modes existed does not repeat it,
-  // and loses it once its owner chooses `ask`.
-  const saved = { runtime: 'claude', runtimeArgs: ['--model', 'opus', '--dangerously-skip-permissions'] };
-  assert.deepEqual(fields('claude', saved).runtimeArgs, ['--model', 'opus', '--dangerously-skip-permissions']);
+  // A launch that declared its own arguments before its owner was asked
+  // starts with exactly those: without the flag it never had full access, and
+  // its grant says so rather than adding one.
+  const bare = fields('claude', { runtime: 'claude', runtimeArgs: ['--model', 'opus'] });
+  assert.deepEqual(bare.runtimeArgs, ['--model', 'opus']);
+  assert.deepEqual(bare.access.args, []);
+  assert.deepEqual(fields('claude', { runtime: 'claude', runtimeArgs: ['--model', 'opus'], access: 'full' }).runtimeArgs,
+    ['--model', 'opus', '--dangerously-skip-permissions']);
+  assert.deepEqual(fields('antigravity', { runtime: 'agy', runtimeArgs: ['acp', '--verbose'], backend: 'acp' }).access.args, []);
+  // One saved with the flag keeps it where it was, and loses it once its
+  // owner chooses `ask`.
+  const saved = { runtime: 'claude', runtimeArgs: ['--dangerously-skip-permissions', '--model', 'opus'] };
+  assert.deepEqual(fields('claude', saved).runtimeArgs, ['--dangerously-skip-permissions', '--model', 'opus']);
   const asked = fields('claude', { ...saved, access: 'ask' });
   assert.deepEqual(asked.runtimeArgs, ['--model', 'opus']);
   assert.deepEqual(asked.access, { mode: 'ask', args: [], env: {}, session: {}, approvesRequests: false });

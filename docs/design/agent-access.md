@@ -30,11 +30,15 @@ empty: the harness runs on its vendor defaults.
 The registration's launch (`AgentRegistrationLaunch.access`, in the machine
 owner's physical environment) holds the mode its owner confirmed. A
 registration added before the confirmation existed has none and launches as
-`full`, which is what every launch was.
+`full`, which is what every launch was. One exception keeps that true: such a
+launch that declares its own arguments always started with exactly those, so
+its grant reports the full-access args they carry and adds none.
+`agentLaunchAccess(launch, preset)` is the one resolution of a launch's grant
+and argv; the spawn and the catalog both read it.
 
 On a launch the Hub resolves the grant and sends it as
 `machine_spawn_agent.access`. It also joins the grant's `args` to the argv it
-sends (`registrationLaunchSpawnFields`), because a daemon released before the
+sends, because a daemon released before the
 grant reads them only there; that daemon adds Grok's flag itself, so Grok's
 stay in the grant alone. The daemon joins the args without repeating one, sets
 `env` on the wrapper it starts, and passes the grant on as

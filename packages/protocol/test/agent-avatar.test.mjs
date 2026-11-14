@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  AGENT_PRESETS,
   agentAvatarUrlFromMetadata,
   agentLaunchExecutable,
   agentPresetById,

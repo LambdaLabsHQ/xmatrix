@@ -5,8 +5,7 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
 import {
-  agentAccessArgs,
-  agentAccessGrant,
+  agentLaunchAccess,
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
   formatAutoLaunchMention,
@@ -291,18 +290,7 @@ function registrationLaunchRuntime(launch: AgentRegistrationLaunch | undefined, 
  * requires to name the registration's harness; a declared runtime (e.g. an
  * absolute path) need not resolve to a preset, so the harness names it. */
 export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | undefined, harness: string) {
-  // A registration added before its owner confirmed a mode launches as it
-  // always did, with full access.
-  const preset = agentPresetById(harness) ?? agentPresetForLauncher(harness), mode = launch?.access ?? "full";
-  const access = agentAccessGrant(preset, mode);
-  // The grant's args travel in the argv the daemon already starts: a daemon
-  // that predates the grant reads them only there. That daemon adds Grok's
-  // itself, so Grok's stay in the grant alone.
-  const inArgv = (args: readonly string[]) => preset?.backend === "grok-acp" ? [...args] : agentAccessArgs(args, preset, mode);
-  // The generic ACP backend starts the ACP argv unless the launch declares its own.
-  const acp = (launch?.backend ?? preset?.backend) === "acp" && !launch?.runtimeArgs.length;
-  const runtimeArgs = acp ? [] : inArgv(launch?.runtimeArgs.length ? launch.runtimeArgs : preset?.defaultArgs ?? []);
-  const acpArgs = acp ? inArgv(launch?.acpArgs?.length ? launch.acpArgs : preset?.acpArgs ?? ["acp"]) : launch?.acpArgs ?? [];
+  const { access, runtimeArgs, acpArgs } = agentLaunchAccess(launch, agentPresetById(harness) ?? agentPresetForLauncher(harness));
   return { runtime: registrationLaunchRuntime(launch, harness), agentPresetId: harness,
     ...(runtimeArgs.length ? { runtimeArgs } : {}),
     ...(launch?.backend ? { agentBackend: launch.backend } : {}),
@@ -557,7 +545,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   /** The environment revision admitted by the reservation is the one whose
    * launch settings start the Run; a later edit waits for the next launch. */
   private async launchSettings(input: LaunchRequest, environmentVersion: number) {
-    return this.directory.transaction({ requestId: input.commandId, operation: "registration.launch.settings" }, async tx => {
+    return this.directory.transaction({ requestId: input.commandId, operation: "registration.launch.settings",
+      statement: "single_read" }, async tx => {
       const rows = await tx.query({ name: "registration_launch_settings_v1", text: `SELECT declaration_json,version
         FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
       values: [input.key.ownerUserId,input.key.machineId,input.key.harness], maxRows: 1 });
@@ -1030,7 +1019,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       failed: SpaceAgentRegistrationKey } | undefined> {
     const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
     const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.fallback-origin",
-      placement: this.placement }, tx => tx.query({ name: "registration_launch_fallback_origin_v1", text: `SELECT
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_fallback_origin_v1", text: `SELECT
         intent.actor_user_id,intent.source_message_id,intent.selection_index,intent.owner_user_id,intent.machine_id,
         intent.harness,message.timeline_sequence
         FROM data.registration_launch_intents intent JOIN data.messages message ON message.space_id=intent.space_id
@@ -1078,7 +1067,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     sourceMention?: string; handoffContext?: Record<string, unknown>; failed: SpaceAgentRegistrationKey[] } | undefined> {
     const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
     const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.handoff-fallback-origin",
-      placement: this.placement }, tx => tx.query({ name: "registration_launch_handoff_fallback_origin_v1", text: `SELECT
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_handoff_fallback_origin_v1", text: `SELECT
         intent.actor_user_id,intent.owner_user_id,intent.machine_id,intent.harness,intent.launch_request_json,
         launch.spawn_payload_json->>'prompt' AS prompt,launch.spawn_payload_json->'handoffContext' AS handoff_context
         FROM data.registration_launch_intents intent JOIN data.agent_launches launch ON launch.run_id=intent.run_id
@@ -1123,7 +1112,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   private async withHost<T extends { launchId: string }>(commandId: string, launch: T): Promise<T & { hostId: string }> {
     const rows = await this.database.transaction({ requestId: commandId, operation: "registration.launch.host",
-      placement: this.placement }, tx => tx.query({ name: "registration_launch_host_v1",
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_host_v1",
       text: `SELECT hostname FROM data.agent_launches WHERE launch_id=$1`, values: [launch.launchId], maxRows: 1 }));
     return { ...launch, hostId: String(rows[0]?.hostname ?? "") };
   }

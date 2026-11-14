@@ -1,4 +1,4 @@
-import { agentAccessGrant, agentPresetById, harnessParameterObservation, machineResourceObservation, hasControlCharacter } from "@xmatrix/protocol";
+import { agentLaunchAccess, agentPresetById, harnessParameterObservation, machineResourceObservation, hasControlCharacter } from "@xmatrix/protocol";
 import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegistrationKey, parseSpaceAgentConfiguration,
   registrationLimitsWithin, spaceConfigurationResources,
   parseRegistrationResourceLimits, intersectRegistrationLimits,
@@ -483,8 +483,8 @@ export class PostgresAgentRegistrationRepository {
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
       const quota = (row.canConfigureSpace || row.canManageOwnerGrant) && reading
         ? { ...reading, ...(windows.length ? { windows } : {}), ...(account ? { account } : {}) } : undefined;
-      const access = environment ? { ...agentAccessGrant(agentPresetById(row.key.harness), environment.launch?.access ?? "full"),
-        confirmed: environment.launch?.access !== undefined } : undefined;
+      const resolved = environment ? agentLaunchAccess(environment.launch, agentPresetById(row.key.harness)) : undefined;
+      const access = resolved ? { ...resolved.access, confirmed: resolved.confirmed } : undefined;
       return { ...row, ...(access ? { access } : {}), models, modelCatalog: reported, ...(nativeModels ? { nativeModels: true as const } : {}), routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
         machineName: String(label?.name || row.machineName),
         live: { machine: { online: label?.online === true, ...(lastSeenAt ? { lastSeenAt } : {}),

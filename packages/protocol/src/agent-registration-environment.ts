@@ -1,7 +1,8 @@
 import { utf8ByteLength } from "./hex.js";
 import { parseAgentRegistrationKey, type AgentRegistrationKey } from "./agent-registration.js";
 import { parseAgentRoutingDeclaration, type AgentRoutingDeclaration } from "./agent-routing.js";
-import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, type AgentAccessMode, type AgentPresetBackend } from "./agent-presets.js";
+import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, agentAccessGrant, type AgentAccessGrant, type AgentAccessMode,
+  type AgentPreset, type AgentPresetBackend } from "./agent-presets.js";
 import { hasControlCharacter } from "./field-validation.js";
 
 /** How the Hub starts this harness on this machine. The Hub maintains it; the
@@ -66,6 +67,33 @@ export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationL
     ...(backend ? { backend: backend as AgentPresetBackend } : {}),
     ...(acpArgs?.length ? { acpArgs } : {}),
     ...(row.access === undefined ? {} : { access: row.access as AgentAccessMode }) };
+}
+
+/**
+ * A registration launch as it starts: its access grant, and the argv that
+ * carries the grant's args (the ACP argv for the generic ACP backend unless
+ * the launch declares its own). The spawn and everything that shows a
+ * registration's access read this one resolution.
+ *
+ * A daemon released before the grant reads access args only from the argv, so
+ * they are joined there. That daemon adds Grok's flag itself; Grok's stay in
+ * the grant alone.
+ */
+export function agentLaunchAccess(launch: AgentRegistrationLaunch | undefined, preset: AgentPreset | undefined):
+  { access: AgentAccessGrant; confirmed: boolean; runtimeArgs: string[]; acpArgs: string[] } {
+  const mode = launch?.access ?? "full", access = agentAccessGrant(preset, mode);
+  const full = preset?.access?.full?.args ?? [], grok = preset?.backend === "grok-acp";
+  const acp = (launch?.backend ?? preset?.backend) === "acp" && !launch?.runtimeArgs.length;
+  const declared = (acp ? launch?.acpArgs : launch?.runtimeArgs) ?? [];
+  // Before its owner was asked, a launch that declared its own arguments
+  // started with exactly those: the grant reports the ones they carry and adds none.
+  if (launch?.access === undefined && declared.length && !grok) access.args = access.args.filter(arg => declared.includes(arg));
+  const base = declared.length ? declared : (acp ? preset?.acpArgs ?? ["acp"] : preset?.defaultArgs) ?? [];
+  // `ask` drops a full-access arg saved with the launch before the modes existed.
+  const kept = mode === "ask" ? base.filter(arg => !full.includes(arg)) : [...base];
+  const argv = grok ? kept : [...kept, ...access.args.filter(arg => !kept.includes(arg))];
+  return { access, confirmed: launch?.access !== undefined,
+    runtimeArgs: acp ? [] : argv, acpArgs: acp ? argv : launch?.acpArgs ?? [] };
 }
 
 export interface AgentEnvironmentCommand {

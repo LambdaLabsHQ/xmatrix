@@ -85,6 +85,11 @@ fn resolve_registration_spawn(
             CliError::Launch("Registered launch is missing the Hub's preset for its harness".into())
         })?;
     let mut resolved = intent.clone();
+    let declared_args = if harness.backend == "acp" && intent.runtime_args.is_empty() {
+        intent.agent_acp_args.clone()
+    } else {
+        intent.runtime_args.clone()
+    };
     if resolved.runtime_args.is_empty() {
         resolved.runtime_args = harness.default_args.clone();
     }
@@ -116,14 +121,20 @@ fn resolve_registration_spawn(
         resolved.agent_acp_args = harness.acp_args.clone().unwrap_or_default();
     }
     // The Hub's grant is the launch's access. A Hub that predates it sends
-    // none, and the launch is what it always was: the preset's full access.
+    // none, and the launch is what it always was: the preset's full access,
+    // except that an argv the registration declared started as declared
+    // (Grok's aside, whose flag the bridge added).
     let access = resolved.access.take().unwrap_or_else(|| {
-        xmatrix_cli_agent::agent_preset_by_id(&harness.id)
+        let mut access = xmatrix_cli_agent::agent_preset_by_id(&harness.id)
             .map(xmatrix_cli_agent::AgentPreset::full_access_grant)
             .unwrap_or_else(|| xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
                 mode: "full".into(),
                 ..Default::default()
-            })
+            });
+        if !declared_args.is_empty() && harness.backend != "grok-acp" {
+            access.args.retain(|arg| declared_args.contains(arg));
+        }
+        access
     });
     // Its args join the argv the harness starts with: the ACP argv for the
     // generic ACP backend unless the launch declares its own.
