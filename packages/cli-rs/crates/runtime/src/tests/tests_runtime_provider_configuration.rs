@@ -586,6 +586,19 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             expected_args,
             "{tool}"
         );
+        // DeepSeek Harness takes its permission mode from the environment;
+        // no other preset here sets any.
+        let launch_env: Vec<(&str, &str)> = config
+            .preset_launch_env
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        let expected_env: &[(&str, &str)] = if id == "deepseek" {
+            &[("DSH_PERMISSION_MODE", "danger-full-access")]
+        } else {
+            &[]
+        };
+        assert_eq!(launch_env, expected_env, "{tool}");
         // DeepSeek Harness bills a prepaid balance its API can state.
         assert_eq!(config.quota_usage.is_some(), id == "deepseek", "{tool}");
         assert_eq!(agent_type_for_preset_or_runtime(None, tool), id, "{tool}");

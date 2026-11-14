@@ -59,6 +59,12 @@ pub struct AgentPreset {
     /// already speaks ACP with no subcommand; absent defaults to `["acp"]`.
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
+    /// Environment variables xMatrix sets on this harness's own process at
+    /// launch, exactly as written. This is where a harness whose permission
+    /// mode is an environment variable is given full access; the launch code
+    /// has no per-harness branch for it.
+    #[serde(default)]
+    pub launch_env: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub avatar_url: String,
     pub launcher_names: Vec<String>,
@@ -590,6 +596,7 @@ mod tests {
             default_args: vec![],
             backend: "claude-print".to_string(),
             acp_args: None,
+            launch_env: Default::default(),
             avatar_url: String::new(),
             launcher_names: vec!["definitely-not-a-real-binary-xyz".to_string()],
             classic_config_dirs: vec![],

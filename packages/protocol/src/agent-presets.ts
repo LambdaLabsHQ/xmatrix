@@ -75,6 +75,13 @@ export interface AgentPreset {
    * speaks ACP with no subcommand; absent defaults to `["acp"]`.
    */
   acpArgs?: string[];
+  /**
+   * Environment variables xMatrix sets on this harness's own process at
+   * launch, exactly as written. A harness whose permission mode is an
+   * environment variable gets full access here (`DSH_PERMISSION_MODE`), so
+   * what a person is shown and what the launch sets are the same data.
+   */
+  launchEnv?: Record<string, string>;
   launcherNames: string[];
   classicConfigDirs: string[];
   /** One-line upstream installer, shown when the runtime binary is missing. */

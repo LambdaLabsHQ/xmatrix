@@ -27,6 +27,7 @@ impl AcpSession {
             "ACP agent stdio",
             |command| {
                 command.stderr(Stdio::piped());
+                command.envs(&config.preset_launch_env);
             },
         )?;
         let stdin = server.take_stdin()?;

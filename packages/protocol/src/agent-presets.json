@@ -2238,6 +2238,7 @@
     "defaultArgs": [],
     "backend": "acp",
     "acpArgs": ["--profile", "acp"],
+    "launchEnv": { "DSH_PERMISSION_MODE": "danger-full-access" },
     "launcherNames": ["dsh", "dsh.exe", "dsh.cmd", "dsh.bat"],
     "classicConfigDirs": ["~/.dsh"],
     "installHint": "npm install -g @deepseek-ai/dsh",

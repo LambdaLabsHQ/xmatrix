@@ -2979,6 +2979,8 @@ struct AcpVendorConfig {
     /// launcher already speaks ACP with no subcommand (`pi-acp`); None falls
     /// back to the `acp` subcommand convention.
     preset_acp_args: Option<Vec<String>>,
+    /// The preset's `launchEnv`, set on the harness process as written.
+    preset_launch_env: std::collections::BTreeMap<String, String>,
 }
 
 impl AcpVendorConfig {
@@ -3012,6 +3014,7 @@ impl AcpVendorConfig {
             resume_namespace: "grok-resume".to_string(),
             presentation_adapter: agent_presentation_adapter_for_runtime("grok"),
             preset_acp_args: None,
+            preset_launch_env: Default::default(),
         }
     }
 
@@ -3054,6 +3057,9 @@ impl AcpVendorConfig {
             resume_namespace: format!("acp-resume-{stem}"),
             presentation_adapter: agent_presentation_adapter_for_acp_runtime(&stem),
             preset_acp_args: preset.and_then(|preset| preset.acp_args.clone()),
+            preset_launch_env: preset
+                .map(|preset| preset.launch_env.clone())
+                .unwrap_or_default(),
         }
     }
 
