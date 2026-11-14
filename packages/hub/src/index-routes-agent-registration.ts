@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import { ControlError } from "@xmatrix/db";
+import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
   parseAgentEnvironmentCommand, parseAgentRegistrationKey, agentAccessModes, agentPresetById, agentPresetForLauncher,
   type AgentRegistrationSummary } from "@xmatrix/protocol";
@@ -113,8 +113,13 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
         // and never writes a mode of its own.
         if (run && command && "action" in command && command.action === "create") {
           const physical = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
-          const held = await port.getEnvironment(c.env, { actorUserId, key: physical });
-          if (!held.environment?.launch?.access) {
+          const held = await port.getEnvironment(c.env, { actorUserId, key: physical }).catch((error) => {
+            // A harness never added on this machine has no environment yet; its
+            // owner has confirmed nothing, so it is the same refusal.
+            if (error instanceof RegistrationAccessError && error.code === "registration_not_found") return undefined;
+            throw error;
+          });
+          if (!held?.environment?.launch?.access) {
             return c.json({ error: `The owner of this machine confirms what ${key.harness} may do on it before it is added. ` +
               `Ask them to run \`xmatrix agent add ${key.harness} --space ${spaceId}\` on it, or to add it in the app` }, 403);
           }

@@ -63,7 +63,7 @@ async function enrollMachine(worker, ownerUserId) {
 }
 
 /** A Human adds an Agent on their own machine: one registration `create` command. */
-function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, displayName = harness }) {
+function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, displayName = harness, access }) {
   return requestJson(worker, token, `/api/spaces/${encodeURIComponent(spaceId)}/agent-registrations/commands`, {
     method: "POST",
     body: JSON.stringify({
@@ -72,7 +72,7 @@ function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, 
       commandId: `create:${harness}:${Date.now()}:${Math.random()}`,
       displayName,
       environment: { schemaVersion: 1, enabled: true, models: [], description: "", availability: "interactive",
-        maxConcurrent: 1, capabilities: [], launch: { runtime: harness } },
+        maxConcurrent: 1, capabilities: [], launch: { runtime: harness, ...(access ? { access } : {}) } },
     }),
   });
 }
@@ -325,8 +325,23 @@ test("Agent principals never inherit the Human admin creation exception", async 
     // exception to "admins only" never passes to it.
     const runAgent = { spaceId, ownerUserId: scenario.registration.ownerUserId,
       machineId: scenario.registration.machineId, harness: "claude" };
+    // Nor does it confirm for its owner what a harness may do on the machine:
+    // one its owner never added there is refused with the command they run.
+    const unconfirmed = await createAgent(worker, runToken, { ...runAgent, access: "full" });
+    assert.equal(unconfirmed.response.status, 403, JSON.stringify(unconfirmed.payload));
+    assert.match(unconfirmed.payload.error, /xmatrix agent add claude --space/u);
+    const environment = await requestJson(worker, MOCK_TOKEN, "/api/agent-environments/query", { method: "POST",
+      body: JSON.stringify({ ownerUserId: runAgent.ownerUserId, machineId: runAgent.machineId, harness: "claude" }) });
+    assert.equal(environment.response.status, 200, JSON.stringify(environment.payload));
+    assert.deepEqual([environment.payload.environment, environment.payload.fullAccess.args],
+      [null, ["--dangerously-skip-permissions"]], "its owner reads what full access adds before the first add");
+    // The owner adds it, confirming full access; removed from the Space, the
+    // harness stays confirmed on the machine.
+    const confirmed = await createAgent(worker, MOCK_TOKEN, { ...runAgent, access: "full" });
+    assert.equal(confirmed.response.status, 200, JSON.stringify(confirmed.payload));
     const agentDenied = await createAgent(worker, runToken, runAgent);
     assert.equal(agentDenied.response.status, 403, JSON.stringify(agentDenied.payload));
+    assert.doesNotMatch(String(agentDenied.payload.error), /xmatrix agent add/u, "refused by the Space's policy, not for access");
     const reopened = await requestJson(worker, MOCK_TOKEN,
       `/api/spaces/${encodeURIComponent(spaceId)}/member-permissions`,
       { method: "PATCH", body: JSON.stringify({ agentCreation: "members" }) });

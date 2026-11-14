@@ -17,6 +17,14 @@ Machine whose CLI shows the cards; on an earlier one it does not start. Claude
 Code's grant now also states that its permission requests are answered with
 allow in full access, which the runtime always did. No schema change. Hub, Web
 and CLI. Recovery is a CI-validated beta reverting this change.
+## Unreleased: the access confirmation works for a harness never added on the machine
+
+The confirmation reads the owner's environment for the harness before the
+first add, and that read answered 404 until the harness had been added once,
+so adding a new harness from the Web or `xmatrix agent add` failed instead of
+asking. The owner now reads an empty environment, with what full access adds,
+for a harness not added yet; nobody else reads it, as before. Hub only.
+Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: a machine's owner confirms an Agent's access when adding it
 
