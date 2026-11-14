@@ -7,6 +7,7 @@ import { MessageAuthorityError } from "./message-authority-error.js";
 import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
@@ -661,7 +662,8 @@ export class PostgresPageRepository {
     revision?: number; conversationId?: string; blockId?: string }): Promise<{ page: PageDocument }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.read", spaceId, async (tx) => {
+    const requestId = bounded(input.requestId, "requestId");
+    const load = async (tx: DatabaseTransaction): Promise<{ page: PageDocument }> => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const revision = input.revision === undefined ? Number(row.head_revision) : input.revision;
@@ -681,7 +683,15 @@ export class PostgresPageRepository {
         });
       }
       return { page: { ...this.summary(row), body: rev.body ?? "", revisionInfo: revisionOf(rev) } };
-    });
+    };
+    // The conversation link is one idempotent row. A lost response before
+    // COMMIT cannot have committed it, so that attempt runs once more. A read
+    // with no link takes no lock and must not open a transaction.
+    if (input.conversationId) {
+      return retryTransactionBeforeCommit(this.database, await activeSpaceContext(this.database,
+        { requestId, operation: "page.read", spaceId }, PageControlError), load);
+    }
+    return this.readInSpace(requestId, "page.read", spaceId, load);
   }
 
   async create(input: { requestId: string; spaceId: string; principal: PagePrincipal;
