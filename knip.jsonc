@@ -73,6 +73,9 @@
     "packages/db": {
       "entry": [
         "package.json",
+        // The package test script selects these in code. Knip cannot follow
+        // that read, and the shell glob used to be their only entry.
+        "test/*.test.mjs",
       ],
       "includeEntryExports": true,
     },
