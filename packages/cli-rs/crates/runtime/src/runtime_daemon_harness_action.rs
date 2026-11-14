@@ -629,6 +629,18 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
         // Only the daemon knows which Runs are live; a local call assumes one may be.
         return release(preset_id, true).await;
     }
+    if action == HarnessAction::Check {
+        // Its owner is looking at this harness now: ask its program, not a
+        // probe from hours ago. A status-less ACP harness is started the way a
+        // launch starts it; any other is asked by its status command.
+        let Some(preset) = preset else {
+            return result(preset_id, action, HarnessActionStatus::Unsupported);
+        };
+        crate::runtime_daemon_harness_inventory::refresh_readiness_of(preset).await;
+        let mut checked = result(preset_id, action, HarnessActionStatus::Succeeded);
+        checked.item = probed_item(preset).await;
+        return checked;
+    }
     if action == HarnessAction::Refresh {
         for preset in agent_presets() {
             read_latest_version(preset).await;

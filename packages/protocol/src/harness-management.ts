@@ -171,9 +171,12 @@ export function parseHarnessInventory(value: unknown): HarnessInventory | undefi
  * `login_start` runs the preset's official sign-in and answers with its URL and
  * code; `login_finish` hands it the code the owner pasted (for `url_paste_code`)
  * and waits for it to finish; `login_cancel` ends it.
+ * `check` asks the one preset's program, now, whether it is installed and
+ * signed in, and answers with what it says (`item`): a page that shows a
+ * sign-in asks when it is looked at, since only the program knows.
  */
 export const HARNESS_ACTIONS = ["install", "update", "uninstall", "auto_update_on", "auto_update_off", "refresh", "release",
-  "login_start", "login_finish", "login_cancel"] as const;
+  "login_start", "login_finish", "login_cancel", "check"] as const;
 export type HarnessAction = typeof HARNESS_ACTIONS[number];
 export const MACHINE_HARNESS_ACTION_CAPABILITY = "machine_harness_action_v1";
 /** Cursor updates must bind the vendor launcher, never an unrelated `agent` on PATH. */
@@ -186,6 +189,8 @@ export const MACHINE_HARNESS_RELEASE_CAPABILITY = "machine_harness_release_v1";
 export const MACHINE_HARNESS_LOGIN_CAPABILITY = "machine_harness_login_v1";
 /** The daemon registers a starting login before its prompt can be cancelled. */
 export const MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY = "machine_harness_login_start_cancel_v1";
+/** A daemon without it cannot parse a `check` command, so none is issued or leased to it. */
+export const MACHINE_HARNESS_CHECK_CAPABILITY = "machine_harness_check_v1";
 export const HARNESS_LOGIN_ACTIONS: readonly HarnessAction[] = ["login_start", "login_finish", "login_cancel"];
 /** A harness action no daemon claimed within this long expires and never runs later. */
 export const HARNESS_ACTION_CLAIM_TTL_MS = 10 * 60_000;
@@ -334,7 +339,9 @@ export function harnessActionAvailable(management: HarnessManagement | undefined
   const any = (recipe: { unix: HarnessCommand | null; windows: HarnessCommand | null }) =>
     recipe.unix !== null || recipe.windows !== null;
   switch (action) {
-    case "refresh": return true;
+    case "refresh":
+    case "check":
+      return true;
     case "install": return any(management.install);
     case "release":
     case "update": return any(management.update);
