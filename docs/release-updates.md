@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: the access confirmation works for a harness never added on the machine
+
+The confirmation reads the owner's environment for the harness before the
+first add, and that read answered 404 until the harness had been added once,
+so adding a new harness from the Web or `xmatrix agent add` failed instead of
+asking. The owner now reads an empty environment, with what full access adds,
+for a harness not added yet; nobody else reads it, as before. Hub only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a machine's owner confirms an Agent's access when adding it
 
 Adding an Agent started its harness with full access without saying so. Every
