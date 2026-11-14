@@ -434,9 +434,28 @@ export type PageProgramStep =
   /** The flow goes on past what was read of it. */
   | { kind: "more" };
 
+/** A program's name: a letter, then letters, digits, `_` or `-`, 40 characters at most. */
+const NORN_PROGRAM_NAME = /^\p{L}[\p{L}\p{N}_-]{0,39}$/u;
+
+/**
+ * What a fenced block's info string makes of it (docs/architecture/norn-host.md,
+ * "Programs on a Page"): `norn run <name>` is a program under that name, and
+ * `norn run` alone is `main`. A block tagged `norn run` whose name runs nothing
+ * is still that block, with why, so it is never silently no program. Anything
+ * else (`norn` alone only shows) is null. The Hub and every client read a block
+ * through this one function.
+ */
+export function nornRunBlock(info: unknown): { name: string; problem?: string } | null {
+  const [language, run, ...words] = String(info ?? "").trim().split(/\s+/u);
+  if (language !== "norn" || run !== "run") return null;
+  const name = words.length ? words.join(" ") : "main";
+  return NORN_PROGRAM_NAME.test(name) ? { name } : { name, problem:
+    `\`norn run ${name}\` names no program: a program's name is one word, a letter and then letters, digits, _ or -, at most 40 characters. Rename the block.` };
+}
+
 /** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
 export interface PageProgramStatus {
-  /** The block's name: the word after `norn run`, or `main`. */
+  /** The block's name: what follows `norn run`, or `main` (`nornRunBlock`). */
   name: string;
   /** The conversation the program works in; absent before its first run. */
   channelId?: string;

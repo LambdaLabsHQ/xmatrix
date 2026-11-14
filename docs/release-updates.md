@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a `norn run` block whose name runs nothing says why
+
+A Page block tagged `norn run 2nd-pass` (or `v1.2`, or two words) never ran:
+the Hub read only names that start with a letter, passed the block over and
+said nothing, while the Page drew it as a program "starting…" for good and
+`page edit` reported no problem. What a block's info string makes of it is
+now one function in protocol (`nornRunBlock`) that the Hub and the Page
+editor both read. A misnamed block is reported by `page edit`, by `page
+read` and under the block on the Page; a message carrying one is refused
+with the same words. An edit whose sync finds a block whose conversation was
+deleted now says so in its answer too, as the Page already did. Hub and Web.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent's `page read` shows the Page's programs
 
 `xmatrix page read` printed no `programs:` section when an Agent ran it: the

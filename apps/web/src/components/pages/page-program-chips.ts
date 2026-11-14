@@ -1,4 +1,4 @@
-import type { PageProgramStatus } from "@xmatrix/protocol";
+import { nornRunBlock, type PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Decoration, DecorationSet } from "prosemirror-view";
 import { pressOpens } from "./page-automation-chips";
@@ -15,12 +15,6 @@ import { Plugin, PluginKey } from "prosemirror-state";
  * opens the conversation the program works in.
  */
 export const programsKey = new PluginKey<{ programs: Map<string, PageProgramStatus>; decorations: DecorationSet }>("page-programs");
-
-/** The name a `norn run` block gives its program, or null for any other block. */
-export function programBlockName(language: unknown): string | null {
-  const [lang, run, name, ...rest] = String(language ?? "").trim().split(/\s+/u);
-  return lang === "norn" && run === "run" && !rest.length ? name ?? "main" : null;
-}
 
 /** Where a problem that names its place (`3:14 …`) is in the block's text, to the end of that word. */
 export function problemRange(source: string, problem: string | undefined): { from: number; to: number } | null {
@@ -50,15 +44,15 @@ function chipDecorations(doc: DocNode, programs: Map<string, PageProgramStatus>,
   // Only a block at the top of the page is a program, as the Hub reads it.
   doc.forEach((node, pos) => {
     if (node.type !== pageSchema.nodes.code_block) return;
-    const name = programBlockName(node.attrs.language);
-    if (name === null) return;
-    const program = programs.get(name);
+    const block = nornRunBlock(node.attrs.language);
+    if (!block) return;
+    const program = programs.get(block.name);
     // The block and its steps are one surface.
     decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: "page-program-code" }));
     const wrong = problemRange(node.textContent, program?.problem);
     if (wrong) decorations.push(Decoration.inline(pos + 1 + wrong.from, pos + 1 + wrong.to, { class: "page-program-wrong" }));
     decorations.push(Decoration.widget(pos + node.nodeSize, () => steps(program, openConversation),
-      { side: -1, ignoreSelection: true, key: `program:${name}:${JSON.stringify(program ?? null)}:${Math.floor(Date.now() / 60_000)}` }));
+      { side: -1, ignoreSelection: true, key: `program:${block.name}:${JSON.stringify(program ?? null)}:${Math.floor(Date.now() / 60_000)}` }));
   });
   return DecorationSet.create(doc, decorations);
 }
@@ -67,7 +61,7 @@ function chipDecorations(doc: DocNode, programs: Map<string, PageProgramStatus>,
 function holdsProgram(doc: DocNode): boolean {
   let found = false;
   doc.forEach((node) => {
-    found ||= node.type === pageSchema.nodes.code_block && programBlockName(node.attrs.language) !== null;
+    found ||= node.type === pageSchema.nodes.code_block && nornRunBlock(node.attrs.language) !== null;
   });
   return found;
 }

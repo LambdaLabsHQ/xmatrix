@@ -1,4 +1,4 @@
-import { parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
+import { nornRunBlock, parseHarnessCapabilityMentions, parseMarkdown, requestReferenceToken, utf8ByteLength } from "@xmatrix/protocol";
 import { NORN_HANDED_ON_REASON, type NornProgramState, type NornProgramWrite, type NornStep } from "@xmatrix/db";
 import { checkSource, elaborate, hostSources, readInterface, readLibrary, type Form, type ReportForm } from "./vendor/norn/frontend/check/index";
 import { NORN_STD } from "./vendor/norn/std";
@@ -14,25 +14,40 @@ import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
  * database layer runs `nornStep` while it holds the program's row.
  */
 
+/** A `norn run` block of a text, and why it does not run when it cannot: its name, or a name another block has too. */
+export interface NornBlock { name: string; source: string; problem?: string }
+
 /**
- * The programs a text carries: its top-level fenced blocks tagged `norn run`,
- * each under the name that follows the tag (`norn run review`), or `main`.
- * A block tagged `norn` alone is only shown, and so is one inside a quote.
+ * The programs a text carries: its top-level fenced blocks tagged `norn run`
+ * (`nornRunBlock`), each under its name. A block tagged `norn` alone is only
+ * shown, and so is one inside a quote. Every block tagged `norn run` is here,
+ * so one that runs nothing says why instead of being passed over; whether its
+ * program checks is `checkNornProgram`'s to say.
  */
-export function nornBlocks(body: string): { name: string; source: string }[] {
+export function nornBlocks(body: string): NornBlock[] {
   const root = parseMarkdown(body) as { children?: { type?: string; lang?: string | null; meta?: string | null; value?: string }[] };
-  return (root.children ?? []).flatMap(node => {
-    const [run, name, ...rest] = (node.meta ?? "").trim().split(/\s+/u);
-    return node.type === "code" && node.lang === "norn" && run === "run" && !rest.length && /^\p{L}[\p{L}\p{N}_-]{0,39}$/u.test(name ?? "main")
-      ? [{ name: name ?? "main", source: node.value ?? "" }] : [];
+  const blocks = (root.children ?? []).flatMap(node => {
+    const block = node.type === "code" ? nornRunBlock([node.lang, node.meta].filter(Boolean).join(" ")) : null;
+    return block ? [{ ...block, source: node.value ?? "" }] : [];
   });
+  // A name used twice names nothing: neither block runs until one is renamed.
+  return blocks.map(block => block.problem || blocks.filter(other => other.name === block.name).length < 2 ? block
+    : { ...block, problem: `Two blocks are named ${block.name}; rename one.` });
+}
+
+/** Why a block does not run as written, or undefined when it runs. */
+export function nornBlockProblem(block: NornBlock): string | undefined {
+  if (block.problem) return block.problem;
+  const checked = checkNornProgram(block.source);
+  return "refusal" in checked ? checked.refusal : undefined;
 }
 
 /** The program a message starts: its one `norn run` block. */
 export function nornProgramIn(body: string): { source: string } | { refusal: string } | undefined {
   const blocks = nornBlocks(body);
   if (!blocks.length) return undefined;
-  return blocks.length === 1 ? { source: blocks[0]!.source } : { refusal: "A message starts one program: it has more than one `norn run` block." };
+  if (blocks.length > 1) return { refusal: "A message starts one program: it has more than one `norn run` block." };
+  return blocks[0]!.problem ? { refusal: `The program was not started: ${blocks[0]!.problem}` } : { source: blocks[0]!.source };
 }
 
 /**
@@ -462,13 +477,14 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
  * what whoever just wrote the text is told at once.
  */
 export function nornProgramProblems(body: string): { source: string; problem: string }[] {
-  const blocks = nornBlocks(body);
-  return blocks.flatMap(block => {
-    const checked = blocks.filter(other => other.name === block.name).length > 1
-      ? { refusal: `Two blocks are named ${block.name}; rename one.` } : checkNornProgram(block.source);
-    return "refusal" in checked ? [{ source: `\`\`\`norn run ${block.name}`, problem: checked.refusal }] : [];
+  return nornBlocks(body).flatMap(block => {
+    const problem = nornBlockProblem(block);
+    return problem === undefined ? [] : [{ source: nornBlockSource(block.name), problem }];
   });
 }
+
+/** How a block's opening line reads, to say which block a problem is about. */
+export const nornBlockSource = (name: string): string => `\`\`\`norn run ${name}`;
 
 /** The ledger a program starts from. */
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);

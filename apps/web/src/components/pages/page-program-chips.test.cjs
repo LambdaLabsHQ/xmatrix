@@ -1,17 +1,12 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { problemRange, programBlockName } = require("./page-program-chips.ts");
+const { problemRange } = require("./page-program-chips.ts");
 const { againText, conditionsText, endText, programFooter, programStep, waitText } = require("./program-flow.ts");
 
 const NOW = Date.parse("2026-11-12T10:00:00Z");
 const request = (change) => ({ holder: "@codex", text: "Review the design", askedAt: "2026-11-12T09:50:00Z", by: null, outcome: null,
   reply: null, settledAt: null, ...change });
-
-test("a norn run block names its program, and any other block names none", () => {
-  assert.deepEqual(["norn run", "norn run review", "norn", "norn run two words", "ts"].map(programBlockName),
-    ["main", "review", null, null, null]);
-});
 
 test("a request is a step: working with the time it has left, its answer, or how it failed", () => {
   assert.deepEqual(programStep(request({ by: "2026-11-12T10:24:00Z" }), NOW),

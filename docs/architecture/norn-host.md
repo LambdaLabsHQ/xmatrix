@@ -24,9 +24,15 @@ person who wrote it, or the owner of the Agent Run that did.
 
 A Page is where a program lives; a message is the ad-hoc way to run one. Each
 top-level `norn run` block of a Page is a program. The word after the tag
-names it (`norn run review`); without one it is `main`. The Page and the name
-are the program's identity, so editing the block's text changes the same
-program. Two blocks with one name run nothing until one is renamed.
+names it (`norn run review`); without one it is `main`. A name is one word:
+a letter, then letters, digits, `_` or `-`, at most 40 characters. The Page
+and the name are the program's identity, so editing the block's text changes
+the same program. Two blocks with one name run nothing until one is renamed,
+and nor does a block whose name is not a name. What a block's info string
+makes of it is one function, `nornRunBlock` in protocol, which the Hub and
+the Page editor both read, so no block is drawn as a program the Hub passes
+over: every block tagged `norn run` is listed, and one that runs nothing
+carries why.
 
 A saved revision is synced like the Page's schedule lines
 (`syncPagePrograms`, from the Page session's commit, a new Page, and a
@@ -68,7 +74,9 @@ line a block: its state, its conversation, how many requests it made and how
 the latest stands.
 A whole-document edit answers with each block that does not run as written
 and why (`nornProgramProblems`, in the edit's `scheduleProblems`), so an
-Agent that writes a program reads the checker's words at once.
+Agent that writes a program reads the checker's words at once. What only the
+sync can know, a block whose conversation was deleted, is added when the
+edit's sync finished before the answer.
 
 ## What it does next
 
