@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: A turn that makes no progress is said in its conversation
+
+An Agent that accepted a message and then neither replied nor failed left the
+person looking at nothing: the host already reported the stall (no progress
+for five minutes), but only as a small badge on the Agent. The Hub now says it
+under the message the turn is answering, once per stall, in the failure
+notice's style: which Agent, for how long, and that it can be waited for,
+stopped (`@name:N:stop`) or another Agent asked. Hub only; no protocol or
+schema change. Recovery is a CI-validated Hub release reverting the notice.
+
 ## Unreleased: a summon reaches its machine, and the program says whether it is signed in
 
 On 2026-11-13 summons to Claude Code on a signed-in machine were refused as

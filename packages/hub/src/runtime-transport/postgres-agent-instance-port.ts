@@ -12,7 +12,8 @@ import type {
   AgentInstanceConnectMessage,
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
-import type { LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import type { AgentRuntimeState, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import { stalledTurnNotice } from "./agent-stalled-turn-notice";
 import {
   normalizeAgentInstanceDurablePresentation,
   type AgentInstanceDurablePresentation,
@@ -383,6 +384,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         );
         await this.recordResting(session, presenceRests(status, presentation?.runtimeState),
           presentation?.runtimeState?.updatedAtMillis);
+        await this.noticeStalledTurn(session, session.presentation?.runtimeState, presentation?.runtimeState);
         return output;
       }
       default: return this.dependencies.signals.publish(session, message);
@@ -683,6 +685,28 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
    * about: shown as xMatrix under the owner, of its own kind so it is nobody's
    * speech, and keyed so a resent report posts nothing new.
    */
+  /** A turn the host reports stalled is said in its Channel, once per stall. */
+  private async noticeStalledTurn(session: Readonly<AgentInstanceRuntimeSession>,
+    previous: AgentRuntimeState | undefined, next: AgentRuntimeState | undefined): Promise<void> {
+    const channelInstanceId = session.run.channelInstanceId;
+    const notice = stalledTurnNotice({ previous, next, channelId: session.run.channelId,
+      instanceId: session.run.instanceId, now: Date.now(),
+      address: `@${session.principal.agentName}${channelInstanceId ? `:${channelInstanceId}` : ""}` });
+    if (!notice) return;
+    try {
+      await this.appendHubNotice(session, {
+        noticeId: runtimeCommandId("turn-stalled", notice.key),
+        body: notice.body,
+        messageKind: "xmatrix.system.runtime-failure",
+        replyToMessageId: notice.replyToMessageId,
+        appMetadata: { source: "turn_stalled", instanceId: session.run.instanceId },
+      });
+    } catch (error) {
+      // Saying it is best-effort: presence itself has already been applied.
+      console.error("Stalled turn notice could not be posted", error);
+    }
+  }
+
   private async appendHubNotice(session: Readonly<AgentInstanceRuntimeSession>, notice: {
     noticeId: string; body: string; messageKind: string; replyToMessageId: string;
     appMetadata?: Record<string, unknown>;
