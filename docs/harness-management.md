@@ -105,9 +105,17 @@ there reads the code's text without the program's name.
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
-`auto_update_off`, `refresh`, `release`, and the sign-in actions `login_start`,
+`auto_update_off`, `refresh`, `release`, `check`, and the sign-in actions `login_start`,
 `login_finish` and `login_cancel` (see [Remote sign-in](#remote-sign-in)). `harnessActionAvailable` says whether a preset has an official
 recipe or control for one; anything else is refused when issued.
+
+`check` asks one preset's program, now, whether it is installed and signed in,
+and answers with what it says: its status command, or for an ACP harness with
+none, a start the way a launch starts it. It changes nothing and needs a daemon
+with `machine_harness_check_v1`. Whether a program is signed in is its own to
+say and nothing announces a change, so a page that shows it asks when it is
+looked at; `refresh` re-probes every preset and reads every registry, which
+takes many seconds and is not for that.
 
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
   `POST /api/machine-daemons/harness-actions { machineId, hostId?, presetId,
@@ -116,8 +124,10 @@ recipe or control for one; anything else is refused when issued.
   another Machine. The one action an Agent Run may issue there is `refresh` of
   its own Machine (a read-only probe, issued as its owner): after any harness
   change it makes, and before `xmatrix request sign-in`, the CLI asks the daemon
-  to look again, so the Hub's view of that Machine (routing, sign-in) shows the
-  change at once instead of at the next six-hourly probe.
+  to look again, so the Hub's view of that Machine (installed versions, and the
+  sign-in its pages show) has the change at once instead of at the next
+  six-hourly probe. Routing does not read that sign-in
+  ([space-agent-routing](architecture/space-agent-routing.md)).
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,

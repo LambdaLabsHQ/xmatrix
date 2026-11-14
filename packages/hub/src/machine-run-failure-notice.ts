@@ -1,4 +1,5 @@
-import { publicMachineStartupFailure, sha256Hex, type RepositoryBaseline } from "@xmatrix/protocol";
+import { HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutSentence, publicMachineStartupFailure, sha256Hex,
+  type HarnessSignedOut, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
 import { humanizeMachineRunFailureDetail, machineStopFailureCode } from "./machine-run-failure";
@@ -52,6 +53,33 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
 
 export async function publishMachineRunFailureNotice(env: Env, input: MachineRunFailureNotice): Promise<void> {
   await deliverMachineNotice(env, await machineRunFailureNoticeCommand(input), input, "startup-failure");
+}
+
+/**
+ * A start its program refused as signed out: the sign-in, in the conversation
+ * where the start failed, and the summon to send again once it is signed in
+ * (HARNESS_SIGNED_OUT_NOTICE_KIND). Stable per Run, so a replay adds nothing.
+ */
+export async function signedOutStartNoticeCommand(input: Omit<MachineRunFailureNotice, "detail" | "phase" | "hostId"> & {
+  signedOut: HarnessSignedOut; sourceMention?: string }) {
+  const digest = await sha256Hex(input.runId);
+  const summon = input.sourceMessageId && input.sourceMention
+    ? { sourceMessageId: input.sourceMessageId, sourceMention: input.sourceMention } : undefined;
+  return {
+    commandId: `machine-run-signed-out-notice:${digest}`.slice(0, 200),
+    messageId: `system:machine-run-signed-out:${digest}`.slice(0, 200), channelId: input.channelId,
+    body: `Couldn't start @${input.agentName}${onMachine(input)}. ${harnessSignedOutSentence(input.signedOut)} ` +
+      `Sign it in from here${summon ? ", then the message goes to it" : ""}.`,
+    messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
+    residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, runId: input.runId,
+      kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut: input.signedOut, ...summon } },
+  };
+}
+
+export async function publishSignedOutStartNotice(env: Env,
+  input: Parameters<typeof signedOutStartNoticeCommand>[0]): Promise<void> {
+  const command = await signedOutStartNoticeCommand(input);
+  await appendChannelMessage(env, command.channelId, command);
 }
 
 /**

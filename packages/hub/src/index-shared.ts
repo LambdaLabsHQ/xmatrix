@@ -64,6 +64,7 @@ import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
 import { getChannel, getSpace } from "./spaces";
 export { privateResponse } from "./private-response";
+export { transientError } from "./error-contract";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
@@ -448,7 +449,7 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/programs|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   // The page route authorizes the live Run and edit access before issuing a
   // co-writer ticket; Runs cannot join as raw document-sync clients.

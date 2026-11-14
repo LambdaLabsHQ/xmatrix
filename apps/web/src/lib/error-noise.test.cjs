@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
-const { isBrowserNotice, isBrowserNoticeReport, isClientDisconnect, isStaleBuild } = require("./error-noise.ts");
+const { earlyScriptLocation, isBrowserNotice, isBrowserNoticeReport, isClientDisconnect, isStaleBuild } = require("./error-noise.ts");
 
 test("a stale build is recognised from a failed chunk fetch or a module webpack no longer has", () => {
   const chunk = Object.assign(new Error("Loading chunk 925 failed."), { name: "ChunkLoadError" });
@@ -27,6 +27,16 @@ test("XMATRIX-WEB-7: the notice is recognised when the browser's error event car
   assert.equal(isBrowserNoticeReport(undefined, report("ResizeObserver loop completed with undelivered notifications.")), true);
   assert.equal(isBrowserNoticeReport(null, report("Cannot read properties of null (reading 'dataset')")), false);
   assert.equal(isBrowserNoticeReport(new Error("render failed"), {}), false);
+});
+
+test("XMATRIX-WEB-10/11: an early script error keeps its path, line and column, and drops the query", () => {
+  assert.deepEqual(earlyScriptLocation({
+    filename: "https://xmatrix.page/_next/static/chunks/app/page.js?token=secret#part",
+    lineno: 12,
+    colno: 4,
+  }), { script: "https://xmatrix.page/_next/static/chunks/app/page.js", line: 12, column: 4 });
+  assert.deepEqual(earlyScriptLocation({ filename: "", lineno: 0, colno: 0 }), {});
+  assert.deepEqual(earlyScriptLocation({}), {});
 });
 
 test("only a response the visitor stopped reading counts as a disconnect", () => {

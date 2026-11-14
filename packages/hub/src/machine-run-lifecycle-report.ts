@@ -1,11 +1,11 @@
 import { publishChannelInvocationsChanged, publishChannelPresenceChanged, runInstanceId } from "./channel-live-judgment";
-import { cleanRepositoryBaseline } from "@xmatrix/protocol";
+import { agentPresetById, cleanRepositoryBaseline } from "@xmatrix/protocol";
 import { PostgresMachineLifecycleRepository, RuntimeControlError, type AuthorityDatabase } from "@xmatrix/db";
 
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { isRecoverableLaunchFailure } from "./live-run-admission";
 import { publishMachineRunFailureNotice, publishMachineStopResultNotice, publishRepositoryBaselineNotice,
-  publishStartupFallbackNotice, type MachineStopCause } from "./machine-run-failure-notice";
+  publishSignedOutStartNotice, publishStartupFallbackNotice, type MachineStopCause } from "./machine-run-failure-notice";
 import { dispatchStartupFallback } from "./registration-launch-dispatch";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import {
@@ -37,6 +37,42 @@ function optionalMachineName(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 160) : undefined;
 }
 
+type StartupFailureDependencies = { startupFallback?: typeof dispatchStartupFallback;
+  failed?: typeof publishMachineRunFailureNotice; handedOn?: typeof publishStartupFallbackNotice;
+  signedOutStart?: typeof publishSignedOutStartNotice };
+
+/**
+ * What a Run that failed to start owes its Channel. Its failure is said on the
+ * summon that asked for it, and an `@auto` summon's work goes to the
+ * next-ranked Agent, once (its command is per Run, so a replay of the report
+ * recovers that launch). A start its program refused as signed out is answered
+ * with its sign-in instead, and with the summon to send again unless another
+ * Agent already has the message.
+ */
+export async function answerStartupFailure(env: Env, context: Record<string, unknown>,
+  failure: { detail: string; phase?: string }, ownerEmail: string, dependencies: StartupFailureDependencies = {}): Promise<void> {
+  const notice = {
+    runId: text(context.runId, "runId"), channelId: text(context.channelId, "channelId"),
+    ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail,
+    agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
+    ...(typeof context.harness === "string" && context.harness ? { harness: context.harness } : {}),
+    machineName: optionalMachineName(context.machineName),
+    ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
+  };
+  const signedOut = context.signedOut === true && notice.harness ? { harness: notice.harness,
+    program: agentPresetById(notice.harness)?.displayName ?? notice.harness, machineId: notice.machineId,
+    ...(notice.machineName ? { machineName: notice.machineName } : {}) } : undefined;
+  if (!signedOut) await (dependencies.failed ?? publishMachineRunFailureNotice)(env, {
+    ...notice, hostId: optionalHostname(context.hostId), ...failure });
+  const handed = await (dependencies.startupFallback ?? dispatchStartupFallback)(env, {
+    channelId: notice.channelId, runId: notice.runId });
+  if (handed) await (dependencies.handedOn ?? publishStartupFallbackNotice)(env, { runId: notice.runId,
+    channelId: notice.channelId, agentName: handed.agentName, ownerUserId: notice.ownerUserId, ownerEmail,
+    ...(notice.sourceMessageId ? { sourceMessageId: notice.sourceMessageId } : {}) });
+  if (signedOut) await (dependencies.signedOutStart ?? publishSignedOutStartNotice)(env, { ...notice, signedOut,
+    ...(!handed && typeof context.sourceMention === "string" ? { sourceMention: context.sourceMention } : {}) });
+}
+
 /**
  * Records one Run lifecycle event its daemon reported — a spawn, stop, reply
  * recovery or cleanup result — on the Run's Space shard. A recoverable spawn
@@ -47,7 +83,7 @@ function optionalMachineName(value: unknown): string | undefined {
 export async function machineRunLifecycleReport(
   env: Env,
   input: Record<string, unknown>,
-  dependencies: { database?: AuthorityDatabase; startupFallback?: typeof dispatchStartupFallback } = {},
+  dependencies: { database?: AuthorityDatabase } & StartupFailureDependencies = {},
 ): Promise<Record<string, unknown>> {
   const database = dependencies.database ?? createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-hub-runtime", ...POSTGRES_AUTHORITY_TIMEOUTS });
@@ -95,22 +131,7 @@ export async function machineRunLifecycleReport(
     const failure = machineRunStartupFailureDetail(String(input.eventType), payload);
     if (failure && !isRecoverableLaunchFailure(failure.detail)) {
       const context = object(value.startupFailureNoticeContext, "startupFailureNoticeContext");
-      await publishMachineRunFailureNotice(env, {
-        runId: text(context.runId, "runId"), channelId: text(context.channelId, "channelId"),
-        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
-        agentName: text(context.agentName, "agentName"), machineId: text(context.machineId, "machineId"),
-        ...(typeof context.harness === "string" && context.harness ? { harness: context.harness } : {}),
-        hostId: optionalHostname(context.hostId), machineName: optionalMachineName(context.machineName), ...failure,
-        ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}),
-      });
-      // An `@auto` summon's work goes to the next-ranked Agent, once. Its
-      // command is per Run, so a replay of this report recovers that launch.
-      const handed = await (dependencies.startupFallback ?? dispatchStartupFallback)(env, {
-        channelId: text(context.channelId, "channelId"), runId: text(context.runId, "runId") });
-      if (handed) await publishStartupFallbackNotice(env, { runId: text(context.runId, "runId"),
-        channelId: text(context.channelId, "channelId"), agentName: handed.agentName,
-        ownerUserId: text(context.ownerUserId, "ownerUserId"), ownerEmail: ownerEmail(context.ownerUserId),
-        ...(typeof context.sourceMessageId === "string" ? { sourceMessageId: context.sourceMessageId } : {}) });
+      await answerStartupFailure(env, context, failure, ownerEmail(context.ownerUserId), dependencies);
     }
   }
   if ("repositoryBaselineNoticeContext" in value) {

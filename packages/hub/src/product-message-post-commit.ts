@@ -3,7 +3,7 @@ import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
+  REGISTRATION_PREPARATION_REJECTION_CODES, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
   AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
 import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
@@ -220,25 +220,22 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // The system notice is source-bound and idempotent across message retries.
     // A hint already lives on the mention's card: Jev's reading, or how to
     // name the machine. A launch that failed still tells the Channel.
-    // A too-old or signed-out program is named, and a signed-out one's notice carries what to sign in
-    // and the summon to send again once it is (HARNESS_SIGNED_OUT_NOTICE_KIND).
+    // A too-old program is named, and an offline machine's notice carries the summon to send again.
     const notices = new Map<string, Record<string, unknown> | undefined>();
     for (const item of rejected ?? []) {
       if (isLaunchHintRejection(item.code)) continue;
       const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
       const code = known ? item.code : "registration_launch_rejected";
-      const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;
       const machineAgents = code === "registration_machine_unavailable" ? item.machineAgents : undefined;
-      // What is too old, signed out or offline, or what a named machine runs, is named; any other code is its own sentence.
-      const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? machineAgents ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+      // What is too old or offline, or what a named machine runs, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, offline ?? machineAgents ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
       const noticeBody = item.quotaRetryId ? `${body}\n\n${item.sourceMention}\nRequest ${(item.selectionIndex ?? 0) + 1}` : body;
       if (!notices.has(noticeBody)) notices.set(noticeBody, item.quotaRetryId
         ? { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: item.quotaRetryId }
         : !item.sourceMention ? undefined
-        : signedOut ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention }
         : offline ? { kind: MACHINE_OFFLINE_NOTICE_KIND, offline, sourceMention: item.sourceMention } : undefined);
     }
     for (const [body, metadata] of notices) {

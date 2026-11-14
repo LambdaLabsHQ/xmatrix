@@ -44,7 +44,8 @@ test("a named offline machine is not reported as a missing registration", () => 
 test("an offline refusal names its machines and how to bring one back", () => {
   const blocked = [{ machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
     { machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
-    { machineId: "mac-id", reason: "harness_signed_out", signedOut: { harness: "codex", program: "Codex", machineId: "mac-id" } }];
+    { machineId: "mac-id", reason: "harness_outdated",
+      tooOld: { program: "Codex", version: "0.1.0", minimumVersion: "0.2.0" } }];
   // Each offline machine once; a machine blocked for another reason is not offline.
   assert.deepEqual(daemonOfflineRefusal(blocked), { code: "registration_daemon_offline",
     offline: [{ machineId: "laptop-id", machineName: "Laptop" }] });
@@ -104,28 +105,17 @@ test("a launch only a too-old harness could take names the program, its version 
   assert.equal(preparationRejectionMessage("registration_daemon_offline", tooOld), preparationRejectionMessage("registration_daemon_offline"));
 });
 
-test("a launch only a signed-out harness could take names the program and machine to sign in", () => {
+test("a signed-out notice names the program and machine to sign in, and the summon to send again", () => {
   const signedOut = { harness: "codex", program: "Codex", machineId: "mac-id", machineName: "mac-mini" };
-  const blocked = [{ machineId: "mac-id", machineName: "mac-mini", reason: "harness_signed_out", signedOut }];
-  assert.deepEqual(launchRefusal("registration_not_found", undefined, blocked),
-    { code: "registration_harness_signed_out", signedOut });
-  assert.equal(launchRefusal("registration_machine_unavailable", "mac-mini", blocked).code, "registration_harness_signed_out");
-  // Another machine being signed out says nothing about the one named.
-  assert.deepEqual(launchRefusal("registration_machine_unavailable", "Other", blocked), { code: "registration_machine_unavailable" });
-  // Too old is the cause first: signing in would not make it answer.
-  const tooOld = { program: "Codex", version: "0.1.0", minimumVersion: "0.2.0" };
-  assert.equal(launchRefusal("registration_not_found", undefined,
-    [...blocked, { machineId: "pc", reason: "harness_outdated", tooOld }]).code, "registration_harness_outdated");
-
-  assert.equal(preparationRejectionMessage("registration_harness_signed_out", signedOut),
-    "Codex on mac-mini is not signed in, so it can't take work. Sign it in from here, then the message goes to it. No launch was allocated.");
+  // No launch is refused for it beforehand: only the program says so, when given work.
+  assert.equal(preparationRejectionMessage("registration_harness_signed_out", signedOut), undefined);
   assert.equal(parseHarnessSignedOut({ ...signedOut, harness: "Codex X" }), undefined);
   assert.equal(parseHarnessSignedOut({ ...signedOut, machineName: "a\nb" }), undefined);
   assert.deepEqual(parseHarnessSignedOut(signedOut), signedOut);
 
   const notice = { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: "@auto", sourceMessageId: "m-1" };
   assert.deepEqual(harnessSignedOutNoticeOf(notice), { signedOut, summon: { sourceMention: "@auto", sourceMessageId: "m-1" } });
-  // A turn failure answers no summon: only the sign-in.
+  // A later turn answers no summon: only the sign-in.
   assert.deepEqual(harnessSignedOutNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut }), { signedOut });
   assert.deepEqual(harnessSignedOutNoticeOf({ ...notice, sourceMention: "auto" }), { signedOut });
   assert.equal(harnessSignedOutNoticeOf({ ...notice, signedOut: { ...signedOut, program: "" } }), null);

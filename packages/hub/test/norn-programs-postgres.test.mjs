@@ -154,6 +154,9 @@ integration("a program's ledger, its delivery and its holder live in PostgreSQL,
     // The conversation is closed to them: the request is left with nobody, and the next pass ends it with the reason.
     await sql("UPDATE data.channels SET mode='closed' WHERE channel_id='channel'");
     await sql("UPDATE data.space_members SET role='member' WHERE space_id='space' AND user_id='owner'");
+    // Nothing is theirs to answer once they can no longer read the conversation, even before the pass ends it.
+    assert.equal(await programs.personRequest({ requestId: randomUUID(), requestRef: asked.requestRef, userId: "owner" }),
+      undefined, "a person who can no longer read holds nothing to answer");
     assert.deepEqual((await programs.channelWork(scope())).passes, ["person"]);
     assert.equal((await programs.advance(scope("person"), nornStep())).status, "completed");
     await sql("UPDATE data.channels SET mode='open' WHERE channel_id='channel'");

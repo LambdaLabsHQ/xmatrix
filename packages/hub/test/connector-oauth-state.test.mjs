@@ -44,7 +44,10 @@ test("a forged, altered, expired or oversized state verifies as nothing", async 
   const state = await signOAuthState(claims, secret);
   const [payload, signature] = state.split(".");
   assert.equal(await verifyOAuthStateClaims(state, "rotated-secret"), undefined, "another secret");
-  assert.equal(await verifyOAuthStateClaims(`${payload}.${signature.slice(0, -1)}A`, secret), undefined, "another signature");
+  // The last base64url character of a 32-byte HMAC is one of 16 values, so a fixed replacement
+  // would equal it in one run of 16; swap it for a different value that still decodes.
+  const otherSignature = `${signature.slice(0, -1)}${signature.at(-1) === "A" ? "E" : "A"}`;
+  assert.equal(await verifyOAuthStateClaims(`${payload}.${otherSignature}`, secret), undefined, "another signature");
   const altered = `${payload.slice(0, 10)}${payload[10] === "A" ? "B" : "A"}${payload.slice(11)}.${signature}`;
   assert.equal(await verifyOAuthStateClaims(altered, secret), undefined, "an altered payload");
   assert.equal(await verifyOAuthStateClaims(await signOAuthState({ ...claims, expiresAt: Date.now() - 1 }, secret), secret), undefined, "expiry");

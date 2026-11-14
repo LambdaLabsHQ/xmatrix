@@ -84,6 +84,9 @@ test("an action is available only where an official recipe or control exists", (
   assert.equal(harnessActionAvailable(preset("custom"), "install"), false);
   assert.equal(harnessActionAvailable(preset("custom"), "refresh"), true);
   assert.equal(harnessActionAvailable(undefined, "refresh"), false);
+  // Any harness xMatrix manages can be asked whether it is signed in.
+  assert.equal(harnessActionAvailable(preset("claude"), "check"), true);
+  assert.equal(harnessActionAvailable(preset("goose"), "check"), true);
   assert.equal(harnessActionAvailable(preset("claude"), "update"), true);
   assert.equal(harnessActionAvailable(preset("claude"), "auto_update_off"), true);
   // goose has no updater of its own; xMatrix schedules its official update.

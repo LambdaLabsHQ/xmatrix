@@ -537,7 +537,11 @@ async fn execute_leased_harness_action(
     } else if action == machine_daemon_connection::HarnessAction::Release {
         let busy = harness_has_live_run(run_registry, &preset_id).await;
         runtime_daemon_harness_action::release(&preset_id, busy).await
-    } else if action == machine_daemon_connection::HarnessAction::Refresh {
+    } else if matches!(
+        action,
+        machine_daemon_connection::HarnessAction::Refresh
+            | machine_daemon_connection::HarnessAction::Check
+    ) {
         runtime_daemon_harness_action::execute(&preset_id, action).await
     } else {
         match runtime_daemon_harness_action::begin_request_once(&request_id) {
@@ -2227,6 +2231,8 @@ pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
     // The daemon parses and runs the `login_*` harness actions.
     "machine_harness_login_v1",
     "machine_harness_login_start_cancel_v1",
+    // The daemon asks one harness, now, whether it is signed in (`check`).
+    "machine_harness_check_v1",
     // A stop may push the Run's whole checkout to a handoff branch.
     "machine_handoff_export_v1",
     // The owner lists and reclaims this machine's git worktrees.

@@ -421,12 +421,19 @@ export class PostgresNornProgramRepository {
     });
   }
 
-  /** The open request this person holds by its reference; undefined when there is none. */
+  /**
+   * The open request this person holds by its reference, while they can still
+   * read its conversation (the same rule that delivered it to them);
+   * undefined when there is none, or when that access has been withdrawn.
+   */
   async personRequest(input: { requestId: string; requestRef: string; userId: string }) {
     return this.transaction(input.requestId, "person-request", async tx => {
-      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_person_v1", text: `SELECT r.channel_id,r.program_id,
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_person_v2", text: `SELECT r.channel_id,r.program_id,
           r.request_id,r.epoch,r.delivery_message_id FROM data.norn_requests r
+          JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=r.channel_id
         WHERE r.space_id=$1 AND r.request_ref=$2 AND r.holder_user_id=$3 AND r.settled_at IS NULL AND r.delivered_at IS NOT NULL
+          AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c", principalKindSql: "'user'",
+            principalIdSql: "$3" })}
         LIMIT 1`, values: [this.placement.spaceId, input.requestRef, input.userId], maxRows: 1 });
       return row ? { channelId: String(row.channel_id), programId: String(row.program_id), ledgerRequestId: String(row.request_id),
         epoch: Number(row.epoch), deliveryMessageId: String(row.delivery_message_id) } : undefined;

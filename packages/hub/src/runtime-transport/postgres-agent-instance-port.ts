@@ -1,5 +1,6 @@
 import { publishChannelInvocationsChanged } from "../channel-live-judgment";
 import { reportAgentTurnRetry } from "../agent-turn-retry";
+import { signedOutTurn, type SignedOutRefusal } from "../agent-signed-out-turn";
 import { postgresSettleQuestionnaire } from "../postgres-message-authority";
 import { INSTANCE_IDLE_SLEEP_MS, presenceRests } from "../instance-idle-sleep";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
@@ -11,7 +12,8 @@ import type {
   AgentInstanceConnectMessage,
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
-import type { HarnessSignedOut, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import type { AgentRuntimeState, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
+import { stalledTurnNotice } from "./agent-stalled-turn-notice";
 import {
   normalizeAgentInstanceDurablePresentation,
   type AgentInstanceDurablePresentation,
@@ -158,8 +160,8 @@ export interface PostgresAgentInstancePortDependencies {
   pullRequestOpened?(input: { spaceId: string; channelId: string; ownerUserId: string; repository: string;
     number: number; commandId: string }): Promise<unknown>;
   turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
-  /** Records a turn its program refused as signed out; the Run's registered program and machine. */
-  recordSignedOut?(session: Readonly<AgentInstanceRuntimeSession>): Promise<HarnessSignedOut | undefined>;
+  /** A turn its program refused as signed out: what its notice offers (signedOutTurn). */
+  signedOutTurn?(session: Readonly<AgentInstanceRuntimeSession>): Promise<SignedOutRefusal | undefined>;
   /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
   settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
@@ -222,8 +224,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         },
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
-      recordSignedOut: (session) => runtimeRepository(input.env).recordRunSignedOut({ requestId: crypto.randomUUID(),
-        runId: session.principal.runId, actorUserId: session.principal.ownerUserId }),
+      signedOutTurn: (session) => signedOutTurn(input.env, { runId: session.principal.runId,
+        channelId: session.run.channelId, ownerUserId: session.principal.ownerUserId }),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
       history: input.history,
       signals: input.signals,
@@ -382,6 +384,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         );
         await this.recordResting(session, presenceRests(status, presentation?.runtimeState),
           presentation?.runtimeState?.updatedAtMillis);
+        await this.noticeStalledTurn(session, session.presentation?.runtimeState, presentation?.runtimeState);
         return output;
       }
       default: return this.dependencies.signals.publish(session, message);
@@ -682,6 +685,28 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
    * about: shown as xMatrix under the owner, of its own kind so it is nobody's
    * speech, and keyed so a resent report posts nothing new.
    */
+  /** A turn the host reports stalled is said in its Channel, once per stall. */
+  private async noticeStalledTurn(session: Readonly<AgentInstanceRuntimeSession>,
+    previous: AgentRuntimeState | undefined, next: AgentRuntimeState | undefined): Promise<void> {
+    const channelInstanceId = session.run.channelInstanceId;
+    const notice = stalledTurnNotice({ previous, next, channelId: session.run.channelId,
+      instanceId: session.run.instanceId, now: Date.now(),
+      address: `@${session.principal.agentName}${channelInstanceId ? `:${channelInstanceId}` : ""}` });
+    if (!notice) return;
+    try {
+      await this.appendHubNotice(session, {
+        noticeId: runtimeCommandId("turn-stalled", notice.key),
+        body: notice.body,
+        messageKind: "xmatrix.system.runtime-failure",
+        replyToMessageId: notice.replyToMessageId,
+        appMetadata: { source: "turn_stalled", instanceId: session.run.instanceId },
+      });
+    } catch (error) {
+      // Saying it is best-effort: presence itself has already been applied.
+      console.error("Stalled turn notice could not be posted", error);
+    }
+  }
+
   private async appendHubNotice(session: Readonly<AgentInstanceRuntimeSession>, notice: {
     noticeId: string; body: string; messageKind: string; replyToMessageId: string;
     appMetadata?: Record<string, unknown>;
@@ -766,10 +791,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     noticeId: string | undefined,
   ): Promise<void> {
     if (!shouldPersistAgentTurnFailureNotice(message)) return;
-    // A program that refused the turn as signed out is named with its sign-in.
+    // A program that refused the turn as signed out is named with its sign-in,
+    // and with the summon to send again when the Run never answered it.
     // An unreadable registration still posts the failure, as written.
-    const signedOut = message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.recordSignedOut
-      ? await this.dependencies.recordSignedOut(session).catch((error: unknown) => {
+    const refused = message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.signedOutTurn
+      ? await this.dependencies.signedOutTurn(session).catch((error: unknown) => {
         console.error("Signed-out harness could not be read for the turn-failure notice", error);
         return undefined;
       }) : undefined;
@@ -785,7 +811,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       pendingTasks: message.pendingTasks,
       reason: message.reason,
       resetsAt: message.resetsAt,
-      ...(signedOut ? { signedOut } : {}),
+      ...(refused ? { signedOut: refused.signedOut, ...(refused.summon ? { summon: refused.summon } : {}) } : {}),
       noticeId,
       senderSnapshot: agentMessagePresentation(session.presentation) ?? {},
     });

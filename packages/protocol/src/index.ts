@@ -8,7 +8,7 @@ export type {
 } from "./authority.js";
 export {
   HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_ACTION_SETTLE_MS, HARNESS_ACTION_TIMEOUT_MS, HARNESS_ACTIONS, HARNESS_LOGIN_ACTIONS, HARNESS_LOGIN_STATES, harnessActionAvailable, harnessOutputTail,
-  MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
+  MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_CHECK_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_LOGIN_START_CANCEL_CAPABILITY,
   MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY,
   parseHarnessActionRequest, validHarnessLoginCode, parseHarnessActionResult, parseHarnessInventory, harnessItemObservedAt,
   compareHarnessVersions, harnessCommandLabel, harnessCommandLine, harnessDisplayVersion, harnessTooOld, harnessTooOldSentence,
@@ -520,7 +520,7 @@ export type {
   ChannelReferenceSpan, MessageReferenceSpan, NornRequestView, RequestReferenceSpan,
 } from "./message-references.js";
 export {
-  PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
+  nornRunBlock, PAGE_DOCUMENT_FRAGMENT, pageAuthorColor, pageAuthorLabel,
 } from "./pages.js";
 export { pagePositionBetween, PagePositionError } from "./page-position.js";
 

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { setTimeout } from "node:timers/promises";
 import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
@@ -155,7 +156,7 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
     url.pathname = `/${name}`;
     let applied;
     if (migrate) applied = JSON.parse((await promisify(execFile)(process.execPath,
-      [new URL("../scripts/migrate.mjs", import.meta.url).pathname, "apply", "--revision=local", "--allow-contract"], {
+      [fileURLToPath(new URL("../scripts/migrate.mjs", import.meta.url)), "apply", "--revision=local", "--allow-contract"], {
         timeout: 120_000, env: { ...process.env, DATABASE_URL: url.toString(), POSTGRES_RUNTIME_ROLE: role },
       })).stdout);
     client = new Client({ connectionString: url.toString() });

@@ -1522,7 +1522,8 @@ pub enum SecretCommand {
         json: bool,
     },
     /// Save a secret in a Space (Space admins). Inside an Agent Run, without
-    /// --space: save a credential it holds into its Space.
+    /// --space: save a credential it holds into its Space, or with only
+    /// `--access ask` make a saved secret ask first (its owner is a Space admin).
     Set {
         /// Secret alias.
         secret_ref: String,

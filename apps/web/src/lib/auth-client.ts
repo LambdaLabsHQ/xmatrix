@@ -10,6 +10,7 @@ import { classifyAuthClientFailure } from "@/lib/auth-error-policy";
 import { isTransientAuthStatus } from "@/lib/auth-session-policy";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 import { UserFacingProblem } from "@/lib/user-facing-error";
+import type { SessionReadGap } from "@/lib/session-not-ready";
 
 const AUTH_UNAVAILABLE = "The sign-in service can't be reached right now. Check your connection and try again.";
 
@@ -103,9 +104,18 @@ function getAuthBaseUrl(): string {
 /** How long one session read may take before it counts as unanswered. */
 export const SESSION_READ_TIMEOUT_MS = 15_000;
 
+/** A signed-in session arrived without `set-auth-jwt`. The name is what a later report keeps. */
+class MissingAuthJwtError extends Error {
+  constructor() {
+    super("The sign-in service returned a session without its set-auth-jwt token");
+    this.name = "MissingAuthJwtError";
+  }
+}
+
 export async function loadBetterAuthSession(): Promise<{
   session: WebAuthSession | null;
   user: AuthUser | null;
+  gap?: SessionReadGap;
 }> {
   // The Hub's jwt plugin answers a signed-in get-session with its bearer in
   // `set-auth-jwt` (exposed to this origin), so the session and the token
@@ -152,15 +162,15 @@ export async function loadBetterAuthSession(): Promise<{
     | undefined;
 
   if (!data?.user?.id || !data.user.email) {
-    return { session: null, user: null };
+    return { session: null, user: null, gap: "empty_user" };
   }
 
   const token: string | null = sessionJwt;
   if (!token) {
     // The app's own account route hands a page no Hub credentials, so a
     // session seen through it is not a browser session.
-    if (accountCallsThroughApp) return { session: null, user: null };
-    throw new Error("The sign-in service returned a session without its set-auth-jwt token");
+    if (accountCallsThroughApp) return { session: null, user: null, gap: "missing_jwt" };
+    throw new MissingAuthJwtError();
   }
 
   const user: AuthUser = {

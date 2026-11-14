@@ -17,7 +17,7 @@ import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
-import { pageSchedules } from "@xmatrix/protocol";
+import { pageSchedules, type PageScheduleProblem } from "@xmatrix/protocol";
 import { syncPageSchedules } from "./page-schedule-sync";
 import { pageProgramsKey, syncPagePrograms } from "./norn-page-programs";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
@@ -293,6 +293,9 @@ export class RelayPageSession extends DurableObject<Env> {
           if (this.programsProblem && Array.isArray(result.scheduleProblems)) {
             result.scheduleProblems.push({ source: "```norn run", problem:
               `The page's programs could not be brought up to date just now (${this.programsProblem}). xMatrix tries again by itself; check with xmatrix page read.` });
+          } else if (this.programsFound?.key === this.programsSynced && Array.isArray(result.scheduleProblems)) {
+            // What the sync of the text as it now stands found that the text alone cannot say.
+            result.scheduleProblems.push(...this.programsFound.problems);
           }
           this.later(this.summaryDue());
           return Response.json(result);
@@ -468,6 +471,8 @@ export class RelayPageSession extends DurableObject<Env> {
   private programsSyncing: Promise<void> = Promise.resolve();
   /** Why the page's programs are not yet what its text says; null once a sync succeeded. */
   private programsProblem: string | null = null;
+  /** What the last sync that succeeded found wrong with blocks, for the text it synced (`key`). */
+  private programsFound: { key: string; problems: PageScheduleProblem[] } | null = null;
 
   private programsChanged(principal: PageSessionPrincipal, body: string): void {
     // The first revision this session commits is synced whatever it holds: a block removed while
@@ -490,15 +495,17 @@ export class RelayPageSession extends DurableObject<Env> {
    */
   private async syncPrograms(userId: string, attempt: number): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const key = this.programsSynced;
     try {
       await this.ctx.storage.put("programsDue", { userId, attempt } satisfies ProgramsDue);
       await this.scheduleAlarm(PROGRAMS_SYNC_MS + PROGRAMS_RETRY_MS);
-      await Promise.race([
+      const problems = await Promise.race([
         syncPagePrograms(this.env, { spaceId: this.need("space"), pageId: this.need("page"), userId }),
         new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("The sync did not finish in time")), PROGRAMS_SYNC_MS); }),
       ]);
       await this.ctx.storage.delete("programsDue");
       this.programsProblem = null;
+      this.programsFound = key === null ? null : { key, problems };
     } catch (error) {
       // The next revision that touches a program syncs again, and so does the alarm.
       this.programsSynced = null;

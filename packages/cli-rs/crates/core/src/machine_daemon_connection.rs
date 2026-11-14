@@ -771,6 +771,9 @@ pub enum HarnessAction {
     /// Hand the running sign-in the owner's code, if any, and wait for it.
     LoginFinish,
     LoginCancel,
+    /// Ask this one preset's program, now, whether it is installed and signed
+    /// in, and answer with what it says. Nothing is changed or remembered.
+    Check,
 }
 
 impl HarnessAction {
@@ -778,6 +781,7 @@ impl HarnessAction {
         LoginStart => "login_start",
         LoginFinish => "login_finish",
         LoginCancel => "login_cancel",
+        Check => "check",
     );
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -4079,6 +4083,7 @@ mod tests {
             HarnessAction::LoginStart,
             HarnessAction::LoginFinish,
             HarnessAction::LoginCancel,
+            HarnessAction::Check,
         ] {
             assert_eq!(HarnessAction::parse(action.as_str()), Some(action));
         }

@@ -14,7 +14,8 @@ import type { Env } from "./types";
  * whether any live Run in the Space reads it when it asks (`auto`) or a Run
  * asks first, on a card in its Channel (`ask`). A Run starts with none and
  * reads a secret at the moment it needs it. A Run may also ask, on a card,
- * that secrets become `auto`; only a Space admin's answer changes them.
+ * that secrets become `auto`; only a Space admin's answer changes them. A Run
+ * whose owner is a Space admin makes a secret `ask` itself.
  */
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -71,9 +72,13 @@ export function registerSecretRoutes(app: Hono<{ Bindings: Env }>): void {
   app.delete(`${spaceSecrets}/:secretRef`, route("human", (c, user) =>
     spaceSecretRepository(c.env).remove({ spaceId: c.req.param("spaceId")!, userId: user.id, secretRef: c.req.param("secretRef")! })));
 
-  // An Agent saves a credential it already holds into its Space.
+  // An Agent saves a credential it already holds into its Space, or, naming
+  // only `access: ask`, makes a held secret ask first.
   app.post(HUB_ROUTES.secrets, route("agent", async (c, _user, run) => {
     const input = await body(c);
+    if (input.access === "ask" && input.value === undefined && input.envName === undefined && input.description === undefined) {
+      return spaceSecretRepository(c.env).runAsk(caller(run), String(input.secretRef ?? ""));
+    }
     return spaceSecretRepository(c.env).runCreate(caller(run), { secretRef: String(input.secretRef ?? ""), ...change(input) });
   }));
 

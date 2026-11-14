@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -34,10 +34,25 @@ test("only a top-level block tagged norn run is a program", () => {
   assert.match(nornProgramIn(fenced(review) + fenced(review)).refusal, /one program/u);
   assert.match(checkNornProgram(`run(@codex, "x")`).refusal, /^1:1 /u);
   // On a page a block may carry a name; without one it is `main`.
-  assert.deepEqual(nornBlocks(`${fenced(review, "norn run review")}\n${fenced("1")}\n${fenced("2", "norn run two words")}`),
+  assert.deepEqual(nornBlocks(`${fenced(review, "norn run review")}\n${fenced("1")}`),
     [{ name: "review", source: review }, { name: "main", source: "1" }]);
   // A name is a word in any language: it is what the program's conversation is called.
-  assert.deepEqual(nornBlocks(`${fenced("1", "norn run 物业费")}\n${fenced("2", "norn run 2nd")}`).map(block => block.name), ["物业费"]);
+  assert.deepEqual(nornBlocks(fenced("1", "norn run 物业费")), [{ name: "物业费", source: "1" }]);
+});
+
+test("a block tagged norn run that runs nothing says why, wherever it is read", () => {
+  const page = [fenced("1", "norn run 2nd"), fenced("2", "norn run two words"), fenced(review, "norn run twice"),
+    fenced(review, "norn run twice"), fenced(review, "norn run fine")].join("\n");
+  // Every block tagged norn run is one, so a page shows each, and none is passed over without a word.
+  assert.deepEqual(nornBlocks(page).map(block => [block.name, Boolean(block.problem)]),
+    [["2nd", true], ["two words", true], ["twice", true], ["twice", true], ["fine", false]]);
+  // Whoever saved the page is told each, under the block's own opening line.
+  assert.deepEqual(nornProgramProblems(page).map(problem => problem.source),
+    ["```norn run 2nd", "```norn run two words", "```norn run twice", "```norn run twice"]);
+  assert.match(nornProgramProblems(page)[0].problem, /names no program/u);
+  assert.match(nornProgramProblems(page)[2].problem, /Two blocks are named twice/u);
+  // A message's block is refused with the same words, not ignored.
+  assert.match(nornProgramIn(fenced(review, "norn run 2nd")).refusal, /^The program was not started: `norn run 2nd` names no program/u);
 });
 
 test("two Agents review a design through typed requests, and the program reads each answer at once", () => {

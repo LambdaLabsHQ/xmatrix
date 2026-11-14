@@ -22,6 +22,7 @@ import {
   type SocialSignInProvider,
   type WebAuthSession,
 } from "./auth-client";
+import { sessionNotReadyMessage, type SessionNotReadyGap } from "./session-not-ready";
 import { sameValue } from "./same-value";
 import {
   isTransientNetworkSessionError,
@@ -582,6 +583,9 @@ async function loadBetterAuthSessionAfterSignIn(): Promise<{
   const startedAt = Date.now();
   const timeoutMs = 30_000;
   let delayMs = 0;
+  let attempts = 0;
+  let gap: SessionNotReadyGap = "empty_user";
+  let errorName: string | undefined;
   let lastError: Error | null = null;
 
   while (Date.now() - startedAt <= timeoutMs) {
@@ -589,21 +593,25 @@ async function loadBetterAuthSessionAfterSignIn(): Promise<{
       await delay(delayMs);
     }
 
+    attempts += 1;
     try {
       const next = await loadBetterAuthSession();
       if (next.session && next.user) {
         return next;
       }
+      gap = next.gap ?? "empty_user";
+      errorName = undefined;
+      lastError = null;
     } catch (error) {
-      lastError = error instanceof Error ? error : new Error(String(error));
+      gap = "error";
+      errorName = error instanceof Error ? error.name : "unknown";
+      lastError = error instanceof Error ? error : null;
     }
 
     delayMs = Math.min(delayMs === 0 ? 250 : delayMs * 1.5, 2_000);
   }
 
-  const error = new Error(
-    "Sign-in succeeded, but the session is still not ready. Please wait a moment and try again."
-  ) as Error & { cause?: Error };
+  const error = new Error(sessionNotReadyMessage(gap, attempts, errorName)) as Error & { cause?: Error };
   if (lastError) {
     error.cause = lastError;
   }
