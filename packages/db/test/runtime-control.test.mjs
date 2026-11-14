@@ -262,6 +262,61 @@ test("Runtime reads route Run IDs into the placed physical shard", async () => {
   assert.equal(shard0.calls.some((call) => call.name === "runtime_get_run_v1"), false);
 });
 
+/** Answers the reads Agent Launch history makes for channel-1 of space-1. */
+function agentLaunchReads(query) {
+  return placedChannel(query) ?? (query.name === "channel_capability_runtime_history_read_v3"
+    ? [{ channel_id: "channel-1", space_id: "space-1", mode: "open", metadata_json: {}, version: 4 }] : []);
+}
+
+test("a lost connection reading Agent Launch history replays the read once on a fresh session", async () => {
+  const lost = Object.assign(new Error("Connection to the origin database was lost."), { code: "08006" });
+  const base = database(agentLaunchReads);
+  let attempts = 0;
+  const flaky = {
+    ...base,
+    openSession() { base.sessionOpens += 1; return flaky; },
+    async transaction(context, callback) {
+      if (context.operation === "runtime.agent-launches.query" && attempts++ === 0) {
+        return callback({ async query() { throw lost; } });
+      }
+      return base.transaction(context, callback);
+    },
+  };
+
+  const page = await new PostgresRuntimeRepository(flaky).queryAgentLaunches({
+    requestId: "agent-launches-replay", channelId: "channel-1", sourceMessageIds: ["message-1"],
+    actorUserId: "user-1",
+  });
+
+  assert.deepEqual(page.launches, []);
+  assert.equal(attempts, 2, "the read runs a second time");
+  assert.equal(base.sessionOpens, 2, "each attempt checks out its own session");
+});
+
+test("an answered reader failure does not replay Agent Launch history", async () => {
+  const answered = Object.assign(new Error("canceling statement due to statement timeout"), { code: "57014" });
+  const base = database(agentLaunchReads);
+  let attempts = 0;
+  const failing = {
+    ...base,
+    openSession() { base.sessionOpens += 1; return failing; },
+    async transaction(context, callback) {
+      if (context.operation === "runtime.agent-launches.query") {
+        attempts += 1;
+        return callback({ async query() { throw answered; } });
+      }
+      return base.transaction(context, callback);
+    },
+  };
+
+  await assert.rejects(() => new PostgresRuntimeRepository(failing).queryAgentLaunches({
+    requestId: "agent-launches-no-replay", channelId: "channel-1", sourceMessageIds: ["message-1"],
+    actorUserId: "user-1",
+  }), error => error === answered);
+
+  assert.equal(attempts, 1);
+});
+
 /**
  * Machine lifecycle reads for channel-1 on its dedicated shard: `run` is the
  * Run row of user-1's `run-1` that the lifecycle locks, if any, and `rows`
