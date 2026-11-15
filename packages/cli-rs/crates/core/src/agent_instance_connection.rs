@@ -304,10 +304,7 @@ fn merge_usage(current: &mut Option<LlmUsage>, incoming: &LlmUsage) {
         &incoming.context_usage_percent,
     );
     if incoming.has_account_quota() && !quota_observation_regresses(current, incoming) {
-        current.quota_usages = incoming.quota_usages.clone();
-        current.quota_source = incoming.quota_source.clone();
-        current.quota_observed_at = incoming.quota_observed_at.clone();
-        current.quota_account = incoming.quota_account.clone();
+        current.replace_quota(incoming);
     }
     merge_present(
         &mut current.cached_input_tokens,
@@ -1834,10 +1831,7 @@ fn prepare_presence_update(
             .and_then(|s| s.usage.as_ref())
             .is_some_and(|current| quota_observation_regresses(current, incoming))
     {
-        incoming.quota_usages = None;
-        incoming.quota_source = None;
-        incoming.quota_observed_at = None;
-        incoming.quota_account = None;
+        incoming.clear_quota();
     }
     let snapshot = latest.get_or_insert_with(AgentPresenceSnapshot::default);
     snapshot.merge(message);
@@ -4306,6 +4300,7 @@ pub(crate) mod tests {
                         remaining: Some(70.0),
                         percent: Some(30.0),
                         reset_at: None,
+                        scope: None,
                     }]),
                     ..Default::default()
                 }
@@ -4561,6 +4556,9 @@ pub(crate) mod tests {
             detail: None,
             snapshot: None,
             resets_at: None,
+            quota_scope: None,
+            quota_scope_reason: None,
+            usage: None,
             pending_tasks: None,
             ts: None,
         };

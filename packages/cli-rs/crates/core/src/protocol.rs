@@ -366,6 +366,11 @@ pub struct AgentModelInfo {
     pub supports_personality: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub upgrade: Option<String>,
+    /// The `scope`s of the provider's scoped quota windows that constrain this
+    /// model (Claude's model family, `"Fable"`; Cursor's pool, `"Auto"` or
+    /// `"API"`). Kept apart from the names a person selects a model by.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub quota_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1384,6 +1389,17 @@ pub enum AgentInstanceClientMessage {
         /// RFC 3339 time a `usage_limited` provider account resets, when known.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         resets_at: Option<String>,
+        /// What a `usage_limited` failure used up: `account`, the `scope` of
+        /// one scoped quota window (`"Fable"`), or `unresolved`.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        quota_scope: Option<String>,
+        /// Why an `unresolved` quota scope could not be told.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        quota_scope_reason: Option<String>,
+        /// The complete provider reading a `usage_limited` scope was told
+        /// from, when the read succeeded.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        usage: Option<Box<LlmUsage>>,
         /// Tasks still pending when `background_tasks_interrupted` was observed.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pending_tasks: Option<u32>,
@@ -2414,6 +2430,9 @@ mod tests {
                 process: Some("online".into()),
             }),
             resets_at: None,
+            quota_scope: None,
+            quota_scope_reason: None,
+            usage: None,
             pending_tasks: None,
             ts: None,
         };
@@ -2422,6 +2441,48 @@ mod tests {
         assert_eq!(json["channelId"], "ch1");
         assert_eq!(json["reason"], "codex_timeout");
         assert_eq!(json["snapshot"]["run"], "failed");
+        assert!(json.get("quotaScope").is_none());
+        assert!(json.get("usage").is_none());
+    }
+
+    #[test]
+    fn usage_limited_lifecycle_carries_its_scope_and_reading() {
+        let msg = AgentInstanceClientMessage::AgentLifecycle {
+            request_id: Some("failure-1".into()),
+            channel_id: None,
+            agent_id: None,
+            instance_id: None,
+            agent_name: None,
+            layer: "application".into(),
+            status: "failed".into(),
+            reason: Some("usage_limited".into()),
+            detail: None,
+            snapshot: None,
+            resets_at: Some("2026-11-19T18:00:00Z".into()),
+            quota_scope: Some("Fable".into()),
+            quota_scope_reason: None,
+            usage: Some(Box::new(LlmUsage {
+                quota_source: Some("provider_api".into()),
+                scoped_quota_usages: Some(vec![LlmQuotaUsage {
+                    label: Some("1w".into()),
+                    percent: Some(100.0),
+                    scope: Some("Fable".into()),
+                    ..LlmQuotaUsage::default()
+                }]),
+                ..LlmUsage::default()
+            })),
+            pending_tasks: None,
+            ts: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["resetsAt"], "2026-11-19T18:00:00Z");
+        assert_eq!(json["quotaScope"], "Fable");
+        assert!(json.get("quotaScopeReason").is_none());
+        assert_eq!(
+            json["usage"],
+            serde_json::json!({ "quotaSource": "provider_api", "scopedQuotaUsages": [
+                { "label": "1w", "percent": 100.0, "scope": "Fable" }] })
+        );
     }
 
     #[test]

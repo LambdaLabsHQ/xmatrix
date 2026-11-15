@@ -459,6 +459,7 @@ fn codex_model_info_from_value(value: &Value) -> Option<protocol::AgentModelInfo
         input_modalities,
         supports_personality: value.get("supportsPersonality").and_then(Value::as_bool),
         upgrade: clean("upgrade", 128),
+        quota_scopes: None,
     })
 }
 

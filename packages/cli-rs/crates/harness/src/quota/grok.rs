@@ -309,6 +309,7 @@ pub fn grok_billing_quota_usages(map: &serde_json::Map<String, Value>) -> Vec<Ll
                 remaining: Some((limit - used).max(0.0)),
                 percent: Some((used / limit) * 100.0),
                 reset_at: period_end.clone(),
+                scope: None,
             });
         }
     }
@@ -358,6 +359,7 @@ fn grok_credits_period_quota(config: &serde_json::Map<String, Value>) -> Option<
         remaining: None,
         percent: normalized_quota_percent(Some(percent), None, None),
         reset_at,
+        scope: None,
     })
 }
 

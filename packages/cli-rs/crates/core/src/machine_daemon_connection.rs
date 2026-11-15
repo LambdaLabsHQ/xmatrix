@@ -898,6 +898,11 @@ pub struct MachineQuotaProbeRequest {
     /// only its balance and currency) only when it sets this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub account_balance: bool,
+    /// The Hub accepts a result's `scopedQuotaUsages` (windows that constrain
+    /// only the models of their `scope`) only when it sets this; it then also
+    /// accepts an observed result whose only windows are scoped.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scoped_quota_usages: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -931,6 +936,11 @@ pub struct MachineQuotaProbeTargetResult {
     pub quota_observed_at: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub quota_usages: Vec<MachineQuotaProbeWindow>,
+    /// Windows that constrain only the models of their `scope`, sent only
+    /// when the probe asked for them. Present, even empty, on a reading that
+    /// states them completely.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scoped_quota_usages: Option<Vec<MachineQuotaProbeWindow>>,
     /// Whether the provider still serves the account, sent only when the
     /// probe asked for it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -949,6 +959,10 @@ pub struct MachineQuotaProbeWindow {
     /// probe asked for window labels.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
+    /// The provider's name for what a scoped window constrains (`"Fable"`);
+    /// only in `scoped_quota_usages`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scope: Option<String>,
 }
 
 /// Machine-local results and snapshots reported to the Hub.
