@@ -639,7 +639,11 @@ change). Quota waits (`packages/hub/src/quota-waits.ts`) carry it:
   waits behind ends; with neither known it waits for an event. A wake carries a
   revision, so a check that began before it cannot put the retry back to
   sleep. Recovering a stopped Instance (`continuation`) still starts only after
-  its author chose to wait.
+  its author chose to wait. One stopped for its own model's quota does not wait
+  for that model while another model of its harness has quota: it resumes in
+  the same session on the first one a launch would offer (the runtime default,
+  then its catalog, or the registration's declared models), as the reborn's
+  `preferredRuntimeModel`.
 The owning machine command authority issues a `quota_probe` to the exact online
 Daemon epoch advertising `machine_quota_probe_v2`; older Daemons never claim it.
 Each command contains at most 32 authorized registration/configuration bindings
