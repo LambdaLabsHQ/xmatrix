@@ -191,9 +191,17 @@ export function normalizeAgentPresetRuntime(
  * and waits. A harness on another backend can only be given `full`. */
 const REQUEST_RELAYING_BACKENDS = new Set<AgentPresetBackend>(["acp", "grok-acp", "claude-print"]);
 
-/** The access modes a harness can be added with, the default first. */
+/** The access modes a harness can be added with, the default first.
+ *
+ * A harness whose full access is an environment setting keeps its limit in
+ * its own sandbox: a refused write fails the command outright and sends no
+ * request. Left on its default, DeepSeek Harness cannot write
+ * `~/.config/xmatrix`, so no `xmatrix` command runs in its shell and the
+ * Agent could not answer in its Channel. Such a harness is offered full
+ * access alone. */
 export function agentAccessModes(preset: AgentPreset | undefined): AgentAccessMode[] {
-  return preset && REQUEST_RELAYING_BACKENDS.has(preset.backend) ? ["full", "ask"] : ["full"];
+  if (!preset || !REQUEST_RELAYING_BACKENDS.has(preset.backend)) return ["full"];
+  return Object.keys(preset.access?.full?.env ?? {}).length ? ["full"] : ["full", "ask"];
 }
 
 /** A daemon with this capability shows an `ask` launch's permission requests

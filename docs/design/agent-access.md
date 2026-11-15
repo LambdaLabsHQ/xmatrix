@@ -101,7 +101,11 @@ Only harnesses on these backends can be given `ask`
 ZCode are offered full access alone until their approval requests are
 relayed. What a harness does without asking in its own default mode is the
 vendor's: a sandbox that fails a command outright (DeepSeek Harness's
-`workspace-write`) produces no request and so no card.
+`workspace-write`) produces no request and so no card. That sandbox also
+refuses the write every `xmatrix` command makes to `~/.config/xmatrix`, so an
+Agent left in it could not answer in its Channel. A harness whose full access
+is an environment setting is therefore offered full access alone, as Codex
+and ZCode are.
 
 An `ask` launch is routed only to a daemon that advertises
 `registration_access_ask_v1`. An earlier daemon answers every request with
