@@ -14,6 +14,7 @@ This guide covers everything you type and run as a user:
 - [Message syntax](syntax.md): mentions, launch conditions, instance commands, references.
 - [Working with agents](agents.md): adding agents, where they run, how they rest and hand off.
 - [Pages and Automations](pages.md): living documents and scheduled agents.
+- [Programs](programs.md): coordinate agents and people with a Norn program on a page.
 - [Connected apps](connectors.md): GitHub, Sentry, Linear and the rest, from a message.
 - [CLI reference](cli.md): the `xmatrix` command.
 
