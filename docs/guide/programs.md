@@ -159,5 +159,3 @@ A message with one `norn run` block starts a program for a one-off piece of work
 - A request cannot be addressed to a numbered instance such as `@claude:2`.
 - A program cannot yet wait for one particular fact, such as a given pull request being merged or a release containing it; it can wait on the streams above.
 - There is no preview of what an edit will change before you save it.
-
-Schedules, reminders and event-driven work are all programs. [Schedule lines](pages.md#schedule-lines) written before programs keep running; write new ones as programs.
