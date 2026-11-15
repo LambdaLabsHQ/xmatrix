@@ -134,3 +134,33 @@ test("a long task is read in full as paragraphs, not as a chip or a cut line", a
   await expect(page.getByTestId("request-reference-chip")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("norn-long-request-paragraphs.png") });
 });
+
+test("a question an Agent asked with a command is one card: it names the asker, and neither its program nor its end takes a row", async ({ page }) => {
+  const question = "数据库里两张没人用的旧定时表，要删吗？删的话我先改一道安全检查并发版，再请你点一次工作流；不删就留着，对用户没有影响。";
+  const asked = request({ verb: "choose", options: ["DropTables", "KeepTables"], about: null, text: question, asker: "claude:2",
+    otherwise: "KeepTables" });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...CHANNEL, messageCount: 3, lastMessageSequence: 3 }] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { hasMore: false, messages: [
+    { messageId: "norn-ask:0b5e", channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+      body: `claude asks E2E Tester:\n\n\`\`\`norn run\ntype choice = DropTables | KeepTables\nswitch choose(@E2E Tester, "${question}", [DropTables, KeepTables], ~by=1d)->wait {\n| NoReply => Answered(KeepTables)\n| other => other\n}\n\`\`\`` },
+    { ...card(asked), sequence: 2 },
+    { messageId: "norn-end:norn-ask:0b5e", channelId: CHANNEL.id, sequence: 3, sentAt: E2E_NOW, from: XMATRIX,
+      body: "@claude:2 The program finished: Answered(DropTables)" }] });
+  await fixtureJson(page, "answer", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/answer`,
+    { status: "running" }, { method: "POST" });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const shown = page.locator("[data-ask-card]");
+  await expect(shown).toContainText(question, { timeout: 20_000 });
+  await expect(shown).toContainText("claude:2 asks");
+  await expect(shown).toContainText("Without an answer by then: KeepTables.");
+  const timeline = page.locator("main");
+  await expect(timeline).not.toContainText("type choice");
+  await expect(timeline).not.toContainText("The program finished");
+  // Nor does the conversation's row preview it: the row shows the card's words.
+  await expect(page.getByText(/The program fini/u)).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("norn-ask-one-card.png") });
+  await shown.getByRole("button", { name: "DropTables" }).click();
+  await expect(shown).toContainText("You answered: DropTables");
+  await expect(shown).not.toContainText("Without an answer by then");
+  await page.screenshot({ path: test.info().outputPath("norn-ask-answered.png") });
+});

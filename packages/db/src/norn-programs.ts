@@ -168,6 +168,14 @@ const unavailable = () => new ControlError("norn_request_unavailable", 404, "No 
 export const NORN_DELIVERY_PREFIX = "norn:";
 export const nornDeliveryMessageId = (requestRef: string, epoch: number) => `${NORN_DELIVERY_PREFIX}${requestRef}:${epoch}`;
 
+/** The Agent Instance that wrote program `p`, by its address in the conversation (`@claude:2`); null for a person's. */
+const AUTHOR_MENTION_SQL = `(SELECT '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id
+            FROM data.instances instance JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
+              LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+                AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
+                AND registration.harness=binding.harness
+            WHERE p.author_kind='agent' AND instance.instance_id=p.author_id LIMIT 1)`;
+
 export class PostgresNornProgramRepository {
   constructor(private readonly database: AuthorityDatabase, private readonly placement: DatabasePlacementContext) {}
 
@@ -290,8 +298,9 @@ export class PostgresNornProgramRepository {
           OR p.next_due_at<=clock_timestamp() OR EXISTS (SELECT 1 FROM data.norn_requests r
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });
-      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v3", text: `SELECT r.program_id,
-          r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,
+      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v4", text: `SELECT r.program_id,
+          r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,p.source,
+          ${AUTHOR_MENTION_SQL} AS author_mention,
           p.ledger_json->'requests'->r.request_id AS request_json,there.instance_id AS there_instance_id,there.mention AS there_mention,
           -- An earlier holding of this request broke off: whoever takes it now reads what that one had done.
           EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.ledger_json->'evidence')='array'
@@ -320,7 +329,7 @@ export class PostgresNornProgramRepository {
             ORDER BY earlier.settled_at DESC LIMIT 1) there ON TRUE
         WHERE r.channel_id=$1 AND r.settled_at IS NULL AND r.delivered_at IS NULL
         ORDER BY r.created_at,r.request_id LIMIT 200`, values: [input.channelId, NORN_HANDED_ON_REASON], maxRows: 200 });
-      const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v2", text: `SELECT p.program_id,p.state,
+      const reports = await tx.query<QueryResultRow>({ name: "norn_channel_reports_v3", text: `SELECT p.program_id,p.state,
           p.authority_user_id,p.page_id,p.page_name,p.ledger_json->'ended' AS ended_json,
           -- A Page's program that ends is told to people: what it asked and of whom, and who answered it.
           CASE WHEN p.page_id IS NOT NULL THEN p.ledger_json->'requests' END AS requests_json,
@@ -330,12 +339,7 @@ export class PostgresNornProgramRepository {
           (SELECT COALESCE(NULLIF(h.handle,''),NULLIF(h.name,''),m.display_name) FROM data.space_members m
               LEFT JOIN control.auth_users h ON h.id=m.user_id
             WHERE m.space_id=p.space_id AND m.user_id=p.authority_user_id) AS authority_name,
-          (SELECT '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id
-            FROM data.instances instance JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
-              LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
-                AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
-                AND registration.harness=binding.harness
-            WHERE p.author_kind='agent' AND instance.instance_id=p.author_id LIMIT 1) AS author_mention
+          ${AUTHOR_MENTION_SQL} AS author_mention
         FROM data.norn_programs p WHERE p.channel_id=$1 AND p.state<>'running' AND p.reported_at IS NULL
         ORDER BY p.updated_at,p.program_id LIMIT 200`, values, maxRows: 200 });
       // The Instance a request started exists for that request alone. Once the request has ended, its Run is
@@ -353,8 +357,8 @@ export class PostgresNornProgramRepository {
             WHERE instance.instance_id=${requestInstance("r")} LIMIT 1) started ON TRUE
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNRELEASED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       // A person's request that has ended: its card is told how, and stops waiting on them.
-      const closings = await tx.query<QueryResultRow>({ name: "norn_channel_closings_v1", text: `SELECT r.program_id,r.request_id,
-          r.holder,r.holder_user_id,r.delivery_message_id,p.ledger_json->'requests'->r.request_id->'reply' AS reply_json
+      const closings = await tx.query<QueryResultRow>({ name: "norn_channel_closings_v2", text: `SELECT r.program_id,r.request_id,
+          r.holder,r.holder_user_id,r.delivery_message_id,p.source,p.ledger_json->'requests'->r.request_id->'reply' AS reply_json
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
         WHERE r.channel_id=$1 AND ${NORN_REQUEST_UNCLOSED_SQL} ORDER BY r.settled_at,r.request_id LIMIT 200`, values, maxRows: 200 });
       const notices = await tx.query<QueryResultRow>({ name: "norn_channel_notices_v1", text: `SELECT n.program_id,n.notice_id,
@@ -364,7 +368,7 @@ export class PostgresNornProgramRepository {
       return {
         closings: closings.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           holder: String(row.holder), holderUserId: String(row.holder_user_id), deliveryMessageId: String(row.delivery_message_id),
-          reply: row.reply_json as unknown })),
+          source: String(row.source), reply: row.reply_json as unknown })),
         notices: notices.map(row => ({ programId: String(row.program_id), noticeId: String(row.notice_id),
           recipient: String(row.recipient), body: String(row.body), authorityUserId: String(row.authority_user_id),
           onPage: row.page_id !== null })),
@@ -375,6 +379,7 @@ export class PostgresNornProgramRepository {
         deliveries: deliveries.map(row => ({ programId: String(row.program_id), requestId: String(row.request_id),
           requestRef: String(row.request_ref), epoch: Number(row.epoch), holder: String(row.holder),
           deliveryMessageId: String(row.delivery_message_id), authorityUserId: String(row.authority_user_id),
+          source: String(row.source), authorMention: typeof row.author_mention === "string" ? row.author_mention : null,
           onPage: row.page_id !== null, handedOn: row.handed_on === true, withPerson: row.with_person === true,
           there: typeof row.there_instance_id === "string" && typeof row.there_mention === "string"
             ? { instanceId: row.there_instance_id, mention: row.there_mention } : null,

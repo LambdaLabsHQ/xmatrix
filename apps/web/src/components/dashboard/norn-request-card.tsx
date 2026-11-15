@@ -27,6 +27,10 @@ export interface NornRequestMetadata {
   context: string | null;
   options: string[];
   by: string | null;
+  /** The Agent Instance whose program asks (`claude:2`); null when a person wrote the program. */
+  asker: string | null;
+  /** The answer taken when it closes unanswered, where the asker said so. */
+  otherwise: string | null;
 }
 
 export function nornRequestMetadata(metadata: Record<string, unknown> | undefined): NornRequestMetadata | null {
@@ -39,7 +43,7 @@ export function nornRequestMetadata(metadata: Record<string, unknown> | undefine
   if (!ref || !verb || !holder || !holderUserId || !asked) return null;
   return { ref, verb, holder, holderUserId, text: asked, about: text(record.about) ?? null, context: text(record.context) ?? null,
     options: Array.isArray(record.options) ? record.options.filter((option): option is string => typeof option === "string") : [],
-    by: text(record.by) ?? null };
+    by: text(record.by) ?? null, asker: text(record.asker) ?? null, otherwise: text(record.otherwise) ?? null };
 }
 
 /** An option the person completes before sending: `High(say why)` takes words of their own. */
@@ -118,7 +122,7 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
 
   return (
     <AskCard
-      who="A program"
+      who={request.asker ?? "A program"}
       kind={request.about ?? undefined}
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
@@ -127,7 +131,8 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
       detail={<>
         {more && <div className="app-ask-more">{render(more)}</div>}
         {request.context && <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request.context}</div>}
-        {request.by && !outcome && <div>Closes {new Date(request.by).toLocaleString()}. Without an answer by then it counts as no reply.</div>}
+        {request.by && !outcome && sent === null && <div>Closes {new Date(request.by).toLocaleString()}. {request.otherwise
+          ? `Without an answer by then: ${request.otherwise}.` : "Without an answer by then it counts as no reply."}</div>}
       </>}
       status={outcome ? { tone: "settled", label: outcome }
         : sent ? { tone: "settled", label: sent }
