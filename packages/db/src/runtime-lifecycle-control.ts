@@ -413,6 +413,7 @@ export class PostgresMachineLifecycleRepository {
     // Instance merely because an earlier report terminalized its predecessor.
     const terminalInstances = input.preserveInstanceForReborn === true ? [] : await this.database.transaction({
       requestId: commandId, operation: "machine-lifecycle.terminal-instances",
+      statement: "single_read",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch },
     }, tx => tx.query<QueryResultRow>({ name: "machine_lifecycle_terminal_instances_v1", text: `SELECT i.instance_id

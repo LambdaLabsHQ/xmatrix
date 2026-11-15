@@ -239,7 +239,7 @@ export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, namedPageBody, pageActor, pageBody, PageControlError,
+  inActiveSpace, readInActiveSpace, namedPageBody, pageActor, pageBody, PageControlError,
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
@@ -265,7 +265,7 @@ export {
 } from "./space-roles.js";
 export { readCliReleaseOwners, requestMachineCliUpdateCheck, recordMachineCliUpdateStatus, failMachineCliUpdateCheck,
   type MachineCliUpdateCheckDecision } from "./machine-cli-release.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { HARNESS_RELEASE_TARGETS_SQL, readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 

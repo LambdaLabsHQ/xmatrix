@@ -2,7 +2,7 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { ControlError } from "./control-error.js";
-import { inActiveSpace } from "./page-control.js";
+import { readInActiveSpace } from "./page-control.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 
 /**
@@ -519,7 +519,7 @@ class NornSpaceError extends ControlError {
  * its conversation. Undefined otherwise, the same for "no such request".
  */
 export async function readNornRequest(database: AuthorityDatabase, input: { requestId: string; spaceId: string; requestRef: string; userId: string }) {
-  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.request", spaceId: input.spaceId }, NornSpaceError,
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.request", spaceId: input.spaceId }, NornSpaceError,
     async tx => {
       const [row] = await tx.query<QueryResultRow>({ name: "norn_request_view_v1", text: `SELECT r.channel_id,r.holder,
           p.ledger_json->'requests'->r.request_id AS request_json
@@ -537,7 +537,7 @@ export async function readNornRequest(database: AuthorityDatabase, input: { requ
  * conversation. Undefined otherwise, the same for "no such program".
  */
 export async function readNornProgram(database: AuthorityDatabase, input: { requestId: string; spaceId: string; programId: string; userId: string }) {
-  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.program", spaceId: input.spaceId }, NornSpaceError,
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.program", spaceId: input.spaceId }, NornSpaceError,
     async tx => {
       const [row] = await tx.query<QueryResultRow>({ name: "norn_program_view_v1", text: `SELECT p.channel_id,p.page_name,p.source,p.state,p.ledger_json
         FROM data.norn_programs p JOIN data.channels c ON c.space_id=p.space_id AND c.channel_id=p.channel_id
@@ -554,7 +554,7 @@ export async function readNornProgram(database: AuthorityDatabase, input: { requ
  * identity is never used again, and the program that worked in it went with it.
  */
 export async function readDeletedConversations(database: AuthorityDatabase, input: { requestId: string; spaceId: string; channelIds: string[] }) {
-  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.deleted-conversations", spaceId: input.spaceId }, NornSpaceError,
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.deleted-conversations", spaceId: input.spaceId }, NornSpaceError,
     async tx => new Set((await tx.query<QueryResultRow>({ name: "norn_deleted_conversations_v1", text: `SELECT d.channel_id
         FROM data.channel_deletions d WHERE d.space_id=$1 AND d.channel_id=ANY($2::text[]) LIMIT 1000`,
       values: [input.spaceId, input.channelIds.slice(0, 1000)], maxRows: 1000 })).map(row => String(row.channel_id))));
@@ -566,7 +566,7 @@ export async function readDeletedConversations(database: AuthorityDatabase, inpu
  * The caller has read the Page as whoever asks.
  */
 export async function readPageNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId: string; pageId: string }) {
-  return inActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
+  return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.page-programs", spaceId: input.spaceId }, NornSpaceError,
     async tx => (await tx.query<QueryResultRow>({
       name: "norn_page_programs_v1", text: `SELECT DISTINCT ON (p.page_name) p.page_name,p.program_id,p.channel_id,p.source,p.state,
           p.ledger_json,(SELECT count(*) FROM data.norn_programs earlier WHERE earlier.space_id=p.space_id
@@ -584,7 +584,8 @@ export async function readPageNornPrograms(database: AuthorityDatabase, input: {
  * owner, admin or member, as for a Page's schedule.
  */
 export async function readWaitingNornPrograms(database: AuthorityDatabase, input: { requestId: string; spaceId?: string }) {
-  return database.transaction({ requestId: input.requestId, operation: "norn.waiting-programs" }, async tx =>
+  return database.transaction({ requestId: input.requestId, operation: "norn.waiting-programs",
+    statement: "single_read" }, async tx =>
     (await tx.query<QueryResultRow>({ name: "norn_waiting_programs_v1", text: `SELECT p.space_id,p.channel_id,p.program_id,
         p.authority_user_id,p.waits_json
       FROM data.norn_programs p JOIN data.space_members member ON member.space_id=p.space_id

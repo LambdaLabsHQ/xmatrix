@@ -66,6 +66,10 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
     readCases.push({ read: () => pages.search({ ...input, query: "Recovery" }), evidence: page.pageId,
       matches: [/SELECT role FROM data\.space_members/u, /data\.page_title\(r.body\) AS title, r.body/u],
       failureMatch: /data\.page_title\(r.body\) AS title, r.body/u });
+    // HUB-CX lost BEGIN on the page tree itself. The tree is the same lock-free read as search.
+    readCases.push({ read: () => pages.tree(input), evidence: page.pageId,
+      matches: [/SELECT role FROM data\.space_members/u, /FROM data\.page_reads/u],
+      failureMatch: /FROM data\.page_reads/u });
     for (const { read, evidence, matches: stages, failureMatch } of readCases) {
       const expected = await read();
       assert.ok(JSON.stringify(expected).includes(evidence), "the accessible page or live activity is returned");

@@ -215,14 +215,18 @@ test("Agent Launch history remains readable after its Channel is archived", asyn
   assert.doesNotMatch(authorization.text, /archived_at IS NULL/u);
 });
 
-test("late daemon spawn evidence stamps a connected Launch without regressing state", async () => {
-  const connected = {
+function connectedLaunch() {
+  return {
     launch_id: "launch-1", channel_id: "channel-1", trigger_id: "message-1", target_name: "Alpha", target_runtime: "node",
     target_metadata_json: {}, launch_kind: "agent_mention_spawn", run_id: "run-1",
     instance_id: "instance-1", state: "connected", attempt: 0, retryable: false,
     created_at: "2026-09-04T00:00:00.000Z", updated_at: "2026-09-04T00:00:01.000Z",
     connected_at: "2026-09-04T00:00:01.000Z", spawned_at: null,
   };
+}
+
+test("late daemon spawn evidence stamps a connected Launch without regressing state", async () => {
+  const connected = connectedLaunch();
   const spawnedAt = "2026-09-04T00:00:00.750Z";
   const db = database((query) => placedChannel(query) ?? (
     query.name === "channel_capability_runtime_terminalize_v3" ? [channel]
@@ -239,6 +243,24 @@ test("late daemon spawn evidence stamps a connected Launch without regressing st
   assert.equal(value.launch.spawnedAt, spawnedAt);
   assert.deepEqual(db.calls.find((call) => call.name === "runtime_agent_launch_late_evidence_v1").values,
     ["launch-1", "spawned", spawnedAt]);
+});
+
+test("an illegal Agent Launch transition names its states and not the sentence", async () => {
+  const connected = connectedLaunch();
+  const db = database((query) => placedChannel(query) ?? (
+    query.name === "channel_capability_runtime_terminalize_v3" ? [channel]
+        : query.name === "runtime_agent_launch_update_lock_v3" ? [connected] : []));
+
+  await assert.rejects(() => new PostgresRuntimeRepository(db).updateAgentLaunch({
+    requestId: "launch-conflict", launchId: "launch-1", channelId: "channel-1",
+    actorUserId: "user-1", state: "prepared", at: "2026-09-04T00:00:02.000Z",
+  }), (error) => {
+    assert.equal(error.code, "launch_transition_conflict");
+    assert.equal(error.status, 409);
+    assert.equal(error.reason, "connected_to_prepared");
+    assert.equal(error instanceof RuntimeControlError, true);
+    return true;
+  });
 });
 
 test("Runtime reads route Run IDs into the placed physical shard", async () => {
