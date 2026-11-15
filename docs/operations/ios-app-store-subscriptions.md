@@ -65,3 +65,9 @@ Apple allows sandbox purchases only on a physical device; the Simulator can read
 The repository's Wrangler 4.79.0 simulator cannot extract the Apple Root G3 EC public key (`id-ecPublicKey`). A successful bundle or Node unit test does not exercise this boundary. The same certificate verifies its self-signature in the current official Wrangler 4.149.0 runtime with the unchanged compatibility date. Use a current official runtime for certificate-chain integration checks; do not work around the old simulator by skipping signature or chain validation. Root self-signature verification alone is not proof of a completed StoreKit purchase.
 
 Apple server API requests use manual redirects, which Cloudflare Workers supports. Non-success responses, including redirects, fail verification without forwarding credentials or granting entitlement.
+
+## Required subscription disclosures (Guideline 3.1.2(c))
+
+- The App Description in `apps/ios/app-store/metadata.json` must link Apple's standard Terms of Use (EULA) and `https://xmatrix.sh/privacy`. The stable submission overwrites the description from this file, so a link added only in App Store Connect is lost on the next release; `validateMetadata` refuses a description without both links.
+- In the app, Settings → Billing shows each subscription's title, length and price on its purchase button and links the Terms of Use (EULA), Privacy Policy and Terms of Service.
+- Every stable submission appends the same disclosure summary to the App Review Notes after the private `ASC_REVIEW_NOTES`.

@@ -81,6 +81,10 @@ test("public metadata has only publishable fields and respects Apple limits", ()
   assert.throws(() => validateMetadata({ ...metadata, demoAccountPassword: "SENSITIVE_TEST_SENTINEL" }), /schema/);
   assert.throws(() => validateMetadata({ ...metadata, localizations: [{ ...metadata.localizations[0], description: "x".repeat(4001) }] }), /description/);
   assert.throws(() => validateMetadata({ ...metadata, localizations: [{ ...metadata.localizations[0], supportUrl: "https://other.invalid" }] }), /URL/);
+  for (const link of ["https://www.apple.com/legal/internet-services/itunes/dev/stdeula/", "https://xmatrix.sh/privacy"]) {
+    const description = metadata.localizations[0].description.split(link).join("");
+    assert.throws(() => validateMetadata({ ...metadata, localizations: [{ ...metadata.localizations[0], description }] }), /must link/);
+  }
 });
 
 test("submits exact build, preserves private review fields and unrelated localizations", async () => {
@@ -92,6 +96,8 @@ test("submits exact build, preserves private review fields and unrelated localiz
   const reviewWrite = writes.find((row) => row.path.startsWith("/v1/appStoreReviewDetails/"));
   assert.deepEqual(Object.keys(reviewWrite.data.attributes), ["notes"]);
   assert.ok(reviewWrite.data.attributes.notes.includes("1.0.200 (12345)"));
+  assert.ok(reviewWrite.data.attributes.notes.includes("Terms of Use (EULA)"));
+  assert.ok(reviewWrite.data.attributes.notes.includes("https://xmatrix.sh/privacy"));
   assert.equal(writes.some((row) => row.method === "DELETE"), false);
   assert.equal(writes.some((row) => row.data?.attributes?.canceled), false);
 });
