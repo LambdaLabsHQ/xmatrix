@@ -57,8 +57,7 @@ test("human push suppresses fallback polls and names the list to re-read", async
     // Every list the Hub announces is one this client holds and re-reads on its
     // frame: a list announced with no query here would be kept current by a timer.
     const { WORKSPACE_RESOURCE_KINDS } = require("@xmatrix/protocol");
-    // `automations` is retired: the Hub may still announce it, and nothing here reads it.
-    for (const resource of WORKSPACE_RESOURCE_KINDS.filter((kind) => kind !== "automations")) {
+    for (const resource of WORKSPACE_RESOURCE_KINDS) {
       read();
       fetched.length = 0;
       await push.invalidateWorkspaceResources(client, { resource, spaceId: "space-1", channelId: "channel-1" });

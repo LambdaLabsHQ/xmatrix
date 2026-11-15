@@ -31,7 +31,7 @@ test("workspace resource wake-ups name one list and an optional channel", () => 
   const input = {
     type: "workspace_resource_changed",
     spaceId: "space-one",
-    resource: "automations",
+    resource: "launch_targets",
     revision: 8,
   };
   assert.deepEqual(parseHumanWorkspaceResourceChangedMessage(input), input);

@@ -61,8 +61,6 @@ export function refetchUnlessHumanPush(intervalMs: number): number | false {
 const HOLDS_RESOURCE: Record<WorkspaceResourceKind, (key: QueryKey, change: WorkspaceResourceChange) => boolean> = {
   launch_targets: (key, { spaceId }) => key[0] === "xmatrix" && key[3] === "space-launch-targets" &&
     (!spaceId || key[4] === spaceId),
-  // The Hub still announces this retired list; no query here holds it.
-  automations: () => false,
   // A space-wide queue (empty channel slot) still includes this channel.
   channel_transfers: (key, { spaceId, channelId }) => key[0] === "channel-transfers" &&
     (!spaceId || key[2] === spaceId) && (!channelId || !key[3] || key[3] === channelId),

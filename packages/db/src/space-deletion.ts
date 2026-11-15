@@ -312,7 +312,6 @@ export const SPACE_PURGE_EXCLUDED_TABLES: Readonly<Record<string, string>> = Obj
   "control.google_play_account_tokens": "immutable purchase ownership must prevent rebinding after Space deletion",
   "data.secret_grant_audit": "content-free credential-access audit survives Space deletion",
   "data.app_slack_workspace_claims": "the workspace's bot stays in its channels until Slack uninstalls it",
-  "data.automations": "retired; nothing reads it, and a contract migration drops it",
 });
 
 function stepName(index: number): string {
