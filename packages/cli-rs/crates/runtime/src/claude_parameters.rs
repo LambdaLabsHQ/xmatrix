@@ -76,15 +76,31 @@ fn effort_workflow_modes(value: &Value) -> Vec<String> {
     .collect()
 }
 
+/// The scope of Claude's per-model quota windows a model spends: the family
+/// word its display name starts with ("Fable 5.2" → "Fable"), as the usage
+/// endpoint names it in `scope.model.display_name`.
+fn claude_quota_scope(display_name: &str) -> Option<String> {
+    display_name
+        .split_whitespace()
+        .next()
+        .map(|family| family.chars().take(64).collect())
+}
+
 pub(crate) fn initialize_facts(value: &Value, model: Option<&str>) -> Facts {
     let workflow_modes = effort_workflow_modes(value);
     let rows = value.get("models").and_then(Value::as_array);
     let models = rows.filter(|rows| rows.len() <= 100).map(|rows| {
-        rows.iter()
+        let mut models: Vec<protocol::AgentModelInfo> = rows
+            .iter()
             .filter_map(|row| {
                 let id = row.get("value")?.as_str()?;
                 choice("model", "Model", vec![id.into()], None)?;
                 Some(protocol::AgentModelInfo {
+                    quota_scopes: (id != "default")
+                        .then(|| row.get("displayName").and_then(Value::as_str))
+                        .flatten()
+                        .and_then(claude_quota_scope)
+                        .map(|scope| vec![scope]),
                     id: id.into(),
                     model: row
                         .get("resolvedModel")
@@ -131,7 +147,19 @@ pub(crate) fn initialize_facts(value: &Value, model: Option<&str>) -> Facts {
                         }),
                 })
             })
-            .collect()
+            .collect();
+        // "Default (recommended)" names no family: the default row spends the
+        // quota of the model it resolves to.
+        let default_scopes = models.iter().find(|row| row.id == "default").and_then(|default| {
+            models
+                .iter()
+                .find(|row| row.id != "default" && row.model == default.model)
+                .and_then(|row| row.quota_scopes.clone())
+        });
+        if let Some(default) = models.iter_mut().find(|row| row.id == "default") {
+            default.quota_scopes = default_scopes;
+        }
+        models
     });
     let selected = rows.and_then(|rows| {
         rows.iter().find(|row| match model {
@@ -201,5 +229,55 @@ pub(crate) fn initialize_facts(value: &Value, model: Option<&str>) -> Facts {
             .get("fast_mode_disabled_reason")
             .and_then(Value::as_str)
             .map(|v| v.chars().take(160).collect()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_model_row_carries_the_family_its_quota_is_scoped_to() {
+        let models = initialize_facts(
+            &json!({ "models": [
+                { "value": "default", "displayName": "Default (recommended)",
+                  "resolvedModel": "claude-fable-5-2" },
+                { "value": "claude-fable-5-2", "displayName": "Fable 5.2" },
+                { "value": "opus", "displayName": "Opus 4.8", "resolvedModel": "claude-opus-4-8" },
+                { "value": "haiku" }
+            ]}),
+            None,
+        )
+        .models
+        .unwrap();
+        let scopes: Vec<_> = models
+            .iter()
+            .map(|row| (row.id.as_str(), row.quota_scopes.clone()))
+            .collect();
+        assert_eq!(
+            scopes,
+            vec![
+                ("default", Some(vec!["Fable".to_string()])),
+                ("claude-fable-5-2", Some(vec!["Fable".to_string()])),
+                ("opus", Some(vec!["Opus".to_string()])),
+                ("haiku", None),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_default_that_resolves_to_no_listed_row_has_no_scope() {
+        let models = initialize_facts(
+            &json!({ "models": [
+                { "value": "default", "displayName": "Default (recommended)",
+                  "resolvedModel": "claude-opus-5" },
+                { "value": "sonnet", "displayName": "Sonnet 5" }
+            ]}),
+            None,
+        )
+        .models
+        .unwrap();
+        assert_eq!(models[0].quota_scopes, None);
+        assert_eq!(models[1].quota_scopes, Some(vec!["Sonnet".to_string()]));
     }
 }

@@ -67,13 +67,23 @@ pub(crate) trait AgentPresentationAdapter {
             !self.runtime().trim().is_empty(),
             "presentation adapters require a stable runtime id"
         );
-        normalized_presentation(
+        let mut snapshot = normalized_presentation(
             self.source(),
             self.command_catalog_json(),
             facts,
             command_overlay,
             self.overlay_is_complete(),
-        )
+        );
+        // Each Cursor model spends its pool, Auto or API.
+        if self.runtime() == "cursor" {
+            for row in snapshot.models.iter_mut().flatten() {
+                row.quota_scopes = Some(vec![
+                    xmatrix_harness::quota::cursor::cursor_quota_scope_for_model(&row.model)
+                        .to_string(),
+                ]);
+            }
+        }
+        snapshot
     }
 }
 
@@ -792,6 +802,7 @@ pub fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelIn
                 input_modalities: None,
                 supports_personality: None,
                 upgrade: None,
+                quota_scopes: None,
             })
         })
         .collect()
@@ -929,6 +940,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
                         input_modalities: None,
                         supports_personality: None,
                         upgrade: None,
+                        quota_scopes: None,
                     })
                 })
                 .collect();

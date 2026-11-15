@@ -244,6 +244,8 @@ pub(crate) async fn run_claude_stream_turn(
         }
         ClaudeTurnStatus::Interrupted => (String::new(), outcome.usage),
     };
+    // The complete reading a usage limit was told from, the newest there is.
+    let mut limit_reading = None;
     if turn_interrupted {
         crate::write_current_run_status("turn_interrupted", false, None);
     } else if !turn_completed {
@@ -252,13 +254,21 @@ pub(crate) async fn run_claude_stream_turn(
         } else {
             body.clone()
         };
+        // Told before it is reported: Hub holds only what the limit used up.
+        let usage_limit = match outcome.usage_limit {
+            Some(limit) => {
+                Some(crate::runtime_usage_limit::resolve_claude_usage_limit(limit).await)
+            }
+            None => None,
+        };
+        limit_reading = usage_limit.as_ref().and_then(|limit| limit.usage.clone());
         crate::report_turn_failure_with_usage_limit(
             relay.as_ref(),
             Some(&channel_id),
             agent,
             &detail,
             execution_state == "unknown",
-            outcome.usage_limit.clone(),
+            usage_limit,
         );
     } else {
         crate::write_current_run_status("turn_completed", true, None);
@@ -266,7 +276,11 @@ pub(crate) async fn run_claude_stream_turn(
 
     latest_usage = merge_llm_usage(latest_usage, turn_usage);
     // Force a refresh after the turn so presence reflects post-turn windows when available.
-    latest_usage = merge_llm_usage(latest_usage, read_claude_oauth_rate_limit_usage(true).await);
+    let post_turn = match limit_reading {
+        Some(reading) => Some(reading),
+        None => read_claude_oauth_rate_limit_usage(true).await,
+    };
+    latest_usage = merge_llm_usage(latest_usage, post_turn);
 
     if turn_completed && !body.trim().is_empty() {
         eprintln!("{body}");

@@ -63,6 +63,34 @@ fn cursor_adapter_shows_readable_model_and_hides_default_agent_mode() {
 }
 
 #[test]
+fn cursor_model_rows_carry_the_pool_they_spend() {
+    let models = |runtime: &str| {
+        let adapter = agent_presentation_adapter_for_acp_runtime(runtime);
+        let mut facts = AgentPresentationFacts::default();
+        adapter.observe_acp(
+            &serde_json::json!({ "configOptions": [{
+                "id": "model", "type": "select", "currentValue": "default[]",
+                "options": [
+                    { "value": "default[]", "name": "Auto" },
+                    { "value": "composer-2.5", "name": "Composer 2.5" },
+                    { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+                ]
+            }]}),
+            &mut facts,
+        );
+        adapter.present(&facts, &[]).models.expect("models")
+    };
+    let scopes: Vec<_> = models("cursor")
+        .into_iter()
+        .map(|row| row.quota_scopes)
+        .collect();
+    let pool = |name: &str| Some(vec![name.to_string()]);
+    assert_eq!(scopes, vec![pool("Auto"), pool("Auto"), pool("API")]);
+    // Other ACP harnesses have no pools.
+    assert!(models("kimi").iter().all(|row| row.quota_scopes.is_none()));
+}
+
+#[test]
 fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
     let mut facts = AgentPresentationFacts::default();

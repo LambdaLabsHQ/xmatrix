@@ -28,8 +28,16 @@ pub struct LlmUsage {
     pub quota_source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub quota_observed_at: Option<String>,
+    /// Account windows: each one constrains every model of the account.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub quota_usages: Option<Vec<LlmQuotaUsage>>,
+    /// Windows that constrain only the models of their `scope` (Claude's
+    /// per-model weekly limit, Cursor's Auto and API pools). Present, even
+    /// empty, only on a complete provider reading; a partial reading (a Claude
+    /// rate-limit verdict) leaves it out. A field of its own so a Hub that does
+    /// not know scopes never reads one as an account window.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scoped_quota_usages: Option<Vec<LlmQuotaUsage>>,
     /// Whether the provider still serves the account, read together with
     /// `quota_usages`. A used-up window does not stop an account the provider
     /// keeps serving (credits), and a provider refusal stops one whose windows
@@ -67,6 +75,10 @@ pub struct LlmQuotaUsage {
     pub percent: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub reset_at: Option<String>,
+    /// The provider's own name for what a scoped window constrains
+    /// (`"Fable"`, `"Auto"`, `"API"`); set only in `scoped_quota_usages`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
@@ -97,14 +109,29 @@ impl LlmUsage {
     /// Whether the report carries an account-quota reading: provider windows,
     /// or the balance of an account that has no windows (prepaid billing).
     pub fn has_account_quota(&self) -> bool {
-        self.quota_usages
-            .as_ref()
-            .is_some_and(|items| !items.is_empty())
+        [&self.quota_usages, &self.scoped_quota_usages]
+            .iter()
+            .any(|items| items.as_ref().is_some_and(|items| !items.is_empty()))
             || self
                 .quota_account
                 .as_ref()
                 .and_then(|account| account.credits.as_ref())
                 .is_some_and(|credits| credits.balance.is_some())
+    }
+
+    /// Take every account-quota fact from `next`: windows, scoped windows,
+    /// source, observation time and account state belong to one read.
+    pub fn replace_quota(&mut self, next: &LlmUsage) {
+        self.quota_usages = next.quota_usages.clone();
+        self.scoped_quota_usages = next.scoped_quota_usages.clone();
+        self.quota_source = next.quota_source.clone();
+        self.quota_observed_at = next.quota_observed_at.clone();
+        self.quota_account = next.quota_account.clone();
+    }
+
+    /// Drop every account-quota fact, keeping the token counters.
+    pub fn clear_quota(&mut self) {
+        self.replace_quota(&LlmUsage::default());
     }
 }
 
@@ -148,6 +175,15 @@ mod tests {
                 remaining: Some(1.0),
                 percent: Some(87.5),
                 reset_at: Some("1900000000".to_string()),
+                scope: None,
+            }]),
+            scoped_quota_usages: Some(vec![LlmQuotaUsage {
+                label: Some("1w".to_string()),
+                window: Some("claude".to_string()),
+                percent: Some(100.0),
+                reset_at: Some("2026-11-19T17:59:59.768897+00:00".to_string()),
+                scope: Some("Fable".to_string()),
+                ..LlmQuotaUsage::default()
             }]),
             quota_account: Some(LlmQuotaAccount {
                 allowed: Some(true),
@@ -185,6 +221,13 @@ mod tests {
                 "remaining": 1.0,
                 "percent": 87.5,
                 "resetAt": "1900000000"
+            }],
+            "scopedQuotaUsages": [{
+                "label": "1w",
+                "window": "claude",
+                "percent": 100.0,
+                "resetAt": "2026-11-19T17:59:59.768897+00:00",
+                "scope": "Fable"
             }],
             "quotaAccount": { "allowed": true, "credits": { "balance": 42.5, "currency": "CNY" } },
             "cachedInputTokens": 9,
@@ -230,5 +273,10 @@ mod tests {
         };
         assert!(!has_llm_usage(&usage));
         assert!(has_llm_usage(&full_usage()));
+        let scoped_only = LlmUsage {
+            scoped_quota_usages: full_usage().scoped_quota_usages,
+            ..LlmUsage::default()
+        };
+        assert!(has_llm_usage(&scoped_only));
     }
 }

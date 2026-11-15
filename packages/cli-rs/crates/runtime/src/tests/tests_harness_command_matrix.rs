@@ -99,6 +99,7 @@ fn matrix_model() -> protocol::AgentModelInfo {
         input_modalities: None,
         supports_personality: None,
         upgrade: None,
+        quota_scopes: None,
     }
 }
 

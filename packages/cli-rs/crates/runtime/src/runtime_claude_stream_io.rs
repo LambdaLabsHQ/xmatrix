@@ -972,6 +972,9 @@ pub(crate) async fn claude_stream_reader(
             detail: None,
             snapshot: None,
             resets_at: None,
+            quota_scope: None,
+            quota_scope_reason: None,
+            usage: None,
             pending_tasks: Some(u32::try_from(count).unwrap_or(u32::MAX)),
             ts: None,
         });
