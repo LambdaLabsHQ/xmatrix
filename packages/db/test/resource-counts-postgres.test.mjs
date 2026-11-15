@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
 import { PostgresUserPreferenceRepository, PostgresPushDeviceRepository,
-  PostgresAssistantMemoryRepository, PostgresSharedMemoryRepository, PostgresPageRepository } from "../dist/index.js";
-import { removePageAutomations } from "../dist/automation-page-anchor.js";
+  PostgresAssistantMemoryRepository, PostgresSharedMemoryRepository } from "../dist/index.js";
 
 // These exercise persistence and complete reads beyond former quotas. Existing
 // owner tests cover access, encryption, replay and provider retirement evidence.
@@ -72,29 +71,6 @@ integration("assistant memory retains entries beyond 80 and shared memory admits
     await f.client.query("DELETE FROM data.assistant_memory_snapshots WHERE owner_user_id=$1", [f.ids.owner]);
     await f.client.query("DELETE FROM data.shared_memory_workspace_entries WHERE owner_user_id=$1", [f.ids.owner]);
     await f.client.query("DELETE FROM control.scoped_control_command_replays WHERE scope_kind='user' AND scope_id=$1", [f.ids.owner]);
-    await f.database.close?.(); await f.close();
-  }
-});
-
-integration("removing a page removes every automation beyond 200", async () => {
-  const f = await spaceSecretFixture();
-  try {
-    await f.client.query(`INSERT INTO data.space_control_heads(space_id,commit_sequence,updated_at)
-      VALUES ($1,0,now()) ON CONFLICT DO NOTHING`, [f.ids.space]);
-    const { page } = await new PostgresPageRepository(f.database).create({ requestId: crypto.randomUUID(),
-      spaceId: f.ids.space, principal: { kind: "user", id: f.ids.owner }, title: "Many Automations", body: "Keep" });
-    await f.client.query(`INSERT INTO data.automations
-      (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,page_id,created_at,updated_at)
-      SELECT $1||':auto:'||lpad(n::text,3,'0'),$2,$3,now()+interval '1 day',true,1,
-        '{"name":"Keep","intervalMinutes":60,"message":{"body":"Keep"}}',$4,now(),now()
-      FROM generate_series(1,251) n`, [f.ids.space, f.ids.owner, f.ids.channel, page.pageId]);
-    const context = { requestId: crypto.randomUUID(), operation: "test.anchors",
-      placement: { spaceId: f.ids.space, shardId: "shard-0", placementEpoch: 1 } };
-    const input = { spaceId: f.ids.space, pageId: page.pageId, at: new Date().toISOString() };
-    await f.database.transaction(context, tx => removePageAutomations(tx, input));
-    assert.equal((await f.client.query("SELECT count(*)::int AS n FROM data.automations WHERE page_id=$1", [page.pageId])).rows[0].n, 0);
-  } finally {
-    await f.client.query("DELETE FROM data.automations WHERE channel_id=$1", [f.ids.channel]);
     await f.database.close?.(); await f.close();
   }
 });

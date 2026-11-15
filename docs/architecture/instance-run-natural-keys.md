@@ -72,9 +72,9 @@ forward: an issued ordinal is never reissued, even if its row is removed.
 3. Each creation path reserves before minting: Hub summon, reborn, handoff,
    management and direct scheduled dispatch; registration launch including About;
    the Hub Run endpoint; database summon, direct Automation Runs and registration reborn.
-   Message Automation occurrences reserve no Run: their canonical messages launch
-   through registration authority, which owns each resulting Run key. See
-   [Automation Run links](../operations/automation-run-links.md).
+   Message Automation occurrences reserved no Run: their canonical messages launched
+   through registration authority, which owns each resulting Run key. Automations
+   are retired and their tables are dropped.
    Parsers of the old id shapes go with them.
 4. Contract: stop every Run, delete every Run, Instance and dependent row,
    and add CHECK constraints that pin each stored id to its key.

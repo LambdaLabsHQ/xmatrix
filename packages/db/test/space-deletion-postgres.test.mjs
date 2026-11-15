@@ -18,7 +18,7 @@ async function fixture(client, repository, id) {
   const ids = {
     space: `${id}-space`, other: `${id}-other`, owner: `${id}-owner`, member: `${id}-member`,
     general: `${id}-general`, archived: `${id}-archived`, agent: `${id}-agent`,
-    automation: `${id}-automation`, outsider: `${id}-outsider`,
+    outsider: `${id}-outsider`,
   };
   ids.instance = `${ids.general}:1`;
   ids.run = `${ids.instance}#1`;
@@ -71,9 +71,6 @@ async function fixture(client, repository, id) {
     (run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,authorization_digest,
      grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
     VALUES ($1,$2,$3,'machine-1','codex',$3,$1,repeat('a',64),1,1,1,1,'{}')`, [ids.run, ids.space, ids.owner]);
-  await client.query(`INSERT INTO data.automations
-    (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,created_at,updated_at)
-    VALUES ($1,$2,$3,now(),true,1,'{}',now(),now())`, [ids.automation, ids.owner, ids.general]);
   for (let sequence = 1; sequence <= 1_200; sequence++) {
     await client.query(`INSERT INTO data.messages
       (space_id,channel_id,message_id,timeline_sequence,entity_version,author_kind,author_id,
@@ -163,8 +160,6 @@ integration("an owner deletes a Space, may restore it, and the purge removes exa
   assert.equal((await scalar(`SELECT count(*)::int AS n FROM control.user_space_membership_routes
     WHERE space_id=$1 AND state='active'`, [ids.space])).n, 0);
   assert.equal((await scalar("SELECT status FROM data.runs WHERE run_id=$1", [ids.run])).status, "stopped");
-  assert.equal((await scalar("SELECT enabled FROM data.automations WHERE automation_id=$1",
-    [ids.automation])).enabled, false);
   await assert.rejects(repository.joinOpenSpace({ requestId: crypto.randomUUID(),
     commandId: crypto.randomUUID(), spaceId: ids.space, actorUserId: ids.outsider }), code("space_not_found"),
   "an open Space cannot be joined while it is being deleted");
@@ -187,8 +182,6 @@ integration("an owner deletes a Space, may restore it, and the purge removes exa
   [{ user_id: ids.owner, role: "owner" }, { user_id: ids.member, role: "member" }]);
   assert.equal((await scalar(`SELECT count(*)::int AS n FROM control.user_space_membership_routes
     WHERE space_id=$1 AND state='active'`, [ids.space])).n, 2);
-  assert.equal((await scalar("SELECT enabled FROM data.automations WHERE automation_id=$1",
-    [ids.automation])).enabled, true, "the paused Automation resumes");
   assert.equal((await scalar("SELECT status FROM data.runs WHERE run_id=$1", [ids.run])).status, "stopped",
     "a stopped Run stays stopped");
   await assert.rejects(restore(ids.owner), code("not_found"), "nothing is left to restore");

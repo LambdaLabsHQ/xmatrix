@@ -1,4 +1,4 @@
-import { PostgresAutomationRepository, type AuthorityDatabase, type DingTalkAppIdentity,
+import { type AuthorityDatabase, type DingTalkAppIdentity,
   type DingTalkInboundEffects, type PostgresDingTalkInboundInboxRepository } from "@xmatrix/db";
 import { postgresMessageAppend } from "../postgres-message-authority";
 import type { Env } from "../types";
@@ -16,7 +16,7 @@ export function createDingTalkPrimaryInboundEffects(input: {
     verifyNative: input.verifyNative,
     async append({ job,event },fence) {
       const request=() => ({ app: input.app,job,requestId: crypto.randomUUID() });
-      const destinations=await input.repository.effectDestinations({ ...request(),kind: "channel" });
+      const destinations=await input.repository.effectDestinations(request());
       for (const destination of destinations) {
         if (fence.signal.aborted || !await fence.current() || fence.signal.aborted) throw new Error("DingTalk effect expired");
         const authority=await input.repository.effectAuthority({ ...request(),destination,signal: fence.signal });
@@ -25,17 +25,6 @@ export function createDingTalkPrimaryInboundEffects(input: {
           principal: { kind: "user",id: destination.authorityRootUserId },appAuthorId: "dingtalk",
           messageKind: "xmatrix.message.text",body: event.body,
         },{ database: input.database,recoveryDatabase: input.database,spaceId: job.spaceId,dingtalkEffect: authority });
-      }
-    },
-    async automations({ job },fence) {
-      const request=() => ({ app: input.app,job,requestId: crypto.randomUUID() });
-      const destinations=await input.repository.effectDestinations({ ...request(),kind: "automation" });
-      const repository=new PostgresAutomationRepository(input.database);
-      for (const destination of destinations) {
-        if (fence.signal.aborted || !await fence.current() || fence.signal.aborted) throw new Error("DingTalk effect expired");
-        const authority=await input.repository.effectAuthority({ ...request(),destination,signal: fence.signal });
-        await repository.fireTrigger({ requestId: crypto.randomUUID(),automationId: destination.id,
-          eventId: authority.effectId,event: {},at: new Date().toISOString() },authority);
       }
     },
   };

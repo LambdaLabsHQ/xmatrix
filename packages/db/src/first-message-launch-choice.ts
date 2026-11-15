@@ -185,8 +185,7 @@ async function markFirstMessageSummoned(tx: DatabaseTransaction, channelId: stri
 async function firstMessage(tx: DatabaseTransaction, spaceId: string, channelId: string, messageId: string) {
   return (await tx.query<FirstMessageLaunchChoiceRow>({ name: "first_message_launch_source_v3", text: `SELECT author_kind,author_id,sent_at,body_hash
     FROM data.messages WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND timeline_sequence=1
-      AND author_kind IN ('user','agent') AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL
-      AND NOT EXISTS (SELECT 1 FROM data.automation_occurrences occurrence WHERE occurrence.message_id=$3)`,
+      AND author_kind IN ('user','agent') AND edited_at IS NULL AND recalled_at IS NULL AND deleted_at IS NULL`,
   values: [spaceId, channelId, messageId], maxRows: 1 }))[0];
 }
 

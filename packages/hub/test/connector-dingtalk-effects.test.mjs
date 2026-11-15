@@ -18,7 +18,7 @@ function afterAppendCommit(database, after) {
     } };
 }
 
-integration('DingTalk closed primary adapter uses real Hub codec, readable append, true trigger owner and stable commit-unknown recovery',async()=>{
+integration('DingTalk closed primary adapter uses real Hub codec, readable append and stable commit-unknown recovery',async()=>{
   // The isolated fixture uses full migrated tables and test-only native grants.
   // Use the same source module graph as the Hub for opaque WeakMap capabilities.
   const { effectFixture }=await import('../../db/test/dingtalk-effects.fixture.mjs');
@@ -36,18 +36,17 @@ integration('DingTalk closed primary adapter uses real Hub codec, readable appen
     const current=await f.current(f.job),fence={signal:new AbortController().signal,current:async()=>!!await f.inbox.current(f.request({job:f.job}))};
     const event={eventId:current.eventId,sourceRef:current.sourceRef,feature:'message.received',summary:'DingTalk text message',body:current.candidate.text};
     await effects.verifyNative(current,fence.signal);
-    await effects.append({job:f.job,event},fence);await effects.automations({job:f.job,event},fence);
+    await effects.append({job:f.job,event},fence);
     assert.equal(unknown,false);assert.equal(nativeCalls,1);
-    await effects.append({job:f.job,event},fence);await effects.automations({job:f.job,event},fence);
+    await effects.append({job:f.job,event},fence);
     const history=await new PostgresMessageRepository(f.database).history({requestId:crypto.randomUUID(),spaceId:f.spaceId,
       channelId:f.channelId,principal:{kind:'user',id:'target'},limit:10});
     assert.equal(history.messages.length,1);
     const message=postgresProductMessage(history.messages[0]);
     assert.equal(message.body,current.candidate.text);
     assert.equal(message.from.kind,'app');assert.equal(message.from.identityId,'app:dingtalk');
-    assert.equal((await f.sql('SELECT trigger_events FROM data.automations WHERE automation_id=$1',[f.automationId])).rows[0].trigger_events.length,1);
     await f.sql("UPDATE data.app_source_relations SET features_json='[]',version=version+1 WHERE relation_id=$1",[f.relationId]);
-    assert.deepEqual(await f.inbox.effectDestinations(f.request({job:f.job,kind:'channel'})),[]);
+    assert.deepEqual(await f.inbox.effectDestinations(f.request({job:f.job})),[]);
     assert.equal((await f.sql('SELECT count(*)::int n FROM data.messages WHERE space_id=$1',[f.spaceId])).rows[0].n,1);
   },{PostgresDingTalkInboundInboxRepository});
 });

@@ -190,13 +190,6 @@ export {
 } from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
-  PostgresAutomationRepository,
-  AutomationControlError,
-  CHANNEL_AUTOMATION_WAKE_SQL,
-} from "./automation-control.js";
-export { automationName } from "./automation-commit.js";
-export { AUTOMATION_OUTCOME_BATCH, type AutomationOccurrenceFacts } from "./automation-outcome-facts.js";
-export {
   PostgresTraceAccessRepository,
   TraceAccessControlError,
   type TraceAccessAuthorityResult,
@@ -245,7 +238,7 @@ export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError,
+  inActiveSpace, namedPageBody, pageActor, pageBody, PageControlError,
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {

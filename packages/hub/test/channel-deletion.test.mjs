@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { generateKeyPair, exportJWK, SignJWT } from "jose";
 import { integration, isolatedPostgres } from "../../db/test/postgres-database.fixture.mjs";
-import { createAuthorityDatabase, PostgresSpaceControlRepository, PostgresPageRepository, PostgresAutomationRepository, CHANNEL_PURGE_STEPS } from "@xmatrix/db";
+import { createAuthorityDatabase, PostgresSpaceControlRepository, PostgresPageRepository, CHANNEL_PURGE_STEPS } from "@xmatrix/db";
 import { requireChannelCapability } from "../../db/src/channel-capability-policy.ts";
 import { signAgentRunToken } from "../src/auth.ts";
 import { registerChannelDeletionRoutes } from "../src/index-routes-channel-deletion.ts";
@@ -63,9 +63,6 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
       SELECT s,c,c||'-message-'||n,n,1,'user','owner','message','hash','inline','inline',now(),now(),
         c||'-rank-'||n,'body for '||c,now() FROM (VALUES ('space','doomed',2501),
         ('space','kept',1),('other-space','foreign',1)) targets(s,c,amount), generate_series(1,amount) n`);
-    await f.run(`INSERT INTO data.automations(automation_id,owner_user_id,channel_id,next_run_at,enabled,version,
-      payload_json,created_at,updated_at,page_id) VALUES('schedule','owner','doomed',now(),true,1,
-        '{"payloadVersion":2,"message":{"body":"private scheduled input"}}',now(),now(),$1)`, [page.pageId]);
     await f.run(`INSERT INTO data.user_space_channel_view_preferences(space_id,user_id,follow_up_review_schedule,
       pinned_channel_ids_json,version,created_at,updated_at) VALUES('space','owner','off','["doomed","kept"]',1,now(),now())`);
     const scope = `channel-user:doomed:owner`, foreignScope = "channel-user:foreign:owner";
@@ -89,10 +86,6 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
     assert.equal(waiting.status, "waiting", "Space purge must preserve the placement of pending Channel cleanup");
     await repo.restoreSpace({ requestId: randomUUID(), commandId: randomUUID(), spaceId: "space",
       actorUserId: "owner", at: new Date().toISOString() });
-    const schedules = new PostgresAutomationRepository(f.session);
-    await schedules.maintain({ requestId: randomUUID(), now: new Date().toISOString(), runTimeoutMs: 1000 });
-    assert.equal((await f.run("SELECT count(*)::int AS n FROM data.automation_occurrences"))[0].n, 0,
-      "a retired Channel cannot create another occurrence even before its schedule is purged");
     for (const capability of ["message_content_read", "message_append", "runtime_new_work", "content_new_work"])
       await assert.rejects(f.session.transaction({ requestId: randomUUID(), operation: "test.retired-channel" },
         tx => requireChannelCapability(tx, { capability, channelId: "doomed", spaceId: "space",
@@ -152,7 +145,9 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
       JOIN information_schema.tables t USING(table_schema,table_name) WHERE c.table_schema IN ('data','control')
       AND c.column_name IN ('channel_id','conversation_id','source_channel_id') AND t.table_type='BASE TABLE'`);
     const classified = new Set(CHANNEL_PURGE_STEPS.map(step => step.table));
-    for (const name of ["data.channels", "data.channel_deletions", "control.channel_space_routes", "control.channel_space_directory"]) classified.add(name);
+    // data.automations is retired: nothing reads it, and a contract migration drops it.
+    for (const name of ["data.channels", "data.channel_deletions", "control.channel_space_routes", "control.channel_space_directory",
+      "data.automations"]) classified.add(name);
     assert.deepEqual(keyed.map(row => row.name).filter(name => !classified.has(name)), []);
   } finally { await f.close(); }
 });

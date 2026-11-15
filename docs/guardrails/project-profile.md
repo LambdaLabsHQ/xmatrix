@@ -314,10 +314,9 @@ The login page supports GitHub, Google and email. GitHub sign-in reuses the
 existing linked Human identity and GitHub App OAuth credentials, independently
 of Space connector installations. See [OAuth recovery](../operations/oauth-callback-recovery.md).
 
-Automation message occurrences link to actual persisted Runs through their exact
-canonical message and registration launches, including multiple Runs per message.
-Unused reservations and unstarted launches do not count; missing historical
-evidence stays unknown. See [Automation Run links](../operations/automation-run-links.md).
+Automations are retired: no code reads or writes `data.automations`,
+`data.automation_occurrences` or the `data.automation_occurrence_runs` view, and
+a contract migration drops them. Scheduled work is a Norn program on a page.
 
 Pages type committed Agent edits in as people type: the structure goes in
 first, then the words as small CRDT insertions, a few at a time. Several Agents
