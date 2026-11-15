@@ -31,6 +31,8 @@ async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerSta
       ...(inPlace ? {
         authorizeInBrowser: async (request: AuthorizeRequest) => {
           (shell.__authorizeRequests as AuthorizeRequest[]).push(request);
+          // A test that follows the app across page loads listens here.
+          void (shell.__noteAuthorize as ((url: string) => Promise<void>) | undefined)?.(request.url);
           const start = new URL(request.url);
           const state = answerState === "same" || start.searchParams.get("session_only") === "1"
             ? start.searchParams.get("state") : "someone-elses-state";
@@ -139,6 +141,24 @@ test("an app already signed in on the web finishes without a provider", async ({
   expect(start.searchParams.get("session_only")).toBe("1");
   expect(start.searchParams.has("provider")).toBe(false);
   expect(redeemed).toHaveLength(1);
+});
+
+test("signing out in the app does not sign straight back in with the browser's account", async ({ page }) => {
+  await openAsPhoneApp(page, { inPlace: true, existingSession: true, newAccount: true, client: "desktop" });
+  await stubRedemption(page);
+  const opened: URLSearchParams[] = [];
+  await page.exposeFunction("__noteAuthorize", (url: string) => { opened.push(new URL(url).searchParams); });
+  await page.goto("/login");
+  await page.waitForURL(/\/app/u);
+  expect(opened.map((params) => params.get("session_only"))).toEqual(["1"]);
+  await page.getByRole("button", { name: "Use a different account" }).click();
+  await page.waitForURL(/\/login/u);
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
+  // The login page that sign-out lands on opens nothing by itself.
+  expect(opened).toHaveLength(1);
+  // Choosing a provider is how the other account is picked.
+  await page.getByRole("button", { name: "Continue with Google" }).click();
+  await expect.poll(() => opened.map((params) => params.get("provider"))).toEqual([null, "google"]);
 });
 
 test("an answer carrying another sign-in's state is refused before any code is redeemed", async ({ page }) => {

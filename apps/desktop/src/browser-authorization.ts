@@ -60,9 +60,8 @@ export function authorizeInBrowser(
         response.writeHead(404, { "content-type": "text/plain" }).end("Not found");
         return;
       }
-      const signedIn = answer.searchParams.has("code");
       response.writeHead(200, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" })
-        .end(answeredPage(signedIn));
+        .end(answeredPage(answer));
       finish(() => resolve(answer.toString()));
       onAnswered();
     });
@@ -96,10 +95,18 @@ function abortError(message: string): Error {
   return error;
 }
 
-function answeredPage(signedIn: boolean): string {
-  const text = signedIn
-    ? "You're signed in. Go back to the xMatrix app; you can close this tab."
-    : "Sign-in didn't finish. Go back to the xMatrix app to try again; you can close this tab.";
+/** What the browser tab says once the app has its answer. */
+function answeredText(answer: URL): string {
+  if (answer.searchParams.has("code")) return "You're signed in. Go back to the xMatrix app; you can close this tab.";
+  // The app only asked whether this browser is signed in on the web, and it is not: nothing failed.
+  if (answer.searchParams.get("error") === "sign_in_required") {
+    return "This browser isn't signed in to xMatrix. Go back to the xMatrix app to sign in there; you can close this tab.";
+  }
+  return "Sign-in didn't finish. Go back to the xMatrix app to try again; you can close this tab.";
+}
+
+function answeredPage(answer: URL): string {
+  const text = answeredText(answer);
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>xMatrix</title></head>
 <body style="font-family:system-ui,sans-serif;background:#f5efe5;color:#2a1c10;padding:40px 24px;max-width:28rem;margin:auto">
 <p>${text}</p></body></html>`;
