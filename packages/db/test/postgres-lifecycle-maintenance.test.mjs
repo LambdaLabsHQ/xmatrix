@@ -17,7 +17,7 @@ function client(deleteCounts = [], reservationDeleteCounts = [], executionDelete
       if (text.includes("expiredIdempotencyRowsCapped")) assert.fail("unexpected label in SQL");
       if (text.includes("AS idempotency_rows")) return { rows: [{
         idempotency_rows: 7, sequence_reservation_rows: 3, message_execution_rows: 2,
-        scoped_command_replay_rows: 4,
+        scoped_command_replay_rows: 4, daemon_command_rows: 5,
       }] };
       if (text.includes("DELETE FROM data.idempotency_keys")) {
         const rowCount = deleteCounts.shift() ?? 0;
@@ -71,6 +71,7 @@ test("dry-run reports lifecycle state without opening a write transaction", asyn
   assert.equal(result.before.expiredSequenceReservationRowsCapped, 3);
   assert.equal(result.before.expiredMessageExecutionRowsCapped, 2);
   assert.equal(result.before.expiredScopedCommandReplayRowsCapped, 4);
+  assert.equal(result.before.expiredDaemonCommandRowsCapped, 5);
 });
 
 test("maintenance deletes only expired idempotency rows in bounded batches", async () => {
@@ -97,7 +98,7 @@ test("maintenance deletes expired PostgreSQL sequence reservations with the same
   ]));
   assert.equal(result.deletedExpiredIdempotencyRows, 0);
   assert.equal(result.deletedExpiredSequenceReservationRows, 1_250);
-  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, authSession: 1, scopedCommandReplay: 1 });
+  assert.deepEqual(result.batchesByRelation, { idempotency: 1, sequenceReservation: 2, messageExecution: 1, wecomInstallAttempt: 1, dingtalkCompanyAttempt: 1, retainedOutbox: 1, authSession: 1, scopedCommandReplay: 1, daemonCommand: 1 });
   const deletes = fake.calls.filter(
     ({ text }) => text.includes("DELETE FROM data.message_sequence_reservations"),
   );
@@ -244,4 +245,13 @@ test("a snapshot failure names the read that failed and rolls back", async () =>
     /lifecycle snapshot outbox by status: canceling statement due to statement timeout/u);
   assert.equal(fake.calls.at(-1).text, "ROLLBACK");
   assert.equal(fake.calls.some(({ text }) => text.includes("DELETE FROM")), false);
+});
+
+test("maintenance purges expired daemon commands in bounded batches", async () => {
+  const fake = clientWithExpired("data.machine_daemon_commands", 2_500);
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--max-rows=2000"]));
+  assert.equal(result.deletedExpiredDaemonCommands, 2_000);
+  const deletes = fake.calls.filter(value => value.text.includes("DELETE FROM data.machine_daemon_commands"));
+  assert.deepEqual(deletes.map(value => value.values[0]), [1_000, 1_000]);
+  assertBoundedExpiryDeletes(deletes);
 });

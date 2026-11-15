@@ -30,7 +30,13 @@ relation sizes and eligibility counts capped at 100,001, never content.
 
 Expired idempotency keys, sequence reservations, Agent message executions,
 connector install attempts and scoped command replays retain their existing
-expiry rules. Readers already refuse expired receipts. Their cleanup was
+expiry rules. Expired Machine daemon commands (`data.machine_daemon_commands`)
+do too: a command past its `expires_at` (30 days for ordinary commands, 15
+seconds for quota probes, shorter for harness, worktree and text-task commands)
+is refused by every reader, so the lifecycle deletes it in bounded batches.
+The `machine_daemon_commands_expiry_idx` partial index (0254) makes the
+eligibility count and each batch a bounded `expires_at` scan instead of a full
+scan of the table. Readers already refuse expired receipts. Their cleanup was
 implemented before the credit rollout; it must be verified through execution
 receipts rather than assumed absent from a large table size.
 
