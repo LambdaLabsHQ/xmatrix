@@ -4,6 +4,11 @@ run-name: PostgreSQL contract ${{ inputs.migration_id }} on ${{ inputs.environme
 # The release trains apply expand migrations only. A contract migration renames
 # or removes what running code may still use, so it runs here, alone, from an
 # exact reviewed revision, against one environment's shards.
+#
+# Dispatch it on a release tag (`xmatrix-v*`): the `production` environment
+# admits only those refs, and a run dispatched from `main` is rejected in the
+# apply job. The `revision` input, not the dispatch ref, names the reviewed
+# commit this run checks out and applies.
 on:
   workflow_dispatch:
     inputs:
