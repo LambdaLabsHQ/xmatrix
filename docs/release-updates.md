@@ -8,6 +8,13 @@ with no request a person could answer, so such an Agent could not send a
 reply. Its preset now says it cannot be given `ask`: the Hub refuses that mode
 for it and the add dialog, the Agent page and `xmatrix agent add` no longer
 offer it. Hub and Web. Recovery is a CI-validated beta reverting this change.
+A DeepSeek Agent could be added asking first. In that mode xMatrix leaves
+DeepSeek Harness on its own `workspace-write` sandbox, which refuses the
+write every `xmatrix` command makes to `~/.config/xmatrix`: the Agent could
+not send a reply, and the sandbox fails the command outright instead of
+asking, so no card appeared either. The confirmation now offers DeepSeek
+Harness full access alone and the Hub refuses `ask` for it, as for Codex and
+ZCode. Hub and Web. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: an Agent can be added asking first
 
