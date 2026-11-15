@@ -314,7 +314,7 @@ The login page supports GitHub, Google and email. GitHub sign-in reuses the
 existing linked Human identity and GitHub App OAuth credentials, independently
 of Space connector installations. See [OAuth recovery](../operations/oauth-callback-recovery.md).
 
-Automations are retired: contract migration 0253 drops `data.automations`,
+Automations are retired: contract migration 0253 dropped `data.automations`,
 `data.automation_occurrences` and the `data.automation_occurrence_runs` view.
 Scheduled work is a Norn program on a page.
 
