@@ -26,7 +26,7 @@ import {
   parseAgentRoutingRequirements,
   selectionLaunchConditions,
   sameAgentRegistration,
-  type SpaceAgentRegistrationKey,
+  type QuotaRetryRegistration, type SpaceAgentRegistrationKey,
   type AgentRoutingRequirements,
   type RegistrationLaunchBinding,
   registrationLaunchBindingForDaemon,
@@ -63,7 +63,8 @@ import { RegistrationAccessError, registrationRouteRefusal } from "./agent-regis
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
-import { currentRegistrationQuotaJoin, registrationQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage,
+  type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
 import { firstMessageSummonId, messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
 import { initialMessageSource, withInitialMessageSource } from "./runtime-initial-input.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -129,8 +130,10 @@ export interface RegistrationLaunchCandidate {
   observations?: {
     evaluatedAt: string; machineResources?: MachineResourceObservation;
     outstandingMachineAllocations: number; outstandingRegistrationAllocations: number;
+    /** The account's own headroom (`windows`: its account windows) and the
+     * stored reading every model's headroom is read from. */
     quota: { remainingPercent: number; assumed: boolean; observedAt?: string; expiresAt?: string; source?: string;
-      windows?: RoutingQuotaWindow[] };
+      windows?: RoutingQuotaWindow[]; usage?: RegistrationQuotaUsage };
   };
   workspaceReferences: string[];
   workspaces: Array<{ reference: string; canonicalCwd?: string; repo?: string; description: string; machineId: string }>;
@@ -809,7 +812,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
       offline?: OfflineMachine[]; machineAgents?: MachineAgents;
-      quotaTargets?: SpaceAgentRegistrationKey[]; quotaRefusedThrough?: string }> = [];
+      quotaTargets?: QuotaRetryRegistration[]; quotaRefusedThrough?: string }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
@@ -1257,13 +1260,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (daemons.length > 0 && !online.length && !reconnecting.length) { offline(); continue; }
         // A reconnecting machine that cannot be offered stays refused as offline.
         const drop = () => { if (reconnecting.length) offline(); else droppedOther = true; };
-        const facts = await tx.query({ name: "registration_launch_observations_v3", text: `SELECT
+        const facts = await tx.query({ name: "registration_launch_observations_v4", text: `SELECT
           e.declaration_json,statement_timestamp() AS evaluated_at,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.state<>'released') AS machine_allocations,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.harness=$3 AND a.state<>'released') AS registration_allocations,
-          q.remaining,q.observed_at,q.expires_at,q.source,q.windows_json,q.account_json
+          ${registrationQuotaColumns("q")}
           FROM control.agent_registration_environments e
           ${currentRegistrationQuotaJoin("q")}
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
@@ -1301,8 +1304,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             !machineResources?.hostCapabilities?.includes(capability))) { drop(); continue; }
         const directories = workspaces.filter(row => workspaceReferences.includes(String(row.workspace_id)));
 
+        // The account's own headroom ranks the environment; the stored
+        // reading tells each model's (`routingQuotaObservation`).
         const quota = registrationQuotaReading(fact);
-        const quotaWindows = currentRoutingQuotaWindows(fact?.windows_json, Date.now());
+        const quotaUsage = registrationQuotaUsage(fact);
+        const quotaWindows = quota ? currentRoutingQuotaWindows(fact?.windows_json, Date.now()) : [];
         const observation = observed.find(row => row.owner === candidate.key.ownerUserId &&
           row.machine === candidate.key.machineId && row.harness === candidate.key.harness);
         const modelCatalog = routingModelCatalogObservation(observation?.models, observation?.observed_at, Date.now())?.value;
@@ -1323,9 +1329,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(fact ? { observations: { evaluatedAt,
             machineResources,
             outstandingMachineAllocations: Number(fact.machine_allocations), outstandingRegistrationAllocations: Number(fact.registration_allocations),
-            quota: quota ? { ...quota, assumed: false, source: fact.source,
+            quota: { ...quota ? { ...quota, assumed: false, source: fact.source,
               ...(quotaWindows.length ? { windows: quotaWindows } : {}) }
-              : { remainingPercent: 100, assumed: true } } } : {}),
+              : { remainingPercent: 100, assumed: true }, ...(quotaUsage ? { usage: quotaUsage } : {}) } } } : {}),
           supportsRequestedParameters: daemonCapable(daemon, "machine_routing_parameters_v1"),
           supportsRequestedEffort: daemonCapable(daemon, "machine_routing_effort_v1"),
           supportsDefaultModelEffort: daemonCapable(daemon, "machine_routing_effort_v1") &&

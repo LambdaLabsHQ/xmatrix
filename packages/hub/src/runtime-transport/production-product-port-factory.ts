@@ -818,7 +818,9 @@ function agentLifecycleOfflineFrame(session: Readonly<AgentInstanceRuntimeSessio
   };
 }
 
-/** Whether a presented usage carries a registration reading still in force. */
+/** Whether a presented usage carries a registration reading still in force
+ * that needs no new read. A usage-limit hold (`exhausted`) waits for a read
+ * to tell what was used up, so a person opening the Channel asks for one. */
 function hasCurrentQuotaReading(usage: LlmUsage | undefined): boolean {
-  return usage?.quotaState === "observed" || usage?.quotaState === "exhausted";
+  return usage?.quotaState === "observed";
 }

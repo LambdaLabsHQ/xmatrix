@@ -224,7 +224,8 @@ export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationC
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
   type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
-export { readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+export { ACCOUNT_QUOTA_SCOPE, readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+  UNRESOLVED_QUOTA_SCOPE, type RegistrationQuotaUsage, type RegistrationUsageLimit,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 
 export {
@@ -268,7 +269,7 @@ export { HARNESS_RELEASE_TARGETS_SQL, readHarnessActionStatus, readHarnessReleas
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
-export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaExpiries,
+export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaUsages,
   readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
 export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, settleRegistrationQuotaWaits,

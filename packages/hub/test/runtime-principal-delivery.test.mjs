@@ -311,6 +311,12 @@ test("opening a Channel whose Agent has no current quota reading asks its machin
   await Promise.resolve();
   assert.deepEqual(current.quotaRefreshes, [], "a reading in force asks nothing");
 
+  const held = await openChannel(ownerCell(), { usage: { quotaState: "exhausted", quotaSource: "provider_api",
+    quotaObservedAt: now, quotaUsages: [{ percent: 100 }] } });
+  await Promise.resolve();
+  assert.deepEqual(held.quotaRefreshes, [{ channelId: "channel-1", actorUserId: "viewer-1" }],
+    "a usage-limit hold waits for a read to tell what was used up");
+
   const refused = await openChannel(ownerCell(), { readable: false });
   assert.deepEqual(refused.quotaRefreshes, [], "nothing is asked for a Channel the person cannot read");
 });

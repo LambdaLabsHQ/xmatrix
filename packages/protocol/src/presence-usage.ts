@@ -6,6 +6,7 @@ export function usageWithoutQuota(usage?: LlmUsage): LlmUsage | undefined {
     quotaSource: _quotaSource,
     quotaState: _quotaState,
     quotaUsages: _quotaUsages,
+    scopedQuotaUsages: _scopedQuotaUsages,
     quotaObservedAt: _quotaObservedAt,
     quotaAccount: _quotaAccount,
     ...localUsage
@@ -39,6 +40,7 @@ export function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | 
   if (!latest) return undefined;
   return { quotaState: latest.quotaState ?? "observed", quotaObservedAt: latest.quotaObservedAt,
     ...(latest.quotaState !== "unknown" ? { quotaSource: "provider_api", quotaUsages: latest.quotaUsages,
+      ...(latest.scopedQuotaUsages ? { scopedQuotaUsages: latest.scopedQuotaUsages } : {}),
       ...(latest.quotaAccount ? { quotaAccount: latest.quotaAccount } : {}) } : {}) };
 }
 
@@ -66,6 +68,7 @@ export function mergeLlmUsagePreferringQuotas(
       const {
         quotaSource: _quotaSource,
         quotaUsages: _quotaUsages,
+        scopedQuotaUsages: _scopedQuotaUsages,
         quotaObservedAt: _quotaObservedAt,
         quotaAccount: _quotaAccount,
         ...localUsage
@@ -80,6 +83,7 @@ export function mergeLlmUsagePreferringQuotas(
       ...update,
       quotaSource: "provider_api",
       quotaUsages: current.quotaUsages,
+      scopedQuotaUsages: current.scopedQuotaUsages,
       quotaAccount: current.quotaAccount,
       ...(current.quotaObservedAt ? { quotaObservedAt: current.quotaObservedAt } : {}),
     };

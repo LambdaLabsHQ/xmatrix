@@ -1152,6 +1152,10 @@ export interface AgentModelInfo {
   inputModalities?: string[];
   supportsPersonality?: boolean;
   upgrade?: string;
+  /** The `scope`s of the provider's scoped quota windows that constrain this
+   * model (Claude's family, `Fable`; Cursor's pool, `Auto` or `API`). Kept
+   * apart from the names a person selects a model by. */
+  quotaScopes?: string[];
 }
 
 export type WorkspaceVisibility = "private" | "channel" | "space";

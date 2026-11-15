@@ -15,9 +15,10 @@ import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime
  * ordinary handoff's job, exactly as if somebody had typed it.
  */
 
-function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" })) {
+function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" })) {
   const { port, commands } = recordingAgentInstancePort({
     respond: (family, input) => family === "registration-usage-limit-hold" ? hold(input) : { sequence: 7 },
+    offerUsageLimitRetry: async () => undefined,
   });
   const session = {
     principal: {
@@ -25,7 +26,8 @@ function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" 
       runId: "run-1", executionKey: "execution-1",
     },
     run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
-    presentation: { model: "claude-opus-5-5" },
+    presentation: { model: "claude-opus-5-5", models: [
+      { id: "default", model: "claude-opus-5-5", displayName: "Opus 5.5", quotaScopes: ["Opus"] }] },
   };
   return { commands, port, session };
 }
@@ -71,6 +73,34 @@ test("a replayed usage-limit signal resolves to the same hold and handoff messag
   assert.deepEqual(second.commands.map(command => command.input.commandId ?? command.input.payload?.commandId),
     first.commands.map(command => command.input.commandId ?? command.input.payload?.commandId));
   assert.equal(second.commands[2].input.messageId, first.commands[2].input.messageId);
+});
+
+test("a turn that used up one model's quota carries its reading to the hold and waits for a retry, never a handoff", async () => {
+  const { commands, port, session } = harness(async () => ({ quotaPoolId: "pool", limitedUntil: "2026-11-19T18:00:00.000Z",
+    usedUp: "scope", scope: "Fable" }));
+  const usage = { quotaSource: "provider_api", quotaObservedAt: "2026-11-15T12:00:00Z",
+    quotaUsages: [{ label: "1w", percent: 55, resetAt: "2026-11-19T17:59:59Z" }],
+    scopedQuotaUsages: [{ label: "1w", percent: 100, resetAt: "2026-11-19T17:59:59Z", scope: "Fable" }] };
+  await port.execute(session, { ...limited, resetsAt: "2026-11-19T18:00:00Z", quotaScope: "Fable", usage });
+  assert.deepEqual(commands.map(command => command.family),
+    ["registration-usage-limit-hold", "append-message", "offer-usage-limit-retry"]);
+  const [hold, notice, retry] = commands;
+  assert.deepEqual(hold.input, { commandId: hold.input.commandId, actorUserId: "owner", channelId: "channel",
+    sourceInstanceId: "instance-1", resetsAt: "2026-11-19T18:00:00Z", quotaScope: "Fable", usage });
+  // The retry waits on the model the turn ran, by the scope that ran out.
+  assert.deepEqual(retry.input, { channelId: "channel", actorUserId: "owner", sourceMessageId: notice.input.messageId,
+    sourceMention: "@claude:3", sourceRunId: "run-1", sourceInstanceId: "instance-1",
+    model: { model: "claude-opus-5-5", quotaScopes: ["Fable"] } });
+});
+
+test("a usage limit no window explains holds the pool and waits for a retry on the model's own scopes", async () => {
+  const { commands, port, session } = harness(async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z",
+    usedUp: "unresolved" }));
+  await port.execute(session, { ...limited, quotaScope: "unresolved", quotaScopeReason: "usage_read_failed" });
+  assert.deepEqual(commands.map(command => command.family),
+    ["registration-usage-limit-hold", "append-message", "offer-usage-limit-retry"]);
+  assert.equal(commands[0].input.quotaScope, "unresolved");
+  assert.deepEqual(commands[2].input.model, { model: "claude-opus-5-5", quotaScopes: ["Opus"] });
 });
 
 test("an ordinary turn failure never starts a handoff", async () => {

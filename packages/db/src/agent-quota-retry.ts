@@ -3,7 +3,7 @@ import {
   preparationRejectionMessage,
   type AgentQuotaRetry,
   type AgentQuotaRetryAdmission,
-  type SpaceAgentRegistrationKey,
+  type QuotaRetryRegistration,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -25,7 +25,7 @@ export interface QuotaRetryWork extends QueryResultRow {
   kind: "launch" | "continuation";
   source_instance_id: string | null;
   source_run_id: string | null;
-  registrations_json: SpaceAgentRegistrationKey[];
+  registrations_json: QuotaRetryRegistration[];
   generation: number;
   state: AgentQuotaRetry["state"];
   created_at: Date;
@@ -136,7 +136,7 @@ export class PostgresQuotaRetryRepository {
     sourceMention: string;
     sourceBodyHash?: string;
     selectionIndex: number;
-    registrations: SpaceAgentRegistrationKey[];
+    registrations: QuotaRetryRegistration[];
     continuation?: {
       instanceId: string;
       runId: string;

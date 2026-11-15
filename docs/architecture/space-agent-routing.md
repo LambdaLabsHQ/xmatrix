@@ -270,9 +270,12 @@ network that levels every environment of a machine still leaves fit and reply
 time to choose among them. Remaining ties compare network quality, quota pace,
 complete bandwidth, then `balance + 0.001 × (fit + headroom)`, fewer outstanding
 Runs on the machine and candidate order. The network factor and bandwidth
-uncertainty are defined below. When the
-chosen model's quota is exhausted there (Cursor's per-model pools), the
-next-ranked environment of the same harness offering it runs the work.
+uncertainty are defined below. A model whose quota is used up is never
+offered: account windows constrain every model, and a scoped window (Claude's
+per-model week, Cursor's Auto and API pools) constrains a model only when its
+scope is one of the `quotaScopes` of that model's catalog row. The
+next-ranked environment of the chosen harness offering the chosen model with
+quota runs the work.
 
 An environment whose latest Run in the Space failed to start within the last 30
 minutes (`STARTUP_FAILURE_WINDOW_MINUTES`) ranks after every environment that did
@@ -1212,7 +1215,9 @@ it reads the catalog every 15 seconds with `?quota=refresh`; after answering, th
 Space member and probes the Space's registrations like a routing refresh, except that a daemon asked for its quota in the
 last minute is skipped. Readers watching the page therefore share one provider read per daemon per minute. Probes the
 Hub issues set `windowLabels: true`; a daemon then names each window, and the Hub accepts a window `label` (at most 24
-bytes) only on a probe that asked for it. Older daemons ignore the flag and answer unnamed windows.
+bytes) only on a probe that asked for it. Older daemons ignore the flag and answer unnamed windows. Probes also set
+`scopedQuotaUsages: true`: a daemon then answers the windows that constrain only some models, each with its `scope`
+(at most 64 bytes), possibly as a reading's only windows, and the Hub stores them as the reading's scoped part.
 
 Repository and directory discovery does not require a legacy Profile. The
 Channel launch-target endpoint first verifies Channel access, then reads the

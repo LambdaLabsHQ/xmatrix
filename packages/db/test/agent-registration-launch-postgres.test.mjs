@@ -29,7 +29,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       "0065_expand_registration_environment.sql", "0066_expand_registration_allocations.sql",
       "0067_expand_registration_grant_execution_revision.sql", "0068_expand_registration_run_bindings.sql",
       "0069_expand_registration_stop_intents.sql", "0070_expand_registration_launch_intents.sql", "0071_expand_registration_quota_observations.sql",
-      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql",
+      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0255_expand_registration_quota_scoped_windows.sql",
       "0074_expand_registration_launch_request.sql", "0076_expand_nullable_profile_references.sql",
       "0078_expand_registration_launch_input.sql", "0079_expand_registration_optional_model.sql",
       "0083_expand_natural_key_reservations.sql",
@@ -349,8 +349,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
       [capabilityHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: capabilityHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     await sql(`UPDATE control.agent_registration_environments SET declaration_json=declaration_json||'{"quotaPoolId":"pool"}'::jsonb`);
-    await sql(`INSERT INTO control.registration_quota_observations VALUES
-      ('owner','pool',0,statement_timestamp()-interval '1 second',statement_timestamp()+interval '5 minutes','provider')`);
+    await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+        expires_at,source,windows_json) VALUES ('owner','pool',0,statement_timestamp()-interval '1 second',
+        statement_timestamp()+interval '5 minutes','provider','[{"usedPercent":100}]')`);
     // An observation is current only for the connection that reported it.
     await sql(`UPDATE data.machine_daemons SET metadata_json=jsonb_build_object('machineResources',
       $1::jsonb||jsonb_build_object('connectionEpoch',connection_epoch))`, [{
