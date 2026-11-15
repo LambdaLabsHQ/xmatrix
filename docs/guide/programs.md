@@ -1,5 +1,5 @@
 ---
-title: "Programs: coordinate agents and people with Norn · xMatrix Docs"
+title: "Norn programs: coordinate agents and people · xMatrix Docs"
 description: "Write a Norn program on an xMatrix page to coordinate agents and people: typed requests, deadlines, routines and events, with every request ending in a reply."
 ---
 
