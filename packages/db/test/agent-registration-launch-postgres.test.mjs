@@ -29,7 +29,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       "0065_expand_registration_environment.sql", "0066_expand_registration_allocations.sql",
       "0067_expand_registration_grant_execution_revision.sql", "0068_expand_registration_run_bindings.sql",
       "0069_expand_registration_stop_intents.sql", "0070_expand_registration_launch_intents.sql", "0071_expand_registration_quota_observations.sql",
-      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0254_expand_registration_quota_scoped_windows.sql",
+      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0255_expand_registration_quota_scoped_windows.sql",
       "0074_expand_registration_launch_request.sql", "0076_expand_nullable_profile_references.sql",
       "0078_expand_registration_launch_input.sql", "0079_expand_registration_optional_model.sql",
       "0083_expand_natural_key_reservations.sql",
