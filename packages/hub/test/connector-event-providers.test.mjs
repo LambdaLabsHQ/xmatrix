@@ -267,7 +267,7 @@ test("connector events fire page Automations whose event trigger concerns them",
       values: { ingressKey: "k" } }) }),
     apps: () => ({ connectorEventRoutes: async () => [] }),
     append: async () => new Response("{}"),
-    automations: async (_env, input) => { fired.push(input); return 1; },
+    events: async (_env, input) => { fired.push(input); return 1; },
   });
   assert.equal(fired.length, 1);
   assert.equal(fired[0].spaceId, "s");

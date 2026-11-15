@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { connectorAppRepository, connectorCredentialRepository, connectorStripeAccountRepository } from "./credentials";
 import type { PostgresStripeAccountRepository } from "@xmatrix/db";
 import { trimmedConnectorEnv } from "./connector-env";
@@ -16,7 +16,7 @@ export type StripeIngressDependencies = ConnectorIngressDependencies & {
 };
 const DEPENDENCIES: StripeIngressDependencies = {
   apps: connectorAppRepository, credentials: connectorCredentialRepository,
-  append: dispatchProductMessageAppend, automations: fireConnectorAutomationTriggers,
+  append: dispatchProductMessageAppend, events: connectorEventArrived,
   accounts: connectorStripeAccountRepository,
 };
 const MAX_CONNECTIONS = 50;
@@ -82,8 +82,8 @@ export async function deliverStripeAccountEvents(env: Env, dependencies: StripeI
       if (!await current()) continue;
       delivered += await deliverEvent(env, apps, currentConnectorAppend(dependencies.append, current), "stripe", connection.connectionId, event,
         { ...binding, grantGeneration: connection.grantGeneration });
-      if (dependencies.automations && await current()) {
-        await dependencies.automations(env, { spaceId: connection.spaceId, provider: "stripe", event })
+      if (dependencies.events && await current()) {
+        await dependencies.events(env, { spaceId: connection.spaceId, provider: "stripe", event })
           .catch(() => console.error("Connector Automation triggers failed", "stripe"));
       }
     }

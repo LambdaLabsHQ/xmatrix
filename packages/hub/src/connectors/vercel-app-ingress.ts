@@ -4,13 +4,13 @@ import { oauthClient } from "./oauth";
 import { parseJsonObject, record } from "./event-format";
 import { connectorAppRepository, connectorCredentialRepository } from "./credentials";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { deliverEvent, readSignedProviderDelivery, type ConnectorIngressDependencies } from "./event-ingress";
 import { vercelEventScopeId, vercelProjectAuthorized } from "./vercel-api";
 
 const DEPENDENCIES: ConnectorIngressDependencies = { apps: connectorAppRepository,
   credentials: connectorCredentialRepository, append: dispatchProductMessageAppend,
-  automations: fireConnectorAutomationTriggers };
+  events: connectorEventArrived };
 const DEPLOYMENTS = new Set(["deployment.created", "deployment.ready", "deployment.succeeded", "deployment.error", "deployment.canceled"]);
 const MAX_CONNECTIONS = 50;
 const BAD_SCOPE = () => Response.json({ error: "Missing Vercel installation scope" }, { status: 400 });
@@ -69,10 +69,10 @@ export async function handleVercelAppDelivery(input: { env: Env; request: Reques
       let count = 0;
       for (const event of received.events) {
         count += await deliverEvent(env, apps, dependencies.append, "vercel", connection.connectionId, event, binding);
-        const current = dependencies.automations ? await query() : [];
-        if (dependencies.automations && current.some(item => item.connectionId === connection.connectionId &&
+        const current = dependencies.events ? await query() : [];
+        if (dependencies.events && current.some(item => item.connectionId === connection.connectionId &&
             item.installationId === connection.installationId && item.credentialVersion === connection.credentialVersion)) {
-          await dependencies.automations(env, { spaceId: connection.spaceId, provider: "vercel", event });
+          await dependencies.events(env, { spaceId: connection.spaceId, provider: "vercel", event });
         }
       }
       return count;

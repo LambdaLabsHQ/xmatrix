@@ -5,7 +5,7 @@ import {
 import { githubConnectionInstallationFor } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import { automationEvaluatorBinding } from "./automation-evaluator-binding";
-import { effectivelyRestricted } from "./automation-occurrence-conversation";
+import { effectivelyRestricted } from "./page-restriction";
 import { commitAutomation } from "./automations";
 import { deterministicConversationId } from "./deterministic-id";
 import { commandPayload, expressionPayload, hubBoundary, type AutomationRecord } from "./index-routes-automation";

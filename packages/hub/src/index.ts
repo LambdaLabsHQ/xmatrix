@@ -26,6 +26,7 @@ import { registerOnboardingFunnelRoutes } from "./index-routes-onboarding-funnel
 import { registerChannelTransferRoutes } from "./index-routes-channel-transfer";
 import { registerPageRoutes } from "./index-routes-pages";
 import { registerPageAutomationRoutes } from "./index-routes-page-automations";
+import { registerPageProgramRoutes } from "./index-routes-page-programs";
 import { registerPageMigrationRoutes } from "./index-routes-page-migration";
 import { registerGovernanceRoutes } from "./index-routes-governance";
 import { registerPageGitRoutes } from "./index-routes-page-git";
@@ -135,6 +136,7 @@ registerIndexRoutesSpaceJoinRequests(app);
 registerIndexRoutesChannelAgent(app);
 registerPageRoutes(app);
 registerPageAutomationRoutes(app);
+registerPageProgramRoutes(app);
 registerPageMigrationRoutes(app);
 registerGovernanceRoutes(app);
 registerPageGitRoutes(app);

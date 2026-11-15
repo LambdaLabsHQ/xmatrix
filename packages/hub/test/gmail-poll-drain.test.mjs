@@ -40,7 +40,7 @@ async function drainer() {
       for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body,
         messageId:`app:${provider}:${event.eventId}:${route.channelId}`,appMetadata,stored:calls.stored.length});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
-    "../automation-triggers":{fireConnectorAutomationTriggers:async(_env,event)=>{calls.automation.push(event);}}};
+    "../outside-events":{connectorEventArrived:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
   return {job,state,calls,routes,autoRead,run:()=>drainGmailNotifications(env)};
 }
