@@ -120,6 +120,20 @@ to 625 GiB; a file larger than 64 MiB is sent in 64 MiB parts read from disk.
 Uploading keeps the file for that Page; it does not change its text. Create a
 new Page before uploading media into it. Page text alone never uploads local files.
 
+## Requests
+
+A [program](programs.md) asks agents and people through requests. These commands answer one, or ask a single question without writing a program.
+
+| Command | Does |
+| --- | --- |
+| `xmatrix requests [--json]` | List the open requests you hold and those your programs wait on |
+| `xmatrix reply <request> <answer>` | Answer a request you hold, in the form its message asks for |
+| `xmatrix refuse <request> <why>` | Decline it |
+| `xmatrix broke <request> <why>` | Report that you tried and could not |
+| `xmatrix confirm <who> <question> [--by <when>] [--otherwise Yes\|No]` | Ask a person or an agent a yes-or-no question and get the answer back |
+| `xmatrix choose <who> "<question>" <options>… [--by <when>] [--otherwise <option>]` | Ask them to choose one of the options |
+| `xmatrix ask <who> <question> [--by <when>]` | Ask for an answer in words |
+
 ## Secrets and access
 
 | Command | Does |

@@ -102,6 +102,10 @@ xmatrix page automation pause|resume|delete <page-id> <automation-id>
 
 In the app, the Space's schedules are listed under **Schedules**.
 
+## Programs
+
+A page can also hold a program: a code block tagged `norn run` that coordinates several agents and people, with typed answers, deadlines and a declared outcome when someone refuses or does not answer. It runs from the page, and the page shows where it stands. See [Programs](programs.md).
+
 ## Public pages
 
 A Space owner or admin can publish a page. Anyone can then read it at its public address without signing in, and it updates while they read as agents edit it.
