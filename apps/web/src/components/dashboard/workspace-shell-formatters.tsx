@@ -530,7 +530,7 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
     : codexQuotas.length > 0
       ? codexQuotas
       : quotaUsages).filter((quota) => {
-      const label = quotaLabel(quota).toLowerCase();
+      const label = quotaWindowLabel(quota).toLowerCase();
       // Codex/Claude/ZCode: 5h + weekly. Grok Build billing: monthly credits (1mo).
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
@@ -552,13 +552,15 @@ export function dedupeQuotaUsagesByLabel(value: LlmQuotaUsage[]): LlmQuotaUsage[
 
 const QUOTA_DISPLAY_ORDER = ["5h", "1w", "2h", "1mo"] as const;
 
-/** Provider array order is transport detail; the visible three are deterministic. */
+/** Provider array order is transport detail; the visible three are
+ * deterministic. A window's account form comes before its scoped ones. */
 export function compareQuotaUsageForDisplay(left: LlmQuotaUsage, right: LlmQuotaUsage): number {
+  const leftRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(left).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);
+  const rightRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(right).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  if (Boolean(left.scope) !== Boolean(right.scope)) return left.scope ? 1 : -1;
   const leftLabel = quotaLabel(left).toLowerCase();
   const rightLabel = quotaLabel(right).toLowerCase();
-  const leftRank = QUOTA_DISPLAY_ORDER.indexOf(leftLabel as typeof QUOTA_DISPLAY_ORDER[number]);
-  const rightRank = QUOTA_DISPLAY_ORDER.indexOf(rightLabel as typeof QUOTA_DISPLAY_ORDER[number]);
-  if (leftRank !== rightRank) return leftRank - rightRank;
   if (leftLabel !== rightLabel) return leftLabel.localeCompare(rightLabel);
   // Duplicate provider records for one window must resolve independently of
   // array order. Prefer the window that remains current longer; if both reset
@@ -601,6 +603,9 @@ export function usageLimitSummary(usage?: LlmUsage): UsageLimitSummary | undefin
   const allowed = usage?.quotaAccount?.allowed;
   if (allowed === false) return { label: "limit", severity: "limit", title: "Usage limit reached: provider refuses requests" };
   const quota = providerQuotaUsages(usage)
+    // A scoped window limits only the models of its scope, not the account
+    // this verdict is about.
+    .filter((candidate) => !candidate.scope)
     .map((candidate) => ({ quota: candidate, percent: quotaPercent(candidate) }))
     // A limit warning is time-sensitive: keep this guard at the verdict boundary
     // even though providerQuotaUsages normalizes its display list as well.
@@ -698,10 +703,11 @@ export function accountQuotaUsage(usage?: LlmUsage): LlmUsage | undefined {
   };
 }
 
-/** Provider API provenance is required before an account meter can render. */
+/** Provider API provenance is required before an account meter can render.
+ * A model's own windows (`scopedQuotaUsages`) follow the account's. */
 export function providerQuotaUsages(usage?: LlmUsage): LlmQuotaUsage[] {
   return usage?.quotaSource === "provider_api"
-    ? normalizeQuotaUsageList(usage.quotaUsages)
+    ? normalizeQuotaUsageList([...usage.quotaUsages ?? [], ...usage.scopedQuotaUsages ?? []])
     : [];
 }
 
@@ -726,7 +732,14 @@ export function agentMemberUsage(presence: ChannelMemberPresence): LlmUsage | un
   );
 }
 
+/** A window's name, its scope first when it is one model's own: "Fable · 1w". */
 export function quotaLabel(quota: LlmQuotaUsage): string {
+  const window = quotaWindowLabel(quota);
+  return quota.scope ? `${quota.scope} · ${window}` : window;
+}
+
+/** The window alone (`5h`, `1w`), whatever it constrains. */
+function quotaWindowLabel(quota: LlmQuotaUsage): string {
   // Unnamed windows have no label to normalise; they are filtered out upstream
   // rather than given a generic one here.
   const raw = quota.label || quota.window || "";
@@ -794,7 +807,7 @@ export function quotaPercent(quota: LlmQuotaUsage): number | undefined {
 export function quotaTitle(quota: LlmQuotaUsage): string {
   // No `"Quota"` stand-in: naming an unnamed window is how a foreign limit got
   // presented as this agent's. Unnamed quotas are dropped before they get here.
-  const parts = [quota.label || quota.window].filter((part): part is string => Boolean(part));
+  const parts = [quota.scope, quota.label || quota.window].filter((part): part is string => Boolean(part));
   const percent = quotaPercent(quota);
   if (percent !== undefined) parts.push(formatPercent(percent));
   if (quota.used !== undefined && quota.limit !== undefined) {

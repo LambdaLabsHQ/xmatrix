@@ -228,8 +228,11 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
       const code = known ? item.code : "registration_launch_rejected";
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;
       const machineAgents = code === "registration_machine_unavailable" ? item.machineAgents : undefined;
-      // What is too old or offline, or what a named machine runs, is named; any other code is its own sentence.
-      const reason = known ? preparationRejectionMessage(code, offline ?? machineAgents ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+      const quotaExhausted = code === "registration_quota_exhausted" ? item.quotaExhausted : undefined;
+      // What is too old or offline, what a named machine runs, or until when a
+      // named model is used up, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, offline ?? machineAgents ?? quotaExhausted ?? item.tooOld)
+        ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
       const noticeBody = item.quotaRetryId ? `${body}\n\n${item.sourceMention}\nRequest ${(item.selectionIndex ?? 0) + 1}` : body;

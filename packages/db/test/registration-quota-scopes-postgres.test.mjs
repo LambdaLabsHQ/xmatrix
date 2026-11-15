@@ -140,5 +140,13 @@ integration("a hold stays until a reading explains it, and a window read used up
     await observeRegistrationQuota(database, key, reading(0, new Date(Date.parse(later) + 7 * 86_400_000).toISOString(), 1, 2),
       "new-week");
     assert.equal(registrationQuotaReading(await row(), fable).remainingPercent, 98);
+
+    // The stored account headroom agrees with the kept windows: a reading that
+    // rounds a used-up account week to 99% leaves it at none.
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    await limit({ resetsAt: later, quotaScope: "account", usage: reading(2000, later, 99, 10) });
+    await observeRegistrationQuota(database, key, reading(1000, new Date(Date.parse(later) - 1500).toISOString(), 99, 10),
+      "lagging-account");
+    assert.deepEqual([Number((await row()).remaining), registrationQuotaReading(await row()).remainingPercent], [0, 0]);
   } finally { await close(); }
 });

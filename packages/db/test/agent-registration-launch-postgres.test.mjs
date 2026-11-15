@@ -777,12 +777,77 @@ integration("launch survives a hostname change with stale Workspace metadata and
       channelId: 'channel', body: 'Continue in the registered directory' }, async () => assert.fail('nothing to choose')),
     error => error.code === 'registration_daemon_offline' && error.status === 409);
     await sql(`UPDATE data.machine_daemons SET status='online'`);
-    const defaultReborn = await reborn.prepare({ commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',
-      sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue' });
+    // What a quota retry chooses the resumed model from: the registration's
+    // allowed models bounded by its environment, the Instance's own catalog
+    // and its pool's reading.
+    const observedAt = new Date().toISOString();
+    await sql(`UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1`, [cold.instanceId,
+      { model: 'provider/model', modelsObservedAt: observedAt, models: [
+        { model: 'provider/model', displayName: 'Model', isDefault: true, quotaScopes: ['Model'] },
+        { model: 'provider/other', displayName: 'Other' }] }]);
+    const factsOf = commandId => reborn.continuationModelFacts({ commandId, channelId: 'channel', sourceInstanceId: cold.instanceId });
+    // A switch keeps the Instance's kind of model: one on the runtime default
+    // of a registration that now declares models has nothing to switch to.
+    assert.equal(await factsOf('continuation-facts-declared'), undefined);
+    const declaredConfiguration = (await sql(`SELECT configuration_json FROM data.space_agent_registrations
+      WHERE harness='codex'`)).rows[0].configuration_json;
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=jsonb_set(configuration_json-'model',
+      '{routing,models}','[]') WHERE harness='codex'`);
+    const facts = await factsOf('continuation-facts');
+    assert.deepEqual([facts.models, facts.modelCatalog.map(row => [row.model, row.quotaScopes]), facts.supportsNativeModel],
+      [[], [['provider/model', ['Model']], ['provider/other', undefined]], undefined]);
+    // And the reverse: a declared-model Instance is offered no catalog model.
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":false,"requestedRuntimeModel":"provider/model"}'
+      WHERE run_id=$1`, [cold.runId]);
+    assert.equal(await factsOf('continuation-facts-native'), undefined);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":true,"requestedRuntimeModel":null}'
+      WHERE run_id=$1`, [cold.runId]);
+    // A runtime-default Instance resumes on another catalog model only through
+    // a daemon that switches to one.
+    const switched = { commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',
+      sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue', preferredRuntimeModel: 'provider/other' };
+    await assert.rejects(() => reborn.prepare(switched), error => error.code === 'registration_workspace_or_daemon_unavailable');
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_native_model_v1"]'::jsonb`);
+    assert.equal((await factsOf('continuation-facts-capable')).supportsNativeModel, true);
+    const defaultReborn = await reborn.prepare(switched);
     const coldSuccessor = await reborn.advance({ intentId: defaultReborn.intentId, actorUserId: 'caller', channelId: 'channel' });
     assert.equal(coldSuccessor.state, 'prepared');
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedModel'), false);
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedEffort'), false);
+    assert.equal(coldSuccessor.spawnPayload.context.preferredModel, 'provider/other');
+    const switchedRun = async runId => (await sql(`SELECT metadata_json->>'preferredRuntimeModel' AS model,
+      metadata_json->'originalRuntimeModel' AS original FROM data.runs WHERE run_id=$1`, [runId])).rows[0];
+    assert.deepEqual(await switchedRun(defaultReborn.intentId), { model: 'provider/other', original: '' },
+      "the switched Run keeps the model it was moved off (the runtime default)");
+    // Its next resume goes back to that model only once a reading shows it has quota.
+    const resumeAgain = async (sourceMessageId, scopedUsed) => {
+      await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE source_instance_id=$1 AND state='prepared'`,
+        [cold.instanceId]);
+      await sql(`UPDATE data.runs SET status='failed' WHERE run_id=(SELECT run_id FROM data.instances WHERE instance_id=$1)`,
+        [cold.instanceId]);
+      const week = new Date(Date.now() + 4 * 86_400_000).toISOString();
+      await sql(`DELETE FROM control.registration_quota_observations`);
+      await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+          expires_at,source,windows_json,scoped_windows_json,scoped_observed_at,scoped_expires_at)
+        SELECT owner_user_id,COALESCE(NULLIF(btrim(declaration_json->>'quotaPoolId'),''),'registration:'||machine_id||':'||harness),45,statement_timestamp()-interval '1 second',
+          statement_timestamp()+interval '10 minutes','provider',$1::jsonb,$2::jsonb,statement_timestamp()-interval '1 second',$3::timestamptz
+        FROM control.agent_registration_environments WHERE harness='codex'`,
+      [JSON.stringify([{ label: '1w', usedPercent: 55, resetAt: week }]),
+        JSON.stringify([{ label: '1w', usedPercent: scopedUsed, resetAt: week, scope: 'Model' }]), week]);
+      const prepared = await reborn.prepare({ commandId: `resume-${sourceMessageId}`, actorUserId: 'caller', channelId: 'channel',
+        sourceMessageId, sourceInstanceId: cold.instanceId, prompt: 'continue' });
+      const advanced = await reborn.advance({ intentId: prepared.intentId, actorUserId: 'caller', channelId: 'channel' });
+      return { context: advanced.spawnPayload.context, run: await switchedRun(prepared.intentId) };
+    };
+    const stillOut = await resumeAgain('message', 100);
+    assert.equal(stillOut.context.preferredModel, 'provider/other', "its own model is still used up: it stays switched");
+    assert.deepEqual(stillOut.run, { model: 'provider/other', original: '' });
+    const back = await resumeAgain('used-up', 10);
+    assert.equal(Object.hasOwn(back.context, 'preferredModel'), false, "back on the runtime default");
+    assert.deepEqual(back.run, { model: null, original: null });
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=$1::jsonb WHERE harness='codex'`,
+      [JSON.stringify(declaredConfiguration)]);
 
     // Handoff moves an Instance's directory to another harness on the same
     // machine. Its successor is a new Instance, and the predecessor is fenced
@@ -1011,6 +1076,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
       [["registration_quota_exhausted", false], ["registration_quota_exhausted", false]]);
     assert.equal((await sql(`SELECT count(*)::int AS count FROM data.instances WHERE instance_id=ANY($1)
       AND rest_state='sleeping'`, [[sleeper.instanceId, repoSleeper.instanceId]])).rows[0].count, 2, "they keep resting");
+    // The model an Instance last ran decides it: its own scope used up keeps
+    // it resting while the account has quota.
+    const week = new Date(Date.now() + 4 * 86_400_000).toISOString();
+    await sql(`UPDATE control.registration_quota_observations SET source='provider',remaining=45,
+      windows_json=$1::jsonb,scoped_windows_json=$2::jsonb,scoped_observed_at=observed_at,scoped_expires_at=$3::timestamptz`,
+    [JSON.stringify([{ label: "1w", usedPercent: 55, resetAt: week }]),
+      JSON.stringify([{ label: "1w", usedPercent: 100, resetAt: week, scope: "Fable" }]), week]);
+    await sql(`UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1`, [sleeper.instanceId,
+      { model: "provider/model", modelsObservedAt: new Date().toISOString(),
+        models: [{ model: "provider/model", displayName: "Fable 5.2", quotaScopes: ["Fable"] }] }]);
+    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-model-used-up", channelId: "channel",
+      sourceMessageId: "model-used-up", targetInstanceId: sleeper.instanceId })).refused.map(item => item.code),
+    ["registration_quota_exhausted"]);
     await sql(`DELETE FROM control.registration_quota_observations`);
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });

@@ -21,7 +21,8 @@ import {
   productAgentSystemNoticeId,
 } from "./product-agent-mention-authority-adapter";
 import { postgresProductMessage } from "./postgres-message-authority";
-import { executeRegistrationLaunchDispatch, prepareRegistrationReborn } from "./registration-launch-dispatch";
+import { executeRegistrationLaunchDispatch, prepareRegistrationReborn, readContinuationModelFacts } from "./registration-launch-dispatch";
+import { quotaRecoveryModel } from "./registration-launch-choice";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import type { Env } from "./types";
 async function quotaSourceMessage(input: {
@@ -149,7 +150,7 @@ export async function offerUsageLimitRecovery(env: Env, input: UsageLimitRecover
     channelId: input.channelId,
     sourceMessageId: input.sourceMessageId,
     body: [original, input.model
-      ? "This model's provider quota is used up. You can wait for it to recover and retry automatically."
+      ? "This model's provider quota is used up. You can retry automatically: the task goes on with another model that has quota, or with this one once it recovers."
       : "No Agent could take over this task. You can wait for its provider quota to recover and retry automatically."]
       .filter(Boolean).join("\n\n"),
     metadata: { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: id },
@@ -189,6 +190,20 @@ async function quotaRetryReadiness(
     fence: fence.toISOString(),
     doorbell: !candidates.some((candidate) => candidate.accountOpen),
   };
+}
+/** A continuation stopped by its own model's quota goes on with another
+ * model of the same harness that has quota, rather than waiting for that
+ * one: the model to resume on ("" the runtime's default) while its own model
+ * reads used up; undefined to keep waiting. */
+async function continuationModelSwitch(env: Env, channelId: string, row: QuotaRetryWork): Promise<string | undefined> {
+  const key = row.registrations_json[0];
+  if (row.kind !== "continuation" || !key?.model || !row.source_instance_id) return undefined;
+  const facts = await readContinuationModelFacts(env, { commandId: `quota-retry:${row.retry_id}:${row.generation}:model`,
+    channelId, sourceInstanceId: row.source_instance_id });
+  if (!facts) return undefined;
+  const now = Date.now();
+  const own = retryModelQuota(facts.observations?.quota?.usage, key.model, now);
+  return own && own.value <= 0 ? quotaRecoveryModel(facts, now, key.model) : undefined;
 }
 async function retryLaunch(
   env: Env,
@@ -264,7 +279,10 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
         row.state === "dispatching"
           ? { ready: true, nextCheckAt: Date.now() }
           : await quotaRetryReadiness(directory, row);
-      if (!readiness.ready) {
+      // A redelivered dispatch resumes on the model its first dispatch chose.
+      const chosen = row.state !== "dispatching" && !readiness.ready
+        ? await continuationModelSwitch(env, channelId, row) : undefined;
+      if (!readiness.ready && chosen === undefined) {
         // Not ready at its time: keep its wait (a delivery that found nothing
         // to start may have spent it) and ask for one fresh read of its own
         // pools, newer than what refused it. That reading wakes it. While its
@@ -278,10 +296,14 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
         await repository.settle(channelId, row, "waiting", readiness.nextCheckAt);
         continue;
       }
-      const admission = await repository.dispatch({ channelId, row });
+      const { admission, resumeModel: switchTo } = await repository.dispatch({ channelId, row,
+        ...(chosen !== undefined ? { resumeModel: chosen } : {}) });
       if (row.kind === "launch") await retryLaunch(env, channelId, row, admission, database);
       else {
-        const body = "Provider quota is available. Resuming the interrupted task from its existing session.";
+        const body = switchTo === undefined
+          ? "Provider quota is available. Resuming the interrupted task from its existing session."
+          : `This model's provider quota is used up. Resuming the interrupted task from its existing session on ${
+            switchTo || "the runtime's default model"}.`;
         const sourceMessageId = await productAgentSystemNoticeId(row.retry_id, channelId, body);
         await dispatchProductAgentSystemNotice({
           env,
@@ -297,6 +319,7 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
           sourceMessageId,
           sourceInstanceId: row.source_instance_id!,
           quotaRetry: admission,
+          ...(switchTo !== undefined ? { preferredRuntimeModel: switchTo } : {}),
           prompt: "Continue where you left off. Check whether your last action completed before repeating it.",
         });
         await wakeAgentLaunchCoordinator(env, channelId, ["reborn"]);

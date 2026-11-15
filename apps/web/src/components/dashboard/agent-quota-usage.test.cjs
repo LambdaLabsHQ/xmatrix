@@ -73,6 +73,19 @@ test("list glance keeps all measured windows with compact labels and reset conte
     [{ key: "quota", label: "Quota", percent: 86, detail: "Quota: 86% used" }]);
 });
 
+test("a model's own window is named by its scope", () => {
+  const windows = quota([
+    { label: "1w", usedPercent: 55, resetAt: at(90) },
+    { label: "1w", usedPercent: 100, resetAt: at(90), scope: "Fable" },
+  ]);
+  assert.deepEqual(agentUsageReadings(windows, now).map(({ key, label }) => [key, label]),
+    [["1w:0", "Weekly"], ["Fable:1w:1", "Fable · Weekly"]]);
+  assert.deepEqual(agentUsageGlance(windows, now).map(({ label, percent, detail }) => [label, percent, detail]), [
+    ["1w", 55, "Weekly: 55% used · resets in 1h 30m"],
+    ["Fable · 1w", 100, "Fable · Weekly: 100% used · resets in 1h 30m"],
+  ]);
+});
+
 test("a prepaid account reads as the money left, not as a window", () => {
   const prepaid = (amount, allowed) => ({ amount, currency: "CNY", allowed, observedAt: at(-1), expiresAt: at(10) });
   assert.deepEqual(agentBalanceReadings(undefined), []);
