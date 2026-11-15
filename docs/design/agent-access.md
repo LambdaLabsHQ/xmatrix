@@ -100,8 +100,11 @@ Only harnesses on these backends can be given `ask`
 (`agentAccessModes`); the Hub refuses the mode for any other, and Codex and
 ZCode are offered full access alone until their approval requests are
 relayed. What a harness does without asking in its own default mode is the
-vendor's: a sandbox that fails a command outright (DeepSeek Harness's
-`workspace-write`) produces no request and so no card.
+vendor's: a sandbox that fails a command outright produces no request and so
+no card. DeepSeek Harness's `workspace-write` does that to the `xmatrix` CLI
+itself (it cannot write `~/.config/xmatrix`), so an `ask` Agent could not even
+reply; its preset says `"ask": false` and it is offered full access alone
+until xMatrix adds that directory to the harness's writable roots.
 
 An `ask` launch is routed only to a daemon that advertises
 `registration_access_ask_v1`. An earlier daemon answers every request with

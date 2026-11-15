@@ -119,6 +119,10 @@ test("a mode is confirmed only for a harness whose permission requests xMatrix c
   assert.equal(refused.status, 400);
   assert.match((await refused.json()).error, /codex can only be given full access/u);
   assert.equal(owner.calls.length, 0);
+  // DeepSeek Harness relays requests, but on its own defaults its sandbox
+  // refuses the xmatrix CLI outright: the Agent could not even reply.
+  assert.equal((await owner.request(create("deepseek"))).status, 400);
+  assert.equal(owner.calls.length, 0);
   for (const harness of ["claude", "cursor", "grok"]) assert.equal((await owner.request(create(harness))).status, 200, harness);
   const { spaceId: _spaceId, ...physicalKey } = key;
   const change = { key: physicalKey, commandId: "environment", expectedVersion: 1, environment: create("codex").environment };

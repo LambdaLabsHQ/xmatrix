@@ -103,7 +103,15 @@ export interface AgentPreset {
   /** What xMatrix adds to this harness's launch per access mode, exactly as
    * written: what a person is shown and what the launch sets are the same
    * data. See `agentAccessGrant`. */
-  access?: { full?: AgentPresetAccess };
+  access?: {
+    full?: AgentPresetAccess;
+    /** `false`: this harness cannot be given `ask` although its backend relays
+     * permission requests, because on its own defaults the Agent cannot run
+     * the `xmatrix` CLI at all. DeepSeek Harness's default sandbox refuses the
+     * CLI's writes to its configuration directory outright, without a request
+     * a person could answer. */
+    ask?: false;
+  };
   backend: AgentPresetBackend;
   /**
    * Subcommand/args appended to the runtime for the generic ACP backend
@@ -193,7 +201,7 @@ const REQUEST_RELAYING_BACKENDS = new Set<AgentPresetBackend>(["acp", "grok-acp"
 
 /** The access modes a harness can be added with, the default first. */
 export function agentAccessModes(preset: AgentPreset | undefined): AgentAccessMode[] {
-  return preset && REQUEST_RELAYING_BACKENDS.has(preset.backend) ? ["full", "ask"] : ["full"];
+  return preset && REQUEST_RELAYING_BACKENDS.has(preset.backend) && preset.access?.ask !== false ? ["full", "ask"] : ["full"];
 }
 
 /** A daemon with this capability shows an `ask` launch's permission requests

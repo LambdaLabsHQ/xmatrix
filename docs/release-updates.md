@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: DeepSeek Harness is offered full access alone
+
+DeepSeek Harness could be added "asking first", but on its own defaults its
+sandbox refuses the `xmatrix` CLI's writes to `~/.config/xmatrix` outright,
+with no request a person could answer, so such an Agent could not send a
+reply. Its preset now says it cannot be given `ask`: the Hub refuses that mode
+for it and the add dialog, the Agent page and `xmatrix agent add` no longer
+offer it. Hub and Web. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent can be added asking first
 
 Confirming an Agent's access offered full access or nothing. A harness can now
