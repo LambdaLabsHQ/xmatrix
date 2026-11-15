@@ -2,7 +2,7 @@ import type { AppleCommerceState, AppleCommerceJob, AppleCommerceChange } from "
 import { linkDatabaseFailures } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { appStoreConnect, appleApp, appleResource, type AppStoreConnectApi, type AppleResource } from "./app-store-connect-api";
 import { appleCommerceRepository, connectorCredentialRepository } from "./credentials";
 import { appendToRoutes } from "./event-ingress";
@@ -97,7 +97,7 @@ async function process(env: Env, job: AppleCommerceJob) {
       phase = "current";
       if (!await repository.current(job)) return;
       phase = "automation";
-      await fireConnectorAutomationTriggers(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
+      await connectorEventArrived(env,{ spaceId: job.spaceId,provider:"appstoreconnect",event:notice,authorizedUserId:job.userId });
       phase = "delivered";
       await repository.delivered(job,change.sequence);
     }

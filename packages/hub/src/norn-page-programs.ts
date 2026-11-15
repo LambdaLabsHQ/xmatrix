@@ -1,7 +1,7 @@
 import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { effectivelyRestricted } from "./automation-occurrence-conversation";
+import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import { checkNornProgram, nornBlocks, nornBlockSource, nornStartLedger, nornStep, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
 import { nornFlow } from "./norn-plan";

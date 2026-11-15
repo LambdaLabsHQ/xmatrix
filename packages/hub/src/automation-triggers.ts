@@ -1,13 +1,10 @@
 import { PostgresAutomationRepository } from "@xmatrix/db";
 import type { AutomationTrigger } from "@xmatrix/protocol";
-import { githubPullRequestPaths, githubRepositoryDelegated } from "./app-connectors";
-import { record, text } from "./github-subscription-domain";
+import { githubPullRequestPaths } from "./app-connectors";
+import type { ConnectorOutsideEvent, GitHubOutsideEvent, SpaceConnected } from "./outside-events";
 import { tellPageAutomationChannels } from "./page-automation-wake";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
-import { findAppConnection } from "./apps";
-import { occurNornEvent } from "./norn-events";
-import { appStream, githubStream } from "./norn-host";
 
 /**
  * Events fire a page's Automations (docs/design/pages-live-document.md §6.2):
@@ -20,45 +17,6 @@ import { appStream, githubStream } from "./norn-host";
 
 interface FiredEvent { id: string; kind: AutomationTrigger["kind"]; summary: string; url?: string }
 
-interface GitHubEvent extends FiredEvent {
-  kind: "merged" | "ci-failed";
-  repository: string;
-  branch: string;
-  defaultBranch: string;
-  installationId: string;
-  workflow?: string;
-  pullRequest?: number;
-}
-
-/** The trigger event a GitHub webhook is, if any. */
-export function githubTriggerEvent(event: string, payload: Record<string, unknown>): GitHubEvent | undefined {
-  const repository = record(payload.repository);
-  const name = text(repository.full_name);
-  const installationId = text(record(payload.installation).id);
-  if (!name || !installationId) return undefined;
-  const base = { repository: name, defaultBranch: text(repository.default_branch) || "main", installationId };
-  if (event === "pull_request" && payload.action === "closed" && record(payload.pull_request).merged === true) {
-    const pull = record(payload.pull_request);
-    const number = Number(pull.number);
-    const branch = text(record(pull.base).ref);
-    if (!Number.isSafeInteger(number) || !branch) return undefined;
-    return { ...base, kind: "merged", branch, pullRequest: number, id: `github:${name}#${number}:merged`,
-      summary: `Pull request #${number} “${text(pull.title).slice(0, 120)}” was merged into ${branch}`,
-      ...(text(pull.html_url) ? { url: text(pull.html_url) } : {}) };
-  }
-  if (event === "workflow_run" && payload.action === "completed" &&
-      record(payload.workflow_run).conclusion === "failure") {
-    const run = record(payload.workflow_run);
-    const branch = text(run.head_branch);
-    const workflow = text(run.name);
-    if (!branch || !text(run.id)) return undefined;
-    return { ...base, kind: "ci-failed", branch, workflow, id: `github:run:${text(run.id)}:${text(run.run_attempt) || "1"}`,
-      summary: `Workflow “${workflow.slice(0, 120)}” failed on ${branch}`,
-      ...(text(run.html_url) ? { url: text(run.html_url) } : {}) };
-  }
-  return undefined;
-}
-
 function underPath(path: string, prefix: string): boolean {
   const clean = prefix.replace(/^\/+/u, "");
   return path === clean || path.startsWith(clean.endsWith("/") ? clean : `${clean}/`);
@@ -69,33 +27,12 @@ function fleet(env: Env) {
     statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 });
 }
 
-/** Fires every page Automation a GitHub webhook concerns; returns how many it fired. */
-export async function fireGitHubAutomationTriggers(env: Env, event: string,
-  payload: Record<string, unknown>): Promise<number> {
-  const fired = githubTriggerEvent(event, payload);
-  if (!fired) return 0;
+/** Fires every page Automation a GitHub event concerns; returns how many it fired. */
+export async function fireGitHubAutomationTriggers(env: Env, fired: GitHubOutsideEvent,
+  spaceConnected: SpaceConnected): Promise<number> {
   let changedPaths: Promise<string[]> | undefined;
   const paths = () => changedPaths ??= githubPullRequestPaths(env, fired.installationId,
     ...(fired.repository.split("/") as [string, string]), fired.pullRequest!);
-  const connected = new Map<string, Promise<boolean>>();
-  const spaceConnected = (spaceId: string, userId: string) => {
-    const key = `${spaceId}\u0000${userId}`;
-    if (!connected.has(key)) connected.set(key, (async () => {
-      const connection = await findAppConnection(env, { spaceId, providerId: "github", actorUserId: userId });
-      const [owner, repo] = fired.repository.split("/") as [string, string];
-      // Only what the installation's linking administrator administers now fires the Space's Automations.
-      return connection?.status === "configured" &&
-        await githubRepositoryDelegated(env, connection, fired.installationId, owner, repo);
-    })().catch(() => false));
-    return connected.get(key)!;
-  };
-  // The same event reaches the Norn programs that wait for it, under the same rule: the Space's GitHub
-  // connection still includes the installation it came from.
-  if (fired.branch === fired.defaultBranch) {
-    await occurNornEvent(env, { what: fired.url ? `${fired.summary} (${fired.url})` : fired.summary,
-      matches: githubStream(fired.kind, fired.repository),
-      allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
-  }
   // A connected app's event reaches only Automations whose authority may use it now.
   return fireAcrossShards(env, { trigger: { kind: fired.kind, repository: fired.repository }, appUse: true }, async (candidate) => {
     let matches = false;
@@ -149,15 +86,11 @@ export function connectorTriggerMatches(trigger: AutomationTrigger, event: { pro
  * may use the Space's connected apps now. The ingress already authenticated
  * the delivery to the connection.
  */
-export async function fireConnectorAutomationTriggers(env: Env, input: { spaceId: string; provider: string; authorizedUserId?: string;
-  event: { eventId: string; sourceRef: string; feature: string; summary: string; url?: string } }): Promise<number> {
+export async function fireConnectorAutomationTriggers(env: Env, input: ConnectorOutsideEvent): Promise<number> {
   if (input.provider === "gmail" && !input.authorizedUserId) return 0;
   const source = input.event.sourceRef.slice(input.provider.length + 1);
   const fired: FiredEvent = { id: `${input.provider}:${input.event.eventId}`.slice(0, 200), kind: "event",
     summary: input.event.summary, ...(input.event.url ? { url: input.event.url } : {}) };
-  await occurNornEvent(env, { spaceId: input.spaceId, what: fired.url ? `${fired.summary} (${fired.url})` : fired.summary,
-    matches: appStream(input.provider, input.event.feature),
-    allowed: async (program) => !input.authorizedUserId || program.authorityUserId === input.authorizedUserId });
   return fireAcrossShards(env, { trigger: { kind: "event", provider: input.provider }, spaceId: input.spaceId, appUse: true },
     async (candidate) => (!input.authorizedUserId || candidate.authorityRootUserId === input.authorizedUserId) &&
       (candidate.triggers as AutomationTrigger[]).some((trigger) => connectorTriggerMatches(trigger,

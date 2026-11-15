@@ -7,20 +7,25 @@ import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mj
 // Exercise the real delivery-to-conversation boundary: a public Page must not
 // publish a connector event merely because its authorized author received it.
 const load = await compileCommonJsSourceModule(new URL("../src/automation-occurrence-conversation.ts", import.meta.url));
+const loadRestriction = await compileCommonJsSourceModule(new URL("../src/page-restriction.ts", import.meta.url));
 
 const LINE = "- [ ] Audit changes 🔁 every day";
 
 function fixture(existingMode, body = `## Audit\n${LINE}\n`) {
   const opened = [], appended = [];
   const page = { pageId: "page", body, accessMode: "space" };
-  const conversations = load(name => ({
+  const stores = {
     "@xmatrix/db": { PostgresPageRepository: class {
       async read() { return { page }; }
       async tree() { return { pages: [page] }; }
       async link() {}
     } },
-    "@xmatrix/protocol": protocol,
     "./postgres-authority-fleet": { createPostgresAuthorityDatabase: () => ({}) },
+  };
+  const conversations = load(name => ({
+    ...stores,
+    "@xmatrix/protocol": protocol,
+    "./page-restriction": loadRestriction(name => stores[name] ?? {}),
     "./deterministic-id": { deterministicConversationId: async () => "occurrence-channel" },
     "./system-conversation": { openConversation: async (_env, input) => { opened.push(input); } },
     "./spaces": { getChannel: async () => ({ channel: { spaceId: "space", mode: existingMode ?? opened.at(-1)?.mode } }) },

@@ -4,13 +4,13 @@ import type { Context, Hono } from "hono";
 import type { AuthUser } from "./auth";
 import { automationEvaluatorBinding } from "./automation-evaluator-binding";
 import { commandPayload, expressionPayload, hubBoundary, type AutomationRecord } from "./index-routes-automation";
+import { pageRequestFailure } from "./index-routes-page-programs";
 import { sessionCall, sessionPrincipal } from "./index-routes-pages";
-import { productCommandId, requireAuth, requestErrorStatus } from "./index-shared";
+import { productCommandId, requireAuth } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { commitAutomation } from "./automations";
 import { withOutcomes } from "./automation-outcomes";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
-import { pageProgramStatus } from "./norn-page-programs";
 import { runPrincipalOf } from "./run-principal";
 import type { Env } from "./types";
 
@@ -182,11 +182,7 @@ function notifyPageAutomations(env: Env, spaceId: string): Promise<void> {
 /** A refusal as its response; a repository's typed refusal by its status and code. */
 export function pageAutomationFailure(error: unknown): Response {
   if (error instanceof Refusal) return error.response;
-  const { status, code, detail } = error as { status?: unknown; code?: unknown; detail?: unknown };
-  if (typeof status === "number" && status >= 400 && status < 500 && typeof code === "string") {
-    return Response.json({ error: (error as Error).message, code, ...(detail ? { detail } : {}) }, { status });
-  }
-  return Response.json({ error: (error as Error).message }, { status: requestErrorStatus(error) });
+  return pageRequestFailure(error);
 }
 
 export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void {
@@ -210,13 +206,6 @@ export function registerPageAutomationRoutes(app: Hono<{ Bindings: Env }>): void
     const automations = await pageAutomations(c.env, spaceId, pageId, humanOf(authUser), read);
     // What each one's latest occurrences produced, as the Space's list says it.
     return { automations: await withOutcomes(new PostgresAutomationRepository(database(c.env)), spaceId, automations) };
-  }));
-  // How each `norn run` block of the page stands. Reading the page as the caller is the access check.
-  app.get("/api/spaces/:spaceId/pages/:pageId/programs", (c) => run(c, async (authUser) => {
-    const [spaceId, pageId] = ids(c);
-    const { page } = await new PostgresPageRepository(database(c.env)).read({ requestId: crypto.randomUUID(), spaceId, pageId,
-      principal: runPrincipalOf(authUser) });
-    return { programs: await pageProgramStatus(c.env, { spaceId, pageId, body: page.body }) };
   }));
   for (const action of ["pause", "resume", "run"] as const) {
     app.post(`${base}/:automationId/${action}`, (c) => run(c, async (authUser) => ({

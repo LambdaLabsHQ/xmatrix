@@ -1,7 +1,7 @@
 import { nornRunBlock, type PageProgramStatus } from "@xmatrix/protocol";
 import { pageSchema } from "@xmatrix/protocol/page-document";
 import { Decoration, DecorationSet } from "prosemirror-view";
-import { pressOpens } from "./page-automation-chips";
+import { pressOpens } from "./page-chip-press";
 import { drawProgramFlow } from "./program-flow";
 import type { Node as DocNode } from "prosemirror-model";
 import { Plugin, PluginKey } from "prosemirror-state";

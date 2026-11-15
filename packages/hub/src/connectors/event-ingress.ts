@@ -1,7 +1,7 @@
 import type { PostgresTeamsRoomRepository } from "@xmatrix/db";
 import { getAppConnectorProvider } from "../app-connectors";
 import { readBoundedRequestBody } from "../index-shared";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import type { Env } from "../types";
 import { connectorAppRepository, connectorCredentialRepository, INGRESS_KEY_FIELD } from "./credentials";
@@ -33,13 +33,13 @@ export interface ConnectorIngressDependencies {
   credentials: typeof connectorCredentialRepository;
   apps: typeof connectorAppRepository;
   append: typeof dispatchProductMessageAppend;
-  automations?: typeof fireConnectorAutomationTriggers;
+  events?: typeof connectorEventArrived;
   /** Whether a Space's own Linear grant reads what an event is about. */
   linearVisible?: typeof linearEventVisible;
 }
 
-/** Shared Channel append and Automation effects; provider authentication stays separate. */
-export const CONNECTOR_DELIVERY_EFFECTS = { append: dispatchProductMessageAppend, automations: fireConnectorAutomationTriggers };
+/** Shared Channel append and outside-event effects; provider authentication stays separate. */
+export const CONNECTOR_DELIVERY_EFFECTS = { append: dispatchProductMessageAppend, events: connectorEventArrived };
 
 const DEFAULT_DEPENDENCIES: ConnectorIngressDependencies = {
   credentials: connectorCredentialRepository,
@@ -129,8 +129,8 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
         ? { ...binding, credentialVersion: proof.credentialVersion, ...(proof.grantGeneration ? { grantGeneration: proof.grantGeneration } : {}) }
         : binding);
       // Reauthorization can change the workspace between the first lookup and dispatch.
-      if (dependencies.automations && await current()) {
-        await dependencies.automations(env, { spaceId: connection.spaceId, provider: provider.id, event })
+      if (dependencies.events && await current()) {
+        await dependencies.events(env, { spaceId: connection.spaceId, provider: provider.id, event })
           .catch(() => console.error("Connector Automation triggers failed", provider.id));
       }
     }
@@ -168,8 +168,8 @@ export async function handleConnectorDelivery(input: {
   let delivered = 0;
   for (const event of result.events.slice(0, MAX_EVENTS_PER_DELIVERY)) {
     delivered += await deliverEvent(env, apps, dependencies.append, provider.id, resolved.connectionId, event);
-    /* Page Automations this event fires (§3.4); a failure must not lose the Channel delivery. */
-    await dependencies.automations?.(env, { spaceId: resolved.spaceId, provider: provider.id, event })
+    /* The Norn programs that wait for this event and the page Automations it fires (§3.4); a failure must not lose the Channel delivery. */
+    await dependencies.events?.(env, { spaceId: resolved.spaceId, provider: provider.id, event })
       .catch((error: unknown) => console.error("Connector Automation triggers failed",
         error instanceof Error ? error.message : "unknown"));
   }
@@ -263,5 +263,5 @@ export async function deliverConnectorRoom(env: Env, rooms: Pick<PostgresTeamsRo
   await effects.deliver(env, effects.apps(env), currentConnectorAppend(effects.append, current), scope.provider,
     binding.connectionId, event, undefined, scope.provider === "googlechat" ? grant : undefined,
     undefined, undefined, undefined, scope.provider === "teams" ? grant : undefined);
-  if (await current()) await effects.automations(env, { spaceId: binding.spaceId, provider: scope.provider, event });
+  if (await current()) await effects.events(env, { spaceId: binding.spaceId, provider: scope.provider, event });
 }

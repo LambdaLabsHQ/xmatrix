@@ -29,7 +29,7 @@ function drainer({ request, stage, finish }) {
     "./event-ingress": { appendToRoutes: async () => {} },
     "./app-store-connect-web": { appOnly: () => ({}) },
     "../product-message-append": { dispatchProductMessageAppend: async () => new Response() },
-    "../automation-triggers": { fireConnectorAutomationTriggers: async () => {} } };
+    "../outside-events": { connectorEventArrived: async () => {} } };
   const { drainAppleCommerce } = loadCommerce(name => {
     if (!imports[name]) throw new Error(`unexpected commerce import ${name}`);
     return imports[name];

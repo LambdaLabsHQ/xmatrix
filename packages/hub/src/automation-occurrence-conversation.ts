@@ -4,6 +4,7 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { deterministicConversationId } from "./deterministic-id";
 import { openConversation } from "./system-conversation";
 import { getChannel } from "./spaces";
+import { effectivelyRestricted } from "./page-restriction";
 import type { Env } from "./types";
 
 function pages(env: Env): PostgresPageRepository {
@@ -11,18 +12,6 @@ function pages(env: Env): PostgresPageRepository {
     applicationName: "xmatrix-page-automations", statementTimeoutMs: 5_000,
     transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000,
   }));
-}
-
-/** A page restricted itself or through an ancestor keeps its Automations' conversations closed. */
-export async function effectivelyRestricted(env: Env, spaceId: string, pageId: string, userId: string): Promise<boolean> {
-  const { pages: tree } = await pages(env).tree({ requestId: crypto.randomUUID(),
-    spaceId, principal: { kind: "user", id: userId } });
-  const byId = new Map(tree.map((page) => [page.pageId, page]));
-  for (let page = byId.get(pageId), depth = 0; page && depth < 64; page = page.parentPageId
-    ? byId.get(page.parentPageId) : undefined, depth++) {
-    if (page.accessMode === "restricted") return true;
-  }
-  return false;
 }
 
 /** `name · 10-09 18:46 UTC`: tells one occurrence's conversation from the next. */

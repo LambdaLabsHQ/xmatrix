@@ -1,6 +1,6 @@
 import type { SentryEventJob } from "@xmatrix/db";
 import { sha256Hex } from "@xmatrix/protocol";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import type { Env } from "../types";
 import { connectorAppRepository, connectorCredentialRepository, connectorSentryEventRepository } from "./credentials";
@@ -18,11 +18,11 @@ export interface SentryDrainDependencies {
   request: typeof providerJson;
   apps: typeof connectorAppRepository;
   append: typeof dispatchProductMessageAppend;
-  automations: typeof fireConnectorAutomationTriggers;
+  events: typeof connectorEventArrived;
 }
 const defaults: SentryDrainDependencies = { receipts: connectorSentryEventRepository, credentials: connectorCredentialRepository,
   refresh: connectionCredentials, verify: verifySentryInstallation, request: providerJson, apps: connectorAppRepository,
-  append: dispatchProductMessageAppend, automations: fireConnectorAutomationTriggers };
+  append: dispatchProductMessageAppend, events: connectorEventArrived };
 const ISSUE_FEATURES: Record<string, string> = { created: "issue.created", resolved: "issue.resolved", unresolved: "issue.regressed",
   assigned: "issue.assigned", ignored: "issue.ignored", archived: "issue.ignored" };
 type DrainStage = "binding" | "refresh" | "credentials" | "installation" | "project" | "channel" | "automation";
@@ -134,7 +134,7 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
     if (automationGrant.credentialVersion !== resolved.version) throw new Error("Sentry credentials changed before Automation delivery");
     // Failure remains durable retry work; already committed Channel/Automation ids make repeats safe.
     progress.stage = "automation";
-    await dependencies.automations(env, { spaceId: job.spaceId, provider: "sentry", event });
+    await dependencies.events(env, { spaceId: job.spaceId, provider: "sentry", event });
   }
   return true;
 }
