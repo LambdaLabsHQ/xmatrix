@@ -59,6 +59,21 @@ function request(input: Record<string, string>) {
   return { ...appleOperationRequest(input.operation!, parsed as AppleOperationInput), digest: text(parsed!.digest), snapshot: parsed!.snapshot };
 }
 
+/**
+ * Apple mints a new `assetToken` on every read of an uploaded asset (screenshots,
+ * previews, review attachments), so a digest over it never matches the next
+ * read and such an asset could never be deleted or updated. The token names a
+ * download, not the asset's state; the checksum, size and delivery state stay
+ * in the digest.
+ */
+function stableSnapshot(before: unknown): unknown {
+  const resource = record(before);
+  const attributes = record(resource.attributes);
+  if (!SAFE_OBJECT(before) || !SAFE_OBJECT(resource.attributes) || !("assetToken" in attributes)) return before;
+  const { assetToken: _rotating, ...stable } = attributes;
+  return { ...resource, attributes: stable };
+}
+
 /** A write plan binds the exact request and the current resource, not a mutable caller-supplied URL. */
 async function plan(api: AppStoreConnectApi, input: Record<string, string>) {
   const call = request(input);
@@ -101,7 +116,7 @@ async function plan(api: AppStoreConnectApi, input: Record<string, string>) {
     problem("A create does not accept an existing-resource snapshot");
   }
   const digest = await sha256Hex(canonicalJsonStringify({ specification: APPLE_SPEC_SHA, operation: input.operation, path: call.path,
-    method: call.operation.method, query: call.query, body: call.body, before }));
+    method: call.operation.method, query: call.query, body: call.body, before: stableSnapshot(before) }));
   return { call, before, digest };
 }
 
