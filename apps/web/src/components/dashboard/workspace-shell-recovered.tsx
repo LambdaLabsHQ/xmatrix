@@ -6,7 +6,7 @@ import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
 import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon, type LiveChannel } from "@xmatrix/protocol";
-import { formatLocalClock, formatZonedDateTime } from "./time-display";
+import { formatLocalClock } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
 import { currentHumanDisplayName } from "./human-profile-summary";
@@ -2414,42 +2414,9 @@ export function eventLabel(event: ObservabilityEvent): string {
 }
 
 /* Bare local time, for a timestamp read down a column of siblings that share
-   its zone. Anything standalone wants formatDateTime instead. */
+   its zone. Anything standalone names its zone (time-display.ts formatZonedDateTime). */
 export function formatTime(value: string): string {
   return formatLocalClock(value);
-}
-
-/**
- * A standalone instant — a schedule's next run, an expiry, a last-updated —
- * so it names its zone. These are exactly the strings a reader quotes into a
- * channel or a ticket, where "Next: Sep 19, 4:23 AM" means nothing without it.
- */
-export function formatDateTime(value: string): string {
-  if (!Number.isFinite(Date.parse(value))) return "Unavailable";
-  return formatZonedDateTime(value, undefined, undefined, { month: "short" });
-}
-
-export function evaluationBindingLabel(input: unknown): string {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return "Legacy compatibility input";
-  }
-  const record = input as Record<string, unknown>;
-  const lineage = record.lineage && typeof record.lineage === "object" && !Array.isArray(record.lineage)
-    ? record.lineage as Record<string, unknown>
-    : undefined;
-  const envRef = record.envRef && typeof record.envRef === "object" && !Array.isArray(record.envRef)
-    ? record.envRef as Record<string, unknown>
-    : undefined;
-  const actor = envRef?.actor && typeof envRef.actor === "object" && !Array.isArray(envRef.actor)
-    ? envRef.actor as Record<string, unknown>
-    : undefined;
-  const depth = lineage?.depth;
-  if (typeof depth !== "number" || !Number.isSafeInteger(depth) || typeof actor?.kind !== "string" ||
-      typeof actor.id !== "string" || !actor.kind || !actor.id) {
-    return "Legacy compatibility input";
-  }
-  const scope = depth === 0 ? "Root evaluation" : `Child evaluation · depth ${depth}`;
-  return `${scope} · actor ${actor.kind}:${actor.id}`;
 }
 
 export type { StatusChip } from "./workspace-shell-domain-types";

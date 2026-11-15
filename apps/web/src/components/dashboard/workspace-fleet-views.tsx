@@ -70,7 +70,6 @@ import {
   Check,
   ChevronDown,
   Circle,
-  Clock,
   Download,
   Folder,
   FolderOpen,
@@ -205,7 +204,6 @@ export function MoreView({
       items: [
         viewItem("agents", "Agents", "Registered agents and where they run", Bot),
         viewItem("machines", "Machines", "Registered machines and daemons", Terminal),
-        viewItem("automation", "Schedules", "Scheduled channel activity", Clock),
       ],
     },
   );

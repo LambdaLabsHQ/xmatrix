@@ -78,7 +78,7 @@ function ago(iso: string, locale: string): string {
 
 /**
  * The page drawn with the live editor's styles (page-document.css): a pasted video plays where the page shows it,
- * a table scrolls itself when it is too wide, and an Automation's reference reads as its name.
+ * and a table scrolls itself when it is too wide.
  */
 const publicPageComponents: Components = {
   img: ({ src, alt, title }) => typeof src === "string" && pageMediaFile(src.slice(src.lastIndexOf("/") + 1))?.video

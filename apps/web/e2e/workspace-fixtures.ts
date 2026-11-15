@@ -69,12 +69,6 @@ export type WorkspaceStubFixtures = {
     workspaces?: unknown[];
   };
   machineDaemons?: unknown[];
-  automations?: unknown[];
-  automationResponses?: unknown[][];
-  automationResponseErrors?: Array<string | null>;
-  automationsError?: string;
-  automationExecutionEnabled?: boolean;
-  automationAgentManagementEnabled?: boolean;
   channelViewPreference?: {
     version?: number;
     childViews?: Record<string, string>;
@@ -191,7 +185,7 @@ export const E2E_USER_SENDER = {
 /* Shared workspace bootstrap for shell e2e specs. Later route registrations
    win, so the catch-all goes first. Every workspace bootstrap fetch reads its
    payload defensively (data.x || []), which makes the empty-object fallback
-   safe for events/projects/Automations. */
+   safe for events/projects. */
 export async function openWorkspaceWithStubs(
   page: Page,
   fixtures: WorkspaceStubFixtures = {}
@@ -258,8 +252,6 @@ export async function fixtureSpaceResources(page: Page) {
     { error: "not found" }, { status: 404, method: "GET" });
   await fixtureJson(page, "page-recent-changes", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/recent-changes(?:\?.*)?$/u,
     { changes: [] });
-  await fixtureJson(page, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/automations$/u,
-    { automations: [] }, { method: "GET" });
   await fixtureJson(page, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links(?:\?.*)?$/u, { links: [] },
     { method: "GET" });
   await fixtureJson(page, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });
@@ -278,7 +270,6 @@ export async function installWorkspaceStubs(
   page: Page,
   fixtures: WorkspaceStubFixtures = {}
 ) {
-  const automationResponses = buildAutomationResponses(fixtures);
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
   // A search the test did not set up finds nothing, as the Hub answers it: an
@@ -293,11 +284,6 @@ export async function installWorkspaceStubs(
     code: "compatible",
     protocolVersion: 2,
     upgradeUrl: "https://xmatrix.sh/download",
-  });
-  await fixtureRule(page, {
-    id: "automations",
-    pattern: /\/api\/xmatrix\/automations(?:\?.*)?$/,
-    responder: { kind: "sequence", responses: automationResponses },
   });
   await fixtureJson(page, "workspaces", /\/api\/xmatrix\/workspaces(?:\?.*)?$/, {
     workspaces: fixtures.workspaces ?? [],
@@ -368,36 +354,6 @@ export async function installWorkspaceStubs(
         pinnedChannelIds: fixtures.channelViewPreference?.pinnedChannelIds ?? [],
       },
     },
-  });
-}
-
-/**
- * Flatten the Automation fixture options into one response-per-call list.
- * The old handler resolved error/sequence/default on every request; the same
- * decision now happens once, up front, because the in-page responder only walks
- * a list.
- */
-function buildAutomationResponses(fixtures: WorkspaceStubFixtures) {
-  const envelope = (automations: unknown[]) => ({
-    status: 200,
-    json: {
-      automations,
-      executionEnabled: fixtures.automationExecutionEnabled ?? true,
-      agentManagementEnabled: fixtures.automationAgentManagementEnabled ?? true,
-    },
-  });
-  if (fixtures.automationsError) {
-    return [{ status: 503, json: { error: fixtures.automationsError } }];
-  }
-  const sequence = fixtures.automationResponses;
-  const errors = fixtures.automationResponseErrors;
-  const length = Math.max(sequence?.length ?? 0, errors?.length ?? 0);
-  if (length === 0) return [envelope(fixtures.automations ?? [])];
-  return Array.from({ length }, (_, index) => {
-    const error = errors?.[Math.min(index, errors.length - 1)];
-    if (error) return { status: 503, json: { error } };
-    const automations = sequence?.[Math.min(index, sequence.length - 1)] ?? fixtures.automations ?? [];
-    return envelope(automations);
   });
 }
 

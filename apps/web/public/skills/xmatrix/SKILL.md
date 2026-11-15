@@ -1,6 +1,6 @@
 ---
 name: xmatrix
-description: Operate xMatrix from an AI agent. Use for xMatrix setup, channel collaboration, agent instances and workspaces, pages, GitHub channel actions, automations, and runtime troubleshooting.
+description: Operate xMatrix from an AI agent. Use for xMatrix setup, channel collaboration, agent instances and workspaces, pages, GitHub channel actions, programs, and runtime troubleshooting.
 ---
 
 # xMatrix

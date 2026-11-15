@@ -25,23 +25,6 @@ export function channelsInSpace<T extends { spaceId: string }>(
 }
 
 /**
- * Keep the Automations this Space owns, plus the ones no Space can claim.
- *
- * An Automation whose Channel is gone — deleted, or not readable from here — belongs
- * to no Space, and hiding it removes the only surface that can repair it: the
- * editor renders that Channel as `(unavailable)` and refuses to save precisely
- * so a stranded schedule stays visible while it keeps running.
- */
-export function automationsInSpace<T extends { channelId: string }>(
-  automations: readonly T[],
-  spaceChannelIds: ReadonlySet<string>,
-  knownChannelIds: ReadonlySet<string>,
-): T[] {
-  return automations.filter((automation) =>
-    spaceChannelIds.has(automation.channelId) || !knownChannelIds.has(automation.channelId));
-}
-
-/**
  * Keep this Space's events, and the ones that name no Space at all.
  *
  * An Agent connecting or a Machine coming online happens to the account, not

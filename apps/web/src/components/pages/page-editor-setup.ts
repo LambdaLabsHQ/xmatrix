@@ -21,7 +21,6 @@ import {
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { automationChips } from "./page-automation-chips";
 import { programChips } from "./page-program-chips";
 import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
@@ -1214,7 +1213,6 @@ export function editorPlugins(input: {
     currentHeading(),
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
     remoteChanges(input.fragment, input.awareness),
-    automationChips(input.openConversation),
     programChips(input.openConversation, input.onProgramsPresent),
     referenceChips(input.references),
     githubFileEmbeds(input.readGitHubFile),

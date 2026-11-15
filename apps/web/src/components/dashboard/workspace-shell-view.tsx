@@ -171,9 +171,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     spaces,
     projects,
     setProjects,
-    automations,
-    automationExecutionEnabled,
-    scheduleFocusId,
     events,
     agentTraceReplicas,
     agents,
@@ -214,10 +211,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loadingAgentPresetDiscoveries,
     localActionBusy,
     localActionError,
-    automationBusy,
-    automationError,
-    automationLoadError,
-    loadingAutomations,
     runtimeCheck,
     checkingDesktopUpdates,
     draft,
@@ -314,13 +307,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     revealLocalWorkspace,
     checkLocalRuntime,
     completeDesktopSetup,
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
-    clearScheduleFocus,
     openAppsForSpace,
     backToMore,
     selectSpace,
@@ -1440,8 +1429,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localManagedAgents={localManagedAgents}
       agentPresetDiscoveries={agentPresetDiscoveries}
       loadingAgentPresetDiscoveries={loadingAgentPresetDiscoveries}
-      automations={automations}
-      automationExecutionEnabled={automationExecutionEnabled}
       spaces={spaces}
       events={events}
       currentSpace={currentSpace}
@@ -1456,13 +1443,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       desktopUpdateStatus={desktopUpdateStatus}
       localActionBusy={localActionBusy}
       localActionError={localActionError}
-      automationBusy={automationBusy}
-      automationError={automationError}
-      automationLoadError={automationLoadError}
-      loadingAutomations={loadingAutomations}
-      scheduleFocusId={scheduleFocusId}
-      onScheduleFocusConsumed={clearScheduleFocus}
-      onOpenPage={openPage}
       onOpenConversation={(channelId) => navigateToChannel(channelId)}
       runtimeCheck={runtimeCheck}
       localSetupReady={localSetupReady}
@@ -1483,9 +1463,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onRevealLocalWorkspace={(workspace) => void revealLocalWorkspace(workspace)}
       onCheckLocalRuntime={(runtime) => void checkLocalRuntime(runtime)}
       onCompleteDesktopSetup={() => void completeDesktopSetup()}
-      onToggleAutomation={(automation) => void toggleAutomation(automation)}
-      onRunAutomation={(automation) => void runAutomation(automation)}
-      onDeleteAutomation={(automation) => void deleteAutomation(automation)}
       joinRequestsBySpace={joinRequestsBySpace}
       onDecideJoinRequest={resolveSpaceJoinRequest}
       onCreateSpaceInviteCode={createSpaceInviteCode}

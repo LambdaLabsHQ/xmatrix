@@ -8353,11 +8353,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   background: color-mix(in oklab, var(--foreground) 5%, transparent);
 }
 
-/* A paused schedule is listed in the panel's faint ink: there, but at rest. */
-.xmatrix-app .app-tool-list-row[data-testid="schedule-row"][data-state="paused"] .app-list-row-title {
-  color: var(--app-panel-ink-faint, var(--muted-foreground));
-}
-
 .xmatrix-app .app-tool-dot {
   display: inline-block;
   width: 8px;
