@@ -158,7 +158,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
       authorityUserId: delivery.authorityUserId, ...(there ? { onlyInstanceId: there.instanceId } : {}),
       ...nornDelivery(delivery.request as LedgerRequest, delivery.requestRef,
-        { ...(there ? { there: there.mention } : {}), kept: delivery.onPage, handedOn: delivery.handedOn,
+        { ...(there ? { there: there.mention } : {}), kept: delivery.onPage, atWork: Boolean(delivery.addressed), handedOn: delivery.handedOn,
           withPerson: delivery.withPerson, delegation: delivery.delegation as Delegation | null }) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
       ...(there ? { instanceId: there.instanceId } : {}) });
@@ -192,16 +192,27 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       body: page?.body ?? `${report.authorMention ? `${report.authorMention} ` : ""}${nornEndBody(ended)}` });
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
-  // An Instance started for a request has nothing left to do in the conversation once the request has ended.
+  // An Instance started for a request has nothing left to do in the conversation once the request has ended,
+  // or once its Agent delegated the request to someone else.
   for (const release of work.releases) {
-    const port = createProductAgentInterventionAuthorityPort({ env, actorUserId: release.authorityUserId,
-      sourceMessageId: `norn-release:${release.programId}:${release.requestId}`.slice(0, 200) });
-    const target = release.runId ? (await port.listKillTargets(channelId)).find(candidate => candidate.runId === release.runId) : undefined;
-    if (target) await port.issueStop(target, `norn-release:${release.runId}`.slice(0, 200), "Its request has ended", channelId);
-    // At rest it has no Run to stop, and the next message in the conversation would wake it.
-    else if (release.mention) await port.stopResting?.(channelId, { mention: release.mention, exclude: [] });
+    await letGo(env, channelId, release, "Its request has ended");
     await programs.released({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
+  for (const release of work.delegatedAway) {
+    await letGo(env, channelId, release, "It delegated its request");
+    await programs.letGoDelegatedAway({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
+  }
+}
+
+/** Stops the Run of an Instance a request started, if still live, or retires the Instance if it rests. */
+async function letGo(env: Env, channelId: string, release: { programId: string; requestId: string; authorityUserId: string;
+  runId: string | null; mention: string | null }, why: string): Promise<void> {
+  const port = createProductAgentInterventionAuthorityPort({ env, actorUserId: release.authorityUserId,
+    sourceMessageId: `norn-release:${release.programId}:${release.requestId}`.slice(0, 200) });
+  const target = release.runId ? (await port.listKillTargets(channelId)).find(candidate => candidate.runId === release.runId) : undefined;
+  if (target) await port.issueStop(target, `norn-release:${release.runId}`.slice(0, 200), why, channelId);
+  // At rest it has no Run to stop, and the next message in the conversation would wake it.
+  else if (release.mention) await port.stopResting?.(channelId, { mention: release.mention, exclude: [] });
 }
 
 /** The Run that holds a request answers it; the program reads the answer in the same step. */
@@ -312,7 +323,10 @@ export async function delegateNornRequest(env: Env, input: { channelId: string; 
     refusal = `${to} is not an Instance of yours, or of the program's authority, that takes messages in this conversation`;
   } else if (!instanceHolder(to) && !agentHolder(to)) refusal = `This host cannot deliver a request to ${to}`;
   if (refusal) return { status: "running", refusal };
-  const result = await programs.delegate({ ...scope, ledgerRequestId: held.requestId, delegatorUserId },
+  // An Agent whose delivery started its Run for this request has nothing left to do here once it delegated it.
+  const delegatedAwayInstanceId = input.delegator.kind === "run" && "startedFor" in held && held.startedFor ? input.delegator.instanceId : undefined;
+  const result = await programs.delegate({ ...scope, ledgerRequestId: held.requestId, delegatorUserId,
+    ...(delegatedAwayInstanceId ? { delegatedAwayInstanceId } : {}) },
     nornStep({ requestId: held.requestId, epoch: held.epoch, delegateTo: to, ...(input.reason ? { reason: input.reason } : {}) }));
   if (!result || result.refusal) return result;
   // The delegator's card no longer waits on them: it says to whom the request went. The delegate is delivered

@@ -325,3 +325,34 @@ integration("only the Agent that asked a question with a command calls it off, a
       [["norn-ask:question", "owner", "Cancelled"]]);
     assert.deepEqual(work.reports.map(report => [report.programId, report.ended.error]), [["norn-ask:question", "Called off by the Agent that asked"]]);
   }));
+
+integration("an Agent that delegates the request its Run was started for is let go, unless something else keeps it here", () =>
+  conversation("norn_delegated_away", async ({ sql, message, programs, scope, instance }) => {
+    await message("program", 1, "user", "owner");
+    await programs.start({ ...scope(), authorKind: "user", authorId: "owner", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `let review = run(@codex, "Review the migration")\nlet rollback = run(@codex, "Review the rollback")\n(review->wait, rollback->wait)` },
+    nornStep());
+    const [first, second] = (await programs.channelWork(scope())).deliveries;
+    // The delivery started this Run for the request.
+    await instance("channel:3");
+    await sql(`INSERT INTO data.agent_launches (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,instance_id,
+        execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
+      VALUES ('launch-3','space','channel',$1,'mention','owner','channel:3#1','channel:3','execution-3','control-3','machine-1','host-1',
+        'admitted','{}',now(),now(),now())`, [first.deliveryMessageId]);
+    await programs.delivered({ ...scope(), ledgerRequestId: first.requestId, epoch: first.epoch });
+    const held = await programs.heldRequest({ requestId: randomUUID(), channelId: "channel", requestRef: first.requestRef,
+      runId: "channel:3#1", instanceId: "channel:3" });
+    assert.equal(held.startedFor, true);
+    const delegated = await programs.delegate({ ...scope(), ledgerRequestId: first.requestId, delegatorUserId: "owner",
+      delegatedAwayInstanceId: "channel:3" }, nornStep({ requestId: first.requestId, epoch: first.epoch, delegateTo: "@claude" }));
+    assert.equal(delegated.refusal, undefined);
+    // Nothing else keeps it here: it is let go, once.
+    assert.deepEqual((await programs.channelWork(scope())).delegatedAway.map(release => [release.requestId, release.authorityUserId]),
+      [[first.requestId, "owner"]]);
+    await programs.letGoDelegatedAway({ ...scope(), ledgerRequestId: first.requestId });
+    assert.deepEqual((await programs.channelWork(scope())).delegatedAway, []);
+    // An Instance that still holds an open request of its own stays until that one has ended.
+    await sql("UPDATE data.norn_requests SET delegated_away_instance_id='channel:3' WHERE request_id=$1", [first.requestId]);
+    await sql("UPDATE data.norn_requests SET instance_id='channel:3',delivered_at=now() WHERE request_id=$1", [second.requestId]);
+    assert.deepEqual((await programs.channelWork(scope())).delegatedAway, []);
+  }));
