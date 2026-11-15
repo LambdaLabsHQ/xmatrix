@@ -11,6 +11,9 @@ use crate::protocol;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationFacts {
     pub(crate) model: Option<String>,
+    /// The model the session reported first, before any switch: the one the
+    /// runtime runs when it is given none (Cursor's catalog marks no default).
+    pub(crate) starting_model: Option<String>,
     pub models: Vec<protocol::AgentModelInfo>,
     pub(crate) models_reported: bool,
     pub(crate) effort: Option<String>,
@@ -74,13 +77,20 @@ pub(crate) trait AgentPresentationAdapter {
             command_overlay,
             self.overlay_is_complete(),
         );
-        // Each Cursor model spends its pool, Auto or API.
+        // Each Cursor model spends its pool, Auto or API. Its catalog marks
+        // no default, so the model the session started on is marked: the one
+        // a launch that names no model runs, and whose pool gates it.
         if self.runtime() == "cursor" {
             for row in snapshot.models.iter_mut().flatten() {
                 row.quota_scopes = Some(vec![
                     xmatrix_harness::quota::cursor::cursor_quota_scope_for_model(&row.model)
                         .to_string(),
                 ]);
+                if facts.starting_model.as_deref().is_some_and(|model| {
+                    row.id.eq_ignore_ascii_case(model) || row.model.eq_ignore_ascii_case(model)
+                }) {
+                    row.is_default = Some(true);
+                }
             }
         }
         snapshot
@@ -949,6 +959,9 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             // Keep the raw currentValue (including Cursor's variants-mode
             // `default[]`) so display-name resolution can still map it to
             // "Auto"; presentation chips never show the placeholder text.
+            if facts.starting_model.is_none() {
+                facts.starting_model.clone_from(&current);
+            }
             facts.model = current;
             attach_config_efforts_to_selected_model(facts);
             continue;
@@ -1101,6 +1114,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
         )
         .filter(|value| !is_placeholder_model_id(value))
         {
+            facts.starting_model.get_or_insert_with(|| model.clone());
             facts.model = Some(model.clone());
             if let Some(selected) = facts
                 .models
@@ -1120,6 +1134,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
     )
     .filter(|value| !is_placeholder_model_id(value))
     {
+        facts.starting_model.get_or_insert_with(|| model.clone());
         facts.model = Some(model);
     }
     if let Some(effort) = clean_string(

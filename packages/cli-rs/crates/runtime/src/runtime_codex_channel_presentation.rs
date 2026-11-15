@@ -190,6 +190,7 @@ pub(crate) fn model_catalog_presentation_with_commands(
     agent_presentation_adapter_for_runtime(&runtime_hint).present(
         &AgentPresentationFacts {
             model,
+            starting_model: None,
             models,
             models_reported: true,
             effort,

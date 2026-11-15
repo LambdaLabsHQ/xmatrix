@@ -91,6 +91,38 @@ fn cursor_model_rows_carry_the_pool_they_spend() {
 }
 
 #[test]
+fn cursor_marks_the_model_its_session_started_on_as_the_default() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts::default();
+    let report = |current: &str| {
+        serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": current,
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]})
+    };
+    adapter.observe_acp(&report("default[]"), &mut facts);
+    // A routed or preferred model switches the session; the default stays the one it started on.
+    adapter.observe_acp(&report("claude-4.5-sonnet"), &mut facts);
+    let defaults: Vec<_> = adapter
+        .present(&facts, &[])
+        .models
+        .expect("models")
+        .into_iter()
+        .map(|row| (row.id, row.is_default))
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![
+            ("default[]".to_string(), Some(true)),
+            ("claude-4.5-sonnet".to_string(), None)
+        ]
+    );
+}
+
+#[test]
 fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
     let mut facts = AgentPresentationFacts::default();
