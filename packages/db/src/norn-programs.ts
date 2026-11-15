@@ -33,7 +33,9 @@ export interface NornProgramState {
 /** What a step writes: the whole ledger, and each request the index must hold. */
 export interface NornProgramWrite {
   ledger: unknown; state: "running" | "completed" | "failed"; nextDueMs: number | null;
-  requests: { requestId: string; requestRef: string; epoch: number; holder: string; settled: boolean }[];
+  requests: { requestId: string; requestRef: string; epoch: number; holder: string; settled: boolean;
+    /** The ledger says its holder answers it for someone who delegated it (Norn spec §7). */
+    delegated: boolean }[];
   /** The outside streams the program now waits on, as the evaluator names them; an event is matched against these. */
   waits: unknown[];
   /** What the program said in this step (`say`), to be posted to its conversation. */
@@ -61,6 +63,25 @@ const instanceTakesMessages = (instance: string) => `((${instance}.status IN ('o
 /** The Instance that holds request `r`: the one it was handed to, or the one its delivery started. */
 const requestInstance = (r: string) => `COALESCE(${r}.instance_id,(SELECT launch.instance_id FROM data.agent_launches launch
     WHERE launch.channel_id=${r}.channel_id AND launch.trigger_id=${r}.delivery_message_id LIMIT 1))`;
+/**
+ * The Instance that request `r` was delegated to by its address (`@claude:2`):
+ * one in the request's conversation, under that name and number, whose Run
+ * belongs to one of `owners` (the program's authority, or whoever delegated
+ * the request), and which takes messages. Only these are asked by address; a
+ * program asks a name, and a new Run takes it.
+ */
+const ADDRESSED_INSTANCE_SQL = (r: string, owners: string) => `(SELECT instance.instance_id,
+      '@'||COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id AS mention
+    FROM data.instances instance JOIN data.runs owned ON owned.run_id=instance.run_id AND owned.owner_user_id IN (${owners})
+      JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
+      LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+        AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
+        AND registration.harness=binding.harness
+    WHERE ${r}.holder ~ '^@[^:@]+:[1-9][0-9]*$' AND instance.channel_id=${r}.channel_id
+      AND instance.channel_instance_id::text=split_part(${r}.holder,':',2)
+      AND lower(COALESCE(registration.display_name,binding.harness))=lower(substr(split_part(${r}.holder,':',1),2))
+      AND ${instanceTakesMessages("instance")}
+    LIMIT 1)`;
 /** The person who holds request `r` can still read its conversation. A person's request needs nothing working on it. */
 const NORN_REQUEST_HELD_BY_PERSON_SQL = `(r.holder_user_id IS NOT NULL AND EXISTS (SELECT 1 FROM data.channels held_in
       WHERE held_in.space_id=r.space_id AND held_in.channel_id=r.channel_id
@@ -118,9 +139,14 @@ const NORN_INSTANCE_STAYS_SQL = `(EXISTS (SELECT 1 FROM data.norn_requests other
               AND ${endedByHolder("newer", "newest")}))))
     OR EXISTS (SELECT 1 FROM data.norn_programs asking WHERE asking.space_id=r.space_id AND asking.channel_id=r.channel_id
       AND asking.state='running' AND asking.author_kind='agent' AND asking.author_id=${requestInstance("r")}))`;
-/** A delivered request `r` that has ended, whose Instance is to be let go and has not been yet. */
+/**
+ * A delivered request `r` that has ended, whose Instance is to be let go and
+ * has not been yet. An Instance its holder delegated it to by its address was
+ * not started for it: it was already at work here, and stays.
+ */
 const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL
-    AND r.holder_user_id IS NULL AND NOT ${NORN_INSTANCE_STAYS_SQL})`;
+    AND r.holder_user_id IS NULL AND NOT (r.delegator_user_id IS NOT NULL AND r.instance_id IS NOT NULL)
+    AND NOT ${NORN_INSTANCE_STAYS_SQL})`;
 /** A request a person held that has ended: its card still says it waits on them. */
 const NORN_REQUEST_UNCLOSED_SQL = "(r.settled_at IS NOT NULL AND r.holder_user_id IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;
@@ -223,6 +249,11 @@ export class PostgresNornProgramRepository {
       values: [...scope, String(program.channel_id), JSON.stringify(write.requests.map(request => ({
         request_id: request.requestId, request_ref: request.requestRef, epoch: request.epoch, holder: request.holder,
         delivery_message_id: nornDeliveryMessageId(request.requestRef, request.epoch), settled: request.settled })))], maxRows: 0 });
+    // Who delegated a request is known only while the ledger says it is delegated: given back, taken back or
+    // handed over, it is nobody's to take back.
+    await tx.query({ name: "norn_request_delegator_clear_v1", text: `UPDATE data.norn_requests SET delegator_user_id=NULL
+      WHERE space_id=$1 AND program_id=$2 AND delegator_user_id IS NOT NULL AND NOT (request_id=ANY($3::text[]))`,
+      values: [...scope, write.requests.filter(request => request.delegated).map(request => request.requestId)], maxRows: 0 });
     if (write.notices.length) await tx.query({ name: "norn_notice_write_v1", text: `INSERT INTO data.norn_notices
         (space_id,channel_id,program_id,notice_id,recipient,body)
       SELECT $1,$3,$2,entry.notice_id,entry.recipient,entry.body
@@ -279,13 +310,38 @@ export class PostgresNornProgramRepository {
       values: [this.placement.spaceId, input.channelId, input.programId], maxRows: 0 }));
   }
 
+  /** The running program's row, held for the rest of the transaction. */
+  private async running(tx: DatabaseTransaction, input: Scope): Promise<QueryResultRow | undefined> {
+    const [program] = await tx.query<QueryResultRow>({ name: "norn_program_lock_v1", text: `SELECT * FROM data.norn_programs
+      WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' FOR UPDATE`,
+      values: [this.placement.spaceId, input.channelId, input.programId], maxRows: 1 });
+    return program;
+  }
+
   /** One step on a running program, holding its row. `undefined`: no such running program in this Channel. */
   async advance<T>(input: Scope, step: NornStep<T>): Promise<T | undefined> {
     return this.transaction(input.requestId, "advance", async tx => {
-      const [program] = await tx.query<QueryResultRow>({ name: "norn_program_lock_v1", text: `SELECT * FROM data.norn_programs
-        WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' FOR UPDATE`,
-        values: [this.placement.spaceId, input.channelId, input.programId], maxRows: 1 });
+      const program = await this.running(tx, input);
       return program ? this.pass(tx, program, step) : undefined;
+    });
+  }
+
+  /**
+   * A step in which the holder of a request delegates it (Norn spec §7). When
+   * the step took the delegation, the same transaction records the person who
+   * delegated it, or whose Agent did, so that they alone can take it back and
+   * their own Instances can be delivered it.
+   */
+  async delegate<T extends { refusal?: string }>(input: Scope & { ledgerRequestId: string; delegatorUserId: string },
+    step: NornStep<T>): Promise<T | undefined> {
+    return this.transaction(input.requestId, "delegate", async tx => {
+      const program = await this.running(tx, input);
+      if (!program) return undefined;
+      const result = await this.pass(tx, program, step);
+      if (result.refusal === undefined) await tx.query({ name: "norn_request_delegator_v1", text: `UPDATE
+        data.norn_requests SET delegator_user_id=$4 WHERE space_id=$1 AND program_id=$2 AND request_id=$3 AND settled_at IS NULL`,
+        values: [this.placement.spaceId, input.programId, input.ledgerRequestId, input.delegatorUserId], maxRows: 0 });
+      return result;
     });
   }
 
@@ -298,7 +354,7 @@ export class PostgresNornProgramRepository {
           OR p.next_due_at<=clock_timestamp() OR EXISTS (SELECT 1 FROM data.norn_requests r
             WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND ${NORN_REQUEST_ABANDONED_SQL}))
         ORDER BY p.created_at,p.program_id LIMIT 200`, values, maxRows: 200 });
-      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v4", text: `SELECT r.program_id,
+      const deliveries = await tx.query<QueryResultRow>({ name: "norn_channel_deliveries_v5", text: `SELECT r.program_id,
           r.request_id,r.request_ref,r.epoch,r.holder,r.delivery_message_id,p.authority_user_id,p.page_id,p.source,
           ${AUTHOR_MENTION_SQL} AS author_mention,
           p.ledger_json->'requests'->r.request_id AS request_json,there.instance_id AS there_instance_id,there.mention AS there_mention,
@@ -308,8 +364,14 @@ export class PostgresNornProgramRepository {
             WHERE gave_up->>'request'=r.request_id AND gave_up->>'reason'=$2) AS handed_on,
           -- A person takes part in this program, so what its Agents do is for a person to follow.
           EXISTS (SELECT 1 FROM data.norn_requests person WHERE person.space_id=r.space_id AND person.program_id=r.program_id
-            AND person.holder_user_id IS NOT NULL) AS with_person
+            AND (person.holder_user_id IS NOT NULL OR person.delegator_user_id IS NOT NULL)) AS with_person,
+          -- How this holding came about when a participant made it: delegated, given back or taken back.
+          (SELECT entry FROM jsonb_array_elements(CASE WHEN jsonb_typeof(p.ledger_json->'delegations')='array'
+              THEN p.ledger_json->'delegations' ELSE '[]'::jsonb END) WITH ORDINALITY AS made(entry,position)
+            WHERE entry->>'request'=r.request_id ORDER BY made.position DESC LIMIT 1) AS delegation_json,
+          addressed.instance_id AS addressed_instance_id,addressed.mention AS addressed_mention
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
+          LEFT JOIN LATERAL ${ADDRESSED_INSTANCE_SQL("r", "p.authority_user_id,r.delegator_user_id")} addressed ON TRUE
           -- A Page's program asks the same participant again where it already is: the Instance that last
           -- answered it for this program, if that one still takes messages.
           LEFT JOIN LATERAL (SELECT instance.instance_id,
@@ -383,6 +445,10 @@ export class PostgresNornProgramRepository {
           onPage: row.page_id !== null, handedOn: row.handed_on === true, withPerson: row.with_person === true,
           there: typeof row.there_instance_id === "string" && typeof row.there_mention === "string"
             ? { instanceId: row.there_instance_id, mention: row.there_mention } : null,
+          /** The Instance a holder delegated the request to by its address, when one here takes messages. */
+          addressed: typeof row.addressed_instance_id === "string" && typeof row.addressed_mention === "string"
+            ? { instanceId: row.addressed_instance_id, mention: row.addressed_mention } : null,
+          delegation: row.delegation_json as unknown,
           request: row.request_json as unknown })),
         reports: reports.map(row => ({ programId: String(row.program_id), state: String(row.state),
           authorMention: typeof row.author_mention === "string" ? row.author_mention : null, onPage: row.page_id !== null,
@@ -443,6 +509,40 @@ export class PostgresNornProgramRepository {
       return row ? { channelId: String(row.channel_id), programId: String(row.program_id), ledgerRequestId: String(row.request_id),
         epoch: Number(row.epoch), deliveryMessageId: String(row.delivery_message_id) } : undefined;
     });
+  }
+
+  /**
+   * The open request this person delegated, by its reference, while they can
+   * still read its conversation: what taking it back needs, and the card of a
+   * person who holds it for them, which is then closed.
+   */
+  async delegatedRequest(input: { requestId: string; requestRef: string; userId: string }) {
+    return this.transaction(input.requestId, "delegated-request", async tx => {
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_delegated_v1", text: `SELECT r.channel_id,r.program_id,
+          r.request_id,r.holder_user_id,r.delivery_message_id,r.delivered_at FROM data.norn_requests r
+          JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=r.channel_id
+        WHERE r.space_id=$1 AND r.request_ref=$2 AND r.delegator_user_id=$3 AND r.settled_at IS NULL
+          AND ${channelCapabilityPredicate({ capability: "message_content_read", channelAlias: "c", principalKindSql: "'user'",
+            principalIdSql: "$3" })}
+        LIMIT 1`, values: [this.placement.spaceId, input.requestRef, input.userId], maxRows: 1 });
+      return row ? { channelId: String(row.channel_id), programId: String(row.program_id), ledgerRequestId: String(row.request_id),
+        delegate: typeof row.holder_user_id === "string" && row.delivered_at !== null
+          ? { userId: row.holder_user_id, cardMessageId: String(row.delivery_message_id) } : null } : undefined;
+    });
+  }
+
+  /**
+   * Whether a request of this program can be delegated to the Instance at
+   * `address` (`@claude:2`): one in this conversation whose Run is the
+   * program's authority's or the delegator's own, and which takes messages.
+   */
+  async instanceAt(input: Scope & { address: string; delegatorUserId: string }): Promise<boolean> {
+    return this.transaction(input.requestId, "instance-at", async tx => (await tx.query<QueryResultRow>({
+      name: "norn_instance_at_v1", text: `SELECT addressed.instance_id FROM data.norn_programs p
+          CROSS JOIN LATERAL (SELECT $4::text AS holder,p.channel_id) asked
+          CROSS JOIN LATERAL ${ADDRESSED_INSTANCE_SQL("asked", "p.authority_user_id,$5::text")} addressed
+        WHERE p.space_id=$1 AND p.channel_id=$2 AND p.program_id=$3 LIMIT 1`,
+      values: [this.placement.spaceId, input.channelId, input.programId, input.address, input.delegatorUserId], maxRows: 1 })).length === 1);
   }
 
   /** The Instance this ended request started was stopped or retired, or had already gone. */
@@ -521,14 +621,16 @@ class NornSpaceError extends ControlError {
 export async function readNornRequest(database: AuthorityDatabase, input: { requestId: string; spaceId: string; requestRef: string; userId: string }) {
   return readInActiveSpace(database, { requestId: input.requestId, operation: "norn.request", spaceId: input.spaceId }, NornSpaceError,
     async tx => {
-      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_view_v1", text: `SELECT r.channel_id,r.holder,
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_request_view_v2", text: `SELECT r.channel_id,r.holder,
+          (r.settled_at IS NULL AND r.delegator_user_id=$3) AS delegated_by_reader,
           p.ledger_json->'requests'->r.request_id AS request_json
         FROM data.norn_requests r JOIN data.norn_programs p ON p.space_id=r.space_id AND p.program_id=r.program_id
           JOIN data.channels c ON c.space_id=r.space_id AND c.channel_id=r.channel_id
         WHERE r.space_id=$1 AND r.request_ref=$2 AND ${channelCapabilityPredicate({ capability: "message_content_read",
           channelAlias: "c", principalKindSql: "'user'", principalIdSql: "$3" })} LIMIT 1`,
         values: [input.spaceId, input.requestRef, input.userId], maxRows: 1 });
-      return row ? { channelId: String(row.channel_id), holder: String(row.holder), request: row.request_json as unknown } : undefined;
+      return row ? { channelId: String(row.channel_id), holder: String(row.holder), delegatedByReader: row.delegated_by_reader === true,
+        request: row.request_json as unknown } : undefined;
     });
 }
 

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: whoever holds a request of a Norn program can delegate it
+
+A person asked on a card can delegate the request to an Agent in the
+conversation (`@claude:2`), an Agent by name, or another member, who answers
+it for them; while it is open, **Take back** returns it. An Agent delegates
+with `xmatrix delegate`. The delegate's answer settles the request; their
+refusal gives it back. Norn is vendored at norn-lang/norn#41, which defines
+delegation; the program does not see it. Hub and beta Web; expand migration
+0256 adds `norn_requests.delegator_user_id`. Recovery is a CI-validated beta
+reverting this change: the column is then unused, a request delegated to an
+Instance meanwhile ends `Broke` at its next pass, and one delegated to a
+person or an Agent by name stays with them.
+
 ## Unreleased: quota is read per account and model
 
 A provider's quota now has two kinds of window: account windows, which stop

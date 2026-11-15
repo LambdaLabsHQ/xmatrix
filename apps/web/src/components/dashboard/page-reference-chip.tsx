@@ -211,7 +211,7 @@ const REQUEST_STATES = { open: "waiting for", answered: "answered by", refused: 
  * "something went wrong" beside a task that is simply under way.
  */
 /** The request a reference names, for whoever can read its conversation; `unavailable` for anyone else. */
-function useNornRequest(requestRef: string) {
+export function useNornRequest(requestRef: string) {
   const scope = useContext(PageReferenceContext);
   const { user } = useAuth();
   const request = useQuery<NornRequestView>({

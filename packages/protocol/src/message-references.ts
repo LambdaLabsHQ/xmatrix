@@ -61,6 +61,8 @@ export interface NornRequestView {
   state: "open" | "answered" | "refused" | "broke" | "no_reply" | "cancelled" | "revoked";
   /** The answer, or the reason it was refused or could not be done. */
   reply: string | null;
+  /** The reader delegated it and it is still open: they may take it back. */
+  yoursToTakeBack?: boolean;
 }
 
 export type MessageReferenceSpan =

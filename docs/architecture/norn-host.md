@@ -148,10 +148,11 @@ polls.
 ## Delivering a request
 
 This version delivers to a harness by its name (`@codex`, `@claude`, …) and
-to `@auto`. Each delivery starts a new Run. A request to a person, or to an
-Instance by its address, is settled `Broke` with that reason; cards for
-people come later. A request offered to several with `anyOf` is taken for the
-group by the first of them this host can reach.
+to `@auto`, each delivery starting a new Run, and to a person by name (below).
+A program that names an Instance by its address has its request settled
+`Broke` with that reason; an Instance holds a request only when its holder
+delegated it there ([Delegating](#delegating)). A request offered to several
+with `anyOf` is taken for the group by the first of them this host can reach.
 
 The coordinator posts one message per holding, as xMatrix, in reply to the
 program's message. Its id is `norn:<reference>:<epoch>`, so a repeat appends
@@ -221,6 +222,45 @@ ends, or they can no longer read the conversation (`Broke`, by the same
 `message_content_read` rule that lets them read it). When it ends, the Hub
 records how on the card's message as a command result and the wait on them
 ends.
+
+## Delegating
+
+Whoever holds a request can delegate it, once, to one participant who answers
+it for them ([Norn spec §7](https://github.com/norn-lang/norn/blob/main/docs/spec.md#7-where-programs-live)):
+a person who cannot judge a question passes it to an Agent that can, or an
+Agent passes a decision that is not its to make to its person. The program
+does not see it: the request keeps its identity, its `~by` and its form, and
+takes a new epoch, so it is a new holding and a new delivery message. The
+ledger records who delegated it, to whom, when and why.
+
+- A person delegates from the card (**Delegate…**:
+  `POST /api/channels/:channel/norn-requests/:ref/delegate`), found by their
+  id as for an answer. An Agent Run uses
+  `xmatrix delegate <request> @who '<why>'`, and its delivery offers it.
+- The delegate is a person who can read the conversation, by name; an Agent
+  by its harness name, whose new Run takes it; or an Instance here by its
+  address (`@claude:2`), whose Run is the program's authority's or the
+  delegator's own, and which takes messages. The delivery goes to that Instance alone, as to one asked
+  again on a Page. A participant the request leaves out (`~except`) is
+  refused, and so is a person for a request with conditions such as `~repo`.
+- The delegate's delivery says who delegated it and quotes their words. A
+  person's card says so too, and its **Decline** reads **Give back**.
+- A delegate's answer settles the request. Their refusal or failure gives it
+  back to whoever delegated it instead (a new holding, delivered to them with
+  the delegate's words), and the program reads nothing; so does a delegate
+  that nobody works on any more, and an Instance that no longer takes
+  messages. Only whom the program asked can refuse or fail a request.
+- The card of a person who delegated says to whom (a note beginning
+  `NORN_DELEGATED_NOTE`) and no longer waits on them. While the request is
+  open they may take it back from that card
+  (`POST /api/channels/:channel/norn-requests/:ref/reclaim`): it comes to them
+  again as a new holding, and what the delegate answers afterwards is
+  refused. The request's index row keeps who delegated it by their id, or
+  the owner of the Agent that did (`norn_requests.delegator_user_id`, expand
+  migration 0256), while the ledger says it is delegated; the request's view
+  tells them (`yoursToTakeBack`). An Agent does not take a request back.
+- A program's own `handOver` or `cancel` ends a delegation, and the
+  deadline passes as it would have.
 
 ## Asking with a command
 
@@ -386,7 +426,9 @@ go once. Some stay (`NORN_INSTANCE_STAYS_SQL`):
 - one that asked a question (`xmatrix ask`, `confirm`, `choose`) whose program
   still runs, so the answer finds it;
 - in a Page program's conversation, the one a running program asks again by
-  name, and the one that ended a request last (answered, refused, or failed).
+  name, and the one that ended a request last (answered, refused, or failed);
+- one a request was delegated to by its address: it was already at work here,
+  and was not started for the request.
 
 So a Page program's conversation always has the Agent that did the work last:
 a person who writes there after the program reaches it, with what it knows.
@@ -443,7 +485,8 @@ by itself from there; the Agent that stayed takes what they say next.
 
 ## Not in this version
 
-- Requests to an existing Instance by its address.
+- Requests to an existing Instance by its address, other than one its holder
+  delegated there.
 - Facts from outside that hold once (a given pull request merged, a release
   that contains it).
 - A preview of what an edit to a Page's program would change before it is saved.

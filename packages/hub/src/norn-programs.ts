@@ -1,10 +1,11 @@
 import { ControlError, PostgresNornProgramRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { canonicalMentionToken, NORN_ASK_MESSAGE_PREFIX } from "@xmatrix/protocol";
+import { canonicalMentionToken, NORN_ASK_MESSAGE_PREFIX, NORN_DELEGATED_NOTE } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { checkNornProgram, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody, nornProgramIn, nornQuestionSource,
-  nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion, type NornRequestCard } from "./norn-host";
+import { agentHolder, checkNornProgram, instanceHolder, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody,
+  nornProgramIn, nornQuestionSource, nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion,
+  type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
@@ -13,7 +14,7 @@ import { wakeRestingInstances } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
 import type { ProductMessagePostCommitInput } from "./product-message-post-commit";
 import type { Env } from "./types";
-import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
+import type { Delegation, Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
 
 /** A program xMatrix wrote for an Agent Run's question: its message is xMatrix's own, which takes no reply. */
 const NORN_ASK_PREFIX = NORN_ASK_MESSAGE_PREFIX;
@@ -22,6 +23,12 @@ const replyTo = (program: { programId: string; onPage: boolean }): { replyTo?: s
   program.onPage || program.programId.startsWith(NORN_ASK_PREFIX) ? {} : { replyTo: program.programId };
 /** The message that carries a request of a person as a card. */
 const NORN_REQUEST_MESSAGE_KIND = "xmatrix.system.norn-request";
+
+/** A person is found by name among those who can read the conversation, as a mention finds them. */
+function peopleNamed(programs: PostgresNornProgramRepository, scope: { requestId: string; channelId: string }, holder: string): Promise<string[]> {
+  const named = canonicalMentionToken(holder.slice(1));
+  return programs.people({ ...scope, matches: name => canonicalMentionToken(name) === named });
+}
 
 /** After a message xMatrix wrote for a program is committed: its summon starts, its mention wakes. */
 type PostCommit = (input: ProductMessagePostCommitInput) => Promise<unknown>;
@@ -121,9 +128,7 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   let undeliverable = false;
   for (const delivery of work.deliveries) {
     if (personHolder(delivery.holder)) {
-      // A person is found by name among those who can read the conversation, as a mention finds them.
-      const named = canonicalMentionToken(delivery.holder.slice(1));
-      const people = await programs.people({ requestId, channelId, matches: name => canonicalMentionToken(name) === named });
+      const people = await peopleNamed(programs, { requestId, channelId }, delivery.holder);
       const scope = { requestId, channelId, programId: delivery.programId };
       if (people.length !== 1) {
         await programs.advance(scope, nornStep({ requestId: delivery.requestId, epoch: delivery.epoch, reply: { tag: "Broke",
@@ -134,19 +139,29 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
       // The card names the Agent that asks; a question asked with a command has no other message a person reads.
       const asking = nornAsking({ ...delivery, askedWithCommand: delivery.programId.startsWith(NORN_ASK_PREFIX) });
       await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
-        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, asking),
+        authorityUserId: delivery.authorityUserId, quiet: true,
+        body: nornPersonBody(delivery.request as LedgerRequest, asking, delivery.delegation as Delegation | null),
         card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!, asking) });
       await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
       continue;
     }
+    // A request delegated to an Instance by its address goes to that Instance, if it is still here to take it;
+    // without it, the delegation fails, and the request goes back to whoever delegated it.
+    if (instanceHolder(delivery.holder) && !delivery.addressed) {
+      await programs.advance({ requestId, channelId, programId: delivery.programId }, nornStep({ requestId: delivery.requestId,
+        epoch: delivery.epoch, reply: { tag: "Broke", reason: `${delivery.holder} no longer takes messages in this conversation` } }));
+      undeliverable = true;
+      continue;
+    }
+    const there = delivery.addressed ?? delivery.there;
     // A page's program has its conversation to itself, and its own message there is xMatrix's, which takes no reply.
     await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
-      authorityUserId: delivery.authorityUserId, ...(delivery.there ? { onlyInstanceId: delivery.there.instanceId } : {}),
+      authorityUserId: delivery.authorityUserId, ...(there ? { onlyInstanceId: there.instanceId } : {}),
       ...nornDelivery(delivery.request as LedgerRequest, delivery.requestRef,
-        { ...(delivery.there ? { there: delivery.there.mention } : {}), kept: delivery.onPage, handedOn: delivery.handedOn,
-          withPerson: delivery.withPerson }) });
+        { ...(there ? { there: there.mention } : {}), kept: delivery.onPage, handedOn: delivery.handedOn,
+          withPerson: delivery.withPerson, delegation: delivery.delegation as Delegation | null }) });
     await programs.delivered({ requestId, channelId, programId: delivery.programId, ledgerRequestId: delivery.requestId, epoch: delivery.epoch,
-      ...(delivery.there ? { instanceId: delivery.there.instanceId } : {}) });
+      ...(there ? { instanceId: there.instanceId } : {}) });
   }
   // A request nobody could be found for ended in this pass: what its program does next is due now.
   if (undeliverable) await wakeAgentLaunchCoordinator(env, channelId, ["norn"]);
@@ -219,7 +234,7 @@ export async function answerNornRequest(env: Env, input: { channelId: string; ru
     // It is appended and not interpreted: nothing in it summons, commands or wakes. Best effort, as above.
     const messageId = `norn-answer:${input.requestRef}:${held.epoch}`;
     await dispatchProductMessageAppend(env, input.channelId, { commandId: `norn-message:${messageId}`.slice(0, 200), messageId,
-      channelId: input.channelId, body: nornAnswerBody(input.outcome, input.text), principal: { kind: "agent", id: input.agent.agentId },
+      channelId: input.channelId, body: nornAnswerBody(input.outcome, input.text, result.returnedTo), principal: { kind: "agent", id: input.agent.agentId },
       senderSnapshot: { identityId: input.agent.agentId, kind: "agent", agentId: input.agent.agentId, label: input.agent.agentName,
         name: input.agent.agentName, agentName: input.agent.agentName, email: "", userId: input.ownerUserId, instanceId: input.instanceId },
       agentRunProof: { runId: input.runId, executionKey: input.agent.executionKey, instanceId: input.instanceId },
@@ -248,8 +263,83 @@ export async function answerNornRequestAsPerson(env: Env, input: { channelId: st
     nornStep({ requestId: held.ledgerRequestId, epoch: held.epoch,
       reply: input.outcome === "answered" ? { typed: input.text } : { tag: "Refused", reason: input.text } }));
   if (!result) return undefined;
+  // A person who was delegated the request and declines gives it back: their card is closed here, since the
+  // request now has a new holding, and the one who delegated it is delivered it again.
+  if (result.returnedTo) await closeCard(env, { channelId: input.channelId, messageId: held.deliveryMessageId, userId: input.userId,
+    text: `Given back to ${result.returnedTo.slice(1)}: ${input.text}` });
   // The card is closed and what the answer opened is delivered by the coordinator.
   if (!result.refusal) await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  return result;
+}
+
+/** A person's card that no longer waits on them, with a line saying why. */
+async function closeCard(env: Env, card: { channelId: string; messageId: string; userId: string; text: string }): Promise<void> {
+  await recordCommandResult(env, { channelId: card.channelId, messageId: card.messageId, key: "norn-request", entry: { note: { text: card.text } } });
+  await markCardAnswered(env, card.channelId, card.messageId, card.userId);
+}
+
+/** Who delegates a request: the person it was delivered to, or the Agent Run that holds it, with its owner. */
+export type NornDelegator = { kind: "person"; userId: string } | { kind: "run"; runId: string; instanceId: string; ownerUserId: string };
+
+/**
+ * The holder of a request delegates it to one participant, who answers it for
+ * them (Norn spec §7): a person who can read the conversation, an Agent by its
+ * name, whose new Run takes it, or an Instance here by its address. The
+ * program does not see it. Returns why it cannot be, or undefined when the
+ * caller holds no such open request.
+ */
+export async function delegateNornRequest(env: Env, input: { channelId: string; requestRef: string; to: string; reason?: string;
+  delegator: NornDelegator }): Promise<NornPassResult | undefined> {
+  const requestId = `norn-delegate:${input.requestRef}:${crypto.randomUUID()}`;
+  const programs = await repository(env, input.channelId, requestId);
+  const held = input.delegator.kind === "person"
+    ? await programs.personRequest({ requestId, requestRef: input.requestRef, userId: input.delegator.userId })
+      .then(row => row && row.channelId === input.channelId ? { programId: row.programId, requestId: row.ledgerRequestId, epoch: row.epoch,
+        cardMessageId: row.deliveryMessageId } : undefined)
+    : await programs.heldRequest({ requestId, channelId: input.channelId, requestRef: input.requestRef, runId: input.delegator.runId,
+      instanceId: input.delegator.instanceId });
+  if (!held) return undefined;
+  const scope = { requestId, channelId: input.channelId, programId: held.programId };
+  const delegatorUserId = input.delegator.kind === "person" ? input.delegator.userId : input.delegator.ownerUserId;
+  const to = input.to.trim();
+  let refusal: string | undefined;
+  if (!/^@[^\s@:()]{1,80}(?::[1-9]\d{0,8})?$/u.test(to)) refusal = "Name one participant: a person here, an Agent such as @claude, or an Instance here such as @claude:2";
+  else if (personHolder(to)) {
+    const people = await peopleNamed(programs, { requestId, channelId: input.channelId }, to);
+    refusal = people.length !== 1 ? (people.length ? `More than one person here is named ${to}` : `Nobody named ${to} can read this conversation`)
+      : input.delegator.kind === "person" && people[0] === input.delegator.userId ? "The request is yours already" : undefined;
+  } else if (instanceHolder(to) && !await programs.instanceAt({ ...scope, address: to, delegatorUserId })) {
+    refusal = `${to} is not an Instance of yours, or of the program's authority, that takes messages in this conversation`;
+  } else if (!instanceHolder(to) && !agentHolder(to)) refusal = `This host cannot deliver a request to ${to}`;
+  if (refusal) return { status: "running", refusal };
+  const result = await programs.delegate({ ...scope, ledgerRequestId: held.requestId, delegatorUserId },
+    nornStep({ requestId: held.requestId, epoch: held.epoch, delegateTo: to, ...(input.reason ? { reason: input.reason } : {}) }));
+  if (!result || result.refusal) return result;
+  // The delegator's card no longer waits on them: it says to whom the request went. The delegate is delivered
+  // the request as a new holding by the coordinator.
+  if (input.delegator.kind === "person" && "cardMessageId" in held) await closeCard(env, { channelId: input.channelId,
+    messageId: held.cardMessageId, userId: input.delegator.userId, text: `${NORN_DELEGATED_NOTE}${to.slice(1)}${input.reason ? `: ${input.reason}` : ""}` });
+  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  return result;
+}
+
+/**
+ * The person who delegated a request takes it back while it is open: it is
+ * delivered to them again, and what the delegate answers afterwards is not
+ * taken. A person who held it for them sees their card closed. Returns
+ * undefined when they delegated no such open request.
+ */
+export async function reclaimNornRequest(env: Env, input: { channelId: string; requestRef: string; userId: string }): Promise<NornPassResult | undefined> {
+  const requestId = `norn-reclaim:${input.requestRef}:${crypto.randomUUID()}`;
+  const programs = await repository(env, input.channelId, requestId);
+  const delegated = await programs.delegatedRequest({ requestId, requestRef: input.requestRef, userId: input.userId });
+  if (!delegated || delegated.channelId !== input.channelId) return undefined;
+  const result = await programs.advance({ requestId, channelId: input.channelId, programId: delegated.programId },
+    nornStep({ requestId: delegated.ledgerRequestId, reclaim: true }));
+  if (!result || result.refusal) return result;
+  if (delegated.delegate) await closeCard(env, { channelId: input.channelId, messageId: delegated.delegate.cardMessageId,
+    userId: delegated.delegate.userId, text: "Taken back by the one who delegated it to you." });
+  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
   return result;
 }
 

@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@1bbc58dbf2854a5d14452ca93f4c4c3ff6e9c9c2; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -20,6 +20,21 @@ export interface LedgerRequest {
   holder: string;
   /** For a request offered to a group with `anyOf`: who may take it. Null once taken, and for a request to one participant. */
   candidates: string[] | null;
+  /**
+   * Who may never hold the request: the `~except` of the group it was offered
+   * to. It stays after one of the group takes the request, and the holder
+   * cannot delegate the request to anyone it names. A ledger written before
+   * delegation existed lacks it, which means nobody.
+   */
+  excluded: string[];
+  /**
+   * While the request is delegated (spec §7): the holder who delegated it,
+   * whom it goes back to when the delegate refuses it or cannot do it, and
+   * who can take it back. Once the delegate has answered it still names on
+   * whose behalf they answered. Null, or missing in a ledger written before
+   * delegation existed, when nobody has delegated the request.
+   */
+  delegatedBy: string | null;
   epoch: number;
   text: string;
   /**
@@ -55,10 +70,29 @@ export interface Ledger {
   occurrences: { key: string; at: number; value: Value }[];
   /** Answers that settled nothing: late, from a former holder, or outside the request's form. */
   evidence: { request: string; holder: string; at: number; reply: Reply; reason: string }[];
+  /** Every change of holder a participant made, in order; a ledger written before delegation existed lacks it. */
+  delegations: Delegation[];
   /** The program's result, recorded once with the cancellation of what it left open. A later pass returns it and evaluates nothing. */
   ended: { at: number; status: "completed" | "failed"; result: Value | null; error: string | null } | null;
 }
-export const emptyLedger = (startedAt = 0): Ledger => ({ startedAt, requests: {}, entries: {}, facts: {}, occurrences: [], evidence: [], ended: null });
+/**
+ * A change of holder made by a participant, not by the program (spec §7): the
+ * holder delegated the request, the delegate gave it back by refusing it or
+ * reporting that they could not do it, or the one who delegated it took it
+ * back. The program never sees one.
+ */
+export interface Delegation {
+  request: string;
+  at: number;
+  kind: "delegated" | "returned" | "reclaimed";
+  from: string;
+  to: string;
+  /** In the participant's words: why they delegated it, or why the delegate gave it back. */
+  reason: string | null;
+  /** For a request given back: the delegate's refusal or report that they could not do it. */
+  reply?: Extract<Reply, { tag: "Refused" | "Broke" }>;
+}
+export const emptyLedger = (startedAt = 0): Ledger => ({ startedAt, requests: {}, entries: {}, facts: {}, occurrences: [], evidence: [], delegations: [], ended: null });
 
 type Source = Extract<Value, { type: "source" }>;
 /** The `First`/`Second` constructors an `or` puts around a value, outermost first. */
@@ -164,8 +198,13 @@ export function settleDue(ledger: Ledger, now: number): LedgerRequest[] {
   }
   return closed;
 }
-/** The first valid answer from the current holder settles a request; anything else is kept as evidence. */
 /**
+ * The first valid answer from the current holder settles a request; anything
+ * else is kept as evidence. A delegate's refusal, or their report that they
+ * could not do it, settles nothing either: the request goes back to whoever
+ * delegated it, because only the participant the program asked can refuse it
+ * or fail it (spec §4.1). True only when the request has ended.
+ *
  * `epoch` is the one the answer was given under. A host passes it so that an
  * answer from an earlier holding does not count after the request has come
  * back to the same participant.
@@ -182,8 +221,68 @@ export function settle(ledger: Ledger, id: string, holder: string, reply: Reply,
   const reason = request.reply !== null ? "The request has already ended"
     : request.holder !== holder || (epoch !== undefined && epoch !== request.epoch) ? "Not the request's holder" : formError(request, reply);
   if (reason !== null) { ledger.evidence.push({ request: id, holder, at: now, reply, reason }); return false; }
+  const delegator = request.delegatedBy ?? null;
+  if (delegator !== null && (reply.tag === "Refused" || reply.tag === "Broke")) {
+    (ledger.delegations ??= []).push({ request: id, at: now, kind: "returned", from: holder, to: delegator, reason: reply.reason, reply });
+    request.holder = delegator; request.delegatedBy = null; request.epoch++;
+    return false;
+  }
   request.reply = reply; request.settledAt = now;
   return true;
+}
+
+/** A participant as a program writes one, `@alice` or `@codex:2`: the only kind of delegate. */
+const ONE_PARTICIPANT = /^@[A-Za-z_][A-Za-z0-9_]*(?:-[A-Za-z0-9_]+)*(?::[0-9]+)?$/u;
+/** Whether `excluded` leaves out `who`: the same participant, or any instance of an agent named without one. */
+function excludes(excluded: string, who: string): boolean {
+  return excluded === who || (!excluded.includes(":") && who.startsWith(`${excluded}:`));
+}
+
+/**
+ * The holder delegates the request: `to` holds it and answers it for them
+ * (spec §7). It stays the same request, with the same `~by` and form, under a
+ * new epoch, and the program does not see the change. Returns null once it is
+ * delegated, or else why it cannot be, and then nothing changes.
+ *
+ * `epoch`, when given, is the holding `from` acts under, as for `settle`. A
+ * host admits a delegation only when the program's author may ask `to` and
+ * `to` may see the request (spec §10); this function cannot know either.
+ */
+export function delegate(ledger: Ledger, id: string, from: string, to: string, now: number, options: { epoch?: number; reason?: string } = {}): string | null {
+  settleDue(ledger, now);
+  const request = ledger.requests[id];
+  const refusal = !request ? "No such request"
+    : request.reply !== null ? "The request has already ended"
+    : request.verb === "judge" ? "Only the host's judge decides a judgement"
+    : request.candidates?.length ? "Nobody of the group has taken the request yet"
+    : request.holder !== from || (options.epoch !== undefined && options.epoch !== request.epoch) ? "Not the request's holder"
+    : (request.delegatedBy ?? null) !== null ? "A delegate answers the request or gives it back; they cannot delegate it again"
+    : !ONE_PARTICIPANT.test(to) || to === "@judge" ? "A request is delegated to one participant, as in @alice or @codex:2"
+    : to === from ? "The holder already holds the request"
+    : (request.excluded ?? []).some(excluded => excludes(excluded, to)) ? `The request leaves out ${to}`
+    : null;
+  if (refusal !== null) return refusal;
+  (ledger.delegations ??= []).push({ request: id, at: now, kind: "delegated", from, to, reason: options.reason ?? null });
+  request.holder = to; request.delegatedBy = from; request.epoch++;
+  return null;
+}
+
+/**
+ * Whoever delegated the request takes it back while it is open, and holds it
+ * again under a new epoch: an answer the delegate gives afterwards is
+ * evidence. Returns null once it is back, or else why it cannot be.
+ */
+export function reclaim(ledger: Ledger, id: string, by: string, now: number): string | null {
+  settleDue(ledger, now);
+  const request = ledger.requests[id];
+  const refusal = !request ? "No such request"
+    : request.reply !== null ? "The request has already ended"
+    : (request.delegatedBy ?? null) !== by ? `${by} has not delegated the request`
+    : null;
+  if (refusal !== null) return refusal;
+  (ledger.delegations ??= []).push({ request: id, at: now, kind: "reclaimed", from: request.holder, to: by, reason: null });
+  request.holder = by; request.delegatedBy = null; request.epoch++;
+  return null;
 }
 function formError(request: LedgerRequest, reply: Reply): string | null {
   if (reply.tag === "NoReply") return "NoReply is decided only by the ledger's clock";
@@ -210,6 +309,10 @@ export function take(ledger: Ledger, id: string, taker: string, now: number): bo
 function conditionsOf(who: Value | undefined): Record<string, string> {
   if (who?.type !== "participant" || who.name === "anyOf") return {};
   return Object.fromEntries(Object.entries(who.labels).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([label, value]) => [label, show(value)]));
+}
+/** Who a group leaves out with `~except`: nobody may hold the request, by taking it or by delegation. */
+function excludedOf(who: Value | undefined): string[] {
+  return who?.type === "participant" && who.name === "anyOf" && who.labels.except ? [show(who.labels.except)] : [];
 }
 function candidatesOf(who: Value): string[] | null {
   if (who.type !== "participant" || who.name !== "anyOf") return null;
@@ -376,7 +479,8 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       if (!request) {
         if (!permitted()) return revoked();
         request = ledger.requests[id] = {
-          id, verb: name, holder, candidates: name === "judge" ? null : candidatesOf(args[0]), epoch: 0, text: question.value,
+          id, verb: name, holder, candidates: name === "judge" ? null : candidatesOf(args[0]),
+          excluded: name === "judge" ? [] : excludedOf(args[0]), delegatedBy: null, epoch: 0, text: question.value,
           conditions: conditionsOf(args[0]),
           about: labels.about ? show(labels.about) : null, context: labels.context ? show(labels.context) : null,
           options: choices?.type === "list" ? choices.values : null,
@@ -516,7 +620,9 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         if (request.reply === null && next === null) close(request, { tag: "Cancelled" }, now);
         else if (request.reply === null) {
           log.push({ kind: "handedOver", id: request.id, from: request.holder, to: next! });
-          request.holder = next!; request.candidates = candidatesOf(args[1]); request.conditions = conditionsOf(args[1]); request.epoch++;
+          // The program moves the request: a delegation ends with the holding it was made under.
+          request.holder = next!; request.candidates = candidatesOf(args[1]); request.excluded = excludedOf(args[1]);
+          request.conditions = conditionsOf(args[1]); request.delegatedBy = null; request.epoch++;
         }
       }
       const at = entry(key, () => ({ at: now, value: null })).at;

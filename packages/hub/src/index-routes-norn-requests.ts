@@ -3,11 +3,27 @@ import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
 import { messageProgramStatus, nornRequestView } from "./norn-page-programs";
-import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, openNornRequests } from "./norn-programs";
+import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, delegateNornRequest, openNornRequests, reclaimNornRequest } from "./norn-programs";
 import type { Env } from "./types";
 
 const NO_STORE = { "cache-control": "private, no-store" };
 const OUTCOMES = ["answered", "refused", "broke"] as const;
+const REQUEST_REF = /^r[a-z0-9]{6,40}$/u;
+
+/** A JSON object body of at most 64 KiB; null when there is none. */
+async function objectBody(request: Request): Promise<Record<string, unknown> | null> {
+  const bytes = await readBoundedRequestBody(request, 64 * 1024);
+  try {
+    const value: unknown = bytes ? JSON.parse(new TextDecoder().decode(bytes)) : null;
+    return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+  } catch { return null; }
+}
+/** Whom a holder delegates a request to, and why in their words, as a body gives them. */
+function delegation(body: Record<string, unknown> | null): { to: string; reason?: string } | undefined {
+  const to = typeof body?.to === "string" ? body.to.trim() : "";
+  const reason = typeof body?.reason === "string" ? body.reason.trim() : "";
+  return to ? { to, ...(reason ? { reason: reason.slice(0, 2000) } : {}) } : undefined;
+}
 
 /**
  * An Agent Run reads and answers the Norn requests of its own Channel. Only
@@ -37,6 +53,19 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
     return c.json(await answerNornRequest(c.env, { channelId: run.channelId, runId: run.runId, instanceId: run.instanceId,
       ownerUserId: run.ownerUserId, requestRef: body.requestRef, outcome, text: body.text.trim(),
       agent: { agentId: run.agentId, agentName: run.agentName || run.agentId, executionKey: run.executionKey } }), 200, NO_STORE);
+  }));
+  // The Run that holds a request delegates it to someone who answers it for them; the repository checks it holds it.
+  app.post(HUB_ROUTES.norn_request_delegate, c => jsonErrors(c, async () => {
+    const run = (await requireAuth(c.req.raw, c.env)).agentRun;
+    if (!run?.instanceId) return c.json({ error: "A request is delegated by the Agent Run that holds it" }, 403, NO_STORE);
+    await requireAgentRunChannelDelegation(c.env, run, []);
+    const body = await objectBody(c.req.raw), to = delegation(body);
+    if (typeof body?.requestRef !== "string" || !REQUEST_REF.test(body.requestRef) || !to) {
+      return c.json({ error: "Name the request and whom to delegate it to" }, 400, NO_STORE);
+    }
+    const result = await delegateNornRequest(c.env, { channelId: run.channelId, requestRef: body.requestRef, ...to,
+      delegator: { kind: "run", runId: run.runId, instanceId: run.instanceId, ownerUserId: run.ownerUserId } });
+    return result ? c.json(result, result.refusal ? 400 : 200, NO_STORE) : c.json({ error: "No such request" }, 404, NO_STORE);
   }));
   // An Agent Run asks one question; the Hub writes its program and the Run's Instance is its author.
   app.post(HUB_ROUTES.norn_request_ask, c => jsonErrors(c, async () => {
@@ -94,4 +123,20 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
       requestRef, outcome, text: body.text.trim() });
     return result ? c.json(result, 200, NO_STORE) : c.json({ error: "This request is not open for you" }, 404, NO_STORE);
   }));
+  // The person who holds a request delegates it from its card; the one who delegated it takes it back. Each is found
+  // by their id on the request's index row, never by a name.
+  for (const [route, act] of [[HUB_ROUTES.channel_norn_request_delegate, "delegate"], [HUB_ROUTES.channel_norn_request_reclaim, "reclaim"]] as const) {
+    const path = route(":channelId", ":requestRef").replace("%3AchannelId", ":channelId").replace("%3ArequestRef", ":requestRef");
+    app.post(path, c => jsonErrors(c, async () => {
+      const auth = await requireAuth(c.req.raw, c.env);
+      if (auth.agentRun) return c.json({ error: "A person's request is delegated and taken back by that person" }, 403, NO_STORE);
+      const requestRef = c.req.param("requestRef") ?? "", channelId = c.req.param("channelId") ?? "";
+      const to = act === "delegate" ? delegation(await objectBody(c.req.raw)) : undefined;
+      if (!REQUEST_REF.test(requestRef) || (act === "delegate" && !to)) return c.json({ error: "Name whom to delegate the request to" }, 400, NO_STORE);
+      const result = to ? await delegateNornRequest(c.env, { channelId, requestRef, ...to, delegator: { kind: "person", userId: auth.id } })
+        : await reclaimNornRequest(c.env, { channelId, requestRef, userId: auth.id });
+      if (!result) return c.json({ error: act === "delegate" ? "This request is not open for you" : "You have no such request to take back" }, 404, NO_STORE);
+      return c.json(result, result.refusal ? 400 : 200, NO_STORE);
+    }));
+  }
 }
