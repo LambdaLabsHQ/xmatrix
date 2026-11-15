@@ -1424,8 +1424,11 @@ export class PostgresRuntimeRepository {
       }
       if (!transitions[currentState]?.includes(target)) {
         if (current.state === target) return { launch: serializeAgentLaunch(current) };
-        throw new RuntimeControlError("launch_transition_conflict", 409,
-          `Invalid Agent Launch transition ${String(current.state)} -> ${target}`);
+        // The sentence stays off the log. Both ends are launch states, so the
+        // token is a fixed label the next rejection can be grouped by.
+        throw Object.assign(new RuntimeControlError("launch_transition_conflict", 409,
+          `Invalid Agent Launch transition ${currentState} -> ${target}`),
+          { reason: `${currentState}_to_${target}` });
       }
       // The daemon's report time may trail the Hub clock that created the
       // Launch and its Run; evidence keeps it, row clocks never move backward.
