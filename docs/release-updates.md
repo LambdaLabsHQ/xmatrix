@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: the retired Automation storage is dropped
+
+Contract migration 0253 drops `data.automation_occurrence_runs`,
+`data.automation_occurrence_conversation_id(text)`, `data.automation_occurrences`
+and `data.automations`, which no code reads or writes since #1682. It refuses
+while any Automation is still enabled and attached to its page; paused,
+finished and detached rows go with their tables. An administrator applied it
+through the PostgreSQL Contract Migration workflow at this change's reviewed
+PR head before it merged. No product change. Recovery is forward only: the
+rows held no Automation that could run.
+
 ## Unreleased: schedule lines no longer run; scheduled work is a `norn run` program
 
 A task line ending in `🔁 every …` or `⏳ <time>` is plain text: the Hub does
@@ -7,9 +18,9 @@ not sync it, fire it on an event or run it. An Agent edit that leaves one on a
 page is answered with the line and the advice to write it as a program, a code
 block tagged `norn run <name>` on the same page. Schedules lists are empty, and
 a CLI's `page automation` commands answer that schedule lines are retired.
-Hub only, no migration: the Automation tables stay as they are until a later
-contract migration. Recovery is a CI-validated beta Hub reverting this change,
-which resumes Automations from their intact rows.
+Hub only, no product change: the Automation tables it left behind are dropped
+by contract migration 0253. Recovery is a CI-validated beta Hub reverting this
+change; the rows are gone, so a revert cannot resume an Automation.
 
 ## Unreleased: signing out of an app, or choosing a provider, leaves the browser's account
 

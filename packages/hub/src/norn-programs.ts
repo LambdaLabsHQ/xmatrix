@@ -1,9 +1,9 @@
 import { ControlError, PostgresNornProgramRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { canonicalMentionToken } from "@xmatrix/protocol";
+import { canonicalMentionToken, NORN_ASK_MESSAGE_PREFIX } from "@xmatrix/protocol";
 import { markCardAnswered } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
-import { checkNornProgram, nornAnswerBody, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody, nornProgramIn, nornQuestionSource,
+import { checkNornProgram, nornAnswerBody, nornAsking, nornDelivery, nornEndBody, nornOutcomeText, nornPageEnd, nornPersonBody, nornProgramIn, nornQuestionSource,
   nornRequestCard, nornStartLedger, nornStep, personHolder, type NornPassResult, type NornQuestion, type NornRequestCard } from "./norn-host";
 import { createProductAgentInterventionAuthorityPort } from "./product-agent-intervention-authority-adapter";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -16,7 +16,7 @@ import type { Env } from "./types";
 import type { Ledger, LedgerRequest, Reply } from "./vendor/norn/runtime/ledger";
 
 /** A program xMatrix wrote for an Agent Run's question: its message is xMatrix's own, which takes no reply. */
-const NORN_ASK_PREFIX = "norn-ask:";
+const NORN_ASK_PREFIX = NORN_ASK_MESSAGE_PREFIX;
 /** What xMatrix says for a program is a reply to the program's message, where a person or an Agent wrote that message. */
 const replyTo = (program: { programId: string; onPage: boolean }): { replyTo?: string } =>
   program.onPage || program.programId.startsWith(NORN_ASK_PREFIX) ? {} : { replyTo: program.programId };
@@ -131,9 +131,11 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
         undeliverable = true;
         continue;
       }
+      // The card names the Agent that asks; a question asked with a command has no other message a person reads.
+      const asking = nornAsking({ ...delivery, askedWithCommand: delivery.programId.startsWith(NORN_ASK_PREFIX) });
       await say(env, postCommit, { channelId, messageId: delivery.deliveryMessageId, ...replyTo(delivery),
-        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest),
-        card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!) });
+        authorityUserId: delivery.authorityUserId, quiet: true, body: nornPersonBody(delivery.request as LedgerRequest, asking),
+        card: nornRequestCard(delivery.request as LedgerRequest, delivery.requestRef, people[0]!, asking) });
       await programs.delivered({ ...scope, ledgerRequestId: delivery.requestId, epoch: delivery.epoch, holderUserId: people[0]! });
       continue;
     }
@@ -151,7 +153,8 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
   // A person's request that ended says how under its card, and no longer waits on them.
   for (const closing of work.closings) {
     if (closing.reply) await recordCommandResult(env, { channelId, messageId: closing.deliveryMessageId, key: "norn-request",
-      entry: { note: { text: nornOutcomeText(closing.holder, closing.reply as Reply) } } });
+      entry: { note: { text: nornOutcomeText(closing.holder, closing.reply as Reply, nornAsking({ authorMention: null, source: closing.source,
+        askedWithCommand: closing.programId.startsWith(NORN_ASK_PREFIX) }).otherwise) } } });
     await markCardAnswered(env, channelId, closing.deliveryMessageId, closing.holderUserId);
     await programs.released({ requestId, channelId, programId: closing.programId, ledgerRequestId: closing.requestId });
   }
@@ -252,9 +255,11 @@ export async function answerNornRequestAsPerson(env: Env, input: { channelId: st
 
 /**
  * An Agent Run asks one question without writing its program. xMatrix writes
- * the program into the Run's conversation, where everyone reads what is asked
- * of whom, and the Run's Instance is its author: the answer comes back to it
- * as the program's result. Returns why the question cannot be asked.
+ * the program into the Run's conversation and the Run's Instance is its
+ * author: the answer comes back to it as the program's result. A person reads
+ * the question once, on the card that names the asker and says how it was
+ * answered; the program and its end are the asker's to read
+ * (`isNornAskProgramMessage`). Returns why the question cannot be asked.
  */
 export async function askNornQuestion(env: Env, run: { channelId: string; instanceId: string; ownerUserId: string; agentName: string },
   question: NornQuestion): Promise<{ refusal?: string }> {

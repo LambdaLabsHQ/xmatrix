@@ -100,6 +100,8 @@ try {
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/page-migration-postgres.test.mjs",
     // Exercise deletion against the current schema, including registered Run dependencies.
     "packages/db/test/space-deletion-postgres.test.mjs",
+    // 0253 refuses while an Automation would still run, and otherwise drops their storage.
+    "packages/db/test/drop-automations-migration-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
     // Machine advisory scopes and runtime heads need real live lock-wait evidence.

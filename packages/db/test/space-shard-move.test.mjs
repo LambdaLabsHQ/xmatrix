@@ -6,7 +6,6 @@ import {
   GLOBAL_DATA_TABLES,
   INDIRECT_MOVABLE_SPACE_TABLES,
   MOVABLE_SPACE_TABLES,
-  RETIRED_DATA_TABLES,
   blockingSpaceTables,
   canonicalRow,
   digestTableRows,
@@ -74,7 +73,6 @@ test("every PostgreSQL data table has exactly one shard movement classification"
     ...INDIRECT_MOVABLE_SPACE_TABLES,
     ...BLOCKING_SPACE_TABLES,
     ...GLOBAL_DATA_TABLES,
-    ...RETIRED_DATA_TABLES,
   ];
   assert.equal(new Set(classifications).size, classifications.length, "classification sets overlap");
   assert.deepEqual([...new Set(classifications)].sort(), [...schemaTables].sort());

@@ -126,13 +126,6 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "workspaces",
 ]);
 
-// Retired tables nothing reads or writes; a contract migration drops them.
-// A move neither copies their rows nor waits for them.
-export const RETIRED_DATA_TABLES = Object.freeze([
-  "automation_occurrences",
-  "automations",
-]);
-
 export const GLOBAL_DATA_TABLES = Object.freeze([
   // How far this shard's own arrivals are rolled up.
   "admin_activity_rollup",

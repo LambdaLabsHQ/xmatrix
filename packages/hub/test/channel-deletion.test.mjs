@@ -145,9 +145,7 @@ integration("confirmed Channel deletion revokes access, resumes bounded erasure 
       JOIN information_schema.tables t USING(table_schema,table_name) WHERE c.table_schema IN ('data','control')
       AND c.column_name IN ('channel_id','conversation_id','source_channel_id') AND t.table_type='BASE TABLE'`);
     const classified = new Set(CHANNEL_PURGE_STEPS.map(step => step.table));
-    // data.automations is retired: nothing reads it, and a contract migration drops it.
-    for (const name of ["data.channels", "data.channel_deletions", "control.channel_space_routes", "control.channel_space_directory",
-      "data.automations"]) classified.add(name);
+    for (const name of ["data.channels", "data.channel_deletions", "control.channel_space_routes", "control.channel_space_directory"]) classified.add(name);
     assert.deepEqual(keyed.map(row => row.name).filter(name => !classified.has(name)), []);
   } finally { await f.close(); }
 });

@@ -210,17 +210,33 @@ export interface NornRequestCard {
   options: string[];
   /** When the request closes by itself. */
   by: string | null;
+  /** The Agent Instance whose program asks (`claude:2`); null when a person wrote the program. */
+  asker: string | null;
+  /** The answer taken when it closes unanswered, where the asker said so. */
+  otherwise: string | null;
 }
-export const nornRequestCard = (request: LedgerRequest, requestRef: string, holderUserId: string): NornRequestCard => ({
+/** Who asks and what silence means, as the program that makes the request says. */
+export interface NornAsking { asker: string | null; otherwise: string | null }
+export const nornRequestCard = (request: LedgerRequest, requestRef: string, holderUserId: string,
+  asking: NornAsking = { asker: null, otherwise: null }): NornRequestCard => ({
   ref: requestRef, verb: request.verb, holder: request.holder, holderUserId, text: request.text, about: request.about,
   context: request.context, options: (request.options ?? []).map(show),
-  by: request.by === null ? null : new Date(request.by).toISOString() });
+  by: request.by === null ? null : new Date(request.by).toISOString(), ...asking });
+/**
+ * Who asks a request and what silence means: the Agent that wrote the program,
+ * by its address without the @, and for a question asked with a command
+ * (`nornQuestionSource`), the answer it gave for silence.
+ */
+export function nornAsking(program: { authorMention: string | null; source: string; askedWithCommand: boolean }): NornAsking {
+  const otherwise = program.askedWithCommand ? /^\| NoReply => Answered\(([A-Z][A-Za-z0-9]*)\)$/mu.exec(program.source)?.[1] : undefined;
+  return { asker: program.authorMention?.replace(/^@/u, "") ?? null, otherwise: otherwise ?? null };
+}
 /**
  * The same request in words, for whoever reads the conversation without the
  * card: the person's name first, so it tells them as a mention does. A person
  * is shown what is asked, never the request's reference; the card carries it.
  */
-export function nornPersonBody(request: LedgerRequest): string {
+export function nornPersonBody(request: LedgerRequest, asking: NornAsking = { asker: null, otherwise: null }): string {
   // What is asked comes first: a list of conversations shows the start of the message, and that is what its
   // reader needs. The first line is plain words; the rest of a longer question follows as the program wrote it.
   const [first = "", ...more] = request.text.split("\n");
@@ -228,15 +244,17 @@ export function nornPersonBody(request: LedgerRequest): string {
     ...(more.join("").trim() ? ["", fence(request.text)] : []),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
-    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? "" : ` It closes at ${new Date(request.by).toISOString()}.`} A program asks.`,
+    "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? ""
+      : ` It closes at ${new Date(request.by).toISOString()}${asking.otherwise === null ? "" : `; without an answer, ${asking.otherwise}`}.`} ${
+      asking.asker ?? "A program"} asks.`,
   ].join("\n");
 }
 /** How a person's request ended, in a line under its card. */
-export function nornOutcomeText(holder: string, reply: Reply): string {
+export function nornOutcomeText(holder: string, reply: Reply, otherwise: string | null = null): string {
   switch (reply.tag) {
     case "Answered": return `${holder} answered: ${reply.value.type === "string" ? reply.value.value : show(reply.value)}`;
     case "Refused": return `${holder} declined: ${reply.reason}`;
-    case "NoReply": return "It closed without an answer.";
+    case "NoReply": return otherwise === null ? "It closed without an answer." : `It closed without an answer, so ${otherwise}.`;
     case "Cancelled": return "The program no longer asks this.";
     case "Revoked": return "The program lost the authority to ask this.";
     default: return reply.reason;
