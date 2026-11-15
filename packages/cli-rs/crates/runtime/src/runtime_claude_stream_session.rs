@@ -353,7 +353,9 @@ impl ClaudeStreamInterrupter {
         {
             Ok(parked.input)
         } else {
-            Err("A person declined this on its permission card. Do not retry it; continue without it or say what you need.")
+            Err(
+                "A person declined this on its permission card. Do not retry it; continue without it or say what you need.",
+            )
         };
         write_claude_control_line(
             &self.stdin,

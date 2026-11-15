@@ -504,24 +504,25 @@ pub(crate) async fn claude_stream_reader(
 
         // AskUserQuestion waits on its person: park it and show its card in
         // the channel the turn serves. Any other tool runs as before.
-        let permission = match claude_tool_permission(&value, crate::launch_access().approves_requests) {
-            Some(ClaudeToolPermission::Allow(response)) => {
-                let _ = write_claude_control_line(&control_stdin, &response).await;
-                continue;
-            }
-            Some(ClaudeToolPermission::Ask {
-                request_id,
-                tool_use_id,
-                input,
-            }) => Some((request_id, tool_use_id, input, None)),
-            Some(ClaudeToolPermission::Permit {
-                request_id,
-                tool_use_id,
-                what,
-                input,
-            }) => Some((request_id, tool_use_id, input, Some(what))),
-            None => None,
-        };
+        let permission =
+            match claude_tool_permission(&value, crate::launch_access().approves_requests) {
+                Some(ClaudeToolPermission::Allow(response)) => {
+                    let _ = write_claude_control_line(&control_stdin, &response).await;
+                    continue;
+                }
+                Some(ClaudeToolPermission::Ask {
+                    request_id,
+                    tool_use_id,
+                    input,
+                }) => Some((request_id, tool_use_id, input, None)),
+                Some(ClaudeToolPermission::Permit {
+                    request_id,
+                    tool_use_id,
+                    what,
+                    input,
+                }) => Some((request_id, tool_use_id, input, Some(what))),
+                None => None,
+            };
         if let Some((request_id, tool_use_id, input, what)) = permission {
             {
                 let channel = active

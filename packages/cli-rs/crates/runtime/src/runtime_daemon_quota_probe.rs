@@ -668,14 +668,7 @@ mod tests {
 
     /// The Claude reading of 2026-11-15: Fable's own week used up.
     fn claude_reading() -> LlmUsage {
-        let window = |label: &str, percent: f64, reset: &str, scope: Option<&str>| LlmQuotaUsage {
-            label: Some(label.to_string()),
-            window: Some("claude".to_string()),
-            percent: Some(percent),
-            reset_at: Some(reset.to_string()),
-            scope: scope.map(str::to_string),
-            ..Default::default()
-        };
+        use crate::runtime_usage_limit::claude_test_window as window;
         LlmUsage {
             scoped_quota_usages: Some(vec![
                 window(

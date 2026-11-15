@@ -159,9 +159,28 @@ pub(crate) fn claude_rate_limit_rejection(value: &Value) -> Option<UsageLimit> {
     })
 }
 
+/// A Claude quota window as the usage reader maps one (tests).
+#[cfg(test)]
+pub(crate) fn claude_test_window(
+    label: &str,
+    percent: f64,
+    reset: &str,
+    scope: Option<&str>,
+) -> LlmQuotaUsage {
+    LlmQuotaUsage {
+        label: Some(label.to_string()),
+        window: Some("claude".to_string()),
+        percent: Some(percent),
+        reset_at: Some(reset.to_string()),
+        scope: scope.map(str::to_string),
+        ..LlmQuotaUsage::default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use claude_test_window as window;
 
     #[test]
     fn claude_rejection_carries_the_reset_time() {
@@ -190,17 +209,6 @@ mod tests {
             claude_rate_limit_rejection(&serde_json::json!({ "type": "result" })),
             None
         );
-    }
-
-    fn window(label: &str, percent: f64, reset: &str, scope: Option<&str>) -> LlmQuotaUsage {
-        LlmQuotaUsage {
-            label: Some(label.to_string()),
-            window: Some("claude".to_string()),
-            percent: Some(percent),
-            reset_at: Some(reset.to_string()),
-            scope: scope.map(str::to_string),
-            ..LlmQuotaUsage::default()
-        }
     }
 
     /// The usage endpoint's `limits[]` on 2026-11-15 as the reader maps them:

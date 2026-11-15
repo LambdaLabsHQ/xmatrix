@@ -331,8 +331,22 @@ pub(crate) fn is_plain_xmatrix_command(command: &str) -> bool {
     matches!(
         words.next(),
         Some(
-            "send" | "channel" | "page" | "goal" | "confirm" | "choose" | "ask" | "whoami" | "status"
-                | "list" | "channels" | "spaces" | "attachment" | "diagnose" | "commands" | "--help"
+            "send"
+                | "channel"
+                | "page"
+                | "goal"
+                | "confirm"
+                | "choose"
+                | "ask"
+                | "whoami"
+                | "status"
+                | "list"
+                | "channels"
+                | "spaces"
+                | "attachment"
+                | "diagnose"
+                | "commands"
+                | "--help"
                 | "--version"
         )
     )
@@ -341,12 +355,15 @@ pub(crate) fn is_plain_xmatrix_command(command: &str) -> bool {
 /// The ACP `session/request_permission` result for a card answer: the option
 /// the person picked by name, else cancelled. None when `params` is no
 /// permission request.
-pub(crate) fn acp_permission_outcome(params: &Value, answers: Option<&HarnessAnswers>) -> Option<Value> {
+pub(crate) fn acp_permission_outcome(
+    params: &Value,
+    answers: Option<&HarnessAnswers>,
+) -> Option<Value> {
     let options = params.get("options").and_then(Value::as_array)?;
     let picked = answers.and_then(permission_answer).and_then(|label| {
-        options.iter().find(|option| {
-            option.get("name").and_then(Value::as_str).map(str::trim) == Some(label)
-        })
+        options
+            .iter()
+            .find(|option| option.get("name").and_then(Value::as_str).map(str::trim) == Some(label))
     });
     Some(match picked.and_then(|option| option.get("optionId")) {
         Some(id) => serde_json::json!({ "outcome": { "outcome": "selected", "optionId": id } }),
@@ -825,15 +842,24 @@ mod tests {
                 { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" },
             ],
         });
-        let question = acp_permission_question(&params).expect("a permission request is a question");
+        let question =
+            acp_permission_question(&params).expect("a permission request is a question");
         assert_eq!(question.prompt, "rm -rf build");
-        let labels: Vec<&str> = question.options.iter().map(|option| option.label.as_str()).collect();
+        let labels: Vec<&str> = question
+            .options
+            .iter()
+            .map(|option| option.label.as_str())
+            .collect();
         assert_eq!(labels, ["Allow once", "Reject"]);
         let answered = |label: &str| {
-            let answers = HarnessAnswers::from([("permission".to_string(), vec![label.to_string()])]);
+            let answers =
+                HarnessAnswers::from([("permission".to_string(), vec![label.to_string()])]);
             acp_permission_outcome(&params, Some(&answers)).unwrap()
         };
-        assert_eq!(answered("Reject"), json!({ "outcome": { "outcome": "selected", "optionId": "reject-once" } }));
+        assert_eq!(
+            answered("Reject"),
+            json!({ "outcome": { "outcome": "selected", "optionId": "reject-once" } })
+        );
         assert_eq!(answered("Allow once")["outcome"]["optionId"], "allow-once");
         // An answer the request never offered, or a withdrawn card, allows nothing.
         let cancelled = json!({ "outcome": { "outcome": "cancelled" } });
