@@ -28,6 +28,14 @@ the outbox and sign-in sessions used the whole 30-second budget from
 and grew from 3.1 GB to 4.1 GB. Before/after reports include row counts,
 relation sizes and eligibility counts capped at 100,001, never content.
 
+After a relation's deletes commit, the executor runs `ANALYZE` on that
+relation. Autovacuum's dead-tuple threshold is a fraction of `pg_class.reltuples`,
+which a bulk delete leaves at the old, larger count; without the refresh the
+threshold stays above the freed rows and autovacuum never revisits the table.
+On 2026-11-14 that left about 7k dead outbox and 6k dead idempotency rows for a
+day. A failed `ANALYZE` is recorded in the report's `analyzeFailures` (relation
+and SQLSTATE only) and retried by the next pass; the committed deletes stand.
+
 Expired idempotency keys, sequence reservations, Agent message executions,
 connector install attempts and scoped command replays retain their existing
 expiry rules. Readers already refuse expired receipts. Their cleanup was
