@@ -54,3 +54,17 @@ test("a newer sign-in replaces one still waiting, which reads as cancelled", asy
   await assert.rejects(second, cancelled);
   await assert.rejects(unopened, /no browser/u);
 });
+
+test("a browser with no web session tells the person to sign in in the app, not that something failed", async () => {
+  for (const [query, text] of [["error=sign_in_required", /isn't signed in to xMatrix/u], ["error=access_denied", /didn't finish/u]]) {
+    let opened;
+    const pending = authorizeInBrowser(new URL("https://xmatrix-hub.xmatrix.sh/api/auth/app/start?session_only=1"),
+      "redirect_uri", async (page) => { opened = new URL(page); }, () => {});
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const landed = await fetch(`${opened.searchParams.get("redirect_uri")}?${query}&state=s`);
+    const page = await landed.text();
+    assert.match(page, text, query);
+    if (query.startsWith("error=sign_in_required")) assert.doesNotMatch(page, /didn't finish/u);
+    await pending;
+  }
+});

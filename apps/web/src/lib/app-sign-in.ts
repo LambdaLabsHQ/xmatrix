@@ -51,15 +51,25 @@ export async function signInAppWithProvider(
   return { session: (await response.json()) as AuthResponse, newAccount: callback.searchParams.has("new_account") };
 }
 
+/** Set while this app window holds a person's sign-out; its session storage ends with the window. */
+const SIGNED_OUT_KEY = "xmatrix.app-signed-out";
+
+/** The person signed out in this window: the browser's web session is no longer theirs to resume. */
+export function rememberAppSignOut(): void {
+  window.sessionStorage.setItem(SIGNED_OUT_KEY, "1");
+}
+
 /**
  * Opens the app's sign-in once, and completes it when this browser is already
  * signed in on the web. No provider page. Returns null when it is not, so the
  * app can offer Google or GitHub instead of asking for the same account again.
+ * After a sign-out in this window it opens nothing: the person signed out to
+ * leave that account, and choosing a provider picks the next one.
  */
 export async function signInAppWithExistingSession(
   bridge: DesktopBridge,
 ): Promise<{ session: AuthResponse; newAccount: boolean } | null> {
-  if (!bridge.authorizeInBrowser) return null;
+  if (!bridge.authorizeInBrowser || window.sessionStorage.getItem(SIGNED_OUT_KEY)) return null;
   const verifier = randomBase64Url(32);
   const state = randomBase64Url(16);
   const start = new URL(HUB_ROUTES.app_sign_in_start, authBaseUrl());

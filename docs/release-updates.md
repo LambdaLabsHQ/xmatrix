@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: signing out of an app, or choosing a provider, leaves the browser's account
+
+After an app signed in with the browser's web session, signing out of the app
+(including "Use a different account" on a new account) landed on the sign-in
+page, which signed straight back in with that same account. Choosing Google or
+GitHub also returned the browser's account without opening the provider, so
+no other account could be picked. A sign-in start now declares one intent:
+only the app's own check of the browser session reads it, and a chosen
+provider always opens with its account chooser. An app window where the person
+signed out does not resume the browser session. The desktop app's browser tab
+no longer reads "Sign-in didn't finish" when the browser simply isn't signed
+in. Hub, beta Web and desktop, no migration. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: an app uses the browser's existing sign-in
 
 Opening the desktop or phone app no longer asks for Google or GitHub when that
