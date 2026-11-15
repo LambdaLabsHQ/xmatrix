@@ -228,6 +228,8 @@ export const HUB_ROUTES = {
   norn_request_answer: "/api/norn/requests/answer",
   /** The Run that holds a Norn request delegates it to someone who answers it for them. */
   norn_request_delegate: "/api/norn/requests/delegate",
+  /** The Run whose Instance asked a question with a command calls it off. */
+  norn_request_call_off: "/api/norn/requests/call-off",
   /** The Norn program a message carries, for whoever can read its conversation: how it stands and what it does next. */
   space_norn_program: (spaceId: string, programId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,

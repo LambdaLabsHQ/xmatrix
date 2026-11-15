@@ -71,6 +71,14 @@ export const NORN_REQUEST_COMMANDS: CliCommand[] = [
     },
   },
   {
+    path: ["cancel"], about: "Call off a question you asked with confirm, choose or ask",
+    positionals: [{ name: "request", help: "The question's request, as `xmatrix requests` lists it among those your programs wait on" }],
+    async run(call, { positionals }) {
+      await call("POST", HUB_ROUTES.norn_request_call_off, { requestRef: positionals.request });
+      return { stdout: "Called off. Whoever holds it is told it is no longer asked, and the program's end comes back to you.\n" };
+    },
+  },
+  {
     path: ["requests"], about: "List the open requests you hold and those your programs wait on",
     options: [{ name: "json", kind: "flag", help: "Print the requests as JSON" }],
     async run(call, { options }) {

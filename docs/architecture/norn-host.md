@@ -273,6 +273,12 @@ and the Run's owner as its authority. Its result is the reply itself
 (`Answered(Yes)`, `Refused(…)`, `NoReply`), told to the Instance by its
 address, so it wakes to read it. `--otherwise` is what silence means: the
 answer taken when `--by` passes.
+The Instance that asked can call the question off while it is open:
+`xmatrix cancel <request>` marks that program, and only that program, to
+stop, and the same call runs its pass. The request ends `Cancelled`, a
+person's card says it is no longer asked, an Agent that held it is let go,
+and the asker reads the program's end. A program an Agent wrote in a message
+is not called off this way.
 What xMatrix says for such a program is not threaded under the program's
 message, because that message is xMatrix's own and takes no reply.
 

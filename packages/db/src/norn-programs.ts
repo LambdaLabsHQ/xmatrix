@@ -1,3 +1,4 @@
+import { NORN_ASK_MESSAGE_PREFIX } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
@@ -158,6 +159,8 @@ const NORN_REQUEST_BROKE_OFF_SQL = `(NOT EXISTS (SELECT 1 FROM data.agent_messag
  * handed the request to a new Instance because the work on it broke off.
  */
 export const NORN_HANDED_ON_REASON = "The work broke off, and the request was handed to a new Instance";
+/** Why a question an Agent asked with a command stopped: the Agent called it off. */
+const NORN_QUESTION_CALLED_OFF = "Called off by the Agent that asked";
 
 /**
  * When a Channel's programs next need a pass, a delivery or a report; NULL
@@ -299,6 +302,26 @@ export class PostgresNornProgramRepository {
         WHERE space_id=$1 AND channel_id=$2 AND program_id=$3 AND state='running' RETURNING *`,
         values: [this.placement.spaceId, input.channelId, input.programId, input.source, input.authorityUserId], maxRows: 1 });
       return program ? this.pass(tx, program, step) : undefined;
+    });
+  }
+
+  /**
+   * The Agent Instance that asked a question with a command (`xmatrix confirm`,
+   * `choose`, `ask`) calls it off while it is open: the program the Hub wrote
+   * for it is marked to stop, and its next pass cancels the request. Only the
+   * Instance that asked can, and only that program. Returns the program, when
+   * there was such a question.
+   */
+  async callOffQuestion(input: { requestId: string; channelId: string; requestRef: string; instanceId: string }): Promise<string | undefined> {
+    return this.transaction(input.requestId, "call-off-question", async tx => {
+      const [row] = await tx.query<QueryResultRow>({ name: "norn_question_call_off_v1", text: `UPDATE data.norn_programs p
+          SET stop_reason=$6,updated_at=clock_timestamp()
+        FROM data.norn_requests r WHERE r.space_id=p.space_id AND r.program_id=p.program_id AND r.space_id=$1 AND r.channel_id=$2
+          AND r.request_ref=$3 AND r.settled_at IS NULL AND starts_with(p.program_id,$5) AND p.author_kind='agent'
+          AND p.author_id=$4 AND p.state='running' AND p.stop_reason IS NULL
+        RETURNING p.program_id`, values: [this.placement.spaceId, input.channelId, input.requestRef, input.instanceId,
+        NORN_ASK_MESSAGE_PREFIX, NORN_QUESTION_CALLED_OFF], maxRows: 1 });
+      return row ? String(row.program_id) : undefined;
     });
   }
 

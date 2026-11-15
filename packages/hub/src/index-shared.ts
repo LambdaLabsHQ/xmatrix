@@ -433,6 +433,7 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && path === HUB_ROUTES.norn_requests) return true;
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_answer) return true;
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_delegate) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_call_off) return true;
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_ask) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
