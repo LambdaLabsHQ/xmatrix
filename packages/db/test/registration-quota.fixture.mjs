@@ -13,7 +13,8 @@ export async function registrationQuotaSchema(prefix) {
   for (const file of ["0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
     "0063_expand_registration_authority.sql", "0065_expand_registration_environment.sql",
     "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql",
-    "0158_expand_registration_quota_account.sql", "0236_expand_registration_quota_waiters.sql"]) {
+    "0158_expand_registration_quota_account.sql", "0236_expand_registration_quota_waiters.sql",
+    "0254_expand_registration_quota_scoped_windows.sql"]) {
     await sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
   }
   await sql(`CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,

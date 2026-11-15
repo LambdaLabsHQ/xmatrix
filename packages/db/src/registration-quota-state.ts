@@ -1,9 +1,9 @@
-import { currentRoutingQuotaWindows, parseLlmQuotaAccount, quotaAccountBalance, routingQuotaObservation, routingQuotaResetTime,
-  type LlmUsage, type RoutingQuotaWindow } from "@xmatrix/protocol";
+import { currentRoutingQuotaWindows, routingQuotaRecord, routingQuotaUsageWindows,
+  type LlmUsage } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase } from "./contracts.js";
-import { REGISTRATION_QUOTA_POOL_SQL,
-  upsertRegistrationQuotaObservation } from "./agent-registration-quota-probe.js";
+import { REGISTRATION_QUOTA_POOL_SQL, registrationQuotaColumns, registrationQuotaUsage,
+  upsertRegistrationQuotaObservation, type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
 
 /** Coordinates supplied by an authorized registration/Run read, never by provider metadata. */
 export interface RegistrationQuotaKey { ownerUserId: string; machineId: string; harness: string }
@@ -14,15 +14,8 @@ export const registrationQuotaKey = (key: RegistrationQuotaKey): string =>
  * True when the reading left one of the owner's refused summons ready to wake. */
 export async function observeRegistrationQuota(database: AuthorityDatabase, key: RegistrationQuotaKey,
   usage: unknown, requestId: string): Promise<boolean> {
-  const observation = routingQuotaObservation(usage, Date.now());
-  if (!observation) return false;
-  const windows = currentRoutingQuotaWindows(((usage as LlmUsage).quotaUsages ?? []).flatMap(window => {
-    if (typeof window.percent !== "number") return [];
-    const reset = routingQuotaResetTime(window.resetAt);
-    return [{ label: window.label ?? window.window, usedPercent: window.percent,
-      ...(Number.isFinite(reset) ? { resetAt: new Date(reset).toISOString() } : {}) }];
-  }), Date.now());
-  const account = parseLlmQuotaAccount((usage as LlmUsage).quotaAccount);
+  const record = routingQuotaRecord(usage, Date.now());
+  if (!record) return false;
   return database.transaction({ requestId, operation: "registration.quota.observe-instance" }, async tx => {
     const rows = await tx.query<QueryResultRow>({ name: "registration_quota_instance_pool_v1",
       text: `SELECT ${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id FROM control.agent_registration_environments e
@@ -30,55 +23,51 @@ export async function observeRegistrationQuota(database: AuthorityDatabase, key:
       values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });
     if (!rows[0]) return false;
     return upsertRegistrationQuotaObservation(tx, { ownerUserId: key.ownerUserId,
-      quotaPoolId: String(rows[0].quota_pool_id), remaining: observation.value,
-      observedAt: observation.observedAt, expiresAt: observation.expiresAt, source: "provider", windows,
-      ...(account ? { account } : {}) });
+      quotaPoolId: String(rows[0].quota_pool_id), record });
   });
 }
 
-/** When each registration's current reading stops counting (a hold ends,
- * a reading expires), for readings that have one. */
-export async function readRegistrationQuotaExpiries(database: AuthorityDatabase,
-  keys: readonly RegistrationQuotaKey[], requestId: string): Promise<Map<string, string>> {
-  const unique = [...new Map(keys.map(key => [registrationQuotaKey(key), key])).values()].slice(0, 512);
-  if (!unique.length) return new Map();
-  const rows = await database.transaction({ requestId, operation: "registration.quota.expiries", statement: "single_read" },
-    tx => tx.query<QueryResultRow>({ name: "registration_quota_expiries_v1", text: `SELECT e.owner_user_id,e.machine_id,
-        e.harness,to_json(quota.expires_at)#>>'{}' AS expires_at
-      FROM jsonb_to_recordset($1::jsonb) requested("ownerUserId" text,"machineId" text,harness text)
-      JOIN control.agent_registration_environments e ON e.owner_user_id=requested."ownerUserId"
-        AND e.machine_id=requested."machineId" AND e.harness=requested.harness
-      ${REGISTRATION_QUOTA_STATE_JOIN}
-      WHERE quota.observed_at<=statement_timestamp() AND quota.expires_at>statement_timestamp()`,
-    values: [JSON.stringify(unique.map(({ ownerUserId, machineId, harness }) => ({ ownerUserId, machineId, harness })))],
-    maxRows: 512 }));
-  return new Map(rows.map(row => [registrationQuotaKey({ ownerUserId: String(row.owner_user_id),
-    machineId: String(row.machine_id), harness: String(row.harness) }), String(row.expires_at)]));
-}
-
 /** A registration and its pool's reading, as both readers select them. */
-const REGISTRATION_QUOTA_STATE_COLUMNS = `e.owner_user_id,e.machine_id,e.harness,
-        quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json`;
+const REGISTRATION_QUOTA_STATE_COLUMNS = `e.owner_user_id,e.machine_id,e.harness,${registrationQuotaColumns("quota")}`;
 const REGISTRATION_QUOTA_STATE_JOIN = `LEFT JOIN control.registration_quota_observations quota
         ON quota.owner_user_id=e.owner_user_id AND quota.quota_pool_id=${REGISTRATION_QUOTA_POOL_SQL}`;
 
 export interface RegistrationQuotaReading { registration: RegistrationQuotaKey; usage: LlmUsage }
 
-/** Batch reads for already authorized presentation consumers. Unknown/expired readings stay unknown. */
-export async function readRegistrationQuotaState(database: AuthorityDatabase,
-  keys: readonly RegistrationQuotaKey[], requestId: string): Promise<Map<string, LlmUsage>> {
+async function readRegistrationQuotaRows(database: AuthorityDatabase, keys: readonly RegistrationQuotaKey[],
+  requestId: string): Promise<readonly QueryResultRow[]> {
   const unique = [...new Map(keys.map(key => [registrationQuotaKey(key), key])).values()];
   if (unique.length > 512) throw new Error("Registration quota selector limit exceeded");
-  if (!unique.length) return new Map();
-  const rows = await database.transaction({ requestId, operation: "registration.quota.read", statement: "single_read" }, tx =>
-    tx.query<QueryResultRow>({ name: "registration_quota_state_v4", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
+  if (!unique.length) return [];
+  return database.transaction({ requestId, operation: "registration.quota.read", statement: "single_read" }, tx =>
+    tx.query<QueryResultRow>({ name: "registration_quota_state_v5", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
       FROM jsonb_to_recordset($1::jsonb) requested("ownerUserId" text,"machineId" text,harness text)
       JOIN control.agent_registration_environments e ON e.owner_user_id=requested."ownerUserId"
         AND e.machine_id=requested."machineId" AND e.harness=requested.harness
       ${REGISTRATION_QUOTA_STATE_JOIN}`,
-      values: [JSON.stringify(unique)], maxRows: 512 }));
-  return new Map(rows.map(presentedQuotaReading)
+      values: [JSON.stringify(unique.map(({ ownerUserId, machineId, harness }) => ({ ownerUserId, machineId, harness })))],
+      maxRows: 512 }));
+}
+
+const rowKey = (row: QueryResultRow): RegistrationQuotaKey => ({ ownerUserId: String(row.owner_user_id),
+  machineId: String(row.machine_id), harness: String(row.harness) });
+
+/** Batch reads for already authorized presentation consumers. Unknown/expired readings stay unknown. */
+export async function readRegistrationQuotaState(database: AuthorityDatabase,
+  keys: readonly RegistrationQuotaKey[], requestId: string): Promise<Map<string, LlmUsage>> {
+  return new Map((await readRegistrationQuotaRows(database, keys, requestId)).map(presentedQuotaReading)
     .map((reading): [string, LlmUsage] => [registrationQuotaKey(reading.registration), reading.usage]));
+}
+
+/** The current pool readings of these registrations, in the form a model's
+ * headroom is read from (`routingQuotaObservation`). Absent when none counts. */
+export async function readRegistrationQuotaUsages(database: AuthorityDatabase,
+  keys: readonly RegistrationQuotaKey[], requestId: string): Promise<Map<string, RegistrationQuotaUsage>> {
+  const now = Date.now();
+  return new Map((await readRegistrationQuotaRows(database, keys, requestId)).flatMap(row => {
+    const usage = registrationQuotaUsage(row, now);
+    return usage ? [[registrationQuotaKey(rowKey(row)), usage] as const] : [];
+  }));
 }
 
 /**
@@ -89,31 +78,27 @@ export async function readRegistrationQuotaState(database: AuthorityDatabase,
 export async function readOwnerRegistrationQuotaState(database: AuthorityDatabase, ownerUserId: string,
   requestId: string): Promise<RegistrationQuotaReading[]> {
   const rows = await database.transaction({ requestId, operation: "registration.quota.read-owner", statement: "single_read" }, tx =>
-    tx.query<QueryResultRow>({ name: "registration_quota_owner_state_v1", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
+    tx.query<QueryResultRow>({ name: "registration_quota_owner_state_v2", text: `SELECT ${REGISTRATION_QUOTA_STATE_COLUMNS}
       FROM control.agent_registration_environments e ${REGISTRATION_QUOTA_STATE_JOIN}
       WHERE e.owner_user_id=$1`, values: [ownerUserId], maxRows: 512 }));
   return rows.map(presentedQuotaReading);
 }
 
+/** A pool reading as an Instance shows it: its windows (a usage-limit hold
+ * keeps the windows read before it, or shows one used-up window), and whether
+ * the account is used up. */
 function presentedQuotaReading(row: QueryResultRow): RegistrationQuotaReading {
-  const registration = { ownerUserId: String(row.owner_user_id), machineId: String(row.machine_id),
-    harness: String(row.harness) };
-  const observed = row.observed_at ? new Date(row.observed_at as string).getTime() : NaN;
-  const expires = row.expires_at ? new Date(row.expires_at as string).getTime() : NaN;
-  if (!Number.isFinite(observed) || observed > Date.now() || !Number.isFinite(expires) || expires <= Date.now()) {
-    return { registration, usage: { quotaState: "unknown", ...(Number.isFinite(observed) && observed <= Date.now()
+  const registration = rowKey(row);
+  const now = Date.now();
+  const usage = registrationQuotaUsage(row, now);
+  if (!usage) {
+    const observed = row.observed_at ? new Date(row.observed_at as string).getTime() : NaN;
+    return { registration, usage: { quotaState: "unknown", ...(Number.isFinite(observed) && observed <= now
       ? { quotaObservedAt: new Date(observed).toISOString() } : {}) } };
   }
-  const windows: RoutingQuotaWindow[] = currentRoutingQuotaWindows(row.windows_json, Date.now());
-  const quotaAccount = parseLlmQuotaAccount(row.account_json);
-  // Usage-limit holds are authoritative too, even when the provider gave no named window.
-  // A prepaid balance has no window to show: the account carries the reading.
-  const quotaUsages = windows.length ? windows.map(({ label, usedPercent, resetAt }) =>
-    ({ ...(label ? { label } : {}), percent: usedPercent, ...(resetAt ? { resetAt } : {}) }))
-    : quotaAccountBalance(quotaAccount) ? [] : [{ percent: 100 - Number(row.remaining) }];
-  return { registration, usage: {
-    quotaState: (row.source === "daemon" || !windows.length) && Number(row.remaining) <= 0 ? "exhausted" : "observed",
-    quotaSource: "provider_api", quotaObservedAt: new Date(row.observed_at as string).toISOString(), quotaUsages,
-    ...(quotaAccount ? { quotaAccount } : {}),
-  } };
+  const hold = row.source === "daemon" && new Date(row.expires_at as string).getTime() > now;
+  const shown = hold ? routingQuotaUsageWindows(currentRoutingQuotaWindows(row.windows_json, now)) : [];
+  const quotaUsages = shown.length ? shown : usage.quotaUsages ?? [];
+  const { scopedQuotaObservedAt: _scopedAt, ...presented } = usage;
+  return { registration, usage: { ...presented, quotaUsages, quotaState: hold ? "exhausted" : "observed" } };
 }

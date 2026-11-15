@@ -232,11 +232,18 @@ test('with equal fit the work runs where the most headroom is; then the fewest o
   assert.deepEqual(chosen.key, candidates[1].key);
 });
 
+/** A stored provider reading as a launch candidate carries it (`RegistrationQuotaUsage`). */
+function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed } = {}) {
+  const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: account,
+    ...(scoped ? { scopedQuotaUsages: scoped } : {}) };
+  return { quota: { remainingPercent: assumed ? 0 : 100, assumed: assumed === true, observedAt, usage } };
+}
+
 test('an environment whose measured quota is exhausted until its reset is never offered', async () => {
   // 2026-09-29: Jev chose a Claude at 0% (reset 18:19 UTC) over one at 10%, and the turn failed at once.
   const later = new Date(Date.now() + 3_600_000).toISOString();
-  const exhausted = { quota: { remainingPercent: 0, assumed: false, source: 'provider', expiresAt: later } };
-  const remaining = { quota: { remainingPercent: 10, assumed: false, source: 'provider', expiresAt: later } };
+  const exhausted = reading({ account: [{ percent: 100, resetAt: later }] });
+  const remaining = reading({ account: [{ percent: 90, resetAt: later }] });
   const result = await registrationLaunchChooser(async input => answer(input))({
     message: '@claude', tags: {}, candidates: [{ ...candidates[0], observations: exhausted }, { ...candidates[1], observations: remaining }] });
   assert.deepEqual(result.key, candidates[1].key);
@@ -248,13 +255,13 @@ test('an environment whose measured quota is exhausted until its reset is never 
   const observedAt = candidates.map((_, index) => new Date(Date.now() - (index + 1) * 60_000).toISOString());
   await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
     candidates: candidates.map((candidate, index) => ({ ...candidate,
-      observations: { quota: { ...exhausted.quota, observedAt: observedAt[index] } } })) }),
+      observations: reading({ observedAt: observedAt[index], account: [{ percent: 100, resetAt: later }] }) })) }),
   error => error.code === 'registration_quota_exhausted'
     && error.quotaRefusedThrough === observedAt.at(-1)
-    && error.quotaTargets.length === candidates.length);
+    && error.quotaTargets.length === candidates.length && error.quotaTargets.every(target => !target.model));
 
   // A passed reset or an assumed default is not an exhaustion fact.
-  const reset = { quota: { ...exhausted.quota, expiresAt: new Date(Date.now() - 1000).toISOString() } };
+  const reset = reading({ account: [{ percent: 100, resetAt: new Date(Date.now() - 1000).toISOString() }] });
   const assumed = { quota: { remainingPercent: 0, assumed: true } };
   for (const observations of [reset, assumed]) {
     const kept = await registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
@@ -262,6 +269,44 @@ test('an environment whose measured quota is exhausted until its reset is never 
     assert.deepEqual(kept.key, candidates[0].key);
   }
 });
+
+test("a model whose own quota is used up is no option, and named alone it is refused until it is back", async () => {
+  // 2026-11-15: Fable's own week used up while the account's week stood at 55%.
+  const back = new Date(Date.now() + 4 * 86_400_000).toISOString();
+  const fable = reading({ account: [{ label: '1w', percent: 55, resetAt: back }],
+    scoped: [{ label: '1w', percent: 100, resetAt: back, scope: 'Fable' }] });
+  const claude = { ...candidates[0], key: { ...candidates[0].key, harness: 'claude' }, models: [], supportsNativeModel: true,
+    observations: fable, modelCatalog: [
+      { model: 'claude-fable-5-2', description: '', efforts: [], names: ['default', 'Fable 5.2'], isDefault: true,
+        quotaScopes: ['Fable'] },
+      { model: 'claude-sonnet-5-5', description: 'Everyday', efforts: [], names: ['sonnet'], quotaScopes: ['Sonnet'] },
+      { model: 'claude-haiku-5-5', description: 'Fast', efforts: [], names: ['haiku'] }] };
+  const calls = [];
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { modelEffort: 'model_0' }); })({
+    message: '@claude review this', tags: {}, candidates: [claude] });
+  // The runtime's default is Fable: neither it nor Fable is offered.
+  const offered = Object.values(calls[0].questions.modelEffort.criteria).map(value => JSON.parse(value).model);
+  assert.deepEqual(offered, ['claude-sonnet-5-5', 'claude-haiku-5-5']);
+  assert.equal(chosen.preferredModel, 'claude-sonnet-5-5');
+  // Named, the used-up model is refused with when it is back.
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude model:fable',
+    tags: { model: 'Fable 5.2' }, candidates: [claude] }),
+  error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === new Date(back).toISOString()
+    && JSON.stringify(error.quotaTargets[0].model) === JSON.stringify({ model: 'Fable 5.2', quotaScopes: ['Fable'] }));
+  // Without a catalog row the scope is unknown: a scoped window refuses nothing.
+  const unlisted = { ...claude, modelCatalog: claude.modelCatalog.map(({ quotaScopes: _scopes, ...row }) => row) };
+  const kept = await registrationLaunchChooser(async input => answer(input, { modelEffort: 'model_0' }))({
+    message: '@claude', tags: {}, candidates: [unlisted] });
+  assert.deepEqual([kept.useRuntimeDefaultModel, kept.preferredModel], [true, undefined]);
+  // An environment is out only when every model it could run is.
+  const allUsed = reading({ account: [{ label: '1w', percent: 55, resetAt: back }], scoped: ['Fable', 'Sonnet', 'Haiku']
+    .map(scope => ({ label: '1w', percent: 100, resetAt: back, scope })) });
+  const spent = { ...claude, observations: allUsed, modelCatalog: claude.modelCatalog.map(row =>
+    ({ ...row, quotaScopes: [row.names[1] === 'Fable 5.2' ? 'Fable' : row.names[0] === 'sonnet' ? 'Sonnet' : 'Haiku'] })) };
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
+    candidates: [spent] }), error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === undefined);
+});
+
 test('runtime model aliases preserve the declared model and its observed effort options', async () => {
   const result = await registrationLaunchChooser(async input => answer(input))({ message: '@codex effort:high', tags: { effort: 'high' },
     candidates: [{ ...candidates[0], models: ['alias'], modelAliases: { alias: 'provider/model' }, supportsRequestedEffort: true,

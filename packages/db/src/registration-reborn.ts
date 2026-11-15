@@ -23,7 +23,7 @@ import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { handoffResumeSource } from "./handoff-resume-source.js";
 import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
-  registrationQuotaReading } from "./agent-registration-quota-probe.js";
+  registrationQuotaColumns, registrationQuotaReading, type RegistrationUsageLimit } from "./agent-registration-quota-probe.js";
 
 interface RebornRegistration {
   key: SpaceAgentRegistrationKey; actorUserId: string; requested: RegistrationResourceLimits;
@@ -362,9 +362,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const keyed = candidates.filter(row => row.machine_id != null && row.harness != null);
     if (!keyed.length) return new Set();
     const rows = await this.directory.transaction({ requestId: `${commandId}:wake-quota`.slice(0, 200),
-      operation: "registration.wake.quota" }, tx => tx.query({ name: "registration_wake_resting_quota_v1",
-      text: `SELECT e.owner_user_id,e.machine_id,e.harness,q.source,q.remaining,q.observed_at,q.expires_at,
-          q.windows_json,q.account_json
+      operation: "registration.wake.quota" }, tx => tx.query({ name: "registration_wake_resting_quota_v2",
+      text: `SELECT e.owner_user_id,e.machine_id,e.harness,${registrationQuotaColumns("q")}
         FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
         JOIN unnest($1::text[],$2::text[],$3::text[]) AS k(owner_user_id,machine_id,harness)
           ON k.owner_user_id=e.owner_user_id AND k.machine_id=e.machine_id AND k.harness=e.harness
@@ -458,20 +457,22 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     });
   }
 
-  /** A live Instance reported its provider account's usage limit used up:
-   * hold its quota pool empty until the reset, so no routing picks it again.
-   * Moving its work is an ordinary `handoff:@auto` the Hub posts next. Only
-   * the Instance's owner, acting through that Instance's own Run, gets here. */
+  /** A live Instance reported a turn refused for its provider usage limit:
+   * record what it used up and the reading it was told from, in one
+   * transaction (`recordRegistrationUsageLimit`), so no routing picks a used-up
+   * model or pool again. The Hub moves the work next: a used-up account hands
+   * off, anything narrower waits for a quota retry. Only the Instance's owner,
+   * acting through that Instance's own Run, gets here. */
   async holdUsageLimit(raw: { commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string;
-    resetsAt?: string }): Promise<{ limitedUntil?: string }> {
+    resetsAt?: string; quotaScope?: string; usage?: unknown }): Promise<RegistrationUsageLimit | undefined> {
     const input = continuationInput({ ...raw, sourceMessageId: raw.commandId, prompt: "" });
     const located = await this.locate(input, "handoff");
     if (located.key.ownerUserId !== input.actorUserId) throw new RegistrationAccessError("forbidden", 403);
-    const held = await this.directory.transaction({ requestId: `${input.commandId}:limit`,
+    return this.directory.transaction({ requestId: `${input.commandId}:limit`,
       operation: "registration.usage-limit.record" }, tx => recordRegistrationUsageLimit(tx, {
       ownerUserId: located.key.ownerUserId, machineId: located.key.machineId, harness: located.key.harness,
-      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}) }));
-    return held?.limitedUntil ? { limitedUntil: held.limitedUntil } : {};
+      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(raw.quotaScope ? { quotaScope: raw.quotaScope } : {}),
+      ...(raw.usage !== undefined ? { usage: raw.usage } : {}) }));
   }
 
   /** `handoff:@auto`: hand the retained directory to the first other harness
@@ -537,11 +538,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     if (!harnesses.length) return [];
     const facts = await this.directory.transaction({ requestId: `${input.commandId}:successor-quota`,
       operation: "registration.usage-limit.successor-quota" }, tx => tx.query({
-      name: "registration_usage_limit_successor_quota_v2", text: `SELECT e.harness,e.declaration_json,
+      name: "registration_usage_limit_successor_quota_v3", text: `SELECT e.harness,e.declaration_json,
         statement_timestamp() AS evaluated_at,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         (SELECT ${REGISTRATION_QUOTA_POOL_SQL} FROM control.agent_registration_environments e
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$4) AS source_pool_id,
-        q.source,q.remaining,q.observed_at,q.expires_at,q.windows_json,q.account_json
+        ${registrationQuotaColumns("q")}
         FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
         WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=ANY($3::text[])`,
       values: [key.ownerUserId, key.machineId, harnesses, key.harness], maxRows: USAGE_LIMIT_SUCCESSOR_CANDIDATES }));

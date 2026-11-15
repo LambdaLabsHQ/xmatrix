@@ -89,6 +89,8 @@ import {
 import { recordInstancePresentation, runtimeRepository } from "../runtime";
 import { deliverQuotaWakes } from "../quota-waits";
 import { holdRegistrationUsageLimit } from "../registration-launch-dispatch";
+import { offerUsageLimitRecovery, type UsageLimitRecovery } from "../agent-quota-retry";
+import type { RegistrationUsageLimit } from "@xmatrix/db";
 
 type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
   AgentInstanceClientMessage,
@@ -169,6 +171,8 @@ export interface PostgresAgentInstancePortDependencies {
   invocationsChanged?(channelId: string): Promise<void>;
   /** Where each connection's last written Instance record is kept for its live reports. */
   instanceRecords?: InstanceRecordCache;
+  /** Offer to retry a turn refused for a quota narrower than the account (offerUsageLimitRecovery). */
+  offerUsageLimitRetry?(input: UsageLimitRecovery): Promise<void>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -224,6 +228,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         },
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
+      offerUsageLimitRetry: (recovery) => offerUsageLimitRecovery(input.env, recovery),
       signedOutTurn: (session) => signedOutTurn(input.env, { runId: session.principal.runId,
         channelId: session.run.channelId, ownerUserId: session.principal.ownerUserId }),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
@@ -819,7 +824,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const usageLimited = isAgentUsageLimitLifecycle(message);
     // Held before the notice commits: the notice wakes the Channel's resting
     // Instances, and those of this used-up registration must read it held.
-    if (usageLimited) await this.holdUsageLimitedInstance(session, message, command.messageId);
+    const limit = usageLimited ? await this.holdUsageLimitedInstance(session, message, command.messageId) : undefined;
     try {
       await this.dependencies.messages.append(command.payload, {
         actorUserId: session.principal.ownerUserId,
@@ -833,32 +838,72 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         return;
       }
     }
-    if (usageLimited) await this.handOffUsageLimitedInstance(session, command.messageId);
+    if (!usageLimited) return;
+    // A used-up account (or one a daemon that predates scopes reports) moves
+    // the work to another harness; a used-up model, or a limit no window
+    // explains, waits on this one for a quota retry its owner chooses.
+    if (limit?.usedUp === "scope" || limit?.usedUp === "unresolved") {
+      await this.offerUsageLimitRetry(session, command.messageId, limit);
+    } else await this.handOffUsageLimitedInstance(session, command.messageId);
   }
 
   /**
-   * The Instance's provider account is used up. Its quota pool is held empty
-   * until the reset, then xMatrix posts `@<name>:<n>:handoff:@auto` as the
-   * owner: an ordinary handoff, interpreted like one anybody typed, picks the
-   * successor on any machine. The committed turn-failure notice keys both, so
-   * a replayed lifecycle signal repeats neither.
+   * A turn was refused for its provider usage limit. What it used up (the
+   * daemon's `quotaScope`) and the complete reading the daemon told it from
+   * are recorded together: a used-up account holds the pool until the reset,
+   * then xMatrix posts `@<name>:<n>:handoff:@auto` as the owner, an ordinary
+   * handoff that picks the successor on any machine. The committed
+   * turn-failure notice keys both, so a replayed lifecycle signal repeats
+   * neither.
    */
   private async holdUsageLimitedInstance(
     session: Readonly<AgentInstanceRuntimeSession>,
     message: Message<"agent_lifecycle">,
     sourceMessageId: string,
-  ): Promise<void> {
+  ): Promise<RegistrationUsageLimit | undefined> {
     const ids = await usageLimitHandoffIds(sourceMessageId);
     try {
-      await this.dependencies.runtime.holdUsageLimit({
+      return await this.dependencies.runtime.holdUsageLimit({
         commandId: ids.commandId,
         actorUserId: session.principal.ownerUserId,
         channelId: session.run.channelId,
         sourceInstanceId: session.run.instanceId,
         ...(typeof message.resetsAt === "string" ? { resetsAt: message.resetsAt.slice(0, 64) } : {}),
+        ...(typeof message.quotaScope === "string" ? { quotaScope: message.quotaScope.slice(0, 64) } : {}),
+        ...(message.usage && typeof message.usage === "object" ? { usage: message.usage } : {}),
       });
     } catch (error) {
       console.error("Agent usage limit could not be recorded", error);
+      return undefined;
+    }
+  }
+
+  /** The turn used up a quota narrower than the account: offer to retry it on
+   * this harness once the model it ran has quota again. The retry waits on
+   * that model (`QuotaRetryModel`), so it never resumes onto it used up. */
+  private async offerUsageLimitRetry(
+    session: Readonly<AgentInstanceRuntimeSession>,
+    sourceMessageId: string,
+    limit: Exclude<RegistrationUsageLimit, { usedUp: "account" }>,
+  ): Promise<void> {
+    if (!this.dependencies.offerUsageLimitRetry) return;
+    const presentation = session.presentation;
+    const model = presentation?.model ?? "";
+    const row = presentation?.models?.find(entry => entry.model === model || entry.id === model);
+    const sourceAddress = session.run.channelInstanceId
+      ? `@${session.principal.agentName}:${session.run.channelInstanceId}` : `@${session.principal.agentName}`;
+    try {
+      await this.dependencies.offerUsageLimitRetry({
+        channelId: session.run.channelId,
+        actorUserId: session.principal.ownerUserId,
+        sourceMessageId,
+        sourceMention: sourceAddress,
+        sourceRunId: session.principal.runId,
+        sourceInstanceId: session.run.instanceId,
+        model: { model, quotaScopes: limit.usedUp === "scope" ? [limit.scope] : row?.quotaScopes ?? [] },
+      });
+    } catch (error) {
+      console.error("Agent usage-limit retry could not be offered", error);
     }
   }
 

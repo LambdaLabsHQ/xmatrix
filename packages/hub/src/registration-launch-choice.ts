@@ -1,6 +1,7 @@
 import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
-  cursorQuotaBucketForModel, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
-  machineNetworkObservation, type MachineNetworkObservation } from "@xmatrix/protocol";
+  routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
+  machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryRegistration,
+  type RoutingModelOption } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser } from "@xmatrix/db";
 import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
 import { RoutingEvaluationFailed, RoutingEvidenceUnavailable, evaluateRoutingChoices, type RoutingAnswer,
@@ -83,36 +84,31 @@ function selectionFailure(phase: "environment" | "parameter", error: unknown): R
   return new RegistrationAccessError(`registration_${phase}_selection_failed`, 503);
 }
 
-/** True while the provider's own reading says this environment has no quota
- * left: a measured (never assumed) zero whose reset has not yet passed. */
-export function providerQuotaExhausted(candidate: RegistrationLaunchCandidate, now: number): boolean {
-  const quota = candidate.observations?.quota;
-  if (!quota || quota.assumed || quota.remainingPercent > 0) return false;
-  const expires = quota.expiresAt ? Date.parse(quota.expiresAt) : NaN;
-  return Number.isFinite(expires) && expires > now;
+/** The catalog row of the model a pair runs, or a summon names: the one the
+ * model (through its owner's alias) names; the runtime default's is the row
+ * the runtime marks as default. None without a catalog that lists it. */
+function catalogRow(candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">): RoutingModelOption | undefined {
+  const catalog = candidate.modelCatalog ?? [];
+  if (!option.model) return catalog.find(observed => observed.isDefault);
+  const model = candidate.modelAliases?.[option.model] ?? option.model;
+  return catalog.find(observed => routingModelOptionNamed(observed, model));
 }
 
-/** Cursor spends Auto or API by model family; other harnesses keep the single
- * remainingPercent gate. Unknown / missing pool readings do not refuse. */
-export function providerQuotaExhaustedForModel(candidate: RegistrationLaunchCandidate,
-  model: string | undefined, now: number): boolean {
-  const quota = candidate.observations?.quota;
-  if (!quota || quota.assumed) return false;
-  const windows = quota.windows;
-  if (!windows?.length) return providerQuotaExhausted(candidate, now);
-  const labels = new Set(windows.map(window => (window.label ?? "").trim().toLowerCase()).filter(Boolean));
-  if (!(labels.has("auto") && labels.has("api"))) return providerQuotaExhausted(candidate, now);
-  if (!quota.observedAt) return false;
-  const bucket = cursorQuotaBucketForModel(model);
-  const observation = routingQuotaObservation({
-    quotaSource: "provider_api", quotaObservedAt: quota.observedAt,
-    quotaUsages: windows.map(window => ({
-      ...(window.label ? { label: window.label } : {}), percent: window.usedPercent,
-      ...(window.resetAt ? { resetAt: window.resetAt } : {}),
-    })),
-  }, now, { windowLabels: [bucket] });
-  if (!observation) return false;
-  return observation.value === 0 && Date.parse(observation.expiresAt) > now;
+/** The provider's reading of one model of this environment (its catalog
+ * row): the account's windows and the scoped windows that constrain it.
+ * Without a row, the account's alone. */
+function modelQuota(candidate: RegistrationLaunchCandidate, model: RoutingModelOption | undefined, now: number) {
+  const usage = candidate.observations?.quota?.usage;
+  return usage ? routingQuotaObservation(usage, now, model ? { model } : undefined) : undefined;
+}
+
+/** True while the provider's own reading says this environment (or one model
+ * of it) has no quota left: a measured, never assumed, zero whose reset has
+ * not yet passed. */
+export function providerQuotaExhausted(candidate: RegistrationLaunchCandidate, now: number,
+  model?: RoutingModelOption): boolean {
+  const quota = modelQuota(candidate, model, now);
+  return quota !== undefined && quota.value <= 0 && Date.parse(quota.expiresAt) > now;
 }
 
 /** How fast the environment's account may spend against its provider's pace
@@ -284,18 +280,39 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       candidate => candidate.workspaces.some(workspace => workspace.canonicalCwd === tags.pwd &&
         workspace.machineId === candidate.key.machineId && candidate.workspaceReferences.includes(workspace.reference)));
     // A provider-measured exhausted quota fails every turn until its reset; it
-    // is a fact about the environment, not an observation for Jev to weigh.
+    // is a fact about the environment or one model, not an observation for Jev
+    // to weigh. A used-up model is no option; an environment is out only when
+    // its account is used up, or every model it could run is.
     const now = Date.now();
-    if (eligible.every(candidate => providerQuotaExhausted(candidate, now))) {
+    const modelExhausted = (candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">) =>
+      providerQuotaExhausted(candidate, now, catalogRow(candidate, option));
+    const parameterPairs = (candidate: RegistrationLaunchCandidate) => modelPairs(candidate, tags).filter(option =>
+      !tags.parameters || !candidate.parameterModel ||
+      (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
+    const runsDefault = (candidate: RegistrationLaunchCandidate) => usesRuntimeDefaults(candidate, tags) &&
+      !modelExhausted(candidate, runtimeDefaultPair(tags));
+    const usedUp = (candidate: RegistrationLaunchCandidate) => providerQuotaExhausted(candidate, now) ||
+      [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []]
+        .every(option => modelExhausted(candidate, option));
+    if (eligible.every(usedUp)) {
       // The earliest reading this refusal rested on: any reading of these
       // pools newer than it is one the refusal never saw.
-      const observed = eligible.map(candidate => Date.parse(candidate.observations?.quota?.observedAt ?? ""))
-        .filter(Number.isFinite);
+      const observed = eligible.map(candidate => Date.parse(candidate.observations?.quota?.observedAt ??
+        candidate.observations?.quota?.usage?.quotaObservedAt ?? "")).filter(Number.isFinite);
+      // A model the author named waits for that model's quota, and is back
+      // when the first environment's is.
+      const named = tags.model;
+      const back = named ? eligible.flatMap(candidate => {
+        const until = Date.parse(modelQuota(candidate, catalogRow(candidate, { model: named }), now)?.expiresAt ?? "");
+        return Number.isFinite(until) ? [until] : [];
+      }) : [];
       throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined,
-        eligible.map(candidate => candidate.key),
-        observed.length ? new Date(Math.min(...observed)).toISOString() : new Date(now).toISOString());
+        eligible.map((candidate): QuotaRetryRegistration => ({ ...candidate.key,
+          ...named ? { model: { model: named, quotaScopes: catalogRow(candidate, { model: named })?.quotaScopes ?? [] } } : {} })),
+        observed.length ? new Date(Math.min(...observed)).toISOString() : new Date(now).toISOString(),
+        back.length ? new Date(Math.min(...back)).toISOString() : undefined);
     }
-    narrow("registration_quota_exhausted", candidate => !providerQuotaExhausted(candidate, now));
+    narrow("registration_quota_exhausted", candidate => !usedUp(candidate));
     if (eligible.length > 100) throw new RegistrationAccessError("registration_candidates_limit", 409);
     let context: Record<string, unknown> | undefined;
     try { context = readContext && sourceSequence !== undefined ? await readContext(sourceSequence) : undefined; }
@@ -314,13 +331,13 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const located = (candidate: RegistrationLaunchCandidate) => candidate.workspaces.filter(workspace =>
       candidate.workspaceReferences.includes(workspace.reference) && workspace.machineId === candidate.key.machineId &&
       (!tags.pwd || workspace.canonicalCwd === tags.pwd) && (!tags.repo || workspace.repo === repoSummonReference(tags.repo)));
-    const pairs = (candidate: RegistrationLaunchCandidate) => modelPairs(candidate, tags).filter(option => !tags.parameters ||
-      !candidate.parameterModel || (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
+    const pairs = (candidate: RegistrationLaunchCandidate) => parameterPairs(candidate)
+      .filter(option => !modelExhausted(candidate, option));
     const pairKey = (option: ModelPair) => JSON.stringify([option.model, option.effort ?? null]);
     // A runtime's own catalog is a choice only beside its default: a summon
     // that names no model may keep the model it would have run anyway.
     const withDefault = (models: ModelPair[], candidates: RegistrationLaunchCandidate[]) =>
-      models.length && models.every(option => option.native) && candidates.every(candidate => usesRuntimeDefaults(candidate, tags))
+      models.length && models.every(option => option.native) && candidates.every(runsDefault)
         ? [runtimeDefaultPair(tags), ...models] : models;
     const unique = <T>(values: T[], key: (value: T) => string) => [...new Map(values.map(value => [key(value), value])).values()];
     // Where the work happens is what it is about, so it is read first, over
@@ -418,12 +435,10 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     const answered = modelAnswer ? models[Number(modelAnswer.choice.slice("model_".length))]! : undefined;
     // Keeping the runtime's default is no model selection.
     const model = answered?.model ? answered : undefined;
-    // Cursor: after the model is known, only that model's Auto/API pool may
-    // refuse; the next-ranked environment of the harness offering it runs it.
-    const offered = ranking.map(item => item.candidate).filter(candidate => candidate.key.harness === harness &&
-      (model ? pairs(candidate).some(option => pairKey(option) === pairKey(model)) : usesRuntimeDefaults(candidate, tags)));
-    const candidate = offered.find(item => !providerQuotaExhaustedForModel(item, model?.model ?? "default", Date.now()));
-    if (!candidate) throw new RegistrationAccessError(offered.length ? "registration_quota_exhausted" : "registration_selection_invalid", 409);
+    // The best-ranked environment of the harness that offers the chosen model with quota runs it.
+    const candidate = ranking.map(item => item.candidate).find(candidate => candidate.key.harness === harness &&
+      (model ? pairs(candidate).some(option => pairKey(option) === pairKey(model)) : runsDefault(candidate)));
+    if (!candidate) throw new RegistrationAccessError("registration_selection_invalid", 409);
     const evidenceRanking = [...ranking.filter(item => item.candidate === candidate),
       ...ranking.filter(item => item.candidate !== candidate)];
     await told;

@@ -359,7 +359,10 @@ function mergeUsagePreferringQuotas(
     if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) {
       return { ...current, ...localLlmUsage(incoming) };
     }
-    return { ...current, ...incoming, quotaObservedAt: incoming.quotaObservedAt };
+    // One read states every quota fact: a partial one (no scoped windows)
+    // must not carry the previous read's scoped windows forward as its own.
+    const { scopedQuotaUsages: _previousScoped, ...rest } = current;
+    return { ...rest, ...incoming, quotaObservedAt: incoming.quotaObservedAt };
   }
   if (current.quotaUsages?.length) {
     return { ...current, ...incoming, quotaUsages: current.quotaUsages };
@@ -540,11 +543,15 @@ function cleanUsage(value: unknown): LlmUsage | undefined {
   } else if (value.quotaSource === "provider_api") {
     if (value.quotaState === "observed" || value.quotaState === "exhausted") usage.quotaState = value.quotaState;
     const quotaUsages = cleanQuotaUsages(value.quotaUsages);
+    // Present, even empty, marks a complete reading; each window needs its scope.
+    const scopedQuotaUsages = Array.isArray(value.scopedQuotaUsages)
+      ? (cleanQuotaUsages(value.scopedQuotaUsages) ?? []).filter((window) => window.scope) : undefined;
     const quotaAccount = parseLlmQuotaAccount(value.quotaAccount);
     // A prepaid account has no window: its balance alone is the reading.
-    if (quotaUsages || quotaAccountBalance(quotaAccount)) {
+    if (quotaUsages || scopedQuotaUsages?.length || quotaAccountBalance(quotaAccount)) {
       usage.quotaSource = "provider_api";
       if (quotaUsages) usage.quotaUsages = quotaUsages;
+      if (scopedQuotaUsages) usage.scopedQuotaUsages = scopedQuotaUsages;
       const quotaObservedAt = parseQuotaObservedAt(value.quotaObservedAt);
       if (quotaObservedAt) usage.quotaObservedAt = quotaObservedAt;
       if (quotaAccount) usage.quotaAccount = quotaAccount;
@@ -568,6 +575,7 @@ function cleanQuotaUsages(value: unknown): LlmQuotaUsage[] | undefined {
       ...(cleanText(candidate.label, 64) ? { label: cleanText(candidate.label, 64) } : {}),
       ...(cleanText(candidate.window, 64) ? { window: cleanText(candidate.window, 64) } : {}),
       ...(cleanText(candidate.resetAt, 64) ? { resetAt: cleanText(candidate.resetAt, 64) } : {}),
+      ...(cleanText(candidate.scope, 64) ? { scope: cleanText(candidate.scope, 64) } : {}),
     };
     for (const key of ["used", "limit", "remaining", "percent"] as const) {
       const number = cleanNonnegativeNumber(candidate[key]);

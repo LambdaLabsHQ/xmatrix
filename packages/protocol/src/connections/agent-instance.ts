@@ -15,6 +15,7 @@ import type {
   TraceInstanceHistoryAvailability,
 } from "../authority.js";
 import type { ChannelActivity } from "../channel-activity.js";
+import type { LlmUsage } from "../authority-runtime.js";
 
 /**
  * First message accepted by the Agent Instance connection endpoint.
@@ -149,6 +150,14 @@ export interface AgentInstanceLifecycleMessage {
   snapshot?: AgentLifecycleSnapshot;
   /** RFC 3339 time a `usage_limited` provider account resets, when known. */
   resetsAt?: string;
+  /** What a `usage_limited` turn used up: `account`, the `scope` of one
+   * scoped window (`Fable`), or `unresolved`. Absent from a daemon that
+   * predates scopes, which means the account. */
+  quotaScope?: string;
+  /** Why an `unresolved` quota scope could not be told. */
+  quotaScopeReason?: string;
+  /** The complete provider reading the quota scope was told from. */
+  usage?: LlmUsage;
   /** Tasks still pending when `background_tasks_interrupted` was observed. */
   pendingTasks?: number;
   ts?: string;

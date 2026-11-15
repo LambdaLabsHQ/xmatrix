@@ -4,14 +4,15 @@ import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegis
   parseRegistrationResourceLimits, intersectRegistrationLimits,
   parseAgentRegistrationEnvironment, routingModelCatalogObservation,
   type AgentRegistrationEnvironment, type AgentRegistrationMachinePlatform, type AgentRegistrationRunningInstance, type AgentRegistrationSummary,
-  currentRoutingQuotaWindows, parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
+  parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
   parseHarnessProfileCommand, type HarnessProfileCommand, type SpaceHarnessProfile } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { enrollGlobalRegistration } from "./agent-registration-enrollment.js";
-import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaColumns, registrationQuotaWindows,
+  registrationShownQuotaReading } from "./agent-registration-quota-probe.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { writeRegistrationOwnerGrant } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationAccess, registrationKeyValues, registrationOwnerGrant, spaceState } from "./agent-registration-rows.js";
@@ -446,10 +447,10 @@ export class PostgresAgentRegistrationRepository {
     // while it is current.
     const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels",
       statement: "single_read" },
-      tx => tx.query({ name: "registration_catalog_machine_labels_v11", text: `SELECT
+      tx => tx.query({ name: "registration_catalog_machine_labels_v12", text: `SELECT
         requested.owner,requested.machine,requested.harness,machine.name,
         e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,daemon.native_models,
-        quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json
+        ${registrationQuotaColumns("quota")}
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=requested.owner
           AND e.machine_id=requested.machine AND e.harness=requested.harness
@@ -483,8 +484,8 @@ export class PostgresAgentRegistrationRepository {
       const lastSeenAt = isoTime(label?.last_seen_at);
       const resources = label?.online === true ? machineResourceObservation(label.resources, Date.now()) : undefined;
       const platform = machinePlatform(label?.platform);
-      const reading = registrationQuotaReading(label);
-      const windows = currentRoutingQuotaWindows(label?.windows_json, Date.now());
+      const reading = registrationShownQuotaReading(label);
+      const windows = registrationQuotaWindows(label);
       const account = parseLlmQuotaAccount(label?.account_json);
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
       const { quota, balance } = row.canConfigureSpace || row.canManageOwnerGrant
