@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
@@ -244,4 +244,35 @@ test("a snapshot failure names the read that failed and rolls back", async () =>
     /lifecycle snapshot outbox by status: canceling statement due to statement timeout/u);
   assert.equal(fake.calls.at(-1).text, "ROLLBACK");
   assert.equal(fake.calls.some(({ text }) => text.includes("DELETE FROM")), false);
+});
+
+test("maintenance refreshes a deleted relation's statistics so autovacuum sees the smaller table", async () => {
+  // reltuples stays at the pre-delete count unless something analyzes the
+  // table, and autovacuum's dead-tuple threshold is a fraction of reltuples.
+  // Without this ANALYZE the 2026-11-14 pass left ~7k dead outbox rows that
+  // autovacuum never revisited.
+  const fake = client([1_000]);
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--max-rows=1000"]));
+  const analyzed = fake.calls.filter(({ text }) => text.startsWith("ANALYZE ")).map(({ text }) => text);
+  assert.deepEqual(analyzed, ["ANALYZE data.idempotency_keys"]);
+  assert.deepEqual(result.analyzedRelations, ["data.idempotency_keys"]);
+  assert.deepEqual(result.analyzeFailures, []);
+});
+
+test("a failed statistics refresh is reported without undoing the committed deletes", async () => {
+  const fake = client([1_000]);
+  const original = fake.query;
+  fake.query = async (text, values) => {
+    if (text.startsWith("ANALYZE ")) {
+      fake.calls.push({ text, values });
+      const error = new Error("canceling statement due to statement timeout");
+      error.code = "57014";
+      throw error;
+    }
+    return original(text, values);
+  };
+  const result = await runLifecycleMaintenance(fake, parseLifecycleOptions(["--max-rows=1000"]));
+  assert.equal(result.deletedExpiredIdempotencyRows, 1_000);
+  assert.deepEqual(result.analyzedRelations, []);
+  assert.deepEqual(result.analyzeFailures, [{ relation: "data.idempotency_keys", code: "57014" }]);
 });
