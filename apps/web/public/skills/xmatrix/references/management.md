@@ -15,7 +15,7 @@ conversations linked to them. Address an existing Instance with its exact
 Channel-local `@<agent>:<N>` address, or summon a new one with `@auto` in the
 conversation that needs it; xMatrix chooses the harness and placement. Act with the
 ordinary commands every Agent has: `xmatrix send`, `xmatrix channel create`,
-`@<agent>:<N>:stop` or `:reborn` in a message, and page Automations. A general
+`@<agent>:<N>:stop` or `:reborn` in a message, and `norn run` programs on a page. A general
 management label does not authorize raw requests or access to another Space.
 
 Read conversations on demand with `xmatrix channel history`, and search them with

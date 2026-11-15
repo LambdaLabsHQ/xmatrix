@@ -160,4 +160,4 @@ A message with one `norn run` block starts a program for a one-off piece of work
 - A program cannot yet wait for one particular fact, such as a given pull request being merged or a release containing it; it can wait on the streams above.
 - There is no preview of what an edit will change before you save it.
 
-[Automations](pages.md#automations) remain the short way to write a schedule as a single line of a page. Use a program when the work involves more than one participant, a typed answer, or a declared outcome for refusal and silence.
+Schedules, reminders and event-driven work are all programs. [Schedule lines](pages.md#schedule-lines) written before programs keep running; write new ones as programs.
