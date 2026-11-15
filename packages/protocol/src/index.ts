@@ -294,7 +294,7 @@ export type {
   MachineHandoffExport, MachineHandoffExportResult,
 } from "./handoff-export.js";
 export {
-  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MAX_ONCE_LEAD_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRef, automationRunsOnce, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView,
+  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES, automationRef, automationRunIdentity, canonicalAutomationCommand, isAutomationIntervalMinutes, legacyAutomationCommandKind, legacyAutomationCommandView,
 } from "./automation-stored-values.js";
 export type {
   AutomationRunIdentity,
@@ -509,7 +509,7 @@ export type {
   GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
-  markScheduleDone, pageSchedules, removeScheduleLine, scheduleTimeInRange, setScheduleStatus,
+  pageSchedules,
 } from "./page-schedules.js";
 export type { PageSchedule, PageScheduleStatus } from "./page-schedules.js";
 export {

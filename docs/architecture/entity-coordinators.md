@@ -63,7 +63,7 @@ rank authority directory and the runtime single cell (listed with reasons in
 | Registration access-change ledger completion | A change with no unsettled execution completes as it is recorded; otherwise the Channel coordinator completes it once its stop intents settle. |
 | Launch claim/publish, reborn advance, stop-command delivery, terminal-report finalization, registration preparation checks and cancellations, routing retries | **Channel object** (`due`/`run` kinds). Each needs a daemon command or model call and its receipt. |
 | Settling Launches whose Run ended or vanished; legacy direct dispatch without a Launch row | **Channel object** repair steps for now, scoped to the Channel. Moving them into the transaction that ends the Run (principle 0) is the remaining follow-up. |
-| Automation occurrences | **Channel object** kind: `due` is the Channel's earliest enabled `next_run_at`, and `run` materializes the occurrence through the ordinary message path. This matches the original "each Channel-family authority's only alarm is its earliest Automation" contract. |
+| Scheduled work | **Channel object** kind `norn`: scheduled work is a Norn program (norn-host.md), and `due` is the earliest time one of the Channel's programs is next evaluated. The Hub runs no Automation, so the Channel object has no Automation kind. |
 | Terminal-report retention (7 days) | A Channel kind whose `due` is the oldest finalized report plus 7 days. |
 
 ## Triggers
@@ -81,8 +81,6 @@ Each write that creates Channel work wakes the Channel object before answering:
   acknowledging. The daemon retries unacknowledged reports.
 - **Authority withdrawal** wakes each Channel with a live registration Run in
   scope before answering.
-- **Automation create/edit/pause** wakes its Channel so the alarm follows the new
-  `next_run_at`.
 
 A wake carries no payload the object must trust. The object re-reads PostgreSQL,
 runs whatever is due and sets its alarm from `due`.
@@ -131,9 +129,9 @@ catalog reads and daemon registration timed out behind them. So:
 Each release that deleted a global coordinator was followed by a one-time,
 idempotent operator handover that wakes every Channel with open work — due now
 or later — paging per shard by `channel_id` cursor:
-`POST /api/admin/agent-launch/handover` (31 Channels woken on 2026-09-26) and
-`POST /api/admin/automation/handover` (2 Channels). Both require the control
-plane operator token or a platform admin. Billing needed none: its queue was
+`POST /api/admin/agent-launch/handover` (31 Channels woken on 2026-09-26),
+which requires the control plane operator token or a platform admin. Automations
+had a handover of their own (2 Channels) while the Hub ran them. Billing needed none: its queue was
 deleted, and its table and columns were dropped by `0095_contract_drop_billing_notice`
 after the code stopped using them.
 

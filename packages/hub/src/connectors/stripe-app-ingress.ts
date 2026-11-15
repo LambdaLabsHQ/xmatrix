@@ -64,7 +64,7 @@ export async function handleStripeAppDelivery(input: { env: Env; request: Reques
 
 type StripeEventConnection = Awaited<ReturnType<PostgresStripeAccountRepository["eventConnections"]>>[number];
 
-/** Both Stripe endpoints fence lookup, append and Automations to the same retained grant. */
+/** Both Stripe endpoints fence lookup, append and programs to the same retained grant. */
 export async function deliverStripeAccountEvents(env: Env, dependencies: StripeIngressDependencies,
   appClientId: string, accountId: string, events: ConnectorEvent[],
   confirm?: (connection: StripeEventConnection) => Promise<ConnectorEvent[]>): Promise<number> {
@@ -84,7 +84,7 @@ export async function deliverStripeAccountEvents(env: Env, dependencies: StripeI
         { ...binding, grantGeneration: connection.grantGeneration });
       if (dependencies.events && await current()) {
         await dependencies.events(env, { spaceId: connection.spaceId, provider: "stripe", event })
-          .catch(() => console.error("Connector Automation triggers failed", "stripe"));
+          .catch(() => console.error("Connector event did not reach its programs", "stripe"));
       }
     }
   }

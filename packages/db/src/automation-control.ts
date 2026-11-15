@@ -518,6 +518,7 @@ export const CHANNEL_AUTOMATION_WAKE_SQL = `SELECT MIN(wake_at) AS wake_at FROM 
               AND (r.run_id IS NULL OR r.status NOT IN (${ACTIVE_RUN_STATUS_SQL}))
         ) automation_wakes WHERE wake_at IS NOT NULL`;
 
+/** @testonly The Hub runs no Automation; this stays for its tests until the tables are dropped. */
 export class PostgresAutomationRepository {
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
   private readonly entityDirectory: PostgresEntitySpaceDirectory;

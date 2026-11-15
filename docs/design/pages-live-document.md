@@ -253,7 +253,7 @@ fact is about.
   lock-free, and what an Agent intends is felt only through what it writes;
   decided by Daniel 2026-10-25: nothing is claimed). A heading carries no row
   of tools (removed 2026-10-23 at Daniel's request): discussion starts from a
-  selection (§4.2), and Automations are written into the section (§6.1). On
+  selection (§4.2), and scheduled work is written into the section (§6.1). On
   a phone the heading of the section the reader is in carries one ⋯ whose
   menu offers *Co-write with ‹Agent›*.
 - **No change log in the text.** As in Google Docs, who changed a section
@@ -783,210 +783,35 @@ is claimed and none owes an update (decided by Daniel 2026-10-25).
    says, and otherwise to say the page is unchanged. A pull request a Run
    opens reports back to its conversation, so the Run hears of the merge
    while it is live and writes the section with `xmatrix page edit`.
-2. **The section's Automation**, where it has one: it keeps the section true
-   on its cadence and on the events it triggers on (§6).
+2. **The section's program**, where it has one: it keeps the section true
+   on its cadence and on the events it waits for (§6.1).
 
 ## 6. What is attached to a page
 
 A page describes an area, so the machinery that works on the area attaches to
 the page, and the page is the one place to find, read and change it. Each
-piece is shown where it acts (§7): an Automation in its section's text, a
-connector's conversation beside its section. The rail's Schedules and App are Space-wide indexes over the same
+piece is shown where it acts (§7): a program in its section's text, a
+connector's conversation beside its section. The rail's App is a Space-wide index over the same
 records, never a second place they live.
 
-- **Automations** live in the body (§6.1).
+- **Scheduled work** lives in the body as a program (§6.1).
 - **Connectors.** "Issues and pull requests of `LambdaLabsHQ/xmatrix`" is a
   repository subscription in a conversation linked to the section, so they
   arrive where the page points, and their outcomes reach the page through
   write-back (§5).
 - **Launch targets** (parent §3.1).
 
-### 6.1 An Automation is a line of its section
+### 6.1 Scheduled work is a program
 
-An Automation is a standing rule, "when this happens, have an Agent do that,
-so that what this section says stays true". A conversation is linear and
-sinks when idle, so an Automation never belongs to one; it belongs to the
-section it keeps true, and it is a line of that section, written as Obsidian
-Tasks writes a recurring or scheduled task (decided by Daniel 2026-10-31):
+Work that runs on a cadence, at a time or when an event arrives is a Norn
+program: a code block tagged `norn run <name>` in the section it keeps true
+([Norn in xMatrix](../architecture/norn-host.md)). The Page session starts,
+revises and ends the program as the block is written, changed and removed, and
+the Page shows how each program stands.
 
-```
-## 1. Architecture: no bloat
-- [ ] @auto repo:acme/api audit the code for bloat; record it here 🔁 every 12 hours
-- [ ] @codex review each merge 🔁 every day, on merged:acme/api@main
-- [ ] Remind @Yiming to renew the domain ⏳ 2026-11-03 09:00 +08:00
-- [x] Remind Daniel about the quarterly tax ⏳ 2026-10-30 09:00 +08:00 ✅ 2026-10-30
-- [-] Sweep Sentry 🔁 every week
-```
-
-- **The line is what it is.** A task with `🔁` or `⏳` outside code is a
-  schedule; its description, before the first of them, is what each
-  occurrence posts. `🔁` takes a cadence (`every 12 hours`, `every day`,
-  `every 2 weeks`, `every 12h`) and, after commas, the events that also make
-  it due (§6.2); `⏳` alone runs it once at that time, written with its
-  offset, and with `🔁` sets when its first occurrence runs. `[ ]` runs, `[-]`
-  (Obsidian's cancelled) pauses, `[x]` is done; deleting the line deletes it,
-  and moving it to another section moves it. People and Agents edit it like
-  any other text; nothing else stores what it is. `@` in the line says who
-  runs it, as in a message; `/` stays a command; neither is reused for time.
-- **The editor quiets its timing** (from `🔁` or `⏳` on) and draws after
-  the line, from the Automation it is, when it runs next; clicking that opens
-  the conversation its last occurrence ran in. A line that cannot run as
-  written says why there instead (a cadence out of bounds, a time without its
-  offset, an event in a repository the Space's GitHub connection does not
-  cover), and `page edit` prints it. `page read` lists the page's schedules
-  under `automations:`, each with what its latest runs produced (§6.4).
-- **Each revision syncs its lines.** After a revision moves the page's head,
-  the Hub makes the page's Automations what its lines say, as that revision's
-  author (an Agent's author is its owner): a new line creates one, a changed
-  line changes it, a removed line deletes it, `[-]` or `[x]` stops it. Each
-  Automation keeps the line it was synced from; the next sync knows it by that
-  line, then by its instruction, then by its place in its section. An
-  occurrence runs only while its line is still running in the head, so a sync
-  that has not landed never runs what the page no longer says.
-- **A delivered reminder is checked off**: the Hub writes `[x] … ✅ <day>` into
-  its line, as Obsidian does for a done task. Giving it a new time and `[ ]`
-  arms it again.
-- **Each occurrence works in a fresh conversation.** Each occurrence opens a
-  new conversation as the Automation's author, linked to its section and
-  named for the Automation and the occurrence's time, posts its message there
-  and writes back to the section (§5). An occurrence never inherits an earlier
-  one's chatter: what carries over lives on the page. An Automation with
-  connector or GitHub event triggers uses closed occurrence conversations even
-  when its Page is readable to the whole Space. Any captured trigger event
-  also requires a closed conversation, even if its trigger configuration has
-  since changed. A retry that finds an older open conversation refuses to
-  append those private details.
-- **Nothing runs unanchored.** An Automation exists only as a page line. The
-  Space's Schedules only lists them and runs, pauses, resumes or deletes one
-  by changing its line. There is no message macro: saying "audit this every
-  12 hours" in a conversation is an ordinary request an Agent acts on by
-  writing the line where it belongs.
-
-### 6.2 Triggers
-
-Every Automation has a cadence, and a page's Automation may add event
-triggers, or instead run once: a reminder. Whoever can manage it can also run a running Automation now
-(Schedules' *Run now*, `xmatrix page automation run`): its next occurrence is
-due at once, as its author, and its cadence continues from that run. A trigger never queues work; it makes the next occurrence due now.
-A GitHub trigger records the installation of the Space's GitHub connection
-that covers its repository, and fires only on that installation's events
-while the Space is still connected to it.
-
-| Trigger | Fires when |
-|---|---|
-| `🔁 every <interval>` | The interval has passed since the last occurrence (15 minutes to 30 days) |
-| `, on merged:<owner/repo>[@branch][:path,…]` | A pull request is merged into the branch (default: the default branch), touching one of the paths if any are given |
-| `, on ci-failed:<owner/repo>[@branch][:workflow]` | A workflow run on the branch concludes with failure |
-| `, on <app>:<event\|*>[:<source>]` | A connected app delivers that event (`connector-platform.md` §3.4) |
-
-A reminder (`⏳ <time with its offset>` without `🔁`)
-is for a dated commitment the page records: a booking, a deadline, a renewal.
-It runs once at its time, within a year, in its own conversation like any
-occurrence; its message waits on its author, so it lands in their Needs you
-and is pushed to their devices. Once delivered it stops and its line is checked off
-(`[x] … ✅ <day>`); giving it a new time and `[ ]` arms it again. It has no cadence
-or triggers, and resuming it keeps its time, which must still be ahead.
-
-Events coalesce: an occurrence takes every event recorded before it (the last
-ten), and events that arrive while one is pending or running wait for a
-single follow-up occurrence. Events run an Automation at most once an hour: one that
-arrives sooner waits for the occurrence that takes it, which bounds the loop an
-Automation would start by triggering on changes its own runs make. So "review every merge
-to main, and sweep every 12 hours" is one Automation with two triggers, and a
-burst of merges costs one review of the combined change, not one per merge.
-The occurrence's message names the events that fired it, so the Run knows
-which change to look at.
-
-### 6.3 Who reads and changes it
-
-Access follows the page, for people and Agents alike:
-
-- **Read**: anyone who can read the page, including every Agent Run whose
-  owner can; there is no birth-conversation restriction. Pending trigger
-  summaries and URLs additionally require the reader (or the Agent's current
-  owner) to be a Space owner, admin or member. Viewers and participants still
-  see the schedule, without connected-app event details; the stored events
-  are preserved for authorized readers and delivery. Author-entered trigger
-  configuration, including repository names, follows the Page's visibility.
-  An authorized author or Agent can also publish event content into Page prose;
-  the automatic event projection does not restrict those explicit Page writes.
-  Its outcomes (§6.4) are read with it: each run's kind and the conversation
-  it ran in, never what was said there, which that conversation's own access
-  still governs.
-- **Create, edit, pause, resume, move, delete**: anyone who can edit the page,
-  by editing its line. On a suggest-only page an Agent's edit is a
-  suggestion, which changes nothing until a person accepts it.
-- **Authority does not change hands in place.** An Automation runs with its
-  author's Machines, Agents and name: whoever last changed what its line does
-  (an Agent's author is its owner). Pausing, resuming and moving it keep its
-  author; a change to what it does by anyone else atomically replaces it with
-  a new Automation whose author is that writer. Every change is a page
-  revision, so History shows who changed which line, in which conversation.
-  The Automation's timer conversation remains private to the Hub; it is never
-  shown or linked as the Automation's conversation.
-
-Agents write and change lines with `xmatrix page edit`, and use `xmatrix page
-automation list|run|pause|resume|delete <page-id>`; pause, resume and delete
-change the line.
-
-### 6.4 Storage and execution
-
-- `data.automations` rows hold what runs and how it has run: `page_id`, and in
-  `payload_json` the line each was synced from (`source`), the instruction,
-  cadence, triggers and a reminder's time (`at`). The section is derived from
-  the line, never stored as authority. The Channel-family authority of the
-  Automation's timer conversation keeps executing it: alarm, occurrences,
-  deadlines and cancellation are unchanged (docs/architecture/
-  automation-execution-cancellation.md).
-- After each committed revision that moves the head, the page session syncs
-  the page's lines to its Automations (`page-schedule-sync.ts`), one sync at a
-  time per page; restoring a revision and creating a page with schedule lines
-  sync the same way. Dispatch rechecks the line in the head before each
-  occurrence and fails it permanently when the line is gone, stopped or
-  unreadable.
-- Event triggers are matched by the Hub where the event arrives (the GitHub
-  webhook, a connector's event ingress) against an index of enabled
-  Automations by trigger key, and delivered to the Automation's authority as
-  "due now".
-- There is no Channel-scoped Automation and no reference link: contract
-  migration 0235 rewrote each page Automation's `[name](xmatrix:automation/<id>)`
-  reference into its line, after the line that held it, and wrote one with no
-  reference paused at the end of its page.
-- **What its runs produced is read, never kept.** Whoever owns a schedule
-  decides to keep it, run it less often or delete it by what its runs
-  produce. Wherever a page's schedules are listed (`xmatrix page automation
-  list`, `page read`'s `automations:`, Schedules), each carries `outcomes`: its
-  ten latest occurrences that were not cancelled (within the thirty days
-  occurrences are kept), newest first, each the strongest of what its own
-  conversation records:
-  1. `pull_request`: an activity entry there is a pull request its Run opened
-     (conversation-activity.md §3.6);
-  2. `page`: a page revision other than a purge lists the conversation;
-  3. `running`: the occurrence is still being delivered, or an Agent launch
-     there is still starting, or a Run there is still active;
-  4. `none`: an Agent started there and changed nothing;
-  5. `failed_to_start`: no Agent started, and the occurrence was not
-     delivered, a launch failed, or the Hub posted a launch failure notice
-     there;
-  6. otherwise `running` for the newest occurrence of a line that names an
-     Agent, whose summon is still being routed, and `none` for anything else,
-     such as a reminder for a person.
-
-  Lists say it as `last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and
-  Schedules lists each run with its conversation. The conversation is the one
-  the scheduler addresses (migration 0200's SQL function), and every fact
-  comes from the record that owns it (the occurrence, the conversation's
-  launches and Runs, page revisions, activity entries and failure notices), so
-  nothing is stored for this and nothing can disagree with them. Each list
-  reads it in one bounded statement per two hundred page Automations on the
-  Space's shard: one probe of a GIN index on `page_revisions.conversation_ids`
-  for all occurrences, and index probes per conversation, its notices and
-  activity entries through a partial message index (migration 0239). The Hub
-  reads a conversation's ten newest activity entries through the message
-  codec. Whether a pull request merged is not said: no record holds it per
-  conversation (the author's own merge is not posted, and the subscription
-  ends when the pull request closes). Lists are read again on the existing
-  `automations` pushes and when Schedules opens; no timer reads them for it.
+A task line that ends in `🔁 every …` or `⏳ <time>` is plain text: nothing
+syncs it and nothing runs it. An Agent edit that leaves one on the page is
+answered with the line and the advice to write it as a program.
 
 ### 6.5 A GitHub file is embedded by reference
 
@@ -1092,7 +917,7 @@ There is no side panel. What its tabs held is shown where it acts:
 |---|---|
 | Now: presence, running Agents | Cursors, the margin's Agents and each heading's avatars (§3.2) |
 | Discussions | Cards beside their passages and the conversation list (§4.4) |
-| Attached: Automations | Chips in the section they keep true (§6.1), written there by an Agent; the Space's Schedules list them all |
+| Attached: scheduled work | A `norn run` block in the section it keeps true (§6.1), shown with how its program stands |
 | Attached: connectors | A conversation linked to its section, a card like any other |
 | History | The page's other state: the margin lists its versions, what is new since the reader's last visit first, and the document shows the chosen one's changes marked in its text, with restore (§4.2) |
 | Settings: publishing, suggestion mode | The Share dialog from the header |
@@ -1150,8 +975,6 @@ Shipped:
 
 Open:
 
-- Automation timing moved off each Automation's timer conversation onto its
-  page (§6.4).
 - Change events pushed to a Run when a block it read or edited changes
   (§3.1).
 - Live references for GitHub issues and pull requests (§2.4).

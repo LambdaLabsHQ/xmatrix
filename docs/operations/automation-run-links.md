@@ -22,23 +22,16 @@ historical associations; absent, pruned or ambiguous evidence stays unknown.
 No historical payload or Run is rewritten, and there is no additional ledger.
 Direct `agent_run` occurrences retain their original exact Run/owner/Channel join.
 
-Authorized Automation catalogs expose the latest occurrence's proved Runs in
-`latestExecution.runs`, with Run, Instance, Channel and current Run status.
-`lastMessageId` continues to identify delivery; message Automation responses no
-longer call it `lastRunId`. Older Hubs omit `runs`; new Hubs return an empty array
-when no Run is provable. Existing consumers may ignore this additive field.
-An empty array does not distinguish a message without summons from a failed or
-unfinished launch; inspect the existing launch diagnostics for that distinction.
+The Hub runs no Automation and lists none
+([live documents §6.1](../design/pages-live-document.md#61-scheduled-work-is-a-program)),
+so the view and the report below read the occurrences recorded while it did.
 
 For scoped operational verification, join the view to occurrences and filter its
 `space_id` and a bounded occurrence window. Count distinct occurrences and Runs
 separately, compare Run status, and keep unlinked occurrences separate. Reading
 this relation does not grant access to another Space or replace API permission
 checks. Source message/launch retention still bounds historical attribution.
-What each occurrence produced (a pull request, a page change, nothing, or no
-Agent started) is read from its conversation wherever schedules are listed
-([live documents §6.4](../design/pages-live-document.md#64-storage-and-execution));
-deployment attribution, merge outcomes and supplier/model cost inputs are
+Deployment attribution, merge outcomes and supplier/model cost inputs are
 separate work.
 
 With the existing runtime credential injected as `DATABASE_URL`, run

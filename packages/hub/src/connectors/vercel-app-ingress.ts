@@ -54,7 +54,7 @@ export async function handleVercelAppDelivery(input: { env: Env; request: Reques
   const connections = await query();
   let delivered = 0;
   // Provider checks are bounded and awaited; partial failures ask Vercel to retry
-  // the same delivery. Channel/Automation event identities make retries safe.
+  // the same delivery. Event identities make retries safe.
   for (let offset = 0; offset < connections.length; offset += 4) {
     const results = await Promise.allSettled(connections.slice(offset, offset + 4).map(async connection => {
       const resolved = await dependencies.credentials(env).resolve({ requestId: crypto.randomUUID(),

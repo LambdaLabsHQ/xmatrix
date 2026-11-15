@@ -33,9 +33,8 @@ completion evidence, and a wait timing out does not prove its recipient stopped.
 The host needs explicit request identity, causal outcomes and current authority
 before it can provide convenient language constructs over those facts.
 
-The existing [message asks](../architecture/message-asks.md) and
-[Automation cancellation](../architecture/automation-execution-cancellation.md)
-documents describe shipped boundaries separately from their future extensions.
+The existing [message asks](../architecture/message-asks.md)
+document describes shipped boundaries separately from their future extensions.
 This proposal preserves that distinction.
 
 ## Separate language semantics from recovery machinery

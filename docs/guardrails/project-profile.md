@@ -88,12 +88,10 @@ durations from PostgreSQL's clock, distinguishing delayed admission from a later
 renewal gap without changing lease authority or socket replies. See
 [Runtime delivery errors](../operations/runtime-delivery-errors.md).
 
-Wherever a page's schedules are listed (`page automation list`, `page read`,
-Schedules), each says what its ten latest runs produced, as `last 10: 4 PR ·
-3 page · 2 none · 1 failed to start`. Each run's outcome is read from its own
-conversation's launches, Runs, page revisions and activity entries in one
-bounded, indexed statement; nothing is stored for it and merges are not
-shown. See [live documents](../design/pages-live-document.md#64-storage-and-execution).
+Scheduled work is a `norn run` program on its page. A task line written as a
+schedule (`🔁`, `⏳`) runs nothing, an Agent edit that leaves one says so, and
+the Hub answers released clients' schedule lists empty and their changes as
+retired. See [live documents](../design/pages-live-document.md#61-scheduled-work-is-a-program).
 
 Runtime WebSocket upgrade failures retain bounded fetch duration, owner versus
 unassigned routing, remote flag and a fixed platform message category, readable
@@ -141,7 +139,7 @@ Failures and external stop causes retain their explanations. See
 
 Saved resources do not inherit fixed cardinality quotas from query bounds.
 Space secrets, Channel pins, push registrations, memory entries, GitHub links,
-Page Automation reconciliation and Sentry/Discord installation bindings retain
+Page Automation deletion and Sentry/Discord installation bindings retain
 complete sets through bounded batches. Request sizes, byte budgets,
 authorization and transaction deadlines remain explicit. See
 [resource counts](../operations/resource-counts.md).
@@ -357,9 +355,8 @@ Legacy wire shapes remain negotiated compatibility projections. See
 [Agent status](../design/agent-status.md#instance-identity-in-presence).
 
 Human message sender snapshots read the current account name and avatar, as the
-Space catalog does, while Space membership still authorizes the append. This
-includes Automation occurrences, which have no client-supplied sender snapshot;
-renaming an account affects new messages and preserves historical authors.
+Space catalog does, while Space membership still authorizes the append.
+Renaming an account affects new messages and preserves historical authors.
 Session exchange creates credentials for the existing account without replacing
 its saved name or avatar with a retained token's older profile fields.
 

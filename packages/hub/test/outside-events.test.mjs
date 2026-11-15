@@ -14,22 +14,18 @@ const stream = (name, argument, labels = {}) => ({ name, args: [{ type: "string"
 
 /** The ingress with what it hands events to recorded; `connection` is the Space's GitHub connection, when it has one. */
 function ingress({ connection = { status: "configured" }, delegated = true } = {}) {
-  const heard = [], fired = [], asked = [];
+  const heard = [], asked = [];
   const { githubOutsideEvent, githubEventArrived, connectorEventArrived } = load(name => ({
     "./app-connectors": { githubRepositoryDelegated: async (_env, _connection, installationId, owner, repo) => {
       asked.push({ installationId, owner, repo });
       return delegated;
     } },
     "./apps": { findAppConnection: async () => connection },
-    "./automation-triggers": {
-      fireGitHubAutomationTriggers: async (_env, event, spaceConnected) => { fired.push({ event, spaceConnected }); return 2; },
-      fireConnectorAutomationTriggers: async (_env, input) => { fired.push(input); return 3; },
-    },
     "./github-subscription-domain": subscriptionDomain,
     "./norn-events": { occurNornEvent: async (_env, input) => { heard.push(input); return 1; } },
     "./norn-host": { appStream, githubStream },
   })[name]);
-  return { heard, fired, asked, githubOutsideEvent, githubEventArrived, connectorEventArrived };
+  return { heard, asked, githubOutsideEvent, githubEventArrived, connectorEventArrived };
 }
 
 test("a merged pull request and a failed workflow are outside events; other webhooks are not", () => {
@@ -52,7 +48,7 @@ test("a merged pull request and a failed workflow are outside events; other webh
 
 test("a GitHub event on the default branch reaches the programs waiting on its repository's stream, in connected Spaces", async () => {
   const f = ingress();
-  assert.equal(await f.githubEventArrived({}, "workflow_run", failedRun("main")), 2);
+  await f.githubEventArrived({}, "workflow_run", failedRun("main"));
   assert.equal(f.heard.length, 1);
   const [event] = f.heard;
   assert.equal(event.spaceId, undefined);
@@ -60,12 +56,11 @@ test("a GitHub event on the default branch reaches the programs waiting on its r
   assert.equal(event.matches(stream("ciFailed", "acme/widgets")), true);
   assert.equal(event.matches(stream("ciFailed", "acme/other")), false);
   assert.equal(event.matches(stream("prMerged", "acme/widgets")), false);
-  // One member's connection is asked once for the event, and the Automations are fired under the same answer.
+  // One member's connection is asked once for the event, however many of their programs wait on it.
   const program = { spaceId: "space", authorityUserId: "user" };
   assert.equal(await event.allowed(program), true);
-  assert.equal(await f.fired[0].spaceConnected("space", "user"), true);
+  assert.equal(await event.allowed({ ...program }), true);
   assert.deepEqual(f.asked, [{ installationId: "42", owner: "acme", repo: "widgets" }]);
-  assert.equal(f.fired[0].event.id, "github:run:5:1");
 
   for (const closed of [ingress({ connection: null }), ingress({ connection: { status: "disconnected" } }),
     ingress({ delegated: false })]) {
@@ -74,20 +69,19 @@ test("a GitHub event on the default branch reaches the programs waiting on its r
   }
 });
 
-test("a GitHub event off the default branch fires Automations only, and a webhook that is no event reaches nothing", async () => {
+test("a GitHub event off the default branch, and a webhook that is no event, reach nothing", async () => {
   const f = ingress();
-  assert.equal(await f.githubEventArrived({}, "workflow_run", failedRun("release")), 2);
+  await f.githubEventArrived({}, "workflow_run", failedRun("release"));
+  await f.githubEventArrived({}, "issues", { action: "opened", installation, repository });
   assert.equal(f.heard.length, 0);
-  assert.equal(f.fired.length, 1);
-  assert.equal(await f.githubEventArrived({}, "issues", { action: "opened", installation, repository }), 0);
-  assert.equal(f.heard.length + f.fired.length, 1);
+  assert.deepEqual(f.asked, []);
 });
 
 test("a connector event reaches the programs of its Space waiting on the app's stream", async () => {
   const f = ingress();
   const input = { spaceId: "space", provider: "sentry", event: { eventId: "e1", sourceRef: "sentry:project",
     feature: "issue.created", summary: "A new issue", url: "https://sentry.example/1" } };
-  assert.equal(await f.connectorEventArrived({}, input), 3);
+  await f.connectorEventArrived({}, input);
   const [event] = f.heard;
   assert.equal(event.spaceId, "space");
   assert.equal(event.what, "A new issue (https://sentry.example/1)");
@@ -96,14 +90,13 @@ test("a connector event reaches the programs of its Space waiting on the app's s
   assert.equal(event.matches(stream("appEvent", "sentry", { feature: "issue.resolved" })), false);
   assert.equal(event.matches(stream("appEvent", "stripe")), false);
   assert.equal(await event.allowed({ spaceId: "space", authorityUserId: "anyone" }), true);
-  assert.deepEqual(f.fired, [input]);
 });
 
 test("a member's own event reaches only that member's programs, and mail that names no member reaches nothing", async () => {
   const f = ingress();
   const event = { eventId: "m1", sourceRef: "gmail:inbox", feature: "message.received", summary: "New mail" };
-  assert.equal(await f.connectorEventArrived({}, { spaceId: "space", provider: "gmail", event }), 0);
-  assert.equal(f.heard.length + f.fired.length, 0);
+  await f.connectorEventArrived({}, { spaceId: "space", provider: "gmail", event });
+  assert.equal(f.heard.length, 0);
   await f.connectorEventArrived({}, { spaceId: "space", provider: "gmail", authorizedUserId: "owner", event });
   assert.equal(f.heard[0].what, "New mail");
   assert.equal(await f.heard[0].allowed({ spaceId: "space", authorityUserId: "owner" }), true);

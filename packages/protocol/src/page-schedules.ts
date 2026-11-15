@@ -1,6 +1,6 @@
 import { automationTriggersFrom, type AutomationTrigger } from "./authority-foundation.js";
 import {
-  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MAX_ONCE_LEAD_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES,
+  AUTOMATION_MAX_INTERVAL_MINUTES, AUTOMATION_MIN_INTERVAL_MINUTES,
 } from "./automation-stored-values.js";
 import { markdownLines, pageBlocks } from "./page-markdown.js";
 
@@ -51,8 +51,6 @@ export interface PageSchedule {
 // Schedule text contains a non-whitespace signifier. Keep its first character
 // disjoint from the separator so a malformed line cannot redistribute blanks.
 const TASK = /^(\s*)[-*+]\s\[([ xX-])\]\s+(\S.*)$/u;
-// Start at a whitespace-run boundary so a missing done field is scanned once.
-const DONE_SUFFIX = /(?<!\s)\s*✅[^🔁⏳✅]*$/u;
 const SIGNIFIER = /[🔁⏳✅]/u;
 const UNITS: Record<string, number> = {
   minute: 1, minutes: 1, min: 1, mins: 1, m: 1,
@@ -182,40 +180,4 @@ function parseScheduleTime(value: string): string | undefined {
   const time = match[2]!.length === 5 ? `${match[2]}:00` : match[2]!;
   const ms = Date.parse(`${match[1]}T${time}${offset}`);
   return Number.isFinite(ms) ? new Date(ms).toISOString() : undefined;
-}
-
-/** Whether a one-time time is ahead and within the year a reminder may be set. */
-export function scheduleTimeInRange(iso: string, now = Date.now()): boolean {
-  const ahead = Date.parse(iso) - now;
-  return ahead > 0 && ahead <= AUTOMATION_MAX_ONCE_LEAD_MINUTES * 60_000;
-}
-
-/**
- * The page with one schedule's line marked: `[x] … ✅ <day>` once a one-time
- * schedule has run, as Obsidian marks a done task. The line is found by its
- * source; a page that no longer holds it is returned unchanged.
- */
-export function markScheduleDone(markdown: string, source: string, day: string): string {
-  const schedule = pageSchedules(markdown).find((candidate) => candidate.source === source);
-  if (!schedule || schedule.status === "done") return markdown;
-  const line = markdown.slice(schedule.start, schedule.end);
-  const marked = line.replace(/\[[ -]\]/u, "[x]").replace(DONE_SUFFIX, "");
-  return `${markdown.slice(0, schedule.start)}${marked} ${SCHEDULE_DONE} ${day}${markdown.slice(schedule.end)}`;
-}
-
-/** The page with one schedule's line set running (`[ ]`) or paused (`[-]`); unchanged when it is not there. */
-export function setScheduleStatus(markdown: string, source: string, status: "running" | "paused"): string {
-  const schedule = pageSchedules(markdown).find((candidate) => candidate.source === source);
-  if (!schedule) return markdown;
-  const line = markdown.slice(schedule.start, schedule.end);
-  const marked = line.replace(/\[[ xX-]\]/u, status === "paused" ? "[-]" : "[ ]").replace(DONE_SUFFIX, "");
-  return `${markdown.slice(0, schedule.start)}${marked}${markdown.slice(schedule.end)}`;
-}
-
-/** The page without one schedule's line; unchanged when it is not there. */
-export function removeScheduleLine(markdown: string, source: string): string {
-  const schedule = pageSchedules(markdown).find((candidate) => candidate.source === source);
-  if (!schedule) return markdown;
-  const end = markdown[schedule.end] === "\n" ? schedule.end + 1 : schedule.end;
-  return `${markdown.slice(0, schedule.start)}${markdown.slice(end)}`;
 }

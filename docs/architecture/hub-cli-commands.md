@@ -35,8 +35,6 @@ commands keep working.
 
 ## Moved so far
 
-- `automation list|update|pause|resume|cancel-execution|delete`
-  (`cli-commands-automation.ts`). Output is unchanged.
 - `call "<connector command>" [--private|--public] [--json]` (`cli-commands-call.ts`) is a new
   Hub-defined command, available without updating a CLI that supports Hub
   commands. It calls `/api/connectors/call` with the caller's own credential;

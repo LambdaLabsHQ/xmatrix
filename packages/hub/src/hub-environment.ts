@@ -98,8 +98,6 @@ export const HUB_ENVIRONMENT = {
   MACHINE_NAME_REQUIRED: product("var", "Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true."),
 
   // Product behavior pinned by the committed config.
-  RELAY_AUTOMATION_EXECUTION_ENABLED: product("var", "Runs Automation occurrences; off when unset."),
-  RELAY_AUTOMATION_RUN_TIMEOUT_MS: product("var", "Default deadline for Automation runs without their own timeout."),
   CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED: product("var", "Admits the last client generation that sends no compatibility identity."),
   GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED: product("var", "Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless \"true\"."),
 
@@ -179,7 +177,6 @@ export const HUB_ENVIRONMENT = {
 
   // Local and test deployments.
   XMATRIX_MOCK_AUTH_TOKEN: test("secret", "Bearer token that signs in the mock user; never set in production."),
-  XMATRIX_MOCK_SCHEDULE_DELAY_MS: test("var", "Automation cadence seed honored only with mock auth."),
   XMATRIX_MOCK_AUTH_USERS: test("var", "JSON map of mock tokens to users."),
   XMATRIX_MOCK_AUTH_USER_ID: test("var", "Mock user id."),
   XMATRIX_MOCK_AUTH_EMAIL: test("var", "Mock user email."),

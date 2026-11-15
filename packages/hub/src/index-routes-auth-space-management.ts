@@ -295,10 +295,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       await onPullRequestNamingBlocks(c.env, payload as Record<string, unknown>)
         .catch((error: unknown) => console.error("pull request block handling failed", error));
     }
-    // The Norn programs that wait for this event and the page Automations it fires (pages-live-document.md §6.2);
+    // The Norn programs that wait for this event (norn-host.md, "Events from outside");
     // likewise, a failure must not lose the delivery to conversations.
     await githubEventArrived(c.env, event, payload as Record<string, unknown>)
-      .catch((error: unknown) => console.error("Automation triggers failed", error));
+      .catch((error: unknown) => console.error("GitHub event did not reach its programs", error));
     return c.json(await dispatchProductGitHubWebhook({
       env: c.env,
       event,

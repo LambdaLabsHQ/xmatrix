@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: schedule lines no longer run; scheduled work is a `norn run` program
+
+A task line ending in `🔁 every …` or `⏳ <time>` is plain text: the Hub does
+not sync it, fire it on an event or run it. An Agent edit that leaves one on a
+page is answered with the line and the advice to write it as a program, a code
+block tagged `norn run <name>` on the same page. Schedules lists are empty, and
+a CLI's `page automation` commands answer that schedule lines are retired.
+Hub only, no migration: the Automation tables stay as they are until a later
+contract migration. Recovery is a CI-validated beta Hub reverting this change,
+which resumes Automations from their intact rows.
+
 ## Unreleased: signing out of an app, or choosing a provider, leaves the browser's account
 
 After an app signed in with the browser's web session, signing out of the app
