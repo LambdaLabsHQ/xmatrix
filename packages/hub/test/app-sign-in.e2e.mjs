@@ -24,6 +24,14 @@ async function signedInCookie(worker) {
   return response.headers.getSetCookie().map(value => value.split(";", 1)[0]).filter(pair => !pair.endsWith("=")).join("; ");
 }
 
+/** A Hub whose Google provider is configured, so a start can be sent there. */
+function startGoogleWorker() {
+  return startPgHubWorker({ vars: {
+    BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",
+    GOOGLE_CLIENT_ID: "google-fixture", GOOGLE_CLIENT_SECRET: "google-fixture",
+  } });
+}
+
 /** Starts a sign-in as the app's sheet would, and returns the flow the Hub will be called back on. */
 async function start(worker, { provider = "google", redirectUri = "xmatrix://auth", challenge, state }) {
   const params = new URLSearchParams({ provider, redirect_uri: redirectUri, code_challenge: challenge,
@@ -39,10 +47,7 @@ async function start(worker, { provider = "google", redirectUri = "xmatrix://aut
 }
 
 test("a browser already signed in on the web finishes the app without a provider", async () => {
-  const worker = await startPgHubWorker({ vars: {
-    BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",
-    GOOGLE_CLIENT_ID: "google-fixture", GOOGLE_CLIENT_SECRET: "google-fixture",
-  } });
+  const worker = await startGoogleWorker();
   try {
     const cookie = await signedInCookie(worker);
     await query("UPDATE control.auth_users SET created_at = now() - interval '2 days' WHERE email = $1", [EMAIL]);
@@ -93,10 +98,7 @@ test("an app that only checks the browser session stays on its buttons when ther
 });
 
 test("an app signs in at a provider and redeems its code once, with its own verifier only", async () => {
-  const worker = await startPgHubWorker({ vars: {
-    BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",
-    GOOGLE_CLIENT_ID: "google-fixture", GOOGLE_CLIENT_SECRET: "google-fixture",
-  } });
+  const worker = await startGoogleWorker();
   try {
     const { verifier, challenge } = pkce();
     const state = base64url(randomBytes(16));
