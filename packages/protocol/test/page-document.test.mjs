@@ -109,19 +109,23 @@ test("canonical form keeps readable markdown", () => {
   assert.equal(canonicalPageMarkdown("| a | b |\n|---|---|\n| 1 | 2 |\n"), "| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 });
 
-test("a long page whose lines carry escapes canonicalizes in bounded time", () => {
-  // Each escape is checked within its own lines, not by reparsing the page: a
-  // 40 KB page used to take seconds, past what a page session can spend.
-  const sections = Array.from({ length: 120 }, (_, index) =>
-    `## Section ${index}\n\nA *note* about [link](https://example.com/${index}) and RelayPostgres*Coordinator.\n\n` +
-    `- item with snake_case_name and a_b\n- \\# not a heading ${index}\n`);
-  const input = sections.join("\n");
+function assertBoundedCanonical(input) {
   const started = performance.now();
   const once = canonicalPageMarkdown(input);
   const elapsed = performance.now() - started;
   assert.equal(canonicalPageMarkdown(once), once);
   assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)));
   assert.ok(elapsed < 3_000, `canonicalized in ${elapsed.toFixed(0)} ms`);
+  return once;
+}
+
+test("a long page whose lines carry escapes canonicalizes in bounded time", () => {
+  // Each escape is checked within its own lines, not by reparsing the page: a
+  // 40 KB page used to take seconds, past what a page session can spend.
+  const sections = Array.from({ length: 120 }, (_, index) =>
+    `## Section ${index}\n\nA *note* about [link](https://example.com/${index}) and RelayPostgres*Coordinator.\n\n` +
+    `- item with snake_case_name and a_b\n- \\# not a heading ${index}\n`);
+  assertBoundedCanonical(sections.join("\n"));
 });
 
 test("a tight list whose lines carry escapes canonicalizes in bounded time", () => {
@@ -130,13 +134,8 @@ test("a tight list whose lines carry escapes canonicalizes in bounded time", () 
   // 400-item list hundreds of times (about 10s). Each item is its own block.
   const input = `${Array.from({ length: 400 }, (_, index) =>
     `- item ${index} snake_case_name and RelayPostgres*Coordinator`).join("\n")}\n`;
-  const started = performance.now();
-  const once = canonicalPageMarkdown(input);
-  const elapsed = performance.now() - started;
-  assert.equal(canonicalPageMarkdown(once), once);
-  assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)));
+  const once = assertBoundedCanonical(input);
   assert.doesNotMatch(once, /\\_/);
-  assert.ok(elapsed < 3_000, `canonicalized in ${elapsed.toFixed(0)} ms`);
 });
 
 test("markdown the schema does not model is kept verbatim", () => {
