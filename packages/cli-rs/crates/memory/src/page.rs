@@ -147,19 +147,21 @@ struct EditResponse {
     head_revision: u64,
     // Absent from a Hub before these were reported.
     #[serde(default)]
-    schedule_problems: Vec<PageScheduleProblem>,
+    schedule_problems: Vec<PageProgramProblem>,
     #[serde(default)]
     removed_sections: Vec<String>,
 }
 
+/// A `norn run` block that does not run as written; the wire field keeps its
+/// older name.
 #[derive(Deserialize)]
-struct PageScheduleProblem {
+struct PageProgramProblem {
     source: String,
     problem: String,
 }
 
 /// What an edit did besides its text, one line each, so a writer whose edit
-/// dropped sections or left a schedule line that cannot run sees it at once.
+/// dropped sections or left a program block that cannot run sees it at once.
 fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
     let mut out = String::new();
     for section in &edited.removed_sections {
@@ -168,10 +170,10 @@ fn render_edit_effects(page: &str, base: u64, edited: &EditResponse) -> String {
              see it with: xmatrix page read {page} --revision {base}\n"
         ));
     }
-    for schedule in &edited.schedule_problems {
+    for program in &edited.schedule_problems {
         out.push_str(&format!(
             "⚠ This does not run as written: {}\n    {}\n",
-            schedule.problem, schedule.source
+            program.problem, program.source
         ));
     }
     out
@@ -592,8 +594,8 @@ fn live_write_hint(page_id: &str) -> String {
 
 const LIVE_WRITE_HINT: &str = "writeLive: in your reply, ⟦write page:";
 
-/// What `page read` prints: the page under its header, whose last lines say what the page's
-/// Automations are and how a Run writes into it.
+/// What `page read` prints: the page under its header, whose last lines say how the page's
+/// programs stand and how a Run writes into it.
 pub(crate) fn render_page_read(
     page: &PageDocument,
     awareness: Option<&PageAwareness>,
@@ -673,7 +675,7 @@ fn read_header_line(text: &str) -> Option<(usize, &str)> {
     None
 }
 
-/// Page markdown and Automation instructions can be resent with -f or --stdin.
+/// Page markdown can be resent with -f or --stdin.
 pub(crate) const PAGE_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
     stdin: true,
     file_flag: Some("-f"),
@@ -762,19 +764,16 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             let url = with_route(hub_url, &route);
             let response: PageResponse = http::request_json(&url, "GET", Some(token), None).await?;
             // The head is read with who is on what; an older revision stands alone.
-            let (awareness, automations, programs): (Option<PageAwareness>, _, _) = if revision
-                .is_none()
-            {
+            let (awareness, programs): (Option<PageAwareness>, _) = if revision.is_none() {
                 let route = format!("{}/awareness", page_route(&space, &page));
                 (
                     http::request_json(&with_route(hub_url, &route), "GET", Some(token), None)
                         .await
                         .ok(),
-                    crate::page_automation::page_automations(hub_url, token, &space, &page).await,
                     crate::page_program::page_programs(hub_url, token, &space, &page).await,
                 )
             } else {
-                (None, Vec::new(), Vec::new())
+                (None, Vec::new())
             };
             let mut page_read = response.page;
             page_read.body = page_text_for_agent(
@@ -786,10 +785,8 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             )
             .await;
             let response = PageResponse { page: page_read };
-            // A page's Automations are live references: the header says what each one is now.
-            let mut header = crate::page_automation::render_page_automations_header(&automations);
-            // Its Norn programs run from its text: the header says how each one stands.
-            header.push_str(&crate::page_program::render_page_programs_header(&programs));
+            // A page's Norn programs run from its text: the header says how each one stands.
+            let mut header = crate::page_program::render_page_programs_header(&programs);
             // A Run's reply goes into a page as it is written (runtime_page_stream_write).
             if run_conversation().is_some()
                 && response.page.summary.can_edit
@@ -1108,9 +1105,6 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             Ok(())
         }
         PageCommand::Migration { command } => cmd_page_migration(hub_url, token, command).await,
-        PageCommand::Automation { command } => {
-            crate::page_automation::cmd_page_automation(hub_url, token, command).await
-        }
     }
 }
 
@@ -1271,18 +1265,18 @@ mod page_tests {
     use super::*;
 
     #[test]
-    fn edit_reports_removed_sections_and_schedule_lines_that_cannot_run() {
+    fn edit_reports_removed_sections_and_program_blocks_that_cannot_run() {
         let edited: EditResponse = serde_json::from_value(json!({
             "revision": 225, "kind": "edit", "headRevision": 225,
             "removedSections": ["Releases"],
-            "scheduleProblems": [{ "source": "- [ ] Sweep 🔁 every month",
-              "problem": "🔁 starts with every and a cadence" }],
+            "scheduleProblems": [{ "source": "```norn run",
+              "problem": "1:1 Unbound name remind" }],
         }))
         .unwrap();
         assert_eq!(
             render_edit_effects("roadmap", 224, &edited),
             "⚠ Removed section \"Releases\" and everything under it. If that was not meant, see it with: xmatrix page read roadmap --revision 224\n\
-             ⚠ This does not run as written: 🔁 starts with every and a cadence\n    - [ ] Sweep 🔁 every month\n"
+             ⚠ This does not run as written: 1:1 Unbound name remind\n    ```norn run\n"
         );
     }
 
@@ -1377,13 +1371,12 @@ mod page_tests {
             { "blockId": "", "working": [{ "name": "claude:1", "status": "busy", "conversationId": "conv-2" }] }
         ] }))
         .unwrap();
-        let automations: Vec<crate::page_automation::PageAutomation> = serde_json::from_value(json!([
-            { "id": "a-1", "enabled": true, "blockId": "现状", "nextRunAt": "2026-11-09T17:28:51.546Z",
-              "outcomes": [{ "kind": "page", "scheduledFor": "2026-11-04T04:59:00.000Z", "conversationId": "conv-1" }] }
+        let programs: Vec<crate::page_program::PageProgram> = serde_json::from_value(json!([
+            { "name": "audit", "channelId": "conv-1", "state": "running", "requests": [] }
         ]))
         .unwrap();
-        let end = crate::page_automation::render_page_automations_header(&automations)
-            + &live_write_hint("p");
+        let end =
+            crate::page_program::render_page_programs_header(&programs) + &live_write_hint("p");
         let printed = render_page_read(&doc, Some(&awareness), &end);
         (doc, printed)
     }
