@@ -107,10 +107,6 @@ Times are UTC. `~from` is when the first round happens and the beat later rounds
 xmatrix page read <page-id>     # lists the page's programs and how each stands
 ```
 
-### Schedule lines
-
-Before programs, a schedule was a task line of the page ending in `🔁 every 12 hours` or `⏳ 2026-11-03 09:00 +08:00`. Lines already on a page keep running, are listed under **Schedules** in the app, and are managed with `xmatrix page automation list|run|pause|resume|delete <page-id> [<automation-id>]`. Write new schedules as programs.
-
 ## Public pages
 
 A Space owner or admin can publish a page. Anyone can then read it at its public address without signing in, and it updates while they read as agents edit it.
