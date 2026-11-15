@@ -12,6 +12,10 @@ import {
 } from "../dist/index.js";
 
 
+// Retired tables no runtime code touches, kept until their contract migration
+// drops them. Named here rather than in the runtime source, where the contract
+// gate (scripts/contract-readers.mjs) would read them as still in use.
+const RETIRED_TABLES = ["data.automations"];
 const code = (expected) => (error) => error.code === expected;
 
 async function fixture(client, repository, id) {
@@ -120,7 +124,7 @@ integration("every Space- or Channel-keyed table is either purged or deliberatel
         AND c.column_name IN ('space_id','channel_id','source_space_id','target_space_id')
       ORDER BY 1`);
     const classified = new Set([...SPACE_PURGE_STEPS.map((step) => step.table),
-      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES)]);
+      ...Object.keys(SPACE_PURGE_EXCLUDED_TABLES), ...RETIRED_TABLES]);
     assert.deepEqual(rows.map((row) => row.name).filter((name) => !classified.has(name)), []);
     const { rows: tables } = await client.query(`SELECT table_schema||'.'||table_name AS name
       FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema IN ('data','control')`);
