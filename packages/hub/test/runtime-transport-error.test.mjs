@@ -10,7 +10,10 @@ import {
   RuntimeAuthorityOperationError,
   RuntimeClientOperationError,
   runtimeFailureOrigin,
+  runtimeOperationFailure,
+  runtimeSessionOriginMetadata,
 } from "../src/runtime-transport/runtime-operation-failure.ts";
+import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 import { PostgresAgentInstancePort } from "../src/runtime-transport/postgres-agent-instance-port.ts";
 import { ControlError } from "@xmatrix/db";
 import { InvalidAuthTokenError } from "../src/auth.ts";
@@ -211,15 +214,36 @@ test("a secret the registration no longer allows names its fix instead of a gene
   assert.doesNotMatch(error.publicMessage, /runtime\.authority_rejected/);
 });
 
-test("an unclassified failure logs where it was thrown, never what it said", () => {
+test("an unclassified failure logs where it was thrown and its shape, never what it said (XMATRIX-HUB-AX)", async () => {
   function authenticationBinding() { throw new TypeError("token for user-secret@example.test expired"); }
   let error;
   try { authenticationBinding(); } catch (caught) { error = caught; }
   const origin = runtimeFailureOrigin(error);
   assert.equal(origin.errorClass, "TypeError");
   assert.equal(origin.origin.split(",")[0], "authenticationBinding");
+  assert.equal(origin.errorShape, "unlisted_17_80");
   assert.doesNotMatch(JSON.stringify(origin), /user-secret|expired/u);
-  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: "" });
+  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: "", errorShape: "empty" });
+  assert.equal(runtimeFailureOrigin(new TypeError("")).errorShape, "empty");
+  assert.equal(runtimeFailureOrigin(new TypeError("Can't call WebSocket send() after close()")).errorShape,
+    "websocket_send_after_close");
+  const circular = new TypeError("Converting circular structure to JSON\n    --> starting at object with constructor 'Secret'");
+  assert.equal(runtimeFailureOrigin(circular).errorShape, "json_circular");
+  assert.doesNotMatch(JSON.stringify(runtimeFailureOrigin(circular)), /Secret/u);
+  const logged = await capturingConsole(() => { runtimeOperationFailure(error); });
+  const payload = logged.error[0][1];
+  assert.equal(payload.errorShape, "unlisted_17_80");
+  assert.equal(payload.errorClass, "TypeError");
+  assert.doesNotMatch(JSON.stringify(logged), /user-secret|example\.test/u);
+  const context = { ...payload, errorShape: "user-secret@example.test", origin: "leak user-secret", errorClass: "leak user-secret" };
+  assert.deepEqual(runtimeSessionOriginMetadata(context), []);
+  assert.deepEqual(sentryEventMetadata({ context: payload }), [
+    `Runtime error class: TypeError`,
+    `Runtime error origin: ${payload.origin}`,
+    "Runtime error shape: unlisted_17_80",
+    `Diagnostic reference: ${payload.diagnosticId}`,
+  ]);
+  assert.deepEqual(sentryEventMetadata({ context }), [`Diagnostic reference: ${payload.diagnosticId}`]);
 });
 
 function credentialPort(authenticate) {
