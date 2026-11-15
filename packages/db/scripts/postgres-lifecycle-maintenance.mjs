@@ -144,27 +144,6 @@ async function readSnapshot(client) {
   };
 }
 
-/**
- * The relation each bounded delete frees rows from. Autovacuum's dead-tuple
- * threshold is `threshold + scale_factor * pg_class.reltuples`, and reltuples
- * only moves when something analyzes the table. A bulk delete leaves it at the
- * old, much larger count, so the threshold stays far above the dead rows and
- * autovacuum never revisits the table: production kept ~7k dead outbox and
- * ~6k dead idempotency rows for a day after the 2026-11-14 pass. ANALYZE after
- * a relation's deletes refreshes reltuples, so the next autovacuum sees the
- * smaller table and reclaims what the pass freed.
- */
-const LIFECYCLE_TABLES = Object.freeze({
-  idempotency: "data.idempotency_keys",
-  sequenceReservation: "data.message_sequence_reservations",
-  messageExecution: "data.agent_message_executions",
-  wecomInstallAttempt: "data.app_wecom_install_attempts",
-  dingtalkCompanyAttempt: "data.app_dingtalk_company_attempts",
-  retainedOutbox: "data.outbox",
-  authSession: "control.auth_sessions",
-  scopedCommandReplay: "control.scoped_control_command_replays",
-});
-
 async function deleteBatch(client, relation, limit) {
   const statement = relation === "retained-outbox"
     ? `WITH retained AS MATERIALIZED (
@@ -235,8 +214,6 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   const startedAt = monotonicNow();
   const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
   const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
-  const analyzed = [];
-  const analyzeFailures = [];
   if (!options.dryRun) {
     let pending = [
       { relation: "idempotency", key: "idempotency" },
@@ -268,26 +245,10 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       }
       pending = next;
     }
-    // A relation with no freed rows keeps its reltuples, so only the ones this
-    // pass changed are analyzed. ANALYZE is its own statement under the same
-    // 5 s statement and 2 s lock ceilings; a busy relation is retried by the
-    // next pass instead of failing the deletes that already committed.
-    for (const [key, table] of Object.entries(LIFECYCLE_TABLES)) {
-      if (deleted[key] === 0) continue;
-      try {
-        await client.query(`ANALYZE ${table}`);
-        analyzed.push(table);
-      } catch (error) {
-        analyzeFailures.push({
-          relation: table,
-          code: typeof error?.code === "string" ? error.code : null,
-        });
-      }
-    }
   }
   const after = await snapshot(client);
   return {
-    schemaVersion: 4,
+    schemaVersion: 3,
     dryRun: options.dryRun,
     limits: { batchSize: options.batchSize, maxRows: options.maxRows, budgetMs: options.budgetMs },
     deletedExpiredIdempotencyRows: deleted.idempotency,
@@ -300,8 +261,6 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
     deletedExpiredAuthSessions: deleted.authSession,
     batches: Object.values(batches).reduce((sum, count) => sum + count, 0),
     batchesByRelation: batches,
-    analyzedRelations: analyzed,
-    analyzeFailures,
     elapsedMs: Math.max(0, monotonicNow() - startedAt),
     before,
     after,
