@@ -102,6 +102,16 @@ pub(crate) fn claude_rate_limit_event_usage(value: &Value) -> Option<LlmUsage> {
     }
     let info = value.get("rate_limit_info")?;
     let status = info.get("status").and_then(Value::as_str)?;
+    // A verdict scoped to one model (`seven_day_fable`, `seven_day_opus`, ...) is
+    // that model's quota, not the account's: reading its `rejected` as the whole
+    // account refused launches of models that still had quota.
+    if info
+        .get("rateLimitType")
+        .and_then(Value::as_str)
+        .is_some_and(|kind| kind.starts_with("seven_day_"))
+    {
+        return None;
+    }
     let windows = info.get("unifiedWindows").and_then(Value::as_object)?;
     let quotas: Vec<LlmQuotaUsage> = [("five_hour", "5h"), ("seven_day", "1w")]
         .into_iter()
@@ -394,6 +404,13 @@ mod tests {
             "rate_limit_info": { "status": "allowed", "rateLimitType": "five_hour" }
         });
         assert!(claude_rate_limit_event_usage(&windowless).is_none());
+    }
+
+    #[test]
+    fn a_verdict_scoped_to_one_model_is_not_account_quota() {
+        let mut event = rate_limit_event("rejected", 1.0, false);
+        event["rate_limit_info"]["rateLimitType"] = serde_json::json!("seven_day_fable");
+        assert!(claude_rate_limit_event_usage(&event).is_none());
     }
 
     #[tokio::test]
