@@ -324,6 +324,20 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
   return database.transaction(await activeSpaceContext(database, input, ErrorType), callback);
 }
 
+/** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
+export async function readInActiveSpace<T>(database: AuthorityDatabase,
+  input: { requestId: string; operation: string; spaceId: string },
+  ErrorType: new (code: string, status: number) => Error,
+  callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  const session = database.openSession();
+  try {
+    const context = await activeSpaceContext(session, input, ErrorType);
+    return await callback(singleReadStatements(session, context));
+  } finally {
+    await session.close();
+  }
+}
+
 /** A page as one actor sees it: their access, and whether it is the Space's governance page. */
 type TreeRow = PageRow & AccessView & { governance: boolean };
 
@@ -413,15 +427,9 @@ export class PostgresPageRepository {
   }
 
   /** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
-  private async readInSpace<T>(requestId: string, operation: string, spaceId: string,
+  private readInSpace<T>(requestId: string, operation: string, spaceId: string,
     callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
-    const session = this.database.openSession();
-    try {
-      const context = await activeSpaceContext(session, { requestId, operation, spaceId }, PageControlError);
-      return await callback(singleReadStatements(session, context));
-    } finally {
-      await session.close();
-    }
+    return readInActiveSpace(this.database, { requestId, operation, spaceId }, PageControlError, callback);
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
@@ -573,7 +581,7 @@ export class PostgresPageRepository {
   async tree(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
     Promise<{ pages: PageSummary[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       // How far a person has read each page is theirs: an Agent Run has none.

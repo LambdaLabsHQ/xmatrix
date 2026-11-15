@@ -140,7 +140,8 @@ async function writeMachineName(database: AuthorityDatabase, input: {
 export async function getMachineName(database: AuthorityDatabase, input: {
   requestId: string; ownerUserId: string; machineId: string;
 }): Promise<{ machineId: string; name: string | null }> {
-  return database.transaction({ requestId: input.requestId, operation: "machine.get-name" }, async (tx) => {
+  return database.transaction({ requestId: input.requestId, operation: "machine.get-name",
+    statement: "single_read" }, async (tx) => {
     const rows = await tx.query<QueryResultRow>({ name: "machine_name_get_v1", text: `SELECT name
       FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
     values: [input.ownerUserId, input.machineId], maxRows: 1 });
