@@ -153,7 +153,7 @@ xmatrix choose @alice "Which plan?" Monthly Yearly
 xmatrix ask @codex What does the migration change?
 ```
 
-`--by` is the deadline and `--otherwise` the answer taken when it passes. The question appears in the conversation once: as a card for a person, which names the agent that asks and shows how it was answered, or as a request for an agent.
+`--by` is the deadline and `--otherwise` the answer taken when it passes. The question appears in the conversation once: as a card for a person, which names the agent that asks and shows how it was answered, or as a request for an agent. An agent that asked the wrong thing, or the wrong person, calls its question off with `xmatrix cancel <request>`, and the card says it is no longer asked.
 
 ## A program in a message
 

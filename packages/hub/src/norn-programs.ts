@@ -365,6 +365,24 @@ export async function askNornQuestion(env: Env, run: { channelId: string; instan
   return {};
 }
 
+/**
+ * The Agent Run whose Instance asked a question with a command calls it off.
+ * The program written for it stops in this call: the request ends
+ * `Cancelled`, whoever holds it is told (a person's card says it is no longer
+ * asked), and the asker reads the program's end. Returns undefined when its
+ * Instance asked no such open question.
+ */
+export async function callOffNornQuestion(env: Env, input: { channelId: string; requestRef: string; instanceId: string }): Promise<NornPassResult | undefined> {
+  const requestId = `norn-call-off:${input.requestRef}:${crypto.randomUUID()}`;
+  const programs = await repository(env, input.channelId, requestId);
+  const programId = await programs.callOffQuestion({ requestId, channelId: input.channelId, requestRef: input.requestRef, instanceId: input.instanceId });
+  if (!programId) return undefined;
+  const result = await programs.advance({ requestId, channelId: input.channelId, programId }, nornStep());
+  // The card is closed, the Agent that held the request let go and the end told by the coordinator.
+  await wakeAgentLaunchCoordinator(env, input.channelId, ["norn"]);
+  return result ?? { status: "failed" };
+}
+
 /** The open requests a Run holds and those its Instance's programs wait on. */
 export async function openNornRequests(env: Env, input: { channelId: string; runId: string; instanceId: string }) {
   const requestId = `norn-requests:${input.runId}`;

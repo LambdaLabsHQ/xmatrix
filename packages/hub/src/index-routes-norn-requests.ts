@@ -3,7 +3,8 @@ import type { Hono } from "hono";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { jsonErrors, readBoundedRequestBody, requireAuth } from "./index-shared";
 import { messageProgramStatus, nornRequestView } from "./norn-page-programs";
-import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, delegateNornRequest, openNornRequests, reclaimNornRequest } from "./norn-programs";
+import { answerNornRequest, answerNornRequestAsPerson, askNornQuestion, callOffNornQuestion, delegateNornRequest, openNornRequests,
+  reclaimNornRequest } from "./norn-programs";
 import type { Env } from "./types";
 
 const NO_STORE = { "cache-control": "private, no-store" };
@@ -66,6 +67,16 @@ export function registerNornRequestRoutes(app: Hono<{ Bindings: Env }>): void {
     const result = await delegateNornRequest(c.env, { channelId: run.channelId, requestRef: body.requestRef, ...to,
       delegator: { kind: "run", runId: run.runId, instanceId: run.instanceId, ownerUserId: run.ownerUserId } });
     return result ? c.json(result, result.refusal ? 400 : 200, NO_STORE) : c.json({ error: "No such request" }, 404, NO_STORE);
+  }));
+  // The Run whose Instance asked a question with a command calls it off; the repository checks it asked it.
+  app.post(HUB_ROUTES.norn_request_call_off, c => jsonErrors(c, async () => {
+    const run = (await requireAuth(c.req.raw, c.env)).agentRun;
+    if (!run?.instanceId) return c.json({ error: "A question is called off by the Agent Run that asked it" }, 403, NO_STORE);
+    await requireAgentRunChannelDelegation(c.env, run, []);
+    const body = await objectBody(c.req.raw);
+    if (typeof body?.requestRef !== "string" || !REQUEST_REF.test(body.requestRef)) return c.json({ error: "Name the question's request" }, 400, NO_STORE);
+    const result = await callOffNornQuestion(c.env, { channelId: run.channelId, requestRef: body.requestRef, instanceId: run.instanceId });
+    return result ? c.json(result, 200, NO_STORE) : c.json({ error: "You asked no such open question here" }, 404, NO_STORE);
   }));
   // An Agent Run asks one question; the Hub writes its program and the Run's Instance is its author.
   app.post(HUB_ROUTES.norn_request_ask, c => jsonErrors(c, async () => {

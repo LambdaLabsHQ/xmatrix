@@ -64,6 +64,7 @@ commands keep working.
   one question without writing its program: the Hub writes the program into the Run's
   conversation, and the answer comes back to the Run as the program's result. `--by` closes it at
   a time, and `--otherwise` names the answer taken then ([Norn host](norn-host.md)).
+  `cancel <request>` calls such a question off while it is open: only the Instance that asked it can.
 
 Moving another command: add it to the Hub table with the same options and
 output, delete its clap definition and handler from the CLI. Older CLIs keep

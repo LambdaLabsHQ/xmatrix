@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: an Agent can call off a question it asked
+
+`xmatrix cancel <request>` lets the Agent Instance that asked a question with
+`xmatrix confirm`, `choose` or `ask` call it off while it is open. The
+request ends `Cancelled`, the person's card says it is no longer asked, and
+the Agent reads the program's end. Only that Instance can, and only for such
+a question. Hub only, no migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
 ## Unreleased: whoever holds a request of a Norn program can delegate it
 
 A person asked on a card can delegate the request to an Agent in the

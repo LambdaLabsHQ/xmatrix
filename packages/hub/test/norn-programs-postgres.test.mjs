@@ -300,3 +300,28 @@ integration("a request a person delegates goes to the Instance they named, and o
       reply: { typed: "Yes" } }))).status, "completed");
     assert.deepEqual((await programs.channelWork(scope())).releases, [], "an Instance delegated to was not started for the request");
   }));
+
+integration("only the Agent that asked a question with a command calls it off, and whoever holds it is told it is no longer asked", () =>
+  conversation("norn_call_off", async ({ message, programs, scope }) => {
+    const ask = async (programId, sequence) => {
+      await message(programId, sequence, "system", "xmatrix");
+      await programs.start({ ...scope(programId), authorKind: "agent", authorId: "channel:4", authorityUserId: "owner", ledger: nornStartLedger,
+        source: `confirm(@Owner, "Clean up the expired commands?")->wait` }, nornStep());
+      const asked = (await programs.channelWork(scope())).deliveries.find(delivery => delivery.programId === programId);
+      await programs.delivered({ ...scope(programId), ledgerRequestId: asked.requestId, epoch: asked.epoch, holderUserId: "owner" });
+      return asked;
+    };
+    const question = await ask("norn-ask:question", 1);
+    // A program the same Agent wrote in a message is its own to change, not a question: it is not called off this way.
+    const written = await ask("written", 2);
+    const callOff = (asked, instanceId = "channel:4") => programs.callOffQuestion({ requestId: randomUUID(), channelId: "channel",
+      requestRef: asked.requestRef, instanceId });
+    assert.deepEqual([await callOff(question, "channel:5"), await callOff(written)], [undefined, undefined]);
+    assert.equal(await callOff(question), "norn-ask:question");
+    assert.equal(await callOff(question), undefined, "a question is called off once");
+    assert.equal((await programs.advance(scope("norn-ask:question"), nornStep())).status, "failed");
+    const work = await programs.channelWork(scope());
+    assert.deepEqual(work.closings.map(closing => [closing.programId, closing.holderUserId, closing.reply.tag]),
+      [["norn-ask:question", "owner", "Cancelled"]]);
+    assert.deepEqual(work.reports.map(report => [report.programId, report.ended.error]), [["norn-ask:question", "Called off by the Agent that asked"]]);
+  }));
