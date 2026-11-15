@@ -1,24 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Client } from 'pg';
-import { assertCleanupDatabaseIdentity, cleanLifecycleData, cleanLifecycleExpression, cleanStoredLifecycles, launchRequestDigest, lifecycleCleanupTargets } from '../scripts/agent-lifecycle-cleanup.mjs';
-
-test('cleanup removes only executable lifetime conditions and preserves prose and quoted paths', () => {
-  for (const [before, after] of [
-    ['@auto repo:o/r oneshot:on audit', '@auto repo:o/r audit'],
-    ['@codex oneshot:off pwd:"/work/oneshot:on folder" task', '@codex pwd:"/work/oneshot:on folder" task'],
-    ['@auto oneshot:"on" effort:high task', '@auto effort:high task'],
-    ['@auto repo:o/r\u3000oneshot:on task\n@claude oneshot:off task', '@auto repo:o/r task\n@claude task'],
-    ['`@auto oneshot:on`\n```\n@auto oneshot:on\n```\n> @auto oneshot:on', '`@auto oneshot:on`\n```\n@auto oneshot:on\n```\n> @auto oneshot:on'],
-    ['@auto task mentions oneshot:on\noneshot:off', '@auto task mentions oneshot:on\noneshot:off'],
-  ]) {
-    assert.equal(cleanLifecycleExpression(before), after);
-    assert.equal(cleanLifecycleExpression(after), after);
-  }
-  assert.throws(() => cleanLifecycleExpression('@auto oneshot:maybe task'), /Invalid retired/);
-  assert.throws(() => cleanLifecycleExpression('@auto oneshot:on repo:o/r oneshot:off task'), /Duplicate/);
-  assert.throws(() => cleanLifecycleExpression('@auto repo:o/r oneshot:on repo:x/y task'), /Invalid launch/);
-});
+import { assertCleanupDatabaseIdentity, cleanLifecycleData, cleanStoredLifecycles, launchRequestDigest, lifecycleCleanupTargets } from '../scripts/agent-lifecycle-cleanup.mjs';
 
 test('cleanup preserves execution and recovery authority and retires unverifiable decision evidence', () => {
   const before = { runId: 'r', executionKey: 'e', resumeSessionKey: 'session', exitAfterInitialMessage: true,
@@ -31,8 +14,6 @@ test('cleanup preserves execution and recovery authority and retires unverifiabl
     prompt: before.prompt, privateToken: 'untouched' });
   assert.equal(before.exitAfterInitialMessage, true);
   assert.deepEqual(cleanLifecycleData(next), next);
-  assert.deepEqual(cleanLifecycleData({ input: { datum: { text: '@auto oneshot:on task' } } }, true),
-    { input: { datum: { text: '@auto task' } } });
 });
 
 test('cleanup treats App arguments, task data and source witnesses as opaque', () => {
@@ -40,11 +21,9 @@ test('cleanup treats App arguments, task data and source witnesses as opaque', (
   const before = { oneshot: 'on', runMetadata: { exitAfterInitialMessage: true, privateData: opaque },
     context: { initialMessageSource: opaque },
     input: { datum: { text: '@auto oneshot:on work', appMentions: [{ arguments: opaque }] } } };
-  const cleaned = cleanLifecycleData(before, true);
-  assert.deepEqual(cleaned, { runMetadata: { privateData: opaque }, context: before.context,
-    input: { datum: { text: '@auto work', appMentions: [{ arguments: opaque }] } } });
-  assert.equal(before.input.datum.text, '@auto oneshot:on work');
-  assert.deepEqual(cleanLifecycleData(cleaned, true), cleaned);
+  const cleaned = cleanLifecycleData(before);
+  assert.deepEqual(cleaned, { runMetadata: { privateData: opaque }, context: before.context, input: before.input });
+  assert.deepEqual(cleanLifecycleData(cleaned), cleaned);
 });
 
 test('production URLs must identify the exact database and local shard', async () => {
@@ -98,12 +77,11 @@ integration('bounded cleanup previews, applies, replays and fences concurrent ch
     await sql("CREATE TABLE control.postgres_local_identity (shard_id text); INSERT INTO control.postgres_local_identity VALUES ('shard-0')");
     await assert.rejects(assertCleanupDatabaseIdentity(database, 'primary'), /identity differs/,
       'an isolated test database cannot masquerade as production merely by using shard-0');
-    for (const { table, keys, column, expressions, intent } of lifecycleCleanupTargets) {
+    for (const { table, keys, column, intent } of lifecycleCleanupTargets) {
       await sql(`CREATE TABLE ${table} (${keys.map(key => `${key} text`).join(',')}, ${column} jsonb,
         ${keys.includes('run_id') ? '' : 'run_id text,'} channel_id text, source_message_id text, created_at timestamptz DEFAULT now(),
         state text, status text, request_digest text, source_body_hash text, version bigint DEFAULT 1, updated_at timestamptz DEFAULT now(), PRIMARY KEY (${keys.join(',')}))`);
-      const value = expressions ? { input: { datum: { text: '@auto repo:o/r oneshot:on work' } } }
-        : intent ? { key: { spaceId: 's', ownerUserId: 'o', machineId: 'm', harness: 'codex' },
+      const value = intent ? { key: { spaceId: 's', ownerUserId: 'o', machineId: 'm', harness: 'codex' },
           requirements: { model: 'm', unattended: false, requiredCapabilities: [] }, oneshot: 'on', commandId: 'cmd' } : { exitAfterInitialMessage: true, runId: 'r', executionKey: 'e' };
       for (const id of ['a', 'b']) await sql(`INSERT INTO ${table} (${keys.join(',')}, ${column}, state, status, request_digest, source_body_hash)
         VALUES (${keys.map((_, i) => `$${i+1}`).join(',')}, $${keys.length+1}, 'committed', 'completed', $${keys.length+2}, $${keys.length+3})`, [...keys.map(() => id), value, intent ? await launchRequestDigest(value, 'a'.repeat(64)) : null, 'a'.repeat(64)]);
@@ -111,18 +89,15 @@ integration('bounded cleanup previews, applies, replays and fences concurrent ch
     // 'a' was staged under an older digest formula: its digest is kept.
     await sql("UPDATE data.registration_launch_intents SET request_digest=$1 WHERE command_id='a'", ['b'.repeat(64)]);
     const preview = await cleanStoredLifecycles(database, { batchSize: 1 });
-    assert.equal(Object.values(preview.changed).reduce((a,b) => a+b), 10);
+    assert.equal(Object.values(preview.changed).reduce((a,b) => a+b), 8);
     assert.equal(preview.legacyDigests, 1);
     assert.equal((await sql('SELECT metadata_json FROM data.runs LIMIT 1')).rows[0].metadata_json.exitAfterInitialMessage, true);
     await cleanStoredLifecycles(database, { apply: true, batchSize: 1 });
     assert.deepEqual((await sql('SELECT metadata_json FROM data.runs LIMIT 1')).rows[0].metadata_json, { runId: 'r', executionKey: 'e' });
-    const automation = (await sql('SELECT * FROM data.automations LIMIT 1')).rows[0];
-    assert.equal(automation.version, '2');
     const [legacy, intent] = (await sql('SELECT * FROM data.registration_launch_intents ORDER BY command_id')).rows;
     assert.equal(intent.request_digest, await launchRequestDigest(intent.launch_request_json, intent.source_body_hash));
     assert.equal(legacy.request_digest, 'b'.repeat(64), 'an older-formula digest is kept');
     assert.equal(Object.hasOwn(legacy.launch_request_json, 'oneshot'), false);
-    assert.equal(automation.payload_json.input.datum.text, '@auto repo:o/r work');
     assert.equal(Object.values((await cleanStoredLifecycles(database, { apply: true })).changed).reduce((a,b) => a+b), 0);
     await sql("UPDATE data.registration_launch_intents SET state='preparing'");
     const preparing = (await sql('SELECT * FROM data.registration_launch_intents ORDER BY command_id')).rows;

@@ -70,40 +70,6 @@ export function runtimeChannelCapability(tx: DatabaseTransaction, channelId: str
 const { text, integer, object: record } = commandFields((field) =>
   new RuntimeControlError("invalid_runtime_request", 400, `${field} is invalid`));
 
-/** Runtime-owned cancellation fence. Call inside the scheduling transaction so
- * revocation and occupancy release commit together. This is not process-death evidence. */
-export async function cancelRunExecution(tx: DatabaseTransaction, input: {
-  runId: string; ownerUserId: string; channelId: string; at: string;
-  reason: "timeout" | "owner";
-}): Promise<void> {
-  const rows = await tx.query<QueryResultRow>({ name: "runtime_execution_cancel_lock_v1",
-    text: `SELECT r.*,i.instance_id FROM data.runs r LEFT JOIN data.instances i
-      ON i.run_id=r.run_id WHERE r.run_id=$1 FOR UPDATE OF r`,
-    values: [input.runId], maxRows: 1 });
-  const run = rows[0];
-  if (!run || run.owner_user_id !== input.ownerUserId || run.channel_id !== input.channelId) {
-    throw new RuntimeControlError("conflict", 409, "Scheduled execution ownership does not match");
-  }
-  const body = metadata(run);
-  if (body.executionCancellation && isTerminalRunStatus(run.status)) return;
-  if (!isActiveRunStatus(run.status)) {
-    throw new RuntimeControlError("conflict", 409, "Run is already terminal");
-  }
-  const cancellation = { reason: input.reason, requestedAt: input.at,
-    processCleanup: { status: "pending", attempts: 0, nextAttemptAt: input.at } };
-  await tx.query({ name: "runtime_execution_cancel_v1", text: `UPDATE data.runs
-    SET status='failed',version=version+1,updated_at=$2,finished_at=$2,
-      metadata_json=metadata_json || $3::jsonb WHERE run_id=$1`,
-    values: [input.runId, input.at, JSON.stringify({ executionCancellation: cancellation,
-      terminalError: input.reason === "timeout" ? "Execution deadline exceeded; execution cancelled"
-        : "Execution cancelled by its owner" })], maxRows: 0 });
-  await tx.query({ name: "runtime_execution_cancel_launch_v1", text: `UPDATE data.agent_launches
-    SET state='cancelled',retryable=false,lease_owner=NULL,lease_until=NULL,
-      version=version+1,updated_at=$2,finished_at=$2 WHERE run_id=$1
-      AND state NOT IN ('cancelled','failed')`, values: [input.runId, input.at], maxRows: 0 });
-  await expireInstanceTraceAccess(tx, run.instance_id, input.at);
-}
-
 function runStatus(value: unknown): RunStatus {
   const result = text(value, "status", 32) as RunStatus;
   if (!isRunStatus(result)) throw new RuntimeControlError(

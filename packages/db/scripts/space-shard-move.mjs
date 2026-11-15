@@ -115,8 +115,6 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "app_googlechat_room_bindings",
   "app_connector_executions",
   "app_source_relations",
-  "automation_occurrences",
-  "automations",
   "instances",
   "machine_run_snapshot_heads",
   "natural_key_counters",
@@ -126,6 +124,13 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "space_deletions",
   "trace_access_grants",
   "workspaces",
+]);
+
+// Retired tables nothing reads or writes; a contract migration drops them.
+// A move neither copies their rows nor waits for them.
+export const RETIRED_DATA_TABLES = Object.freeze([
+  "automation_occurrences",
+  "automations",
 ]);
 
 export const GLOBAL_DATA_TABLES = Object.freeze([
@@ -204,9 +209,6 @@ const BLOCKER_QUERIES = Object.freeze({
   app_googlechat_room_bindings: "space_id = $1",
   app_connector_executions: "space_id = $1",
   app_source_relations: "space_id = $1",
-  automation_occurrences:
-    "automation_id IN (SELECT automation_id FROM data.automations WHERE channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1))",
-  automations: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   instances: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   machine_run_snapshot_heads: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   runs: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",

@@ -43,18 +43,14 @@ WITH space_totals AS (
         ), run_totals AS (
           SELECT COUNT(*) AS runs,
             COUNT(*) FILTER (WHERE status IN ('starting', 'running')) AS active_runs FROM data.runs
-        ), automation_totals AS (
-          SELECT COUNT(*) AS automations,
-            COUNT(*) FILTER (WHERE enabled) AS enabled_automations FROM data.automations
         )
         SELECT space_totals.*, channel_totals.*, message_totals.*,
           (SELECT COUNT(*) FROM data.messages WHERE deleted_at IS NULL AND sent_at >= $1) AS messages_last_24h,
           (SELECT COUNT(*) FROM data.space_agent_registrations) AS agent_registrations,
           run_totals.*, (SELECT COUNT(*) FROM data.instances) AS agent_instances,
-          automation_totals.*,
           (SELECT COALESCE(SUM(logical_bytes), 0) FROM data.space_storage_usage) AS storage_logical_bytes
         FROM space_totals CROSS JOIN channel_totals CROSS JOIN message_totals
-        CROSS JOIN run_totals CROSS JOIN automation_totals
+        CROSS JOIN run_totals
 ),
 spaces AS (
 WITH member_counts AS (

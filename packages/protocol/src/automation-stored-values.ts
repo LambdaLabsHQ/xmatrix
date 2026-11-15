@@ -1,22 +1,7 @@
 /**
- * Automation names shared by the Hub and its authorities, stored and on the
- * wire. Contract migration 0081 rewrote every pre-rename stored value, and the
- * Hub sends only the automation spelling: command kinds `automation_put` /
- * `automation_remove` and `automationId`.
- * Inventory: docs/operations/automation-stored-values-inventory.md.
+ * What a Run's metadata says about the Automation that started it. Automations
+ * no longer run, but Runs they started keep this metadata.
  */
-
-/** Shortest cadence an Automation may store, in minutes. */
-export const AUTOMATION_MIN_INTERVAL_MINUTES = 15;
-/** Longest cadence an Automation may store: 30 days, in minutes. */
-export const AUTOMATION_MAX_INTERVAL_MINUTES = 30 * 24 * 60;
-
-/** A whole number of minutes inside the stored Automation cadence bounds. */
-export function isAutomationIntervalMinutes(value: number): boolean {
-  return Number.isSafeInteger(value)
-    && value >= AUTOMATION_MIN_INTERVAL_MINUTES
-    && value <= AUTOMATION_MAX_INTERVAL_MINUTES;
-}
 
 export interface AutomationRunIdentity {
   automationId?: string;
@@ -41,62 +26,4 @@ export function automationRunIdentity(
     ...(automationName ? { automationName } : {}),
     ...(automationOccurrenceId ? { automationOccurrenceId } : {}),
   };
-}
-
-/** Lineage root / expression ref for an Automation: `automation:<id>`. */
-export function automationRef(automationId: string): string {
-  return `automation:${automationId}`;
-}
-
-/*
- * Replay compatibility for the command rename. Remove this section once the
- * replay rows written before the rename have expired (30-day TTL after the
- * rename ships).
- *
- * Hubs before the rename sent `scheduled_task_put` / `scheduled_task_remove`,
- * and `taskId`, and every authority stored the
- * digest of exactly that body. An authority therefore canonicalizes each
- * incoming body before digesting it, stores the canonical digest, and also
- * accepts a stored digest of the legacy view, so a retry that straddles the
- * deploy replays instead of conflicting.
- */
-
-const LEGACY_COMMAND_KINDS: Readonly<Record<string, string>> = {
-  scheduled_task_put: "automation_put",
-  scheduled_task_remove: "automation_remove",
-};
-const AUTOMATION_ID_COMMAND_KINDS: ReadonlySet<string> = new Set([
-  "automation_put", "automation_remove", "scheduled_execution_cancel",
-]);
-
-function inverse(map: Readonly<Record<string, string>>, value: string): string {
-  return Object.entries(map).find(([, current]) => current === value)?.[0] ?? value;
-}
-
-/** An Automation command body in the current spelling, from either spelling. */
-export function canonicalAutomationCommand<T extends Record<string, unknown>>(input: T): T {
-  const kind = typeof input.kind === "string"
-    ? LEGACY_COMMAND_KINDS[input.kind] ?? input.kind : input.kind;
-  if (typeof kind !== "string" || !AUTOMATION_ID_COMMAND_KINDS.has(kind)) return input;
-  const { taskId, ...rest } = input as Record<string, unknown>;
-  const canonical: Record<string, unknown> = {
-    ...rest, kind,
-    ...(taskId !== undefined && rest.automationId === undefined ? { automationId: taskId } : {}),
-  };
-  return canonical as T;
-}
-
-/** The body a pre-rename Hub sent for this canonical command (digest comparison only). */
-export function legacyAutomationCommandView(command: Record<string, unknown>): Record<string, unknown> {
-  if (typeof command.kind !== "string" || !AUTOMATION_ID_COMMAND_KINDS.has(command.kind)) return command;
-  const { automationId, ...rest } = command;
-  return {
-    ...rest, kind: inverse(LEGACY_COMMAND_KINDS, command.kind),
-    ...(automationId !== undefined ? { taskId: automationId } : {}),
-  };
-}
-
-/** The command kind a pre-rename Hub used for this canonical kind. */
-export function legacyAutomationCommandKind(kind: string): string {
-  return inverse(LEGACY_COMMAND_KINDS, kind);
 }

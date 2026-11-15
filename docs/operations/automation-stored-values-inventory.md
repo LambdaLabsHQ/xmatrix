@@ -1,5 +1,8 @@
 # Automation stored values: inventory (C1 → M2 → C2)
 
+> Historical. Automations are retired; the code named below was removed, and
+> a contract migration drops the Automation tables.
+
 The "task" name is gone from the PostgreSQL identifiers (M1,
 `0080_contract_automation_storage_names`).
 This inventory covers the stored **values** that said `scheduled_task` /

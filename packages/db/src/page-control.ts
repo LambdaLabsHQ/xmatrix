@@ -12,7 +12,6 @@ import { channelCapabilityPredicate, requireChannelCapability } from "./channel-
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
-import { removePageAutomations } from "./automation-page-anchor.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
@@ -261,10 +260,7 @@ interface CoWritingInput {
   requestId: string; spaceId: string; pageId: string; principal: PagePrincipal; conversationId: string;
 }
 
-/**
- * A committed revision. Its schedule lines are synced to the page's
- * Automations after the commit, by the Hub (docs/design/pages-live-document.md §6.4).
- */
+/** A committed revision. */
 export interface PageCommit {
   page: PageSummary; revision: PageRevision;
 }
@@ -388,33 +384,6 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
     const view = resolve(row.page_id);
     return { ...row, ...view, governance, canEdit: view.canEdit && (admin || !governance) };
   }).filter((row) => row.canRead);
-}
-
-/** Every page a principal can read in a Space, with whether they can edit it; none when they are not a member. */
-export async function pageAccessMap(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal):
-  Promise<Map<string, { canEdit: boolean; agentSuggestOnly: boolean }>> {
-  let actor: PageActor;
-  try {
-    actor = await pageActor(tx, spaceId, principal, false);
-  } catch (error) {
-    if (error instanceof PageControlError && error.status < 500) return new Map();
-    throw error;
-  }
-  return new Map((await accessibleTree(tx, spaceId, actor, [])).map((row) =>
-    [row.page_id, { canEdit: row.canEdit, agentSuggestOnly: row.agent_suggest_only }]));
-}
-
-/**
- * What a principal may do with one page, in the caller's transaction. An
- * Agent Run acts with its owner's access, and only while it is live.
- */
-export async function pageAccess(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal,
-  pageId: string, write: boolean): Promise<{ canRead: boolean; canEdit: boolean; agentSuggestOnly: boolean;
-    actor: PageActor }> {
-  const actor = await pageActor(tx, spaceId, principal, write);
-  const row = (await accessibleTree(tx, spaceId, actor, [])).find((item) => item.page_id === pageId);
-  return { canRead: Boolean(row), canEdit: Boolean(row?.canEdit), agentSuggestOnly: Boolean(row?.agent_suggest_only),
-    actor };
 }
 
 export interface PageRepositoryOptions {
@@ -1567,7 +1536,7 @@ export class PostgresPageRepository {
   }
 
   async remove(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ removed: boolean; automationChannels: string[]; programChannels: string[] }> {
+    Promise<{ removed: boolean; programChannels: string[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.remove", spaceId, async (tx) => {
@@ -1583,7 +1552,6 @@ export class PostgresPageRepository {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }
-      const automationChannels = await removePageAutomations(tx, { spaceId, pageId, at: new Date().toISOString() });
       const removed = await tx.query({ name: "page_remove_v1",
         text: "DELETE FROM data.pages WHERE space_id=$1 AND page_id=$2 RETURNING page_id",
         values: [spaceId, pageId], maxRows: 1 });
@@ -1592,7 +1560,7 @@ export class PostgresPageRepository {
         text: `UPDATE data.norn_programs SET stop_reason='Removed with its page',updated_at=clock_timestamp()
           WHERE space_id=$1 AND page_id=$2 AND state='running' AND stop_reason IS NULL RETURNING channel_id`,
         values: [spaceId, pageId], maxRows: 200 })).map(row => String(row.channel_id));
-      return { removed: removed.length === 1, automationChannels, programChannels };
+      return { removed: removed.length === 1, programChannels };
     });
   }
 
