@@ -1516,3 +1516,25 @@ fn signed_out_start_failure_is_one_hub_keeps() {
     )
     .is_none());
 }
+
+#[test]
+fn a_resumed_cursor_session_marks_no_default() {
+    // A loaded session first reports the model it last ran, not the runtime's default.
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts {
+        session_resumed: true,
+        ..AgentPresentationFacts::default()
+    };
+    adapter.observe_acp(
+        &serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": "claude-4.5-sonnet",
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]}),
+        &mut facts,
+    );
+    let models = adapter.present(&facts, &[]).models.expect("models");
+    assert!(models.iter().all(|row| row.is_default.is_none()));
+}

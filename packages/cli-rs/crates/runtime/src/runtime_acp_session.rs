@@ -277,6 +277,7 @@ impl AcpSession {
             .flatten();
         let new_session_params = || acp_session_new_params(&workspace_path, trusted_rules);
         let result = if let Some(session_id) = resume_session_id.as_deref() {
+            self.presentation.session_resumed = true;
             match self
                 .request_with_login_retry(
                     "session/load",
@@ -299,6 +300,7 @@ impl AcpSession {
                 }
                 Err(err) => {
                     self.loaded_goal = None;
+                    self.presentation.session_resumed = false;
                     eprintln!(
                         "{} {} session/load failed for {}: {err}; starting a new session",
                         "⚠".yellow().bold(),

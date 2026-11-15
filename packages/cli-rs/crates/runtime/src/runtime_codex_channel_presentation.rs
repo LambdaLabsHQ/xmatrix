@@ -191,6 +191,7 @@ pub(crate) fn model_catalog_presentation_with_commands(
         &AgentPresentationFacts {
             model,
             starting_model: None,
+            session_resumed: false,
             models,
             models_reported: true,
             effort,

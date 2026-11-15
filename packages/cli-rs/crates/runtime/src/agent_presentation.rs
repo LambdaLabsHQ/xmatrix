@@ -14,6 +14,9 @@ pub(crate) struct AgentPresentationFacts {
     /// The model the session reported first, before any switch: the one the
     /// runtime runs when it is given none (Cursor's catalog marks no default).
     pub(crate) starting_model: Option<String>,
+    /// The session was loaded, not created: the model it reports first is the
+    /// one it last ran, not the runtime's default, so it is no starting model.
+    pub(crate) session_resumed: bool,
     pub models: Vec<protocol::AgentModelInfo>,
     pub(crate) models_reported: bool,
     pub(crate) effort: Option<String>,
@@ -43,6 +46,15 @@ pub(crate) struct AgentPresentationSnapshot {
 /// Contract implemented by every Agent runtime family before presentation
 /// reaches Hub/Web. Vendor events are observed here and normalized into the
 /// same model/effort/command/chip/usage snapshot.
+impl AgentPresentationFacts {
+    /// Keep the first model a created session reports as the one it started on.
+    fn note_starting_model(&mut self, model: &str) {
+        if !self.session_resumed && self.starting_model.is_none() {
+            self.starting_model = Some(model.to_string());
+        }
+    }
+}
+
 pub(crate) trait AgentPresentationAdapter {
     fn runtime(&self) -> &str;
     fn source(&self) -> &str;
@@ -959,8 +971,8 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             // Keep the raw currentValue (including Cursor's variants-mode
             // `default[]`) so display-name resolution can still map it to
             // "Auto"; presentation chips never show the placeholder text.
-            if facts.starting_model.is_none() {
-                facts.starting_model.clone_from(&current);
+            if let Some(current) = &current {
+                facts.note_starting_model(current);
             }
             facts.model = current;
             attach_config_efforts_to_selected_model(facts);
@@ -1114,7 +1126,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
         )
         .filter(|value| !is_placeholder_model_id(value))
         {
-            facts.starting_model.get_or_insert_with(|| model.clone());
+            facts.note_starting_model(&model);
             facts.model = Some(model.clone());
             if let Some(selected) = facts
                 .models
@@ -1134,7 +1146,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
     )
     .filter(|value| !is_placeholder_model_id(value))
     {
-        facts.starting_model.get_or_insert_with(|| model.clone());
+        facts.note_starting_model(&model);
         facts.model = Some(model);
     }
     if let Some(effort) = clean_string(
