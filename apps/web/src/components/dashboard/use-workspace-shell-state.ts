@@ -99,7 +99,7 @@ import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, isNornAskProgramMessage, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
@@ -2107,8 +2107,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
              now. For any other, the rows that show it do, and the shell is
              told when the catalog window below reorders the list, instead of
              once per message (use-channel-catalog-paging.ts). */
-          // An instruction to one Agent Instance neither previews nor needs reading.
-          const instruction = isAgentInstruction(entry.metadata);
+          // An instruction to one Agent Instance neither previews nor needs reading, nor does the program or end
+          // of a question an Agent asked with a command: its card is what a person reads.
+          const instruction = isAgentInstruction(entry.metadata) || isNornAskProgramMessage(entry.messageId);
           const arrival = {
             entry,
             preview: instruction ? undefined : channelLastMessagePreviewFromEntry(entry),
@@ -2785,7 +2786,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   // (presented-channel-tail.ts). Published before paint, so the row and the
   // timeline change in the same frame.
   const presentedEntry = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
-    ? latestHistoryEntry(history)
+    ? latestHistoryEntry(history.filter((message) => !isAgentInstruction(message.metadata) && !isNornAskProgramMessage(message.messageId)))
     : undefined;
   useLayoutEffect(() => {
     const preview = presentedEntry ? channelLastMessagePreviewFromEntry(presentedEntry) : undefined;

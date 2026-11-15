@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -341,6 +341,22 @@ test("a question asked with a command is its program: the request, waited on, wi
     [{ verb: "confirm", who: "@Daniel", question: "?", by: "1d", otherwise: "Maybe" }, /one of Yes, No/u]]) {
     assert.match(nornQuestionSource(input).refusal, why);
   }
+});
+
+test("a question asked with a command reads on its card: the Agent that asks, and what silence means", () => {
+  const { source } = nornQuestionSource({ verb: "choose", who: "@Daniel", question: "Drop the tables?", options: ["DropTables", "KeepTables"],
+    by: "1d", otherwise: "KeepTables" });
+  const asking = nornAsking({ authorMention: "@claude:2", source, askedWithCommand: true });
+  assert.deepEqual(asking, { asker: "claude:2", otherwise: "KeepTables" });
+  // A program someone wrote says what silence means in its own words: only the command's program is read for it.
+  assert.deepEqual(nornAsking({ authorMention: null, source, askedWithCommand: false }), { asker: null, otherwise: null });
+  const asked = program(source);
+  const [open] = asked.step().open;
+  const request = asked.state.ledger.requests[open.requestId];
+  assert.deepEqual([nornRequestCard(request, open.requestRef, "user-1", asking).asker, nornRequestCard(request, open.requestRef, "user-1", asking).otherwise],
+    ["claude:2", "KeepTables"]);
+  assert.match(nornPersonBody(request, asking).split("\n").at(-1), /; without an answer, KeepTables\. claude:2 asks\.$/u);
+  assert.equal(nornOutcomeText("@Daniel", { tag: "NoReply" }, asking.otherwise), "It closed without an answer, so KeepTables.");
 });
 
 test("a program opens the standard library: a routine is one line, and a decision has its default", () => {

@@ -35,6 +35,19 @@ export function isAgentInstruction(metadata: Record<string, unknown> | undefined
       (retry as { version?: unknown }).version === 1);
 }
 
+/**
+ * The message xMatrix writes for a question an Agent asks with a command
+ * (`xmatrix ask`, `confirm`, `choose`): the program's message is its identity,
+ * and its end is the asker's answer. A person reads the question on its card,
+ * which names the asker and says how it was answered, so neither message takes
+ * a row of its own; the asking Instance still reads both.
+ */
+export const NORN_ASK_MESSAGE_PREFIX = "norn-ask:";
+const NORN_ASK_END_PREFIX = `norn-end:${NORN_ASK_MESSAGE_PREFIX}`;
+/** Whether a message is the program or the end of a question an Agent asked with a command. */
+export const isNornAskProgramMessage = (messageId: string): boolean =>
+  messageId.startsWith(NORN_ASK_MESSAGE_PREFIX) || messageId.startsWith(NORN_ASK_END_PREFIX);
+
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";
 

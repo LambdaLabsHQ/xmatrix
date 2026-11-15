@@ -5,7 +5,7 @@ import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon, type LiveChannel } from "@xmatrix/protocol";
+import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, isNornAskProgramMessage, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon, type LiveChannel } from "@xmatrix/protocol";
 import { formatLocalClock } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
@@ -828,9 +828,11 @@ export function buildTimeline(
   const safeChannelHistory = channelHistory.filter(isValidChannelMessage);
   const historyById = new Map(safeChannelHistory.map((message) => [message.messageId, message]));
   const commandNotices = foldCommandNotices(safeChannelHistory);
-  // An instruction to one Agent Instance is its input, not anything said to people.
+  // An instruction to one Agent Instance is its input, not anything said to people. A question an Agent asked
+  // with a command is read on its card, which names the asker and how it was answered.
   const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message) &&
-    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata)).map((message) => {
+    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata) &&
+    !isNornAskProgramMessage(message.messageId)).map((message) => {
     const senderEmail = message.from.email.trim().toLowerCase();
     const senderLabel = message.from.label.trim().toLowerCase();
     const senderIdentityId = message.from.identityId;
