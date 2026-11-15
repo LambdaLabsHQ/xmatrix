@@ -13,6 +13,27 @@ reverting this change: the column is then unused, a request delegated to an
 Instance meanwhile ends `Broke` at its next pass, and one delegated to a
 person or an Agent by name stays with them.
 
+## Unreleased: quota is read per account and model
+
+A provider's quota now has two kinds of window: account windows, which stop
+every model, and scoped windows, which stop only the models whose catalog row
+names their scope (Claude's per-model week such as `Fable`, Cursor's `Auto`
+and `API` pools). A launch drops a used-up model before Jev chooses, including
+the runtime default when that is the used-up one; a pool is refused whole only
+when its account, or every model it could run, is used up, and a model the
+author named is refused with when it is back. A turn refused for one model's
+quota no longer holds the pool or hands the work to another harness: its
+reading is recorded and the quota retry waits on that model's windows alone.
+A limit the daemon could not tell holds the pool until its reset and asks the
+machine for a fresh complete reading on the next launch, Channel refresh or
+reconnect; that reading releases the hold or narrows it to the window
+resetting with it. Hub's Cursor special cases are gone. Hub only, with expand
+migration 0254 (`registration_quota_observations.scoped_windows_json`,
+`scoped_observed_at`, `scoped_expires_at`; `windows_json`/`observed_at`/
+`expires_at` are the account part). A daemon that predates scopes behaves as
+before: its usage limit holds the whole pool and hands off. Recovery is a
+CI-validated beta Hub reverting this change; the added columns are ignored.
+
 ## Unreleased: the retired Automation storage is dropped
 
 Contract migration 0253 drops `data.automation_occurrence_runs`,

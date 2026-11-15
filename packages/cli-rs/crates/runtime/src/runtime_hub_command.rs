@@ -44,7 +44,12 @@ struct HubCommandOutput {
 fn ensure_arguments_intact(args: &[String]) -> crate::error::Result<()> {
     use xmatrix_cli_core::text_input::{TextRoutes, TextSource, ensure_text_intact};
     for word in args.iter().skip(1) {
-        ensure_text_intact("command argument", word, TextSource::Argument, TextRoutes::default())?;
+        ensure_text_intact(
+            "command argument",
+            word,
+            TextSource::Argument,
+            TextRoutes::default(),
+        )?;
     }
     Ok(())
 }
@@ -76,10 +81,12 @@ mod tests {
     #[test]
     fn an_argument_that_lost_its_characters_never_reaches_the_hub() {
         let words = |line: &[&str]| line.iter().map(|word| word.to_string()).collect::<Vec<_>>();
-        super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "池内 52 家已复查"])).unwrap();
-        let error = super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "broken \u{fffd}"]))
-            .unwrap_err()
-            .to_string();
+        super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "池内 52 家已复查"]))
+            .unwrap();
+        let error =
+            super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "broken \u{fffd}"]))
+                .unwrap_err()
+                .to_string();
         assert!(error.contains("command argument"), "{error}");
         assert!(error.contains("Nothing was sent"), "{error}");
     }

@@ -148,7 +148,9 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             // Its Runs start on this machine, so its daemon must be up.
             ensure_local_daemon_started(hub_url, token).await
         }
-        AgentCommand::Access { harness, mode } => machine_access(hub_url, token, harness, mode).await,
+        AgentCommand::Access { harness, mode } => {
+            machine_access(hub_url, token, harness, mode).await
+        }
         AgentCommand::Show {
             harness,
             space,
@@ -546,7 +548,12 @@ struct AgentLaunch {
 /// resolves it (`AgentAccessGrant`), then what that means on the machine.
 fn access_disclosure(name: &str, grant: &Value) -> Vec<String> {
     let mut lines = Vec::new();
-    for arg in grant["args"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+    for arg in grant["args"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
         lines.push(format!("  adds the argument               {arg}"));
     }
     for (key, value) in grant["env"].as_object().into_iter().flatten() {
@@ -565,9 +572,14 @@ fn access_disclosure(name: &str, grant: &Value) -> Vec<String> {
         lines.push("  adds no argument or environment variable to its launch".into());
     }
     if grant["approvesRequests"].as_bool() == Some(true) {
-        lines.push(format!("  answers every permission request {name} makes with allow"));
+        lines.push(format!(
+            "  answers every permission request {name} makes with allow"
+        ));
     }
-    lines.insert(0, format!("With full access, xMatrix starts {name} like this:"));
+    lines.insert(
+        0,
+        format!("With full access, xMatrix starts {name} like this:"),
+    );
     lines.push(format!(
         "{name} then works without asking before it changes a file or runs a command, and xMatrix sets no limit on which files it reaches."
     ));
@@ -609,9 +621,15 @@ async fn confirm_access(
         ));
     }
     if asks {
-        eprint!("Access for {} on this machine? [full/ask/none] ", preset.display_name);
+        eprint!(
+            "Access for {} on this machine? [full/ask/none] ",
+            preset.display_name
+        );
     } else {
-        eprint!("Add {} with full access on this machine? [y/N] ", preset.display_name);
+        eprint!(
+            "Add {} with full access on this machine? [y/N] ",
+            preset.display_name
+        );
     }
     std::io::stderr().flush()?;
     let mut answer = String::new();
@@ -630,8 +648,10 @@ async fn held_environment(hub_url: &str, token: &str, key: &Value) -> error::Res
         &with_route(hub_url, protocol::AGENT_ENVIRONMENT_QUERY_ROUTE),
         "POST",
         Some(token),
-        Some(serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
-            "harness": key["harness"] })),
+        Some(
+            serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
+            "harness": key["harness"] }),
+        ),
     )
     .await
 }
@@ -943,9 +963,7 @@ mod tests {
         assert!(on_machine(&row, "laptop") && on_machine(&row, "machine:abc"));
         assert!(!on_machine(&row, "Workstation"));
         // A prepaid account has no window: the money left is the reading.
-        let prepaid = |currency: &str| {
-            serde_json::json!({"live":{"balance":{"amount":12.3,"currency":currency,"allowed":true}}})
-        };
+        let prepaid = |currency: &str| serde_json::json!({"live":{"balance":{"amount":12.3,"currency":currency,"allowed":true}}});
         assert_eq!(quota_label(&prepaid("CNY")), "¥12.30");
         assert_eq!(quota_label(&prepaid("USD")), "$12.30");
         assert_eq!(quota_label(&prepaid("EUR")), "12.30 EUR");

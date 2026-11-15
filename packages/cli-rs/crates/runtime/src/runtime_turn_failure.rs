@@ -1,6 +1,6 @@
 //! One reconnect-safe failure observation path for every harness.
 
-use crate::runtime_usage_limit::UsageLimit;
+use crate::runtime_usage_limit::UsageLimitReport;
 use crate::{AgentLifecycleNotice, agent_instance_connection, protocol, truncate_chars};
 use colored::Colorize;
 
@@ -88,7 +88,7 @@ struct PendingTurnFailure {
     failure_id: String,
     reason: &'static str,
     detail: String,
-    resets_at: Option<String>,
+    usage_limit: Option<UsageLimitReport>,
 }
 
 static PENDING_TURN_FAILURE: std::sync::Mutex<Option<PendingTurnFailure>> =
@@ -145,20 +145,20 @@ fn send_turn_failure(
                     .to_string(),
                 ),
             }),
-            resets_at: failure.resets_at.as_deref(),
+            usage_limit: failure.usage_limit.as_ref(),
         },
     );
 }
 
 /// [`report_turn_failure`] for an adapter that observed the provider's own
-/// usage-limit signal.
+/// usage-limit signal and told what it used up.
 pub(crate) fn report_turn_failure_with_usage_limit(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
     channel_id: Option<&str>,
     agent: &protocol::SerializedAgent,
     error: &str,
     runtime_restarting: bool,
-    usage_limit: Option<UsageLimit>,
+    usage_limit: Option<UsageLimitReport>,
 ) {
     let detail = compact_notice_line(error, TURN_FAILURE_DETAIL_MAX_CHARS);
     crate::write_current_run_status(
@@ -187,7 +187,7 @@ pub(crate) fn report_turn_failure_with_usage_limit(
             AGENT_TURN_FAILURE_LIFECYCLE_REASON
         },
         detail,
-        resets_at: usage_limit.and_then(|limit| limit.resets_at),
+        usage_limit,
     };
     if let Ok(mut pending) = PENDING_TURN_FAILURE.lock() {
         *pending = Some(failure.clone());

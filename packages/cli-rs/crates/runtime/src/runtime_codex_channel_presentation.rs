@@ -190,6 +190,8 @@ pub(crate) fn model_catalog_presentation_with_commands(
     agent_presentation_adapter_for_runtime(&runtime_hint).present(
         &AgentPresentationFacts {
             model,
+            starting_model: None,
+            session_resumed: false,
             models,
             models_reported: true,
             effort,
@@ -392,7 +394,7 @@ pub(crate) fn send_agent_lifecycle(
             reason,
             detail,
             snapshot,
-            resets_at: None,
+            usage_limit: None,
             request_id: None,
         },
     );
@@ -406,11 +408,12 @@ pub(crate) struct AgentLifecycleNotice<'a> {
     reason: Option<&'a str>,
     detail: Option<&'a str>,
     snapshot: Option<protocol::AgentLifecycleSnapshot>,
-    resets_at: Option<&'a str>,
+    usage_limit: Option<&'a crate::runtime_usage_limit::UsageLimitReport>,
 }
 
 /// [`send_agent_lifecycle`] for a `usage_limited` turn failure, which also
-/// says when the provider account resets.
+/// says when the provider account resets, what it used up, and the reading
+/// that told.
 pub(crate) fn send_agent_lifecycle_with_reset(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
     channel_id: Option<&str>,
@@ -424,7 +427,7 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         reason,
         detail,
         snapshot,
-        resets_at,
+        usage_limit,
     } = notice;
     let _ = relay.send_message(protocol::AgentInstanceClientMessage::AgentLifecycle {
         request_id: request_id.map(str::to_string),
@@ -437,7 +440,14 @@ pub(crate) fn send_agent_lifecycle_with_reset(
         reason: reason.map(str::to_string),
         detail: detail.map(str::to_string),
         snapshot,
-        resets_at: resets_at.map(str::to_string),
+        resets_at: usage_limit.and_then(|limit| limit.resets_at.clone()),
+        quota_scope: usage_limit.map(|limit| limit.quota_scope.clone()),
+        quota_scope_reason: usage_limit
+            .and_then(|limit| limit.quota_scope_reason)
+            .map(str::to_string),
+        usage: usage_limit
+            .and_then(|limit| limit.usage.clone())
+            .map(Box::new),
         pending_tasks: None,
         ts: None,
     });
@@ -679,7 +689,6 @@ fn collect_llm_usage(value: &Value, usage: &mut protocol::LlmUsage) {
             // account-level data and are read only by each provider's explicit
             // online endpoint, never by this generic app-server event parser.
             if is_rate_limit_snapshot_map(map)
-                || !claude_named_window_quota_usages(map).is_empty()
                 || !zai_monitor_quota_usages(map).is_empty()
                 || !grok_billing_quota_usages(map).is_empty()
                 || !codex_wham_quota_usages(map).is_empty()
@@ -698,6 +707,7 @@ fn collect_llm_usage(value: &Value, usage: &mut protocol::LlmUsage) {
                         | "rateLimits"
                         | "rate_limits"
                         | "rate_limit"
+                        | "rate_limit_info"
                         | "usageLimits"
                         | "usage_limits"
                         | "limits"
@@ -746,10 +756,7 @@ fn merge_llm_usage(
                 // Provider-account quota is a snapshot, not additive turn
                 // telemetry. Windows, source and observation time belong to
                 // the same read and must be replaced together.
-                current.quota_usages = next.quota_usages;
-                current.quota_source = next.quota_source;
-                current.quota_observed_at = next.quota_observed_at;
-                current.quota_account = next.quota_account;
+                current.replace_quota(&next);
             }
             if next.cached_input_tokens.is_some() {
                 current.cached_input_tokens = next.cached_input_tokens;

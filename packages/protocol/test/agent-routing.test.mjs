@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseAgentRoutingDeclaration, parsePresentedRoutingDecision, routingDecisionCopy, routingQuotaObservation,
-  cursorQuotaBucketForModel, ROUTING_QUOTA_MAX_AGE_MS, machineResourceObservation, hostObservedRequirements, routingModelCatalogObservation } from '../dist/agent-routing.js';
+  routingScopedQuotaExpiry, ROUTING_QUOTA_MAX_AGE_MS, machineResourceObservation, hostObservedRequirements, routingModelCatalogObservation } from '../dist/agent-routing.js';
 
 const now = Date.parse('2026-09-19T20:00:00Z');
 const routingDeclaration = { schemaVersion: 1, enabled: true, models: ['model-a'], description: '',
@@ -92,23 +92,53 @@ test('a reset short window cannot erase an exhausted weekly window', () => {
   assert.equal(routingQuotaObservation(usage, now).expiresAt, usage.quotaUsages[1].resetAt);
 });
 
-test('Cursor API bucket exhaustion does not zero routing headroom while Auto remains', () => {
-  // Cursor GetCurrentPeriodUsage returns 1mo/Auto/API. Auto/Composer spend Auto;
-  // third-party models spend API. Without a model, headroom is the better pool.
+test('a scoped window constrains only the models whose catalog row lists its scope', () => {
+  // 2026-11-15: Fable's own week used up while the account's week is at 55%.
   const observedAt = '2026-09-19T19:55:00Z';
-  const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: [
-    { label: '1mo', percent: 26, resetAt: '2026-10-13T09:32:23Z' },
-    { label: 'Auto', percent: 26, resetAt: '2026-10-13T09:32:23Z' },
-    { label: 'API', percent: 100, resetAt: '2026-10-13T09:32:23Z' },
+  const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt,
+    quotaUsages: [{ label: '5h', percent: 10, resetAt: '2026-09-19T23:00:00Z' },
+      { label: '1w', percent: 55, resetAt: '2026-09-23T18:00:00Z' }],
+    scopedQuotaUsages: [{ label: '1w', percent: 100, resetAt: '2026-09-23T18:00:00Z', scope: 'Fable' }] };
+  // The account alone, and a model of no listed scope, keep the account's headroom.
+  assert.equal(routingQuotaObservation(usage, now).value, 45);
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Sonnet'] } }).value, 45);
+  // A row without scopes (or no row): the scope is unknown and does not apply.
+  assert.equal(routingQuotaObservation(usage, now, { model: {} }).value, 45);
+  // Fable's row lists the scope, compared without case: used up until its reset.
+  const fable = routingQuotaObservation(usage, now, { model: { quotaScopes: ['fable'] } });
+  assert.equal(fable.value, 0);
+  assert.equal(fable.expiresAt, new Date('2026-09-23T18:00:00Z').toISOString());
+  // Only exact names match: a prefix is another scope.
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Fab'] } }).value, 45);
+  // Served past its limits on credits: still eligible.
+  assert.equal(routingQuotaObservation({ ...usage, quotaAccount: { allowed: true } }, now,
+    { model: { quotaScopes: ['Fable'] } }).value, 1);
+});
+
+test('Cursor pools are scoped windows; a reading of pools alone says nothing of the account', () => {
+  const observedAt = '2026-09-19T19:55:00Z';
+  const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, scopedQuotaUsages: [
+    { label: '1mo', percent: 26, resetAt: '2026-10-13T09:32:23Z', scope: 'Auto' },
+    { label: '1mo', percent: 100, resetAt: '2026-10-13T09:32:23Z', scope: 'API' },
   ] };
-  const quota = routingQuotaObservation(usage, now);
-  assert.equal(quota.value, 74);
-  assert.equal(quota.expiresAt, new Date(Date.parse(observedAt) + ROUTING_QUOTA_MAX_AGE_MS).toISOString());
-  assert.equal(routingQuotaObservation(usage, now, { windowLabels: ['Auto'] }).value, 74);
-  assert.equal(routingQuotaObservation(usage, now, { windowLabels: ['API'] }).value, 0);
-  assert.equal(cursorQuotaBucketForModel('default'), 'Auto');
-  assert.equal(cursorQuotaBucketForModel('composer-2.5'), 'Auto');
-  assert.equal(cursorQuotaBucketForModel('claude-4-sonnet'), 'API');
+  assert.equal(routingQuotaObservation(usage, now), undefined);
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Auto'] } }).value, 74);
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['API'] } }).value, 0);
+  // The used-up pool keeps the scoped part of the reading until its reset.
+  assert.equal(routingScopedQuotaExpiry(usage, now), new Date('2026-10-13T09:32:23Z').toISOString());
+  assert.equal(routingScopedQuotaExpiry({ ...usage, scopedQuotaUsages: [] }, now), undefined);
+});
+
+test('a stored reading reads its scoped windows as of their own, earlier read', () => {
+  // A partial read (a rate-limit verdict) renewed the account windows only.
+  const usage = { quotaSource: 'provider_api', quotaObservedAt: new Date(now - 60_000).toISOString(),
+    quotaUsages: [{ percent: 30 }],
+    scopedQuotaObservedAt: new Date(now - ROUTING_QUOTA_MAX_AGE_MS - 1).toISOString(),
+    scopedQuotaUsages: [{ percent: 90, scope: 'Fable' }] };
+  // The scoped window without a reset is past its age: only the account counts.
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Fable'] } }).value, 70);
+  usage.scopedQuotaObservedAt = new Date(now - 120_000).toISOString();
+  assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Fable'] } }).value, 10);
 });
 
 test('exhaustion without a reset expires, implausibly distant resets are bounded, and fresh recovery replaces it', () => {
@@ -159,6 +189,18 @@ test('model catalogs retain real effort options and exclude private or invented 
   for (const time of [undefined, 'invalid', new Date(now + 1).toISOString(), new Date(now - 86400000).toISOString()]) {
     assert.equal(routingModelCatalogObservation([{ model: 'actual-model' }], time, now), undefined);
   }
+});
+
+test('a model keeps the quota scopes its runtime lists, through storage and routing', async () => {
+  const { cleanAgentModelCatalog } = await import('../dist/agent-instance-catalogs.js');
+  const stored = cleanAgentModelCatalog([
+    { id: 'default', model: 'claude-fable-5-2', displayName: 'Fable 5.2', isDefault: true, quotaScopes: ['Fable'] },
+    { id: 'sonnet', model: 'claude-sonnet-5-5', displayName: 'Sonnet 5.5', quotaScopes: [' ', 7] }]);
+  assert.deepEqual(stored.map(entry => entry.quotaScopes), [['Fable'], undefined]);
+  const options = routingModelCatalogObservation(stored, new Date(now - 1000).toISOString(), now).value;
+  assert.deepEqual(options.map(option => option.quotaScopes), [['Fable'], undefined]);
+  // Scopes are not names a person selects a model by.
+  assert.deepEqual(options[0].names, ['default', 'Fable 5.2']);
 });
 
 test("a model stays nameable by every selector its runtime lists, through storage and routing", async () => {

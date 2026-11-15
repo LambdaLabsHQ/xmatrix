@@ -244,6 +244,8 @@ pub(crate) async fn run_claude_stream_turn(
         }
         ClaudeTurnStatus::Interrupted => (String::new(), outcome.usage),
     };
+    // The complete reading a usage limit was told from, the newest there is.
+    let mut limit_reading = None;
     if turn_interrupted {
         crate::write_current_run_status("turn_interrupted", false, None);
     } else if !turn_completed {
@@ -252,13 +254,21 @@ pub(crate) async fn run_claude_stream_turn(
         } else {
             body.clone()
         };
+        // Told before it is reported: Hub holds only what the limit used up.
+        let usage_limit = match outcome.usage_limit {
+            Some(limit) => {
+                Some(crate::runtime_usage_limit::resolve_claude_usage_limit(limit).await)
+            }
+            None => None,
+        };
+        limit_reading = usage_limit.as_ref().and_then(|limit| limit.usage.clone());
         crate::report_turn_failure_with_usage_limit(
             relay.as_ref(),
             Some(&channel_id),
             agent,
             &detail,
             execution_state == "unknown",
-            outcome.usage_limit.clone(),
+            usage_limit,
         );
     } else {
         crate::write_current_run_status("turn_completed", true, None);
@@ -266,7 +276,11 @@ pub(crate) async fn run_claude_stream_turn(
 
     latest_usage = merge_llm_usage(latest_usage, turn_usage);
     // Force a refresh after the turn so presence reflects post-turn windows when available.
-    latest_usage = merge_llm_usage(latest_usage, read_claude_oauth_rate_limit_usage(true).await);
+    let post_turn = match limit_reading {
+        Some(reading) => Some(reading),
+        None => read_claude_oauth_rate_limit_usage(true).await,
+    };
+    latest_usage = merge_llm_usage(latest_usage, post_turn);
 
     if turn_completed && !body.trim().is_empty() {
         eprintln!("{body}");
@@ -661,7 +675,10 @@ pub(crate) enum ClaudeToolPermission {
 }
 
 /// `approves`: the launch's access grant answers permission requests with allow.
-pub(crate) fn claude_tool_permission(value: &Value, approves: bool) -> Option<ClaudeToolPermission> {
+pub(crate) fn claude_tool_permission(
+    value: &Value,
+    approves: bool,
+) -> Option<ClaudeToolPermission> {
     if value.get("type").and_then(Value::as_str) != Some("control_request")
         || value.pointer("/request/subtype").and_then(Value::as_str) != Some("can_use_tool")
     {
@@ -682,7 +699,10 @@ pub(crate) fn claude_tool_permission(value: &Value, approves: bool) -> Option<Cl
             input,
         });
     }
-    let tool = request.get("tool_name").and_then(Value::as_str).unwrap_or("tool");
+    let tool = request
+        .get("tool_name")
+        .and_then(Value::as_str)
+        .unwrap_or("tool");
     let command = (tool == "Bash")
         .then(|| input.get("command").and_then(Value::as_str))
         .flatten();
@@ -694,11 +714,14 @@ pub(crate) fn claude_tool_permission(value: &Value, approves: bool) -> Option<Cl
     }
     let what = match command {
         Some(command) => format!("Run: {command}"),
-        None => format!("{tool}: {}", ["file_path", "path", "url", "pattern", "query"]
-            .iter()
-            .find_map(|field| input.get(field).and_then(Value::as_str))
-            .map(str::to_string)
-            .unwrap_or_else(|| input.to_string())),
+        None => format!(
+            "{tool}: {}",
+            ["file_path", "path", "url", "pattern", "query"]
+                .iter()
+                .find_map(|field| input.get(field).and_then(Value::as_str))
+                .map(str::to_string)
+                .unwrap_or_else(|| input.to_string())
+        ),
     };
     Some(ClaudeToolPermission::Permit {
         tool_use_id: request
@@ -814,24 +837,47 @@ mod permission_tests {
     fn ask_access_parks_a_tool_for_its_permission_card_and_full_access_allows_it() {
         let bash = request("Bash", serde_json::json!({ "command": "rm -rf build" }));
         // Full access: the grant answers for the person.
-        assert!(matches!(claude_tool_permission(&bash, true), Some(ClaudeToolPermission::Allow(_))));
+        assert!(matches!(
+            claude_tool_permission(&bash, true),
+            Some(ClaudeToolPermission::Allow(_))
+        ));
         // Ask: a person answers, shown what would run.
-        let Some(ClaudeToolPermission::Permit { request_id, tool_use_id, what, input }) = claude_tool_permission(&bash, false)
+        let Some(ClaudeToolPermission::Permit {
+            request_id,
+            tool_use_id,
+            what,
+            input,
+        }) = claude_tool_permission(&bash, false)
         else {
             panic!("a tool that needs permission is parked for its card");
         };
-        assert_eq!((request_id.as_str(), tool_use_id.as_str(), what.as_str()), ("r1", "t1", "Run: rm -rf build"));
+        assert_eq!(
+            (request_id.as_str(), tool_use_id.as_str(), what.as_str()),
+            ("r1", "t1", "Run: rm -rf build")
+        );
         assert_eq!(input["command"], "rm -rf build");
-        let edit = request("Edit", serde_json::json!({ "file_path": "/etc/hosts", "old_string": "a" }));
+        let edit = request(
+            "Edit",
+            serde_json::json!({ "file_path": "/etc/hosts", "old_string": "a" }),
+        );
         assert!(matches!(claude_tool_permission(&edit, false),
             Some(ClaudeToolPermission::Permit { what, .. }) if what == "Edit: /etc/hosts"));
         // The Agent's own Channel commands are not asked about; a question for
         // its person is a question in either mode.
-        let send = request("Bash", serde_json::json!({ "command": "xmatrix send c --file /tmp/r.md" }));
-        assert!(matches!(claude_tool_permission(&send, false), Some(ClaudeToolPermission::Allow(_))));
+        let send = request(
+            "Bash",
+            serde_json::json!({ "command": "xmatrix send c --file /tmp/r.md" }),
+        );
+        assert!(matches!(
+            claude_tool_permission(&send, false),
+            Some(ClaudeToolPermission::Allow(_))
+        ));
         let question = request("AskUserQuestion", serde_json::json!({ "questions": [] }));
         for approves in [true, false] {
-            assert!(matches!(claude_tool_permission(&question, approves), Some(ClaudeToolPermission::Ask { .. })));
+            assert!(matches!(
+                claude_tool_permission(&question, approves),
+                Some(ClaudeToolPermission::Ask { .. })
+            ));
         }
     }
 }

@@ -63,6 +63,66 @@ fn cursor_adapter_shows_readable_model_and_hides_default_agent_mode() {
 }
 
 #[test]
+fn cursor_model_rows_carry_the_pool_they_spend() {
+    let models = |runtime: &str| {
+        let adapter = agent_presentation_adapter_for_acp_runtime(runtime);
+        let mut facts = AgentPresentationFacts::default();
+        adapter.observe_acp(
+            &serde_json::json!({ "configOptions": [{
+                "id": "model", "type": "select", "currentValue": "default[]",
+                "options": [
+                    { "value": "default[]", "name": "Auto" },
+                    { "value": "composer-2.5", "name": "Composer 2.5" },
+                    { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+                ]
+            }]}),
+            &mut facts,
+        );
+        adapter.present(&facts, &[]).models.expect("models")
+    };
+    let scopes: Vec<_> = models("cursor")
+        .into_iter()
+        .map(|row| row.quota_scopes)
+        .collect();
+    let pool = |name: &str| Some(vec![name.to_string()]);
+    assert_eq!(scopes, vec![pool("Auto"), pool("Auto"), pool("API")]);
+    // Other ACP harnesses have no pools.
+    assert!(models("kimi").iter().all(|row| row.quota_scopes.is_none()));
+}
+
+#[test]
+fn cursor_marks_the_model_its_session_started_on_as_the_default() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts::default();
+    let report = |current: &str| {
+        serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": current,
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]})
+    };
+    adapter.observe_acp(&report("default[]"), &mut facts);
+    // A routed or preferred model switches the session; the default stays the one it started on.
+    adapter.observe_acp(&report("claude-4.5-sonnet"), &mut facts);
+    let defaults: Vec<_> = adapter
+        .present(&facts, &[])
+        .models
+        .expect("models")
+        .into_iter()
+        .map(|row| (row.id, row.is_default))
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![
+            ("default[]".to_string(), Some(true)),
+            ("claude-4.5-sonnet".to_string(), None)
+        ]
+    );
+}
+
+#[test]
 fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
     let mut facts = AgentPresentationFacts::default();
@@ -1455,4 +1515,26 @@ fn signed_out_start_failure_is_one_hub_keeps() {
         "error_during_execution: API Error: 529 overloaded"
     )
     .is_none());
+}
+
+#[test]
+fn a_resumed_cursor_session_marks_no_default() {
+    // A loaded session first reports the model it last ran, not the runtime's default.
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts {
+        session_resumed: true,
+        ..AgentPresentationFacts::default()
+    };
+    adapter.observe_acp(
+        &serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": "claude-4.5-sonnet",
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]}),
+        &mut facts,
+    );
+    let models = adapter.present(&facts, &[]).models.expect("models");
+    assert!(models.iter().all(|row| row.is_default.is_none()));
 }

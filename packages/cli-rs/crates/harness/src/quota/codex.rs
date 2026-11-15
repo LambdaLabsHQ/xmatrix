@@ -289,6 +289,7 @@ fn codex_wham_window_quota(window: &serde_json::Map<String, Value>) -> Option<Ll
         remaining: None,
         percent: normalized_quota_percent(Some(percent), None, None),
         reset_at: first_reset_at(window, &["reset_at", "resetAt", "resets_at", "resetsAt"]),
+        scope: None,
     })
 }
 
