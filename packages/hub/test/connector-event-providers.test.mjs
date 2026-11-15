@@ -240,24 +240,7 @@ test("ingress delivers once to a Channel subscribed to both the source and *", a
   assert.deepEqual(appended.sort(), ["a", "b"]);
 });
 
-test("connector events fire page Automations whose event trigger concerns them", async () => {
-  const { connectorTriggerMatches } = await import("../src/automation-triggers.ts");
-  const { automationTriggersFrom } = await import("../../protocol/src/authority-foundation.ts");
-  const event = { provider: "sentry", source: "web", feature: "issue.created" };
-  const [any, web, regressed] = automationTriggersFrom([
-    { kind: "event", provider: "sentry" },
-    { kind: "event", provider: "Sentry", source: "Web", feature: "issue.created" },
-    { kind: "event", provider: "sentry", source: "web", feature: "issue.regressed" },
-  ]);
-  assert.deepEqual(any, { kind: "event", provider: "sentry", source: "*" });
-  assert.ok(connectorTriggerMatches(any, event));
-  assert.ok(connectorTriggerMatches(web, event));
-  assert.ok(!connectorTriggerMatches(regressed, event));
-  assert.ok(!connectorTriggerMatches({ kind: "event", provider: "linear", source: "*" }, event));
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "github" }]), /delivers events/u);
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "sentry", feature: "nope" }]), /Sentry events are/u);
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "gitlab", source: "not a path" }]), /source/u);
-
+test("a connector delivery hands its event to the Space's programs", async () => {
   const fired = [];
   await handleConnectorDelivery({ env: {},
     request: new Request("https://hub.test/x?source=deploys", { method: "POST", body: "{\"title\":\"hi\"}",
@@ -267,7 +250,7 @@ test("connector events fire page Automations whose event trigger concerns them",
       values: { ingressKey: "k" } }) }),
     apps: () => ({ connectorEventRoutes: async () => [] }),
     append: async () => new Response("{}"),
-    events: async (_env, input) => { fired.push(input); return 1; },
+    events: async (_env, input) => { fired.push(input); },
   });
   assert.equal(fired.length, 1);
   assert.equal(fired[0].spaceId, "s");

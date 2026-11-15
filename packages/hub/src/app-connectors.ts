@@ -599,8 +599,7 @@ export function githubConnectionHasInstallation(
 
 /**
  * The installation of this Space's GitHub connection that covers one
- * repository. A page's Automation triggered by that repository's events
- * records it, so only events from an installation the Space connected fire it.
+ * repository; refused when the Space has not connected that installation.
  */
 export async function githubConnectionInstallationFor(env: AppConnectorEnv,
   connection: Pick<AppConnectorConnectionView, "metadata">, owner: string, repo: string): Promise<string> {
@@ -609,24 +608,6 @@ export async function githubConnectionInstallationFor(env: AppConnectorEnv,
     throw new Error("github_installation_not_linked_to_space");
   }
   return installationId;
-}
-
-/** The paths a pull request changed (the first 300), read with one installation's token. */
-export async function githubPullRequestPaths(env: AppConnectorEnv, installationId: string, owner: string,
-  repo: string, number: number): Promise<string[]> {
-  const auth = await githubInstallationAuthForId(env, installationId, { repositories: [repo] });
-  const paths: string[] = [];
-  for (let page = 1; page <= 3; page++) {
-    const files = await fetchGitHubJson(env, `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls/${
-      number}/files?per_page=100&page=${page}`, auth.token);
-    if (!Array.isArray(files)) break;
-    for (const file of files) {
-      const path = githubString(githubObject(file).filename);
-      if (path) paths.push(path);
-    }
-    if (files.length < 100) break;
-  }
-  return paths;
 }
 
 /** Where a commit's checks stand: still running, or every check finished and which of them failed. */

@@ -129,10 +129,10 @@ async function deliverSentryJob(env: Env, job: SentryEventJob, dependencies: Sen
       providerId: "sentry", appClientId: job.appClientId, installationId: job.installationId,
       credentialVersion: fresh.credentialVersion, grantGeneration: job.grantGeneration });
     progress.stage = "binding";
-    const automationGrant = await current();
-    if (!automationGrant) return false;
-    if (automationGrant.credentialVersion !== resolved.version) throw new Error("Sentry credentials changed before Automation delivery");
-    // Failure remains durable retry work; already committed Channel/Automation ids make repeats safe.
+    const eventGrant = await current();
+    if (!eventGrant) return false;
+    if (eventGrant.credentialVersion !== resolved.version) throw new Error("Sentry credentials changed before event delivery");
+    // Failure remains durable retry work; already committed ids make repeats safe.
     progress.stage = "automation";
     await dependencies.events(env, { spaceId: job.spaceId, provider: "sentry", event });
   }

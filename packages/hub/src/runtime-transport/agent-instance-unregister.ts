@@ -1,5 +1,3 @@
-import { automationRunIdentity } from "@xmatrix/protocol";
-
 function nonemptyString(value: unknown): boolean {
   return typeof value === "string" && value.trim() !== "";
 }
@@ -12,9 +10,5 @@ function nonemptyString(value: unknown): boolean {
 export function agentInstanceUnregisterIsTerminal(
   runMetadata: Readonly<Record<string, unknown>>,
 ): boolean {
-  const automation = automationRunIdentity(runMetadata);
-  return !(
-    (automation.automationId !== undefined && automation.automationOccurrenceId !== undefined) ||
-    nonemptyString(runMetadata.spawnControlId)
-  );
+  return !nonemptyString(runMetadata.spawnControlId);
 }

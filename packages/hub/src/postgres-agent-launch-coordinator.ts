@@ -11,7 +11,7 @@ import { dispatchProductMessagePostCommit } from "./product-message-post-commit"
 import { ControlError, reconcileRegistrationPreparationCancellations } from "@xmatrix/db";
 import { cleanAgentRuntimeMessageSource, sha256Hex, TERMINAL_RUN_STATUS_SQL } from "@xmatrix/protocol";
 import { withInitialMessageSource, PostgresChannelSpaceDirectory, PostgresEntitySpaceDirectory, type AuthorityDatabase,
-  type EntitySpaceRouteMutation, CHANNEL_AUTOMATION_WAKE_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL,
+  type EntitySpaceRouteMutation, FIRST_MESSAGE_SUMMON_DUE_AT_SQL,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, NORN_CHANNEL_DUE_SQL, NORN_PROGRAM_OPEN_SQL } from "@xmatrix/db";
 import type { QueryResultRow } from "pg";
 
@@ -20,15 +20,12 @@ import { isRecoverableLaunchFailure } from "./live-run-admission";
 import { recordAgentLaunchCoordinator } from "./postgres-coordination-observability";
 import { machineDaemonCommand, machineRepository } from "./machines";
 import type { Env } from "./types";
-import { channelAutomationEnabled, runChannelAutomation } from "./channel-automation-work";
 import type { ScheduledStep, StepDue } from "./postgres-agent-launch-schedule";
 
 /** What one coordinator pass runs; see `runChannel`. */
 export interface CoordinatorPassPlan {
   steps?: ReadonlySet<ScheduledStep>;
   includeParked: boolean;
-  /** The Automation due time the pass already read, so its step need not read it again. */
-  automationDue?: number;
 }
 
 const CLAIM_LIMIT = 100;
@@ -539,15 +536,13 @@ function dueTime(value: string | Date | null | undefined): number | undefined {
   return Number.isFinite(due) ? due : undefined;
 }
 
-/** One read of when each kind of this Channel's work is next due, Automation
- *  included when it runs, so a pass runs only the steps that have work. */
-export async function nextChannelStepDue(database: AuthorityDatabase, shardId: string, channelId: string,
-  options: { automation?: boolean } = {}): Promise<StepDue> {
+/** One read of when each kind of this Channel's work is next due, so a pass runs only the steps that have work. */
+export async function nextChannelStepDue(database: AuthorityDatabase, shardId: string, channelId: string): Promise<StepDue> {
   return database.transaction({ requestId: `agent-launch:next-due:${channelId}`,
     operation: "launch.coordinator.next-due" }, async (tx) => {
     const rows = await tx.query<Record<"launch_due" | "reborn_due" | "report_due" | "preparation_due" | "stop_due"
-      | "automation_due" | "retry_due" | "quota_due" | "idle_sleep_due" | "summon_due" | "norn_due", string | Date | null>>({ name: options.automation
-        ? "agent_launch_channel_step_due_automation_v6" : "agent_launch_channel_step_due_v6",
+      | "retry_due" | "quota_due" | "idle_sleep_due" | "summon_due" | "norn_due", string | Date | null>>({
+      name: "agent_launch_channel_step_due_v6",
       text: `SELECT LEAST(
         (SELECT MIN(${attemptAt("launch")}) FROM data.agent_launches launch
           WHERE launch.channel_id=$1 AND ${ACTIVE_LAUNCH_SQL} AND ${CLAIMABLE_LAUNCH_SQL.replace("$3", "$2")}),
@@ -583,8 +578,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
         (SELECT MIN(idle_sleep_at) FROM data.runs WHERE channel_id=$1 AND idle_sleep_at IS NOT NULL) AS idle_sleep_due,
         (SELECT MIN(${FIRST_MESSAGE_SUMMON_DUE_AT_SQL}) FROM data.first_message_launch_choices choice
           WHERE choice.channel_id=$1 AND ${FIRST_MESSAGE_SUMMON_PENDING_SQL}) AS summon_due,
-        ${NORN_CHANNEL_DUE_SQL} AS norn_due
-        ${options.automation ? `,(${CHANNEL_AUTOMATION_WAKE_SQL}) AS automation_due` : ""}`,
+        ${NORN_CHANNEL_DUE_SQL} AS norn_due`,
       values: [channelId, shardId], maxRows: 1 });
     const row = rows[0];
     const due: StepDue = {};
@@ -594,7 +588,7 @@ export async function nextChannelStepDue(database: AuthorityDatabase, shardId: s
     };
     set("launch", row?.launch_due); set("reborn", row?.reborn_due); set("runTerminal", row?.report_due);
     set("registrationPreparation", row?.preparation_due); set("registrationStop", row?.stop_due);
-    set("automation", row?.automation_due); set("turnRetry", row?.retry_due); set("idleSleep", row?.idle_sleep_due);
+    set("turnRetry", row?.retry_due); set("idleSleep", row?.idle_sleep_due);
     set("firstMessageSummon", row?.summon_due);
     set("quotaRetry", row?.quota_due); set("norn", row?.norn_due);
     return due;
@@ -615,9 +609,7 @@ export class RelayPostgresAgentLaunchCoordinatorService {
   private readonly located = new Map<string, { shardId: string; until: number }>();
 
   constructor(private readonly env: AgentLaunchCoordinatorEnv,
-    private readonly stepDeadlineMs = RECONCILE_STEP_DEADLINE_MS,
-    /** Keeps work that outlives a pass, such as post-commit message interpretation, alive. */
-    private readonly waitUntil: (task: Promise<unknown>) => void = (task) => { void task; }) {}
+    private readonly stepDeadlineMs = RECONCILE_STEP_DEADLINE_MS) {}
 
   enabled(): boolean {
     return true;
@@ -673,8 +665,8 @@ export class RelayPostgresAgentLaunchCoordinatorService {
     const { channelId } = route;
     const stepMs: Record<string, number> = {};
     const runs = (name: ScheduledStep) => !plan.steps || plan.steps.has(name);
-    const step = (name: CoordinatorStep | "automation" | "endedRun" | "runless",
-      kind: CoordinatorStep | "automation", work: () => Promise<unknown>) =>
+    const step = (name: CoordinatorStep | "endedRun" | "runless",
+      kind: CoordinatorStep, work: () => Promise<unknown>) =>
       runs(kind) ? this.boundedStep(`${name}:${channelId}`, work, stepMs) : Promise.resolve();
     await step("registrationPreparation", "registrationPreparation", () => reconcileRegistrationPreparationCancellations(
       shard.database, fleet.directoryDatabase, channelId));
@@ -694,9 +686,6 @@ export class RelayPostgresAgentLaunchCoordinatorService {
     await step("reborn", "reborn", () => reconcileReborn(shard.database, shard.shardId, this.env, fleet.directoryDatabase, channelId));
     await step("endedRun", "launch", () => reconcileEndedRunLaunches(shard.database, shard.shardId, channelId));
     await step("runless", "launch", () => reconcileRunlessLaunches(shard.database, shard.shardId, channelId));
-    await step("automation", "automation", () => runChannelAutomation(this.env as Env,
-      { shard: shard.database, directory: fleet.directoryDatabase }, channelId,
-      this.waitUntil, new Date(), plan.automationDue));
     const claimed = runs("launch")
       ? await this.claimAndPublish({ channelId, shardId: shard.shardId, launchIds: [] }) : 0;
     // A pass settles launches, reborns, stops and first-message choices: the
@@ -732,8 +721,7 @@ export class RelayPostgresAgentLaunchCoordinatorService {
     if (!this.enabled()) return {};
     const fleet = this.fleet();
     const shard = await this.shardFor(fleet, target);
-    return nextChannelStepDue(shard.database, shard.shardId, target.channelId,
-      { automation: channelAutomationEnabled(this.env as Env) });
+    return nextChannelStepDue(shard.database, shard.shardId, target.channelId);
   }
 
   private async shardFor(fleet: ReturnType<RelayPostgresAgentLaunchCoordinatorService["fleet"]>,

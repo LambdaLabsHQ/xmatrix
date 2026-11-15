@@ -18,7 +18,6 @@ for the local Workerd connection:
 node scripts/run-auto-routing-repro.mjs --lifecycle-connect-retry
 node scripts/run-auto-routing-repro.mjs --lifecycle-terminal
 node scripts/run-auto-routing-repro.mjs --lifecycle-start-failure
-node scripts/run-auto-routing-repro.mjs --lifecycle-scheduled
 node scripts/run-auto-routing-repro.mjs --lifecycle-workspace
 node scripts/run-auto-routing-repro.mjs --hub-suite
 ```
@@ -27,11 +26,6 @@ These cross the real tagged launch, signed Run credentials and daemon WebSocket
 protocol, but use a transport double rather than a child process. The terminal check retains the live
 socket shutdown and presence-retirement assertions, including the case where
 Agent unregister never arrives.
-The scheduled-message check uses the PostgreSQL scheduler and its real alarm
-coordinator, then requires a leased daemon spawn without a lifetime flag and with the
-same canonical source message ID as the delivered request. Its transport double
-reports a startup failure for cleanup; actual child execution and once exit are
-not inferred from this test.
 The workspace checks retain cross-member discovery, private-field redaction and
 outsider denial, then launch through tagged Auto from both Human HTTP messages
 and an authenticated Agent WebSocket publication. PostgreSQL's opaque invite
@@ -59,15 +53,6 @@ batch's test descendants. The suite-owned PostgreSQL process has no such marker
 and survives between batches; ordinary Actions tracking is not changed. Missing
 batch scope fails closed instead of reclaiming all current-job descendants.
 
-To isolate the existing Channel Catalog/message verification, Focus Auto,
-Focus-starting convergence and scheduled-timeout PostgreSQL integration files:
-
-```sh
-node scripts/run-auto-routing-repro.mjs --hub-postgres-integrations
-```
-
-This mode uses the same fresh migrated cluster and requires every selected test
-to run; it does not skip failures or reuse an external database.
 The message concurrency canary uses the current sequence-reservation authority
 before appending, with one checked-out session per message. Its query budget is
 three reservation statements plus four append statements (the original three

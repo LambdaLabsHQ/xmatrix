@@ -116,7 +116,7 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
       // One Linear delivery serves every Space that connected the organization;
       // each takes only what its own grant reads (private teams stay private),
       // and only while that grant is current: a Connect since the read is a
-      // different grant, so routes, the final append and Automations are
+      // different grant, so routes, the final append and the programs it reaches are
       // fenced to the credential version that read it.
       const proof = provider.id === "linear" ? await visible(env, connection.spaceId, event) : undefined;
       if (provider.id === "linear" && !proof) continue;
@@ -131,7 +131,7 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
       // Reauthorization can change the workspace between the first lookup and dispatch.
       if (dependencies.events && await current()) {
         await dependencies.events(env, { spaceId: connection.spaceId, provider: provider.id, event })
-          .catch(() => console.error("Connector Automation triggers failed", provider.id));
+          .catch(() => console.error("Connector event did not reach its programs", provider.id));
       }
     }
   }
@@ -168,9 +168,9 @@ export async function handleConnectorDelivery(input: {
   let delivered = 0;
   for (const event of result.events.slice(0, MAX_EVENTS_PER_DELIVERY)) {
     delivered += await deliverEvent(env, apps, dependencies.append, provider.id, resolved.connectionId, event);
-    /* The Norn programs that wait for this event and the page Automations it fires (§3.4); a failure must not lose the Channel delivery. */
+    /* The Norn programs that wait for this event; a failure must not lose the Channel delivery. */
     await dependencies.events?.(env, { spaceId: resolved.spaceId, provider: provider.id, event })
-      .catch((error: unknown) => console.error("Connector Automation triggers failed",
+      .catch((error: unknown) => console.error("Connector event did not reach its programs",
         error instanceof Error ? error.message : "unknown"));
   }
   return Response.json({ ok: true, events: result.events.length, delivered });
@@ -250,7 +250,7 @@ export function currentConnectorAppend(append: typeof dispatchProductMessageAppe
   return async (...args) => await current() ? append(...args) : new Response(null, { status: 503 });
 }
 
-/** Both app endpoints share primary-grant fences, durable append and Automation ordering. */
+/** Both app endpoints share primary-grant fences, durable append and event ordering. */
 export async function deliverConnectorRoom(env: Env, rooms: Pick<PostgresTeamsRoomRepository, "route" | "current">,
   input: Parameters<PostgresTeamsRoomRepository["route"]>[0], event: ConnectorEvent,
   scope: { provider: "teams" | "googlechat"; appIdentity: string },

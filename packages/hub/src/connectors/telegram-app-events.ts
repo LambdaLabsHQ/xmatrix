@@ -48,7 +48,7 @@ export function telegramAppInteraction(rawBody: string, botId: string, now = Dat
   if (from.is_bot !== false || !Number.isSafeInteger(from.id) || Number(from.id) <= 0 || message.sender_chat ||
       !Number.isSafeInteger(message.message_id) || Number(message.message_id) <= 0 || typeof message.text !== "string") return undefined;
   const body = message.text;
-  // Even malformed, copied or wrapped private challenges are never Channel messages or Automation content.
+  // Even malformed, copied or wrapped private challenges are never Channel messages or program content.
   if (/\/xmatrix_link(?:@[A-Za-z0-9_]+)?\b/iu.test(body)) {
     const link = /^\/xmatrix_link@([A-Za-z][A-Za-z0-9_]{4,31})\s+([A-Za-z0-9_-]{32})$/u.exec(body.trim());
     if (!link) return undefined;

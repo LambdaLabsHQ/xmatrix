@@ -1,6 +1,5 @@
 import { githubRepositoryDelegated } from "./app-connectors";
 import { findAppConnection } from "./apps";
-import { fireConnectorAutomationTriggers, fireGitHubAutomationTriggers } from "./automation-triggers";
 import { record, text } from "./github-subscription-domain";
 import { occurNornEvent } from "./norn-events";
 import { appStream, githubStream } from "./norn-host";
@@ -10,14 +9,13 @@ import type { Env } from "./types";
  * Events arrive from outside the Hub here: a pull request merged into a
  * branch, a workflow failing on it, a connected app's event. Each reaches the
  * Norn programs that wait on a matching stream
- * (docs/architecture/norn-host.md, "Events from outside") and the page
- * Automations it fires (automation-triggers.ts). A GitHub event is heard only
- * in a Space whose GitHub connection still includes the installation it came
- * from; a connector event only in the Space of the connection its ingress
- * authenticated it to.
+ * (docs/architecture/norn-host.md, "Events from outside"). A GitHub event is
+ * heard only in a Space whose GitHub connection still includes the
+ * installation it came from; a connector event only in the Space of the
+ * connection its ingress authenticated it to.
  */
 
-export interface GitHubOutsideEvent {
+interface GitHubOutsideEvent {
   id: string;
   kind: "merged" | "ci-failed";
   summary: string;
@@ -31,7 +29,7 @@ export interface GitHubOutsideEvent {
 }
 
 /** A connector's event for one connection's Space; `authorizedUserId` keeps it to that member's own work. */
-export interface ConnectorOutsideEvent {
+interface ConnectorOutsideEvent {
   spaceId: string;
   provider: string;
   authorizedUserId?: string;
@@ -39,7 +37,7 @@ export interface ConnectorOutsideEvent {
 }
 
 /** Whether a member's Space is connected to what an event came from. */
-export type SpaceConnected = (spaceId: string, userId: string) => Promise<boolean>;
+type SpaceConnected = (spaceId: string, userId: string) => Promise<boolean>;
 
 /** The outside event a GitHub webhook is, if any. */
 export function githubOutsideEvent(event: string, payload: Record<string, unknown>): GitHubOutsideEvent | undefined {
@@ -93,28 +91,21 @@ function githubSpaceConnected(env: Env, event: GitHubOutsideEvent): SpaceConnect
 const inWords = (event: { summary: string; url?: string }): string =>
   event.url ? `${event.summary} (${event.url})` : event.summary;
 
-/** A GitHub webhook arrived; returns how many page Automations it fired. */
-export async function githubEventArrived(env: Env, event: string, payload: Record<string, unknown>): Promise<number> {
+/** A GitHub webhook arrived. */
+export async function githubEventArrived(env: Env, event: string, payload: Record<string, unknown>): Promise<void> {
   const arrived = githubOutsideEvent(event, payload);
-  if (!arrived) return 0;
-  const spaceConnected = githubSpaceConnected(env, arrived);
   // A program's GitHub streams are about a repository's default branch.
-  if (arrived.branch === arrived.defaultBranch) {
-    await occurNornEvent(env, { what: inWords(arrived), matches: githubStream(arrived.kind, arrived.repository),
-      allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
-  }
-  return fireGitHubAutomationTriggers(env, arrived, spaceConnected);
+  if (!arrived || arrived.branch !== arrived.defaultBranch) return;
+  const spaceConnected = githubSpaceConnected(env, arrived);
+  await occurNornEvent(env, { what: inWords(arrived), matches: githubStream(arrived.kind, arrived.repository),
+    allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
 }
 
-/**
- * A connector delivered an event for a connection, which its ingress already
- * authenticated the delivery to; returns how many page Automations it fired.
- */
-export async function connectorEventArrived(env: Env, input: ConnectorOutsideEvent): Promise<number> {
+/** A connector delivered an event for a connection, which its ingress already authenticated the delivery to. */
+export async function connectorEventArrived(env: Env, input: ConnectorOutsideEvent): Promise<void> {
   // Mail is one member's: an event that names no member is heard by nobody.
-  if (input.provider === "gmail" && !input.authorizedUserId) return 0;
+  if (input.provider === "gmail" && !input.authorizedUserId) return;
   await occurNornEvent(env, { spaceId: input.spaceId, what: inWords(input.event),
     matches: appStream(input.provider, input.event.feature),
     allowed: async (program) => !input.authorizedUserId || program.authorityUserId === input.authorizedUserId });
-  return fireConnectorAutomationTriggers(env, input);
 }

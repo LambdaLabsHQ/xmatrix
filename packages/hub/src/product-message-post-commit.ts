@@ -205,8 +205,8 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     await notice({ ...input, sourceMessageId: input.messageId, body: RETIRED_AGENT_LAUNCH_NOTICE });
     return true;
   }
-  // `@auto`, a harness shout or an Instance address from any author (Human,
-  // Agent, Automation), or a Human's picker selections: every launch is the
+  // `@auto`, a harness shout or an Instance address from any author (Human
+  // or Agent), or a Human's picker selections: every launch is the
   // registration dispatch, which records a refusal where the message shows it.
   const directMention = filterOperationalMentions(input.body, parseHarnessCapabilityMentions(input.body)).length > 0 ||
     parseAutoLaunchMentions(input.body).some(mention => isAutoLaunchSummonText(mention.text)) ||

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  MAX_STALLED_BACKOFF_MS, MIN_RECHECK_MS, alarmAt, effectiveDue, mergeWake, nextStalls, stepsToRun,
+  MAX_STALLED_BACKOFF_MS, MIN_RECHECK_MS, alarmAt, effectiveDue, isScheduledStep, mergeWake, nextStalls, stepsToRun,
+  storedWake,
 } from "../src/postgres-agent-launch-schedule.ts";
 
 const now = 1_800_000_000_000;
@@ -58,4 +59,22 @@ test("wakes accumulate; a wake that names nothing wakes every kind", () => {
   assert.deepEqual(mergeWake({ all: false, named: ["launch"] }, ["reborn", "launch"]), { all: false, named: ["launch", "reborn"] });
   assert.deepEqual(mergeWake({ all: false, named: ["launch"] }, undefined), { all: true });
   assert.deepEqual(mergeWake({ all: true }, ["launch"]), { all: true });
+});
+
+// A Channel's storage outlives the Hub that wrote it: a Hub that timed Automations left wakes, due
+// times and stalls naming "automation", a kind this coordinator does not have.
+test("a kind the coordinator does not have is never run or timed, and a wake naming one wakes every kind", () => {
+  assert.equal(isScheduledStep("automation"), false);
+  assert.equal(["launch", "automation"].every(isScheduledStep), false, "the wake route then names nothing");
+  assert.deepEqual(storedWake({ all: false, named: ["launch", "automation"] }), { all: true });
+  assert.deepEqual(storedWake({ all: false, named: ["launch"] }), { all: false, named: ["launch"] });
+  assert.equal(storedWake(undefined), undefined);
+
+  const stored = { automation: now - 1, launch: now + 60_000 };
+  assert.deepEqual([...stepsToRun(stored, new Set(), now)], []);
+  const stalls = nextStalls({ now, due: stored, stalls: { automation: { count: 3, retryAt: now } }, ran: undefined });
+  assert.deepEqual(stalls, {});
+  const effective = effectiveDue(stored, { automation: { count: 3, retryAt: now + 5_000 } });
+  assert.deepEqual(effective, { launch: now + 60_000 });
+  assert.equal(alarmAt(effective, now), now + 60_000);
 });

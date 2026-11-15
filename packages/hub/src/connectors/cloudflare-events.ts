@@ -6,7 +6,7 @@ import { connectorEvent, excerpt, oneLine, record, sourceToken, text } from "./e
  * (https://developers.cloudflare.com/notifications/reference/webhook-payload-schema/).
  * `cf-webhook-auth` echoes the destination secret the Hub registered. The
  * source is the notification's alert type; the feature is whether the alert
- * fired or resolved, so a Channel or Automation can follow either edge. The
+ * fired or resolved, so a Channel or program can follow either edge. The
  * destination's test message carries neither and reaches `*` subscriptions only.
  * An alert from an account other than the connection's default carries the
  * account in its source, so each account's subscriptions stay apart.

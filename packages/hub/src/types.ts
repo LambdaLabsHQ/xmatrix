@@ -23,7 +23,6 @@ export interface Env {
   /** Per-Channel sequence reservation/confirmation only; never stores message facts. */
   RELAY_POSTGRES_CHANNEL_COORDINATOR: DurableObjectNamespace;
   /** One global alarm/lease trigger for PostgreSQL billing notices; stores no product facts. */
-  /** One global clock for PostgreSQL Automations; stores no product facts. */
   /** Global fact-free publisher for durable PostgreSQL Agent Launches. */
   /** One Agent Launch coordinator per Channel, addressed by Channel id. */
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
@@ -91,10 +90,6 @@ export interface Env {
   AUTH_AUTHORITY?: "d1" | "postgres";
   /** Enrollment requires an owner-chosen name; clients cannot override this gate. */
   MACHINE_NAME_REQUIRED?: string;
-  /** Durable CORE_ACTIVE Automation occurrence execution. Defaults off. */
-  RELAY_AUTOMATION_EXECUTION_ENABLED?: string;
-  /** Legacy/default deadline for schedules without an Automation-level execution timeout. */
-  RELAY_AUTOMATION_RUN_TIMEOUT_MS?: string;
   /**
    * Transitional admission for the last pre-identity client generation.
    * Only requests with no compatibility fields at all may enter this lane;
@@ -203,8 +198,6 @@ export interface Env {
    */
   XMATRIX_MOCK_AUTH_TOKEN?: string;
   XMATRIX_RUNTIME_LOCATION_HINT?: string;
-  /** Test-only cadence seed; never honored without mock auth. */
-  XMATRIX_MOCK_SCHEDULE_DELAY_MS?: string;
   XMATRIX_MOCK_AUTH_USERS?: string;
   XMATRIX_MOCK_AUTH_USER_ID?: string;
   XMATRIX_MOCK_AUTH_EMAIL?: string;

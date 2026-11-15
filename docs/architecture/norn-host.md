@@ -12,8 +12,8 @@ checker, evaluator and ledger.
 
 A message whose Markdown has one top-level fenced block tagged `norn run` is
 a program. A block tagged `norn` is only shown, and so is one inside a quote.
-The message is the program's identity: seen again, it starts nothing. People,
-Agents and Automations start a program the same way, by sending the message.
+The message is the program's identity: seen again, it starts nothing. People
+and Agents start a program the same way, by sending the message.
 
 The Hub checks the program when the message is committed. A program that does
 not check starts nothing, and a reply under the message names the line and
@@ -34,9 +34,8 @@ the Page editor both read, so no block is drawn as a program the Hub passes
 over: every block tagged `norn run` is listed, and one that runs nothing
 carries why.
 
-A saved revision is synced like the Page's schedule lines
-(`syncPagePrograms`, from the Page session's commit, a new Page, and a
-restored revision), as whoever wrote it:
+A saved revision is synced (`syncPagePrograms`, from the Page session's
+commit, a new Page, and a restored revision), as whoever wrote it:
 
 - A new block that checks starts its program.
 - A changed block revises its running program: the same ledger is evaluated
@@ -323,9 +322,8 @@ program waits on or listens to (`norn_programs.waits_json`, expand migration
 connector's ingress. It is recorded as an occurrence in the ledger of every
 running program that waits on a matching stream, and the program is
 evaluated at once (`norn-events.ts`). The value is the event in words, with
-its link. A program hears an event only under the rule an Automation does:
-its authority is a member who may act, and the Space's connection still
-covers the event's source. A program listens while a round of its loop is
+its link. A program hears an event only when its authority is a member who
+may act and the Space's connection still covers the event's source. A program listens while a round of its loop is
 out, too: the streams its loops take from are stored with the ones it waits
 on (`pass.listening`). Events that arrive during a round are kept in the
 ledger and are one more round when that one is over, with the latest event;
@@ -441,5 +439,4 @@ by itself from there; the Agent that stayed takes what they say next.
 - Facts from outside that hold once (a given pull request merged, a release
   that contains it).
 - A preview of what an edit to a Page's program would change before it is saved.
-- Moving `--wait`, cards, Automations and pull request subscriptions onto
-  the ledger.
+- Moving `--wait`, cards and pull request subscriptions onto the ledger.
