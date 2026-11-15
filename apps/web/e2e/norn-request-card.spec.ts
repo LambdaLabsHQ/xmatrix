@@ -62,6 +62,38 @@ test("an option that takes words is completed before it is sent, and a request c
     .toEqual([{ outcome: "answered", text: "High(\"the migration is not rehearsed\")" }]);
 });
 
+test("the person asked delegates the request from its card to an Agent here, and takes it back while it is theirs", async ({ page }) => {
+  const asked = await openCard(page, card(request()));
+  await fixtureJson(page, "delegate", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/delegate`,
+    { status: "running" }, { method: "POST" });
+  await fixtureJson(page, "reclaim", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/reclaim`,
+    { status: "running" }, { method: "POST" });
+  // The Hub says whether it is still open and theirs to take back; the card offers it only then.
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@claude:2", text: "Ship release 4.2 to everyone?", state: "open", reply: null, yoursToTakeBack: true } });
+  await asked.getByRole("button", { name: "Delegate…" }).click({ timeout: 20_000 });
+  await asked.getByLabel("Who answers it for you").fill("claude:2");
+  await asked.getByLabel("Why it is theirs to answer").fill("You read the release notes");
+  await page.screenshot({ path: test.info().outputPath("norn-request-delegate.png") });
+  await asked.getByRole("button", { name: "Delegate", exact: true }).click();
+  await expect(asked).toContainText("Delegated to claude:2: You read the release notes");
+  await expect(asked).toHaveAttribute("data-ask-card", "settled");
+  await expect.poll(() => fixtureRequestBodies(page, "delegate")).toEqual([{ to: "@claude:2", reason: "You read the release notes" }]);
+  await asked.getByRole("button", { name: "Take back" }).click();
+  await expect(asked).toContainText("You took it back");
+  await expect.poll(() => fixtureRequestBodies(page, "reclaim")).toEqual([{}]);
+});
+
+test("a request delegated to the reader says by whom, and declining it gives it back", async ({ page }) => {
+  const asked = await openCard(page, card(request({ delegatedBy: "@Daniel" })));
+  await expect(asked).toContainText("Daniel delegated this to you: you answer it for them.", { timeout: 20_000 });
+  // A delegate answers it or gives it back; passing it on again is not theirs to do.
+  await expect(asked.getByRole("button", { name: "Delegate…" })).toHaveCount(0);
+  await asked.getByRole("button", { name: "Give back" }).click();
+  await expect(asked).toContainText("You gave it back to Daniel: Given back");
+  await expect.poll(() => fixtureRequestBodies(page, "answer")).toEqual([{ outcome: "refused", text: "Given back" }]);
+});
+
 test("everyone else reads whom it waits for, and afterwards how it ended", async ({ page }) => {
   const waiting = await openCard(page, card(request({ holder: "@Daniel", holderUserId: "someone-else" })));
   await expect(waiting).toContainText("Waiting for @Daniel", { timeout: 20_000 });

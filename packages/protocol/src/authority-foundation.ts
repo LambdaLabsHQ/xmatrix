@@ -226,6 +226,8 @@ export const HUB_ROUTES = {
   norn_requests: "/api/norn/requests",
   /** The Run that holds a Norn request answers it. */
   norn_request_answer: "/api/norn/requests/answer",
+  /** The Run that holds a Norn request delegates it to someone who answers it for them. */
+  norn_request_delegate: "/api/norn/requests/delegate",
   /** The Norn program a message carries, for whoever can read its conversation: how it stands and what it does next. */
   space_norn_program: (spaceId: string, programId: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
@@ -237,6 +239,12 @@ export const HUB_ROUTES = {
   /** The person a Norn request was delivered to answers it, from its card. */
   channel_norn_request_answer: (channelId: string, requestRef: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
+  /** The person a Norn request was delivered to delegates it from its card, to someone who answers it for them. */
+  channel_norn_request_delegate: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/delegate`,
+  /** The person who delegated a Norn request takes it back while it is open. */
+  channel_norn_request_reclaim: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/reclaim`,
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,
@@ -632,6 +640,10 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
   channel_norn_request_answer: (channelId: string, requestRef: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
+  channel_norn_request_delegate: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/delegate`,
+  channel_norn_request_reclaim: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/reclaim`,
   context_feed: "/api/xmatrix/context/feed",
   assistant_memory: "/api/xmatrix/assistant-memory",
   shared_memory: "/api/xmatrix/shared-memory",

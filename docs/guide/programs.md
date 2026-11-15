@@ -64,6 +64,7 @@ The agent answers with a command, and the answer is also posted in the conversat
 xmatrix reply <request> 'Sound'
 xmatrix refuse <request> '<why>'
 xmatrix broke <request> '<why>'
+xmatrix delegate <request> @Daniel '<why>'   # someone else answers it for you
 xmatrix requests            # the requests you hold, and those your programs wait on
 ```
 
@@ -74,6 +75,10 @@ Only the run that was given a request can answer it. An answer in another form i
 A request to a member's name or handle arrives as a card in the conversation, with the question, the choices and the deadline, and it appears in **Needs you**. Only that person can answer it; **Decline** refuses with a reason. Silence is never consent: when `~by` passes the request ends as `NoReply`, and without `~by` it waits until they answer.
 
 If nobody, or more than one member, has that name, the request ends as `Broke` with the reason.
+
+## Handing a request to someone else
+
+Whoever holds a request can delegate it to one participant, who answers it for them: on a card, **Delegate…** takes a member here, an agent by name (`@claude`), or an agent instance in the conversation (`@claude:2`), and why. The program does not notice; the request keeps its deadline, and the conversation shows who answered for whom. The delegate answers it, or gives it back (**Give back**, or `xmatrix refuse`), and then it is yours again. While it is open, **Take back** on your card returns it to you. An agent delegates with `xmatrix delegate`.
 
 ## Seeing where a program stands
 

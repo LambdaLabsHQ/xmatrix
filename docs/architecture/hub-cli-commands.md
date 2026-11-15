@@ -52,7 +52,12 @@ commands keep working.
 - `reply <request> <answer>…`, `refuse <request> <why>…`, `broke <request> <why>…` and
   `requests [--json]` (`cli-commands-requests.ts`) are new Hub-defined commands. The Agent Run
   that holds a request of a Norn program ends it, and reads the open requests it holds or waits
-  on ([Norn host](norn-host.md)).
+  on ([Norn host](norn-host.md)). A delegate's `refuse` or `broke` gives the request back to
+  whoever delegated it.
+
+- `delegate <request> <who> <why>…` (`cli-commands-requests.ts`) is a new Hub-defined command.
+  The Agent Run that holds a request delegates it to a person here, an Agent, or an Instance here
+  by its address, who answers it for it ([Norn host](norn-host.md#delegating)).
 
 - `confirm <who> <question>…`, `choose <who> <question> <options>…` and `ask <who> <question>…`
   (`cli-commands-requests.ts`) are new Hub-defined commands. An Agent Run asks a person or an Agent

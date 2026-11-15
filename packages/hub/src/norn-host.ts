@@ -4,7 +4,8 @@ import { checkSource, elaborate, hostSources, readInterface, readLibrary, type F
 import { NORN_STD } from "./vendor/norn/std";
 import { parse } from "./vendor/norn/frontend/parser";
 import { compile, type Code } from "./vendor/norn/runtime/code";
-import { emptyLedger, evaluate, occur, settle, stop, take, type Ledger, type LedgerRequest, type Pass, type PassOptions, type Reply } from "./vendor/norn/runtime/ledger";
+import { delegate, emptyLedger, evaluate, occur, reclaim, settle, stop, take, type Delegation, type Ledger, type LedgerRequest, type Pass,
+  type PassOptions, type Reply } from "./vendor/norn/runtime/ledger";
 import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
 
 /**
@@ -83,7 +84,7 @@ export function checkNornProgram(source: string): Checked {
 }
 
 /** A holder that names an Agent this host starts: a harness by its name, or `@auto`. */
-const agentHolder = (holder: string): boolean =>
+export const agentHolder = (holder: string): boolean =>
   holder === "@auto" || (!holder.includes(":") && parseHarnessCapabilityMentions(holder).length === 1);
 /**
  * A holder that can only be a person: a name that is no harness and no
@@ -91,12 +92,16 @@ const agentHolder = (holder: string): boolean =>
  * the request is delivered: the conversation's people are read there.
  */
 export const personHolder = (holder: string): boolean => holder.startsWith("@") && !holder.includes(":") && !agentHolder(holder);
+/** An Agent Instance by its address in the conversation: `@claude:2`. */
+export const instanceHolder = (holder: string): boolean => /^@[^\s@:()]{1,80}:[1-9]\d{0,8}$/u.test(holder);
 /**
  * Whom this host can deliver a request to: a harness by its name or `@auto`,
  * each delivery starting a new Run of it, or a person by name. An Instance by
- * its address is not delivered to yet.
+ * its address only holds a request its holder delegated to it there: a
+ * program asks by name, and a new Run takes it.
  */
-const deliverable = (holder: string): boolean => agentHolder(holder) || personHolder(holder);
+const deliverable = (request: Pick<LedgerRequest, "holder" | "delegatedBy">): boolean =>
+  agentHolder(request.holder) || personHolder(request.holder) || (Boolean(request.delegatedBy) && instanceHolder(request.holder));
 
 const typeText = (form: Form): string => form.kind === "base" || form.kind === "named" ? form.name
   : form.kind === "list" ? `list<${typeText(form.element)}>` : form.kind === "tuple" ? `(${form.elements.map(typeText).join(", ")})` : "_";
@@ -156,6 +161,27 @@ function summonConditions(request: LedgerRequest): { words: string[]; refusal?: 
   return { words };
 }
 
+/** A participant's name as words: without the `@`, so that saying it summons and notifies nobody. */
+const named = (participant: string): string => participant.replace(/^@/u, "");
+/**
+ * How a holding came about, for its holder, when a participant made it
+ * (Norn spec §7): delegated to them to answer for someone, or given back to
+ * them by the one they delegated it to. What the participant wrote is quoted,
+ * so nothing in it summons or commands anyone.
+ */
+function delegationLines(request: Pick<LedgerRequest, "holder" | "delegatedBy">, delegation: Delegation | null,
+  reader: "agent" | "person"): string[] {
+  const words = delegation?.reason ? ["Their words:", fence(delegation.reason)] : [];
+  if (request.delegatedBy && delegation?.kind === "delegated" && delegation.to === request.holder) {
+    return ["", `${named(request.delegatedBy)} delegated this request to you: you answer it for them.`, ...words,
+      reader === "agent" ? `If you will not or cannot answer it, \`xmatrix refuse\` or \`xmatrix broke\` gives it back to ${named(request.delegatedBy)}; it does not end the request.`
+        : `Declining gives it back to ${named(request.delegatedBy)}.`];
+  }
+  if (!request.delegatedBy && delegation?.kind === "returned" && delegation.to === request.holder) {
+    return ["", `${named(delegation.from)}, to whom you delegated this request, gave it back: it is yours to answer again.`, ...words];
+  }
+  return [];
+}
 /**
  * The message that delivers a request to its holder. What the program wrote
  * is quoted as literal text, so nothing in it summons or commands anyone;
@@ -174,7 +200,9 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   /** An earlier holding of the request broke off: this holder goes on from what that one did. */
   handedOn?: boolean;
   /** A person takes part in the program, so the holder says in the conversation what it does. */
-  withPerson?: boolean } = {}): { body: string; answerFrom: number } {
+  withPerson?: boolean;
+  /** How this holding came about, when a participant made it: delegated to this holder, or given back to it. */
+  delegation?: Delegation | null } = {}): { body: string; answerFrom: number } {
   const [answer, ...types] = answerText(request).split("\n");
   const asked = [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
     // The reference in its own code span is what a person's client draws as the request itself.
@@ -183,6 +211,7 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
     ...(to.handedOn ? ["", "An earlier attempt at this request broke off before it answered. First read this conversation (`xmatrix channel history`) and the pages the request names for what that attempt already did, and go on from there: do not do again what is done."] : []),
+    ...delegationLines(request, to.delegation ?? null, "agent"),
     "", "The request is from a program. xMatrix posts your answer in this conversation under your name and gives it to the program.",
     // Agents that work for one another alone keep the conversation to their answers; where a person takes part, they follow the work here.
     to.withPerson ? "A person takes part in this program and reads this conversation: say here what you are doing, as you would on a task they gave you."
@@ -194,6 +223,8 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),
     `- \`xmatrix refuse ${requestRef} '<why>'\` when you will not do it.`,
     `- \`xmatrix broke ${requestRef} '<why>'\` when you tried and could not.`,
+    // A delegate answers or gives the request back; only the holder the program asked passes it on.
+    ...(request.delegatedBy ? [] : [`- \`xmatrix delegate ${requestRef} @name '<why>'\` when the whole request is someone else's to answer: a person here, or an Agent. They answer it for you.`]),
     "", `A turn that ends without one of these is recorded as failed.${request.by === null ? "" : ` The request closes at ${new Date(request.by).toISOString()}.`}`,
   ].join("\n");
   return { body: asked + answering, answerFrom: asked.length };
@@ -214,6 +245,8 @@ export interface NornRequestCard {
   asker: string | null;
   /** The answer taken when it closes unanswered, where the asker said so. */
   otherwise: string | null;
+  /** Who delegated the request to this person (`@Daniel`), who answers it for them; null when it was not delegated. */
+  delegatedBy: string | null;
 }
 /** Who asks and what silence means, as the program that makes the request says. */
 export interface NornAsking { asker: string | null; otherwise: string | null }
@@ -221,7 +254,7 @@ export const nornRequestCard = (request: LedgerRequest, requestRef: string, hold
   asking: NornAsking = { asker: null, otherwise: null }): NornRequestCard => ({
   ref: requestRef, verb: request.verb, holder: request.holder, holderUserId, text: request.text, about: request.about,
   context: request.context, options: (request.options ?? []).map(show),
-  by: request.by === null ? null : new Date(request.by).toISOString(), ...asking });
+  by: request.by === null ? null : new Date(request.by).toISOString(), ...asking, delegatedBy: request.delegatedBy ?? null });
 /**
  * Who asks a request and what silence means: the Agent that wrote the program,
  * by its address without the @, and for a question asked with a command
@@ -236,7 +269,8 @@ export function nornAsking(program: { authorMention: string | null; source: stri
  * card: the person's name first, so it tells them as a mention does. A person
  * is shown what is asked, never the request's reference; the card carries it.
  */
-export function nornPersonBody(request: LedgerRequest, asking: NornAsking = { asker: null, otherwise: null }): string {
+export function nornPersonBody(request: LedgerRequest, asking: NornAsking = { asker: null, otherwise: null },
+  delegation: Delegation | null = null): string {
   // What is asked comes first: a list of conversations shows the start of the message, and that is what its
   // reader needs. The first line is plain words; the rest of a longer question follows as the program wrote it.
   const [first = "", ...more] = request.text.split("\n");
@@ -244,6 +278,7 @@ export function nornPersonBody(request: LedgerRequest, asking: NornAsking = { as
     ...(more.join("").trim() ? ["", fence(request.text)] : []),
     ...(request.about === null ? [] : ["", "About:", fence(request.about)]),
     ...(request.context === null ? [] : ["", "Given:", fence(request.context)]),
+    ...delegationLines(request, delegation, "person"),
     "", `Answer on this card: ${answerText(request).split("\n")[0]}.${request.by === null ? ""
       : ` It closes at ${new Date(request.by).toISOString()}${asking.otherwise === null ? "" : `; without an answer, ${asking.otherwise}`}.`} ${
       asking.asker ?? "A program"} asks.`,
@@ -319,9 +354,14 @@ export const plainAnswer = (value: Value): string =>
 export const plainResult = (value: Value): string =>
   value.type === "variant" && value.name === "Answered" && value.args.length === 1 ? plainAnswer(value.args[0]!) : show(value);
 
-/** What a holder's own ending of a request reads as, in the message xMatrix posts under the holder's name. */
-export const nornAnswerBody = (outcome: "answered" | "refused" | "broke", words: string): string =>
-  outcome === "answered" ? words : `${outcome === "refused" ? "I will not do this" : "I could not do this"}: ${words}`;
+/**
+ * What a holder's own ending of a request reads as, in the message xMatrix
+ * posts under the holder's name. A delegate who refuses or fails gives the
+ * request back to whoever delegated it, and says so.
+ */
+export const nornAnswerBody = (outcome: "answered" | "refused" | "broke", words: string, returnedTo?: string): string =>
+  outcome === "answered" ? words : returnedTo ? `I gave this back to ${named(returnedTo)}: ${words}`
+    : `${outcome === "refused" ? "I will not do this" : "I could not do this"}: ${words}`;
 
 /** A program ended from outside, by whoever may stop it: nobody is to be told that it stopped by itself. */
 const ENDED_FROM_OUTSIDE = /^(?:Stopped in the conversation|Removed (?:from|with) its page)$/u;
@@ -372,8 +412,28 @@ export function nornPageEnd(program: { ended: Ledger["ended"]; requests: Record<
 const NORN_RECHECK_MS = 5 * 60_000;
 export interface NornPassResult {
   status: "running" | "completed" | "failed";
-  /** Why the answer this pass carried was not taken; absent when it settled its request. */
+  /** Why what this pass carried was not taken: an answer, a delegation, a taking back. Absent when it was. */
   refusal?: string;
+  /** A delegate refused or failed the request: it went back to this participant, who delegated it (Norn spec §7). */
+  returnedTo?: string;
+}
+/** What a call does to one request of the program, in the step that runs its pass. */
+export type NornAct =
+  /** Its holder ends it: an answer typed or given, a refusal, a failure. */
+  | { requestId: string; epoch: number; reply: Reply | { typed: string } }
+  /** Its holder delegates it to one participant, who answers it for them (Norn spec §7). */
+  | { requestId: string; epoch: number; delegateTo: string; reason?: string }
+  /** Whoever delegated it takes it back. */
+  | { requestId: string; reclaim: true };
+/**
+ * Why this host cannot take a delegation of `request` to `to`, before the
+ * ledger is asked: a participant it cannot deliver to, or a person for a
+ * request whose conditions only an Agent can meet.
+ */
+function delegationRefusal(request: LedgerRequest, to: string): string | undefined {
+  if (!agentHolder(to) && !personHolder(to) && !instanceHolder(to)) return `This host cannot deliver a request to ${to}`;
+  if (personHolder(to) && Object.keys(request.conditions ?? {}).length) return `${to} is a person: the request's conditions, such as ~repo, apply to an Agent`;
+  return undefined;
 }
 const reference = (): string => {
   const bytes = crypto.getRandomValues(new Uint8Array(10));
@@ -398,9 +458,9 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
     for (const request of Object.values(ledger.requests)) {
       if (request.reply !== null) continue;
       // One of a group takes the request for the group: the first this host can reach.
-      const taker = request.candidates?.find(deliverable);
+      const taker = request.candidates?.find(holder => deliverable({ holder, delegatedBy: null }));
       if (taker) take(ledger, request.id, taker, now);
-      const reason = !deliverable(request.holder) ? `This host cannot deliver a request to ${request.holder} yet`
+      const reason = !deliverable(request) ? `This host cannot deliver a request to ${request.holder} yet`
         : personHolder(request.holder) && Object.keys(request.conditions ?? {}).length ? `${request.holder} is a person: conditions such as ~repo apply to an Agent`
         : (personHolder(request.holder) ? undefined : summonConditions(request).refusal)
           ?? (utf8ByteLength(nornDelivery(request, reference()).body) > MAX_DELIVERY_BYTES ? "The request is too large to deliver in one message" : null);
@@ -417,14 +477,14 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
  * the requests nobody works on any more, then the program from the top.
  * Requests this host cannot deliver end at once, so the program reads why.
  */
-export function nornStep(answer?: { requestId: string; epoch: number; reply: Reply | { typed: string } },
+export function nornStep(act?: NornAct,
   /** An outside event the program waits for: the stream as the program named it, and what happened. */
   occurred?: { stream: unknown; what: string }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
     const ledger = state.ledger as Ledger;
     const now = Math.max(state.nowMs, ledger.startedAt);
     const checked = checkNornProgram(state.source);
-    let refusal: string | undefined, nextDue: number | null = null, taken = false;
+    let refusal: string | undefined, returnedTo: string | undefined, nextDue: number | null = null, taken = false;
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
     const said: { to: string; text: string }[] = [];
     let waits: unknown[] = [];
@@ -436,15 +496,26 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
     else if ("refusal" in checked) {
       return { write: { retryAtMs: now + NORN_RECHECK_MS }, result: { status: "running", refusal: `The program does not check on this build of the Hub yet:\n${checked.refusal}` } };
     } else {
-      const asked = answer ? ledger.requests[answer.requestId] : undefined;
-      if (answer && asked) {
-        const read = "typed" in answer.reply ? readNornAnswer(asked, answer.reply.typed) : undefined;
+      const asked = act ? ledger.requests[act.requestId] : undefined;
+      if (act && asked && "reply" in act) {
+        const read = "typed" in act.reply ? readNornAnswer(asked, act.reply.typed) : undefined;
         if (read && "refusal" in read) refusal = read.refusal;
         else {
-          const reply: Reply = read ? { tag: "Answered", value: read.value } : answer.reply as Reply;
-          taken = settle(ledger, asked.id, asked.holder, reply, now, answer.epoch);
-          if (!taken) refusal = ledger.evidence.at(-1)?.reason ?? "The answer was not taken";
+          const reply: Reply = read ? { tag: "Answered", value: read.value } : act.reply as Reply;
+          const told = ledger.delegations?.length ?? 0;
+          taken = settle(ledger, asked.id, asked.holder, reply, now, act.epoch);
+          // A delegate's refusal or failure ends nothing: the request went back to whoever delegated it.
+          returnedTo = (ledger.delegations ?? []).slice(told).find(entry => entry.kind === "returned")?.to;
+          if (returnedTo) taken = true;
+          else if (!taken) refusal = ledger.evidence.at(-1)?.reason ?? "The answer was not taken";
         }
+      } else if (act && asked && "delegateTo" in act) {
+        refusal = delegationRefusal(asked, act.delegateTo) ?? delegate(ledger, asked.id, asked.holder, act.delegateTo, now,
+          { epoch: act.epoch, ...(act.reason ? { reason: act.reason } : {}) }) ?? undefined;
+        taken = refusal === undefined;
+      } else if (act && asked) {
+        refusal = asked.delegatedBy ? reclaim(ledger, asked.id, asked.delegatedBy, now) ?? undefined : "The request is not delegated";
+        taken = refusal === undefined;
       }
       if (occurred) occur(ledger, occurred.stream as Value, text(occurred.what), now);
       for (const row of state.requests) {
@@ -477,16 +548,16 @@ export function nornStep(answer?: { requestId: string; epoch: number; reply: Rep
         }
       });
     }
-    if (answer && !taken && refusal === undefined) refusal = "The request has already ended";
+    if (act && !taken && refusal === undefined) refusal = "The request has already ended";
     const refs = new Map(state.requests.map(row => [row.requestId, row.requestRef]));
     const status = ledger.ended ? ledger.ended.status : "running";
     const write: NornProgramWrite = { ledger, state: status, nextDueMs: ledger.ended ? null : nextDue,
       // Only requests that were or will be delivered are indexed: the rest ended in the pass that opened them.
       requests: Object.values(ledger.requests).filter(request => refs.has(request.id) || request.reply === null)
         .map(request => ({ requestId: request.id, requestRef: refs.get(request.id) ?? reference(), epoch: request.epoch,
-          holder: request.holder, settled: request.reply !== null })),
+          holder: request.holder, settled: request.reply !== null, delegated: Boolean(request.delegatedBy) })),
       waits, notices: said.map(({ to, text: body }) => ({ noticeId: reference(), recipient: to, body })) };
-    return { write, result: { status, ...(refusal === undefined ? {} : { refusal }) } };
+    return { write, result: { status, ...(refusal === undefined ? {} : { refusal }), ...(returnedTo ? { returnedTo } : {}) } };
   };
 }
 

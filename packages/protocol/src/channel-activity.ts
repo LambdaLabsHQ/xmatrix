@@ -47,6 +47,12 @@ const NORN_ASK_END_PREFIX = `norn-end:${NORN_ASK_MESSAGE_PREFIX}`;
 /** Whether a message is the program or the end of a question an Agent asked with a command. */
 export const isNornAskProgramMessage = (messageId: string): boolean =>
   messageId.startsWith(NORN_ASK_MESSAGE_PREFIX) || messageId.startsWith(NORN_ASK_END_PREFIX);
+/**
+ * How the Hub's note on a person's Norn request card begins once they
+ * delegated the request from it, followed by to whom: the card then asks the
+ * Hub whether the request is still theirs to take back.
+ */
+export const NORN_DELEGATED_NOTE = "Delegated to ";
 
 /** Author of annotations the Hub writes itself. Public writers cannot take it. */
 export const SYSTEM_ANNOTATION_AUTHOR = "system:xmatrix";

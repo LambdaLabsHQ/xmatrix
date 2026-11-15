@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { Client } from "pg";
-import { createAuthorityDatabase, PostgresNornProgramRepository, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
+import { createAuthorityDatabase, PostgresNornProgramRepository, readNornRequest, readWaitingNornPrograms, NORN_CHANNEL_DUE_SQL } from "../../db/dist/index.js";
 import { fenceChannelRunsForStop } from "../../db/dist/channel-stop-fence.js";
 import { initialMessageSource } from "../../db/dist/runtime-initial-input.js";
 import { integration, isolatedPostgres, seedOwnedTestSpace } from "../../db/test/postgres-database.fixture.mjs";
@@ -249,4 +249,46 @@ integration("work that broke off is handed on once, and in a Page program's conv
     const [question] = (await work()).deliveries;
     await programs.advance(scope("question"), nornStep({ requestId: question.requestId, epoch: question.epoch, reply: { tag: "Refused", reason: "no" } }));
     assert.deepEqual((await work()).releases.map(release => release.requestId), [third.requestId]);
+  }));
+
+integration("a request a person delegates goes to the Instance they named, and only they can take it back while it is delegated", () =>
+  conversation("norn_delegation", async ({ sql, message, programs, scope, instance, database }) => {
+    await message("asked", 1, "user", "owner");
+    await programs.start({ ...scope("asked"), authorKind: "user", authorId: "owner", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `confirm(@Owner, "Clean up the expired commands?")->wait` }, nornStep());
+    const [card] = (await programs.channelWork(scope())).deliveries;
+    await programs.delivered({ ...scope("asked"), ledgerRequestId: card.requestId, epoch: card.epoch, holderUserId: "owner" });
+    // An Instance is named by its address: here, the program's authority's own, and one that takes messages.
+    await instance("channel:2");
+    await sql("INSERT INTO data.agent_registrations VALUES ('owner','machine','claude',1,now(),now())");
+    await sql("INSERT INTO data.space_agent_registrations VALUES ('space','owner','machine','claude','claude','{}',1,now(),now())");
+    await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,
+        authorization_digest,grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
+      VALUES ('channel:2#1','space','owner','machine','claude','owner','allocation-2',repeat('d',64),1,1,1,1,'{}')`);
+    const at = (address, delegatorUserId = "owner") => programs.instanceAt({ ...scope("asked"), address, delegatorUserId });
+    assert.deepEqual([await at("@claude:2"), await at("@Claude:2"), await at("@claude:3"), await at("@codex:2")], [true, true, false, false]);
+    // Another person's Instance is theirs to hand a request to, not the program's or anyone else's.
+    await sql("UPDATE data.runs SET owner_user_id='someone-else' WHERE run_id='channel:2#1'");
+    assert.deepEqual([await at("@claude:2"), await at("@claude:2", "someone-else")], [false, true]);
+    await sql("UPDATE data.runs SET owner_user_id='owner' WHERE run_id='channel:2#1'");
+
+    // Delegated: a new holding, delivered to that Instance, and whoever delegated it is known by their id alone.
+    const delegate = (delegatorUserId, epoch, to) => programs.delegate({ ...scope("asked"), ledgerRequestId: card.requestId, delegatorUserId },
+      nornStep({ requestId: card.requestId, epoch, delegateTo: to, reason: "You read the code" }));
+    assert.equal((await delegate("owner", card.epoch, "@claude:2")).refusal, undefined);
+    const [delivery] = (await programs.channelWork(scope())).deliveries;
+    assert.deepEqual([delivery.holder, delivery.epoch, delivery.addressed?.mention, delivery.delegation.kind, delivery.delegation.reason,
+      delivery.withPerson], ["@claude:2", card.epoch + 1, "@claude:2", "delegated", "You read the code", true]);
+    const takesBack = async userId => Boolean(await programs.delegatedRequest({ requestId: randomUUID(), requestRef: card.requestRef, userId }));
+    const view = async userId => (await readNornRequest(database, { requestId: randomUUID(), spaceId: "space", requestRef: card.requestRef,
+      userId })).delegatedByReader;
+    assert.deepEqual([await takesBack("owner"), await takesBack("someone-else"), await view("owner")], [true, false, true]);
+    // A delegation refused records nobody, and leaves who delegated it as it was.
+    assert.match((await delegate("someone-else", card.epoch + 1, "@codex")).refusal, /cannot delegate it again/u);
+    assert.deepEqual([await takesBack("owner"), await takesBack("someone-else")], [true, false]);
+    // Taken back: it is theirs again as a new holding, and nobody has it to take back any more.
+    assert.equal((await programs.advance(scope("asked"), nornStep({ requestId: card.requestId, reclaim: true }))).refusal, undefined);
+    assert.deepEqual([await takesBack("owner"), await view("owner")], [false, false]);
+    const [back] = (await programs.channelWork(scope())).deliveries;
+    assert.deepEqual([back.holder, back.epoch, back.addressed, back.delegation.kind], ["@Owner", card.epoch + 2, null, "reclaimed"]);
   }));

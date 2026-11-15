@@ -131,7 +131,8 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
   return { ref: input.requestRef, channelId: found.channelId, holder: request.holder, text: request.text,
     state: request.reply === null ? "open" : OUTCOMES[request.reply.tag],
     reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
-      : "reason" in request.reply ? request.reply.reason : null };
+      : "reason" in request.reply ? request.reply.reason : null,
+    ...(found.delegatedByReader ? { yoursToTakeBack: true } : {}) };
 }
 
 /**

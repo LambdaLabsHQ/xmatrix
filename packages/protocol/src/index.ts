@@ -67,7 +67,7 @@ export {
   isReservedMessageMetadataKey, normalizeChannelActivity,
   SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult, mergeCommandResults,
-  AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction, NORN_ASK_MESSAGE_PREFIX, isNornAskProgramMessage,
+  AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction, NORN_ASK_MESSAGE_PREFIX, isNornAskProgramMessage, NORN_DELEGATED_NOTE,
 } from "./channel-activity.js";
 export type {
   ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
