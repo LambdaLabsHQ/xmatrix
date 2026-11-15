@@ -111,6 +111,20 @@ test("a repository rejection on a socket is reported once, under the id its clie
     [["xMatrix runtime authority rejection", frame.failure.diagnosticId]]);
 });
 
+test("XMATRIX-HUB-7S: a launch transition conflict logs the bounded states", async () => {
+  const conflict = Object.assign(new ControlError("launch_transition_conflict", 409,
+    "Invalid Agent Launch transition connected -> prepared"), { reason: "connected_to_prepared" });
+  const { frame, logged } = await answered(conflict);
+  assert.equal(frame.failure.code, "runtime.authority_rejected");
+  assert.equal(frame.failure.retryable, false);
+  const [[, detail]] = logged.error.filter(([message]) => message === "xMatrix runtime authority rejection");
+  assert.equal(detail.authorityReason, "connected_to_prepared");
+  assert.equal(detail.authorityCode, "launch_transition_conflict");
+  assert.equal(detail.status, 409);
+  assert.doesNotMatch(JSON.stringify(detail), /Invalid|->/);
+  assert.doesNotMatch(JSON.stringify(frame), /connected_to_prepared/);
+});
+
 test("XMATRIX-HUB-7F: a stale lease logs which fence refused it and on what command type", async () => {
   const stale = Object.assign(new ControlError("machine_command_stale_lease", 409, "Machine command lease is stale"),
     { reason: "complete.owner", commandType: "harness_action" });
