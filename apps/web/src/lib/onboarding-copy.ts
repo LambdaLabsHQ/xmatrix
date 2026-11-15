@@ -27,7 +27,7 @@ const en = {
   runCommand: "Run this on your computer",
   /** On a Mac or PC the App is the way in; the terminal is the alternative. */
   getApp: "Get the xMatrix app on this computer",
-  appDoes: "Open it and sign in with this same account: it sets up this computer and finds your agents. No terminal needed.",
+  appDoes: "Open it. A browser already signed in on the web sets up this computer and finds your agents, without signing in again or using a terminal.",
   useTerminal: "Use a terminal instead",
   /** Inside the App, which connects its own computer. */
   settingUpHere: "Setting up this computer",
@@ -169,7 +169,7 @@ const zh: OnboardingCopy = {
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",
   getApp: "在这台电脑上装 xMatrix App",
-  appDoes: "打开后用同一个账号登录，它会接上这台电脑、找到你的 Agent。不用开终端。",
+  appDoes: "打开即可。这个浏览器里已经登录的话，它会接上这台电脑、找到你的 Agent。不用再登录，也不用开终端。",
   useTerminal: "改用终端",
   settingUpHere: "正在接上这台电脑",
   settingUpHereDoes: "xMatrix 正在接上这台电脑，并查找你的 Agent…",

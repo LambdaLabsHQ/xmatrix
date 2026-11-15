@@ -51,6 +51,39 @@ export async function signInAppWithProvider(
   return { session: (await response.json()) as AuthResponse, newAccount: callback.searchParams.has("new_account") };
 }
 
+/**
+ * Opens the app's sign-in once, and completes it when this browser is already
+ * signed in on the web. No provider page. Returns null when it is not, so the
+ * app can offer Google or GitHub instead of asking for the same account again.
+ */
+export async function signInAppWithExistingSession(
+  bridge: DesktopBridge,
+): Promise<{ session: AuthResponse; newAccount: boolean } | null> {
+  if (!bridge.authorizeInBrowser) return null;
+  const verifier = randomBase64Url(32);
+  const state = randomBase64Url(16);
+  const start = new URL(HUB_ROUTES.app_sign_in_start, authBaseUrl());
+  start.searchParams.set("session_only", "1");
+  start.searchParams.set("code_challenge", await sha256Base64Url(verifier));
+  start.searchParams.set("code_challenge_method", "S256");
+  start.searchParams.set("state", state);
+  const callback = new URL(await bridge.authorizeInBrowser({
+    url: start.toString(), redirectParam: "redirect_uri",
+  }));
+  if (callback.searchParams.get("state") !== state) return null;
+  if (callback.searchParams.get("error") === "sign_in_required" || !callback.searchParams.get("code")) return null;
+  const response = await xmatrixRawResponse(WEB_PROXY_ROUTES.app_sign_in_token, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ code: callback.searchParams.get("code"), codeVerifier: verifier }),
+  });
+  if (!response.ok) return null;
+  return {
+    session: (await response.json()) as AuthResponse,
+    newAccount: callback.searchParams.has("new_account"),
+  };
+}
+
 /** The provider, or the person, turned the sign-in down; `code` is the provider's or the Hub's reason. */
 export class AppSignInRefused extends Error {
   constructor(readonly code: string) {
