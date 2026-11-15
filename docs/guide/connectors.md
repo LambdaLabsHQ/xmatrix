@@ -41,7 +41,7 @@ The words after the target select which kinds of event to post. Without them the
 
 GitHub's kinds are `issues`, `pulls`, `comments`, `reviews`, `commits`, `checks`, `status` and `releases`. A pull request an agent opens is subscribed to the agent's conversation automatically, so its CI result, reviews and merge arrive where the work was asked for.
 
-An event can also start an agent: see [Automation triggers](pages.md#when-it-runs).
+An event can also start an agent: a [program](programs.md#events-from-connected-apps) on a page waits on it.
 
 ## GitHub
 
@@ -175,7 +175,7 @@ With App Store Connect connected, an agent can take a build from upload to the s
 @appstoreconnect:release:com.example.app 1.2.0
 ```
 
-- `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. Use it as an [Automation trigger](pages.md#when-it-runs) to have an agent pick up a rejection.
+- `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. A [program](programs.md#events-from-connected-apps) can wait on these events to have an agent pick up a rejection.
 - `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
 - `set_build` takes the build number you uploaded, once Apple has processed it. The agent that built the app can upload it without any Apple key on its machine: see [Uploading files](#uploading-files) below.
 - `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
