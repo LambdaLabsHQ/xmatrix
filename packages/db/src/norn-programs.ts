@@ -139,9 +139,14 @@ const NORN_INSTANCE_STAYS_SQL = `(EXISTS (SELECT 1 FROM data.norn_requests other
               AND ${endedByHolder("newer", "newest")}))))
     OR EXISTS (SELECT 1 FROM data.norn_programs asking WHERE asking.space_id=r.space_id AND asking.channel_id=r.channel_id
       AND asking.state='running' AND asking.author_kind='agent' AND asking.author_id=${requestInstance("r")}))`;
-/** A delivered request `r` that has ended, whose Instance is to be let go and has not been yet. */
+/**
+ * A delivered request `r` that has ended, whose Instance is to be let go and
+ * has not been yet. An Instance its holder delegated it to by its address was
+ * not started for it: it was already at work here, and stays.
+ */
 const NORN_REQUEST_UNRELEASED_SQL = `(r.settled_at IS NOT NULL AND r.delivered_at IS NOT NULL AND r.released_at IS NULL
-    AND r.holder_user_id IS NULL AND NOT ${NORN_INSTANCE_STAYS_SQL})`;
+    AND r.holder_user_id IS NULL AND NOT (r.delegator_user_id IS NOT NULL AND r.instance_id IS NOT NULL)
+    AND NOT ${NORN_INSTANCE_STAYS_SQL})`;
 /** A request a person held that has ended: its card still says it waits on them. */
 const NORN_REQUEST_UNCLOSED_SQL = "(r.settled_at IS NOT NULL AND r.holder_user_id IS NOT NULL AND r.released_at IS NULL)";
 const NORN_REQUEST_ABANDONED_SQL = `(r.delivered_at IS NOT NULL AND r.settled_at IS NULL AND NOT ${NORN_REQUEST_WORKED_SQL})`;

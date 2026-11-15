@@ -426,7 +426,9 @@ go once. Some stay (`NORN_INSTANCE_STAYS_SQL`):
 - one that asked a question (`xmatrix ask`, `confirm`, `choose`) whose program
   still runs, so the answer finds it;
 - in a Page program's conversation, the one a running program asks again by
-  name, and the one that ended a request last (answered, refused, or failed).
+  name, and the one that ended a request last (answered, refused, or failed);
+- one a request was delegated to by its address: it was already at work here,
+  and was not started for the request.
 
 So a Page program's conversation always has the Agent that did the work last:
 a person who writes there after the program reaches it, with what it knows.

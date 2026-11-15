@@ -286,9 +286,17 @@ integration("a request a person delegates goes to the Instance they named, and o
     // A delegation refused records nobody, and leaves who delegated it as it was.
     assert.match((await delegate("someone-else", card.epoch + 1, "@codex")).refusal, /cannot delegate it again/u);
     assert.deepEqual([await takesBack("owner"), await takesBack("someone-else")], [true, false]);
+    await programs.delivered({ ...scope("asked"), ledgerRequestId: card.requestId, epoch: delivery.epoch, instanceId: "channel:2" });
     // Taken back: it is theirs again as a new holding, and nobody has it to take back any more.
     assert.equal((await programs.advance(scope("asked"), nornStep({ requestId: card.requestId, reclaim: true }))).refusal, undefined);
     assert.deepEqual([await takesBack("owner"), await view("owner")], [false, false]);
     const [back] = (await programs.channelWork(scope())).deliveries;
     assert.deepEqual([back.holder, back.epoch, back.addressed, back.delegation.kind], ["@Owner", card.epoch + 2, null, "reclaimed"]);
+    // Delegated again and answered there: the request ends, and the Instance that answered it stays at its work.
+    await programs.delivered({ ...scope("asked"), ledgerRequestId: card.requestId, epoch: back.epoch, holderUserId: "owner" });
+    assert.equal((await delegate("owner", back.epoch, "@claude:2")).refusal, undefined);
+    await programs.delivered({ ...scope("asked"), ledgerRequestId: card.requestId, epoch: back.epoch + 1, instanceId: "channel:2" });
+    assert.equal((await programs.advance(scope("asked"), nornStep({ requestId: card.requestId, epoch: back.epoch + 1,
+      reply: { typed: "Yes" } }))).status, "completed");
+    assert.deepEqual((await programs.channelWork(scope())).releases, [], "an Instance delegated to was not started for the request");
   }));
