@@ -197,6 +197,8 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   there?: string;
   /** Its Instance stays for the program's next request, instead of ending with this one. */
   kept?: boolean;
+  /** The Instance was at work here before the request was delegated to it: answering it does not end its Run. */
+  atWork?: boolean;
   /** An earlier holding of the request broke off: this holder goes on from what that one did. */
   handedOn?: boolean;
   /** A person takes part in the program, so the holder says in the conversation what it does. */
@@ -217,7 +219,8 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
     to.withPerson ? "A person takes part in this program and reads this conversation: say here what you are doing, as you would on a task they gave you."
       : "Say nothing else in the conversation.",
     "What is left for a person to do or decide goes to them as a card before you answer: `xmatrix ask @name …`, `xmatrix confirm @name …` or `xmatrix choose @name …`. Words in your answer alone ask nobody; the card's answer comes back to you here.",
-    to.kept ? "End this turn with exactly one of these. You stay in this conversation afterwards: the program may ask you again here, and a person who writes here reaches you:"
+    to.atWork ? "Answer it with exactly one of these. It does not end your Run: you were at work here before it came, and you go on:"
+      : to.kept ? "End this turn with exactly one of these. You stay in this conversation afterwards: the program may ask you again here, and a person who writes here reaches you:"
       : "End this turn with exactly one of these. It ends your Run, so do it last:", "",
     `- \`xmatrix reply ${requestRef} '<answer>'\` when it is done. The answer must be ${answer}`,
     ...(types.length ? ["", fence(types.join("\n")), ""] : []),

@@ -340,6 +340,10 @@ test("a person who cannot judge a request delegates it to an Agent here, and the
   assert.match(delivery, /Daniel delegated this request to you: you answer it for them\.\nTheir words:\n```text\nI cannot judge this\n```/u);
   assert.match(delivery, /gives it back to Daniel; it does not end the request/u);
   assert.doesNotMatch(delivery, /xmatrix delegate/u);
+  // An Instance that was at work here before it was delegated the request is not told that answering ends its Run.
+  const atWork = nornDelivery(request, asked.requestRef, { there: "@claude:2", atWork: true, delegation: state.ledger.delegations.at(-1) }).body;
+  assert.match(atWork, /It does not end your Run: you were at work here before it came, and you go on:/u);
+  assert.doesNotMatch(atWork, /It ends your Run/u);
   // The delegator's own answer no longer counts; the delegate's settles the request.
   assert.equal(step({ requestId: asked.requestId, epoch: asked.epoch, reply: { typed: "No" } }).result.refusal, "Not the request's holder");
   assert.equal(step({ requestId: asked.requestId, epoch: asked.epoch + 1, reply: { typed: "Yes" } }).result.status, "completed");
