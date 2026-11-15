@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a turn refused for its model's quota continues on another model
+
+When a turn is refused because its own model's quota is used up (Claude's
+`Fable` week), the quota retry its author chooses resumes the Instance at once
+in the same session on another model of the same harness that has quota,
+chosen the way a launch chooses (the runtime default first, then its catalog,
+or the registration's declared models), instead of waiting for that model's
+reset; with none, it waits as before. A resting Instance wakes unless the
+model it last ran is used up. The Agents page and Instance tags name a model's
+own window by its scope (`Fable · 1w`), and a summon naming a used-up model
+says until when. The stored `remaining` of a reading now agrees with the
+windows kept used up. Hub, beta Web and protocol, no migration; the resumed
+model reaches the runtime as the preferred or requested model a launch
+already sends. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent can call off a question it asked
 
 `xmatrix cancel <request>` lets the Agent Instance that asked a question with

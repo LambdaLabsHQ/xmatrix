@@ -2,7 +2,8 @@ import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
   routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
   machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryRegistration,
   type RoutingModelOption } from "@xmatrix/protocol";
-import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser } from "@xmatrix/db";
+import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser,
+  type RegistrationModelFacts } from "@xmatrix/db";
 import { digestCanonicalCloneCborV1, canonicalRegistrationHarness, machineTagSelects, repoSummonReference, START_INTENT_CATEGORIES, START_INTENT_INSTRUCTIONS, type AutoLaunchTags } from "@xmatrix/protocol";
 import { RoutingEvaluationFailed, RoutingEvidenceUnavailable, evaluateRoutingChoices, type RoutingAnswer,
   type RoutingChoice, type RoutingEvaluator } from "./agent-routing-evaluation";
@@ -22,7 +23,7 @@ interface ModelPair {
  * catalog names none of them. With no declared list, the choice is the
  * runtime's own fresh catalog, on a daemon that applies a preferred model;
  * without such a catalog there is no model decision. */
-function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): ModelPair[] {
+function modelPairs(candidate: RegistrationModelFacts, tags: AutoLaunchTags): ModelPair[] {
   const allowed = candidate.models;
   const requested = tags.model;
   const catalog = candidate.modelCatalog ?? [];
@@ -49,7 +50,7 @@ function modelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags
 /** The runtime's catalog entries a launch may prefer. The effort stays the
  * runtime's default unless the author wrote one the entry lists, and that
  * needs a daemon that carries an effort onto the runtime's default model. */
-function nativeModelPairs(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): ModelPair[] {
+function nativeModelPairs(candidate: RegistrationModelFacts, tags: AutoLaunchTags): ModelPair[] {
   if (!candidate.supportsNativeModel) return [];
   if (tags.effort && !candidate.supportsDefaultModelEffort) return [];
   return (candidate.modelCatalog ?? []).filter(observed => tags.model ? routingModelOptionNamed(observed, tags.model) : !observed.isDefault)
@@ -70,7 +71,7 @@ function runtimeDefaultPair(tags: AutoLaunchTags): ModelPair {
  * daemon carries it there and the runtime's report of the current model
  * explicitly lists it. Missing evidence cannot prove an effort is supported.
  */
-function usesRuntimeDefaults(candidate: RegistrationLaunchCandidate, tags: AutoLaunchTags): boolean {
+function usesRuntimeDefaults(candidate: RegistrationModelFacts, tags: AutoLaunchTags): boolean {
   if (candidate.models.length || tags.model) return false;
   if (!tags.effort) return true;
   if (!candidate.supportsDefaultModelEffort) return false;
@@ -87,7 +88,7 @@ function selectionFailure(phase: "environment" | "parameter", error: unknown): R
 /** The catalog row of the model a pair runs, or a summon names: the one the
  * model (through its owner's alias) names; the runtime default's is the row
  * the runtime marks as default. None without a catalog that lists it. */
-function catalogRow(candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">): RoutingModelOption | undefined {
+function catalogRow(candidate: RegistrationModelFacts, option: Pick<ModelPair, "model">): RoutingModelOption | undefined {
   const catalog = candidate.modelCatalog ?? [];
   if (!option.model) return catalog.find(observed => observed.isDefault);
   const model = candidate.modelAliases?.[option.model] ?? option.model;
@@ -97,7 +98,7 @@ function catalogRow(candidate: RegistrationLaunchCandidate, option: Pick<ModelPa
 /** The provider's reading of one model of this environment (its catalog
  * row): the account's windows and the scoped windows that constrain it.
  * Without a row, the account's alone. */
-function modelQuota(candidate: RegistrationLaunchCandidate, model: RoutingModelOption | undefined, now: number) {
+function modelQuota(candidate: RegistrationModelFacts, model: RoutingModelOption | undefined, now: number) {
   const usage = candidate.observations?.quota?.usage;
   return usage ? routingQuotaObservation(usage, now, model ? { model } : undefined) : undefined;
 }
@@ -105,10 +106,28 @@ function modelQuota(candidate: RegistrationLaunchCandidate, model: RoutingModelO
 /** True while the provider's own reading says this environment (or one model
  * of it) has no quota left: a measured, never assumed, zero whose reset has
  * not yet passed. */
-export function providerQuotaExhausted(candidate: RegistrationLaunchCandidate, now: number,
+export function providerQuotaExhausted(candidate: RegistrationModelFacts, now: number,
   model?: RoutingModelOption): boolean {
   const quota = modelQuota(candidate, model, now);
   return quota !== undefined && quota.value <= 0 && Date.parse(quota.expiresAt) > now;
+}
+
+/**
+ * The model a stopped Instance continues on when the one it ran is used up:
+ * of the options a launch offers this environment (its declared models, or
+ * on the runtime default its catalog beside the default, which comes first),
+ * the first its provider reading leaves quota. Only a model whose catalog row
+ * is known counts: without one its quota cannot be told from the used-up
+ * model's (`usedUp`, never chosen again). None while the account itself is
+ * used up.
+ */
+export function quotaRecoveryModel(facts: RegistrationModelFacts, now: number, usedUp: string): string | undefined {
+  if (providerQuotaExhausted(facts, now)) return undefined;
+  const options = [...usesRuntimeDefaults(facts, {}) ? [runtimeDefaultPair({})] : [], ...modelPairs(facts, {})];
+  return options.find(option => {
+    const row = catalogRow(facts, option);
+    return row !== undefined && !routingModelOptionNamed(row, usedUp) && !providerQuotaExhausted(facts, now, row);
+  })?.model;
 }
 
 /** How fast the environment's account may spend against its provider's pace

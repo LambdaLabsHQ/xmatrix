@@ -312,6 +312,11 @@ const keptExpiry = (expires: string, windows: string, observed: string) => `GREA
       AND (w->>'resetAt')::timestamptz>${observed}))`;
 const KEPT_ACCOUNT_WINDOWS = keptWindows("EXCLUDED.windows_json", "o.windows_json");
 const KEPT_SCOPED_WINDOWS = keptWindows("EXCLUDED.scoped_windows_json", "o.scoped_windows_json");
+/** The account's headroom as the kept windows leave it: the reading's own
+ * (`EXCLUDED.remaining`, the provider's verdict included) lowered by a window
+ * kept used up, never below the floor a still-served account keeps ($12). */
+const KEPT_REMAINING = `GREATEST(LEAST(EXCLUDED.remaining,COALESCE(100-(SELECT max((w->>'usedPercent')::float8)
+  FROM jsonb_array_elements(${KEPT_ACCOUNT_WINDOWS}) w),100)),$12::float8)`;
 
 /** Persist one owner's provider reading, each part fenced on its own read
  * time: every reading renews the account part, a complete one the scoped part
@@ -334,14 +339,14 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
     const narrowed = hold ? quotaRecordUsedUp(record, Date.parse(String(hold.held_until)), undefined, Date.now()) : undefined;
     if (narrowed) { record = narrowed; explainsHold = true; }
   }
-  await tx.query({ name: "registration_quota_observe_v6", text: `INSERT INTO control.registration_quota_observations AS o
+  await tx.query({ name: "registration_quota_observe_v7", text: `INSERT INTO control.registration_quota_observations AS o
       (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json,
         scoped_windows_json,scoped_observed_at,scoped_expires_at)
       SELECT $1,$2,$3,$4::timestamptz,$5::timestamptz,'provider',$6::jsonb,$7::jsonb,$8::jsonb,$9::timestamptz,$10::timestamptz
       WHERE $4::timestamptz<=statement_timestamp() AND GREATEST($5::timestamptz,$10::timestamptz)>statement_timestamp()
       ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
         ${setWhen(ACCOUNT_PART_NEWER, ["remaining", "observed_at", "expires_at", "source", "windows_json", "account_json"], {
-          windows_json: KEPT_ACCOUNT_WINDOWS,
+          windows_json: KEPT_ACCOUNT_WINDOWS, remaining: KEPT_REMAINING,
           expires_at: keptExpiry("EXCLUDED.expires_at", KEPT_ACCOUNT_WINDOWS, "EXCLUDED.observed_at") })},
         ${setWhen(SCOPED_PART_NEWER, ["scoped_windows_json", "scoped_observed_at", "scoped_expires_at"], {
           scoped_windows_json: KEPT_SCOPED_WINDOWS,
@@ -351,7 +356,7 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
       routingQuotaAccountPartExpiry(record), record.windows.length ? JSON.stringify(record.windows) : null,
       record.quotaAccount ? JSON.stringify(record.quotaAccount) : null,
       record.scoped ? JSON.stringify(record.scoped.windows) : null, record.scoped ? record.observedAt : null,
-      record.scoped?.expiresAt ?? null, explainsHold],
+      record.scoped?.expiresAt ?? null, explainsHold, record.quotaAccount?.allowed === true ? 1 : 0],
     maxRows: 0 });
   // A reading may end a refused summon's wait. Marking it here, in the
   // reading's own transaction, means the event cannot be lost. True when one

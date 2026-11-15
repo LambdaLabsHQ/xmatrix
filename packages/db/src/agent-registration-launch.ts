@@ -26,7 +26,7 @@ import {
   parseAgentRoutingRequirements,
   selectionLaunchConditions,
   sameAgentRegistration,
-  type QuotaRetryRegistration, type SpaceAgentRegistrationKey,
+  type QuotaRetryRegistration, type SpaceAgentRegistrationKey, type RegistrationResourceLimits,
   type AgentRoutingRequirements,
   type RegistrationLaunchBinding,
   registrationLaunchBindingForDaemon,
@@ -46,7 +46,7 @@ import {
   validateHarnessParameterValues,
   type AutoLaunchTags,
   type HarnessTooOld,
-  type MachineAgents,
+  type MachineAgents, type QuotaExhausted,
   type OfflineMachine,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
@@ -154,6 +154,24 @@ export interface RegistrationLaunchCandidate {
    * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
   responseLatencyMs?: number;
 }
+
+/** The declared models a registration's grant and policy both allow; empty
+ * when it declares none (the runtime default). Declared models that are not
+ * allowed never widen into the runtime default: undefined then. */
+export function registrationAllowedModels(configuration: ReturnType<typeof parseSpaceAgentConfiguration>,
+  grant: RegistrationResourceLimits, policy: RegistrationResourceLimits): string[] | undefined {
+  const declared = [...new Set([...(configuration.routing?.models ?? []), ...(configuration.model ? [configuration.model] : [])])];
+  const models = declared.filter(model => grant.models.includes(model) && policy.models.includes(model));
+  return declared.length && !models.length ? undefined : models;
+}
+
+/** What decides which models an environment can run now: its declared
+ * models, its runtime's catalog, and the provider reading every model's
+ * headroom is read from. A resumed Instance's model is chosen from these. */
+export type RegistrationModelFacts = Pick<RegistrationLaunchCandidate, "models" | "modelCatalog" | "modelAliases" |
+  "parameterModel" | "supportsRequestedEffort" | "supportsDefaultModelEffort" | "supportsNativeModel"> & {
+  observations?: { quota?: Pick<NonNullable<RegistrationLaunchCandidate["observations"]>["quota"], "usage"> };
+};
 
 /** The window and the least sample a harness's measured reply latency needs. */
 export const RESPONSE_LATENCY_WINDOW_DAYS = 30;
@@ -811,7 +829,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
-      offline?: OfflineMachine[]; machineAgents?: MachineAgents;
+      offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaExhausted?: QuotaExhausted;
       quotaTargets?: QuotaRetryRegistration[]; quotaRefusedThrough?: string }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
@@ -827,8 +845,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         ? selectionLaunchConditions(input.body, selection).tags.machine : undefined;
       // Only wording: a failed read leaves the refusal as it was.
       const machineAgents = machine ? await this.machineAgents(machine).catch(() => undefined) : undefined;
+      // A named model that is used up says until when.
+      const named = error instanceof RegistrationAccessError ? error.quotaTargets?.[0]?.model?.model : undefined;
+      const resetsAt = error instanceof RegistrationAccessError ? error.quotaResetsAt : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
         ...(offline?.length ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
+        ...(named && resetsAt ? { quotaExhausted: { model: named, resetsAt } } : {}),
         ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}),
         ...(error instanceof RegistrationAccessError && error.quotaRefusedThrough
           ? { quotaRefusedThrough: error.quotaRefusedThrough } : {}) });
@@ -1148,11 +1170,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const configuration = parseSpaceAgentConfiguration(row.configuration_json);
       if (configuration.routing?.enabled === false) return [];
       const grant = parseRegistrationResourceLimits(row.grant_limits), policy = parseRegistrationResourceLimits(row.policy_limits);
-      const declared = [...new Set([...(configuration.routing?.models ?? []), ...(configuration.model ? [configuration.model] : [])])];
-      const models = declared.filter(model => grant.models.includes(model) && policy.models.includes(model));
-      // No declared model means no model override. Declared models that are
-      // not allowed never widen into the runtime default.
-      if (declared.length && !models.length) return [];
+      const models = registrationAllowedModels(configuration, grant, policy);
+      if (!models) return [];
       const directories = configuration.workspaceReferences.filter(value =>
         (!this.repositoryReader || !value.startsWith("repo:")) && grant.workspaces.includes(value) && policy.workspaces.includes(value));
       const workspaceReferences = [...new Set([...directories,
