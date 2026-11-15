@@ -318,21 +318,30 @@ test("a stopped Instance whose model is used up continues on the launch's first 
     { model: 'claude-sonnet-5-5', description: '', efforts: [], names: ['sonnet'], quotaScopes: ['Sonnet'] },
     { model: 'claude-haiku-5-5', description: '', efforts: [], names: ['haiku'] }];
   const facts = (observations, extra = {}) => ({ models: [], supportsNativeModel: true, modelCatalog: catalog, observations, ...extra });
+  const fable = { model: 'claude-fable-5-2', quotaScopes: ['Fable'] };
   // Fable (the default) used up: the first catalog model with quota, never Fable again.
   const fableOut = reading({ account: [week(55)], scoped: [week(100, 'Fable')] });
-  assert.equal(quotaRecoveryModel(facts(fableOut), now, 'claude-fable-5-2'), 'claude-sonnet-5-5');
+  assert.equal(quotaRecoveryModel(facts(fableOut), now, fable), 'claude-sonnet-5-5');
   // A model of its own used up: the runtime's default comes first.
   const sonnetOut = reading({ account: [week(55)], scoped: [week(100, 'Sonnet')] });
-  assert.equal(quotaRecoveryModel(facts(sonnetOut), now, 'claude-sonnet-5-5'), '');
+  assert.equal(quotaRecoveryModel(facts(sonnetOut), now, { model: 'claude-sonnet-5-5', quotaScopes: ['Sonnet'] }), '');
+  // The runtime's default used up (no model named): the default is out even
+  // before a reading shows it, and so is every model the refusal's scopes constrain.
+  const unread = reading({ account: [week(55)] });
+  assert.equal(quotaRecoveryModel(facts(unread), now, { model: '', quotaScopes: ['Fable'] }), 'claude-sonnet-5-5');
+  assert.equal(quotaRecoveryModel(facts(unread), now, { model: 'claude-opus-5-5', quotaScopes: ['fable', 'SONNET'] }),
+    'claude-haiku-5-5', "the refused scopes, compared without case, rule out Fable and Sonnet");
+  assert.equal(quotaRecoveryModel(facts(unread, { modelCatalog: catalog.slice(0, 2) }), now,
+    { model: '', quotaScopes: ['Sonnet'] }), undefined, "default and Sonnet both out");
   // A row without its scopes cannot be told apart from the used-up model.
-  assert.equal(quotaRecoveryModel(facts(fableOut, { modelCatalog: catalog.slice(0, 1) }), now, 'claude-fable-5-2'), undefined);
+  assert.equal(quotaRecoveryModel(facts(fableOut, { modelCatalog: catalog.slice(0, 1) }), now, fable), undefined);
   // The account used up, or a daemon that cannot switch: nothing to switch to.
-  assert.equal(quotaRecoveryModel(facts(reading({ account: [week(100)] })), now, 'claude-fable-5-2'), undefined);
-  assert.equal(quotaRecoveryModel(facts(fableOut, { supportsNativeModel: false }), now, 'claude-fable-5-2'), undefined);
+  assert.equal(quotaRecoveryModel(facts(reading({ account: [week(100)] })), now, fable), undefined);
+  assert.equal(quotaRecoveryModel(facts(fableOut, { supportsNativeModel: false }), now, fable), undefined);
   // Declared models: another declared model, by its declared name.
   const declared = facts(fableOut, { models: ['opus', 'sonnet'], modelAliases: { opus: 'claude-fable-5-2', sonnet: 'claude-sonnet-5-5' } });
-  assert.equal(quotaRecoveryModel(declared, now, 'claude-fable-5-2'), 'sonnet');
-  assert.equal(quotaRecoveryModel({ ...declared, models: ['opus'] }, now, 'claude-fable-5-2'), undefined);
+  assert.equal(quotaRecoveryModel(declared, now, fable), 'sonnet');
+  assert.equal(quotaRecoveryModel({ ...declared, models: ['opus'] }, now, fable), undefined);
 });
 
 test('runtime model aliases preserve the declared model and its observed effort options', async () => {

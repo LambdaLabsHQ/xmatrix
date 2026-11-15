@@ -6,14 +6,19 @@ When a turn is refused because its own model's quota is used up (Claude's
 `Fable` week), the quota retry its author chooses resumes the Instance at once
 in the same session on another model of the same harness that has quota,
 chosen the way a launch chooses (the runtime default first, then its catalog,
-or the registration's declared models), instead of waiting for that model's
-reset; with none, it waits as before. A resting Instance wakes unless the
-model it last ran is used up. The Agents page and Instance tags name a model's
-own window by its scope (`Fable · 1w`), and a summon naming a used-up model
-says until when. The stored `remaining` of a reading now agrees with the
-windows kept used up. Hub, beta Web and protocol, no migration; the resumed
-model reaches the runtime as the preferred or requested model a launch
-already sends. Recovery is a CI-validated beta reverting this change.
+or the registration's declared models, never one the refused scopes
+constrain), instead of waiting for that model's reset; with none, or when the
+registration no longer offers the kind of model it ran, it waits as before.
+Its next resume goes back to the original model once a reading shows that
+model has quota. A resting Instance wakes unless the model it last ran is used
+up. The Agents page and Instance tags name a model's own window by its scope
+(`Fable · 1w`), and a summon naming a used-up model says until when. The
+stored `remaining` of a reading now agrees with the windows kept used up. Hub,
+beta Web and protocol, with expand migration 0258
+(`agent_quota_retries.resume_model`, so a redelivered dispatch resumes on the
+same model); the resumed model reaches the runtime as the preferred or
+requested model a launch already sends. Recovery is a CI-validated beta
+reverting this change; the column is then ignored.
 
 ## Unreleased: an Agent that delegates its request is let go
 

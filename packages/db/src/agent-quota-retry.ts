@@ -38,6 +38,9 @@ export interface QuotaRetryWork extends QueryResultRow {
   /** Moves with every wake; a check that read an older one cannot put the
    * retry back to sleep. NULL is no wake yet. */
   wake_revision: string | number | null;
+  /** A dispatched continuation's model instead of the used-up one ('' the
+   * runtime's default); NULL resumes on its own model. */
+  resume_model: string | null;
 }
 // A source publication and, for continuation, its exact stopped Instance still
 // own the work. A later successful handoff or reborn retires the old offer.
@@ -353,19 +356,24 @@ export class PostgresQuotaRetryRepository {
       },
     );
   }
-  async dispatch(input: { channelId: string; row: QuotaRetryWork }): Promise<AgentQuotaRetryAdmission> {
+  /** Start a due retry. A continuation records the model it resumes on
+   * (`resumeModel`) as it first dispatches; a redelivery keeps that one. */
+  async dispatch(input: { channelId: string; row: QuotaRetryWork; resumeModel?: string }):
+    Promise<{ admission: AgentQuotaRetryAdmission; resumeModel?: string }> {
     return this.transaction(input.channelId, input.row.actor_user_id, "dispatch", async (tx) => {
       const [row] = await tx.query<QueryResultRow>({
-        name: "quota_retry_dispatch_v2",
+        name: "quota_retry_dispatch_v3",
         text: `UPDATE data.agent_quota_retries q
-        SET state='dispatching',updated_at=clock_timestamp() WHERE q.channel_id=$1 AND q.retry_id=$2
+        SET resume_model=CASE WHEN q.state='dispatching' THEN q.resume_model ELSE $4 END,
+          state='dispatching',updated_at=clock_timestamp() WHERE q.channel_id=$1 AND q.retry_id=$2
           AND (q.state IN ('waiting','dispatching') OR ${VERIFYING_SQL})
-          AND q.generation=$3 AND q.expires_at>clock_timestamp() AND ${CURRENT_SQL} RETURNING generation`,
-        values: [input.channelId, input.row.retry_id, input.row.generation],
+          AND q.generation=$3 AND q.expires_at>clock_timestamp() AND ${CURRENT_SQL} RETURNING generation,resume_model`,
+        values: [input.channelId, input.row.retry_id, input.row.generation, input.resumeModel ?? null],
         maxRows: 1,
       });
       if (!row) throw new RegistrationAccessError("quota_retry_cancelled", 409);
-      return { id: input.row.retry_id, generation: Number(row.generation) };
+      return { admission: { id: input.row.retry_id, generation: Number(row.generation) },
+        ...(typeof row.resume_model === "string" ? { resumeModel: row.resume_model } : {}) };
     });
   }
   /** `waiting` with no `nextCheck` waits for an event (a reading, a reconnect)

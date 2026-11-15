@@ -1,6 +1,6 @@
 import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
   routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
-  machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryRegistration,
+  machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryModel, type QuotaRetryRegistration,
   type RoutingModelOption } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser,
   type RegistrationModelFacts } from "@xmatrix/db";
@@ -118,15 +118,22 @@ export function providerQuotaExhausted(candidate: RegistrationModelFacts, now: n
  * on the runtime default its catalog beside the default, which comes first),
  * the first its provider reading leaves quota. Only a model whose catalog row
  * is known counts: without one its quota cannot be told from the used-up
- * model's (`usedUp`, never chosen again). None while the account itself is
- * used up.
+ * model's. The used-up model (`usedUp`, the runtime's default when it names
+ * none) and the models its scopes constrain are never chosen. None while the
+ * account itself is used up.
  */
-export function quotaRecoveryModel(facts: RegistrationModelFacts, now: number, usedUp: string): string | undefined {
+export function quotaRecoveryModel(facts: RegistrationModelFacts, now: number, usedUp: QuotaRetryModel): string | undefined {
   if (providerQuotaExhausted(facts, now)) return undefined;
   const options = [...usesRuntimeDefaults(facts, {}) ? [runtimeDefaultPair({})] : [], ...modelPairs(facts, {})];
+  const refused = new Set(usedUp.quotaScopes.map(scope => scope.trim().toLowerCase()));
+  // The used-up model, by name or as the runtime's default, and every model
+  // its used-up scopes constrain, are out whatever a reading says.
+  const sameModel = (option: ModelPair, row: RoutingModelOption) => usedUp.model
+    ? routingModelOptionNamed(row, usedUp.model) || option.model === usedUp.model : !option.model || row.isDefault === true;
   return options.find(option => {
     const row = catalogRow(facts, option);
-    return row !== undefined && !routingModelOptionNamed(row, usedUp) && !providerQuotaExhausted(facts, now, row);
+    return row !== undefined && !sameModel(option, row) &&
+      !(row.quotaScopes ?? []).some(scope => refused.has(scope.trim().toLowerCase())) && !providerQuotaExhausted(facts, now, row);
   })?.model;
 }
 

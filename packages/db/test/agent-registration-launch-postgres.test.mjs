@@ -785,27 +785,69 @@ integration("launch survives a hostname change with stale Workspace metadata and
       { model: 'provider/model', modelsObservedAt: observedAt, models: [
         { model: 'provider/model', displayName: 'Model', isDefault: true, quotaScopes: ['Model'] },
         { model: 'provider/other', displayName: 'Other' }] }]);
-    const facts = await reborn.continuationModelFacts({ commandId: 'continuation-facts', channelId: 'channel',
-      sourceInstanceId: cold.instanceId });
-    assert.deepEqual([facts.models, facts.modelAliases, facts.modelCatalog.map(row => [row.model, row.quotaScopes]),
-      facts.supportsNativeModel], [['model'], { model: 'provider/model' },
-      [['provider/model', ['Model']], ['provider/other', undefined]], undefined]);
+    const factsOf = commandId => reborn.continuationModelFacts({ commandId, channelId: 'channel', sourceInstanceId: cold.instanceId });
+    // A switch keeps the Instance's kind of model: one on the runtime default
+    // of a registration that now declares models has nothing to switch to.
+    assert.equal(await factsOf('continuation-facts-declared'), undefined);
+    const declaredConfiguration = (await sql(`SELECT configuration_json FROM data.space_agent_registrations
+      WHERE harness='codex'`)).rows[0].configuration_json;
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=jsonb_set(configuration_json-'model',
+      '{routing,models}','[]') WHERE harness='codex'`);
+    const facts = await factsOf('continuation-facts');
+    assert.deepEqual([facts.models, facts.modelCatalog.map(row => [row.model, row.quotaScopes]), facts.supportsNativeModel],
+      [[], [['provider/model', ['Model']], ['provider/other', undefined]], undefined]);
+    // And the reverse: a declared-model Instance is offered no catalog model.
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":false,"requestedRuntimeModel":"provider/model"}'
+      WHERE run_id=$1`, [cold.runId]);
+    assert.equal(await factsOf('continuation-facts-native'), undefined);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":true,"requestedRuntimeModel":null}'
+      WHERE run_id=$1`, [cold.runId]);
     // A runtime-default Instance resumes on another catalog model only through
     // a daemon that switches to one.
     const switched = { commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',
       sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue', preferredRuntimeModel: 'provider/other' };
     await assert.rejects(() => reborn.prepare(switched), error => error.code === 'registration_workspace_or_daemon_unavailable');
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_native_model_v1"]'::jsonb`);
-    assert.equal((await reborn.continuationModelFacts({ commandId: 'continuation-facts-native', channelId: 'channel',
-      sourceInstanceId: cold.instanceId })).supportsNativeModel, true);
+    assert.equal((await factsOf('continuation-facts-capable')).supportsNativeModel, true);
     const defaultReborn = await reborn.prepare(switched);
     const coldSuccessor = await reborn.advance({ intentId: defaultReborn.intentId, actorUserId: 'caller', channelId: 'channel' });
     assert.equal(coldSuccessor.state, 'prepared');
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedModel'), false);
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedEffort'), false);
     assert.equal(coldSuccessor.spawnPayload.context.preferredModel, 'provider/other');
-    assert.equal((await sql(`SELECT metadata_json->>'preferredRuntimeModel' AS model FROM data.runs WHERE run_id=$1`,
-      [defaultReborn.intentId])).rows[0].model, 'provider/other', "a later reborn brings the switched model back");
+    const switchedRun = async runId => (await sql(`SELECT metadata_json->>'preferredRuntimeModel' AS model,
+      metadata_json->'originalRuntimeModel' AS original FROM data.runs WHERE run_id=$1`, [runId])).rows[0];
+    assert.deepEqual(await switchedRun(defaultReborn.intentId), { model: 'provider/other', original: '' },
+      "the switched Run keeps the model it was moved off (the runtime default)");
+    // Its next resume goes back to that model only once a reading shows it has quota.
+    const resumeAgain = async (sourceMessageId, scopedUsed) => {
+      await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE source_instance_id=$1 AND state='prepared'`,
+        [cold.instanceId]);
+      await sql(`UPDATE data.runs SET status='failed' WHERE run_id=(SELECT run_id FROM data.instances WHERE instance_id=$1)`,
+        [cold.instanceId]);
+      const week = new Date(Date.now() + 4 * 86_400_000).toISOString();
+      await sql(`DELETE FROM control.registration_quota_observations`);
+      await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+          expires_at,source,windows_json,scoped_windows_json,scoped_observed_at,scoped_expires_at)
+        SELECT owner_user_id,COALESCE(NULLIF(btrim(declaration_json->>'quotaPoolId'),''),'registration:'||machine_id||':'||harness),45,statement_timestamp()-interval '1 second',
+          statement_timestamp()+interval '10 minutes','provider',$1::jsonb,$2::jsonb,statement_timestamp()-interval '1 second',$3::timestamptz
+        FROM control.agent_registration_environments WHERE harness='codex'`,
+      [JSON.stringify([{ label: '1w', usedPercent: 55, resetAt: week }]),
+        JSON.stringify([{ label: '1w', usedPercent: scopedUsed, resetAt: week, scope: 'Model' }]), week]);
+      const prepared = await reborn.prepare({ commandId: `resume-${sourceMessageId}`, actorUserId: 'caller', channelId: 'channel',
+        sourceMessageId, sourceInstanceId: cold.instanceId, prompt: 'continue' });
+      const advanced = await reborn.advance({ intentId: prepared.intentId, actorUserId: 'caller', channelId: 'channel' });
+      return { context: advanced.spawnPayload.context, run: await switchedRun(prepared.intentId) };
+    };
+    const stillOut = await resumeAgain('message', 100);
+    assert.equal(stillOut.context.preferredModel, 'provider/other', "its own model is still used up: it stays switched");
+    assert.deepEqual(stillOut.run, { model: 'provider/other', original: '' });
+    const back = await resumeAgain('used-up', 10);
+    assert.equal(Object.hasOwn(back.context, 'preferredModel'), false, "back on the runtime default");
+    assert.deepEqual(back.run, { model: null, original: null });
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=$1::jsonb WHERE harness='codex'`,
+      [JSON.stringify(declaredConfiguration)]);
 
     // Handoff moves an Instance's directory to another harness on the same
     // machine. Its successor is a new Instance, and the predecessor is fenced

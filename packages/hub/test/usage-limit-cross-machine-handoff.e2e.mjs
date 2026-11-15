@@ -196,6 +196,12 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
         cleanupReason: "process_terminated", relayLease: stop.relayLease }));
       const recovered = await resumed;
       assert.equal(recovered.context.preferredModel, "claude-sonnet-5-5");
+      const [retry] = await inTestTransaction(tx => tx.query({ text: "SELECT resume_model FROM data.agent_quota_retries WHERE retry_id=$1",
+        values: [notice.metadata.xmatrixQuotaRetryId] }));
+      assert.equal(retry.resume_model, "claude-sonnet-5-5", "a redelivered dispatch resumes on the same model");
+      const [run] = await inTestTransaction(tx => tx.query({ text: "SELECT metadata_json FROM data.runs WHERE run_id=$1",
+        values: [recovered.runId] }));
+      assert.equal(run.metadata_json.originalRuntimeModel, "", "it goes back to the runtime default once that has quota");
       assert.equal(recovered.resumeSessionKey, launch.resumeSessionKey);
       assert.equal((await channelHistory(worker, MOCK_TOKEN, channel.id)).messages
         .filter(message => /:handoff:@auto/u.test(message.body ?? "")).length, 0);

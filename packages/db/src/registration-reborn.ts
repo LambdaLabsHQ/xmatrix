@@ -4,7 +4,7 @@ import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
-  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
+  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -209,13 +209,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
   /** What decides the model a stopped Instance can continue on: the models
    * its registration allows, its runtime's catalog as the Instance last
    * reported it, and its pool's provider reading. Undefined when its declared
-   * models are no longer allowed, or its registration or environment is gone. */
+   * models are no longer allowed or no longer what it ran (declared or the
+   * runtime default), or its registration or environment is gone. */
   async continuationModelFacts(raw: { commandId: string; channelId: string; sourceInstanceId: string }):
     Promise<RegistrationModelFacts | undefined> {
     const commandId = text(raw.commandId), channelId = text(raw.channelId), instanceId = text(raw.sourceInstanceId);
     const space = await this.database.transaction({ requestId: commandId, operation: "registration.continuation.models",
       placement: this.placement }, async tx => {
-      const { key } = await this.predecessor(tx, instanceId, channelId);
+      const { key, useRuntimeDefaultModel } = await this.predecessor(tx, instanceId, channelId);
       const [row] = await tx.query({ name: "registration_continuation_models_v1", text: `SELECT
           r.configuration_json,a.grant_limits,a.policy_limits,
           i.presentation_json->'models' AS catalog_models,i.presentation_json->>'modelsObservedAt' AS catalog_observed_at
@@ -225,11 +226,14 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         JOIN data.instances i ON i.instance_id=$5 AND i.channel_id=$6
         WHERE r.space_id=$1 AND r.owner_user_id=$2 AND r.machine_id=$3 AND r.harness=$4`,
       values: [...registrationKeyValues(key), instanceId, channelId], maxRows: 1 });
-      return row ? { key, row } : undefined;
+      return row ? { key, row, useRuntimeDefaultModel } : undefined;
     });
     const allowed = space && registrationAllowedModels(parseSpaceAgentConfiguration(space.row.configuration_json),
       parseRegistrationResourceLimits(space.row.grant_limits), parseRegistrationResourceLimits(space.row.policy_limits));
-    if (!space || !allowed) return undefined;
+    // A switch keeps the predecessor's kind of model: a declared model for one
+    // that ran a declared model, the runtime's catalog for one on the runtime
+    // default. A registration whose declarations changed since offers neither.
+    if (!space || !allowed || space.useRuntimeDefaultModel !== !allowed.length) return undefined;
     const { key } = space;
     const [fact] = await this.directory.transaction({ requestId: commandId, operation: "registration.continuation.model-facts",
       statement: "single_read" }, tx => tx.query({ name: "registration_continuation_model_facts_v1", text: `SELECT
@@ -251,20 +255,41 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       ...(usage ? { observations: { quota: { usage } } } : {}) };
   }
 
+  /** Whether a Run moved off `original` for quota can go back to it: a
+   * current reading shows that model has quota, it is still the registration's
+   * kind of model, and a catalog model has a daemon that switches to it. */
+  private async originalModelBack(input: ContinuationInput, original: string, runtimeDefault: boolean): Promise<boolean> {
+    const facts = await this.continuationModelFacts({ commandId: `${input.commandId}:original-model`.slice(0, 300),
+      channelId: input.channelId, sourceInstanceId: input.sourceInstanceId });
+    if (!facts || (runtimeDefault ? original && !facts.supportsNativeModel : !facts.models.includes(original))) return false;
+    const catalog = facts.modelCatalog ?? [];
+    const runtimeModel = runtimeDefault ? original : facts.modelAliases?.[original] ?? original;
+    const row = runtimeModel ? catalog.find(option => routingModelOptionNamed(option, runtimeModel))
+      : catalog.find(option => option.isDefault);
+    const now = Date.now();
+    const quota = row && routingQuotaObservation(facts.observations?.quota?.usage, now, { model: row });
+    return quota !== undefined && quota.value > 0;
+  }
+
   /**
    * One durable resume of an Instance in its own session and directory, recorded
    * as `kind`. A reborn names its asking message as its continuation source, so
    * its status and failure answer that message; a wake answers no message.
    */
-  private async recordResume(input: ContinuationInput, kind: "reborn" | "wake") {
+  private async recordResume(raw: ContinuationInput, kind: "reborn" | "wake") {
     const spaceId = this.placement.spaceId;
-    const located = await this.locate(input, "reborn");
+    const located = await this.locate(raw, "reborn");
+    // A Run moved off its model for quota goes back to it on its next resume
+    // once a reading shows that model has quota again.
+    const returning = raw.preferredRuntimeModel === undefined && located.originalRuntimeModel !== undefined &&
+      await this.originalModelBack(raw, located.originalRuntimeModel, located.useRuntimeDefaultModel);
+    const input = returning ? { ...raw, preferredRuntimeModel: located.originalRuntimeModel } : raw;
     const physical = await this.physical(input, located.key, located, "reborn", located.useRuntimeDefaultModel === true,
       located.useRuntimeDefaultModel === true && Boolean(input.preferredRuntimeModel));
     const at = new Date().toISOString();
     return this.database.transaction({ requestId: input.commandId, operation: `registration.${kind}.prepare`,
       placement: this.placement }, async tx => {
-      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at);
+      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at, returning);
       // The written mention binds this reborn's status to its source message.
       const invocationSource = kind === "reborn" ? readContinuationSource({ schemaVersion: 1, kind: "reborn",
         sourceMessageId: input.sourceMessageId, sourceMessageVersion: 1, sourceMention: input.sourceMention,
@@ -287,7 +312,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * under its own registration, re-admitted against current grants. */
   private async resumeSuccessor(tx: DatabaseTransaction, input: ContinuationInput,
     located: Awaited<ReturnType<PostgresRegistrationRebornRepository["locate"]>>,
-    physical: Awaited<ReturnType<PostgresRegistrationRebornRepository["physical"]>>, at: string) {
+    physical: Awaited<ReturnType<PostgresRegistrationRebornRepository["physical"]>>, at: string, returning: boolean) {
     const spaceId = this.placement.spaceId;
     const key = located.key;
     const { source, displayName } = await this.lockedSource(tx, input, key, located.key, "reborn");
@@ -300,6 +325,10 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const model = declared && switched ? physical.environment.modelAliases?.[switched] ?? switched : declared;
     const modelResource = model ? (declared && switched ? switched : source.modelResource ?? model) : undefined;
     const preferredRuntimeModel = model ? undefined : switched === undefined ? source.preferredRuntimeModel : switched || undefined;
+    // The model a switched Run was moved off, kept until it goes back to it.
+    const moved = switched === undefined ? source.originalRuntimeModel : returning ? undefined
+      : source.originalRuntimeModel ?? (declared ? source.modelResource ?? declared : source.preferredRuntimeModel ?? "");
+    const originalRuntimeModel = moved === switched ? undefined : moved;
     if (physical.managed && (source.managedWorkspaceKey !== physical.managed.key
       || source.canonicalCwd !== `.xmatrix-management/${physical.managed.key}` || source.remoteRepo)) {
       throw new RegistrationAccessError("reborn_source_changed", 409);
@@ -324,6 +353,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       sourceMessageId: input.sourceMessageId, useRuntimeDefaultModel: !model, requestedRuntimeModel: model || null, modelResource: modelResource ?? null,
       // The runtime catalog model the predecessor started on comes back with it, unless it switches.
       ...(preferredRuntimeModel ? { preferredRuntimeModel } : {}),
+      ...(originalRuntimeModel !== undefined ? { originalRuntimeModel } : {}),
       ...(source.handedOff ? { resumeAfterHandoff: true } : {}),
       ...(source.managedWorkspaceKey ? { managedWorkspaceKey: source.managedWorkspaceKey } : {}),
       ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}) };
@@ -852,6 +882,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       requestedRuntimeModel: typeof metadata.requestedRuntimeModel === "string" ? metadata.requestedRuntimeModel : undefined,
       preferredRuntimeModel: metadata.useRuntimeDefaultModel === true && typeof metadata.preferredRuntimeModel === "string"
         ? metadata.preferredRuntimeModel : undefined,
+      originalRuntimeModel: typeof metadata.originalRuntimeModel === "string" ? metadata.originalRuntimeModel : undefined,
       modelResource: typeof metadata.modelResource === "string" ? metadata.modelResource : undefined,
       hostname: typeof metadata.hostname === "string" ? metadata.hostname : undefined,
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : undefined,

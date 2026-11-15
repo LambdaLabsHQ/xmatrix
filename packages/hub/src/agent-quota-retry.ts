@@ -203,7 +203,7 @@ async function continuationModelSwitch(env: Env, channelId: string, row: QuotaRe
   if (!facts) return undefined;
   const now = Date.now();
   const own = retryModelQuota(facts.observations?.quota?.usage, key.model, now);
-  return own && own.value <= 0 ? quotaRecoveryModel(facts, now, key.model.model) : undefined;
+  return own && own.value <= 0 ? quotaRecoveryModel(facts, now, key.model) : undefined;
 }
 async function retryLaunch(
   env: Env,
@@ -279,9 +279,10 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
         row.state === "dispatching"
           ? { ready: true, nextCheckAt: Date.now() }
           : await quotaRetryReadiness(directory, row);
-      const switchTo = row.state === "dispatching" || !readiness.ready
+      // A redelivered dispatch resumes on the model its first dispatch chose.
+      const chosen = row.state !== "dispatching" && !readiness.ready
         ? await continuationModelSwitch(env, channelId, row) : undefined;
-      if (!readiness.ready && switchTo === undefined) {
+      if (!readiness.ready && chosen === undefined) {
         // Not ready at its time: keep its wait (a delivery that found nothing
         // to start may have spent it) and ask for one fresh read of its own
         // pools, newer than what refused it. That reading wakes it. While its
@@ -295,7 +296,8 @@ export async function reconcileQuotaRetries(env: Env, database: AuthorityDatabas
         await repository.settle(channelId, row, "waiting", readiness.nextCheckAt);
         continue;
       }
-      const admission = await repository.dispatch({ channelId, row });
+      const { admission, resumeModel: switchTo } = await repository.dispatch({ channelId, row,
+        ...(chosen !== undefined ? { resumeModel: chosen } : {}) });
       if (row.kind === "launch") await retryLaunch(env, channelId, row, admission, database);
       else {
         const body = switchTo === undefined
