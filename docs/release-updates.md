@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: an Agent that delegates its request is let go
+
+An Agent whose Run was started for a Norn request and then delegated it with
+`xmatrix delegate` stayed in the conversation; it is now let go like one
+whose request ended, unless it still holds another request or waits on a
+question. An Instance delegated a request by its address is told that
+answering does not end its Run. Hub only; expand migration 0257 adds
+`norn_requests.delegated_away_instance_id`. Recovery is a CI-validated beta
+Hub reverting this change; the column is then ignored.
+
 ## Unreleased: an Agent can call off a question it asked
 
 `xmatrix cancel <request>` lets the Agent Instance that asked a question with

@@ -240,9 +240,11 @@ ledger records who delegated it, to whom, when and why.
 - The delegate is a person who can read the conversation, by name; an Agent
   by its harness name, whose new Run takes it; or an Instance here by its
   address (`@claude:2`), whose Run is the program's authority's or the
-  delegator's own, and which takes messages. The delivery goes to that Instance alone, as to one asked
-  again on a Page. A participant the request leaves out (`~except`) is
-  refused, and so is a person for a request with conditions such as `~repo`.
+  delegator's own, and which takes messages. The delivery goes to that
+  Instance alone, as to one asked again on a Page, and tells it that
+  answering does not end its Run. A participant the request leaves out
+  (`~except`) is refused, and so is a person for a request with conditions
+  such as `~repo`.
 - The delegate's delivery says who delegated it and quotes their words. A
   person's card says so too, and its **Decline** reads **Give back**.
 - A delegate's answer settles the request. Their refusal or failure gives it
@@ -436,6 +438,10 @@ go once. Some stay (`NORN_INSTANCE_STAYS_SQL`):
 - one a request was delegated to by its address: it was already at work here,
   and was not started for the request.
 
+An Instance a delivery started is let go the same way once its Agent
+delegated the request (`norn_requests.delegated_away_instance_id`, expand
+migration 0257): the request goes on with someone else, and nothing is left
+for it here unless one of the rules above keeps it.
 So a Page program's conversation always has the Agent that did the work last:
 a person who writes there after the program reaches it, with what it knows.
 The others are let go, also while the program runs, so a routine does not
