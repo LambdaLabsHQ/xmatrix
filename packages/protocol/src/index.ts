@@ -237,7 +237,7 @@ export type {
   LaunchDecisionStage, LaunchHarnessFit, LaunchParameterEvidence, LaunchPlacementCandidate,
 } from "./launch-parameter-evidence.js";
 export {
-  currentRoutingQuotaWindows, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
+  currentRoutingQuotaWindows, fromPreScopeCursorWire, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   ROUTING_QUOTA_MAX_SCOPE_BYTES, ROUTING_QUOTA_MAX_WINDOWS, ROUTING_QUOTA_PROBE_MAX_TARGETS, routingQuotaAccountPartExpiry, routingQuotaPace,
   routingQuotaProbeObservations, routingQuotaRecord, routingQuotaUsageWindows,
 } from "./agent-routing-quota-probe.js";

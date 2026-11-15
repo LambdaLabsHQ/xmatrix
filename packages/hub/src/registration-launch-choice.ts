@@ -306,9 +306,13 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
         const until = Date.parse(modelQuota(candidate, catalogRow(candidate, { model: named }), now)?.expiresAt ?? "");
         return Number.isFinite(until) ? [until] : [];
       }) : [];
+      // Its retry waits on that model, or without one on the runtime's
+      // default, so it wakes when that model's quota is back.
       throw new RegistrationAccessError("registration_quota_exhausted", 409, undefined, undefined,
-        eligible.map((candidate): QuotaRetryRegistration => ({ ...candidate.key,
-          ...named ? { model: { model: named, quotaScopes: catalogRow(candidate, { model: named })?.quotaScopes ?? [] } } : {} })),
+        eligible.map((candidate): QuotaRetryRegistration => {
+          const row = catalogRow(candidate, { model: named ?? "" });
+          return { ...candidate.key, ...named || row ? { model: { model: named ?? "", quotaScopes: row?.quotaScopes ?? [] } } : {} };
+        }),
         observed.length ? new Date(Math.min(...observed)).toISOString() : new Date(now).toISOString(),
         back.length ? new Date(Math.min(...back)).toISOString() : undefined);
     }

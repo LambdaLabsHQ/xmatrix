@@ -215,3 +215,31 @@ test('scoped windows travel only on a probe that asked, each naming its scope, p
   assert.throws(() => parseRoutingQuotaProbeResponse(response({ ...pools, scopedQuotaUsages: [] }), asked, now),
     'a reading of nothing is no reading');
 });
+
+test('a Cursor reading in the pre-scope wire reads its pools as scoped windows; the field marks the new wire', async () => {
+  const { fromPreScopeCursorWire } = await import('../dist/agent-routing-quota-probe.js');
+  const { routingQuotaObservation } = await import('../dist/agent-routing.js');
+  const reset = '2026-10-13T09:32:23Z';
+  const old = { quotaSource: 'provider_api', quotaObservedAt: '2026-09-21T19:55:00Z', quotaUsages: [
+    { label: '1mo', window: 'cursor', percent: 60, resetAt: reset },
+    { label: 'Auto', window: 'cursor', percent: 26, resetAt: reset },
+    { label: 'API', window: 'cursor', percent: 100, resetAt: reset }] };
+  const read = fromPreScopeCursorWire(old, 'cursor');
+  assert.deepEqual(read.quotaUsages, [], 'the cycle total gated nothing beside the pools');
+  assert.deepEqual(read.scopedQuotaUsages.map(window => [window.scope, window.percent]), [['Auto', 26], ['API', 100]]);
+  assert.equal(routingQuotaObservation(read, now, { model: { quotaScopes: ['Auto'] } }).value, 74,
+    'a used-up API pool does not stop Auto');
+  // A reading that carries the field is the new wire, and other harnesses are never read so.
+  const current = { ...old, scopedQuotaUsages: [] };
+  assert.equal(fromPreScopeCursorWire(current, 'cursor'), current);
+  assert.equal(fromPreScopeCursorWire(old, 'claude'), old);
+  // A probe of an old Cursor daemon is read the same way.
+  const cursorTarget = { targetId: 'registration:cursor', configurationDigest: 'c'.repeat(64) };
+  const asked = { requestId: 'probe:1', connectionEpoch: 7, targets: [cursorTarget], windowLabels: true,
+    scopedQuotaUsages: true };
+  const [fact] = routingQuotaProbeObservations({ requestId: 'probe:1', connectionEpoch: 7, results: [{ ...cursorTarget,
+    status: 'observed', quotaSource: 'provider_api', quotaObservedAt: old.quotaObservedAt,
+    quotaUsages: old.quotaUsages.map(({ window: _window, ...window }) => window) }] }, asked, now);
+  assert.equal(fact.record.account, undefined);
+  assert.deepEqual(fact.record.scoped.windows.map(window => window.scope), ['Auto', 'API']);
+});

@@ -112,6 +112,31 @@ export function routingQuotaRecord(usage: unknown, now: number): RoutingQuotaRec
       ...(scopedExpiresAt ? { expiresAt: scopedExpiresAt } : {}) } } : {}) };
 }
 
+/**
+ * Translates the pre-scope Cursor wire. A daemon from before quota scopes
+ * (#1693) reports Cursor's Auto and API pools as account windows labelled
+ * `Auto` and `API` beside the `1mo` cycle total, and never sends the
+ * `scopedQuotaUsages` field, which a later daemon's complete reading always
+ * carries (even empty): its absence marks the old protocol. Under that
+ * protocol the pools constrained models by pool and the total gated nothing,
+ * so the pools become scoped windows `Auto` and `API` and the total is
+ * dropped. Any other reading, and every reading carrying the field, is
+ * returned as is. Delete this once no daemon below the #1693 release reports.
+ */
+export function fromPreScopeCursorWire(usage: unknown, harness: string): unknown {
+  if (harness !== "cursor" || !usage || typeof usage !== "object" || Array.isArray(usage)) return usage;
+  const row = usage as Record<string, unknown>;
+  if ("scopedQuotaUsages" in row || !Array.isArray(row.quotaUsages)) return usage;
+  const pool = (window: unknown) => {
+    const label = window && typeof window === "object" ? (window as Record<string, unknown>).label : undefined;
+    return label === "Auto" || label === "API" ? label : undefined;
+  };
+  const pools = row.quotaUsages.filter(pool);
+  if (!pools.length) return usage;
+  return { ...row, quotaUsages: [],
+    scopedQuotaUsages: pools.map(window => ({ ...window as Record<string, unknown>, scope: pool(window) })) };
+}
+
 /** Windows of a usage or probe reading (`percent`) in their shown form (`usedPercent`). */
 function usageWindows(value: unknown, scoped: boolean): unknown[] {
   return (Array.isArray(value) ? value : []).flatMap(item => {
@@ -136,7 +161,8 @@ export function routingQuotaProbeObservations(value: unknown, expected: RoutingQ
   const response = parseRoutingQuotaProbeResponse(value, expected, now);
   return response.results.flatMap(result => {
     if (result.status !== "observed") return [];
-    const record = routingQuotaRecord(result, now);
+    const harness = result.targetId.startsWith("registration:") ? result.targetId.slice("registration:".length) : "";
+    const record = routingQuotaRecord(fromPreScopeCursorWire(result, harness), now);
     return record ? [{ targetId: result.targetId, configurationDigest: result.configurationDigest, record }] : [];
   });
 }

@@ -109,9 +109,12 @@ export async function offerUsageLimitRecovery(env: Env, input: UsageLimitRecover
   const now = Date.now();
   const usage = (await readRegistrationQuotaUsages(directory, [key], crypto.randomUUID())).get(registrationQuotaKey(key));
   const quota = retryModelQuota(usage, input.model, now);
-  if (!quota || quota.value > 0) return;
+  // A handoff that found no successor offers to wait only on quota read as
+  // used up. A turn refused for its model's quota is offered the retry
+  // whatever a newer reading says: its readiness settles it.
+  if (!input.model && (!quota || quota.value > 0)) return;
   // The hold or reading that stopped the Instance: only a newer reading is news.
-  const refusedThrough = quota.observedAt;
+  const refusedThrough = quota?.observedAt ?? new Date(now).toISOString();
   const id = await repository.offer({
     channelId: input.channelId,
     actorUserId: input.actorUserId,

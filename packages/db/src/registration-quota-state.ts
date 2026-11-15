@@ -1,4 +1,4 @@
-import { currentRoutingQuotaWindows, routingQuotaRecord, routingQuotaUsageWindows,
+import { currentRoutingQuotaWindows, fromPreScopeCursorWire, routingQuotaRecord, routingQuotaUsageWindows,
   type LlmUsage } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase } from "./contracts.js";
@@ -14,7 +14,7 @@ export const registrationQuotaKey = (key: RegistrationQuotaKey): string =>
  * True when the reading left one of the owner's refused summons ready to wake. */
 export async function observeRegistrationQuota(database: AuthorityDatabase, key: RegistrationQuotaKey,
   usage: unknown, requestId: string): Promise<boolean> {
-  const record = routingQuotaRecord(usage, Date.now());
+  const record = routingQuotaRecord(fromPreScopeCursorWire(usage, key.harness), Date.now());
   if (!record) return false;
   return database.transaction({ requestId, operation: "registration.quota.observe-instance" }, async tx => {
     const rows = await tx.query<QueryResultRow>({ name: "registration_quota_instance_pool_v1",

@@ -304,7 +304,9 @@ test("a model whose own quota is used up is no option, and named alone it is ref
   const spent = { ...claude, observations: allUsed, modelCatalog: claude.modelCatalog.map(row =>
     ({ ...row, quotaScopes: [row.names[1] === 'Fable 5.2' ? 'Fable' : row.names[0] === 'sonnet' ? 'Sonnet' : 'Haiku'] })) };
   await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
-    candidates: [spent] }), error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === undefined);
+    candidates: [spent] }), error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === undefined
+    // Named no model: its retry waits on the runtime's default.
+    && JSON.stringify(error.quotaTargets[0].model) === JSON.stringify({ model: '', quotaScopes: ['Fable'] }));
 });
 
 test('runtime model aliases preserve the declared model and its observed effort options', async () => {
