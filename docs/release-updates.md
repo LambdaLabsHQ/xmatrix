@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: the retired Automation storage is dropped
+
+Contract migration 0253 drops `data.automation_occurrence_runs`,
+`data.automation_occurrence_conversation_id(text)`, `data.automation_occurrences`
+and `data.automations`, which no code reads or writes since #1682. It refuses
+while any Automation is still enabled and attached to its page; paused,
+finished and detached rows go with their tables. An administrator applies it
+through the PostgreSQL Contract Migration workflow at this change's reviewed
+PR head before it merges. No product change. Recovery is forward only: the
+rows held no Automation that could run.
+
 ## Unreleased: schedule lines no longer run; scheduled work is a `norn run` program
 
 A task line ending in `🔁 every …` or `⏳ <time>` is plain text: the Hub does
