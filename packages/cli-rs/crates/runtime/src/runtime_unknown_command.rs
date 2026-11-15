@@ -112,7 +112,7 @@ mod tests {
 
     #[test]
     fn a_plain_word_is_asked_of_the_hub_before_it_is_called_unknown() {
-        assert!(unknown_command_error_for(&args(&["automation", "list"]), false).is_none());
+        assert!(unknown_command_error_for(&args(&["settings", "status"]), false).is_none());
         assert!(unknown_command_error_for(&args(&["Logn"]), false).is_some());
     }
 

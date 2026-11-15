@@ -93,7 +93,7 @@ mod tests {
         let _guard = crate::tests::test_process_env_lock();
         let previous = std::env::var_os("XMATRIX_SPAWN_RUNTIME");
         unsafe { std::env::remove_var("XMATRIX_SPAWN_RUNTIME") };
-        assert!(candidate("automation list"));
+        assert!(candidate("settings status"));
         assert!(candidate("commands"));
         assert!(!candidate("claude --resume"));
         assert!(!candidate("/opt/tool"));
@@ -101,7 +101,7 @@ mod tests {
         assert!(!candidate(""));
         unsafe { std::env::set_var("XMATRIX_SPAWN_RUNTIME", "/usr/local/bin/mytool") };
         assert!(!candidate("mytool"), "the Run's own runtime");
-        assert!(candidate("automation"));
+        assert!(candidate("settings"));
         match previous {
             Some(value) => unsafe { std::env::set_var("XMATRIX_SPAWN_RUNTIME", value) },
             None => unsafe { std::env::remove_var("XMATRIX_SPAWN_RUNTIME") },
