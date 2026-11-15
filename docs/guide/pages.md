@@ -1,6 +1,6 @@
 ---
-title: "Living pages and the programs that keep them true · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Norn programs that run agents on a schedule, a date or an event."
+title: "Living pages and programs that keep them true · xMatrix Docs"
+description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Norn programs that run agents on a schedule or an event."
 ---
 
 # Pages
