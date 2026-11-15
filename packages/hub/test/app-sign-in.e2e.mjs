@@ -38,6 +38,60 @@ async function start(worker, { provider = "google", redirectUri = "xmatrix://aut
   return { response, providerUrl, finish: `${finish.pathname}${finish.search}` };
 }
 
+test("a browser already signed in on the web finishes the app without a provider", async () => {
+  const worker = await startPgHubWorker({ vars: {
+    BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",
+    GOOGLE_CLIENT_ID: "google-fixture", GOOGLE_CLIENT_SECRET: "google-fixture",
+  } });
+  try {
+    const cookie = await signedInCookie(worker);
+    await query("UPDATE control.auth_users SET created_at = now() - interval '2 days' WHERE email = $1", [EMAIL]);
+    const { verifier, challenge } = pkce();
+    const state = base64url(randomBytes(16));
+    const params = new URLSearchParams({
+      provider: "google", session_only: "1", redirect_uri: "xmatrix://auth",
+      code_challenge: challenge, code_challenge_method: "S256", state,
+    });
+    const response = await worker.fetch(`/api/auth/app/start?${params}`, { headers: { cookie }, redirect: "manual" });
+    assert.equal(response.status, 302);
+    const callback = new URL(response.headers.get("location"));
+    assert.equal(`${callback.protocol}//${callback.host}`, "xmatrix://auth");
+    assert.equal(callback.searchParams.get("state"), state);
+    assert.equal(callback.searchParams.get("new_account"), null);
+    const code = callback.searchParams.get("code");
+    assert.match(code, /^[a-f0-9]{64}$/u);
+
+    const issued = await worker.fetch("/api/auth/app/token", { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ code, codeVerifier: verifier }) });
+    assert.equal(issued.status, 200);
+    assert.equal((await issued.json()).user.email, EMAIL);
+  } finally {
+    await worker.stop();
+  }
+});
+
+test("an app that only checks the browser session stays on its buttons when there is none", async () => {
+  const worker = await startPgHubWorker({ vars: {
+    BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",
+  } });
+  try {
+    const state = base64url(randomBytes(16));
+    const params = new URLSearchParams({
+      session_only: "1", redirect_uri: "xmatrix://auth",
+      code_challenge: pkce().challenge, code_challenge_method: "S256", state,
+    });
+    const response = await worker.fetch(`/api/auth/app/start?${params}`, { redirect: "manual" });
+    assert.equal(response.status, 302);
+    const callback = new URL(response.headers.get("location"));
+    assert.equal(`${callback.protocol}//${callback.host}`, "xmatrix://auth");
+    assert.equal(callback.searchParams.get("error"), "sign_in_required");
+    assert.equal(callback.searchParams.get("state"), state);
+    assert.equal(callback.searchParams.get("code"), null);
+  } finally {
+    await worker.stop();
+  }
+});
+
 test("an app signs in at a provider and redeems its code once, with its own verifier only", async () => {
   const worker = await startPgHubWorker({ vars: {
     BETTER_AUTH_SECRET: "app-sign-in-fixture-secret-not-production",

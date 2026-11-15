@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: an app uses the browser's existing sign-in
+
+Opening the desktop or phone app no longer asks for Google or GitHub when that
+browser is already signed in on the web. The app's sign-in reads the browser's
+session and hands the app a code for that account; with no session it returns
+to the app's own provider buttons. The connect card no longer tells a person
+to sign in with the same account. Hub and beta Web, no migration. Recovery is
+a CI-validated beta reverting this change.
+
 ## Unreleased: DeepSeek Harness is offered full access alone
 
 A DeepSeek Agent could be added asking first. In that mode xMatrix leaves
