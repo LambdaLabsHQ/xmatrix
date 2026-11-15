@@ -12,6 +12,8 @@ test("every shell address is served the prerendered workspace page", () => {
     "/app/space-1/channels/general--abc",
     "/app/space-1/settings",
     "/app/space-1/more",
+    // Retired, and still the shell's: it opens Pages there.
+    "/app/space-1/automation",
   ]) assert.equal(isAppShellPath(path), true, path);
 });
 

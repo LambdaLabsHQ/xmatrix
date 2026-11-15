@@ -28,7 +28,6 @@ import {
   compareChannelsForSidebar,
   sortChannels,
   sortProjects,
-  sortAutomations,
   sortSpaces,
   timestampMs,
 } from "./workspace-shell-helpers-extra";
@@ -76,7 +75,7 @@ import {
 
 import { cn } from "@/lib/utils";
 
-import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireField, requireJson } from "@/lib/query/api-client";
+import { errorFromResponse, xmatrixApiRequest, requireResponseOk, xmatrixRawResponse, unexpectedResponse, requireJson } from "@/lib/query/api-client";
 import { hubReadResponse } from "@/lib/query/hub-read";
 
 import { recordOnboardingStep } from "@/lib/onboarding-funnel";
@@ -90,8 +89,6 @@ import type {
   SerializedAgent,
   ChannelSnapshot,
   SerializedMachineDaemon,
-  SerializedAutomation,
-  SerializedAutomationCatalog,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -381,66 +378,6 @@ export async function fetchProjects(
     url: WEB_PROXY_ROUTES.workspaces, token, signal,
   });
   return sortProjects(data.workspaces || []);
-}
-
-export async function fetchAutomations(
-  token: string,
-  options: { spaceId?: string; signal?: AbortSignal } = {},
-): Promise<SerializedAutomationCatalog> {
-  const params = new URLSearchParams();
-  if (options.spaceId) params.set("spaceId", options.spaceId);
-  const query = params.toString();
-  const data = await xmatrixApiRequest<Partial<SerializedAutomationCatalog>>({
-    url: query ? `${WEB_PROXY_ROUTES.automations}?${query}` : WEB_PROXY_ROUTES.automations,
-    token,
-    signal: options.signal,
-  });
-  return {
-    // A record from an older Hub may lack a name; every view sorts and shows by it.
-    automations: sortAutomations((data.automations || []).map((automation) =>
-      typeof automation.name === "string" && automation.name.trim()
-        ? automation : { ...automation, name: automation.expression?.text?.split("\n")[0]?.trim().slice(0, 80) || "Automation" })),
-    executionEnabled: data.executionEnabled === true,
-    agentManagementEnabled: data.agentManagementEnabled === true,
-  };
-}
-
-export async function setAutomationPaused(
-  token: string,
-  automation: SerializedAutomation,
-  paused: boolean
-): Promise<SerializedAutomation> {
-  const route = paused
-    ? WEB_PROXY_ROUTES.automation_pause(automation.id)
-    : WEB_PROXY_ROUTES.automation_resume(automation.id);
-  const res = await xmatrixRawResponse(route, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ expectedVersion: automation.version }),
-    cache: "no-store",
-  });
-  return requireField<SerializedAutomation>(res, "automation", "The Automation");
-}
-
-/** The Automation as the Hub holds it now, or null once it is gone. */
-export async function fetchAutomation(token: string, automationId: string): Promise<SerializedAutomation | null> {
-  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automationId), {
-    method: "GET",
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
-  if (res.status === 404) return null;
-  return requireField<SerializedAutomation>(res, "automation", "The Automation");
-}
-
-export async function removeAutomation(token: string, automation: SerializedAutomation): Promise<void> {
-  const res = await xmatrixRawResponse(WEB_PROXY_ROUTES.automation(automation.id), {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" },
-    body: JSON.stringify({ expectedVersion: automation.version }),
-    cache: "no-store",
-  });
-  await requireResponseOk(res, 404);
 }
 
 export async function registerWorkspace(
@@ -1128,20 +1065,6 @@ export function replaceWorkspace(
   return exists
     ? workspaces.map((current) => (workspaceKey(current) === key ? workspace : current))
     : [...workspaces, workspace];
-}
-
-export function replaceAutomation(
-  automations: SerializedAutomation[],
-  automation: SerializedAutomation
-): SerializedAutomation[] {
-  const exists = automations.some((current) => current.id === automation.id);
-  // Outcomes are read with the list; a single record answering a change keeps the list's until it is read again.
-  const next = exists
-    ? automations.map((current) => (current.id === automation.id
-      ? (automation.outcomes || !current.outcomes ? automation : { ...automation, outcomes: current.outcomes })
-      : current))
-    : [...automations, automation];
-  return sortAutomations(next);
 }
 
 export function emptyAgentConfigForm(): AgentConfigForm {

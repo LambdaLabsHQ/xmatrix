@@ -73,7 +73,6 @@ import {
   ChevronRight,
   CircleArrowUp,
   CircleHelp,
-  Clock,
   Bot,
   HardDrive,
   Hash,
@@ -199,7 +198,6 @@ export const WorkspaceRail = memo(function WorkspaceRail({
         <RailButton active={activeView === "status"} icon={statusLive ? StatusPulseIconLive : StatusPulseIcon} label="Status"
           onClick={() => onChangeView("status")} />
         <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
-        <RailButton active={activeView === "automation"} icon={Clock} label="Schedules" onClick={() => onChangeView("automation")} />
         <RailButton active={activeView === "agents"} icon={Bot} label="Agents" onClick={() => onChangeView("agents")} />
         <RailButton active={activeView === "apps"} icon={PlugZap} label="App" onClick={() => onChangeView("apps")} />
         <RailButton

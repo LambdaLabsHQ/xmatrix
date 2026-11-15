@@ -6,7 +6,9 @@
  * isolate rendering the same startup frame.
  *
  * Legacy addresses (`direct`, `roles`, `analytics`, `/app/<space>/<channel>`)
- * are left to their redirect routes under `app/(en)/app/[spaceId]`.
+ * are left to their redirect routes under `app/(en)/app/[spaceId]`. The retired
+ * `automation` address stays here: the shell opens Pages for it and rewrites
+ * the address, where no route would read it as a channel id.
  */
 const SHELL_SEGMENTS = new Set([
   "activity", "admin", "agents", "apps", "automation", "channels", "local", "machines",

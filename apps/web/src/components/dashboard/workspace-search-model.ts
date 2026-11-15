@@ -108,7 +108,6 @@ export const SEARCH_DESTINATIONS: ReadonlyArray<{ view: AppView; label: string; 
   { view: "status", label: "Status", keywords: "status overview" },
   { view: "agents", label: "Agents", keywords: "agents harness runtime" },
   { view: "machines", label: "Machines", keywords: "machines computers daemons" },
-  { view: "automation", label: "Schedules", keywords: "schedules automations cron" },
   { view: "apps", label: "Apps", keywords: "apps connectors integrations github" },
   { view: "team", label: "Team", keywords: "team members people invite roles" },
   { view: "activity", label: "Activity", keywords: "activity events" },

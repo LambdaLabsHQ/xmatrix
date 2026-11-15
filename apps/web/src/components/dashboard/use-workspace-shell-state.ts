@@ -95,7 +95,7 @@ import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
 import { noteAgentAnswered } from "@/lib/star-prompt";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
-import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
+import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
@@ -109,7 +109,6 @@ import type {
   InstanceRecord,
   ChannelPresence,
   SerializedMachineDaemon,
-  SerializedAutomation,
   SerializedSpace,
   SerializedWorkspace,
   HumanServerMessage,
@@ -135,7 +134,6 @@ import {
   HUMAN_HEARTBEAT_PING,
   RELAY_PUSH_PING_INTERVAL_MS,
   RELAY_PUSH_PONG_TIMEOUT_MS,
-  AUTOMATION_REFRESH_INTERVAL_MS,
   TRACE_EVENT_LIMIT,
   TimelineItem,
   WorkspaceMessageSearch,
@@ -160,7 +158,6 @@ import {
   fetchChannelHistory,
   fetchEvents,
   fetchProjects,
-  fetchAutomations,
   fetchSpacesForLanding,
   fetchWorkingSpace,
   historyMessageCountEstimate,
@@ -448,12 +445,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [projects, setProjects] = useState<SerializedWorkspace[]>([]);
 
-  const [automations, setAutomations] = useState<SerializedAutomation[]>([]);
-
-  const [automationExecutionEnabled, setAutomationExecutionEnabled] = useState<boolean | null>(null);
-
-  const [scheduleFocusId, setScheduleFocusId] = useState<string | null>(null);
-
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
   const [realtimeEventViews] = useState(() => createRealtimeCollection<ChannelEventView>());
   const [presentedChannelTail] = useState(createPresentedChannelTail);
@@ -596,14 +587,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const [localActionBusy, setLocalActionBusy] = useState<string | null>(null);
 
   const [localActionError, setLocalActionError] = useState<string | null>(null);
-
-  const [automationBusy, setAutomationBusy] = useState<string | null>(null);
-
-  const [automationError, setAutomationError] = useState<string | null>(null);
-
-  const [automationLoadError, setAutomationLoadError] = useState<string | null>(null);
-
-  const [loadingAutomations, setLoadingAutomations] = useState(false);
 
   const [runtimeCheck, setRuntimeCheck] = useState<DesktopRuntimeCheckResult | null>(null);
 
@@ -2373,8 +2356,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       setSpaces([]);
       setSpacesLoadedUserId(null);
       setProjects([]);
-      setAutomations([]);
-      setAutomationExecutionEnabled(null);
       setEvents([]);
       setAgentTraceReplicas([]);
       setLoadingWorkspace(false);
@@ -2490,48 +2471,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   );
 
   const renderableHistory = historyRenderAuthorized ? history : EMPTY_CHANNEL_HISTORY;
-
-  const automationsQuery = useQuery({
-    queryKey: xmatrixQueryKeys.domain(
-      { userId: authenticatedUserId || "anonymous" }, "automations",
-      [resolvedSpaceId ?? null],
-    ),
-    queryFn: ({ signal }) => fetchAutomations(token!, {
-      spaceId: resolvedSpaceId!,
-      signal,
-    }),
-    enabled: Boolean(token && authenticatedUserId && resolvedSpaceId && startupBackgroundReady),
-    staleTime: 15_000,
-    refetchInterval: () => refetchUnlessHumanPush(AUTOMATION_REFRESH_INTERVAL_MS),
-    refetchIntervalInBackground: false,
-  });
-  useEffect(() => {
-    if (!token || !resolvedSpaceId) {
-      setAutomations([]);
-      setAutomationExecutionEnabled(null);
-      setAutomationLoadError(null);
-      setLoadingAutomations(false);
-      return;
-    }
-    setLoadingAutomations(automationsQuery.isPending);
-    setAutomations(automationsQuery.data?.automations ?? []);
-    if (automationsQuery.error) {
-      // TanStack Query retains the last successful data during a failed
-      // background refetch. Keep painting it, but revoke mutation capability
-      // until a fresh authoritative response succeeds.
-      setAutomationExecutionEnabled(null);
-      setAutomationLoadError(userErrorMessage(automationsQuery.error, "Couldn't load Automations"));
-    } else if (automationsQuery.data) {
-      setAutomationExecutionEnabled(automationsQuery.data.executionEnabled);
-      setAutomationLoadError(null);
-    }
-  }, [
-    resolvedSpaceId,
-    automationsQuery.data,
-    automationsQuery.error,
-    automationsQuery.isPending,
-    token,
-  ]);
 
   useMachineDaemonLoad({
     token,
@@ -3153,11 +3092,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setSpaces,
     projects,
     setProjects,
-    automations,
-    setAutomations,
-    automationExecutionEnabled,
-    scheduleFocusId,
-    setScheduleFocusId,
     events,
     setEvents,
     agentTraceReplicas,
@@ -3233,12 +3167,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setLocalActionBusy,
     localActionError,
     setLocalActionError,
-    automationBusy,
-    setAutomationBusy,
-    automationError,
-    setAutomationError,
-    automationLoadError,
-    loadingAutomations,
     runtimeCheck,
     setRuntimeCheck,
     checkingDesktopUpdates,

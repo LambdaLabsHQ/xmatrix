@@ -128,7 +128,6 @@ import type {
   SerializedAgent,
   ChannelSnapshot,
   SerializedMachineDaemon,
-  SerializedAutomation,
   SerializedSpace,
   SerializedWorkspace,
   PageSummary,
@@ -285,14 +284,6 @@ export function sortProjects(projects: SerializedWorkspace[]): SerializedWorkspa
     const byTime = new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime();
     if (byTime !== 0) return byTime;
     return a.displayName.localeCompare(b.displayName);
-  });
-}
-
-export function sortAutomations(automations: SerializedAutomation[]): SerializedAutomation[] {
-  return [...automations].sort((a, b) => {
-    const byNextRun = timestampMs(a.nextRunAt) - timestampMs(b.nextRunAt);
-    if (byNextRun !== 0) return byNextRun;
-    return a.name.localeCompare(b.name);
   });
 }
 

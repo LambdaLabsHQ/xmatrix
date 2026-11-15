@@ -23,4 +23,4 @@ Read conversations on demand with `xmatrix channel history`, and search them wit
 
 If a capability or required evidence is unavailable, report the precise blocker.
 Do not fall back to an owner token, guessed API, or fabricated evidence. See
-[automations](automations.md) for scheduling.
+[programs](automations.md) for scheduling.

@@ -1855,7 +1855,6 @@ export const ChannelDetails = memo(function ChannelDetails({
             onManageApps={onManageApps}
           />
 
-          {/* Automations are made on a page, in the section they keep true; this lists the ones running here. */}
           {/* The desktop title carries delete; the phone has no title icons. */}
           {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
             className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}

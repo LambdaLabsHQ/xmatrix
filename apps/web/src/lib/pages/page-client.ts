@@ -5,7 +5,6 @@ import {
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
   type NornRequestView, type PageProgramStatus,
-  type SerializedAutomation,
 } from "@xmatrix/protocol";
 
 export type {
@@ -149,10 +148,6 @@ export const pageApi = {
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ pages: PageTreeActivity[] }>({ hubPath: HUB_ROUTES.space_page_links(spaceId, "agents"),
       webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
-  // A page's Automations (docs/design/pages-live-document.md §6).
-  automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
-      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
   // What a `request:<ref>` reference shows in its place.
   request: (spaceId: string, requestRef: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ request: NornRequestView }>({ hubPath: HUB_ROUTES.space_norn_request(spaceId, requestRef),
@@ -165,13 +160,6 @@ export const pageApi = {
   programs: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ programs: PageProgramStatus[] }>({ hubPath: hubPage(spaceId, pageId, "programs"),
       webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/programs`, token, signal }),
-  changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "run" | "delete") =>
-    xmatrixApiRequest<{ automation?: SerializedAutomation }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
-        action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
-      token, method: action === "delete" ? "DELETE" : "POST",
-      ...(action === "delete" ? {} : { body: { expectedVersion: automation.version } }) }),
   link: (spaceId: string, token: string, input: { conversationId: string; pageId: string; blockId?: string;
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,

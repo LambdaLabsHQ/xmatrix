@@ -75,8 +75,6 @@ test("stat tiles summarize the platform totals without dropping a metric", () =>
     agentInstances: 3,
     machines: 6,
     onlineMachines: 4,
-    scheduledTasks: 8,
-    enabledScheduledTasks: 5,
     storageLogicalBytes: 1024 * 1024,
     archivedSegmentBytes: 2048,
   };

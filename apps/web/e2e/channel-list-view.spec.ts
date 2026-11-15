@@ -32,7 +32,7 @@ test("rail destinations reuse the chat list resize handle", async ({ page }) => 
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const handle = page.getByRole("separator", { name: "Resize sidebar" });
 
-  for (const view of ["machines", "automation", "agents", "apps", "team", "settings", "pages"]) {
+  for (const view of ["machines", "agents", "apps", "team", "settings", "pages"]) {
     await page.goto(`/app/personal-sspaceperso/${view}`);
     await expect(handle).toHaveCount(1);
     await expect(handle).toBeVisible();

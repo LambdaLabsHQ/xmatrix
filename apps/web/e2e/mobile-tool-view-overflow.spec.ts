@@ -108,16 +108,22 @@ test("machine cards keep every detail value inside the mobile tool surface", asy
   await expect(page.getByText(/c50a4b0b-6de5-485a-b89e-8968c6eef6a1/i)).toHaveCount(0);
 });
 
-/* pages/profile, like machines/automation, has a route segment; without one a
+/* pages/profile, like machines, has a route segment; without one a
    deep link or a reload fell through to the legacy [channelId] redirect and
    dropped the user on the channel list. */
 test("More and dock views survive a deep link instead of falling back to channels", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
 
-  for (const view of ["machines", "automation", "pages", "profile"]) {
+  for (const view of ["machines", "pages", "profile"]) {
     await page.goto(`/app/personal-sspaceperso/${view}`);
     await expect(page).toHaveURL(new RegExp(`/app/personal-sspaceperso/${view}$`));
   }
+});
+
+test("a link to the retired Schedules view opens Pages", async ({ page }) => {
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  await page.goto("/app/personal-sspaceperso/automation?schedule=gone");
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/pages$/u);
 });
 
 test("a long secret alias does not push the settings column off the surface", async ({ page }) => {

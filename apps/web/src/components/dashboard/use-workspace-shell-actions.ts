@@ -172,7 +172,6 @@ import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResp
 import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
 import { confirmAccessForAdd } from "./agent-access";
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
-import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
 import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-rest";
@@ -195,7 +194,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setChannels,
     setSpaces,
     setProjects,
-    setScheduleFocusId,
     setEvents,
     setChannelReadCounts,
     setChannelReadCountsBaselineReady,
@@ -1271,20 +1269,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  const {
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
-  } = useWorkspaceAutomationActions({
-    token: s.token,
-    currentSpaceId: s.currentSpaceId,
-    automations: s.automations,
-    busy: s.automationBusy,
-    setAutomations: s.setAutomations,
-    setBusy: s.setAutomationBusy,
-    setError: s.setAutomationError,
-  });
-
   function openLocalAgentDiscovery() {
     setView("local");
     const nextPath = appViewPath(s.selectedChannel, "local", s.currentSpaceId, s.spaces);
@@ -1332,8 +1316,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
-
-  const clearScheduleFocus = useCallback(() => setScheduleFocusId(null), [setScheduleFocusId]);
 
   function openAppsForSpace(spaceId: string) {
     setPendingExplicitSpaceId(spaceId);
@@ -2934,15 +2916,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     revealLocalWorkspace,
     checkLocalRuntime,
     completeDesktopSetup,
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
     openHumanProfile,
     profileUserId,
-    clearScheduleFocus,
     openAppsForSpace,
     backToMore,
     selectSpace,
