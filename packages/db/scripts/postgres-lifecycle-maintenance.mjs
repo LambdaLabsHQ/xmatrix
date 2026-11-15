@@ -49,6 +49,14 @@ export function parseLifecycleOptions(argv) {
 // transaction with their own ceiling; the deletes keep the tighter one.
 const SNAPSHOT_STATEMENT_TIMEOUT = "30s";
 const DELETE_STATEMENT_TIMEOUT = "5s";
+/**
+ * A Machine daemon command stays a week past its expiry. Commands live 15 s to
+ * 30 days, and readers refuse an expired one, but the harness action list, the
+ * harness release repeat and the quota probe look back by creation time, at
+ * most a day. Because expires_at is never before created_at, a row past this
+ * grace was also created over a week ago, and the expiry index alone bounds it.
+ */
+const MACHINE_COMMAND_GRACE = "interval '7 days'";
 
 async function snapshotQuery(client, label, text, values) {
   try {
@@ -82,7 +90,8 @@ async function readSnapshot(client) {
       FROM pg_class relation JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
       WHERE (namespace.nspname='data'
         AND relation.relname IN (
-          'idempotency_keys','message_sequence_reservations','agent_message_executions','outbox','message_mutations'
+          'idempotency_keys','message_sequence_reservations','agent_message_executions','outbox','message_mutations',
+          'machine_daemon_commands'
         )) OR (namespace.nspname='control' AND relation.relname IN ('scoped_control_command_replays','auth_sessions'))
       ORDER BY relation.relname`);
   // One scan of the outbox serves both its per-status counts and its oldest row.
@@ -123,6 +132,11 @@ async function readSnapshot(client) {
           SELECT 1 FROM control.auth_sessions WHERE expires_at<=now() ORDER BY expires_at,id LIMIT $1
         ) bounded) AS auth_session_rows,
         (SELECT COUNT(*)::integer FROM (
+          SELECT 1 FROM data.machine_daemon_commands
+          WHERE expires_at<=now()-${MACHINE_COMMAND_GRACE} AND created_at<=now()-${MACHINE_COMMAND_GRACE}
+          ORDER BY expires_at,command_id LIMIT $1
+        ) bounded) AS machine_daemon_command_rows,
+        (SELECT COUNT(*)::integer FROM (
           SELECT 1 FROM data.outbox WHERE status='pending' AND attempts=0 AND lease_until IS NULL
             AND available_at<now()-interval '35 days' AND created_at<now()-interval '35 days'
             AND updated_at<now()-interval '35 days'
@@ -139,6 +153,7 @@ async function readSnapshot(client) {
     expiredMessageExecutionRowsCapped: Number(expired.rows[0]?.message_execution_rows ?? 0),
     expiredScopedCommandReplayRowsCapped: Number(expired.rows[0]?.scoped_command_replay_rows ?? 0),
     expiredAuthSessionRowsCapped: Number(expired.rows[0]?.auth_session_rows ?? 0),
+    expiredMachineDaemonCommandRowsCapped: Number(expired.rows[0]?.machine_daemon_command_rows ?? 0),
     retainedOutboxRowsCapped: Number(expired.rows[0]?.retained_outbox_rows ?? 0),
     expiredIdempotencyRowsCappedAt: EVIDENCE_ROWS + 1,
   };
@@ -189,6 +204,13 @@ async function deleteBatch(client, relation, limit) {
                   ORDER BY expires_at,id LIMIT $1 FOR UPDATE SKIP LOCKED
                 ) DELETE FROM control.auth_sessions target USING expired
                   WHERE target.ctid=expired.ctid RETURNING 1`
+            : relation === "machine-daemon-command"
+              ? `WITH expired AS MATERIALIZED (
+                  SELECT ctid FROM data.machine_daemon_commands
+                  WHERE expires_at<=now()-${MACHINE_COMMAND_GRACE} AND created_at<=now()-${MACHINE_COMMAND_GRACE}
+                  ORDER BY expires_at,command_id LIMIT $1 FOR UPDATE SKIP LOCKED
+                ) DELETE FROM data.machine_daemon_commands target USING expired
+                  WHERE target.ctid=expired.ctid RETURNING 1`
             : relation === "scoped-command-replay"
               ? `WITH expired AS MATERIALIZED (
                   -- now() is stable, so the expiry index bounds the scan instead of filtering
@@ -212,8 +234,8 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   await client.query("SET lock_timeout = '2s'");
   const before = await snapshot(client);
   const startedAt = monotonicNow();
-  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
-  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, scopedCommandReplay: 0 };
+  const deleted = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, machineDaemonCommand: 0, scopedCommandReplay: 0 };
+  const batches = { idempotency: 0, sequenceReservation: 0, messageExecution: 0, wecomInstallAttempt: 0, dingtalkCompanyAttempt: 0, retainedOutbox: 0, authSession: 0, machineDaemonCommand: 0, scopedCommandReplay: 0 };
   if (!options.dryRun) {
     let pending = [
       { relation: "idempotency", key: "idempotency" },
@@ -224,6 +246,9 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
       { relation: "retained-outbox", key: "retainedOutbox" },
       // An expired session is refused by every sign-in check; only its row remains.
       { relation: "auth-session", key: "authSession" },
+      // Readers refuse an expired command, but some read recent commands by
+      // creation time (up to a day back), so a week's grace keeps them whole.
+      { relation: "machine-daemon-command", key: "machineDaemonCommand" },
       // Every reader already ignores expired replays; this only frees their rows.
       { relation: "scoped-command-replay", key: "scopedCommandReplay" },
     ];
@@ -248,7 +273,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
   }
   const after = await snapshot(client);
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     dryRun: options.dryRun,
     limits: { batchSize: options.batchSize, maxRows: options.maxRows, budgetMs: options.budgetMs },
     deletedExpiredIdempotencyRows: deleted.idempotency,
@@ -259,6 +284,7 @@ export async function runLifecycleMaintenance(client, options, dependencies = {}
     deletedExpiredScopedCommandReplays: deleted.scopedCommandReplay,
     deletedRetainedOutboxRows: deleted.retainedOutbox,
     deletedExpiredAuthSessions: deleted.authSession,
+    deletedExpiredMachineDaemonCommands: deleted.machineDaemonCommand,
     batches: Object.values(batches).reduce((sum, count) => sum + count, 0),
     batchesByRelation: batches,
     elapsedMs: Math.max(0, monotonicNow() - startedAt),
