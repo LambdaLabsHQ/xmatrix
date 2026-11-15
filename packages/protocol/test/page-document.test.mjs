@@ -124,6 +124,21 @@ test("a long page whose lines carry escapes canonicalizes in bounded time", () =
   assert.ok(elapsed < 3_000, `canonicalized in ${elapsed.toFixed(0)} ms`);
 });
 
+test("a tight list whose lines carry escapes canonicalizes in bounded time", () => {
+  // Blank lines split a page into runs. A tight list has none, so the list is
+  // one run; judging each escaped line against that whole run reparsed a
+  // 400-item list hundreds of times (about 10s). Each item is its own block.
+  const input = `${Array.from({ length: 400 }, (_, index) =>
+    `- item ${index} snake_case_name and RelayPostgres*Coordinator`).join("\n")}\n`;
+  const started = performance.now();
+  const once = canonicalPageMarkdown(input);
+  const elapsed = performance.now() - started;
+  assert.equal(canonicalPageMarkdown(once), once);
+  assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)));
+  assert.doesNotMatch(once, /\\_/);
+  assert.ok(elapsed < 3_000, `canonicalized in ${elapsed.toFixed(0)} ms`);
+});
+
 test("markdown the schema does not model is kept verbatim", () => {
   const out = canonicalPageMarkdown("Footnote[^1] and <kbd>K</kbd>.\n\n[^1]: The note.\n");
   assert.equal(out, "Footnote[^1] and <kbd>K</kbd>.\n\n[^1]: The note.\n");

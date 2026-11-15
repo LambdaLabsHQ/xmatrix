@@ -406,10 +406,13 @@ const TABLE_DELIMITER = /^(\s*(?:>\s*)*)\|((?:\s*:?-+:?\s*\|)+)\s*$/u;
  *
  * An escape of a character that cannot start markup is dropped without a
  * parse, except inside inline code, where the backslash is text. What remains
- * of a line is tried once inside its own run of lines, and only a line whose
- * escapes disagree is taken one character at a time. The joined lines are
- * checked once against the document already in hand. A mismatch checks each
- * remaining line against that same document.
+ * of a line is tried once inside its own block. A tight list is a single run,
+ * so the block is one item rather than the whole page. A run that holds a
+ * fence or a link definition, or a line whose block marker would change, is
+ * still judged against the whole run. Only a line whose escapes disagree is
+ * taken one character at a time. The joined lines are checked once against
+ * the document already in hand. A mismatch checks each remaining line against
+ * that same document.
  */
 function tidy(markdown: string, doc: DocNode): string {
   const lines = markdown.split("\n");
@@ -421,7 +424,7 @@ function tidy(markdown: string, doc: DocNode): string {
   return unescape(whole, lineRuns(whole), doc).join("\n");
 }
 
-interface LineRun { start: number; end: number; doc?: DocNode }
+interface LineRun { start: number; end: number; doc?: DocNode; local?: boolean; spans?: Uint32Array }
 
 /**
  * An escaped character that can begin markdown markup. A backslash stays,
@@ -476,10 +479,42 @@ function dropPlainEscapes(line: string): string {
   return out;
 }
 
+/** The block marker a line would be parsed as. Two lines with the same key stay in one block. */
+function blockKey(line: string): string {
+  const match = /^( {0,3})(#{1,6} |[-*+] |\d{1,9}[.)] |>|`{3,}|~{3,})/u.exec(line);
+  if (match) return match[0];
+  return line.trim() ? "text" : "blank";
+}
+
+/**
+ * A run may be judged one block at a time when nothing in it can change a
+ * different block: a fence, or a link or footnote definition.
+ */
+function runAllowsLocal(lines: string[], run: LineRun): boolean {
+  for (let index = run.start; index < run.end; index++) {
+    const line = lines[index]!;
+    if (FENCE_LINE.test(line)) return false;
+    if (/^ {0,3}(?:\[[^\]]+\]|\[\^[^\]]+\])\s*:/u.test(line)) return false;
+  }
+  return true;
+}
+
+/** Start index of each line's top-level block. A tight list item is its own block. */
+function spanStarts(lines: string[], run: LineRun): Uint32Array {
+  const starts = new Uint32Array(run.end);
+  const boundary = /^(?:#{1,6} |[-*+] |\d{1,9}[.)] )/u;
+  let start = run.start;
+  for (let index = run.start; index < run.end; index++) {
+    if (index > run.start && boundary.test(lines[index]!)) start = index;
+    starts[index] = start;
+  }
+  return starts;
+}
+
 /**
  * Tidies delimiter rows and drops escapes that leave the document unchanged.
  * A line is tried whole first. `doc` judges it against that document;
- * otherwise it is judged inside its own run of lines.
+ * otherwise it is judged inside its own block, falling back to its run.
  */
 function unescape(lines: string[], runs: LineRun[], doc: DocNode | null): string[] {
   let fence: string | null = null;
@@ -502,9 +537,26 @@ function unescape(lines: string[], runs: LineRun[], doc: DocNode | null): string
     }
   }
   const source = doc ? [...lines] : null;
+  if (!doc) {
+    for (const run of runs) {
+      if (run.end - run.start <= 8 || !runAllowsLocal(lines, run)) continue;
+      run.local = true;
+      run.spans = spanStarts(lines, run);
+    }
+  }
   const same = (index: number, run: LineRun, line: string) => {
     if (source && doc) {
       return markdownToPageDoc([...source.slice(0, index), line, ...source.slice(index + 1)].join("\n")).eq(doc);
+    }
+    if (run.local && run.spans && blockKey(lines[index]!) === blockKey(line)) {
+      const start = run.spans[index]!;
+      let end = index + 1;
+      while (end < run.end && run.spans[end] === start) end++;
+      if (end - start < run.end - run.start) {
+        const localBefore = markdownToPageDoc(lines.slice(start, end).join("\n"));
+        const localAfter = markdownToPageDoc([...lines.slice(start, index), line, ...lines.slice(index + 1, end)].join("\n"));
+        if (localAfter.eq(localBefore)) return true;
+      }
     }
     const before = run.doc ??= markdownToPageDoc(lines.slice(run.start, run.end).join("\n"));
     return markdownToPageDoc([...lines.slice(run.start, index), line, ...lines.slice(index + 1, run.end)].join("\n"))
