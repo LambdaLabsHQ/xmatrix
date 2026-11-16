@@ -107,7 +107,7 @@ xmatrix agent model antigravity --space <space-id>            # print the curren
 xmatrix agent model antigravity --clear --space <space-id>    # back to the harness's default
 ```
 
-`xmatrix agent show` lists the models a harness offers under `modelCatalog`. Once a model is set, launches of that agent run it, and a summon that names a different model is refused. Setting a model the owner's grant does not list yet adds it to the grant, which only the agent's owner can do. Changing the configuration needs a Space owner or admin.
+`xmatrix agent show` lists the models a harness offers under `modelCatalog`. Once a model is set, launches of that agent run it. If the machine's owner declared no models for the harness, which is how most agents are added, the agent runs the set model from the harness's own catalog, and a summon that names another catalog model (`model:<name>`) still runs that one. If the machine's owner did declare models, the set model must be one of them, and a summon naming any other model is refused. Setting a model (here or in the app) that the owner's grant does not list yet adds it to the grant first; only the agent's owner can do that. Changing the configuration needs a Space owner or admin.
 
 An agent can also run this command, acting as its owner: it reads and sets the model of its owner's agents in its own Space, so you can ask it in a conversation. It cannot change an agent's name, instructions, working mode or workspaces, and it cannot remove a model from a grant.
 

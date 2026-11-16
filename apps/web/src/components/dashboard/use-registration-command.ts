@@ -3,8 +3,8 @@
 import { useState } from "react";
 import { WEB_PROXY_ROUTES, type AgentRegistrationDetails, type SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
-import { registrationEnvironmentCommand, registrationSpaceCommand, type EnvironmentChange, type EnvironmentState,
-  type RegistrationChange } from "./registration-space-command";
+import { registrationEnvironmentCommand, registrationModelGrantCommand, registrationSpaceCommand, type EnvironmentChange,
+  type EnvironmentState, type RegistrationChange } from "./registration-space-command";
 import { userErrorMessage } from "../../lib/user-facing-error";
 
 /** Stable identity of one registration tuple, for busy flags and React keys. */
@@ -34,6 +34,12 @@ export function useRegistrationCommand(spaceId: string, token: string, onChanged
         const current = await xmatrixApiRequest<AgentRegistrationDetails>({
           url: WEB_PROXY_ROUTES.space_agent_registration_query(spaceId), token, method: "POST", body: key });
         const body = registrationSpaceCommand(key, current, change);
+        // A model the owner's grant does not list yet is added to it first.
+        const grant = change.kind === "configure" ? registrationModelGrantCommand(key, current, change.model) : undefined;
+        if (grant) {
+          await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_agent_registration_command(spaceId), token, method: "POST",
+            body: { ...grant, commandId: `registration-ui:${crypto.randomUUID()}` } });
+        }
         await xmatrixApiRequest({ url: WEB_PROXY_ROUTES.space_agent_registration_command(spaceId), token, method: "POST",
           body: { ...body, commandId: `registration-ui:${crypto.randomUUID()}` } });
       }

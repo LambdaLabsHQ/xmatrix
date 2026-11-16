@@ -1,4 +1,5 @@
-import { agentLaunchAccess, agentPresetById, harnessParameterObservation, machineResourceObservation, hasControlCharacter } from "@xmatrix/protocol";
+import { agentLaunchAccess, agentPresetById, harnessParameterObservation, machineResourceObservation, hasControlCharacter,
+  routingModelOptionNamed } from "@xmatrix/protocol";
 import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegistrationKey, parseSpaceAgentConfiguration,
   registrationLimitsWithin, spaceConfigurationResources,
   parseRegistrationResourceLimits, intersectRegistrationLimits,
@@ -472,11 +473,17 @@ export class PostgresAgentRegistrationRepository {
       const label = labels.find(label => label.owner === row.key.ownerUserId && label.machine === row.key.machineId && label.harness === row.key.harness);
       const environment = label?.declaration_json ? parseAgentRegistrationEnvironment(label.declaration_json) : null;
       // The physical environment bounds the Space's models exactly as a launch does.
-      const models = row.models.filter(model => environment?.models.includes(model));
+      const declared = row.models.filter(model => environment?.models.includes(model));
+      // A machine whose owner declared no models runs the Space's models from
+      // the runtime's own catalog, on a daemon that switches to one (as a launch does).
+      const fromCatalog = environment && !environment.models.length && label?.native_models === true
+        ? row.models.filter(model => row.modelCatalog?.some(option => routingModelOptionNamed(option, model))) : [];
+      const models = [...declared, ...fromCatalog];
       // With no declared models the runtime's default model is the one that runs and its efforts stay
       // selectable; a daemon that switches the runtime to a catalog model offers the whole catalog.
       const nativeModels = !row.models.length && label?.native_models === true && Boolean(row.modelCatalog?.length);
-      const reported = row.modelCatalog?.filter(model => row.models.length ? models.includes(model.model)
+      const reported = row.modelCatalog?.filter(model => row.models.length
+        ? models.some(name => name === model.model || routingModelOptionNamed(model, name))
         : nativeModels || model.model === row.parameterModel);
       const blocker: AgentRegistrationSummary["routingBlocker"] = !environment ? "owner_environment_missing"
         : !environment.enabled ? "owner_environment_disabled" : !row.routingReady ? "space_setup"

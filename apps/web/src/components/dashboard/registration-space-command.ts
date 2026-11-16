@@ -49,6 +49,21 @@ export function registrationSpaceCommand(key: SpaceAgentRegistrationKey, current
       ...(instructions ? { instructions } : {}) } };
 }
 
+/** A model the Space sets runs only where the owner's grant allows it. The
+ * owner's grant command that adds `model`, or nothing when it already allows
+ * it (or the change clears the model). */
+export function registrationModelGrantCommand(key: SpaceAgentRegistrationKey, current: AgentRegistrationDetails,
+  model: string): Record<string, unknown> | undefined {
+  const wanted = model.trim();
+  const grant = current.access?.grant;
+  if (!wanted || grant?.limits.models.includes(wanted)) return undefined;
+  if (!current.canManageOwnerGrant || !grant) {
+    throw new UserFacingProblem(`Only the agent's owner can let it run ${wanted}.`);
+  }
+  return { key, action: "owner-grant", state: grant.state, expectedRevision: grant.revision,
+    limits: { ...grant.limits, models: [...grant.limits.models, wanted] } };
+}
+
 /** The owner turns an agent off or on for its machine, in every Space, or
  * confirms what it may do there. */
 export type EnvironmentChange = { kind: "disable" } | { kind: "enable" } | { kind: "access"; mode: AgentAccessMode };
