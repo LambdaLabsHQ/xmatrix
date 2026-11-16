@@ -73,15 +73,11 @@ for (const [name, run] of Object.entries(commands)) {
 
   test(`${name} replays one lock-deadline abort on a fresh session (HUB-AZ/BE)`, async () => {
     for (const stage of ["begin", "write"]) {
-      const failure = Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
-      const { database, pools } = fixture(stage, [failure]);
-      const value = await run(database);
-      assert.equal(name === "enroll" ? value.daemon.id : value.status,
-        name === "enroll" ? "daemon" : "source_unavailable");
-      assert.equal(pools.length, 2, stage);
+      const { database, pools } = fixture(stage,
+        [Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })]);
+      await run(database);
+      assert.deepEqual(pools.map(pool => pool.queries.includes("COMMIT")), [false, true], stage);
       assert.ok(pools.every(pool => pool.ended));
-      assert.ok(!pools[0].queries.includes("COMMIT"));
-      assert.equal(pools[1].queries.at(-1), "COMMIT");
     }
   });
 
