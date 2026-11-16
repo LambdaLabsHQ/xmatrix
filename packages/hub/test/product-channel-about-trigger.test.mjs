@@ -146,6 +146,50 @@ test("a harness launch exception reports uncertainty without retrying", async ()
   }), true, "notice failure must not replay a potentially committed launch");
 });
 
+test("a launch whose database connection drops before commit is retried with the same dispatch", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "message",
+    senderKind: "agent", senderId: "instance", actorUserId: "owner", body: "@opencode machine:Laptop do it" };
+  const calls = [], waits = [];
+  const registration = async value => {
+    calls.push(value);
+    if (calls.length < 3) throw new Error("Query read timeout");
+    return { selectionCount: 1, prepared: [{ launchId: "l" }] };
+  };
+  const notices = [];
+  assert.equal(await dispatchProductMessageLaunches(input, { registration, sleep: async ms => { waits.push(ms); } },
+    async value => { notices.push(value); }), true);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(call => call === input), "every attempt is the same idempotent message dispatch");
+  assert.deepEqual(waits, [1_000, 3_000]);
+  assert.equal(notices.length, 0);
+});
+
+test("a launch the database keeps dropping says so, and that nothing started", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "message",
+    senderKind: "agent", senderId: "instance", actorUserId: "owner", body: "@opencode machine:Laptop do it" };
+  let attempts = 0;
+  const notices = [];
+  assert.equal(await dispatchProductMessageLaunches(input, {
+    registration: async () => { attempts++; throw new Error("Query read timeout"); }, sleep: async () => {},
+  }, async value => { notices.push(value); }), true);
+  assert.equal(attempts, 3);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].body, /^Agent launch failed: the xMatrix database did not respond in time \(database_unavailable\); xMatrix tried 3 times\. No Agent was started\./);
+  assert.doesNotMatch(notices[0].body, /may already have been allocated|Query read timeout/);
+});
+
+test("a database failure with several summons never claims none of them started", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "message",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@codex one @claude two" };
+  const notices = [];
+  await dispatchProductMessageLaunches(input, {
+    registration: async () => { throw new Error("Query read timeout"); }, sleep: async () => {},
+  }, async value => { notices.push(value); });
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].body, /database did not respond in time/);
+  assert.doesNotMatch(notices[0].body, /No Agent was started/);
+});
+
 test("an Agent's @auto launches through its derived registration selection", async () => {
   const input = { env: {}, channelId: "channel", messageId: "message",
     senderKind: "agent", senderId: "instance", senderRunId: "run", actorUserId: "owner", body: "@auto repo:owner/repo fix it" };
