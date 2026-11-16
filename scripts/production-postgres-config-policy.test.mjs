@@ -71,7 +71,7 @@ function readback(binding) {
     },
     caching: { disabled: true },
     mtls: { sslmode: "require" },
-    origin_connection_limit: shard ? 5 : 8,
+    origin_connection_limit: shard ? 5 : 20,
   };
 }
 

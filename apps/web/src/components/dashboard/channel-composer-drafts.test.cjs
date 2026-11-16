@@ -209,6 +209,22 @@ test("normal completion has one capability per harness and explicit locations re
   assert.deepEqual(registrationMentionCandidates(existing, catalog, "codex/mac"), []);
 });
 
+test("a harness enabled here but not ready is listed, unselectable, with why", () => {
+  // 2026-11-16: antigravity's default model was not in its catalog, and the
+  // harness vanished from @ with no reason anyone could see.
+  const location = { key: { ...key, harness: "antigravity" }, machineName: "srv", ownerName: "Owner", displayName: "antigravity",
+    state: "enabled", routingReady: false, routingBlocker: "model_unavailable", canDescribe: true,
+    profile: { description: "Gemini agent", revision: 1 } };
+  const [row] = registrationMentionCandidates([], [{ harness: "antigravity", locations: [location] }], "anti");
+  assert.equal(row.unavailable, "No model available");
+  assert.equal(row.description, "No model available");
+  assert.equal(row.profileInvite, false);
+  const ready = registrationMentionCandidates([], [{ harness: "antigravity", locations: [location,
+    { ...location, key: { ...location.key, machineId: "other" }, routingReady: true, routingBlocker: undefined }] }], "anti");
+  assert.equal(ready[0].unavailable, undefined, "one ready location makes the harness selectable");
+  assert.equal(ready[0].description, "Gemini agent");
+});
+
 test("an offline location stays in the list and is not selectable", () => {
   const locations = ["Workstation", "Laptop"].map((machineName, index) => ({
     key: { spaceId: "space", ownerUserId: "owner", machineId: `machine-${index}`, harness: "codex" },

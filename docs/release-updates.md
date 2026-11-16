@@ -15,6 +15,16 @@ Instance that has reported no model catalog yet (its first turn still runs)
 is asked as written, since its runtime holds the catalog; before, the Hub
 refused it. `xmatrix channel history` marks used-up models in a listing.
 Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting this change.
+## Unreleased: an Agent that cannot take work is listed under @ with why
+
+The @ list showed only Agents ready to take work, so an Agent that was enabled
+but could not run (its model unavailable, not set up on its machine, or
+needing Space setup) disappeared, and nobody could tell it from one that was
+never added. On 2026-11-16 antigravity vanished this way: its default model was
+not in the catalog its updated harness reported. It is now listed greyed out
+and cannot be chosen, with the reason where its description would be. An
+Agent its owner turned off on its machine is still left out. Web only.
+Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: a refused `/model` says why, and what is true of the Instance
 

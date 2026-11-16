@@ -56,6 +56,7 @@ import {
   parseAgentHostTraceCursor,
 } from "./agent-host-trace";
 import { answerHarnessReleaseWatch, RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH } from "./harness-release-watch";
+import { answerScheduledMinute, RELAY_RUNTIME_SCHEDULED_MINUTE_PATH } from "./scheduled-minute";
 import { parseCliReleaseNotice } from "./cli-release-notice";
 import { analyticsWorkerVersion } from "./analytics-sampling";
 import { PageAssistantOutputReceiver, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
@@ -522,6 +523,9 @@ export class RelayRuntimeLive extends DurableObject<Env> {
     }
     if (request.method === "POST" && url.pathname === RELAY_RUNTIME_HARNESS_RELEASE_WATCH_PATH) {
       return answerHarnessReleaseWatch(this.env);
+    }
+    if (request.method === "POST" && url.pathname === RELAY_RUNTIME_SCHEDULED_MINUTE_PATH) {
+      return answerScheduledMinute(this.env, request);
     }
     if (request.method === "GET" && url.pathname === "/internal/health") {
       return Response.json({
