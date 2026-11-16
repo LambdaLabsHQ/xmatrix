@@ -53,7 +53,10 @@ function modelPairs(candidate: RegistrationModelFacts, tags: AutoLaunchTags): Mo
 function nativeModelPairs(candidate: RegistrationModelFacts, tags: AutoLaunchTags): ModelPair[] {
   if (!candidate.supportsNativeModel) return [];
   if (tags.effort && !candidate.supportsDefaultModelEffort) return [];
-  return (candidate.modelCatalog ?? []).filter(observed => tags.model ? routingModelOptionNamed(observed, tags.model) : !observed.isDefault)
+  // The Space's own models, when it sets any, are what a summon naming none runs.
+  const set = candidate.catalogModels;
+  return (candidate.modelCatalog ?? []).filter(observed => tags.model ? routingModelOptionNamed(observed, tags.model)
+    : set?.length ? set.some(model => routingModelOptionNamed(observed, model)) : !observed.isDefault)
     .filter(observed => !tags.effort || observed.efforts.some(effort => effort.value === tags.effort))
     .map(observed => ({ model: observed.model,
       description: [observed.names?.join(" / "), observed.description].filter(Boolean).join(": ") || "Runtime model",
@@ -72,7 +75,7 @@ function runtimeDefaultPair(tags: AutoLaunchTags): ModelPair {
  * explicitly lists it. Missing evidence cannot prove an effort is supported.
  */
 function usesRuntimeDefaults(candidate: RegistrationModelFacts, tags: AutoLaunchTags): boolean {
-  if (candidate.models.length || tags.model) return false;
+  if (candidate.models.length || candidate.catalogModels?.length || tags.model) return false;
   if (!tags.effort) return true;
   if (!candidate.supportsDefaultModelEffort) return false;
   const reported = candidate.modelCatalog?.find(observed => observed.model === candidate.parameterModel);

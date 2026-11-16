@@ -973,3 +973,27 @@ test('level on the weakest side, the next-weakest decides: a slow network does n
   assert.equal(ranked[0].candidate, grok);
   assert.deepEqual(ranked.slice(1, 3).map(item => item.candidate.key.harness), ['cursor', 'claude']);
 });
+
+test("a Space's model on a machine that declares none runs from the runtime's catalog, and a named model still wins", async () => {
+  // 2026-11-16: antigravity's machine declares no models; the Space set Hydrogen
+  // while Argon (its default) had no capacity.
+  const antigravity = { ...candidates[0], key: { ...candidates[0].key, harness: 'antigravity' }, models: [],
+    catalogModels: ['gemini-4-hydrogen-medium'], supportsNativeModel: true, modelCatalog: [
+      { model: 'gemini-4-argon-medium', description: '', efforts: [], names: ['Gemini 4 Argon (Medium)'], isDefault: true },
+      { model: 'gemini-4-hydrogen-medium', description: '', efforts: [], names: ['Gemini 4 Hydrogen (Medium)'] },
+      { model: 'gemini-3.8-flash-medium', description: '', efforts: [], names: ['Gemini 3.8 Flash (Medium)'] }] };
+  const calls = [];
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@antigravity look at this', tags: {}, candidates: [antigravity] });
+  // Only the Space's model is offered: not the runtime default, not the rest of the catalog.
+  const offered = Object.values(calls[0].questions.modelEffort.criteria).map(value => JSON.parse(value).model);
+  assert.deepEqual(offered, ['gemini-4-hydrogen-medium']);
+  assert.deepEqual([chosen.model, chosen.useRuntimeDefaultModel, chosen.preferredModel], ['', true, 'gemini-4-hydrogen-medium']);
+  // A summon that names another catalog model runs that one.
+  const named = await registrationLaunchChooser(async input => answer(input))({ message: '@antigravity model:argon',
+    tags: { model: 'Gemini 4 Argon (Medium)' }, candidates: [antigravity] });
+  assert.deepEqual([named.useRuntimeDefaultModel, named.preferredModel], [true, 'gemini-4-argon-medium']);
+  // A daemon that cannot switch the runtime offers nothing for the Space's model.
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@antigravity', tags: {},
+    candidates: [{ ...antigravity, supportsNativeModel: false }] }));
+});

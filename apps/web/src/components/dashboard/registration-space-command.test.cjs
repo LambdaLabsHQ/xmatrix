@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { registrationEnvironmentCommand, registrationSpaceCommand } = require("./registration-space-command.ts");
+const { registrationEnvironmentCommand, registrationModelGrantCommand, registrationSpaceCommand } = require("./registration-space-command.ts");
 const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const current = { key, version: 8, displayName: "Codex", canConfigureSpace: true,
   configuration: { model: "old", reasoningEffort: "high", instructions: "Inspect the project",
@@ -90,4 +90,15 @@ test("disabling flips only the owner's environment switch, against the version r
   assert.equal(enabled.environment.enabled, true);
   assert.throws(() => registrationEnvironmentCommand({ key: physical, version: 0, environment: null }, { kind: "enable" }),
     /not set up/u);
+});
+
+test("a default model the owner's grant does not list is added to it, by the owner only", () => {
+  const granted = { ...current, canManageOwnerGrant: true, access: { ...current.access, grant: { state: "active", revision: 5,
+    limits: { models: ["old"], workspaces: ["repo:owner/project"], capabilities: [] } } } };
+  assert.equal(registrationModelGrantCommand(key, granted, "old"), undefined);
+  assert.equal(registrationModelGrantCommand(key, granted, "  "), undefined, "clearing the model needs no grant");
+  assert.deepEqual(registrationModelGrantCommand(key, granted, " new "), { key, action: "owner-grant", state: "active",
+    expectedRevision: 5, limits: { models: ["old", "new"], workspaces: ["repo:owner/project"], capabilities: [] } });
+  assert.throws(() => registrationModelGrantCommand(key, { ...granted, canManageOwnerGrant: false }, "new"),
+    /Only the agent's owner can let it run new/u);
 });

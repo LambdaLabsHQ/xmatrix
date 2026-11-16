@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: an Agent's default model no longer leaves it unable to run
+
+Setting a default model for an Agent whose machine declares no models, such as
+antigravity or Claude added with `xmatrix agent add`, marked it
+`model_unavailable`: every launch dropped it, because a Space's model had to be
+one the machine's owner declared. Such an Agent now runs the Space's model from
+its harness's own catalog, the same way a summon naming a catalog model already
+did. This needs a daemon that switches the runtime to a catalog model, and a
+summon naming another catalog model still runs that one. The Agents page also
+adds a model to the owner's grant before saving it as the default, as
+`xmatrix agent model` does; before, saving a model the grant did not list
+failed. Hub, DB and Web. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent can set which model its owner's Agents run
 
 The model an Agent runs when a launch names none (**Default model** on the
