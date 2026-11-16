@@ -192,10 +192,16 @@ test("session points carry every segment of one checkout in fixed slots", () => 
     indexes: [POSTGRES_OBSERVABILITY_SCHEMA],
     blobs: [
       "session", "postgres.catalog", "session", "shard-0", "ok", "none", "version-1",
-      "cache_disabled", "none", "slow", "channel-catalog.page",
+      "cache_disabled", "none", "slow", "channel-catalog.page", "none",
     ],
     doubles: [812, 40, 1, 1, ...SESSION_SEGMENTS.map((field) => summary[field])],
   });
+  // A session nested in another's open transaction is always kept and names it.
+  const before = written.length;
+  recordPostgresSessionObservation(env, { ...summary, wallMs: 20, nestedIn: "registration.launch.commit" });
+  assert.equal(written.length, before + 1);
+  assert.deepEqual(written.at(-1).blobs.slice(9), ["nested", "channel-catalog.page", "registration.launch.commit"]);
+  written.length = before;
   assert.equal(written[0].doubles.length, 16);
   assert.equal(written[0].doubles[15], 96_512, "double16 is the session's result bytes");
   assert.equal(JSON.stringify(written).includes("must-not-be-written"), false);
@@ -238,7 +244,7 @@ test("database observers accept any Worker env and stay silent without the bindi
     transactions: 0, queries: 0, rows: 0 });
   assert.deepEqual(written.at(-1).blobs, [
     "session", "postgres.auth", "session", "shard-0", "error", "CONNECT_TIMEOUT", "version-1",
-    "cache_disabled", "none", "error", "auth.account-revocation",
+    "cache_disabled", "none", "error", "auth.account-revocation", "none",
   ]);
   assert.doesNotThrow(() => postgresDatabaseObservers({}).observer({ requestId: "r",
     operation: "space.get", queryName: "space_get_v1", shardId: "shard-0", durationMs: 1,

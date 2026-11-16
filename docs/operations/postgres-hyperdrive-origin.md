@@ -165,6 +165,31 @@ minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
 ([connectivity breaker](postgres-connectivity-breaker.md)).
 
+### Connections held at once
+
+Hyperdrive splits a configuration's limit over several pools (five for the
+primary on 2026-11-16, each holding one origin connection), and a request waits
+on the pool it lands in. So what matters is how many connections one
+invocation holds at the same moment, not the day's total:
+
+- The minute cron runs its passes in two lanes, one pass at a time each
+  (`scheduled-passes.ts`). Started together, its thirteen passes queued behind
+  each other for 0.5-1.9 s and requests in that window queued behind them.
+- A session opened inside another session's open transaction holds a second
+  connection while the first waits. Each such session point is always kept
+  (`blob10 = 'nested'`) and names the outer transaction's operation in
+  `blob12`; every other session point has `none` there. List the sites with:
+
+```sql
+SELECT blob12 AS outer_operation, blob11 AS inner_operation, count() AS sessions
+FROM xmatrix_relay_authority_observability
+WHERE index1 = 'postgres_substrate_observability_v4' AND blob1 = 'session'
+  AND blob12 != 'none' AND blob12 != '' AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY outer_operation, inner_operation ORDER BY sessions DESC
+```
+
+  Move the inner read before the transaction, or onto the transaction itself.
+
 Authentication database operations use the `postgres.auth` family and retain
 their code-defined operation in `blob11`, including `auth.account-revocation`.
 Use `database_phase_pool_checkout_v1` and the session's checkout duration to
