@@ -384,9 +384,16 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // A private managed directory has no reference; it is offered only when the
     // input needs no repository and no explicit location constraint exists.
     const managed = { description: "Private managed directory with no repository" };
+    // A Run checks out the repositories its work needs itself, when it needs
+    // them (`xmatrix repo checkout`). So a summon that names no repository or
+    // directory starts in its xMatrix-managed working directory, and nobody
+    // guesses a repository for it up front. Only a machine whose daemon cannot
+    // check out yet still needs one chosen at launch.
+    const selfCheckout = managedWorkspace && !tags.repo && !tags.pwd &&
+      eligible.every(candidate => candidate.supportsRepoCheckout === true);
     // A conversation co-writing a page is offered only that directory: it is ready at once.
     const workspaceOptions: Array<{ reference?: string; repo?: string; canonicalCwd?: string; description: string; machine?: string }> =
-      managedOnly && managedWorkspace ? [managed] : repositories.length ? repositories
+      (managedOnly || selfCheckout) && managedWorkspace ? [managed] : repositories.length ? repositories
         : [...places, ...(managedWorkspace && !tags.pwd && !tags.repo ? [managed] : [])];
     if (!workspaceOptions.length) throw new Error("No registered workspace matches the explicit constraints");
     // Jev reads each harness's fit on its own question, so no harness is

@@ -802,6 +802,10 @@ async fn live_repo_pool_state(registry: &DaemonRunRegistry) -> repo_pool::PoolLi
         if let Some(binding) = child.repo_pool_binding.as_ref() {
             liveness.slot_ids.insert(binding.slot_id.clone());
         }
+        // Checkouts the Run asked for after it started are bound to its session.
+        if let Some(session) = child.resume_session_key.as_ref() {
+            liveness.sessions.insert(session.clone());
+        }
         if let Some(cwd) = child.cwd.as_ref() {
             liveness.cwds.insert(cwd.clone());
         }
@@ -893,6 +897,18 @@ async fn report_finished_daemon_child(
             );
             return;
         }
+    }
+    // Checkouts the Run asked for wait for its session's next Run. A failure
+    // here does not hold the exit report: the sweep demotes a stranded lease.
+    if let Err(error) = settle_run_checkouts(
+        exit.run_id.as_deref(),
+        None,
+        exit.repo_pool_authority.as_ref().map(|authority| authority.binding.slot_id.as_str()),
+        RunCheckoutsSettle::Retain,
+    )
+    .await
+    {
+        eprintln!("{} {error}", "⚠".yellow().bold());
     }
     let relay = relay.clone();
     let exit_pid = exit.pid;
@@ -1769,7 +1785,17 @@ async fn return_repo_pool_without_live_registry(
         slot_id,
     } = authority;
     let repo_fields = [repo_identity, repo_key_id, slot_id];
+    // Checkouts the Run asked for are found by its session: the Hub carries
+    // only the launch slot's authority.
+    let checkouts = if resume_session_key.is_some() {
+        settle_run_checkouts(run_id, resume_session_key, slot_id, RunCheckoutsSettle::Abandon).await?
+    } else {
+        0
+    };
     if repo_fields.iter().all(|value| value.is_none()) {
+        if checkouts > 0 {
+            return Ok(());
+        }
         return Err(CliError::Launch(
             "abandon without a live registry row requires exact retained repo pool authority"
                 .into(),
@@ -2132,6 +2158,8 @@ async fn stop_daemon_child(
     }
     let stopped_pid = managed.pid;
     let pool_authority = daemon_repo_pool_run_authority(managed)?;
+    let checkout_run = managed.run_id.clone();
+    let checkout_session = managed.resume_session_key.clone();
     managed.stop_in_progress = true;
     drop(guard);
     let pool_transition = if let Some(authority) = pool_authority.as_ref() {
@@ -2141,6 +2169,21 @@ async fn stop_daemon_child(
         }
     } else {
         Ok(())
+    };
+    // The checkouts the Run asked for follow the same disposition.
+    let pool_transition = match pool_transition {
+        Ok(()) => settle_run_checkouts(
+            checkout_run.as_deref(),
+            checkout_session.as_deref(),
+            pool_authority.as_ref().map(|authority| authority.binding.slot_id.as_str()),
+            match disposition {
+                MachineWorktreeDisposition::Retain => RunCheckoutsSettle::Retain,
+                MachineWorktreeDisposition::Abandon => RunCheckoutsSettle::Abandon,
+            },
+        )
+        .await
+        .map(|_| ()),
+        failed => failed,
     };
     let mut guard = registry.lock().await;
     if let Err(error) = pool_transition {

@@ -12,4 +12,5 @@ include!("repo_pool_baseline.rs");
 include!("repo_pool_reclaim.rs");
 include!("repo_pool_rehydrate.rs");
 include!("repo_pool_handoff.rs");
+include!("repo_pool_checkout.rs");
 include!("repo_pool_tests.rs");

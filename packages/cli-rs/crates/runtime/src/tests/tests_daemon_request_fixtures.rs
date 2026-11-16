@@ -36,6 +36,8 @@ fn test_daemon_request_broker(_records: Vec<TestRunRequest>) -> super::DaemonReq
         hub_url: None,
         auth_broker_url: None,
         run_registry: Arc::new(super::AsyncMutex::new(HashMap::new())),
+        relay: None,
+        git_credentials: None,
     }
 }
 

@@ -128,10 +128,11 @@ Selection does not follow the rule that credentials already follow.
    the Run (`runId`, `executionKey`) its credential grant was issued for, and
    `POST /api/machine-daemon/github/repository-token` mints only when that Run
    is active (`starting`, `running` or `stopping`, so a handoff export still
-   pushes), targets the calling machine, sits in the named Channel, and was
-   launched into the named repository (`metadata.remoteRepo`, compared
-   case-insensitively). A machine can therefore no longer mint for a
-   repository of the Space that none of its Runs was admitted to. On both the
+   pushes), targets the calling machine, and sits in the named Channel. The
+   repository is not bound to the launch: a Run checks out the repositories
+   its work needs as it goes (`xmatrix repo checkout`, see
+   `docs/worktree-v2-design.md` §4.8), so any repository the Space's
+   installation covers may be minted for one of its live Runs. On both the
    Run-bound and the compatibility path, the machine owner must be able to act
    with the Space's connected apps in that Channel (owner/admin/member); a
    viewer or open-project participant is refused with

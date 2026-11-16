@@ -851,6 +851,11 @@ struct DaemonRequestBroker {
     hub_url: Option<String>,
     auth_broker_url: Option<String>,
     run_registry: DaemonRunRegistry,
+    /// What a repository checkout needs to fetch with the Space's GitHub
+    /// connection: the machine credential that mints, and the auth broker's
+    /// Git credential grants that serve the token to Git.
+    relay: Option<SharedMachineDaemonConnection>,
+    git_credentials: Option<DaemonGitCredentialGrants>,
 }
 
 struct DaemonRequestGrant {

@@ -388,6 +388,39 @@ fn own_daemon_run_request_scope() -> error::Result<DaemonRunRequestScope> {
     })
 }
 
+/// `xmatrix repo checkout`: the daemon that started this Run checks out its
+/// worktree; the path goes to stdout alone so `cd "$(…)"` works.
+async fn cmd_repo_checkout(repository: &str) -> error::Result<()> {
+    let DaemonRunRequestScope { url, capability, .. } = own_daemon_run_request_scope().map_err(|_| {
+        CliError::Launch(
+            "xmatrix repo checkout runs inside an Agent Run started by an xMatrix daemon".into(),
+        )
+    })?;
+    #[derive(Deserialize)]
+    struct Checkout {
+        path: String,
+        outcome: String,
+    }
+    let checkout: Checkout = request_local_daemon_request_json_with_rediscovery(
+        &url,
+        &capability,
+        "POST",
+        "/request/repo-checkout",
+        Some(serde_json::json!({ "repository": repository })),
+    )
+    .await
+    .map_err(|error| match error {
+        // A daemon from before this route answers 404 "not found".
+        CliError::Launch(message) if message == "not found" => CliError::Launch(
+            "this machine's xMatrix daemon is too old to check out repositories; it updates itself, or run `xmatrix update`".into(),
+        ),
+        other => other,
+    })?;
+    eprintln!("{} {repository} ({})", "✓".green().bold(), checkout.outcome);
+    println!("{}", checkout.path);
+    Ok(())
+}
+
 /// Tells the local daemon that this run continues under the replacement
 /// wrapper pid, keeping the run registered (and its auth/request capabilities
 /// valid) across the live-update handoff. Authenticated with the run's own

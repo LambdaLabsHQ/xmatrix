@@ -2217,6 +2217,9 @@ pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
     "registration_access_ask_v1",
     // A registered launch may run in a private managed directory.
     "registration_managed_v1",
+    // A Run checks out a repository worktree itself (`xmatrix repo checkout`),
+    // so a summon that names no repository starts in its managed directory.
+    "run_repo_checkout_v1",
     "reply_recovery_v1",
     "machine_quota_probe_v2",
     "machine_harness_inventory_v1",
@@ -2364,8 +2367,9 @@ async fn run_daemon_connection(
     let request_broker = spawn_daemon_request_broker(
         hub_url.to_string(),
         Some(machine_id.clone()),
-        auth_broker.as_ref().map(|broker| broker.url.clone()),
+        auth_broker.as_ref(),
         run_registry.clone(),
+        relay.clone(),
     )
     .await?;
     let spawn_inflight: DaemonSpawnInflight = Arc::new(AsyncMutex::new(HashSet::new()));
@@ -3893,6 +3897,7 @@ mod daemon_capability_tests {
             "registration_native_model_v1",
             "registration_access_ask_v1",
             "registration_managed_v1",
+            "run_repo_checkout_v1",
         ] {
             assert!(DAEMON_CAPABILITIES.contains(&capability), "{capability}");
         }

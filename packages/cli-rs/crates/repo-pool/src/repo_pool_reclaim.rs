@@ -143,9 +143,20 @@ impl PoolReclaimOutcome {
 pub struct PoolLiveness {
     pub slot_ids: BTreeSet<String>,
     pub cwds: BTreeSet<PathBuf>,
+    /// Sessions of live Runs. Every slot such a session is bound to is in
+    /// use, including checkouts the Run asked for after it started, which are
+    /// neither its launch slot nor its cwd.
+    pub sessions: BTreeSet<String>,
 }
 
 impl PoolLiveness {
+    fn claims_in(&self, manifest: &RepoPoolManifest, slot_id: &str, slot_path: &Path) -> bool {
+        self.claims(slot_id, slot_path)
+            || manifest.bindings.iter().any(|binding| {
+                binding.slot_id == slot_id && self.sessions.contains(&binding.session_key)
+            })
+    }
+
     fn claims(&self, slot_id: &str, slot_path: &Path) -> bool {
         if self.slot_ids.contains(slot_id) {
             return true;
@@ -241,7 +252,7 @@ fn demote_orphaned_leases(
         let Ok(path) = layout.slot_path_for_id(&id) else {
             continue;
         };
-        if live.claims(&id, &path) {
+        if live.claims_in(manifest, &id, &path) {
             continue;
         }
         if slot_idle_for(&path).is_none_or(|idle| idle < min_age) {
@@ -288,7 +299,7 @@ async fn record_lost_checkouts(
         let Ok(path) = layout.slot_path_for_id(&id) else {
             continue;
         };
-        if is_formal_linked_worktree(&path) || live.claims(&id, &path) {
+        if is_formal_linked_worktree(&path) || live.claims_in(manifest, &id, &path) {
             continue;
         }
         match record_lost_checkout(layout, &base_repo, manifest, &id).await {
@@ -323,7 +334,7 @@ fn prune_missing_slot_dirs(
                     .iter()
                     .any(|binding| binding.slot_id == id)
         });
-        if resting || path.exists() || live.claims(&id, &path) {
+        if resting || path.exists() || live.claims_in(manifest, &id, &path) {
             continue;
         }
         manifest.slots.remove(&id);
@@ -355,7 +366,7 @@ fn eviction_candidates(
         let Ok(path) = layout.slot_path_for_id(id) else {
             continue;
         };
-        if live.claims(id, &path) {
+        if live.claims_in(manifest, id, &path) {
             continue;
         }
         let bound = manifest

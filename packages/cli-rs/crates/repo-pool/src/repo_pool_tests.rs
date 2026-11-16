@@ -2424,7 +2424,7 @@ mod tests {
     fn claims(slot_ids: &[&str]) -> PoolLiveness {
         PoolLiveness {
             slot_ids: slot_ids.iter().map(|id| id.to_string()).collect(),
-            cwds: BTreeSet::new(),
+            ..PoolLiveness::default()
         }
     }
 
@@ -4026,4 +4026,5 @@ worktree /pools/b\nHEAD 3333333333333333333333333333333333333333\ndetached\n";
     }
 
     include!("repo_pool_handoff_tests.rs");
+    include!("repo_pool_checkout_tests.rs");
 }

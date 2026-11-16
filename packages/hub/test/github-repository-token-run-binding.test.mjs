@@ -3,8 +3,8 @@ import { test } from "node:test";
 
 /**
  * A machine's repository-token request speaks for one Run. These pin that the
- * Hub mints only for the repository it admitted for that live Run, on that
- * machine, in that Channel -- not for any repository of the Space.
+ * Hub mints only for a live Run on that machine, in that Channel; which of the
+ * Space's repositories it checks out is the Run's to decide.
  */
 import {
   githubRepositoryTokenRunRefusal,
@@ -46,16 +46,12 @@ test("a stopping Run still pushes its handoff branch", () => {
   assert.equal(githubRepositoryTokenRunRefusal(run({ status: "starting" }), principal, claim()), undefined);
 });
 
-test("another repository of the same Space is refused", () => {
+test("a Run checks out another repository of the Space, or one from its managed directory", () => {
   assert.equal(
-    githubRepositoryTokenRunRefusal(run(), principal, claim({ repository: { owner: "LambdaLabsHQ", repo: "secrets" } })),
-    "github_repository_not_authorized_for_run",
+    githubRepositoryTokenRunRefusal(run(), principal, claim({ repository: { owner: "LambdaLabsHQ", repo: "norn" } })),
+    undefined,
   );
-  assert.equal(
-    githubRepositoryTokenRunRefusal(run({}, { remoteRepo: undefined }), principal, claim()),
-    "github_repository_not_authorized_for_run",
-    "a Run launched into a machine directory has no repository to mint for",
-  );
+  assert.equal(githubRepositoryTokenRunRefusal(run({}, { remoteRepo: undefined }), principal, claim()), undefined);
 });
 
 test("a Run of another machine, Channel or execution cannot be named", () => {

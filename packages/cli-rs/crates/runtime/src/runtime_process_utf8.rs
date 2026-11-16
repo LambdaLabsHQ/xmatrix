@@ -934,6 +934,9 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
             cmd_secret(&hub_url, &token, cli.token.as_deref(), command).await
         }
         Some(Commands::Goal { command }) => cmd_goal(command),
+        Some(Commands::Repo {
+            command: xmatrix_cli_args::RepoCliCommand::Checkout { repository },
+        }) => cmd_repo_checkout(&repository).await,
         Some(Commands::Connector {
             command: xmatrix_cli_args::ConnectorCliCommand::List,
         }) => {

@@ -298,3 +298,34 @@ continues through the legacy reborn path.
   fail closed rather than silently creating an untracked cache tier.
 - There is no environment flag, UI toggle, disabled pool error, or alternate
   legacy fallback for an eligible new Run. S1 co-trust is the product contract.
+
+### 4.8 Checkouts a Run asks for
+
+A summon fixes a repository only when its author writes `repo:` (or a
+directory with `pwd:`). Otherwise the Run starts in its xMatrix-managed working
+directory and decides itself when its work needs a repository, and which:
+`xmatrix repo checkout <owner/repo>` prints the path of its own worktree.
+Guessing the repository at launch, before the Agent has read the task, was
+wrong too often, and a wrong guess cost the whole turn.
+
+- The Run asks its daemon (`POST /request/repo-checkout`, its own request
+  capability). The daemon mints the Space's repository token for the Run, as
+  for a `repo:` launch (a repository the Space's installation does not cover
+  is refused), then leases a slot of that repository's pool bound to the Run's
+  session and claims it at once — the Run is already running, so there is no
+  Starting window.
+- One session holds at most one slot per repository. Asking again answers with
+  the slot the Run holds; after the Instance restarts, the next Run of the
+  session takes its retained slot back (or rehydrates it if the sweep reclaimed
+  it), so its work-in-progress is where it left it.
+- Lifecycle follows the launch slot: natural exit and Retain stops retain the
+  Run's checkouts; abandon returns every slot the session holds, also when the
+  daemon no longer has the Run's registry row (found by session key, since the
+  Hub carries only the launch slot's authority). A live Run's session claims
+  all of its slots against the sweep.
+- Jev no longer chooses a repository when every candidate daemon advertises
+  `run_repo_checkout_v1`; a machine whose daemon predates it still gets one
+  chosen at launch.
+- Same-machine handoff does not carry checkouts: the successor checks out
+  again, and the predecessor's slots are returned (with un-landed work
+  snapshotted) when it is abandoned.
