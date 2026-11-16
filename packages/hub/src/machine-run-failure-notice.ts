@@ -1,4 +1,4 @@
-import { HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutSentence, publicMachineStartupFailure, sha256Hex,
+import { HARNESS_SESSION_IN_USE, HARNESS_SIGNED_OUT_NOTICE_KIND, harnessSignedOutSentence, publicMachineStartupFailure, sha256Hex,
   type HarnessSignedOut, type RepositoryBaseline } from "@xmatrix/protocol";
 import { appendChannelMessage } from "./channel-messages";
 import { recordCommandResult } from "./command-result";
@@ -32,11 +32,28 @@ function systemNoticeAuthor(input: { ownerUserId: string; ownerEmail: string }) 
       avatarUrl: XMATRIX_SYSTEM_AVATAR_URL } };
 }
 
-/** Stable per-Run key: a replay retries the append, never adds another notice. */
+/**
+ * A startup failure notice is stable per Run: a replay retries the append and
+ * never adds another notice. A session another live process still holds fails
+ * every later Run of that Instance the same way until the holder ends, so that
+ * failure is stable per Instance, Channel and holder (the detail names it):
+ * the Channel hears it once, not once per message (#1686). Returns the
+ * Instance such a failure is keyed by.
+ */
+function heldSessionInstanceId(input: MachineRunFailureNotice, code: string): string | undefined {
+  if (code !== HARNESS_SESSION_IN_USE) return undefined;
+  const at = input.runId.lastIndexOf("#");
+  return at > 0 ? input.runId.slice(0, at) : input.runId;
+}
+
 export async function machineRunFailureNoticeCommand(input: MachineRunFailureNotice) {
-  const digest = await sha256Hex(input.runId);
   const detail = String(input.detail || "").trim() || "Unknown startup failure";
   const humanized = humanizeMachineRunFailureDetail(detail);
+  const heldBy = heldSessionInstanceId(input, humanized.code);
+  // Every Run that fails on the same held session sends this same command, so
+  // it names the Instance, never one of its Runs.
+  const digest = await sha256Hex(heldBy === undefined ? input.runId
+    : `${HARNESS_SESSION_IN_USE}\0${input.channelId}\0${heldBy}\0${humanized.summary}`);
   return {
     commandId: `machine-run-failure-notice:${digest}`.slice(0, 200),
     messageId: `system:machine-run-failure:${digest}`.slice(0, 200), channelId: input.channelId,
@@ -44,7 +61,7 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
       "", humanized.summary, ...(humanized.action ? ["", humanized.action] : [])].join("\n"),
     messageKind: "xmatrix.system.runtime-failure", ...systemNoticeAuthor(input),
     residual: { appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true,
-      source: "machine_run_failure", runId: input.runId, machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
+      source: "machine_run_failure", ...(heldBy === undefined ? { runId: input.runId } : { instanceId: heldBy }), machineId: input.machineId, machineOwnerUserId: input.ownerUserId, machineName: input.machineName,
       failureCode: humanized.code, failureDetail: humanized.summary,
       ...(input.harness ? { harness: input.harness } : {}),
       ...(input.phase ? { statusPhase: input.phase } : {}) } },
@@ -52,7 +69,11 @@ export async function machineRunFailureNoticeCommand(input: MachineRunFailureNot
 }
 
 export async function publishMachineRunFailureNotice(env: Env, input: MachineRunFailureNotice): Promise<void> {
-  await deliverMachineNotice(env, await machineRunFailureNoticeCommand(input), input, "startup-failure");
+  const command = await machineRunFailureNoticeCommand(input);
+  // A summon's chip records one note per failure key, so later Runs failing
+  // on the same held session add nothing to the message that asked.
+  await deliverMachineNotice(env, command, input, "startup-failure",
+    command.residual.appMetadata.failureCode === HARNESS_SESSION_IN_USE ? command.messageId : undefined);
 }
 
 /**
@@ -89,13 +110,13 @@ export async function publishSignedOutStartNotice(env: Env,
  * as a notice, because nothing else would.
  */
 async function deliverMachineNotice(env: Env, command: Record<string, unknown> & { channelId: string; body: string },
-  input: { runId: string; sourceMessageId?: string }, key: string): Promise<void> {
+  input: { runId: string; sourceMessageId?: string }, key: string, noteKey = input.runId): Promise<void> {
   if (!input.sourceMessageId) {
     await appendChannelMessage(env, command.channelId, command);
     return;
   }
   await recordCommandResult(env, { channelId: command.channelId, messageId: input.sourceMessageId,
-    key: `${key}:${input.runId}`, entry: { note: { text: command.body, runId: input.runId } } });
+    key: `${key}:${noteKey}`, entry: { note: { text: command.body, runId: input.runId } } });
 }
 
 /** The same message went to another Agent after a failed start. Stable per

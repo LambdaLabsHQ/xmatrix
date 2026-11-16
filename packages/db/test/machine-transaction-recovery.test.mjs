@@ -71,6 +71,16 @@ for (const [name, run] of Object.entries(commands)) {
     }
   });
 
+  test(`${name} replays one lock-deadline abort on a fresh session (HUB-AZ/BE)`, async () => {
+    for (const stage of ["begin", "write"]) {
+      const { database, pools } = fixture(stage,
+        [Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" })]);
+      await run(database);
+      assert.deepEqual(pools.map(pool => pool.queries.includes("COMMIT")), [false, true], stage);
+      assert.ok(pools.every(pool => pool.ended));
+    }
+  });
+
   test(`${name} does not replay COMMIT uncertainty, answered rejections or an open breaker`, async () => {
     const lost = fixture("commit", [new Error("Query read timeout")]);
     await assert.rejects(run(lost.database), DatabaseCommitUnknownError);

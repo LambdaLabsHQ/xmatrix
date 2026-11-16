@@ -165,3 +165,23 @@ test("a process found gone before it was ready is a failed start that says what 
     assert.equal(machineRunStartupFailureDetail("machine_run_exited", { statusPhase, status: "exit code: 1" }), undefined, statusPhase);
   }
 });
+
+test("a session another process still holds is one notice for its Instance, not one per Run (#1686)", async () => {
+  const detail = "harness_session_in_use: Codex conversation 01a1d3e0 is still open in Codex process 4242 on this computer, so it cannot be resumed here.";
+  const codex = { ...base, agentName: "codex", phase: "wrapper_startup_failed", detail };
+  const first = await machineRunFailureNoticeCommand({ ...codex, runId: "instance-1#7" });
+  const next = await machineRunFailureNoticeCommand({ ...codex, runId: "instance-1#8" });
+  assert.deepEqual(next, first, "a later Run's failure replays the same notice");
+  assert.equal(first.residual.appMetadata.failureCode, "harness_session_in_use");
+  assert.equal(first.residual.appMetadata.instanceId, "instance-1");
+  assert.match(first.body, /Codex process 4242/u);
+  const otherInstance = await machineRunFailureNoticeCommand({ ...codex, runId: "instance-2#1" });
+  assert.notEqual(otherInstance.messageId, first.messageId);
+  const otherHolder = await machineRunFailureNoticeCommand({ ...codex, runId: "instance-1#9",
+    detail: detail.replace("4242", "5151") });
+  assert.notEqual(otherHolder.messageId, first.messageId, "a new holder is news");
+  const ordinary = { ...base, detail: "boom" };
+  assert.notEqual((await machineRunFailureNoticeCommand({ ...ordinary, runId: "instance-1#7" })).messageId,
+    (await machineRunFailureNoticeCommand({ ...ordinary, runId: "instance-1#8" })).messageId,
+    "other failures stay per Run");
+});

@@ -16,13 +16,14 @@ async function drainer() {
     userId:"owner",mode:"poll",historyId:"100",pendingWake:false,
     nextSearchAt:new Date(Date.now()+900000).toISOString(),selection:{address:"me@example.com",account:"ca_owned",owner:"user:owner",
       refreshToken:"private-refresh",appIdentity:await polling.gmailPollIdentity(env),pollToken:{accessToken:"private-access",expiresAt:Date.now()+3600000}}};
-  const calls={reported:[],finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[],stored:[]};
+  const calls={reported:[],finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[],stored:[],heartbeat:[],order:[]};
   const autoRead={result:{detail:"private body"}};
   // The owner's subscription to this mailbox; tests add others.
   const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
   let pending=[];
   const state={current:true};
-  const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,polled:async()=>{},
+  const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,
+    heartbeat:async(_job)=>{calls.heartbeat.push(_job.id);calls.order.push("heartbeat");},polled:async()=>{},
     pending:async()=>pending,stage:async(_job,ids,historyId,pageToken)=>{calls.stage.push({ids,historyId,pageToken});pending=[...ids];},
     delivered:async(_job,id)=>{pending=pending.filter(item=>item!==id);},searched:async()=>{calls.searched++;},
     cachePollToken:async(_job,token)=>{calls.cached.push(token);},finish:async(_job,outcome)=>{calls.finish.push(outcome);}};
@@ -34,7 +35,8 @@ async function drainer() {
     "./gmail-watch-client":{},"./http":{ProviderRequestError},
     "./gmail-read-failure":{reportGmailNotificationFailure:error=>{calls.reported.push(error);}},
     "./gmail-auto-read":{autoReadGmailMessage:async(_env,input)=>{
-      calls.read.push(input);return typeof autoRead.result==="function" ? autoRead.result() : autoRead.result;}},
+      calls.read.push(input);calls.order.push("read");
+      return typeof autoRead.result==="function" ? autoRead.result() : autoRead.result;}},
     "./private-result-content":{writeConnectorPrivateResult:async(_env,input)=>{calls.stored.push(input);}},
     "./event-ingress":{connectorEventMessageId:(provider,eventId,channelId)=>`app:${provider}:${eventId}:${channelId}`,
       appendToRoutes:async(_env,append,provider,event,targets,appMetadata)=>{
@@ -103,6 +105,19 @@ test("access lost while Gmail answers stores and posts nothing",async()=>{
   await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:[{messagesAdded:[
     {message:{id:"abcdef1234567890",labelIds:["INBOX"]}}]}]}}}],revoked.run);
   assert.equal(revoked.calls.stored.length,0);assert.equal(revoked.calls.append.length,0);
+  // The mailbox fence is an expected stop, not a failure: retry quietly without a report.
+  assert.equal(revoked.calls.reported.length,0);assert.deepEqual(revoked.calls.finish,["retry"]);
+});
+
+test("a slow pass renews the lease before each message so a backlog is delivered without a fence",async()=>{
+  const due=await drainer();due.job.pendingWake=true;
+  const ids=["abcdef1234567890","bcdef12345678901","cdef123456789012"];
+  await fetched([{body:counts},{body:{status:200,data:{historyId:"200",history:ids.map(id=>({
+    messagesAdded:[{message:{id,labelIds:["INBOX"]}}]}))}}}],due.run);
+  assert.equal(due.calls.heartbeat.length,3);
+  assert.deepEqual(due.calls.order,["heartbeat","read","heartbeat","read","heartbeat","read"]);
+  assert.deepEqual(due.calls.finish,["done"]);assert.equal(due.calls.reported.length,0);
+  assert.deepEqual(due.calls.stage,[{ids,historyId:"200",pageToken:undefined}]);
 });
 
 test("pending changes, transient confirmation failure and lost authority retain the right outcome",async()=>{

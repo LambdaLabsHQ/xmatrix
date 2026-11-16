@@ -275,7 +275,7 @@ export {
   machineExecutionCompleted, scheduledMachineExecutionCompleted,
 } from "./machine-execution-outcome.js";
 export {
-  publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
+  HARNESS_SESSION_IN_USE, publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
   RUN_PHASES_BEFORE_READY, runPhaseBeforeReady,
 } from "./machine-startup-failure.js";
 export type {
