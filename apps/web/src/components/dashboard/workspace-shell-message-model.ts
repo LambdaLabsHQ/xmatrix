@@ -266,10 +266,11 @@ export type TimelineItem = {
    */
   folded?: TimelineItem[];
   /**
-   * Set on a folded row that is one pull request's line: its opening and the
-   * facts GitHub reported about it in one stretch (conversation-activity-rows.ts).
+   * Set on a folded row that is one stretch of pull request facts: per pull
+   * request, its opening and what GitHub reported about it, in the order each
+   * first appears (conversation-activity-rows.ts).
    */
-  pullRequest?: { repository: string; number: number; url: string };
+  pullRequests?: { ref: { repository: string; number: number; url: string }; items: TimelineItem[] }[];
   /** Same sender as the row above, moments later, with the same tags: no header. */
   continuation?: boolean;
   /**

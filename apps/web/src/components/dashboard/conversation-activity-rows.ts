@@ -166,14 +166,17 @@ function foldRow(items: TimelineItem[]): TimelineItem {
 export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
   let run: TimelineItem[] = [];
-  // One stretch of bare pull request facts, one line per pull request in the
-  // order each first appears (docs/design/conversation-activity.md §4.1).
+  // One stretch of bare pull request facts: one slip, one entry per pull
+  // request in the order each first appears (docs/design/conversation-activity.md §4.1).
   let pulls = new Map<string, { ref: PullRequestRef; items: TimelineItem[] }>();
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
-    for (const { ref, items } of pulls.values()) {
-      rows.push({ ...foldRow(items), id: `pull:${items[0]!.id}`, author: items[0]!.author, pullRequest: ref });
+    if (pulls.size > 0) {
+      const lines = [...pulls.values()];
+      const items = lines.flatMap((line) => line.items)
+        .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+      rows.push({ ...foldRow(items), id: `pull:${items[0]!.id}`, author: items[0]!.author, pullRequests: lines });
     }
     pulls = new Map();
   };
