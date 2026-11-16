@@ -7,10 +7,11 @@ import {
 } from "@xmatrix/protocol";
 import {
   createAuthorityDatabase,
+  lostBeforeCommit,
   type DatabaseTransaction,
 } from "@xmatrix/db";
 import { Pool, types as pgTypes } from "pg";
-import type { CustomTypesConfig, QueryResultRow } from "pg";
+import type { CustomTypesConfig, PoolClient, QueryResultRow } from "pg";
 
 import type { Env } from "./types";
 import { postgresDatabaseObservers } from "./postgres-observability";
@@ -85,6 +86,63 @@ export async function authPostgresTransaction<T>(
   }, callback);
 }
 
+const AUTH_ADAPTER_READ = /^\s*select\b/iu;
+
+function adapterReadText(input: unknown): string | null {
+  if (typeof input === "string") return input;
+  if (!input || typeof input !== "object") return null;
+  const text = (input as { text?: unknown }).text;
+  return typeof text === "string" ? text : null;
+}
+
+type ConnectCallback = (
+  error: Error | undefined,
+  client: PoolClient | undefined,
+  release: (release?: boolean) => void,
+) => void;
+
+/**
+ * Better Auth's Kysely adapter runs its own node-postgres Pool, outside the
+ * authority client's single_read recovery. A lost response on one of its
+ * lock-free SELECTs gets the same bounded retry: the stalled checkout is
+ * destroyed and the read runs once on a fresh connection. Writes, answered
+ * database errors and callback-style calls are never replayed (HUB-DD).
+ */
+export function retryAuthAdapterReads(pool: Pool): Pool {
+  const connect = pool.connect.bind(pool) as () => Promise<PoolClient>;
+  const wrap = (client: PoolClient): PoolClient => {
+    const run = client.query.bind(client) as (input: unknown, ...rest: unknown[]) => Promise<unknown>;
+    client.query = (async (input: unknown, ...rest: unknown[]) => {
+      if (rest.some((value) => typeof value === "function")) return run(input, ...rest);
+      const text = adapterReadText(input);
+      try {
+        return await run(input, ...rest);
+      } catch (error) {
+        if (!text || !AUTH_ADAPTER_READ.test(text) || !lostBeforeCommit(error)) throw error;
+        const fresh = await connect();
+        try {
+          const replay = fresh.query.bind(fresh) as (input: unknown, ...rest: unknown[]) => Promise<unknown>;
+          return await replay(input, ...rest);
+        } finally {
+          fresh.release();
+        }
+      }
+    }) as typeof client.query;
+    return client;
+  };
+  const patched = (callback?: unknown): unknown => {
+    if (typeof callback !== "function") return connect().then(wrap);
+    const reply = callback as ConnectCallback;
+    void connect().then(
+      (client) => reply(undefined, wrap(client), (release) => client.release(release)),
+      (error: Error) => reply(error, undefined, () => undefined),
+    );
+    return undefined;
+  };
+  pool.connect = patched as unknown as Pool["connect"];
+  return pool;
+}
+
 /**
  * Create the Better Auth adapter pool for one Worker request.
  *
@@ -101,7 +159,7 @@ export function createAuthPostgresPool(env: Env): Pool {
     throw new Error("PostgreSQL is not the Auth authority");
   }
   const settings = postgresSettings(env);
-  return new Pool({
+  return retryAuthAdapterReads(new Pool({
     connectionString: settings.connectionString,
     types: AUTH_POSTGRES_TYPES,
     application_name: "xmatrix-hub-auth-adapter",
@@ -109,7 +167,7 @@ export function createAuthPostgresPool(env: Env): Pool {
     connectionTimeoutMillis: 3_000,
     idleTimeoutMillis: 30_000,
     query_timeout: 5_000,
-  });
+  }));
 }
 
 export async function withAuthPostgresPool<T>(

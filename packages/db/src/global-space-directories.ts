@@ -84,7 +84,9 @@ export class PostgresEntitySpaceDirectory extends DirectoryAuthority {
   ): Promise<EntitySpaceRoute | null> {
     const entityKind = kind(kindValue);
     const entityId = boundedDatabaseIdentifier(entityIdValue, "entityId");
-    return this.directoryDatabase.transaction(context, async (transaction) => {
+    // A lock-free lookup: one SELECT, no transaction round trips, and the
+    // authority client's single lost-response retry (HUB-D8, HUB-DB).
+    return this.directoryDatabase.transaction({ ...context, statement: "single_read" }, async (transaction) => {
       const rows = await transaction.query<EntityRouteRow>({
         name: "entity_space_route_resolve_v1",
         text: `SELECT route.entity_kind, route.entity_id, route.space_id, route.shard_id,
@@ -278,7 +280,7 @@ export class PostgresUserSpaceMembershipDirectory extends DirectoryAuthority {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 201) {
       throw new DatabaseContractError("membership directory limit is invalid");
     }
-    return this.directoryDatabase.transaction(context, async (transaction) => {
+    return this.directoryDatabase.transaction({ ...context, statement: "single_read" }, async (transaction) => {
       const rows = await transaction.query<MembershipRouteRow>({
         name: "user_space_membership_routes_list_v1",
         text: `WITH routes AS (

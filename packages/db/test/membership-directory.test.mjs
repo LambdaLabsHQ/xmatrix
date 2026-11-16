@@ -24,6 +24,8 @@ test("membership directory merges versioned global routes with the legacy rollou
   }]);
   assert.match(source.calls[1].text, /user_space_membership_routes/u);
   assert.match(source.calls[1].text, /user_space_memberships/u);
+  assert.equal(source.calls[0].context.statement, "single_read",
+    "a membership listing is a lock-free read, not a transaction");
 });
 
 test("membership directory fences publication and orders remove/rejoin by Space commit sequence", async () => {

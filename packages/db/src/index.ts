@@ -1,4 +1,8 @@
-export { createAuthorityDatabase, type AuthorityDatabaseOptions } from "./client.js";
+export {
+  createAuthorityDatabase,
+  lostBeforeCommit,
+  type AuthorityDatabaseOptions,
+} from "./client.js";
 export {
   legacyChannelRouteUuidRanges,
   PostgresChannelCatalogRepository,
