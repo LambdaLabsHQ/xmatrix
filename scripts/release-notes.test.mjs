@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { appStoreReleaseNotes, authoredReleaseNotes, composeReleaseNotes, generatedBetaReleaseNotes } from "./release-notes.mjs";
+import { appStoreReleaseNotes, authoredReleaseNotes, composeReleaseNotes, generatedBetaReleaseNotes, githubRetryDelayMs } from "./release-notes.mjs";
 
 // These protect publication content and its transaction boundary. The train's
 // repository test separately proves that notes must be in the candidate tree.
@@ -50,6 +50,60 @@ test("beta generation bypasses stale release lists and names the previous publis
     return Response.json({ body: "Changes since the previous beta." });
   };
   assert.equal(await generatedBetaReleaseNotes({ repository: "LambdaLabsHQ/xmatrix", tag: "xmatrix-v1.1.1-beta.4", token: "test" }), "Changes since the previous beta.");
+});
+
+test("a throttled 403 is retried instead of failing the receipt", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  let calls = 0;
+  const sleeps = [];
+  global.fetch = async (url) => {
+    calls += 1;
+    if (new URL(url).pathname.endsWith("/releases")) {
+      if (calls === 1) {
+        return Response.json({ message: "You have exceeded a secondary rate limit." }, {
+          status: 403,
+          headers: { "retry-after": "1" },
+        });
+      }
+      return Response.json([{ tag_name: "xmatrix-v1.1.1-beta.2" }]);
+    }
+    return Response.json({ body: "Notes recovered after throttling." });
+  };
+  assert.equal(await generatedBetaReleaseNotes({
+    repository: "LambdaLabsHQ/xmatrix",
+    tag: "xmatrix-v1.1.1-beta.4",
+    token: "test",
+    sleep: async (ms) => { sleeps.push(ms); },
+  }), "Notes recovered after throttling.");
+  assert.equal(calls, 3);
+  assert.deepEqual(sleeps, [1_000]);
+});
+
+test("a permission 403 fails the receipt immediately without retrying", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return Response.json({ message: "Resource not accessible by integration" }, { status: 403 });
+  };
+  await assert.rejects(generatedBetaReleaseNotes({
+    repository: "LambdaLabsHQ/xmatrix",
+    tag: "xmatrix-v1.1.1-beta.4",
+    token: "test",
+    sleep: async () => { throw new Error("a permission refusal must not sleep"); },
+  }), /Reading release notes failed \(403\): .*Resource not accessible/u);
+  assert.equal(calls, 1);
+});
+
+test("a 403 whose primary allowance is spent waits for the published reset", () => {
+  const reset = Math.ceil((Date.now() + 5_000) / 1_000);
+  const delay = githubRetryDelayMs(new Response("", {
+    status: 403,
+    headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) },
+  }), "", 0);
+  assert.ok(delay >= 1_000 && delay <= 6_000, `delay ${delay}`);
 });
 
 test("publication keeps authored changes before the receipt and rejects forged control metadata", () => {
