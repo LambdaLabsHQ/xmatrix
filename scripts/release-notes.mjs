@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { assertSemver, compareSemver, RELEASE_TAG_PATTERN, releaseChannel } from "./release-version-order.mjs";
+import { githubRateLimitRetryAfterMs } from "./github-rate-limit.mjs";
 
 const NOTES_MARKER = "<!-- xmatrix-release-notes:v1 -->";
 
@@ -29,12 +30,21 @@ export function authoredReleaseNotes(root, version, revision) {
   return body;
 }
 
-export async function generatedBetaReleaseNotes({ repository, tag, token }) {
+// A rate-limited receipt run already changed production; waiting out a short
+// limit is cheaper than leaving the release without its immutable record. Hold
+// the release concurrency group only briefly: a primary limit usually resets
+// within the hour, so a longer wait is recovered by rerunning the failed job.
+const NOTES_RATE_LIMIT_DEADLINE_MS = 10 * 60_000;
+const NOTES_MAX_ATTEMPTS = 6;
+
+export async function generatedBetaReleaseNotes({ repository, tag, token, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now }) {
   const version = tag.replace(/^xmatrix-v/u, "");
   assertSemver(version);
+  const deadline = now() + NOTES_RATE_LIMIT_DEADLINE_MS;
   const api = async (suffix, body) => {
-    for (let attempt = 0; ; attempt++) {
+    for (let attempt = 1; ; attempt++) {
       let response;
+      let waitMs;
       try {
         const url = new URL(`https://api.github.com/repos/${repository}/releases${suffix}`);
         if (!body) url.searchParams.set("_xmatrix_read", randomUUID());
@@ -45,13 +55,26 @@ export async function generatedBetaReleaseNotes({ repository, tag, token }) {
           ...(body ? { body: JSON.stringify(body) } : {}),
           signal: AbortSignal.timeout(15_000),
         });
-        if (response.ok) return await response.json();
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (attempt === NOTES_MAX_ATTEMPTS) throw error;
+        await sleep(1_000 * attempt);
+        continue;
       }
-      if (response && response.status !== 429 && response.status < 500) throw new Error(`Reading release notes failed (${response.status})`);
-      if (attempt === 2) throw new Error(`Reading release notes failed (${response?.status})`);
-      await new Promise((resolve) => setTimeout(resolve, 1_000 * (attempt + 1)));
+      if (response.ok) return await response.json();
+      await response.body?.cancel();
+      if (response.status === 429 || response.status >= 500) {
+        waitMs = 1_000 * attempt;
+      } else {
+        waitMs = githubRateLimitRetryAfterMs(response, now());
+        // A permission or validation refusal is decided: retrying cannot fix it.
+        if (waitMs === undefined) throw new Error(`Reading release notes failed (${response.status})`);
+        // GitHub may say 0 seconds; still yield instead of spinning.
+        waitMs = Math.max(1_000, waitMs);
+      }
+      if (attempt === NOTES_MAX_ATTEMPTS || now() + waitMs > deadline) {
+        throw new Error(`Reading release notes failed (${response.status}) after ${attempt} attempt${attempt === 1 ? "" : "s"}`);
+      }
+      await sleep(waitMs);
     }
   };
   // GitHub's implicit baseline can start at the first public commit when tags

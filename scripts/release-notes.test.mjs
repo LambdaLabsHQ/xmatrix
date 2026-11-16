@@ -59,3 +59,56 @@ test("publication keeps authored changes before the receipt and rejects forged c
     assert.throws(() => composeReleaseNotes({ notes, receipt: "receipt" }), /bounded text/u);
   }
 });
+
+test("a rate-limited release read waits for the named reset and succeeds", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  const waits = [];
+  let clock = 1_700_000_000_000;
+  const sleep = async (ms) => { waits.push(ms); clock += ms; };
+  let releaseReads = 0;
+  global.fetch = async (url) => {
+    const request = new URL(url);
+    if (request.pathname.endsWith("/releases")) {
+      releaseReads += 1;
+      return releaseReads === 1
+        ? new Response("", { status: 403, headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(clock / 1000 + 5) } })
+        : Response.json([{ tag_name: "xmatrix-v1.1.0" }]);
+    }
+    assert.equal(url, "https://api.github.com/repos/LambdaLabsHQ/xmatrix/releases/generate-notes");
+    return Response.json({ body: "Changes since the previous beta." });
+  };
+  assert.equal(await generatedBetaReleaseNotes({ repository: "LambdaLabsHQ/xmatrix", tag: "xmatrix-v1.1.1-beta.4", token: "test", sleep, now: () => clock }),
+    "Changes since the previous beta.");
+  assert.deepEqual(waits, [5_000]);
+  assert.equal(releaseReads, 2, "the list is read again after the limit clears");
+});
+
+test("a permission refusal fails the receipt at once, without sleeping", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  let calls = 0;
+  global.fetch = async () => { calls += 1; return new Response("forbidden", { status: 403 }); };
+  await assert.rejects(generatedBetaReleaseNotes({ repository: "LambdaLabsHQ/xmatrix", tag: "xmatrix-v1.1.1-beta.4", token: "test", sleep: async () => assert.fail("must not wait") }),
+    /Reading release notes failed \(403\)/u);
+  assert.equal(calls, 1);
+});
+
+test("a rate limit that outlasts the wait budget fails without pretending the receipt is published", async (t) => {
+  const original = global.fetch;
+  t.after(() => { global.fetch = original; });
+  const waits = [];
+  let clock = 0;
+  let calls = 0;
+  global.fetch = async () => {
+    calls += 1;
+    return new Response("", { status: 403, headers: { "retry-after": "120" } });
+  };
+  await assert.rejects(generatedBetaReleaseNotes({
+    repository: "LambdaLabsHQ/xmatrix", tag: "xmatrix-v1.1.1-beta.4", token: "test",
+    sleep: async (ms) => { waits.push(ms); clock += ms; }, now: () => clock,
+  }), /Reading release notes failed \(403\) after 6 attempts/u);
+  assert.deepEqual(waits, [120_000, 120_000, 120_000, 120_000, 120_000]);
+  assert.equal(calls, 6);
+});
+
