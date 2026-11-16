@@ -1212,12 +1212,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const modelReads = singleReadStatements(this.database, { requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement });
     const observed = await modelReads.query({
-      name: "registration_launch_model_catalog_v6", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
+      name: "registration_launch_model_catalog_v7", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
           FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
           WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND i.updated_at>=statement_timestamp()-interval '48 hours'
             AND jsonb_typeof(i.presentation_json->'models')='array'
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'modelsObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
@@ -1227,6 +1228,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           i.presentation_json->>'model' AS parameter_model,i.presentation_json->>'parametersObservedAt' AS parameters_observed_at
           FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
           WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND i.updated_at>=statement_timestamp()-interval '48 hours'
             AND jsonb_typeof(i.presentation_json->'parameters')='array'
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
