@@ -84,7 +84,7 @@ test("CI speaks once, when every check has settled", () => {
     undefined, "single checks are not news");
 });
 
-test("a verdict, merge or close carries its fact; people's reviews and comments do not", () => {
+test("every said event carries its fact; a review or comment keeps its words", () => {
   const ref = { repository: "acme/app", number: 7, url: "https://github.com/acme/app/pull/7" };
   const payload = { action: "completed", check_suite: { head_sha: "abcdef1234567", pull_requests: [{ number: 7 }] } };
   assert.deepEqual(said("check_suite", payload, { state: "passed", failed: [], settledAt: "t" }).fact,
@@ -96,8 +96,12 @@ test("a verdict, merge or close carries its fact; people's reviews and comments 
     sender: { login: "xmatrix-connector[bot]" } }).fact, { ...ref, event: "merged", title: "Fix it" });
   assert.deepEqual(said("pull_request", { action: "closed", pull_request: pull, sender: { login: "yiming" } }).fact,
     { ...ref, event: "closed", title: "Fix it", actor: "yiming" });
-  assert.equal(said("issue_comment", { action: "created", issue: pull, sender: { login: "yiming" },
-    comment: { body: "Why?", user: { login: "yiming" } } }).fact, undefined);
+  assert.deepEqual(said("issue_comment", { action: "created", issue: pull, sender: { login: "yiming" },
+    comment: { body: "Why?", user: { login: "yiming" }, html_url: "https://github.com/acme/app/pull/7#c1" } }).fact,
+  { ...ref, event: "commented", actor: "yiming", words: "Why?", commentUrl: "https://github.com/acme/app/pull/7#c1" });
+  assert.deepEqual(said("pull_request_review", { action: "submitted", pull_request: pull, sender: { login: "codex" },
+    review: { state: "CHANGES_REQUESTED", body: "Handle the empty case.", user: { login: "codex" } } }).fact,
+  { ...ref, event: "reviewed", actor: "codex", verdict: "changes requested", words: "Handle the empty case." });
 });
 
 function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "2026-10-08T22:00:00Z" },
@@ -249,9 +253,17 @@ test("a pull request is subscribed only through the Space's connection that reac
   const input = { spaceId: "space-1", channelId: "channel-1", ownerUserId: "user-1",
     repository: "Acme/App", number: 7, commandId: "activity:r-1" };
   const connection = { id: "space-1:github", status: "configured" };
+  const announced = [];
   const deps = (overrides) => ({ findConnection: async () => connection, installationFor: async () => "42",
-    command: async (_env, kind, value) => { commands.push({ kind, value }); }, ...overrides });
+    command: async (_env, kind, value) => { commands.push({ kind, value }); },
+    announce: async (_env, channelId, value) => { announced.push({ channelId, ...value }); }, ...overrides });
   assert.equal(await subscribeConversationToPullRequest({}, input, deps()), true);
+  // GitHub says it follows the pull request here, as context: nobody is woken or left unread by it.
+  assert.equal(announced.length, 1);
+  assert.equal(announced[0].appAuthorId, "github");
+  assert.equal(announced[0].messageId, "app:github:follow:activity:r-1:channel-1");
+  assert.deepEqual(announced[0].residual, { appMetadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: {
+    repository: "Acme/App", number: 7, url: "https://github.com/Acme/App/pull/7", event: "subscribed" } } });
   assert.deepEqual(commands[0], { kind: "put-relation", value: {
     commandId: "product:github-pull-request:activity:r-1", connectionId: "space-1:github",
     channelId: "channel-1", sourceKind: "issue", sourceRef: "github:issue:acme/app#7",
@@ -260,6 +272,7 @@ test("a pull request is subscribed only through the Space's connection that reac
   assert.equal(await subscribeConversationToPullRequest({}, input, deps({
     installationFor: async () => { throw new Error("github_installation_not_linked_to_space"); } })), false);
   assert.equal(commands.length, 1);
+  assert.equal(announced.length, 1, "nothing is announced for a pull request that is not followed");
 });
 
 test("a subscription made before its issue existed named an earlier issue and hears nothing", async () => {

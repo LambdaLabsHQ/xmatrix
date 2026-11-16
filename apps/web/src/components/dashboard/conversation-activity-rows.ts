@@ -21,12 +21,35 @@ export function timelineItemActivity(item: TimelineItem): ChannelActivity | unde
 }
 
 /**
- * A pull request fact GitHub reported (CI verdict, merge, close): drawn as the
- * same compact line as the "Opened" entry, not as a message.
+ * A pull request fact GitHub reported (CI verdict, merge, close, a person's
+ * review or comment). Not a message: the timeline draws it on its pull
+ * request's line, or, with a person's words, as a line over those words.
  */
 export function timelineItemGitHubFact(item: TimelineItem): GitHubPullRequestFact | undefined {
   if (item.senderKind !== "app" || item.recalledAt) return undefined;
   return githubPullRequestFactOf(item.metadata);
+}
+
+type PullRequestRef = { repository: string; number: number; url: string };
+
+/**
+ * The pull request an entry is a bare fact about: a Run's "opened", or
+ * GitHub's CI verdict, merge or close. A review or comment carries a
+ * person's words and is never folded away.
+ */
+export function timelineItemPullRequest(item: TimelineItem): PullRequestRef | undefined {
+  if (!item.messageId || item.sendStatus || item.isEvent) return undefined;
+  const activity = timelineItemActivity(item);
+  if (activity?.kind === "pull_request" && !item.recalledAt) {
+    return { repository: activity.repository, number: activity.number, url: activity.url };
+  }
+  const fact = timelineItemGitHubFact(item);
+  if (!fact || fact.event === "reviewed" || fact.event === "commented") return undefined;
+  return { repository: fact.repository, number: fact.number, url: fact.url };
+}
+
+function pullRequestKey(ref: PullRequestRef): string {
+  return `${ref.repository.toLowerCase()}#${ref.number}`;
 }
 
 /** The narrowest sender identity: two Instances of one Agent are different work. */
@@ -37,9 +60,10 @@ function actorKey(item: TimelineItem): string | undefined {
     : `${item.senderKind ?? "user"}:${item.senderId}`;
 }
 
+/** A plan entry: folds with its own Instance's run. */
 function foldable(item: TimelineItem): boolean {
   if (!item.messageId || item.recalledAt || item.sendStatus || item.isEvent) return false;
-  return Boolean(timelineItemActivity(item));
+  return timelineItemActivity(item)?.kind === "plan";
 }
 
 /** The header tags a message carries, by the key its tag is drawn with. */
@@ -89,7 +113,7 @@ function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
 
 /** Whether a message can drop its avatar and header under the row above. */
 export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
-  if (!previous || previous.folded || timelineItemGitHubFact(previous)) return false;
+  if (!previous || (previous.folded && !previous.pullRequests)) return false;
   return sameTurn(previous, item) && changedTags(previous, item).length === 0;
 }
 
@@ -142,27 +166,56 @@ function foldRow(items: TimelineItem[]): TimelineItem {
 export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
   let run: TimelineItem[] = [];
+  const pushMessage = (item: TimelineItem) => {
+    const previous = rows[rows.length - 1];
+    if (continuesPrevious(previous, item)) {
+      rows.push({ ...item, continuation: true });
+      return;
+    }
+    const retagged = retaggedFrom(rows, item);
+    rows.push(retagged ? { ...item, retagged } : item);
+  };
+  // One stretch of bare pull request facts is one GitHub message whose slip
+  // has an entry per pull request, in the order each first appears
+  // (docs/design/conversation-activity.md §4.1).
+  let pulls = new Map<string, { ref: PullRequestRef; items: TimelineItem[] }>();
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
+    if (pulls.size > 0) pushMessage(pullRequestStretch([...pulls.values()]));
+    pulls = new Map();
   };
   for (const item of timeline) {
+    const pull = timelineItemPullRequest(item);
+    if (pull) {
+      if (run.length > 0) flush();
+      const key = pullRequestKey(pull);
+      const line = pulls.get(key);
+      if (line) line.items.push(item);
+      else pulls.set(key, { ref: pull, items: [item] });
+      continue;
+    }
     if (foldable(item)) {
-      if (run.length > 0 && actorKey(run[0]!) !== actorKey(item)) flush();
+      if (pulls.size > 0 || (run.length > 0 && actorKey(run[0]!) !== actorKey(item))) flush();
       run.push(item);
       continue;
     }
     flush();
-    const previous = rows[rows.length - 1];
-    if (continuesPrevious(previous, item)) {
-      rows.push({ ...item, continuation: true });
-      continue;
-    }
-    const retagged = retaggedFrom(rows, item);
-    rows.push(retagged ? { ...item, retagged } : item);
+    pushMessage(item);
   }
   flush();
   return rows;
+}
+
+/**
+ * A stretch of pull request facts as one message: GitHub's newest one, so it
+ * reads, is replied to and reacts as that message, standing where the stretch
+ * began. Only a stretch GitHub said nothing in is its opener's.
+ */
+function pullRequestStretch(lines: NonNullable<TimelineItem["pullRequests"]>): TimelineItem {
+  const items = lines.flatMap((line) => line.items).sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+  const said = [...items].reverse().find((item) => timelineItemGitHubFact(item)) ?? items[items.length - 1]!;
+  return { ...said, id: `pull:${items[0]!.id}`, sequence: foldRow(items).sequence, folded: items, pullRequests: lines };
 }
 
 export type FoldSummary = {

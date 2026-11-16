@@ -78,23 +78,25 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
   }, messages);
 
   const folds = page.locator(".app-activity-row");
-  await expect(folds).toHaveCount(4);
+  await expect(folds).toHaveCount(3);
   // claude:1's two plan entries are one run; its report before them and its
-  // finding after stay whole; its pull request starts a new run that codex:2 ends.
+  // finding after stay whole; codex:2's entry ends its next run.
   await expect(folds.nth(0)).toContainText("claude:1");
   await expect(folds.nth(0)).toContainText("✓ e2e regression 191/191");
-  await expect(folds.nth(1).getByRole("link", { name: "LambdaLabsHQ/xmatrix#3043" }))
+  // Its pull request is a slip of its own, like any App's receipt, under its finding.
+  const pull = page.locator("[data-pull-requests]");
+  await expect(pull).toHaveText(/#3043.*opened by claude:1/u);
+  await expect(pull.getByRole("link", { name: "LambdaLabsHQ/xmatrix#3043" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/pull/3043");
-  // A lone pull request says everything on its line, so it has nothing to open.
-  await expect(folds.nth(1).getByRole("button")).toHaveCount(0);
-  await expect(folds.nth(2)).toContainText("codex:2");
-  await expect(folds.nth(3)).toContainText("→ Web");
+  await expect(folds.nth(1)).toContainText("codex:2");
+  await expect(folds.nth(2)).toContainText("→ Web");
   await expect(page.getByText("The two db cross-space failures fail on main too")).toBeVisible();
   // What anyone said stays whole, however soon its sender said more.
   await expect(page.locator(".app-message-timeline").getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
 
-  // A second message moments later from the same person drops the header.
-  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(1);
+  // A second message moments later from the same sender drops the header: the
+  // reviewer's second request, and claude:1's pull request after its finding.
+  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(2);
 
   // Opening a run shows every entry it stands for, in order.
   await folds.nth(0).getByRole("button").first().click();
@@ -484,9 +486,13 @@ function pullRequestLife() {
   return [
     entry(reviewer, 10, "Reload automatically when the network comes back."),
     opened(18, 121),
+    entry(github, 18, `Following [LambdaLabsHQ/NomadCafe#121](${pullUrl}) in this conversation.`, {
+      metadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: { ...pullFact, event: "subscribed" } } }),
     entry(github, 19, `CI passed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 3ffa10b.`, {
       metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_passed", sha: "3ffa10b" } } }),
-    entry(github, 20, `yiming reviewed [LambdaLabsHQ/NomadCafe#121](${pullUrl})\n\nCan the retry back off?`),
+    entry(github, 20, `yiming reviewed [LambdaLabsHQ/NomadCafe#121](${pullUrl})\n\nCan the retry back off?`, {
+      metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "reviewed", actor: "yiming", verdict: "reviewed",
+        words: "Can the retry back off?" } } }),
     entry(github, 23, `CI failed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 9c41d2e: [web](https://github.com/LambdaLabsHQ/NomadCafe/runs/1), ios.`, {
       metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_failed", sha: "9c41d2e",
         failed: [{ name: "web", url: "https://github.com/LambdaLabsHQ/NomadCafe/runs/1" }, { name: "ios" }], more: 0 } } }),
@@ -496,26 +502,32 @@ function pullRequestLife() {
   ];
 }
 
-test("GitHub's CI verdicts and merges read as the same line as the pull request they follow", async ({ page }) => {
+test("GitHub's pull request facts are its messages: one slip per stretch, a review's words whole", async ({ page }) => {
   const messages = pullRequestLife();
   await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: messages.length,
     lastMessageSequence: messages.length, updatedAt: at(26) }, messages);
 
-  const facts = page.locator("[data-github-fact]");
-  await expect(facts).toHaveCount(3);
-  await expect(facts.nth(0)).toHaveText(/GitHub.*CI passed on LambdaLabsHQ\/NomadCafe#121 at 3ffa10b/u);
-  await expect(facts.nth(1)).toHaveText(/CI failed on LambdaLabsHQ\/NomadCafe#121 at 9c41d2e: web, ios/u);
-  await expect(facts.nth(1).getByRole("link", { name: "web" }))
+  // A stretch of pull request facts is one slip, one entry per pull request; the review ends the first stretch.
+  const slips = page.locator("[data-pull-requests]");
+  await expect(slips).toHaveCount(2);
+  await expect(slips.nth(0).locator("[data-pull-request]")).toHaveCount(1);
+  const opened = slips.nth(0).locator("[data-pull-request='#121']");
+  // From opening, through the subscription GitHub made here, to what it reported.
+  await expect(opened).toHaveText(/#121.*opened by claude:1 · following here · CI passed/u);
+  await expect(opened.getByRole("link", { name: "LambdaLabsHQ/NomadCafe#121" })).toHaveAttribute("href", pullUrl);
+  const later = slips.nth(1).locator("[data-pull-request]");
+  await expect(later).toHaveCount(2);
+  await expect(later.nth(0)).toHaveText(/#121 Reload on reconnect.*CI failed: web, ios · merged · stopped following/u);
+  await expect(later.nth(0).getByRole("link", { name: "web" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/NomadCafe/runs/1");
-  await expect(facts.nth(2)).toHaveText(/Merged LambdaLabsHQ\/NomadCafe#121: Reload on reconnect/u);
-  // A fact sets in the same type and line as the "Opened" line above it.
-  const opened = page.locator(".app-activity-row:not([data-github-fact])").first();
-  const type = (row: Locator) => row.evaluate((element) => {
-    const style = getComputedStyle(element);
-    return `${style.fontSize}/${style.lineHeight}/${style.paddingTop}/${style.paddingLeft}`;
-  });
-  expect(await type(facts.nth(0))).toBe(await type(opened));
-  // A person's review is their words: it stays a whole message.
-  await expect(page.getByText("Can the retry back off?")).toBeVisible();
-  await expect(page.locator("[data-github-fact]", { hasText: "reviewed" })).toHaveCount(0);
+  await expect(later.nth(1)).toHaveText(/#122.*opened by claude:1/u);
+  // A person's review is GitHub's message too, its words whole on the same slip.
+  const review = page.locator("[data-github-fact='reviewed']");
+  await expect(review).toHaveText(/yiming reviewed #121.*Can the retry back off\?/u);
+  // These are GitHub's messages: one GitHub header heads the run of them that follows the person's.
+  await expect(page.locator(".app-message-timeline").getByText("GitHub", { exact: true })).toHaveCount(1);
+  // The same tinted slip as any App's receipt.
+  const tint = (slip: Locator) => slip.evaluate((element) =>
+    `${getComputedStyle(element).backgroundColor}/${getComputedStyle(element).borderRadius}`);
+  expect(await tint(review)).toBe(await tint(slips.nth(0)));
 });

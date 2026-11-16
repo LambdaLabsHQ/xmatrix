@@ -148,7 +148,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   `github:issue:<owner>/<repo>#<n>`, with the features `pulls`, `comments`,
   `reviews` and `checks`. It is listed in the conversation's Subscriptions
   with the repository subscriptions. A pull request the connection does not
-  reach is not subscribed; the entry is recorded either way.
+  reach is not subscribed; the entry is recorded either way. Once subscribed,
+  GitHub says so in the conversation (`Following <link> in this
+  conversation…`, a `subscribed` fact with activity provenance), so what it
+  posts later is seen to come from that subscription (§4.1).
   Webhook routes require the subscription creator's current user permission
   to append to that Channel. Legacy Agent creators and revoked or read-only
   users do not dispatch events or attempt subscription cleanup; their stored
@@ -197,17 +200,26 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 ### 4.1 Web timeline
 
 - **Activity rows.** An activity entry renders as one compact line in a
-  message head's order: sender, time, then the entry itself (`✓` completed,
-  `→` in progress, "Opened" and the pull request as the same underlined
-  link the GitHub App's messages carry). No avatar and no identity tags; the
+  sender, then the entry itself (`✓` completed, `→` in progress, "opened"
+  and the pull request as `#121`, its repository in the link's label), with
+  the time at the right edge. No avatar and no identity tags; the
   avatar column holds the fold's disclosure, or the pull request mark when a
   lone pull request leaves nothing to open.
-- **GitHub's pull request facts.** A subscribed pull request's CI verdict,
-  merge and close (§3.6) carry their fact in the message metadata
-  (`xmatrixGitHubPullRequest`) and render as the same line: the verdict,
-  merge or close mark in the avatar column, then GitHub, time and the
-  sentence. They never fold. Reviews and comments are people's words and
-  stay whole messages.
+- **Pull request slips.** What GitHub reports about a pull request is
+  GitHub's message: its header (avatar, name, App) and, as its body, the
+  tinted receipt slip every App's message uses (`.app-connector-receipt`).
+  The whole path is visible in one place, from the subscription being made
+  to what it delivers: when the Hub subscribes the conversation it posts
+  GitHub's `subscribed` fact (context for Agents, never unread), and a
+  stretch of bare pull request facts (a Run's `pull_request` entry; GitHub's
+  subscribed, CI verdict, merge and close, `xmatrixGitHubPullRequest`
+  metadata, §3.6) is one message with one slip entry per pull request: its
+  current mark, `#121` and its title once GitHub said it, the latest time,
+  and beneath its steps `opened by claude:1 · following here · CI passed ·
+  merged · stopped following` (closing ends the subscription). Talk ends the
+  stretch; GitHub's messages moments apart share one header like any
+  sender's. A person's review or comment is GitHub's message with a slip
+  headed `yiming requested changes on #121` over their words.
 - **Folding.** Consecutive activity entries from the same Instance merge into
   one row with a time range and a count; the newest items are shown inline.
   Any entry from anyone else, or any message, ends the fold, so interleaving

@@ -1,7 +1,9 @@
 import { appCommand, findAppConnection } from "./apps";
 import {
-  ChannelActivityInvalid, normalizeChannelActivity, type GitHubPullRequestFact,
+  CHANNEL_ACTIVITY_PROVENANCE, ChannelActivityInvalid, GITHUB_PULL_REQUEST_FACT_METADATA_KEY, normalizeChannelActivity,
+  type GitHubPullRequestFact,
 } from "@xmatrix/protocol";
+import { dispatchProductMessageAppend } from "./product-message-append";
 import {
   githubConnectionInstallationFor, readGitHubPullRequestOpen, type GitHubCommitCheckVerdict,
 } from "./app-connectors";
@@ -78,8 +80,8 @@ function login(value: unknown): string {
  * that says nothing new to its conversation: the author's own pushes, comments,
  * reviews and merge (the Agent that opened it did those itself), edits,
  * labels, and every check but the settled verdict. A CI verdict, merge or
- * close also carries its fact, so the timeline draws it as a compact line;
- * reviews and comments are people's words and stay messages.
+ * close, review or comment also carries its fact, so the timeline draws it
+ * as a compact line; a review's or comment's words stay whole beneath it.
  */
 export function githubPullRequestEventMessage(input: {
   event: string;
@@ -116,9 +118,10 @@ export function githubPullRequestEventMessage(input: {
     const review = record(payload.review);
     if (payload.action !== "submitted" || login(review.user) === author) return undefined;
     const state = text(review.state).toLowerCase().replace(/_/gu, " ") || "reviewed";
+    const verdict = state === "commented" ? "reviewed" : state;
     const body = text(review.body);
-    return { body: [`${actor} ${state === "commented" ? "reviewed" : state} ${link}`, body || undefined]
-      .filter(Boolean).join("\n\n") };
+    return { body: [`${actor} ${verdict} ${link}`, body || undefined].filter(Boolean).join("\n\n"),
+      fact: { ...pullRequest, event: "reviewed", actor, verdict, words: body } };
   }
   if (event === "pull_request_review_comment" || event === "issue_comment") {
     const comment = record(payload.comment);
@@ -126,7 +129,9 @@ export function githubPullRequestEventMessage(input: {
     const path = text(comment.path);
     const at = text(comment.html_url);
     return { body: [`${actor} commented on ${link}${path ? ` (${path})` : ""}${at ? ` ([comment](${at}))` : ""}`,
-      text(comment.body) || undefined].filter(Boolean).join("\n\n") };
+      text(comment.body) || undefined].filter(Boolean).join("\n\n"),
+    fact: { ...pullRequest, event: "commented", actor, words: text(comment.body),
+      ...(path ? { path } : {}), ...(at ? { commentUrl: at } : {}) } };
   }
   if (event === "check_suite") {
     const verdict = input.verdict;
@@ -150,6 +155,7 @@ export interface PullRequestSubscriptionDependencies {
   installationFor: typeof githubConnectionInstallationFor;
   pullRequestOpen: typeof readGitHubPullRequestOpen;
   command: typeof appCommand;
+  announce: typeof dispatchProductMessageAppend;
 }
 
 interface PullRequestSubscriber {
@@ -194,7 +200,30 @@ export async function subscribeConversationToPullRequest(env: Env,
   const connection = await connectionReaching(env, input, owner, repo, dependencies);
   if (!connection) return false;
   await subscribe(env, input, connection.id, input.repository, input.number, dependencies);
+  await announceFollowing(env, input, dependencies);
   return true;
+}
+
+/**
+ * GitHub says in the conversation that it now follows the pull request, so
+ * what it posts later is seen to come from that subscription. Context for
+ * Agents and never unread: it reports what the opener just did.
+ */
+async function announceFollowing(env: Env, input: PullRequestSubscriber & { repository: string; number: number },
+  dependencies: Partial<PullRequestSubscriptionDependencies>): Promise<void> {
+  const ref = `${input.repository}#${input.number}`;
+  const url = `https://github.com/${input.repository}/pull/${input.number}`;
+  const fact: GitHubPullRequestFact = { repository: input.repository, number: input.number, url, event: "subscribed" };
+  const key = `${input.commandId}:${input.channelId}`;
+  await (dependencies.announce ?? dispatchProductMessageAppend)(env, input.channelId, {
+    commandId: `product:github-pull-request-follow:${key}`.slice(0, 200),
+    messageId: `app:github:follow:${key}`.slice(0, 200),
+    channelId: input.channelId,
+    body: `Following [${ref}](${url}) in this conversation: its CI results, reviews, comments and merge will arrive here.`,
+    principal: { kind: "user", id: input.ownerUserId },
+    appAuthorId: "github",
+    residual: { appMetadata: { xmatrixProvenance: CHANNEL_ACTIVITY_PROVENANCE, [GITHUB_PULL_REQUEST_FACT_METADATA_KEY]: fact } },
+  });
 }
 
 /**

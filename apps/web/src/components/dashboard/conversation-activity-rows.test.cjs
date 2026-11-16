@@ -46,15 +46,43 @@ test("one Instance's run of activity folds into one row that keeps its place", (
     pullRequest(claude1, 3043, 29),
     said(claude1, "The two db failures also fail on main: known baseline.", 29),
   ]);
-  assert.equal(rows.length, 3);
-  const [, fold, finding] = rows;
-  assert.equal(fold.folded.length, 3);
+  assert.equal(rows.length, 4);
+  const [, fold, pull, finding] = rows;
+  assert.equal(fold.folded.length, 2);
   assert.equal(fold.id, "fold:message:m-2", "keyed by the run's first entry");
-  assert.equal(fold.sequence, 4, "exposes the run's newest entry as read");
+  assert.equal(fold.sequence, 3, "exposes the run's newest entry as read");
   assert.equal(fold.messageId, undefined);
-  assert.deepEqual(foldSummary(fold.folded).segments, ["✓ lint", "✓ tsc", "✓ e2e 191/191", "↗ a/b#3043"]);
+  assert.deepEqual(foldSummary(fold.folded).segments, ["✓ lint", "✓ tsc", "✓ e2e 191/191"]);
+  assert.deepEqual(pull.pullRequests.map((line) => line.ref),
+    [{ repository: "a/b", number: 3043, url: "https://github.com/a/b/pull/3043" }], "a pull request is its own slip");
   assert.equal(finding.folded, undefined, "a finding is talk and stays whole");
-  assert.equal(finding.continuation, undefined, "a fold above breaks continuation");
+  assert.equal(finding.continuation, true, "a pull request is its opener's message when GitHub said nothing of it");
+});
+
+const github = { author: "GitHub", kind: "app", id: "app:github" };
+function githubFact(number, minute, fact) {
+  return said(github, fact.event, minute, { metadata: { xmatrixGitHubPullRequest: {
+    repository: "a/b", number, url: `https://github.com/a/b/pull/${number}`, ...fact } } });
+}
+
+test("a stretch of pull request facts is one slip, one entry per pull request; people's words stay whole", () => {
+  sequence = 0;
+  const rows = buildConversationRows([
+    said(claude1, "Cause: no retry after the network drops.", 10),
+    pullRequest(claude1, 121, 18),
+    githubFact(121, 19, { event: "ci_passed", sha: "3ffa10b" }),
+    pullRequest(claude1, 122, 24),
+    githubFact(121, 25, { event: "reviewed", actor: "yiming", verdict: "changes requested", words: "Back off." }),
+    githubFact(122, 27, { event: "ci_failed", sha: "9c41d2e", failed: [{ name: "web" }], more: 0 }),
+    githubFact(121, 29, { event: "merged", title: "Reload on reconnect" }),
+  ]);
+  assert.deepEqual(rows.map((row) => row.pullRequests
+    ? row.pullRequests.map((line) => `#${line.ref.number}:${line.items.length}`).join(" ")
+    : row.body), ["Cause: no retry after the network drops.", "#121:2 #122:1", "reviewed", "#122:1 #121:1"]);
+  assert.equal(rows[1].id, "pull:message:m-2");
+  assert.equal(rows[1].folded.length, 3, "every entry of the stretch is read with it");
+  assert.equal(rows[1].author, "GitHub", "a stretch GitHub spoke in is GitHub's message");
+  assert.equal(rows[2].continuation, true, "GitHub's messages moments apart read as one turn, like any sender's");
 });
 
 test("anyone else's entry ends a run, so interleaving stays visible", () => {

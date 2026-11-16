@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a pull request's GitHub messages read as one connector story
+
+What GitHub reported about a pull request an Agent opened (CI passed or
+failed, merged, closed, reviews, comments) came as full messages, while the
+Agent's own "Opened #121" was a small activity line, so the two looked
+unrelated. They are now GitHub's messages, on the same tinted slip as every
+other connector, and show the whole path: when the Hub subscribes the
+conversation, GitHub says it is following the pull request here (context for
+Agents, never unread); a run of facts is one GitHub message with an entry per
+pull request, its current mark, `#121` and title, and its steps (`opened by
+claude:1 · following here · CI passed · merged · stopped following`). A
+review or comment is a GitHub message with the person's words whole. Older
+messages keep their look. Hub and Web. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a Codex conversation another process still holds is said once, with who holds it
 
 When Codex refused to resume an Agent's conversation because another live
