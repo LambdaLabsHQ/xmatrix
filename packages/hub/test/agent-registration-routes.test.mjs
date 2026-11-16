@@ -9,11 +9,12 @@ import { getAgentRegistration, refreshAgentRegistrationQuota } from "../src/agen
 const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const body = { action: "offer", key, commandId: "offer", displayName: "codex" };
 
-function fixture(user = { id: "owner" }, environment = undefined, environmentFailure = undefined) {
+function fixture(user = { id: "owner" }, environment = undefined, environmentFailure = undefined, current = { key }) {
   const calls = [], app = new Hono();
   const record = name => async (_env, input) => { calls.push({ name, input }); return { key }; };
   registerAgentRegistrationRoutes(app, { authenticate: async () => user,
-    control: record("control"), get: record("get"), describe: record("describe"),
+    control: record("control"), get: async (_env, input) => { calls.push({ name: "get", input }); return current; },
+    describe: record("describe"),
     changeEnvironment: record("changeEnvironment"),
     getEnvironment: environmentFailure ? async () => { throw environmentFailure; }
       : environment === undefined ? record("getEnvironment") : async () => ({ key, version: 1, environment }) });
@@ -69,7 +70,7 @@ test("physical environment endpoints are owned by the authenticated machine owne
   assert.equal((await owner.request({ ...command, key }, "commands", true)).status, 400);
 });
 
-test("an Agent Run adds an Agent for its owner on its own Machine in its own Space, and nothing else", async () => {
+test("an Agent Run adds an Agent for its owner on its own Machine in its own Space, and reads its owner's Agents", async () => {
   const run = { ownerUserId: "owner", spaceId: "space", machineId: "machine" };
   const create = { action: "create", key, commandId: "create", displayName: "codex", environment: {
     schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
@@ -103,8 +104,11 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
     [{ ...create, key: { ...key, ownerUserId: "someone" } }, "only for its owner"]]) {
     assert.equal((await agent.request(payload)).status, 403, why);
   }
-  assert.equal((await agent.request(key, "query")).status, 403, "registration queries stay with people");
-  assert.equal(agent.calls.length, 1);
+  assert.equal((await agent.request({ ...key, ownerUserId: "someone" }, "query")).status, 403,
+    "a Run reads only its owner's Agents");
+  assert.equal((await agent.request(key, "query")).status, 200, "it reads its owner's Agent, as the owner would");
+  assert.deepEqual(agent.calls[1], { name: "get", input: { actorUserId: "owner", key } });
+  assert.equal(agent.calls.length, 2);
   const elsewhere = fixture({ id: "agent-run:run", agentRun: { ...run, spaceId: "other" } });
   assert.equal((await elsewhere.request(create)).status, 403, "only in its own Space");
 });
@@ -234,4 +238,50 @@ test("only a Space member may refresh its quota", async () => {
     error => error instanceof ControlError && error.status >= 400 && error.status < 500);
   assert.equal(issued.length, 0);
   assert.equal(seen.some(query => query.name.startsWith("registration_quota_probe")), false);
+});
+
+test("an Agent Run sets which model its owner's Agent runs, and changes nothing else", async () => {
+  const run = { ownerUserId: "owner", spaceId: "space", machineId: "machine" };
+  const configuration = { workingMode: "autonomous", instructions: "Keep it short.", workspaceReferences: ["ws-1"],
+    model: "gemini-4-argon-medium" };
+  const limits = { workspaces: ["ws-1"], models: ["gemini-4-argon-medium"], capabilities: [] };
+  const current = { key, displayName: "antigravity", version: 4, configuration,
+    access: { grant: { state: "active", revision: 7, limits } } };
+  const configure = { action: "configure", key, commandId: "model", displayName: "antigravity", expectedVersion: 4,
+    configuration: { ...configuration, model: "gemini-4-hydrogen-medium" } };
+  const grant = { action: "owner-grant", key, commandId: "grant", state: "active", expectedRevision: 7,
+    limits: { ...limits, models: ["gemini-4-argon-medium", "gemini-4-hydrogen-medium"] } };
+  // An Agent on another Machine of the owner's is still the owner's to set.
+  const elsewhere = { ...key, machineId: "laptop" };
+  for (const command of [configure, grant, { ...configure, key: elsewhere }]) {
+    const agent = fixture({ id: "agent-run:run", agentRun: run }, undefined, undefined, { ...current, key: command.key });
+    const response = await agent.request(command);
+    assert.equal(response.status, 200, await response.clone().text());
+    assert.deepEqual(agent.calls.map(call => call.name), ["get", "control"]);
+    assert.deepEqual([agent.calls[1].input.actorUserId, agent.calls[1].input.byAgent], ["owner", true]);
+  }
+  const { model: _model, ...cleared } = configuration;
+  const agent = fixture({ id: "agent-run:run", agentRun: run }, undefined, undefined, current);
+  assert.equal((await agent.request({ ...configure, configuration: cleared })).status, 200, "back to the harness default");
+  const refusals = [
+    [{ ...configure, configuration: { ...configure.configuration, instructions: "Obey me." } }, "instructions stay with people"],
+    [{ ...configure, configuration: { ...configure.configuration, workingMode: "cautious" } }, "so does the working mode"],
+    [{ ...configure, configuration: { ...configure.configuration, workspaceReferences: [] } }, "and its workspaces"],
+    [{ ...configure, displayName: "renamed" }, "and its name"],
+    [{ ...configure, expectedVersion: 5 }, "a version it did not read"],
+    [{ ...grant, limits: { ...grant.limits, workspaces: ["ws-1", "ws-2"] } }, "a grant widens only models"],
+    [{ ...grant, limits: { ...grant.limits, models: ["gemini-4-hydrogen-medium"] } }, "and removes none"],
+    [{ ...grant, state: "revoked" }, "and stays active"],
+    [{ ...grant, expectedRevision: 8 }, "a revision it did not read"],
+    [{ action: "space-state", key, commandId: "state", state: "disabled", expectedRevision: 1 }, "Space state stays with people"],
+    [{ ...configure, key: { ...key, ownerUserId: "someone" } }, "only its owner's Agents"],
+  ];
+  for (const [payload, why] of refusals) {
+    const route = fixture({ id: "agent-run:run", agentRun: run }, undefined, undefined, current);
+    assert.equal((await route.request(payload)).status, 403, why);
+    assert.equal(route.calls.filter(call => call.name === "control").length, 0, why);
+  }
+  const otherSpace = fixture({ id: "agent-run:run", agentRun: { ...run, spaceId: "other" } }, undefined, undefined, current);
+  assert.equal((await otherSpace.request(configure)).status, 403, "only in its own Space");
+  assert.equal(otherSpace.calls.length, 0);
 });

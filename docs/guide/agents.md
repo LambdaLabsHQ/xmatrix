@@ -97,6 +97,20 @@ xmatrix agent describe codex --space <space-id>    # print the current descripti
 
 The description covers every agent of that harness in the Space. A Space owner or admin can write it, and so can anyone who has an agent of that harness there. Its first sentence shows beside the harness when you type `@`, and the `auto` row in that list says it picks by these descriptions. A harness nobody has described shows **Say what it's good at** in that place instead, in your language, to the people who may write it; it opens this editor for that agent. The mention's detail view says whether the chosen agent was judged from its description or from its name alone.
 
+### Set an agent's model
+
+An agent runs its harness's own default model unless its Space names one. To name one, use **Default model** in its settings on the Agents page, or the CLI:
+
+```sh
+xmatrix agent model antigravity gemini-4-hydrogen-medium --space <space-id>
+xmatrix agent model antigravity --space <space-id>            # print the current model
+xmatrix agent model antigravity --clear --space <space-id>    # back to the harness's default
+```
+
+`xmatrix agent show` lists the models a harness offers under `modelCatalog`. Once a model is set, launches of that agent run it, and a summon that names a different model is refused. Setting a model the owner's grant does not list yet adds it to the grant, which only the agent's owner can do. Changing the configuration needs a Space owner or admin.
+
+An agent can also run this command, acting as its owner: it reads and sets the model of its owner's agents in its own Space, so you can ask it in a conversation. It cannot change an agent's name, instructions, working mode or workspaces, and it cannot remove a model from a grant.
+
 ### Keep a machine for yourself
 
 ```sh

@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
   parseAgentEnvironmentCommand, parseAgentRegistrationKey, agentAccessModes, agentPresetById, agentPresetForLauncher,
-  type AgentRegistrationSummary } from "@xmatrix/protocol";
+  parseRegistrationResourceLimits, parseSpaceAgentConfiguration, type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
 import { failureResponse } from "./error-contract";
@@ -25,6 +25,40 @@ function registrationFailure(error: unknown, fallback: string): Response {
   const failure = requestFailure(error);
   if (error instanceof ControlError || failure.body.retryable) return failureResponse(failure, NO_STORE);
   return failureResponse({ ...failure, body: { ...failure.body, error: fallback } }, NO_STORE);
+}
+
+/** One JSON text for a value, whatever order its object fields came in. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, item: unknown) => item && typeof item === "object" && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b))) : item);
+}
+
+type RegistrationRead = { displayName?: unknown; version?: unknown; configuration?: unknown;
+  access?: { grant?: { state?: unknown; revision?: unknown; limits?: unknown } } | null };
+
+/**
+ * Whether a Run's command changes only which model its owner's Agent runs,
+ * against the registration as it stands: the configuration with nothing but
+ * its model changed, or the owner's grant with models only added. Each names
+ * the version it read, so a person's change in between refuses it.
+ */
+function changesOnlyModel(command: ReturnType<typeof parseAgentRegistrationCommand>, current: RegistrationRead): boolean {
+  if (command.action === "configure") {
+    if (current.configuration === undefined || command.expectedVersion !== current.version ||
+        command.displayName !== current.displayName) return false;
+    const { model: _next, ...next } = parseSpaceAgentConfiguration(command.configuration);
+    const { model: _held, ...held } = parseSpaceAgentConfiguration(current.configuration);
+    return canonical(next) === canonical(held);
+  }
+  if (command.action === "owner-grant") {
+    const grant = current.access?.grant;
+    if (!grant || grant.state !== "active" || command.state !== "active" || command.expectedRevision !== grant.revision) return false;
+    const next = parseRegistrationResourceLimits(command.limits), held = parseRegistrationResourceLimits(grant.limits);
+    return canonical(next.workspaces) === canonical(held.workspaces) &&
+      canonical(next.capabilities) === canonical(held.capabilities) &&
+      held.models.every(model => next.models.includes(model));
+  }
+  return false;
 }
 
 export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, dependencies: Partial<
@@ -80,9 +114,11 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
         const authenticated = await authenticate(c.req.raw, c.env);
         const run = authenticated.agentRun;
         // An Agent Run adds an Agent for its owner on its own Machine in its
-        // own Space, as the owner's `xmatrix agent add` would; the rest of
-        // registration management stays with people.
-        if (run && (scope !== "space" || action !== "commands")) {
+        // own Space, as the owner's `xmatrix agent add` would, and reads and
+        // sets which model its owner's Agents there run, as the owner's
+        // `xmatrix agent model` would; the rest of registration management
+        // stays with people.
+        if (run && scope !== "space") {
           return c.json({ error: "Registration management requires a Human" }, 403);
         }
         const user = run ? { id: run.ownerUserId } : requireHumanAuth(authenticated);
@@ -96,9 +132,22 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
         } catch { return c.json({ error: "Invalid registration request" }, 400); }
         const spaceId = c.req.param("spaceId");
         if (scope === "space" && (!("spaceId" in key) || key.spaceId !== spaceId)) return c.json({ error: "Registration not found" }, 404);
-        if (run && (!command || !("action" in command) || command.action !== "create" || spaceId !== run.spaceId || key.ownerUserId !== run.ownerUserId ||
-            key.machineId !== run.machineId)) {
+        const runAction = command && "action" in command ? command.action : undefined;
+        if (run && (spaceId !== run.spaceId || key.ownerUserId !== run.ownerUserId)) {
+          return c.json({ error: "An Agent Run manages only its owner's Agents, in its own Space" }, 403);
+        }
+        if (run && runAction === "create" && key.machineId !== run.machineId) {
           return c.json({ error: "An Agent Run adds Agents only for its owner, on its own Machine, in its own Space" }, 403);
+        }
+        if (run && runAction !== undefined && runAction !== "create" && runAction !== "configure" && runAction !== "owner-grant") {
+          return c.json({ error: "An Agent Run adds its owner's Agents and sets their model; the rest stays with people" }, 403);
+        }
+        if (run && (runAction === "configure" || runAction === "owner-grant")) {
+          const current = await port.get(c.env, { actorUserId: run.ownerUserId,
+            key: key as ReturnType<typeof parseSpaceAgentRegistrationKey> }) as RegistrationRead;
+          if (!changesOnlyModel(command as ReturnType<typeof parseAgentRegistrationCommand>, current)) {
+            return c.json({ error: "An Agent Run changes only which model an Agent runs; its other settings stay with people" }, 403);
+          }
         }
         if (scope === "physical" && key.ownerUserId !== user.id) return c.json({ error: "Registration not found" }, 404);
         // A mode is confirmed only for a harness whose permission requests xMatrix can show.

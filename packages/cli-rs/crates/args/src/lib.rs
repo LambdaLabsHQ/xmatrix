@@ -1698,6 +1698,27 @@ pub enum AgentCommand {
         #[arg(long, conflicts_with = "text")]
         stdin: bool,
     },
+    /// Show or set the model an Agent runs in a Space when a launch names
+    /// none. An Agent Run may set it for its owner's Agents in its own Space
+    Model {
+        /// Harness id of the Agent, for example antigravity or codex
+        harness: String,
+        /// The model id, as `xmatrix agent show` lists it in modelCatalog.
+        /// Omit to show the current one
+        model: Option<String>,
+        /// Go back to the harness's own default model
+        #[arg(long, conflicts_with = "model")]
+        clear: bool,
+        /// Defaults to this Agent Run's Space
+        #[arg(long)]
+        space: Option<String>,
+        /// Owner user id. Defaults to you, or to this Agent Run's owner.
+        #[arg(long)]
+        owner: Option<String>,
+        /// Machine id. Defaults to this machine.
+        #[arg(long)]
+        machine: Option<String>,
+    },
     /// Remove an Agent from a Space
     #[command(alias = "rm")]
     Remove {
