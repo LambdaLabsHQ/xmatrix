@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  decideProductAgentSwitch,
   orchestrateProductAgentControlCommands,
   parseProductAgentControlCommands,
 } from "../src/product-agent-model-effort.ts";
@@ -232,4 +233,70 @@ test("a refused switch that cancelled the turn still continues it; one that canc
   const idle = continuationPort([() => ({ status: "switched", selected: "fable" })]);
   await orchestrateProductAgentControlCommands({ channelId: "channel", body: "@claude:1 /model fable", port: idle.port });
   assert.deepEqual(idle.continuations, []);
+});
+
+const NOW = Date.parse("2026-11-16T20:29:30Z");
+const CATALOG = [
+  { model: "claude-opus-5-5", description: "", efforts: [], isDefault: true },
+  { model: "claude-fable-5-2", description: "", efforts: [], names: ["fable"], quotaScopes: ["Fable"] },
+];
+/** An account with weekly quota left whose Fable-only week is used up. */
+const FABLE_USED_UP = {
+  quotaSource: "provider_api", quotaObservedAt: "2026-11-16T20:29:00Z",
+  quotaUsages: [{ label: "1w", percent: 63, resetAt: "2026-11-19T18:00:00Z" }],
+  scopedQuotaUsages: [{ label: "1w", scope: "Fable", percent: 100, resetAt: "2026-11-19T18:00:00Z" }],
+};
+const running = (extra = {}) => ({ state: "running", agentName: "claude", machineName: "build-box",
+  currentModel: "claude-opus-5-5", modelCatalog: CATALOG, reportedModels: [{ model: "claude-opus-5-5" }], ...extra });
+
+function decide(command, target, outcome = { status: "switched", selected: command.value }) {
+  const dispatched = [];
+  return decideProductAgentSwitch({ command: { target: "claude:3", ...command }, target, now: NOW,
+    dispatch: async (reportedModels) => { dispatched.push(reportedModels); return outcome; } })
+    .then((result) => ({ result, dispatched }));
+}
+
+test("a model whose provider quota is used up is refused before its Instance is interrupted", async () => {
+  const { result, dispatched } = await decide({ kind: "model", value: "fable" }, running({ usage: FABLE_USED_UP }));
+  assert.deepEqual(result, { status: "error",
+    message: "the provider quota for claude-fable-5-2 on build-box is used up until 2026-11-19 18:00 UTC. @claude:3 stays on claude-opus-5-5.",
+    quotaExhausted: { model: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box",
+      available: ["claude-opus-5-5"] } });
+  assert.deepEqual(dispatched, []);
+});
+
+test("a model with quota left is switched with the Instance row's catalog", async () => {
+  const { result, dispatched } = await decide({ kind: "model", value: "claude-opus-5-5" }, running({ usage: FABLE_USED_UP }));
+  assert.deepEqual(result, { status: "switched", selected: "claude-opus-5-5" });
+  assert.deepEqual(dispatched, [[{ model: "claude-opus-5-5" }]]);
+});
+
+test("a provider's own quota refusal names the account and keeps the turn's continuation", async () => {
+  const continuation = { instanceId: "channel-1:3", requestId: "request-1" };
+  const { result } = await decide({ kind: "model", value: "fable" }, running(), { status: "error", continuation,
+    message: "API error: 429 This request would exceed your account's rate limit. Please try again later · model not changed" });
+  assert.deepEqual(result, { status: "error", continuation,
+    message: "the provider account on build-box has no quota left for claude-fable-5-2, and gave no reset time. @claude:3 stays on claude-opus-5-5.",
+    quotaExhausted: { model: "claude-fable-5-2", machineName: "build-box" } });
+});
+
+test("an Instance no Runtime cell holds is named for what it is", async () => {
+  const missing = { status: "no_instance" };
+  const message = async (state) => (await decide({ kind: "model", value: "fable" }, running({ state }), missing)).result.message;
+  assert.equal(await message("starting"),
+    "@claude:3 is still starting on build-box and has not connected yet. Send this again once it is running.");
+  assert.equal(await message("asleep"),
+    "@claude:3 is asleep, so it has no session to switch. It wakes on its next message; send this again then.");
+  assert.equal(await message("stopped"),
+    "@claude:3 has stopped. Start it again with @claude:3:reborn, then send this again.");
+  // No such Instance, or one whose row names another Agent, stays not found.
+  assert.deepEqual((await decide({ kind: "model", value: "fable" }, undefined, missing)).result, missing);
+  assert.deepEqual((await decide({ kind: "model", value: "fable" }, running({ agentName: "codex", usage: FABLE_USED_UP }), missing)).result, missing);
+});
+
+test("a listed catalog marks the models whose quota is used up", async () => {
+  const catalog = { status: "catalog", current: "claude-opus-5-5", options: ["claude-opus-5-5", "claude-fable-5-2"] };
+  assert.deepEqual((await decide({ kind: "model" }, running({ usage: FABLE_USED_UP }), catalog)).result,
+    { ...catalog, usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
+  assert.deepEqual((await decide({ kind: "model" }, running(), catalog)).result, catalog);
 });

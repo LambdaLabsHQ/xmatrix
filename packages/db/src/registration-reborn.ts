@@ -4,7 +4,7 @@ import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
-  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
+  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -185,6 +185,21 @@ function continuationSpawnWorkspace(source: ContinuationSource, key: SpaceAgentR
   };
 }
 
+/** What a live switch of one Instance is decided against (`switchTargetFacts`). */
+export interface SwitchTargetFacts {
+  instanceId: string;
+  /** `starting` and `running` have a Run; `asleep` wakes on its next message; `stopped` only by a reborn. */
+  state: "starting" | "running" | "asleep" | "stopped";
+  agentName?: string;
+  machineName?: string;
+  currentModel?: string;
+  /** The runtime's catalog as the Instance row stores it, whatever its age. */
+  reportedModels?: unknown[];
+  /** That catalog while it is fresh enough to decide quota by. */
+  modelCatalog?: RoutingModelOption[];
+  usage?: ReturnType<typeof registrationQuotaUsage>;
+}
+
 /**
  * Continuations of a registration Run, both through one durable intent (stop
  * the predecessor, then create its successor):
@@ -253,6 +268,47 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     return { models, ...(environment.modelAliases ? { modelAliases: environment.modelAliases } : {}),
       ...(modelCatalog ? { modelCatalog } : {}), ...(fact.native_models === true ? { supportsNativeModel: true } : {}),
       ...(usage ? { observations: { quota: { usage } } } : {}) };
+  }
+
+  /**
+   * What a `/model` or `/effort` statement addressed to Instance `ordinal` of
+   * a Channel meets: whether it runs, where, the catalog its runtime last
+   * reported (kept on the Instance row, so it outlives a Runtime cell's
+   * memory) and its account's provider reading. Undefined when the Channel
+   * holds no such Instance.
+   */
+  async switchTargetFacts(raw: { commandId: string; channelId: string; ordinal: number }): Promise<SwitchTargetFacts | undefined> {
+    const commandId = text(raw.commandId), channelId = text(raw.channelId);
+    const row = await this.database.transaction({ requestId: commandId, operation: "registration.switch.target",
+      placement: this.placement }, async tx => (await tx.query({ name: "registration_switch_target_v1", text: `SELECT
+          instance.instance_id,instance.rest_state,run.status AS run_status,run.metadata_json,
+          binding.owner_user_id AS b_owner,binding.machine_id AS b_machine,binding.harness AS b_harness,
+          instance.presentation_json->'models' AS catalog_models,
+          instance.presentation_json->>'modelsObservedAt' AS catalog_observed_at,
+          instance.presentation_json->>'model' AS current_model
+        FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
+        LEFT JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id
+        WHERE instance.channel_id=$1 AND instance.channel_instance_id=$2`,
+      values: [channelId, raw.ordinal], maxRows: 1 }))[0]);
+    if (!row) return undefined;
+    const metadata = object(row.metadata_json);
+    const fact = row.b_owner ? (await this.directory.transaction({ requestId: commandId,
+      operation: "registration.switch.quota", statement: "single_read" }, tx => tx.query({
+      name: "registration_switch_quota_v1", text: `SELECT ${registrationQuotaColumns("q")}
+        FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
+        WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
+      values: [String(row.b_owner), String(row.b_machine), String(row.b_harness)], maxRows: 1 })))[0] : undefined;
+    const modelCatalog = routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value;
+    const usage = registrationQuotaUsage(fact);
+    const runStatus = String(row.run_status);
+    const state = runStatus === "starting" || runStatus === "running" ? runStatus
+      : row.rest_state === "sleeping" || row.rest_state === "interrupted" ? "asleep" : "stopped";
+    return { instanceId: String(row.instance_id), state,
+      ...(typeof metadata.agentName === "string" && metadata.agentName ? { agentName: metadata.agentName } : {}),
+      ...(typeof metadata.hostname === "string" && metadata.hostname ? { machineName: metadata.hostname } : {}),
+      ...(typeof row.current_model === "string" && row.current_model ? { currentModel: row.current_model } : {}),
+      ...(Array.isArray(row.catalog_models) && row.catalog_models.length ? { reportedModels: row.catalog_models } : {}),
+      ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}) };
   }
 
   /** Whether a Run moved off `original` for quota can go back to it: a

@@ -240,6 +240,7 @@ export type {
 } from "./agent-channel-access.js";
 
 export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE_FAILED_SQL } from "./registration-reborn.js";
+export type { SwitchTargetFacts } from "./registration-reborn.js";
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {

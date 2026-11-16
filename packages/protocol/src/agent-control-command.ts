@@ -36,9 +36,22 @@ export interface AgentControlInvocation extends AgentControlCommand {
 /** What one statement came to, in statement order on the Hub's receipt. */
 export type AgentControlOutcomeRecord = Pick<AgentControlCommand, "kind" | "target"> & (
   | { status: "switched"; selected: string }
-  | { status: "catalog"; current?: string; options: string[] }
+  | { status: "catalog"; current?: string; options: string[]; usedUp?: AgentControlUsedUpOption[] }
   | { status: "no_instance" }
-  | { status: "error"; message: string });
+  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted });
+
+/** An offered model whose provider quota is used up, and when it is next back. */
+export interface AgentControlUsedUpOption { option: string; resetsAt: string }
+
+/** A switch refused because the model's provider quota is used up: the model,
+ * when its quota is next back, the machine whose account it is, and the
+ * models of that Instance that still have quota. */
+export interface AgentControlQuotaExhausted {
+  model: string;
+  resetsAt?: string;
+  machineName?: string;
+  available?: string[];
+}
 
 /**
  * Every statement in the message, or none at all.

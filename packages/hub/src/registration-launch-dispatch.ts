@@ -343,6 +343,11 @@ export async function readContinuationModelFacts(env: Env, input: {
   return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).continuationModelFacts(input);
 }
 
+/** What a `/model` or `/effort` statement to Instance `ordinal` of a Channel meets. */
+export async function readSwitchTargetFacts(env: Env, input: { commandId: string; channelId: string; ordinal: number }) {
+  return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).switchTargetFacts(input);
+}
+
 /** Jev decides whether a new conversation's first message asks for an Agent;
  * a Human author may choose first within the window. */
 export function decideNewConversationLaunch(env: Env, input: {

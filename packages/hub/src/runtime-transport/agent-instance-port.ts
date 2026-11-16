@@ -11,6 +11,7 @@ import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   crossChannelReplyRelay,
   isLiveAgentStatus,
+  sanitizeAgentInstancePresentation,
   type AgentStatus,
   type LiveAgentStatus,
   type MessageSender,
@@ -510,6 +511,8 @@ export class AgentInstanceRuntimeTransport {
     target: string;
     kind: "model" | "effort";
     value?: string;
+    /** The runtime's catalog as the Instance row stores it. */
+    reportedModels?: unknown[];
   }): Promise<AgentInstanceControlSwitchOutcome> {
     const wanted = input.target.trim().toLowerCase();
     const candidates = Array.from(this.sockets.entries()).filter(([, session]) =>
@@ -518,7 +521,12 @@ export class AgentInstanceRuntimeTransport {
         `${session.principal.agentId}:${session.run.channelInstanceId}`.toLowerCase() === wanted)
     );
     if (candidates.length !== 1) return { status: "no_instance" };
-    const [socket, session] = candidates[0]!;
+    const [socket, held] = candidates[0]!;
+    // A cell that hibernated keeps a compact session without the runtime's
+    // catalog; the Instance row still holds it, and the caller read it there.
+    const session = held.presentation?.models?.length || !input.reportedModels?.length ? held
+      : { ...held, presentation: { ...held.presentation,
+        models: sanitizeAgentInstancePresentation({ models: input.reportedModels })?.models } };
 
     const options = input.kind === "model"
       ? agentInstanceModelOptions(session)
@@ -540,7 +548,9 @@ export class AgentInstanceRuntimeTransport {
     if (!selected) {
       return {
         status: "error",
-        message: `\`${input.value}\` is not one this instance offers.`,
+        message: options.length
+          ? `\`${input.value}\` is not one @${input.target} offers. It offers ${options.map((option) => `\`${option}\``).join(", ")}.`
+          : `@${input.target} has not reported which ${input.kind}s it offers.`,
       };
     }
     if (!this.backend.awaitControlResult) {
