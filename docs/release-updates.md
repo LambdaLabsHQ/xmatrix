@@ -10,8 +10,11 @@ a new one there on that model (an ordinary handoff; the answer says it stops
 the Instance first). It is offered only for a repository-backed Instance and
 only for a machine whose own account reading shows quota. When the Instance
 was still starting, **Send again** sends the same statement. Machines are
-named as their owners named them, which is what `machine:` selects. Hub, DB
-and Web. Recovery is a CI-validated beta reverting this change.
+named as their owners named them, which is what `machine:` selects. An
+Instance that has reported no model catalog yet (its first turn still runs)
+is asked as written, since its runtime holds the catalog; before, the Hub
+refused it. `xmatrix channel history` marks used-up models in a listing.
+Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: a refused `/model` says why, and what is true of the Instance
 

@@ -543,14 +543,15 @@ export class AgentInstanceRuntimeTransport {
     }
 
     // A model is also named by any selector or display name its runtime lists for it (Claude's `opus`).
+    // An Instance that has reported no catalog yet (its first turn still runs)
+    // is asked as written: its runtime holds the catalog and answers for it.
     const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase()) ??
-      (input.kind === "model" ? agentInstanceModelNamed(session, input.value) : undefined);
+      (input.kind === "model" ? agentInstanceModelNamed(session, input.value) : undefined) ??
+      (options.length ? undefined : input.value.trim());
     if (!selected) {
       return {
         status: "error",
-        message: options.length
-          ? `\`${input.value}\` is not one @${input.target} offers. It offers ${options.map((option) => `\`${option}\``).join(", ")}.`
-          : `@${input.target} has not reported which ${input.kind}s it offers.`,
+        message: `\`${input.value}\` is not one @${input.target} offers. It offers ${options.map((option) => `\`${option}\``).join(", ")}.`,
       };
     }
     if (!this.backend.awaitControlResult) {
@@ -599,7 +600,7 @@ export class AgentInstanceRuntimeTransport {
     if (!confirmed) {
       return { status: "error", message: "The instance did not confirm a selection.", ...continuation };
     }
-    if (confirmed.toLowerCase() !== selected.toLowerCase()) {
+    if (options.length && confirmed.toLowerCase() !== selected.toLowerCase()) {
       return {
         status: "error",
         message: `the instance confirmed \`${confirmed}\` instead of \`${selected}\`.`,
