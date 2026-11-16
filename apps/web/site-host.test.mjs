@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { isSitePath, siteOriginRedirect } from "./site-host.mjs";
 
@@ -6,7 +7,7 @@ const env = { XMATRIX_SITE_ORIGIN: "https://site.example", XMATRIX_APP_ORIGIN: "
 
 test("the site origin serves the site's pages, files and assets", () => {
   for (const path of [
-    "/", "/zh", "/docs", "/docs/setup", "/download", "/releases", "/releases/1.0.304", "/terms", "/privacy",
+    "/", "/zh", "/docs", "/docs/setup", "/download", "/support", "/releases", "/releases/1.0.304", "/terms", "/privacy",
     "/subprocessors", "/cookies", "/robots.txt", "/sitemap.xml", "/llms.txt", "/index.md", "/pricing.md",
     "/install.sh", "/_next/static/chunks/main-0123456789abcdef.js", "/brand/xmatrix-share-card.jpg",
     "/fonts/inter.0123456789.woff2", "/icon-192.png", "/api/releases/latest",
@@ -32,4 +33,13 @@ test("the app origin, and a deployment without a site origin, serve everything w
   assert.equal(siteOriginRedirect(new URL("https://site.example/app"), { XMATRIX_SITE_ORIGIN: "https://site.example" }), null);
   assert.equal(siteOriginRedirect(new URL("https://site.example/app"),
     { XMATRIX_SITE_ORIGIN: "https://site.example", XMATRIX_APP_ORIGIN: "https://site.example" }), null);
+});
+
+test("every page the sitemap lists is served at the site origin, not redirected away from it", () => {
+  const source = readFileSync(new URL("./src/app/sitemap.ts", import.meta.url), "utf8");
+  const list = source.match(/const publicPaths = \[([^\]]*)\]/u)?.[1];
+  assert.ok(list, "sitemap.ts names its pages in publicPaths");
+  const paths = [...list.matchAll(/"([^"]+)"/gu)].map((match) => match[1]);
+  assert.ok(paths.length > 5, "publicPaths lists the site's pages");
+  for (const path of paths) assert.equal(isSitePath(path), true, path);
 });
