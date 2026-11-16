@@ -3,15 +3,23 @@ import { lostBeforeCommit } from "./client.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabaseRequestContext } from "./context.js";
 
+/** A server-answered lock timeout has already aborted the transaction, so a
+ * database-only command may run again exactly like one whose response was lost. */
+function lockTimedOut(error: unknown): boolean {
+  return !!error && typeof error === "object" && "code" in error &&
+    String((error as { code?: unknown }).code).toUpperCase() === "55P03";
+}
+
 /**
  * Only for database-only work: its owner closes the failed session before
  * this one replay takes a fresh checkout. COMMIT/PREPARE uncertainty and
- * answered database errors still escape to the caller's reconciliation.
+ * other answered database errors still escape to the caller's reconciliation;
+ * a lock timeout is replayed because the server rolled the transaction back.
  */
 export async function retryBeforeCommit<T>(run: () => Promise<T>): Promise<T> {
   try { return await run(); }
   catch (error) {
-    if (!lostBeforeCommit(error)) throw error;
+    if (!lostBeforeCommit(error) && !lockTimedOut(error)) throw error;
     try { return await run(); }
     catch (retryError) { linkDatabaseFailures(retryError, error); throw retryError; }
   }
