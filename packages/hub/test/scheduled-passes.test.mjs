@@ -44,3 +44,16 @@ test("a lane stops waiting for a slow pass, which still reports its own failure"
   await new Promise(resolve => setTimeout(resolve, 5));
   assert.deepEqual(failures, ["slow"]);
 });
+
+test("an hourly pass is due only in its own minute; the others every minute", async () => {
+  const { scheduledPassesDue } = await import("../src/scheduled-passes.ts");
+  const passes = [{ name: "every", work: async () => {} }, { name: "at7", hourlyAtMinute: 7, work: async () => {} },
+    { name: "at22", hourlyAtMinute: 22, work: async () => {} }];
+  const at = minute => scheduledPassesDue(passes, Date.UTC(2026, 10, 16, 20, minute, 3)).map(pass => pass.name);
+  assert.deepEqual(at(6), ["every"]);
+  assert.deepEqual(at(7), ["every", "at7"]);
+  assert.deepEqual(at(22), ["every", "at22"]);
+  const hour = Array.from({ length: 60 }, (_, minute) => at(minute)).flat();
+  assert.equal(hour.filter(name => name === "at7").length, 1);
+  assert.equal(hour.filter(name => name === "every").length, 60);
+});
