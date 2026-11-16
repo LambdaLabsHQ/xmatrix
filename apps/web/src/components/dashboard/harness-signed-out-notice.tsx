@@ -11,7 +11,8 @@ import { useInstalledHarnesses } from "./use-installed-harnesses";
    it. The machine's owner signs it in here and a refused summon is sent
    again; anyone else reads the notice as written (HARNESS_SIGNED_OUT_NOTICE_KIND).
    Signing in belongs to the machine, so its owner needs no Agent for the
-   program in this Space. */
+   program in this Space. Where they have one, work it could not take also
+   offers turning it off; an Agent's own request is only for the sign-in. */
 export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token, userId, onSignedIn, notice }: {
   signedOut: HarnessSignedOut; spaceId: string | null; token: string | null; userId: string;
   /** The Agent that asked for this sign-in, when one did. */
@@ -24,15 +25,17 @@ export function HarnessSignedOutNotice({ signedOut, requestedBy, spaceId, token,
   const fleet = useInstalledHarnesses(spaceId, token, userId);
   const copy = useOnboardingCopy(spaceId, token, userId);
   const [resent, setResent] = useState<"sent" | "failed" | "again" | "told" | null>(null);
-  const target: HarnessSignInTarget | undefined = fleet.catalog.data?.registrations.find((candidate) =>
+  const agent = fleet.catalog.data?.registrations.find((candidate) =>
     candidate.key.ownerUserId === userId && candidate.key.machineId === signedOut.machineId &&
-    candidate.key.harness === signedOut.harness) ?? ownedMachineTarget(fleet.daemons.data, userId, signedOut);
+    candidate.key.harness === signedOut.harness);
+  const target: HarnessSignInTarget | undefined = agent ?? ownedMachineTarget(fleet.daemons.data, userId, signedOut);
   if (!target || !token) return <>{notice}</>;
   return (
     <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="harness-signed-out-notice">
       {requestedBy && notice}
       <HarnessSignedOutBody registration={target} token={token} userId={userId} copy={copy}
         program={signedOut.program} machine={signedOut.machineName ?? target.machineName}
+        agent={requestedBy ? undefined : agent}
         onSignedIn={() => {
           // A refused summon is sent again; a failed turn is the person's to ask again.
           if (requestedBy) { setResent("told"); return; }
