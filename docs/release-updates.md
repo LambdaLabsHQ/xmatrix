@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: an Agent can set which model its owner's Agents run
+
+The model an Agent runs when a launch names none (**Default model** on the
+Agents page) could only be changed by a person in the app. The CLI now has
+`xmatrix agent model <harness> [<model>|--clear]`, and an Agent Run can use it
+as its owner, for its owner's Agents in its own Space: a conversation can now
+ask an Agent to move antigravity off a model that has no capacity, for
+example. A Run changes only the model. A configure that touches anything
+else, or a grant change that does more than add models, is refused, and each
+must name the version it read. CLI and Hub. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: "Following" a pull request no longer wakes every Agent in the conversation
 
 When a Run opened a pull request, GitHub's "Following repo#N in this
