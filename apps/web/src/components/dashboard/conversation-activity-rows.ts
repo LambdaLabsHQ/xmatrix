@@ -21,12 +21,35 @@ export function timelineItemActivity(item: TimelineItem): ChannelActivity | unde
 }
 
 /**
- * A pull request fact GitHub reported (CI verdict, merge, close): drawn as the
- * same compact line as the "Opened" entry, not as a message.
+ * A pull request fact GitHub reported (CI verdict, merge, close, a person's
+ * review or comment). Not a message: the timeline draws it on its pull
+ * request's line, or, with a person's words, as a line over those words.
  */
 export function timelineItemGitHubFact(item: TimelineItem): GitHubPullRequestFact | undefined {
   if (item.senderKind !== "app" || item.recalledAt) return undefined;
   return githubPullRequestFactOf(item.metadata);
+}
+
+type PullRequestRef = { repository: string; number: number; url: string };
+
+/**
+ * The pull request an entry is a bare fact about: a Run's "opened", or
+ * GitHub's CI verdict, merge or close. A review or comment carries a
+ * person's words and is never folded away.
+ */
+export function timelineItemPullRequest(item: TimelineItem): PullRequestRef | undefined {
+  if (!item.messageId || item.sendStatus || item.isEvent) return undefined;
+  const activity = timelineItemActivity(item);
+  if (activity?.kind === "pull_request" && !item.recalledAt) {
+    return { repository: activity.repository, number: activity.number, url: activity.url };
+  }
+  const fact = timelineItemGitHubFact(item);
+  if (!fact || fact.event === "reviewed" || fact.event === "commented") return undefined;
+  return { repository: fact.repository, number: fact.number, url: fact.url };
+}
+
+function pullRequestKey(ref: PullRequestRef): string {
+  return `${ref.repository.toLowerCase()}#${ref.number}`;
 }
 
 /** The narrowest sender identity: two Instances of one Agent are different work. */
@@ -37,9 +60,10 @@ function actorKey(item: TimelineItem): string | undefined {
     : `${item.senderKind ?? "user"}:${item.senderId}`;
 }
 
+/** A plan entry: folds with its own Instance's run. */
 function foldable(item: TimelineItem): boolean {
   if (!item.messageId || item.recalledAt || item.sendStatus || item.isEvent) return false;
-  return Boolean(timelineItemActivity(item));
+  return timelineItemActivity(item)?.kind === "plan";
 }
 
 /** The header tags a message carries, by the key its tag is drawn with. */
@@ -142,13 +166,29 @@ function foldRow(items: TimelineItem[]): TimelineItem {
 export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
   let run: TimelineItem[] = [];
+  // One stretch of bare pull request facts, one line per pull request in the
+  // order each first appears (docs/design/conversation-activity.md §4.1).
+  let pulls = new Map<string, { ref: PullRequestRef; items: TimelineItem[] }>();
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
+    for (const { ref, items } of pulls.values()) {
+      rows.push({ ...foldRow(items), id: `pull:${items[0]!.id}`, author: items[0]!.author, pullRequest: ref });
+    }
+    pulls = new Map();
   };
   for (const item of timeline) {
+    const pull = timelineItemPullRequest(item);
+    if (pull) {
+      if (run.length > 0) flush();
+      const key = pullRequestKey(pull);
+      const line = pulls.get(key);
+      if (line) line.items.push(item);
+      else pulls.set(key, { ref: pull, items: [item] });
+      continue;
+    }
     if (foldable(item)) {
-      if (run.length > 0 && actorKey(run[0]!) !== actorKey(item)) flush();
+      if (pulls.size > 0 || (run.length > 0 && actorKey(run[0]!) !== actorKey(item))) flush();
       run.push(item);
       continue;
     }

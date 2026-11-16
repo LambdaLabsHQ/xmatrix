@@ -142,7 +142,7 @@ import {
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
-import { FoldedActivityRow, GitHubFactRow } from "./conversation-activity-row";
+import { FoldedActivityRow, GitHubFactRow, PullRequestLineRow } from "./conversation-activity-row";
 import { HumanAboveViewJump, TIMELINE_ROW_ID_ATTRIBUTE } from "./timeline-human-above";
 import {
   buildConversationRows,
@@ -1183,7 +1183,9 @@ export const MessageTimeline = memo(function MessageTimeline({
                 )}
               >
                 {since && message.id === sinceRowId && <SinceDivider digest={since} />}
-                {message.folded ? (
+                {message.folded && message.pullRequest ? (
+                  <PullRequestLineRow row={message} expanded={openFolds.has(message.id)} onToggle={toggleFold} />
+                ) : message.folded ? (
                   <FoldedActivityRow
                     row={message}
                     expanded={openFolds.has(message.id)}

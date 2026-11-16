@@ -202,13 +202,18 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   the time at the right edge. No avatar and no identity tags; the
   avatar column holds the fold's disclosure, or the pull request mark when a
   lone pull request leaves nothing to open.
-- **GitHub's pull request facts.** A subscribed pull request's CI verdict,
-  merge, close, reviews and comments (§3.6) carry their fact in the message metadata
-  (`xmatrixGitHubPullRequest`) and render as the same line: the verdict,
-  merge or close mark in the avatar column, then the sentence alone (the
-  mark says it is GitHub's), the time at the right edge. They never fold. A person's review or comment is the same line
-  (`yiming requested changes on <link>`), its words whole beneath it in
-  message ink, so no GitHub avatar interrupts a pull request's thread.
+- **Pull request lines.** A pull request is one line per stretch: its
+  opening (a Run's `pull_request` entry) and the facts GitHub reported about
+  it (CI verdict, merge, close; `xmatrixGitHubPullRequest` metadata, §3.6)
+  in one uninterrupted stretch fold into
+  `#121 <title>  opened by claude:1 · CI passed · merged`, one line per pull
+  request in the order each first appears. Its mark in the avatar column is
+  where it stands now (open, failing, merged, closed); the title appears
+  once GitHub has said it; the time is the latest step's, at the right edge.
+  Talk ends the stretch. A line of several steps opens to each with its time.
+  A person's review or comment is a line of the same shape
+  (`yiming requested changes on #121`) with their words whole beneath it, so
+  no GitHub avatar interrupts the conversation.
 - **Folding.** Consecutive activity entries from the same Instance merge into
   one row with a time range and a count; the newest items are shown inline.
   Any entry from anyone else, or any message, ends the fold, so interleaving

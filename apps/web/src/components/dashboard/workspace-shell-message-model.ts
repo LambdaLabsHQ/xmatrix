@@ -265,6 +265,11 @@ export type TimelineItem = {
    * same sender, oldest first (conversation-activity-rows.ts). Never a message.
    */
   folded?: TimelineItem[];
+  /**
+   * Set on a folded row that is one pull request's line: its opening and the
+   * facts GitHub reported about it in one stretch (conversation-activity-rows.ts).
+   */
+  pullRequest?: { repository: string; number: number; url: string };
   /** Same sender as the row above, moments later, with the same tags: no header. */
   continuation?: boolean;
   /**
