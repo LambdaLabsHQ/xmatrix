@@ -3,7 +3,8 @@ const test = require("node:test");
 require("../dashboard/typescript-require.cjs").installTypeScriptRequire();
 const { EditorState, TextSelection } = require("prosemirror-state");
 const { markdownToPageDoc, pageSchema } = require("@xmatrix/protocol/page-document");
-const { markdownShortcuts, syntaxDecorations, typoraBackspace, typoraDelete } = require("./page-editor-syntax.ts");
+const { nornRunBlock } = require("@xmatrix/protocol");
+const { markdownShortcuts, openFence, syntaxDecorations, typoraBackspace, typoraDelete } = require("./page-editor-syntax.ts");
 
 function caret(markdown, needle, where) {
   const doc = markdownToPageDoc(markdown);
@@ -126,4 +127,35 @@ test("typed markdown becomes the mark or block", () => {
 
   const rule = type(plugin, "---");
   assert.equal(rule.doc.firstChild.type.name, "horizontal_rule");
+});
+
+test("a fence keeps the info string nornRunBlock reads, and a space does not end a norn run tag", () => {
+  const plugin = markdownShortcuts();
+  const ts = type(plugin, "```ts ");
+  assert.equal(ts.doc.firstChild.type.name, "code_block");
+  assert.equal(ts.doc.firstChild.attrs.language, "ts");
+
+  const started = type(plugin, "```norn ");
+  assert.equal(started.doc.firstChild.type.name, "paragraph");
+  assert.equal(started.doc.textContent, "```norn ");
+
+  const named = apply(type(plugin, "```norn run 物业费"), openFence);
+  assert.equal(named.doc.firstChild.type.name, "code_block");
+  assert.equal(named.doc.firstChild.attrs.language, "norn run 物业费");
+  assert.deepEqual(nornRunBlock(named.doc.firstChild.attrs.language), { name: "物业费" });
+
+  const main = apply(type(plugin, "```norn run"), openFence);
+  assert.equal(main.doc.firstChild.attrs.language, "norn run");
+  assert.deepEqual(nornRunBlock(main.doc.firstChild.attrs.language), { name: "main" });
+
+  const shown = apply(type(plugin, "```norn"), openFence);
+  assert.equal(shown.doc.firstChild.attrs.language, "norn");
+  assert.equal(nornRunBlock(shown.doc.firstChild.attrs.language), null);
+
+  const ordinary = apply(type(plugin, "```ts"), openFence);
+  assert.equal(ordinary.doc.firstChild.attrs.language, "ts");
+
+  const prose = type(plugin, "see ```ts ");
+  assert.equal(prose.doc.firstChild.type.name, "paragraph");
+  assert.equal(openFence(prose, () => { throw new Error("dispatched"); }), false);
 });

@@ -74,6 +74,10 @@ export type {
   CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {
+  GITHUB_PULL_REQUEST_FACT_METADATA_KEY, githubPullRequestFactOf,
+} from "./github-pull-request-fact.js";
+export type { GitHubPullRequestFact, GitHubPullRequestFactCheck } from "./github-pull-request-fact.js";
+export {
   channelSummarySource,
 } from "./channel-summary.js";
 export type {
