@@ -17,7 +17,7 @@ integration("composite registration commands preserve identity, configuration an
       CREATE TABLE data.channels (channel_id text,space_id text,mode text,metadata_json jsonb,version bigint,archived_at timestamptz);
       CREATE TABLE data.channel_access (channel_id text,space_id text,subject_kind text,subject_id text);
       CREATE TABLE data.instances (instance_id text,run_id text,channel_id text,channel_instance_id bigint,status text,
-        presentation_json jsonb);
+        presentation_json jsonb,updated_at timestamptz NOT NULL DEFAULT now());
       CREATE TABLE data.agent_launches (launch_id text,run_id text,channel_id text,instance_id text,state text,retryable boolean,lease_owner text,
         lease_until timestamptz,version bigint,updated_at timestamptz,finished_at timestamptz)`));
     for (const file of ["0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql", "0062_expand_registration_execution_revision.sql", "0067_expand_registration_grant_execution_revision.sql", "0063_expand_registration_authority.sql", "0064_expand_registration_enrollments.sql",
@@ -145,6 +145,11 @@ integration("composite registration commands preserve identity, configuration an
     const observedPage = await repo.list({ ...listing, actorUserId: "member" });
     assert.deepEqual(observedPage.registrations[0].modelCatalog,
       [{ model: "model-a", description: "", efforts: [{ value: "high", description: "Deep reasoning" }] }]);
+    // The catalog reads open only Instances written in the last two days: a
+    // report is what stamps updated_at, so an older row holds no fresh catalog.
+    await client.query(`UPDATE ${schema}.instances SET updated_at=now()-interval '3 days'`);
+    assert.equal((await repo.list(listing)).registrations.find(row => row.key.harness === "codex").modelCatalog, undefined);
+    await client.query(`UPDATE ${schema}.instances SET updated_at=now()`);
     await client.query(`UPDATE ${schema}.instances SET presentation_json=$1`,
       [{ ...modelObservation, modelsObservedAt: new Date(Date.now()-2*86400000).toISOString() }]);
     assert.equal((await repo.list(listing)).registrations.find(row => row.key.harness === "codex").modelCatalog, undefined);
