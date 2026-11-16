@@ -346,9 +346,14 @@ export class PostgresAgentRegistrationRepository {
       // Running Instances come from the owner's live Runs on that machine (a
       // partial index keeps this to what is running now), bound to this
       // registration in this Space, in Channels the reader may read.
+      // A catalog observed in the last 24 hours was written to its Instance
+      // row then, and that write stamps updated_at: the 48-hour bound on it
+      // (a day of reporter clock skew to spare) keeps the two catalog reads
+      // from opening every Instance this registration ever ran, each with
+      // kilobytes of presentation to detoast (0.4-0.8 s on 2026-11-16).
       // Membership and visibility share the read's snapshot. The outer row
       // distinguishes a member's empty page from a nonmember without a lock.
-      const result = await tx.query({ name: "registration_catalog_page_v7", text: `SELECT
+      const result = await tx.query({ name: "registration_catalog_page_v8", text: `SELECT
         reader.role AS reader_role,page.* FROM
         (SELECT role FROM data.space_members WHERE space_id=$1 AND user_id=$2) reader
         LEFT JOIN LATERAL (SELECT
@@ -369,6 +374,7 @@ export class PostgresAgentRegistrationRepository {
           FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
           WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
             AND binding.machine_id=r.machine_id AND binding.harness=r.harness
+            AND i.updated_at>=statement_timestamp()-interval '48 hours'
             AND jsonb_typeof(i.presentation_json->'models')='array'
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'modelsObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
@@ -379,6 +385,7 @@ export class PostgresAgentRegistrationRepository {
           FROM data.run_agent_registrations binding JOIN data.instances i ON i.run_id=binding.run_id
           WHERE binding.space_id=r.space_id AND binding.owner_user_id=r.owner_user_id
             AND binding.machine_id=r.machine_id AND binding.harness=r.harness
+            AND i.updated_at>=statement_timestamp()-interval '48 hours'
             AND jsonb_typeof(i.presentation_json->'parameters')='array'
             AND CASE WHEN pg_input_is_valid(i.presentation_json->>'parametersObservedAt','timestamp with time zone')
               THEN (i.presentation_json->>'parametersObservedAt')::timestamptz BETWEEN statement_timestamp()-interval '24 hours' AND statement_timestamp()
