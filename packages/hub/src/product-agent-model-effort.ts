@@ -21,7 +21,7 @@ export type ProductAgentControlOutcome =
       continuation?: { instanceId: string; requestId: string } }
   | { status: "catalog"; current?: string; options: readonly string[]; usedUp?: AgentControlUsedUpOption[] }
   | { status: "no_instance" }
-  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted;
+  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted; starting?: true;
       /** A refused switch still cancelled this Instance's running turn. */
       continuation?: { instanceId: string; requestId: string } };
 
@@ -37,6 +37,10 @@ export interface ProductAgentSwitchTarget {
   modelCatalog?: RoutingModelOption[];
   /** The provider's reading of the Instance's account. */
   usage?: unknown;
+  harness?: string;
+  /** Other Machines that run its harness and could take over its work, each
+   * with its own account's reading. */
+  elsewhere?: Array<{ machineName: string; usage: unknown }>;
 }
 
 /** `2026-11-19 18:00 UTC`: a reset as every refusal writes it. */
@@ -94,7 +98,13 @@ export async function decideProductAgentSwitch(input: {
   const row = target && command.kind === "model" && command.value
     ? (target.modelCatalog ?? []).find(option => routingModelOptionNamed(option, command.value!)) : undefined;
   const quotaRefusal = (model: string, resetsAt: string | undefined): ProductAgentControlOutcome => {
-    const available = modelsWithQuota(target!, now).filter(option => option !== model);
+    const available = modelsWithQuota(target!, now).filter(option => option !== model && option !== target!.currentModel);
+    // A Machine is named only when its own reading shows this model has quota
+    // there, and the model can be written after `model:` as it is.
+    const elsewhere = row && target!.harness && !/[\s"]/u.test(row.model) && !/"/u.test(target!.harness)
+      ? (target!.elsewhere ?? []).filter(machine => !/"/u.test(machine.machineName) &&
+        (routingQuotaObservation(machine.usage, now, { model: row })?.value ?? 0) > 0)
+        .slice(0, 3).map(machine => ({ machineName: machine.machineName, harness: target!.harness! })) : [];
     return { status: "error",
       message: (resetsAt
         ? `the provider quota for ${model}${onMachine(target!)} is used up until ${utcMinute(resetsAt)}.`
@@ -102,7 +112,7 @@ export async function decideProductAgentSwitch(input: {
         staysOn(target!, command.target),
       quotaExhausted: { model, ...(resetsAt ? { resetsAt } : {}),
         ...(target!.machineName ? { machineName: target!.machineName } : {}),
-        ...(available.length ? { available } : {}) } };
+        ...(available.length ? { available } : {}), ...(elsewhere.length ? { elsewhere } : {}) } };
   };
   if (target && live && row) {
     const resetsAt = usedUpUntil(target, row, now);
@@ -116,7 +126,8 @@ export async function decideProductAgentSwitch(input: {
       ? `${address} is asleep, so it has no session to switch. It wakes on its next message; send this again then.`
       : target.state === "stopped"
         ? `${address} has stopped. Start it again with ${address}:reborn, then send this again.`
-        : `${address} is still starting${onMachine(target)} and has not connected yet. Send this again once it is running.` };
+        : `${address} is still starting${onMachine(target)} and has not connected yet. Send this again once it is running.`,
+      ...(live ? { starting: true as const } : {}) };
   }
   if (outcome.status === "error" && command.kind === "model" && command.value && PROVIDER_QUOTA_REFUSAL.test(outcome.message)) {
     const refused = quotaRefusal(row?.model ?? command.value, undefined);
@@ -175,7 +186,8 @@ function outcomeRecord(command: ProductAgentControlCommand, outcome: ProductAgen
       ...(outcome.current ? { current: outcome.current } : {}), ...(outcome.usedUp?.length ? { usedUp: outcome.usedUp } : {}) };
     case "no_instance": return { ...statement, status: "no_instance" };
     case "error": return { ...statement, status: "error", message: outcome.message,
-      ...(outcome.quotaExhausted ? { quotaExhausted: outcome.quotaExhausted } : {}) };
+      ...(outcome.quotaExhausted ? { quotaExhausted: outcome.quotaExhausted } : {}),
+      ...(outcome.starting ? { starting: true } : {}) };
   }
 }
 

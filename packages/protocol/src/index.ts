@@ -551,7 +551,7 @@ export type {
 } from "./harness-parameters.js";
 
 export {
-  parseAgentControlCommands, parseAgentControlInvocations,
+  agentControlHandoffStatement, parseAgentControlCommands, parseAgentControlInvocations,
 } from "./agent-control-command.js";
 export type {
   AgentControlCommand, AgentControlInvocation, AgentControlKind, AgentControlOutcomeRecord, AgentControlQuotaExhausted, AgentControlUsedUpOption,

@@ -38,7 +38,9 @@ export type AgentControlOutcomeRecord = Pick<AgentControlCommand, "kind" | "targ
   | { status: "switched"; selected: string }
   | { status: "catalog"; current?: string; options: string[]; usedUp?: AgentControlUsedUpOption[] }
   | { status: "no_instance" }
-  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted });
+  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted;
+      /** The Instance is still starting: the same statement works once it runs. */
+      starting?: true });
 
 /** An offered model whose provider quota is used up, and when it is next back. */
 export interface AgentControlUsedUpOption { option: string; resetsAt: string }
@@ -51,6 +53,16 @@ export interface AgentControlQuotaExhausted {
   resetsAt?: string;
   machineName?: string;
   available?: string[];
+  /** Where the Instance's work can continue on that model: a handoff of the
+   * Instance to `harness` on `machineName`, whose account has quota for it. */
+  elsewhere?: Array<{ machineName: string; harness: string }>;
+}
+
+/** The statement that moves an Instance's work to another Machine's Agent on
+ * `model`: an ordinary handoff, written as a person would write it. */
+export function agentControlHandoffStatement(target: string, harness: string, machineName: string, model: string): string {
+  const quoted = (value: string) => /\s/u.test(value) ? `"${value}"` : value;
+  return `@${target}:handoff:@${harness} machine:${quoted(machineName)} model:${model}`;
 }
 
 /**

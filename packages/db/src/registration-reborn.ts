@@ -3,7 +3,7 @@ import { assertQuotaRetryAdmission } from "./agent-quota-retry.js";
 import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
-import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
+import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
   parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
@@ -191,6 +191,7 @@ export interface SwitchTargetFacts {
   /** `starting` and `running` have a Run; `asleep` wakes on its next message; `stopped` only by a reborn. */
   state: "starting" | "running" | "asleep" | "stopped";
   agentName?: string;
+  /** The Machine's name in its owner's words, as `machine:` selects it. */
   machineName?: string;
   currentModel?: string;
   /** The runtime's catalog as the Instance row stores it, whatever its age. */
@@ -198,6 +199,11 @@ export interface SwitchTargetFacts {
   /** That catalog while it is fresh enough to decide quota by. */
   modelCatalog?: RoutingModelOption[];
   usage?: ReturnType<typeof registrationQuotaUsage>;
+  harness?: string;
+  /** Other online Machines of the Space that run the same harness and hold a
+   * current provider reading, for a repository-backed Instance: where its
+   * work could continue. Named as `machine:` selects them. */
+  elsewhere?: Array<{ machineName: string; usage: NonNullable<ReturnType<typeof registrationQuotaUsage>> }>;
 }
 
 /**
@@ -292,23 +298,59 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       values: [channelId, raw.ordinal], maxRows: 1 }))[0]);
     if (!row) return undefined;
     const metadata = object(row.metadata_json);
-    const fact = row.b_owner ? (await this.directory.transaction({ requestId: commandId,
+    const key = row.b_owner ? { ownerUserId: String(row.b_owner), machineId: String(row.b_machine),
+      harness: String(row.b_harness) } : undefined;
+    // The Machines of the Space, to name this one as its people do and to find
+    // where else its harness runs. A name two owners both use selects neither.
+    const registered = key ? await this.database.transaction({ requestId: commandId,
+      operation: "registration.switch.machines", placement: this.placement }, tx => tx.query({
+      name: "registration_switch_machines_v1", text: `SELECT r.owner_user_id,r.machine_id,r.harness
+        FROM data.space_agent_registrations r
+        JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
+          AND a.machine_id=r.machine_id AND a.harness=r.harness
+        WHERE r.space_id=$1 AND a.grant_state='active' AND a.policy_state='enabled'
+        ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 501`, values: [this.placement.spaceId], maxRows: 501 })) : [];
+    const sameMachine = (item: QueryResultRow) => item.owner_user_id === key!.ownerUserId && item.machine_id === key!.machineId;
+    const machines = [...new Map([...registered.map(item => ({ ownerUserId: String(item.owner_user_id), machineId: String(item.machine_id) })),
+      ...key ? [key] : []].map(item => [`${item.ownerUserId}\n${item.machineId}`, item])).values()].slice(0, 100);
+    const facts = key ? await this.directory.transaction({ requestId: commandId,
       operation: "registration.switch.quota", statement: "single_read" }, tx => tx.query({
-      name: "registration_switch_quota_v1", text: `SELECT ${registrationQuotaColumns("q")}
-        FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
-        WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
-      values: [String(row.b_owner), String(row.b_machine), String(row.b_harness)], maxRows: 1 })))[0] : undefined;
+      name: "registration_switch_quota_v2", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
+          EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
+            AND d.machine_id=m.machine_id AND d.status='online') AS online,${registrationQuotaColumns("q")}
+        FROM data.machines m
+        LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=m.owner_user_id
+          AND e.machine_id=m.machine_id AND e.harness=$3
+        ${currentRegistrationQuotaJoin("q")}
+        WHERE (m.owner_user_id,m.machine_id) IN (SELECT * FROM unnest($1::text[],$2::text[])) AND m.retired_at IS NULL`,
+      values: [machines.map(item => item.ownerUserId), machines.map(item => item.machineId), key.harness], maxRows: 100 })) : [];
+    const nameCount = new Map<string, number>();
+    for (const item of facts) nameCount.set(String(item.name).toLowerCase(), (nameCount.get(String(item.name).toLowerCase()) ?? 0) + 1);
+    const own = facts.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId);
+    // A repository-backed Instance's work can continue on another Machine
+    // (docs/same-machine-instance-handoff.md §2.2); a directory never leaves its own.
+    const elsewhere = key && typeof metadata.remoteRepo === "string" && metadata.remoteRepo
+      ? facts.filter(item => !sameMachine(item) && item.declared === true && item.online === true &&
+        nameCount.get(String(item.name).toLowerCase()) === 1 &&
+        machineMentionValue(String(item.machine_id), String(item.name)) === String(item.name) &&
+        registered.some(candidate => candidate.owner_user_id === item.owner_user_id &&
+          candidate.machine_id === item.machine_id && candidate.harness === key.harness))
+        .flatMap(item => {
+          const usage = registrationQuotaUsage(item);
+          return usage ? [{ machineName: String(item.name), usage }] : [];
+        }).slice(0, 8) : [];
     const modelCatalog = routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value;
-    const usage = registrationQuotaUsage(fact);
+    const usage = registrationQuotaUsage(own);
     const runStatus = String(row.run_status);
     const state = runStatus === "starting" || runStatus === "running" ? runStatus
       : row.rest_state === "sleeping" || row.rest_state === "interrupted" ? "asleep" : "stopped";
     return { instanceId: String(row.instance_id), state,
       ...(typeof metadata.agentName === "string" && metadata.agentName ? { agentName: metadata.agentName } : {}),
-      ...(typeof metadata.hostname === "string" && metadata.hostname ? { machineName: metadata.hostname } : {}),
+      ...(own?.name ? { machineName: String(own.name) } : {}), ...(key ? { harness: key.harness } : {}),
       ...(typeof row.current_model === "string" && row.current_model ? { currentModel: row.current_model } : {}),
       ...(Array.isArray(row.catalog_models) && row.catalog_models.length ? { reportedModels: row.catalog_models } : {}),
-      ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}) };
+      ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}),
+      ...(elsewhere.length ? { elsewhere } : {}) };
   }
 
   /** Whether a Run moved off `original` for quota can go back to it: a
