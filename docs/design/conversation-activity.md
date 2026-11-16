@@ -197,16 +197,16 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 ### 4.1 Web timeline
 
 - **Activity rows.** An activity entry renders as one compact line in a
-  message head's order: sender, time, then the entry itself (`✓` completed,
-  `→` in progress, "Opened" and the pull request as the same underlined
-  link the GitHub App's messages carry). No avatar and no identity tags; the
+  sender, then the entry itself (`✓` completed, `→` in progress, "opened"
+  and the pull request as `#121`, its repository in the link's label), with
+  the time at the right edge. No avatar and no identity tags; the
   avatar column holds the fold's disclosure, or the pull request mark when a
   lone pull request leaves nothing to open.
 - **GitHub's pull request facts.** A subscribed pull request's CI verdict,
   merge, close, reviews and comments (§3.6) carry their fact in the message metadata
   (`xmatrixGitHubPullRequest`) and render as the same line: the verdict,
-  merge or close mark in the avatar column, then GitHub, time and the
-  sentence. They never fold. A person's review or comment is the same line
+  merge or close mark in the avatar column, then the sentence alone (the
+  mark says it is GitHub's), the time at the right edge. They never fold. A person's review or comment is the same line
   (`yiming requested changes on <link>`), its words whole beneath it in
   message ink, so no GitHub avatar interrupts a pull request's thread.
 - **Folding.** Consecutive activity entries from the same Instance merge into
