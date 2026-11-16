@@ -74,12 +74,18 @@ function FoldedEntry({ item }: { item: TimelineItem }) {
   );
 }
 
-function ExternalLink({ url, children }: { url: string; children: ReactNode }) {
+function ExternalLink({ url, label, children }: { url: string; label?: string; children: ReactNode }) {
   return (
-    <a href={url} target="_blank" rel="noreferrer" className="font-medium text-foreground underline underline-offset-2">
+    <a href={url} target="_blank" rel="noreferrer" aria-label={label} title={label}
+      className="font-medium text-foreground underline-offset-2 hover:underline">
       {children}
     </a>
   );
+}
+
+/** A pull request as `#121`; its repository is in the link's name and tooltip, not on every line. */
+function PullRef({ repository, number, url }: { repository: string; number: number; url: string }) {
+  return <ExternalLink url={url} label={`${repository}#${number}`}>#{number}</ExternalLink>;
 }
 
 /** A pull request reads as the same underlined reference GitHub's facts below it carry. */
@@ -89,7 +95,7 @@ function PullRequestLink({ repository, number, url, icon = true }: {
   return (
     <span>
       {icon && <GitPullRequest className="mr-1 inline size-3.5 align-[-2px]" aria-hidden="true" />}
-      Opened <ExternalLink url={url}>{repository}#{number}</ExternalLink>
+      opened <PullRef repository={repository} number={number} url={url} />
     </span>
   );
 }
@@ -142,7 +148,7 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
   // so its mark stands in the avatar column instead of a disclosure.
   const lone = items.length === 1 && timelineItemActivity(first)?.kind === "pull_request";
   return (
-    <div className="app-activity-row group px-5 py-0.5 text-[13px] text-muted-foreground"
+    <div className="app-activity-row group px-5 py-1 text-[13px] text-muted-foreground"
       data-activity-row="" id={lone ? entryAnchorId(first) : undefined}>
       {/* Read like a message head: name, then its time, then what happened. A
           link inside opens itself; anywhere else on the line opens the fold. */}
@@ -168,10 +174,10 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
         )}
         <span className="flex min-w-0 flex-1 items-center gap-1.5">
           <span className="shrink-0 font-bold text-foreground/80">{row.author}</span>
-          <Time value={last.sentAt} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "mr-1")} />
           <FoldFacts items={items} lone={lone} inProgress={summary.inProgress} />
           {items.length > 1 && <span className="shrink-0 text-xs">· {items.length} updates</span>}
         </span>
+        <Time value={last.sentAt} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "pl-3")} />
       </div>
       {expanded && !lone && (
         <ol className="mt-1 mb-1 ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] space-y-1 border-l border-border pl-3">
@@ -206,12 +212,13 @@ function githubFactMark(fact: GitHubPullRequestFact): { icon: LucideIcon; classN
 
 /** What GitHub reported, in the words of its message, with the same links. */
 function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
-  const pull = <ExternalLink url={fact.url}>{fact.repository}#{fact.number}</ExternalLink>;
-  if (fact.event === "ci_passed") return <>CI passed on {pull} at {fact.sha}</>;
+  const pull = <PullRef repository={fact.repository} number={fact.number} url={fact.url} />;
+  const sha = (value: string) => value && <span className="ml-1.5 font-mono text-[11px] opacity-70">{value}</span>;
+  if (fact.event === "ci_passed") return <>CI passed on {pull}{sha(fact.sha)}</>;
   if (fact.event === "ci_failed") {
     return (
       <>
-        CI failed on {pull} at {fact.sha}:{" "}
+        CI failed on {pull}{sha(fact.sha)} ·{" "}
         {fact.failed.map((check, index) => (
           <Fragment key={`${index}:${check.name}`}>
             {index > 0 && ", "}
@@ -230,7 +237,7 @@ function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
     return (
       <>
         {fact.actor} {fact.commentUrl ? <ExternalLink url={fact.commentUrl}>commented</ExternalLink> : "commented"} on{" "}
-        {pull}{fact.path && <> · <span className="font-mono text-xs">{fact.path}</span></>}
+        {pull}{fact.path && <span className="ml-1.5 font-mono text-[11px] opacity-70">{fact.path}</span>}
       </>
     );
   }
@@ -239,7 +246,7 @@ function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
     <>
       {fact.actor ? `${fact.actor} ${verb} ` : `${verb === "merged" ? "Merged" : "Closed"} `}
       {pull}
-      {fact.title && <span>: {fact.title}</span>}
+      {fact.title && <span className="ml-1.5 opacity-70">{fact.title}</span>}
     </>
   );
 }
@@ -257,21 +264,22 @@ export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: Timelin
   const words = fact.event === "reviewed" || fact.event === "commented" ? fact.words : "";
   const Icon = mark.icon;
   return (
-    <div className="app-activity-row px-5 py-0.5 text-[13px] text-muted-foreground"
+    <div className="app-activity-row px-5 py-1 text-[13px] text-muted-foreground"
       data-activity-row="" data-github-fact={fact.event}>
       <div className="flex w-full min-w-0 items-start gap-(--app-message-avatar-gap)">
         <span className="flex h-[1lh] w-(--app-message-avatar-size) shrink-0 items-center justify-center" aria-hidden="true">
           <Icon className={cn("size-3.5 shrink-0", mark.className)} />
         </span>
+        {/* The mark and the sentence say it is GitHub's; the time steps aside to the right. */}
         <span className="min-w-0 flex-1">
-          <span className="mr-1.5 font-bold text-foreground/80">{row.author}</span>
-          <Time value={row.sentAt} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "mr-2.5 whitespace-nowrap")} />
+          <span className="sr-only">{row.author}: </span>
           <GitHubFactText fact={fact} />
         </span>
+        <Time value={row.sentAt} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "whitespace-nowrap pl-3 leading-[inherit]")} />
       </div>
       {/* A person's words stay whole, in message ink, under the line that says who wrote them. */}
       {words && (
-        <div className="ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] mt-0.5 mb-1 text-[15px] text-foreground">
+        <div className="ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] mt-1 text-[15px] text-foreground">
           <RichMessageContent body={words} />
         </div>
       )}

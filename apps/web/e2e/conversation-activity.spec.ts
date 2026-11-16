@@ -505,13 +505,13 @@ test("GitHub's CI verdicts and merges read as the same line as the pull request 
 
   const facts = page.locator("[data-github-fact]");
   await expect(facts).toHaveCount(4);
-  await expect(facts.nth(0)).toHaveText(/GitHub.*CI passed on LambdaLabsHQ\/NomadCafe#121 at 3ffa10b/u);
-  await expect(facts.nth(2)).toHaveText(/CI failed on LambdaLabsHQ\/NomadCafe#121 at 9c41d2e: web, ios/u);
+  await expect(facts.nth(0)).toHaveText(/CI passed on #121\s*3ffa10b/u);
+  await expect(facts.nth(2)).toHaveText(/CI failed on #121\s*9c41d2e · web, ios/u);
   await expect(facts.nth(2).getByRole("link", { name: "web" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/NomadCafe/runs/1");
-  await expect(facts.nth(3)).toHaveText(/Merged LambdaLabsHQ\/NomadCafe#121: Reload on reconnect/u);
+  await expect(facts.nth(3)).toHaveText(/Merged #121\s*Reload on reconnect/u);
   // No GitHub avatar anywhere: a person's review is the same line, its words whole beneath it.
-  await expect(facts.nth(1)).toHaveText(/yiming reviewed LambdaLabsHQ\/NomadCafe#121\s*Can the retry back off\?/u);
+  await expect(facts.nth(1)).toHaveText(/yiming reviewed #121.*Can the retry back off\?/u);
   await expect(page.locator(".app-message-timeline img[alt='GitHub'], .app-message-timeline [aria-label^='GitHub App']"))
     .toHaveCount(0);
   // A fact sets in the same type and line as the "Opened" line above it.
