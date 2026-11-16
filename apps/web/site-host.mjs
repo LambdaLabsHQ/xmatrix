@@ -8,7 +8,7 @@
 
 /** Exact paths of the site's pages and files. */
 const SITE_PATHS = new Set([
-  "/", "/zh", "/download", "/terms", "/privacy", "/subprocessors", "/cookies",
+  "/", "/zh", "/download", "/support", "/terms", "/privacy", "/subprocessors", "/cookies",
   "/robots.txt", "/sitemap.xml", "/llms.txt", "/llms-full.txt", "/site.webmanifest",
   "/favicon.ico", "/apple-touch-icon.png", "/install.sh", "/install.ps1",
 ]);
