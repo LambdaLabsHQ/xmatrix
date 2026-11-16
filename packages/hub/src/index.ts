@@ -42,6 +42,7 @@ import { registerStripeAccountRoutes } from "./index-routes-stripe-accounts";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
 import { scheduledTaskFailed } from "./scheduled-task-failure";
+import { runScheduledLanes, type ScheduledPass } from "./scheduled-passes";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -182,24 +183,34 @@ export default {
       executionCtx.waitUntil(drainAppleCommerce(env).catch(error => scheduledTaskFailed("Apple commerce recovery",error)).finally(sendErrorReports));
       return;
     }
-    // Feeds first: the passes below each open a Hyperdrive connection, and six
+    // Feeds first: a pass below holds a Hyperdrive connection, and six
     // header-waits is the invocation's whole budget (HUB-BX).
     const latest = await readCliReleaseFeeds();
-    const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
-      Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
-    run("Account deletion maintenance", () => maintainAccountDeletions(env));
-    run("Channel deletion maintenance", () => maintainChannelDeletions(env));
-    run("Sentry event recovery", () => drainSentryEvents(env));
-    run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
-    run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
-    run("CLI release notice", () => noticeCliReleases(env, { latest }));
-    run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
-    run("Admin activity rollup", () => rollUpAdminActivityOnSchedule(env, event.scheduledTime));
-    // Delivers again quota waits a reading already made ready; never asks a provider.
-    run("Quota wait redelivery", () => redeliverOwedQuotaWakes(env));
-    for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
-      run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
-    }
+    // Two lanes, so the cron holds at most two PostgreSQL connections: the
+    // passes that only read or write PostgreSQL, and those that also wait on
+    // another service and must not hold the first lane up.
+    const database: ScheduledPass[] = [
+      { name: "Account deletion maintenance", work: () => maintainAccountDeletions(env) },
+      { name: "Channel deletion maintenance", work: () => maintainChannelDeletions(env) },
+      { name: "Machine load history maintenance", work: () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime) },
+      { name: "Admin activity rollup", work: () => rollUpAdminActivityOnSchedule(env, event.scheduledTime) },
+      // Delivers again quota waits a reading already made ready; never asks a provider.
+      { name: "Quota wait redelivery", work: () => redeliverOwedQuotaWakes(env) },
+      ...([["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const)
+        .map(([provider, repository]) => ({ name: `${provider} lifecycle maintenance`,
+          work: () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }) })),
+    ];
+    const network: ScheduledPass[] = [
+      { name: "Sentry event recovery", work: () => drainSentryEvents(env) },
+      { name: "Gmail notification recovery and renewal", work: () => drainGmailNotifications(env) },
+      { name: "Harness release watch", work: () => watchHarnessReleasesBesidePostgres(env) },
+      { name: "CLI release notice", work: () => noticeCliReleases(env, { latest }) },
+    ];
+    // A pass that fails after its lane stopped waiting still sends its report.
+    executionCtx.waitUntil(runScheduledLanes([database, network], (name, error) => {
+      scheduledTaskFailed(name, error);
+      executionCtx.waitUntil(sendErrorReports());
+    }));
   }),
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;
