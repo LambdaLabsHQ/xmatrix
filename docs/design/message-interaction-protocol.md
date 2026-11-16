@@ -125,6 +125,20 @@ addressed Instance before and after its Runtime is asked
   names no Instance of the Channel is `no_instance`.
 - A listed catalog marks the models that are used up (`usedUp`).
 
+A refused switch offers the person who wrote it one step, in its answer
+(`controlNextStep`), and the step is an ordinary command sent as them:
+
+- An Instance that was still starting (`starting`) takes the same statement
+  again: **Send again**.
+- A used-up model names, in `quotaExhausted.elsewhere`, up to three other
+  Machines of the Space where the work can continue on that model: online,
+  running the same harness, uniquely named, and with a current provider
+  reading of their own account that leaves the model quota. Only a
+  repository-backed Instance has any, since a directory never leaves its
+  Machine. **Continue on <machine>** sends
+  `@<agent>:<n>:handoff:@<harness> machine:<machine> model:<model>`, and says
+  first that it stops the Instance and starts a new one there.
+
 Live annotations and history snapshots merge by fact, through the protocol's
 same command-result reducer. A partial snapshot retains notes absent from it;
 each note's annotation id deduplicates replay, and its recording time keeps a

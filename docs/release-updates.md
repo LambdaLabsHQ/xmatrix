@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a refused `/model` offers the step that gets what was asked
+
+The answer to a refused `/model` now carries one button for the person who
+wrote it. When the model's provider quota is used up on the Instance's
+machine and another online machine of the Space runs the same Agent with
+quota for that model, **Continue on <machine>** hands the Instance's work to
+a new one there on that model (an ordinary handoff; the answer says it stops
+the Instance first). It is offered only for a repository-backed Instance and
+only for a machine whose own account reading shows quota. When the Instance
+was still starting, **Send again** sends the same statement. Machines are
+named as their owners named them, which is what `machine:` selects. Hub, DB
+and Web. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a refused `/model` says why, and what is true of the Instance
 
 Four `/model claude-fable-5-2` statements to one Instance failed with three
