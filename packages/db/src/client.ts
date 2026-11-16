@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { utf8ByteLength } from "@xmatrix/protocol";
 import { Client, Pool, type ClientConfig, type PoolConfig, type QueryResult, type QueryResultRow } from "pg";
 
@@ -297,9 +298,19 @@ type SessionPhase = "pool_checkout" | "begin" | "commit" | "rollback";
  * Request-local accumulator behind DatabaseSessionObservation. It also reports
  * the session's first statement outcome to the shard's connectivity breaker.
  */
+/**
+ * The transaction whose callback is running, across awaits. A transaction
+ * opened on another session inside it holds a second connection while the
+ * first one waits: with few origin connections that is the request waiting
+ * for itself (XMATRIX-HUB-CY). Observed, never refused.
+ */
+const heldTransaction = new AsyncLocalStorage<{ operation: string; session: object }>();
+
 class SessionStats {
   backendPid?: number;
   operation: string | null = null;
+  /** Operation of the transaction on another session this one was opened inside. */
+  nestedIn: string | undefined;
   startedAt = 0;
   errorCode: string | undefined;
   rolledBack = false;
@@ -364,6 +375,7 @@ class SessionStats {
       shardId,
       outcome: this.errorCode ? "error" : this.rolledBack ? "rollback" : "ok",
       ...(this.errorCode ? { errorCode: this.errorCode } : {}),
+      ...(this.nestedIn ? { nestedIn: this.nestedIn } : {}),
       wallMs: endedAt - this.startedAt,
       ...this.totals,
     };
@@ -825,6 +837,8 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
     await previous;
     const startedAt = performance.now();
     this.stats.startTransaction(context.operation, startedAt - queuedAt, queuedAt);
+    const outer = heldTransaction.getStore();
+    if (outer && outer.session !== this) this.stats.nestedIn ??= outer.operation;
     try {
       let readRetried = false;
       let readFailure: unknown;
@@ -856,7 +870,8 @@ class PgAuthorityDatabaseSession implements AuthorityDatabaseSession {
         await this.open(client, context);
         const transaction=new PgDatabaseTransaction(client, context, this.options, this.stats);
         if (preparation) registerDingTalkPreparedTransaction(transaction,preparation);
-        const value = await callback(transaction);
+        const value = await heldTransaction.run({ operation: context.operation, session: this },
+          () => callback(transaction));
         const phaseStartedAt = performance.now();
         try {
           await client.query(preparation ? `PREPARE TRANSACTION '${preparation.gid}'` : "COMMIT");
