@@ -14,6 +14,7 @@ import {
   setMachineAutoAssign,
 } from "./workspace-admin-views";
 
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { takeGitHubConnectOutcome } from "@/lib/github-connect-return";
 import type { HumanProfile } from "@xmatrix/protocol";
 
@@ -69,7 +70,6 @@ import {
   Check,
   ChevronDown,
   Circle,
-  Clock,
   Download,
   Folder,
   FolderOpen,
@@ -204,7 +204,6 @@ export function MoreView({
       items: [
         viewItem("agents", "Agents", "Registered agents and where they run", Bot),
         viewItem("machines", "Machines", "Registered machines and daemons", Terminal),
-        viewItem("automation", "Schedules", "Scheduled channel activity", Clock),
       ],
     },
   );
@@ -1291,7 +1290,9 @@ export function AppsView({
         const started = await connectionMutation.mutateAsync({
           url: WEB_PROXY_ROUTES.space_app_connection_oauth_start(currentSpace.id, connector.id),
           method: "POST",
-          body: connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : undefined,
+          // A shell that takes the grant back says so; the browser then returns to it instead of finishing itself.
+          body: { ...(connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : {}),
+            ...(getDesktopBridge()?.connectReturn ? { returnTo: "desktop" } : {}) },
         });
         if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
@@ -1370,8 +1371,10 @@ export function AppsView({
         payload.connection!,
       ]);
       setSelectedConnectorId(connector.id);
-      if (payload.connection.status === "error") {
-        setConnectionsError(payload.connection.error || payload.message || "App connection check failed");
+      // A failed check's reason is the connection's own error, shown once where the fix is; only a
+      // failure that left none is reported here.
+      if (payload.connection.status === "error" && !payload.connection.error) {
+        setConnectionsError(payload.message || "App connection check failed");
       }
     } catch (error) {
       setConnectionsError(userErrorMessage(error, "Couldn't check the app", `Couldn't check ${connector.name}`));

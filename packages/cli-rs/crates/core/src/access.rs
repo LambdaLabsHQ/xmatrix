@@ -125,11 +125,7 @@ pub(crate) fn rediscovered_daemon_request_capability(
     else {
         return DaemonRequestCapabilityRediscovery::None;
     };
-    let Some(execution_key) = std::env::var("XMATRIX_EXECUTION_KEY")
-        .ok()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(execution_key) = run_execution_key() else {
         return DaemonRequestCapabilityRediscovery::None;
     };
     let Some(url) = daemon_request_broker_locator() else {
@@ -166,6 +162,61 @@ struct PersistedRunRequestCapability {
     execution_key: Option<String>,
     #[serde(default)]
     request_capability: Option<String>,
+}
+
+/// This Run's execution key: the spawn-time environment value, or — when the
+/// harness kept it from its tool shell — the one the daemon recorded for the
+/// Run whose request capability this process holds.
+///
+/// Some harnesses drop credential-shaped names from every command they run
+/// (DeepSeek Harness removes anything matching `KEY|PASSWORD|SECRET|TOKEN`), so
+/// `XMATRIX_EXECUTION_KEY` never arrives while `XMATRIX_RUN_ID` and the request
+/// capability do. The Run id alone selects nothing here: the caller must hold
+/// the capability the daemon issued to that same Run, which is the proof every
+/// brokered request already rests on.
+pub fn run_execution_key() -> Option<String> {
+    let env = |name: &str| {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    if let Some(key) = env("XMATRIX_EXECUTION_KEY") {
+        return Some(key);
+    }
+    let run_id = env("XMATRIX_RUN_ID")?;
+    let capability = env(DAEMON_REQUEST_CAPABILITY_ENV)?;
+    let runs = read_persisted_runs_for_request_capability().ok()?;
+    recorded_execution_key(&runs, &run_id, &capability)
+}
+
+/// The one execution key recorded for `run_id` beside `capability`. The
+/// registry keeps the capability as its `sha256:` verifier; an older record
+/// holds it raw. Records that disagree name no key.
+fn recorded_execution_key(
+    runs: &[PersistedRunRequestCapability],
+    run_id: &str,
+    capability: &str,
+) -> Option<String> {
+    let verifier = format!("sha256:{}", crate::hex::sha256_hex(capability.as_bytes()));
+    let mut keys = runs
+        .iter()
+        .filter(|run| run.run_id.as_deref() == Some(run_id))
+        .filter(|run| {
+            run.request_capability
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|recorded| recorded == verifier || recorded == capability)
+        })
+        .filter_map(|run| run.execution_key.as_deref().map(str::trim))
+        .filter(|key| !key.is_empty())
+        .collect::<Vec<_>>();
+    keys.sort_unstable();
+    keys.dedup();
+    match keys.as_slice() {
+        [key] => Some((*key).to_string()),
+        _ => None,
+    }
 }
 
 fn read_persisted_request_capabilities_for_run(
@@ -350,6 +401,40 @@ mod broker_locator_tests {
     fn a_malformed_record_is_not_a_locator() {
         assert_eq!(broker_url_from_state(b"not json", None), None);
         assert_eq!(broker_url_from_state(b"{}", None), None);
+    }
+
+    #[test]
+    fn a_scrubbed_execution_key_is_read_back_only_with_the_runs_own_capability() {
+        let verifier = format!("sha256:{}", crate::hex::sha256_hex(b"cap-a"));
+        let row = |run: &str, key: &str, capability: &str| PersistedRunRequestCapability {
+            run_id: Some(run.into()),
+            execution_key: Some(key.into()),
+            request_capability: Some(capability.into()),
+        };
+        // The registry row and its sidecar agree: one key.
+        let runs = vec![
+            row("run-a", "exec-a", &verifier),
+            row("run-a", "exec-a", &verifier),
+            row("run-b", "exec-b", "sha256:other"),
+        ];
+        assert_eq!(
+            recorded_execution_key(&runs, "run-a", "cap-a").as_deref(),
+            Some("exec-a")
+        );
+        // Knowing a Run id is not enough, nor is another Run's capability.
+        assert_eq!(recorded_execution_key(&runs, "run-b", "cap-a"), None);
+        assert_eq!(recorded_execution_key(&runs, "run-a", "cap-b"), None);
+        // An older record kept the capability raw.
+        assert_eq!(
+            recorded_execution_key(&[row("run-a", "exec-a", "cap-a")], "run-a", "cap-a").as_deref(),
+            Some("exec-a")
+        );
+        // Records that disagree about the same Run name no key.
+        let split = vec![
+            row("run-a", "exec-a", &verifier),
+            row("run-a", "exec-z", &verifier),
+        ];
+        assert_eq!(recorded_execution_key(&split, "run-a", "cap-a"), None);
     }
 
     struct RediscoveryEnv {

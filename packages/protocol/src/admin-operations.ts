@@ -3,7 +3,7 @@
  *
  * Like the overview and user detail these are metadata only — identities,
  * roles, counts, statuses, kinds, and timestamps. Message and page text,
- * Automation prompts and error text, connector payloads and errors, secret
+ * connector payloads and errors, secret
  * values, billing provider ids and payloads, Machine host and display names,
  * and every `metadata_json` never appear here.
  */
@@ -19,7 +19,7 @@ export function adminSpaceDetailWebRoute(spaceId: string): string {
   return `${ADMIN_SPACE_DETAIL_WEB_ROUTE}/${encodeURIComponent(spaceId)}`;
 }
 
-/** Days of Space activity, Run, Automation and paid-call history in the detail. */
+/** Days of Space activity, Run and paid-call history in the detail. */
 export const ADMIN_SPACE_DETAIL_DAYS = 30;
 /** Rows per list in the Space detail; a list at the bound says so instead of growing. */
 export const ADMIN_SPACE_DETAIL_MAX_ROWS = 200;
@@ -52,14 +52,12 @@ export interface AdminSpaceConnector {
   lastCheckedAt?: string;
 }
 
+/** @deprecated Automations are retired, so these are always zero. Webs before #1680 still read them; remove them once the stable Web no longer does. */
 export interface AdminSpaceAutomationSummary {
-  total: number;
-  enabled: number;
-  /** Automations whose last run recorded an error; the error text is not shown. */
-  withError: number;
-  runCount: number;
-  lastRunAt?: string;
-  /** Occurrences scheduled in the window, by status. */
+  total: 0;
+  enabled: 0;
+  withError: 0;
+  runCount: 0;
   occurrencesByStatus: Record<string, number>;
 }
 
@@ -118,6 +116,7 @@ export interface AdminSpaceDetail {
   members: AdminSpaceMember[];
   agents: AdminSpaceAgent[];
   connectors: AdminSpaceConnector[];
+  /** @deprecated Automations are retired, so these are always zero. Webs before #1680 still read them; remove them once the stable Web no longer does. */
   automations: AdminSpaceAutomationSummary;
   /** Runs started in the window, by status. */
   runs: { total: number; byStatus: Record<string, number>; lastRunAt?: string };
@@ -134,13 +133,13 @@ export interface AdminSpaceDetail {
 }
 
 /**
- * The platform's moving parts: Machines and Agents, Runs, Automations,
+ * The platform's moving parts: Machines and Agents, Runs,
  * delivery backlog, billing, and the calls xMatrix pays for.
  */
 export const ADMIN_OPERATIONS_HUB_ROUTE = "/api/admin/operations";
 export const ADMIN_OPERATIONS_WEB_ROUTE = "/api/xmatrix/admin/operations";
 
-/** Days of Run, Automation, webhook and paid-call history in operations. */
+/** Days of Run, webhook and paid-call history in operations. */
 export const ADMIN_OPERATIONS_DAYS = 30;
 /** Rows per list in operations; a list at the bound says so instead of growing. */
 export const ADMIN_OPERATIONS_MAX_ROWS = 1_000;
@@ -188,15 +187,8 @@ export interface AdminOperations {
     byStatus: Record<string, number>;
     daily: AdminOperationsRunDay[];
   };
-  automations: {
-    total: number;
-    enabled: number;
-    withError: number;
-    /** Occurrences scheduled in the window, by status. */
-    occurrencesByStatus: Record<string, number>;
-    /** Pending occurrences already past their scheduled time. */
-    overdue: number;
-  };
+  /** @deprecated Automations are retired, so these are always zero. Webs before #1680 still read them; remove them once the stable Web no longer does. */
+  automations: { total: 0; enabled: 0; withError: 0; occurrencesByStatus: Record<string, number>; overdue: 0 };
   /**
    * Always empty: `data.outbox` keeps publication envelopes no consumer
    * delivers, so it has no backlog. Kept for clients that still read it.

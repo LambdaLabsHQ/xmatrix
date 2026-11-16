@@ -20,7 +20,7 @@ export interface CliOption {
 }
 
 export interface CliCommand {
-  /** Words after `xmatrix`, e.g. ["automation", "list"]. */
+  /** Words after `xmatrix`, e.g. ["settings", "status"]. */
   path: string[];
   about: string;
   /** The last one may be `variadic`: it takes every remaining word, at least one, under `lists`. */

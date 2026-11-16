@@ -5,7 +5,7 @@
  * Lives below composer/timeline so both views can import without forming an SCC.
  */
 import { memo } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
+import renderMarkdown, { type Components } from "react-markdown";
 import type { ConnectorInvocation } from "@xmatrix/protocol";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
@@ -18,26 +18,36 @@ import { ConnectorCommandChip, MentionRichText } from "./mention-read-chip";
 import { RICH_MESSAGE_CLASS_NAME, RICH_MESSAGE_PARAGRAPH_CLASS_NAME } from "./row-frames";
 import { cn } from "@/lib/utils";
 import { citingComponents, remarkDiscussionCitations } from "./discussion-citation";
-import { messageUrlTransform, picturingComponents } from "./inline-pictures";
+import { messageUrlTransform, picturingComponents, recordMessagePictures } from "./inline-pictures";
 
 export const messageMarkdownComponents: Components = createMessageMarkdownComponents();
 
 /** A message's Markdown, with every passage it quotes read as one slip where it was put. */
 const MESSAGE_REMARK_PLUGINS = [...markdownRemarkPlugins, remarkDiscussionCitations];
 
-export const RichMessageContent = memo(function RichMessageContent({
-  body,
-  collapsed = false,
-  components = messageMarkdownComponents,
-  connector,
-}: {
+type RichMessageInput = {
   body: string;
   collapsed?: boolean;
   components?: Components;
   connector?: ConnectorInvocation;
-}) {
+};
+
+export const RichMessageContent = memo(function RichMessageContent(input: RichMessageInput) {
+  return prepareRichMessageContent(input).content;
+});
+
+/** Prepare the displayed body and the attachments it actually draws together.
+ * react-markdown's synchronous API runs its plugins now and returns React nodes;
+ * only those image nodes consume attachments from the message's fallback grid. */
+export function prepareRichMessageContent({
+  body,
+  collapsed = false,
+  components = messageMarkdownComponents,
+  connector,
+}: RichMessageInput) {
+  const picturedPlaces = new Set<number>();
   if (!body) {
-    return null;
+    return { content: null, picturedPlaces };
   }
 
   const renderedBody = collapsed ? collapsedMessagePreview(body) : body;
@@ -51,7 +61,15 @@ export const RichMessageContent = memo(function RichMessageContent({
     ? renderedBody.slice(0, invocation.end).replace(/[^\r\n]/g, " ") + renderedBody.slice(invocation.end)
     : renderedBody;
 
-  return (
+  const prose = !markdownBody.trim() ? null : renderPlainText ? (
+    <pre className="message-plain-text whitespace-pre-wrap font-sans [overflow-wrap:anywhere]">
+      <MentionRichText text={markdownBody} rawMarkdown />
+    </pre>
+  ) : renderMarkdown({ children: markdownBody, remarkPlugins: MESSAGE_REMARK_PLUGINS,
+    rehypePlugins: [[recordMessagePictures, picturedPlaces]], urlTransform: messageUrlTransform,
+    components: citingComponents(picturingComponents(components)) });
+
+  const content = (
     <div
       className={cn(
         RICH_MESSAGE_CLASS_NAME,
@@ -63,16 +81,8 @@ export const RichMessageContent = memo(function RichMessageContent({
           <ConnectorCommandChip invocation={invocation} text={command} />
         </p>
       ) : null}
-      {!markdownBody.trim() ? null : renderPlainText ? (
-        <pre className="message-plain-text whitespace-pre-wrap font-sans [overflow-wrap:anywhere]">
-          <MentionRichText text={markdownBody} rawMarkdown />
-        </pre>
-      ) : (
-        <ReactMarkdown remarkPlugins={MESSAGE_REMARK_PLUGINS} urlTransform={messageUrlTransform}
-          components={citingComponents(picturingComponents(components))}>
-          {markdownBody}
-        </ReactMarkdown>
-      )}
+      {prose}
     </div>
   );
-});
+  return { content, picturedPlaces };
+}

@@ -38,8 +38,17 @@ jobs each finish in about two minutes including setup:
 
 - `node-tests`: Oxlint, synchronized versions, dependency reachability,
   unused imports, duplicate CSS rules, the source line limit, and the
-  protocol, billing, PostgreSQL package and script tests;
-- `node-tests (duplicates)`: the duplicate-code scan, on its own runner;
+  protocol, billing, PostgreSQL package and script tests. The package check
+  typechecks once, via the `tsc` build its tests run, then checks migration
+  syntax. Migration files are normalized to LF before the checksum and the
+  online-index marker, so a CRLF checkout does not change migration identity
+  or hide `CREATE INDEX CONCURRENTLY`. A second `tsc --noEmit` of that same
+  program only repeated this lane's slowest stage;
+- `node-tests (duplicates)`: the duplicate-code scan, on its own runner. jscpd's
+  default store rejected every lookup miss with a new `Error`, and the scan
+  spent most of its CPU capturing those stack traces; it now uses a store with
+  the same get/set contract that rejects misses with one shared reason, and
+  hashes with Node's one-shot MD5, the same digest jscpd computes;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
@@ -70,6 +79,19 @@ identifies the request by its workflow path. The request's run-name replaces
 event name. The stamp proof is the same release-commit check the gate runs
 before checkout.
 Public Snapshot CI stays unrecorded.
+
+Protocol Markdown round-trip coverage keeps every Markdown file under `docs/`
+and the focused syntax cases. Each input and its canonical form are parsed
+once; the same two document objects prove serializer idempotence and document
+equivalence. Other focused tests exercise the canonicalization convenience API.
+This avoids repeating the parser solely to reconstruct values for assertions.
+Canonicalizing a page drops an escape of punctuation that cannot start markup
+without parsing that line, and keeps a backslash that is itself text,
+including one inside inline code. An escape that can start markup is checked
+inside its own block. A tight list is one run of lines, and each item is its
+own block; a fence or a link definition still makes the check use the whole
+run. The resulting page is compared with the document already in hand, so a
+long page is not parsed again to decide that its escapes were safe.
 
 ## Hosted runners
 
@@ -103,9 +125,13 @@ requests push the cache account over its egress limit, the transfer sits at
 install is within a few seconds of a successful store restore. Each hosted
 job still carries PNPM's lockfile supply-chain verification record
 (`lockfile-verified.jsonl`) in the Actions cache, keyed by the lockfile, the
-workspace policy files and the PNPM version. PNPM itself skips its per-entry
-registry check only for a lockfile with the same content hash verified under a
-policy at least as strict; any other lockfile or policy is checked in full.
+workspace policy files and the PNPM version pinned in `setup-pnpm-node`. The
+key does not include `package.json`: a release commit rewrites that file's
+version, and a pull request restores the default branch's cache, so hashing
+the version made every hosted install miss and repeat the registry check.
+PNPM itself skips its per-entry registry check only for a lockfile with the
+same content hash verified under a policy at least as strict; any other
+lockfile or policy is checked in full.
 Only a job that runs `next build` restores the Next.js build cache. The unit
 tests and the lint/typecheck job do not, so they do not compete with the
 compile for that egress.
@@ -151,16 +177,24 @@ PNPM enters the job's PATH only after installation and its version probe succeed
 This recovery applies only to package-manager bootstrap, never validation or
 deployment failures.
 
-CodeQL scans before a release ships, not on pull requests or merges. Each
-release train runs CodeQL's security-extended queries on its frozen source for
-the languages its components are written in, plus the workflows that release
-them (`codeql` in `production-release-request.yml`; languages from
-`codeqlLanguages` in `scripts/release-train.mjs`). Swift builds on macOS with
-autobuild; the other languages use build mode `none`. Results upload as code
-scanning alerts on `main` under the same `/language:<name>` categories GitHub's
-default setup used, which must stay disabled: GitHub refuses a workflow's
-upload while default setup is on. The analysis has to finish before the train
-ships; its findings are alerts, not a gate verdict.
+CodeQL scans before a release ships, not on pull requests or merges. A beta
+scans Hub, Web and Desktop JavaScript and TypeScript, plus the workflows that
+release it. Rust, Kotlin and Swift are scanned on the stable train that ships
+that client, in the same layer as the client suites, not on the beta that
+publishes them to a dev channel or TestFlight (`codeql` in
+`production-release-request.yml`; languages from `codeqlLanguages` in
+`scripts/release-train.mjs`). Swift builds on macOS with autobuild; the other
+languages use build mode `none`. Results upload as code scanning alerts on
+`main` under the same `/language:<name>` categories GitHub's default setup
+used, which must stay disabled: GitHub refuses a workflow's upload while
+default setup is on. The analysis has to finish before the train ships; its
+findings are alerts, not a gate verdict. A train already running keeps the
+scan list it started with. Existing tags and artifacts stay immutable. The
+next beta that ships the CLI shows no Rust analysis, while JavaScript,
+TypeScript and the release workflows still run; the next stable that ships a
+client runs that client's language. Recovery is a CI-validated forward release
+that puts the language back on the beta list. Do not cancel a train to change
+its scan, and do not treat an alert as a skipped gate.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
 VMs: ARM64 on `macos-26`, Intel on `macos-26-intel`. GitHub reported ARM64

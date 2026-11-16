@@ -55,6 +55,39 @@ export const AGENT_PRESET_BACKENDS = new Set<AgentPresetBackend>([
   "codex-app", "claude-print", "zcode-app", "grok-acp", "acp", "pty",
 ]);
 
+/**
+ * What xMatrix adds to a harness launch in one access mode. `args` join the
+ * launcher's argv (the ACP argv for the generic ACP backend), `env` is set on
+ * the harness process, and `session` values are sent when its native session
+ * starts (Codex `thread/start`, ZCode `session/create`).
+ */
+export interface AgentPresetAccess {
+  args?: string[];
+  env?: Record<string, string>;
+  session?: Record<string, string>;
+}
+
+/**
+ * How much a registration's Runs may do on its machine without asking. `full`
+ * launches the harness with everything in its preset's `access.full` and
+ * answers its permission requests with allow; `ask` adds nothing, so the
+ * harness keeps its vendor defaults. The machine's owner chooses when adding
+ * the Agent.
+ */
+export type AgentAccessMode = "full" | "ask";
+export const AGENT_ACCESS_MODES: readonly AgentAccessMode[] = ["full", "ask"];
+
+/** Exactly what one launch adds for its access mode: the data the daemon
+ * applies and the same data the owner is shown before confirming. */
+export interface AgentAccessGrant {
+  mode: AgentAccessMode;
+  args: string[];
+  env: Record<string, string>;
+  session: Record<string, string>;
+  /** xMatrix answers the harness's permission requests with allow. */
+  approvesRequests: boolean;
+}
+
 export interface AgentPreset {
   id: AgentPresetId;
   displayName: string;
@@ -67,6 +100,10 @@ export interface AgentPreset {
   agentType?: string;
   avatarUrl?: string;
   defaultArgs: string[];
+  /** What xMatrix adds to this harness's launch per access mode, exactly as
+   * written: what a person is shown and what the launch sets are the same
+   * data. See `agentAccessGrant`. */
+  access?: { full?: AgentPresetAccess };
   backend: AgentPresetBackend;
   /**
    * Subcommand/args appended to the runtime for the generic ACP backend
@@ -148,6 +185,41 @@ export function normalizeAgentPresetRuntime(
  * behind; the install hint travels because the daemon shows it when the
  * launcher is missing.
  */
+/** The backends whose bridge receives the harness's permission requests
+ * (ACP `session/request_permission`, Claude `can_use_tool`): in `full` it
+ * answers them with allow, in `ask` it shows each as a card in the Channel
+ * and waits. A harness on another backend can only be given `full`. */
+const REQUEST_RELAYING_BACKENDS = new Set<AgentPresetBackend>(["acp", "grok-acp", "claude-print"]);
+
+/** The access modes a harness can be added with, the default first.
+ *
+ * A harness whose full access is an environment setting keeps its limit in
+ * its own sandbox: a refused write fails the command outright and sends no
+ * request. Left on its default, DeepSeek Harness cannot write
+ * `~/.config/xmatrix`, so no `xmatrix` command runs in its shell and the
+ * Agent could not answer in its Channel. Such a harness is offered full
+ * access alone. */
+export function agentAccessModes(preset: AgentPreset | undefined): AgentAccessMode[] {
+  if (!preset || !REQUEST_RELAYING_BACKENDS.has(preset.backend)) return ["full"];
+  return Object.keys(preset.access?.full?.env ?? {}).length ? ["full"] : ["full", "ask"];
+}
+
+/** A daemon with this capability shows an `ask` launch's permission requests
+ * in its Channel. An earlier one answers them all with allow, so an `ask`
+ * launch is never routed to it. */
+export const REGISTRATION_ACCESS_ASK_CAPABILITY = "registration_access_ask_v1";
+
+export function agentAccessGrant(preset: AgentPreset | undefined, mode: AgentAccessMode): AgentAccessGrant {
+  const added = mode === "full" ? preset?.access?.full : undefined;
+  return {
+    mode,
+    args: [...(added?.args ?? [])],
+    env: { ...added?.env },
+    session: { ...added?.session },
+    approvesRequests: mode === "full" && preset !== undefined && REQUEST_RELAYING_BACKENDS.has(preset.backend),
+  };
+}
+
 export interface AgentHarnessSpec {
   id: AgentPresetId;
   runtime: string;

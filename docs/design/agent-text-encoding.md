@@ -43,6 +43,21 @@ The CLI still rejects damaged text and non-UTF-8 input before publishing, becaus
 setting a later process's code page cannot recover characters a previous process
 already replaced.
 
+`??` from an argument or stdin is refused while the Windows ANSI code page is not
+UTF-8. The code page does not see every lossy writer: Windows PowerShell pipes
+through an ASCII `$OutputEncoding` under any code page, and a body saved with
+`Set-Content`/`Out-File -Encoding ascii` reaches `--file` as valid UTF-8. A script
+run with `&` inside the managed entrypoint that assigns
+`$OutputEncoding = New-Object System.Text.UTF8Encoding $false` also pipes ASCII
+in Windows PowerShell 5.1, although every encoding it can read says UTF-8
+(PowerShell/PowerShell#5763); `[System.Text.UTF8Encoding]::new($false)` does
+not. All leave pure ASCII, so on Windows a `???` run in text with no non-ASCII character
+is refused from arguments, stdin and files alike.
+
+Commands the Hub defines (`reply`, `refuse`, `broke`, `ask`, `confirm`, `choose`)
+take their text only as arguments. The CLI applies the same refusal to those
+arguments before the command line leaves for the Hub.
+
 ## Verification
 
 Regression tests exercise inherited non-UTF-8 overrides and case-insensitive

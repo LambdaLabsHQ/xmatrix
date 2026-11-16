@@ -649,6 +649,18 @@ fn an_acp_turn_the_agent_ended_unfinished_is_a_failed_turn() {
 }
 
 #[test]
+fn an_acp_turn_answered_with_the_account_refusal_is_a_failed_turn() {
+    assert_eq!(
+        super::acp_account_refusal_detail("Cursor", "\nAdd a payment method to continue\n").as_deref(),
+        Some("Cursor refused the turn for its account: Add a payment method to continue")
+    );
+    assert!(super::acp_account_refusal_detail("Cursor", "Done: sent the report.").is_none());
+    assert!(super::acp_account_refusal_detail("Cursor", "").is_none());
+    let discussion = format!("The checkout says: add a payment method to continue. {}", "x".repeat(300));
+    assert!(super::acp_account_refusal_detail("Cursor", &discussion).is_none());
+}
+
+#[test]
 fn daemon_managed_workspace_cwd_leaf_is_short_and_portable() {
     // Every Run path is rendered under this leaf, and on Windows the whole
     // path has 260 characters. Composite keys reach ~88 characters, so the leaf
@@ -2168,6 +2180,66 @@ fn a_run_sidecar_written_before_space_id_existed_still_loads() {
 }
 
 #[test]
+fn a_registration_launch_adds_exactly_its_access_grant() {
+    let wire = |harness: serde_json::Value, access: Option<serde_json::Value>| {
+        let id = harness["id"].as_str().unwrap().to_string();
+        let mut wire = serde_json::json!({
+            "type":"machine_spawn_agent", "requestId":"command", "spaceId":"space", "channelId":"channel",
+            "runId":"run", "instanceId":"instance", "identityId":"instance", "runtime":harness["runtime"],
+            "runtimeArgs":harness.get("declaredArgs").cloned().unwrap_or(serde_json::json!([])),
+            "harness":harness, "agentName":"Agent", "prompt":"task", "context":{},
+            "workspace":{"ownerUserId":"owner","machineId":"machine","hostId":"host","canonicalCwd":"/repo",
+                "displayName":"Repo","visibility":"private","createdAt":"now","updatedAt":"now","lastSeenAt":"now"},
+            "registration":{"schemaVersion":1,"key":{"spaceId":"space","ownerUserId":"owner","machineId":"machine","harness":id},
+                "runId":"run","instanceId":"instance","allocationId":"allocation","authorizationDigest":"a".repeat(64),
+                "environmentVersion":1,
+                "resources":{"workspaces":["workspace"],"models":[],"secrets":[],"capabilities":[]}}
+        });
+        if let Some(access) = access {
+            wire["access"] = access;
+        }
+        let intent = super::DaemonSpawnRequest::from_command(serde_json::from_value(wire).unwrap()).unwrap();
+        super::resolve_registration_spawn(&intent, "machine").unwrap()
+    };
+    let grok = serde_json::json!({"id":"grok","runtime":"grok","agentType":"grok","backend":"grok-acp",
+        "defaultArgs":[],"launcherNames":["grok"],"classicConfigDirs":[]});
+    let dsh = serde_json::json!({"id":"deepseek","runtime":"dsh","agentType":"deepseek","backend":"acp",
+        "defaultArgs":[],"acpArgs":["--profile","acp"],"launcherNames":["dsh"],"classicConfigDirs":[]});
+    // The owner chose `ask`: nothing is added, whatever the preset holds.
+    let ask = serde_json::json!({"mode":"ask","args":[],"env":{},"session":{},"approvesRequests":false});
+    let asked = wire(grok.clone(), Some(ask.clone()));
+    assert!(asked.runtime_args.is_empty());
+    assert_eq!(asked.access.as_ref().map(|access| access.approves_requests), Some(false));
+    // A Hub that predates the grant sends none: the launch is the preset's
+    // full access, as every launch was.
+    let legacy = wire(grok, None);
+    assert_eq!(legacy.runtime_args, ["--always-approve"]);
+    // An argv the registration declared started as declared, so that Hub's
+    // launch gains no flag it never had.
+    let mut claude = serde_json::json!({"id":"claude","runtime":"claude","agentType":"claude_code","backend":"claude-print",
+        "defaultArgs":[],"launcherNames":["claude"],"classicConfigDirs":[]});
+    assert_eq!(wire(claude.clone(), None).runtime_args, ["--dangerously-skip-permissions"]);
+    claude["declaredArgs"] = serde_json::json!(["--model", "opus"]);
+    assert_eq!(wire(claude, None).runtime_args, ["--model", "opus"]);
+    // A generic ACP harness takes the grant's args in its ACP argv and its
+    // environment on the process, alongside the grant itself for the wrapper.
+    let full = serde_json::json!({"mode":"full","args":["--flag"],"env":{"DSH_PERMISSION_MODE":"danger-full-access"},
+        "session":{},"approvesRequests":true});
+    let granted = wire(dsh, Some(full));
+    assert!(granted.runtime_args.is_empty());
+    assert_eq!(granted.agent_acp_args, ["--profile", "acp", "--flag"]);
+    let env = super::apply_spawn_access(std::collections::BTreeMap::new(), granted.access.as_ref().unwrap()).unwrap();
+    assert_eq!(env.get("DSH_PERMISSION_MODE").map(String::as_str), Some("danger-full-access"));
+    assert!(env["XMATRIX_AGENT_ACCESS"].contains("\"approvesRequests\":true"));
+    // A grant cannot name xMatrix's own variables or the process loader's.
+    for name in ["XMATRIX_EXECUTION_KEY", "LD_PRELOAD", "PATH", "lower"] {
+        let mut bad = granted.access.clone().unwrap();
+        bad.env.insert(name.into(), "x".into());
+        assert!(super::apply_spawn_access(std::collections::BTreeMap::new(), &bad).is_err(), "{name}");
+    }
+}
+
+#[test]
 fn registration_spawn_uses_the_hub_registration_preset_and_bound_model() {
     let wire = serde_json::json!({
         "type":"machine_spawn_agent", "requestId":"command", "spaceId":"space", "channelId":"channel",
@@ -2203,6 +2275,26 @@ fn registration_spawn_uses_the_hub_registration_preset_and_bound_model() {
     assert_eq!(defaults.requested_model, None);
     // The effort the author asked for applies to the runtime's own default model.
     assert_eq!(defaults.requested_effort.as_deref(), Some("high"));
+    // On the runtime default, a model from the runtime's own catalog is requested
+    // so the runtime starts on it; it never displaces an admitted binding.
+    let mut preferred = wire.clone();
+    preferred["context"] = serde_json::json!({"preferredModel":"sonnet"});
+    preferred["registration"]
+        .as_object_mut()
+        .unwrap()
+        .remove("runtimeModel");
+    preferred["registration"]["resources"]["models"] = serde_json::json!([]);
+    let preferred =
+        super::DaemonSpawnRequest::from_command(serde_json::from_value(preferred).unwrap())
+            .unwrap();
+    let preferred = super::resolve_registration_spawn(&preferred, "machine").unwrap();
+    assert_eq!(preferred.requested_model.as_deref(), Some("sonnet"));
+    let mut bound = wire.clone();
+    bound["context"] = serde_json::json!({"requestedModel":"x","preferredModel":"sonnet"});
+    let bound =
+        super::DaemonSpawnRequest::from_command(serde_json::from_value(bound).unwrap()).unwrap();
+    let bound = super::resolve_registration_spawn(&bound, "machine").unwrap();
+    assert_eq!(bound.requested_model.as_deref(), Some("provider/model"));
     assert!(super::resolve_registration_spawn(&intent, "other-machine").is_err());
     // Every Run is a Run of a registration: an unbound spawn is refused.
     let mut unbound = wire.clone();

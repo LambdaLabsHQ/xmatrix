@@ -65,3 +65,41 @@ integration("a blocked Machine report retains its scope holder without changing 
     await fixture.close();
   }
 });
+
+// Every daemon command locks its daemon row, and the row's metadata is
+// kilobytes of harness inventory. Only a connection hands the daemon its own
+// record; a report, claim or renewal never reads the metadata back.
+integration("daemon commands lock their row without its metadata; a connection still gets the whole record", async () => {
+  const fixture = await isolatedPostgres("machine_lock_bytes");
+  const observations = [];
+  const database = createAuthorityDatabase({ connectionString: fixture.url.toString(), shardId: "shard-0",
+    applicationName: "xmatrix-hub-machine-control", observer: point => observations.push(point) });
+  const controls = new PostgresMachineControlRepository(database);
+  const route = { ownerUserId: "owner", ownerEmail: "owner@example.test",
+    machineId: `machine:${"b".repeat(64)}`, hostId: "host", daemonId: "daemon" };
+  const principal = { kind: "machine", id: `machine-daemon:${route.ownerUserId}:${route.machineId}`,
+    ownerUserId: route.ownerUserId, machineId: route.machineId };
+  const inventory = { capturedAt: "2026-11-04T00:00:00.000Z", items: [{ id: "x".repeat(65_536) }] };
+  try {
+    await controls.command({ ...route, commandId: "enroll", action: "enroll", metadata: {},
+      capabilities: [], payload: { source: "credential-issuance" }, principal: { kind: "user", id: route.ownerUserId } });
+    await controls.command({ ...route, commandId: "connect", action: "connect", metadata: {},
+      capabilities: [], payload: {}, principal });
+    await fixture.client.query(`UPDATE data.machine_daemons
+      SET metadata_json=metadata_json||jsonb_build_object('harnesses',$1::jsonb)`, [JSON.stringify(inventory)]);
+    const connected = await controls.command({ ...route, commandId: "reconnect", action: "connect", metadata: {},
+      capabilities: [], payload: {}, principal });
+    assert.equal(connected.daemon.metadata.harnesses.items[0].id.length, 65_536, "a connection gets its whole record");
+    observations.length = 0;
+    await controls.command({ ...route, commandId: "report", action: "report", eventType: "machine_run_snapshot",
+      connectionEpoch: Number(connected.connectionEpoch), metadata: {}, capabilities: [], principal,
+      payload: { type: "machine_run_snapshot", snapshotComplete: false, registryConnectionEpoch: 1,
+        registrySequence: 1, runs: [] } });
+    const lock = observations.find(point => point.queryName.startsWith("machine_control_daemon_lock_"));
+    assert.ok(lock, "the report locks its daemon row");
+    assert.ok(lock.resultBytes > 0 && lock.resultBytes < 2048,
+      `the report's lock returned ${lock.resultBytes} bytes for a daemon with 64 KB of inventory`);
+  } finally {
+    await fixture.close();
+  }
+});

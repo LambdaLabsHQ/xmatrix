@@ -36,7 +36,7 @@ function fixture(bindings = [{ connectionId: 'space-a:slack', spaceId: 'space-a'
     credentials() { throw new Error('App delivery must not decrypt arbitrary Space tokens'); },
     apps: () => apps,
     async append(_env, _channel, command) { appends.push(command); return new Response('{}'); },
-    async automations(_env, trigger) { automations.push(trigger); },
+    async events(_env, trigger) { automations.push(trigger); },
     // The grant (credential version and binding generation) that read the event's subject, or undefined.
     async linearVisible(_env, spaceId, event) { visibility.push({ spaceId, subject: event.subject }); return readable(spaceId); },
   } };

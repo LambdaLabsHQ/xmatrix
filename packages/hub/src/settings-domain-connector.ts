@@ -7,6 +7,7 @@ import { checkAppConnection } from "./app-connection-check";
 import { getAppConnectorProvider } from "./app-connectors";
 import { connectionUseRefused, listAppConnections, recentAppExecutions, upsertAppConnection } from "./apps";
 import { credentialPolicy, readConnectorReadback, saveConnectorCredentials } from "./connectors/credential-policy";
+import { connectorCredentialRepository } from "./connectors/credentials";
 import { connectorProvider } from "./connectors/registry";
 import { recordedRead } from "./index-routes-connector-call";
 import { SettingWriteRefused, type SettingDomainResolver, type SettingsReader } from "./settings-registry";
@@ -36,9 +37,13 @@ const PORT: ConnectorSettingsPort = {
   },
   async readback(reader, providerId) {
     const policy = credentialPolicy(providerId);
-    if (!policy) return undefined;
-    try { return await readConnectorReadback(reader.env, { spaceId: reader.spaceId, policy, actorUserId: reader.userId }); }
-    catch { return undefined; }
+    try {
+      if (policy) return await readConnectorReadback(reader.env, { spaceId: reader.spaceId, policy, actorUserId: reader.userId });
+      // An App connected by authorizing (GitHub) has no typed field to read back, and a Space admin still connects it.
+      await connectorCredentialRepository(reader.env).authorizeAdmin({ requestId: crypto.randomUUID(), spaceId: reader.spaceId,
+        actorUserId: reader.userId });
+      return {};
+    } catch { return undefined; }
   },
   async save(reader, providerId, fields) {
     const policy = credentialPolicy(providerId)!;

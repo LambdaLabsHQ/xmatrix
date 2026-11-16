@@ -253,12 +253,49 @@ test("a second click on the same quote jumps again", async ({ page }) => {
   await replyPreview(page, HEAD_QUOTED_SEQUENCE).click();
   await expectLandedOn(page, HEAD_QUOTED_SEQUENCE);
 
+  // The reader scrolls back down; a landed message is held until they do.
   const timeline = page.locator(".app-message-timeline");
-  await timeline.evaluate((element) => element.scrollTo({ top: element.scrollHeight }));
-  await expect(page.locator(".app-message-timeline").getByText(NEWEST_BODY)).toBeVisible();
+  await timeline.hover();
+  for (let step = 0; step < 40; step += 1) await page.mouse.wheel(0, 2_000);
+  await expect(page.locator(".app-message-timeline").getByText(NEWEST_BODY)).toBeInViewport();
 
   // Every click arms its own jump. The URL hash left over from the first jump
   // must never be able to swallow the second one.
   await replyPreview(page, HEAD_QUOTED_SEQUENCE).click();
   await expectLandedOn(page, HEAD_QUOTED_SEQUENCE);
+});
+
+/* Rows above a landed message keep changing height after the landing: a
+   private result card loads its content, an image decodes. The list does not
+   compensate for rows above the viewport while nobody scrolls, so the landed
+   message used to slide off screen a second after it was highlighted
+   (user recording 2026-11-04). It stays where it landed until something else
+   scrolls the timeline. */
+test("a landed message stays put while rows above it grow", async ({ page }) => {
+  const history = historyFixture({
+    quotedSequence: MID_QUOTED_SEQUENCE,
+    previewCarriesSequence: true,
+  });
+  await openChannel(page, history);
+  await replyPreview(page, MID_QUOTED_SEQUENCE).click();
+  await expectLandedOn(page, MID_QUOTED_SEQUENCE);
+
+  const topOf = () => messageRow(page, MID_QUOTED_SEQUENCE).evaluate((element) => element.getBoundingClientRect().top);
+  const landedTop = await topOf();
+  // Two rows above it each grow, one after the other, as late cards do.
+  for (const sequence of [MID_QUOTED_SEQUENCE - 1, MID_QUOTED_SEQUENCE - 2]) {
+    await messageRow(page, sequence).evaluate((element) => {
+      const grown = document.createElement("div");
+      grown.style.height = "320px";
+      (element.lastElementChild ?? element).appendChild(grown);
+    });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(Math.abs((await topOf()) - landedTop)).toBeLessThan(1);
+  }
+
+  // The reader's own scrolling takes the timeline back from the hold.
+  const timeline = page.locator(".app-message-timeline");
+  await timeline.hover();
+  for (let step = 0; step < 40; step += 1) await page.mouse.wheel(0, 2_000);
+  await expect(timeline.getByText(NEWEST_BODY)).toBeInViewport();
 });

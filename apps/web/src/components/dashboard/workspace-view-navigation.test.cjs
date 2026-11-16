@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { adminViewPath, viewSelectionPath } = require("./workspace-shell-navigation.ts");
+const { adminViewPath, appRouteInfo, viewSelectionPath } = require("./workspace-shell-navigation.ts");
 
 test("Apps canonicalization removes item and preserves connector return parameters", () => {
   const path = adminViewPath("/app/lambda/apps",
@@ -16,10 +16,16 @@ test("Apps canonicalization removes item and preserves connector return paramete
 });
 
 test("each destination owns a semantic field and no item alias", () => {
-  for (const [view, parameter] of [["agents", "agent"], ["machines", "machine"], ["automation", "schedule"], ["settings", "section"], ["admin", "section"], ["team", "space"]]) {
+  for (const [view, parameter] of [["agents", "agent"], ["machines", "machine"], ["settings", "section"], ["admin", "section"], ["team", "space"]]) {
     assert.equal(viewSelectionPath(`/app/lambda/${view}`, `/app/lambda/${view}?${parameter}=selected&item=old`), `/app/lambda/${view}?${parameter}=selected`);
     assert.equal(viewSelectionPath(`/app/lambda/${view}`, `/app/lambda/${view}?item=old`), `/app/lambda/${view}`);
   }
+});
+
+test("a link to the retired Schedules view opens Pages and drops its selection", () => {
+  assert.equal(appRouteInfo("/app/lambda/automation?schedule=abc").view, "pages");
+  assert.equal(appRouteInfo("/app?view=automation").view, "pages");
+  assert.equal(viewSelectionPath("/app/lambda/pages", "/app/lambda/automation?schedule=abc"), "/app/lambda/pages");
 });
 
 /* `/billing` kept writing the retired `item` field after #1203, so Stripe

@@ -68,11 +68,12 @@ export function sourceToken(value: unknown): string {
 }
 
 /**
- * The message for one event: a bold provider label and one-line title, the
- * link, then optional detail lines (already shaped by the caller).
+ * The message for one event: a bold provider label and one-line title (the
+ * label alone when the title is empty), the link, then optional detail lines
+ * (already shaped by the caller).
  */
 export function eventMessage(input: { provider: string; title: string; url?: string; details?: (string | undefined)[] }): string {
-  return [`**${input.provider}** — ${oneLine(input.title)}`, ...(input.url ? [input.url] : []),
+  return [`**${input.provider}**${input.title ? ` — ${oneLine(input.title)}` : ""}`, ...(input.url ? [input.url] : []),
     ...(input.details ?? []).filter((line): line is string => Boolean(line))].join("\n");
 }
 

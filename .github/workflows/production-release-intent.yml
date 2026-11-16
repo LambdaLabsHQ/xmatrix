@@ -8,6 +8,7 @@ run-name: Production Release Intent ${{ inputs.channel }} ${{ inputs.release_com
 # - beta, the default: any Agent, after merging. The train ships the union of
 #   every open beta its frozen main revision contains as X.Y.Z-beta.N: the Hub
 #   and the beta Web to production, clients to their dev channel and TestFlight.
+#   A train that ships the Hub ships it alone; the rest follows in the next.
 # - stable: the stable release Agent, naming a beta it verified and the patch,
 #   minor or major bump its changes call for. The train rebuilds exactly that
 #   beta's source as X.Y.Z and ships what it names: the stable Web, and clients

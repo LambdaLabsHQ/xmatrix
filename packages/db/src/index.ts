@@ -9,6 +9,7 @@ export {
   type ChannelCatalogResolveInput,
   type ChannelHeadMessage,
 } from "./channel-catalog.js";
+export type { AgentInstanceRecord } from "./channel-agent-presence.js";
 export {
   createAuthorityDatabaseRouter,
   type AuthorityDatabaseRouterOptions,
@@ -18,6 +19,7 @@ export {
   PostgresBillingRepository,
   type StripeSubscriptionFact,
   type BillingSubscriptionFact,
+  type BillingProvider,
 } from "./billing-control.js";
 export {
   ContentControlError,
@@ -188,12 +190,6 @@ export {
 } from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
-  PostgresAutomationRepository,
-  AutomationControlError,
-  CHANNEL_AUTOMATION_WAKE_SQL,
-} from "./automation-control.js";
-export { automationName } from "./automation-commit.js";
-export {
   PostgresTraceAccessRepository,
   TraceAccessControlError,
   type TraceAccessAuthorityResult,
@@ -223,12 +219,13 @@ export { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 export { firstMessageSummonId, readMessageInvocationSelections, XMATRIX_SYSTEM_AUTHOR_ID } from "./message-invocation-selections.js";
 export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent } from "./agent-registration-revocation.js";
 
-export type { RegistrationLaunchCandidate, RegistrationLaunchChooser } from "./agent-registration-launch.js";
+export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationModelFacts } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
   type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
-export { readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+export { ACCOUNT_QUOTA_SCOPE, readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+  UNRESOLVED_QUOTA_SCOPE, type RegistrationQuotaUsage, type RegistrationUsageLimit,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 
 export {
@@ -242,7 +239,7 @@ export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError, pageNameFrom,
+  inActiveSpace, readInActiveSpace, namedPageBody, pageActor, pageBody, PageControlError,
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
@@ -268,11 +265,11 @@ export {
 } from "./space-roles.js";
 export { readCliReleaseOwners, requestMachineCliUpdateCheck, recordMachineCliUpdateStatus, failMachineCliUpdateCheck,
   type MachineCliUpdateCheckDecision } from "./machine-cli-release.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { HARNESS_RELEASE_TARGETS_SQL, readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
-export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaExpiries,
+export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaUsages,
   readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
 export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, settleRegistrationQuotaWaits,
@@ -317,6 +314,7 @@ export { DingTalkEffectCoordinator,type DingTalkCoordinationNativeProof } from "
 export type { DingTalkPreparedPathCapability } from "./dingtalk-prepared-port.js";
 
 export { PostgresAppleBillingRepository, type AppleAccountBinding, type AppleAssignedSeat, type AppleSeatGroupState } from "./apple-billing-control.js";
+export { PostgresGooglePlayBillingRepository, type GooglePlayAccountBinding, type GooglePlayEnvironment } from "./google-play-billing-control.js";
 export { PostgresCreditPackRepository, type CreditPackPayment } from "./credit-pack-control.js";
 export { PostgresPaidCallRepository, type PaidCallReceipt } from "./paid-call-control.js";
 export {
@@ -334,10 +332,14 @@ export { PostgresAppActionRequestRepository, type AppActionRequestPayload,
   type XUploadReference, type XExecutingUpload, type XUploadOutcome } from "./app-action-request-control.js";
 export { PostgresGmailRoutingRepository, type GmailRoutingJob, type GmailRoutingSelection } from "./gmail-routing-control.js";
 
-export { databaseFailureEvidence, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
+export { databaseFailureEvidence, linkDatabaseFailures, parseDatabaseFailureEvidence } from "./database-failure-evidence.js";
 
 export { PostgresMessageAskRepository, readMessageAsks } from "./message-asks.js";
+export { PostgresNornProgramRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms, readWaitingNornPrograms, NORN_DELIVERY_PREFIX, NORN_HANDED_ON_REASON, NORN_CHANNEL_DUE_SQL, NORN_PROGRAM_OPEN_SQL,
+  type NornProgramState, type NornProgramWrite, type NornRequestRow, type NornStep } from "./norn-programs.js";
 export { PostgresQuotaRetryRepository, assertQuotaRetryAdmission, type QuotaRetryWork } from "./agent-quota-retry.js";
 
 export { PostgresStripeAccountRepository, type StripeAccountGrant,
   type StripeAccountSnapshot, type StripeRefreshClaim } from "./stripe-account-control.js";
+
+export { PostgresAppleCommerceRepository, type AppleCommerceJob, type AppleCommerceState, type AppleCommerceChange } from "./apple-commerce-control.js";

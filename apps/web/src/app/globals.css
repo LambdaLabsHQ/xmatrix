@@ -73,6 +73,21 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
+/* Cascadia Code, self-hosted, for code. The mono stack used to name a font the
+   app never shipped, so code drew in whatever monospace each machine had (SF
+   Mono on a Mac), which has no ligatures: a Norn program's `after(…)->wait`
+   read as a hyphen and a bracket jammed between two words. Cascadia Code draws
+   `->`, `=>`, `!=` and `>=` as one sign each, on by default. Only the Latin
+   file: a code character outside it falls back to the system monospace.
+   Source: @fontsource-variable/cascadia-code 5.3.0 (SIL Open Font License 1.1). */
+@font-face {
+  font-family: "Cascadia Code";
+  font-style: normal;
+  font-weight: 200 700;
+  font-display: swap;
+  src: url("/fonts/cascadia-code-latin-wght-normal.a3018c0c6b.woff2") format("woff2");
+}
+
 @theme inline {
     /* `tracking-tight` keeps the type at its own spacing. */
     --tracking-tight: 0em;
@@ -2512,8 +2527,25 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 
 /* The control the panel dropped from is under its field row: the panel's
    magnifier and close button take its place, so it is not drawn twice. */
-.xmatrix-app.app-search-open [data-search-anchor] {
+.xmatrix-app.app-search-open [data-search-anchor],
+body:has(> .app-page-find) [data-search-anchor] {
   visibility: hidden;
+}
+
+/* Find in page is a paper slip, not glass: the slip's own 8px corner, never a
+   capsule, and its buttons' hover a rounded square like the page's menus
+   (Daniel 2026-11-12: 纸面风格，不要有阴影；纸面不要用胶囊). */
+.xmatrix-app.app-page-find .app-search-panel {
+  border-radius: 8px;
+}
+
+.xmatrix-app.app-page-find .app-search-panel-close {
+  border-radius: 6px;
+}
+
+.xmatrix-app .app-page-find-count {
+  font-size: 0.75rem;
+  font-variant-numeric: tabular-nums;
 }
 
 /* A global rule makes every child of a portaled .xmatrix-app relative. */
@@ -2880,8 +2912,72 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 .xmatrix-app .rich-message button.message-citation:hover {
   background: color-mix(in oklch, var(--app-quote-wood) 50%, var(--app-panel-paper, oklch(0.976 0.005 85)));
 }
+/* A reply is a quote of the whole message: the same slip above the reply's words, two lines of the message and
+   its author in quiet ink, opening the message as a quoted passage does. */
+.xmatrix-app .message-reply-citation {
+  display: block;
+  width: fit-content;
+  max-width: min(36rem, 100%);
+  margin: 2px 0 10px;
+  padding: 10px 14px 9px;
+  border-radius: 10px;
+  background: var(--app-quote-tint);
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 20px;
+  text-decoration: none;
+  transition: background-color 120ms ease-out;
+}
+.xmatrix-app .message-reply-citation:hover {
+  background: color-mix(in oklch, var(--app-quote-wood) 50%, var(--app-panel-paper, oklch(0.976 0.005 85)));
+}
+.xmatrix-app .message-reply-citation .message-citation-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.xmatrix-app .message-reply-citation .message-citation-source { display: block; margin-top: 2px; }
+.xmatrix-app .message-citation-composer .message-citation-source + .message-citation-source { margin-top: 0; }
+/* Every slip opens with a large curly quotation mark in the slip's own wood, so a quote reads as one at a glance
+   before its words do (Daniel 2026-11-09: 引用前面加个比较大的引用号). It is drawn, not a font's glyph, so it is
+   the same light mark on every system; a bold fallback glyph read as a dark blot (有点丑). The words keep their
+   column to its right. */
+.xmatrix-app .rich-message .message-citation,
+.xmatrix-app .message-reply-citation,
+.xmatrix-app .message-citation-composer {
+  --app-quote-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 22 14'%3E%3Cpath d='M0.5 9.5C0.5 4.8 3.8 1.2 9 0.5L9.5 2.3C7 3 5.4 4 5 5A4.5 4.5 0 1 1 0.5 9.5Z'/%3E%3Cpath transform='translate(12 0)' d='M0.5 9.5C0.5 4.8 3.8 1.2 9 0.5L9.5 2.3C7 3 5.4 4 5 5A4.5 4.5 0 1 1 0.5 9.5Z'/%3E%3C/svg%3E");
+  position: relative;
+  padding-left: 50px;
+}
+.xmatrix-app .rich-message .message-citation::before,
+.xmatrix-app .message-reply-citation::before,
+.xmatrix-app .message-citation-composer::before {
+  content: "";
+  position: absolute;
+  left: 14px;
+  top: 11px;
+  width: 26px;
+  height: 16.5px;
+  background: color-mix(in oklch, var(--app-quote-wood) 75%, var(--foreground));
+  opacity: 0.6;
+  -webkit-mask: var(--app-quote-mark) no-repeat center / contain;
+  mask: var(--app-quote-mark) no-repeat center / contain;
+  pointer-events: none;
+}
+.xmatrix-app .message-citation-composer { padding-left: 44px; }
+.xmatrix-app .message-citation-composer::before { left: 12px; top: 10px; width: 22px; height: 14px; }
 ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
+}
+
+/* Find in page (PageFind): every match washed in the cited passage's wood, the current one in full. */
+::highlight(page-find) {
+  background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 45%, transparent);
+}
+::highlight(page-find-current) {
+  background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 100%, var(--foreground) 12%);
 }
 
 
@@ -5469,6 +5565,26 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
   color: inherit !important;
 }
 
+/* On a phone a sender's tags wrap onto several lines, and a grey label round
+   each one turned the header into a block of boxes. There they are plain
+   grey words with their icons, like a list row's subtitle; the meter's tone
+   and every tag stay (user 2026-11-04: 分割线啊，什么都不够简洁). */
+@media (max-width: 767px) {
+  .xmatrix-app .app-message-meta {
+    column-gap: 0.75rem;
+    row-gap: 0;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-message-meta .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip {
+    background: transparent !important;
+    padding-inline: 0 !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-message-meta .app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip.app-shared-chip > .app-usage-meter-fill {
+    display: none;
+  }
+}
+
 /* Mobile app shell reset.
    Keep this last: the dashboard has several material/glass generations above,
    and phone ergonomics need a single authoritative layout pass. */
@@ -6296,15 +6412,20 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     filter: drop-shadow(0 1px 0 oklch(0.97 0.03 85 / 0.55));
   }
 
-  /* Summary and linked pages are about the conversation, not part of it:
-     quiet prose on the bar's paper under the sign, closed by a hairline so
-     the message stream visibly starts below it. No band, card frame, glass
-     or shadow. */
+  /* A conversation's head (its bar, Summary and pages) is one block of the
+     deeper paper over the messages' lighter paper: one boundary, below the
+     sign's shadow rather than under it (user 2026-11-04: 白顶栏+灰带子+阴影
+     不协调). The bar takes the tone only while that block is there, so a
+     conversation without a Summary or pages keeps a plain bar. No rule, card
+     frame, glass or shadow. */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-topbar.app-mobile-channel-detail-bar.app-mobile-channel-head-bar,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
-    background: var(--background) !important;
+    background: var(--app-mobile-head-paper) !important;
+  }
+
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-about {
     color: var(--foreground) !important;
     border: 0 !important;
-    border-bottom: 1px solid var(--border) !important;
     -webkit-backdrop-filter: none !important;
     backdrop-filter: none !important;
     box-shadow: none !important;
@@ -6318,12 +6439,24 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     color: var(--muted-foreground);
   }
 
-  /* Page chips are solid white controls on the band, without a second glass layer. */
-  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-page-chip {
-    background: white !important;
-    border: 1px solid var(--border) !important;
+  /* A linked page is its icon and title, like a word in a list row: no
+     pill, fill or edge (user 2026-11-04: 这个胶囊有点丑). */
+  html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-mobile-channel-page-chip.app-mobile-channel-page-chip {
+    background: transparent !important;
+    background-image: none !important;
+    border: 0 !important;
     box-shadow: none !important;
     color: var(--foreground) !important;
+  }
+
+  /* A phone's channel list meets the sign with the same room as a
+     conversation's Summary, clear of the sign's shadow (user 2026-11-06:
+     列表页面只需要统一 padding，无需颜色变化). The list's skeleton holds that
+     first heading's place, so it takes the same room; otherwise every row
+     drops by it when the catalog lands. */
+  .xmatrix-app.xmatrix-app-shell .app-mobile-chat-list > .app-list-section-heading:first-child,
+  .xmatrix-app.xmatrix-app-shell .app-mobile-chat-list > .app-list-skeleton:first-child .app-list-section-heading {
+    min-height: calc(36px + var(--app-mobile-head-room) - 9px);
   }
 
   .xmatrix-app.xmatrix-app-shell .app-mobile-channel-pages {
@@ -7579,7 +7712,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   background: color-mix(in oklab, var(--invocation-color) 12%, transparent);
 }
 
-/* Summon intent. Right after sending, Jev is reading the sentence: a light
+/* A summon starting. Right after sending, xMatrix chooses where it runs: a light
    band sweeps across the author's own words. The answer resolves in place — a
    request lights into the routed chip; anything else settles back into prose
    with a dotted underline that explains itself. */
@@ -7681,26 +7814,14 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
-/* What the draft knows before it is sent: a forced launch, a malformed one, and Jev's reading of a summon. */
-.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"], [data-intent]) {
+/* What the draft knows before it is sent: a forced launch and a malformed one. */
+.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"]) {
   background: color-mix(in oklab, var(--chip-ink) var(--chip-fill, 14%), transparent);
   color: var(--chip-ink);
 }
 .xmatrix-app .composer-textarea .app-mention-chip[data-forced="true"] { --chip-ink: oklch(0.62 0.16 70); --chip-fill: 22%; }
 .xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] { --chip-ink: var(--destructive); }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="summon"] { --chip-ink: oklch(0.55 0.17 285); --chip-fill: 16%; }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="declined"] { --chip-ink: var(--muted-foreground); --chip-fill: 9%; }
-.xmatrix-app .composer-textarea .app-mention-chip[data-intent="reading"] { --chip-ink: var(--primary); --chip-fill: 10%; opacity: 0.6; }
 .app-composer-hint-overlay { position: absolute; pointer-events: none; user-select: none; white-space: pre; }
-.app-composer-summon-declined {
-  position: absolute; pointer-events: auto; padding: 0; border: 0; background: transparent; cursor: help;
-  border-bottom: 1.5px dotted var(--muted-foreground); border-radius: 2px;
-}
-.app-composer-summon-declined:hover,
-.app-composer-summon-declined[data-popup-open] { border-bottom-color: var(--foreground); }
-.app-composer-summon-declined:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.app-composer-summon-popup { font-size: 14px; }
-.app-composer-summon-explanation { margin: 12px 0; font-size: 15px; line-height: 1.5; }
 /* The empty composer's hint (composer-hints.ts), drawn where the text would start.
    The words stay faint; the trigger they teach sits in the band it will become,
    and @ wears the summon violet because typing it calls an Agent in. It starts
@@ -7796,7 +7917,7 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 }
 
 /* A parameter Jev chose, drawn into the mention after the author's words.
-   Same highlight as a written condition, in the ink of "Jev is reading".
+   Same highlight as a written condition, in the ink of "Starting".
    Each choice pops in on its own beat, in the order it was decided, then stays lit. */
 .xmatrix-app .app-summon-condition[data-jev="true"],
 .xmatrix-app .app-summon-condition[data-routing="true"] {
@@ -8232,11 +8353,6 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   background: color-mix(in oklab, var(--foreground) 5%, transparent);
 }
 
-/* A paused schedule is listed in the panel's faint ink: there, but at rest. */
-.xmatrix-app .app-tool-list-row[data-testid="schedule-row"][data-state="paused"] .app-list-row-title {
-  color: var(--app-panel-ink-faint, var(--muted-foreground));
-}
-
 .xmatrix-app .app-tool-dot {
   display: inline-block;
   width: 8px;
@@ -8527,6 +8643,27 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-settings-card:is(
 }
 .xmatrix-app .app-settings-card-dot { width: 6px; height: 6px; border-radius: 999px; background: currentColor; }
 
+/* An App event (event-card.tsx: a payment, a canceled subscription) is the same rounded slip of tinted
+   paper as a setting card, with no rail. The slip's colour says how it ended (Daniel 2026-11-13:
+   加点颜色区分): green when money arrived, the alert red when someone has to act, plain paper for the
+   rest. The icon wears the same ink at full strength; the words stay in the body's ink. */
+.xmatrix-app .app-event-card {
+  --app-event-ink: var(--m-ink-settled, var(--muted-foreground));
+  padding: 10px 14px 11px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--foreground) 4.5%, transparent);
+}
+.xmatrix-app .app-event-card[data-event-card="good"] {
+  --app-event-ink: oklch(0.55 0.14 152);
+  background: color-mix(in oklab, var(--app-event-ink) 11%, transparent);
+}
+.xmatrix-app .app-event-card[data-event-card="bad"] {
+  --app-event-ink: var(--m-ink-alert, var(--destructive));
+  background: color-mix(in oklab, var(--app-event-ink) 9%, transparent);
+}
+.xmatrix-app .app-event-card-icon { color: var(--app-event-ink); }
+.xmatrix-app .app-event-card-link { color: inherit; text-decoration: none; }
+
 /* A problem the reader can fix is a sheet of the paper, with the alert ink
    on its rail and its icon: it says something stopped, and the rest of the
    card is plain instructions. Paper has no rounded corners (user 2026-10-26:
@@ -8623,6 +8760,44 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
    connector settings' own, not in the browser's blue. */
 .xmatrix-app .app-ask-card input:is([type="radio"], [type="checkbox"]) {
   accent-color: currentColor;
+}
+
+/* An answer the reader writes on an ask (norn-request-card.tsx) is written
+   on the slip itself, not into a box (Daniel 2026-11-13: 这输入框太丑了, then
+   不要有边框): the questionnaire's own answer line, a pencil and the words,
+   with the composer's round Send at its end. With no box, the line has to say
+   by its ink that it waits to be written on (Daniel 2026-11-13: 根本看不出来需要你
+   写答案): until the reader writes, the pencil and the words inviting an
+   answer are in the card's brass, at the weight of the line saying who asks. */
+.xmatrix-app .app-ask-answer textarea::placeholder {
+  color: var(--app-ask-ink);
+  font-weight: 700;
+  opacity: 1;
+}
+
+/* What a program asks is drawn as a message's words are, so a Page it names
+   is a link, but at the size of the line it stands in: the question's own
+   paragraph, and under it the rest of what the program wrote in the body's ink. */
+.xmatrix-app .app-ask-question :is(p, li) {
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.xmatrix-app .app-ask-more {
+  margin-top: 6px;
+  color: var(--app-panel-ink, var(--foreground));
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+html[data-app-theme] .xmatrix-app.xmatrix-app .app-ask-answer.app-ask-answer textarea {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 /* The Pending approvals dock is one such block, and the asks inside it are
@@ -8969,6 +9144,83 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 3;
+}
+
+/* The request a delivery message is about: the task in full, as paragraphs of
+   the message's own body text. No highlight and no capsule; a quiet rule down
+   its side says these are the program's words, and a small line above says
+   whom they wait for. */
+.xmatrix-app .app-request-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  max-width: 72ch;
+  margin-top: 0.75rem;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
+}
+
+.xmatrix-app .app-request-block > p { margin: 0; }
+
+.xmatrix-app .app-request-block-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.xmatrix-app .app-request-block-head > svg {
+  width: 13px;
+  height: 13px;
+  flex: none;
+}
+
+.xmatrix-app .app-request-block-head > strong {
+  color: var(--foreground);
+  font-weight: 650;
+}
+
+.xmatrix-app .app-request-block-paragraph,
+.xmatrix-app .app-request-block-reply {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  line-height: 1.65;
+}
+
+.xmatrix-app .app-request-block :is(.app-request-block-paragraph, .app-request-block-reply) code {
+  padding: 0.05em 0.3em;
+  border-radius: 4px;
+  background: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+
+.xmatrix-app .app-request-block-reply {
+  padding-top: 0.6em;
+  border-top: 1px solid var(--border);
+}
+
+.xmatrix-app .app-request-block-unavailable { margin: 0.75rem 0 0; }
+
+/* A request's preview is the request itself, in full: wide enough to read a
+   paragraph, as body text and not a muted status line, and scrolling inside the
+   panel when the task is long. */
+.xmatrix-app .app-page-reference-popup.app-request-reference-popup {
+  width: min(460px, calc(100vw - 24px));
+}
+
+.xmatrix-app .app-request-reference-popup .app-page-reference-popup-body {
+  display: block;
+  max-height: min(52vh, 420px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  -webkit-line-clamp: unset;
 }
 
 /* A handoff, drawn as what it does: the work leaves one Agent and arrives at
@@ -9504,6 +9756,11 @@ html[data-overlay-scrollbars] ::-webkit-scrollbar {
 .xmatrix-app .app-gmail-card-meta { display: flex; flex-wrap: wrap; column-gap: 8px; font-size: 12px; line-height: 1.4; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .xmatrix-app .app-gmail-card-meta > span + span::before { content: "·"; margin-right: 8px; }
 .xmatrix-app .app-gmail-card-subject { margin-top: 4px; font-size: 16px; font-weight: 650; line-height: 1.3; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.xmatrix-app .app-gmail-card-opens { cursor: pointer; transition: background-color 120ms ease, border-color 120ms ease; }
+.xmatrix-app .app-gmail-card-opens:hover {
+  background: color-mix(in oklab, var(--foreground) 3%, var(--background));
+  border-color: color-mix(in oklab, var(--foreground) 16%, transparent);
+}
 .xmatrix-app .app-gmail-card-sender { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; font-size: 12px; font-weight: 550; }
 .xmatrix-app .app-gmail-card-sender svg { width: 13px; height: 13px; flex: none; }
 .xmatrix-app .app-gmail-card-body {

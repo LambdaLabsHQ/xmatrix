@@ -2,13 +2,14 @@ import type { QueryResultRow } from "pg";
 import { messagePublicationEvidence, type AgentRuntimeMessageSource } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { messageChoiceSourceCurrentSql } from "./message-choice-source.js";
+import { NORN_DELIVERY_SOURCE_SQL } from "./norn-programs.js";
 
 /** Caller has authorized Channel launch creation in this same transaction.
  * Only an unchanged original publication can be the invocation source. */
 export async function initialMessageSource(tx: DatabaseTransaction, input: {
   spaceId: string; channelId: string; messageId: string; actorUserId: string;
 }): Promise<AgentRuntimeMessageSource | undefined> {
-  const row = (await tx.query<QueryResultRow>({ name: "runtime_initial_message_source_v5", text: `SELECT
+  const row = (await tx.query<QueryResultRow>({ name: "runtime_initial_message_source_v6", text: `SELECT
       message.entity_version,message.body_hash,message.timeline_sequence
     FROM data.messages message WHERE message.space_id=$1 AND message.channel_id=$2 AND message.message_id=$3
       AND COALESCE(message.invocation_input_version,message.entity_version)=1
@@ -18,10 +19,10 @@ export async function initialMessageSource(tx: DatabaseTransaction, input: {
           JOIN data.run_agent_registrations author_run ON author_run.run_id=author_instance.run_id
           WHERE author_instance.instance_id=message.author_id
             AND author_run.space_id=$1 AND author_run.owner_user_id=$4))
-        OR (message.author_kind='system' AND message.author_id='xmatrix' AND EXISTS (SELECT 1
+        OR (message.author_kind='system' AND message.author_id='xmatrix' AND (EXISTS (SELECT 1
           FROM data.first_message_launch_choices choice WHERE choice.space_id=$1 AND choice.channel_id=$2
             AND $3='xmatrix-summon:'||choice.message_id AND choice.author_user_id=$4 AND choice.choice='start'
-            AND ${messageChoiceSourceCurrentSql("choice")}))) LIMIT 1`,
+            AND ${messageChoiceSourceCurrentSql("choice")}) OR ${NORN_DELIVERY_SOURCE_SQL}))) LIMIT 1`,
     values: [input.spaceId,input.channelId,input.messageId,input.actorUserId], maxRows: 1 }))[0];
   if (!row) return undefined;
   const publication = messagePublicationEvidence({ entityVersion: Number(row.entity_version), bodyHash: row.body_hash });

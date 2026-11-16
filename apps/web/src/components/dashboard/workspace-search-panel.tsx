@@ -48,7 +48,7 @@ type PanelPlacement = { top: number; right: number; width: number; maxHeight: nu
   fill: boolean };
 
 /** The visible search control nearest the window's top right, if any. */
-function visibleSearchAnchor(): DOMRect | null {
+export function visibleSearchAnchor(): DOMRect | null {
   let best: DOMRect | null = null;
   for (const element of Array.from(document.querySelectorAll<HTMLElement>(`[${SEARCH_ANCHOR_ATTRIBUTE}]`))) {
     const box = element.getBoundingClientRect();

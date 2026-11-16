@@ -1,12 +1,12 @@
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
+import { parseMarkdown } from "./markdown.js";
+import { gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
-import { gfm } from "micromark-extension-gfm";
 import { diffIndices } from "node-diff3";
 import { Fragment, Schema, type Mark, type Node as DocNode } from "prosemirror-model";
 import { pageBlocks } from "./page-markdown.js";
 
 export * from "./page-blame.js";
+export * from "./page-doc-diff.js";
 
 /**
  * Only the page session and the page editor load this module (the
@@ -141,10 +141,6 @@ interface MdNode {
 
 type MarkSpec = { type: string; attrs?: Record<string, unknown> };
 type JsonNode = { type: string; attrs?: Record<string, unknown>; content?: JsonNode[]; text?: string; marks?: MarkSpec[] };
-
-function parseMarkdown(markdown: string): MdNode {
-  return fromMarkdown(markdown, { extensions: [gfm()], mdastExtensions: [gfmFromMarkdown()] }) as unknown as MdNode;
-}
 
 function source(markdown: string, node: MdNode): string {
   const start = node.position?.start.offset;
@@ -407,26 +403,37 @@ const TABLE_DELIMITER = /^(\s*(?:>\s*)*)\|((?:\s*:?-+:?\s*\|)+)\s*$/u;
  * The serializer escapes every character that could ever be markup. Agents
  * and people read this markdown, so an escape stays only on lines where
  * dropping it would change the document, and delimiter rows read `---`.
+ *
+ * An escape of a character that cannot start markup is dropped without a
+ * parse, except inside inline code, where the backslash is text. What remains
+ * of a line is tried once inside its own block. A tight list is a single run,
+ * so the block is one item rather than the whole page. A run that holds a
+ * fence or a link definition, or a line whose block marker would change, is
+ * still judged against the whole run. Only a line whose escapes disagree is
+ * taken one character at a time. The joined lines are checked once against
+ * the document already in hand. A mismatch checks each remaining line against
+ * that same document.
  */
-function tidy(markdown: string): string {
-  const doc = markdownToPageDoc(markdown);
+function tidy(markdown: string, doc: DocNode): string {
   const lines = markdown.split("\n");
-  // Each line is first tried within its paragraph-sized run of lines, so the
-  // check costs one short parse, not one parse of the whole page; the result
-  // is checked once against the whole document.
   const runs = lineRuns(lines);
-  const quick = unescape(lines, runs, (index, run, line) => {
-    const before = run.doc ??= markdownToPageDoc(lines.slice(run.start, run.end).join("\n"));
-    return markdownToPageDoc([...lines.slice(run.start, index), line, ...lines.slice(index + 1, run.end)].join("\n"))
-      .eq(before);
-  });
-  if (markdownToPageDoc(quick.join("\n")).eq(doc)) return quick.join("\n");
+  const quick = unescape(lines, runs, null);
+  const joined = quick.join("\n");
+  if (markdownToPageDoc(joined).eq(doc)) return joined;
   const whole = markdown.split("\n");
-  return unescape(whole, lineRuns(whole), (index, _run, line) =>
-    markdownToPageDoc([...whole.slice(0, index), line, ...whole.slice(index + 1)].join("\n")).eq(doc)).join("\n");
+  return unescape(whole, lineRuns(whole), doc).join("\n");
 }
 
-interface LineRun { start: number; end: number; doc?: DocNode }
+interface LineRun { start: number; end: number; doc?: DocNode; local?: boolean; spans?: Uint32Array }
+
+/**
+ * An escaped character that can begin markdown markup. A backslash stays,
+ * including inside a Windows path. Parentheses, periods and the other
+ * punctuation below are text wherever they stand, so their escape is dropped
+ * without parsing the line.
+ */
+const MARKUP_ESCAPE = /\\[*_<>`#[\]|\\-]/u;
+const PLAIN_ESCAPED = new Set("!\"$%&'()+,./:;=?@^_{}~".split(""));
 
 /** Runs of lines between blank lines outside code fences; a fence stays in one run. */
 function lineRuns(lines: string[]): LineRun[] {
@@ -449,11 +456,67 @@ function lineRuns(lines: string[]): LineRun[] {
 }
 
 /**
- * Tidies delimiter rows and drops each escape whose removal `same` finds
- * leaves the document unchanged, trying a whole line's escapes first.
+ * The line with escapes of non-markup characters removed outside inline code.
+ * Inside code the backslash is text (`\.` in a Windows path), so it stays.
+ * A fence opener is a run of unescaped backticks.
  */
-function unescape(lines: string[], runs: LineRun[],
-  same: (index: number, run: LineRun, line: string) => boolean): string[] {
+function dropPlainEscapes(line: string): string {
+  let out = "";
+  let code: string | null = null;
+  for (let at = 0; at < line.length; at++) {
+    if (code === null) {
+      const opener = /^`+/u.exec(line.slice(at));
+      if (opener) { code = opener[0]; out += opener[0]; at += opener[0].length - 1; continue; }
+    } else if (line.startsWith(code, at)) {
+      out += code; at += code.length - 1; code = null; continue;
+    }
+    const character = line[at + 1];
+    if (code === null && line[at] === "\\" && character && PLAIN_ESCAPED.has(character)) {
+      out += character; at++; continue;
+    }
+    out += line[at];
+  }
+  return out;
+}
+
+/** The block marker a line would be parsed as. Two lines with the same key stay in one block. */
+function blockKey(line: string): string {
+  const match = /^( {0,3})(#{1,6} |[-*+] |\d{1,9}[.)] |>|`{3,}|~{3,})/u.exec(line);
+  if (match) return match[0];
+  return line.trim() ? "text" : "blank";
+}
+
+/**
+ * A run may be judged one block at a time when nothing in it can change a
+ * different block: a fence, or a link or footnote definition.
+ */
+function runAllowsLocal(lines: string[], run: LineRun): boolean {
+  for (let index = run.start; index < run.end; index++) {
+    const line = lines[index]!;
+    if (FENCE_LINE.test(line)) return false;
+    if (/^ {0,3}(?:\[[^\]]+\]|\[\^[^\]]+\])\s*:/u.test(line)) return false;
+  }
+  return true;
+}
+
+/** Start index of each line's top-level block. A tight list item is its own block. */
+function spanStarts(lines: string[], run: LineRun): Uint32Array {
+  const starts = new Uint32Array(run.end);
+  const boundary = /^(?:#{1,6} |[-*+] |\d{1,9}[.)] )/u;
+  let start = run.start;
+  for (let index = run.start; index < run.end; index++) {
+    if (index > run.start && boundary.test(lines[index]!)) start = index;
+    starts[index] = start;
+  }
+  return starts;
+}
+
+/**
+ * Tidies delimiter rows and drops escapes that leave the document unchanged.
+ * A line is tried whole first. `doc` judges it against that document;
+ * otherwise it is judged inside its own block, falling back to its run.
+ */
+function unescape(lines: string[], runs: LineRun[], doc: DocNode | null): string[] {
   let fence: string | null = null;
   const escaped: number[] = [];
   for (let index = 0; index < lines.length; index++) {
@@ -473,15 +536,41 @@ function unescape(lines: string[], runs: LineRun[],
       escaped.push(index);
     }
   }
+  const source = doc ? [...lines] : null;
+  if (!doc) {
+    for (const run of runs) {
+      if (run.end - run.start <= 8 || !runAllowsLocal(lines, run)) continue;
+      run.local = true;
+      run.spans = spanStarts(lines, run);
+    }
+  }
+  const same = (index: number, run: LineRun, line: string) => {
+    if (source && doc) {
+      return markdownToPageDoc([...source.slice(0, index), line, ...source.slice(index + 1)].join("\n")).eq(doc);
+    }
+    if (run.local && run.spans && blockKey(lines[index]!) === blockKey(line)) {
+      const start = run.spans[index]!;
+      let end = index + 1;
+      while (end < run.end && run.spans[end] === start) end++;
+      if (end - start < run.end - run.start) {
+        const localBefore = markdownToPageDoc(lines.slice(start, end).join("\n"));
+        const localAfter = markdownToPageDoc([...lines.slice(start, index), line, ...lines.slice(index + 1, end)].join("\n"));
+        if (localAfter.eq(localBefore)) return true;
+      }
+    }
+    const before = run.doc ??= markdownToPageDoc(lines.slice(run.start, run.end).join("\n"));
+    return markdownToPageDoc([...lines.slice(run.start, index), line, ...lines.slice(index + 1, run.end)].join("\n"))
+      .eq(before);
+  };
   for (const index of escaped) {
     const run = runs.find((candidate) => candidate.start <= index && index < candidate.end)!;
-    const line = lines[index]!;
+    const line = dropPlainEscapes(lines[index]!);
     const bare = line.replace(/\\([!-/:-@[-`{-~])/gu, "$1");
-    if (same(index, run, bare)) { lines[index] = bare; continue; }
-    // Some escapes on the line matter: drop the others one at a time.
+    if (line === bare || same(index, run, bare)) { lines[index] = bare; continue; }
+    // Some remaining escapes matter: drop the others one at a time.
     let current = line;
     for (let at = current.indexOf("\\"); at >= 0; at = current.indexOf("\\", at + 1)) {
-      if (!/[!-/:-@[-`{-~]/u.test(current[at + 1] ?? "")) continue;
+      if (!MARKUP_ESCAPE.test(current.slice(at, at + 2))) continue;
       const candidate = current.slice(0, at) + current.slice(at + 1);
       if (same(index, run, candidate)) current = candidate;
       else at++;
@@ -499,7 +588,7 @@ export function pageDocToMarkdown(doc: DocNode): string {
     incrementListMarker: true, setext: false,
     extensions: [gfmToMarkdown({ tablePipeAlign: false })],
   }).replace(/\n+$/u, "");
-  return text.trim() ? `${tidy(text)}\n` : "";
+  return text.trim() ? `${tidy(text, doc)}\n` : "";
 }
 
 /** A page's markdown in canonical form, as the editor saves it. */
@@ -573,11 +662,11 @@ export function pageDocBlockAt(doc: DocNode, pos: number): string {
 }
 
 /**
- * What changed between a revision a reader last had on screen and the document
- * now (pages-live-document.md §3.1), in the current document's positions: text
- * and blocks that are new, and what was taken out, at where it was. Text taken
- * out of a line keeps the space that parted it from the words beside it, so it
- * reads as it did drawn back in at `at`.
+ * What differs between two documents, in the second one's positions: text and
+ * blocks that are new, and what was taken out, at where it was. Text taken out
+ * of a line keeps the space that parted it from the words beside it, so it
+ * reads as it did drawn back in at `at`. A suggestion's changes are told this
+ * way (`pageDocHunks`); two versions of a page are compared by `pageDocDiff`.
  */
 export type PageDocChange =
   | { kind: "added"; from: number; to: number; block: boolean }
@@ -771,42 +860,6 @@ function topBlocks(node: DocNode): Array<{ node: DocNode; pos: number; key: stri
   const out: Array<{ node: DocNode; pos: number; key: string }> = [];
   node.forEach((child, pos) => out.push({ node: child, pos, key: JSON.stringify(child.toJSON()) }));
   return out;
-}
-
-/**
- * The page as its reader has seen it (pages-live-document.md §3.1), after they had `now` on screen where
- * `inView` says: each top-level block of `now` in view is seen as it is, one out of view keeps what they
- * saw of it in `seen`, and a block taken out is gone for them once where it stood is in view.
- */
-export function pageSeenDoc(seen: DocNode, now: DocNode, inView: (pos: number, end: number) => boolean): DocNode {
-  const old = topBlocks(seen);
-  const current = topBlocks(now);
-  const out: DocNode[] = [];
-  let kept = 0;
-  const shown = (block: { node: DocNode; pos: number }) => inView(block.pos, block.pos + block.node.nodeSize);
-  for (const hunk of diffIndices(old.map((block) => block.key), current.map((block) => block.key))) {
-    const [removedStart, removedLength] = hunk.buffer1;
-    const [addedStart, addedLength] = hunk.buffer2;
-    for (const block of old.slice(kept, removedStart)) out.push(block.node);
-    kept = removedStart + removedLength;
-    const removed = old.slice(removedStart, kept);
-    const added = current.slice(addedStart, addedStart + addedLength);
-    // Where a block was taken out: the blocks either side of the gap it left.
-    const gap = () => [current[addedStart - 1], current[addedStart]].some((block) => block !== undefined && shown(block));
-    // A block that took another's place is paired with it: seen, it replaces it; unseen, the old one stays.
-    for (let index = 0; index < Math.max(removed.length, added.length); index++) {
-      const was = removed[index];
-      const is = added[index];
-      if (is) {
-        if (shown(is)) out.push(is.node);
-        else if (was) out.push(was.node);
-      } else if (was && !(added.length ? shown(added[added.length - 1]!) : gap())) {
-        out.push(was.node);
-      }
-    }
-  }
-  for (const block of old.slice(kept)) out.push(block.node);
-  return now.type.create(now.attrs, out);
 }
 
 /**

@@ -459,6 +459,7 @@ fn codex_model_info_from_value(value: &Value) -> Option<protocol::AgentModelInfo
         input_modalities,
         supports_personality: value.get("supportsPersonality").and_then(Value::as_bool),
         upgrade: clean("upgrade", 128),
+        quota_scopes: None,
     })
 }
 
@@ -2148,10 +2149,6 @@ impl CodexAppSession {
         .await?;
         self.notify("initialized").await?;
 
-        let approval_policy =
-            std::env::var("XMATRIX_CODEX_APP_APPROVAL").unwrap_or_else(|_| "never".to_string());
-        let sandbox = std::env::var("XMATRIX_CODEX_APP_SANDBOX")
-            .unwrap_or_else(|_| "danger-full-access".to_string());
         let resume_thread_id = resume_requested
             .then(|| load_codex_resume_session_id(resume_session_key))
             .flatten();
@@ -2159,16 +2156,17 @@ impl CodexAppSession {
         // not turn/start or steer. Keep the reminder in the persistent native
         // context, including recovery, without promoting any user input.
         let developer_instructions = codex_thread_developer_instructions();
-        let mut params = if let Some(thread_id) = resume_thread_id.as_deref() {
-            codex_thread_resume_params(thread_id, cwd, &approval_policy, &sandbox)
+        // The sandbox and approval policy are the launch's access grant;
+        // without them Codex applies its own configuration.
+        let params = if let Some(thread_id) = resume_thread_id.as_deref() {
+            codex_thread_resume_params(thread_id, cwd)
         } else {
             serde_json::json!({
                 "cwd": cwd,
-                "approvalPolicy": approval_policy,
-                "sandbox": sandbox,
                 "dynamicTools": codex_goal_dynamic_tools(),
             })
         };
+        let mut params = with_access_session(params, &launch_access());
         if let Some(instructions) = developer_instructions {
             params["developerInstructions"] = Value::String(instructions);
         }

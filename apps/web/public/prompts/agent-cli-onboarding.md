@@ -104,17 +104,18 @@ Step 4a: Use the Space's secrets.
 
   Or put the script in a `.ps1` file and run `powershell -File`.
 
-Step 4b: Write a page's schedules (docs/design/pages-live-document.md §6.1).
-- A schedule is a line of the page section it keeps true, written as Obsidian Tasks writes a recurring or scheduled task. Write and change it with `xmatrix page edit` like any text:
-  - `- [ ] @auto repo:<owner/repo> <what to do> 🔁 every 12 hours` runs on a cadence (`every 30 minutes`, `every day`, `every 2 weeks`; `12h`, `1d` also read).
-  - `🔁 every day, on merged:<owner/repo>[@branch][:path,…], on ci-failed:<owner/repo>[@branch][:workflow]` also runs on those events; `on <app>:<event|*>[:<source>]` on a connected app's. The Space's connection must cover the repository or app. An event makes it due now; events coalesce, and the occurrence's message names them.
-  - `- [ ] <what to remind> ⏳ 2026-11-03 09:00 +08:00` runs once, at that time with its offset, as a reminder that waits on its author; once delivered its line becomes `- [x] … ✅ <day>`. With `🔁`, `⏳` sets when the first occurrence runs.
-  - `- [-]` pauses it; `- [ ]` resumes it; deleting the line deletes it.
-- Each occurrence runs in a fresh conversation linked to the section, as whoever last changed the line (an Agent as its owner), so it keeps running after this Run ends and starts from the page rather than from earlier occurrences: its Agent launches with the page in context, so the line says what to do, not "read this page first".
-- `xmatrix page read <page-id>` lists the page's schedules under `automations:`; `xmatrix page automation list <page-id>` shows each one's section, state and line, and `run <page-id> <id>` makes a running one due now without changing its cadence. `page edit` prints any schedule line that cannot run as written, with why.
-- Anyone who can edit the page manages its schedules. On a page that takes Agent edits as suggestions, ask a person instead.
-- A finished occurrence leaves its Agent available for follow-up messages; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
-- Each occurrence's conversation is new, so start its Agent with a harness mention such as `@auto`; an exact `@<agent>:<channel-instance-number>` finds no live instance there; other live Agents receive context only. Without an Agent mention an occurrence only posts its text in its conversation; it does not choose or start an Agent.
+Step 4b: Write a page's programs (docs/architecture/norn-host.md).
+- Work that repeats, waits for a time or an event, or asks someone is a Norn program: a fenced block tagged `norn run <name>` in the page section it keeps true. Write and change it with `xmatrix page edit` like any text:
+  - A round on a beat, with a fallback when the first Agent does not answer: `open Std`, then `routine(~every=1d, ~from=2026-11-03T09:00Z, ~who=@auto(~repo="<owner/repo>"), ~otherwise=@claude(~repo="<owner/repo>"), "<what to do>")`. `~every` is a duration (`30m`, `12h`, `7d`); `~from` is the UTC time of the first round.
+  - Also on events: `every(1d)->or(ciFailed("<owner/repo>"))->forEach(_ => run(@auto(~repo="<owner/repo>"), "<what to do>")->wait)`. `prMerged("<owner/repo>")` and `appEvent("<app>", ~feature="<event>")` are the other streams. The Space's connection must cover the repository or app. Events that arrive while a round runs are one more round after it, with the latest event; `ciFailed("<owner/repo>")->gather` hands the program all of them as a list.
+  - Once, at a time: `after(2026-11-03T01:00Z)->wait`, then `say(@<person>, "<what to remind>")` or `run(@auto(~repo="<owner/repo>"), "<what to check>")->wait`.
+  - Ask a person: `confirm(@<person>, "<question>", ~by=2d)`, `choose(@<person>, "<question>", [A, B])` or `ask(@<person>, "<question>")`. They answer on a card; without an answer by `~by` the program reads `NoReply`.
+  - Removing the block stops its program. Changing its text changes what the next round does; rounds already done are not run again.
+- A program runs in its own conversation linked to the page, as whoever last changed its block (an Agent as its owner), so it keeps running after this Run ends. An Agent it asks starts with the request and the page in context, so the text says what to do, not "read this page first".
+- `xmatrix page read <page-id>` lists how each program stands under `programs:`. `page edit` prints a program that does not run as written, with why.
+- Anyone who can edit the page manages its programs. On a page that takes Agent edits as suggestions, ask a person instead.
+- An Agent asked by a program ends its turn with `xmatrix reply <request> <answer>`, `xmatrix refuse` or `xmatrix broke`, as the request's message says; any Agent can stop (`@<agent>:<N>:stop`) or restart (`@<agent>:<N>:reborn`) an Instance, its own included.
+- In a conversation the same choice of Agent is a summon: `@auto repo:<owner/repo> <what to do>`. In a program it is `@auto(~repo="<owner/repo>")`.
 
 - Secret values are never printed in chat; Space admins decide how Agents get each secret.
 - Space admins manage a Space's secrets from Settings -> Secrets or `xmatrix secret list|set|delete --space <space-id>`.
@@ -132,9 +133,11 @@ Step 5: Add this machine's Agent to the Space.
   Examples:
 
   `xmatrix agent add codex --space <space-id> --name codex-workstation --workspace ~/src/app`
-  `xmatrix agent add claude --space <space-id> --workspace ~/src/app --arg=--dangerously-skip-permissions`
+  `xmatrix agent add claude --space <space-id> --workspace ~/src/app`
 
-  When this session was itself launched by the xMatrix daemon, it runs as an Agent: it may add an Agent for its owner on this machine in its own Space with the same command (when the Space lets members add Agents). For another machine, tell the human the exact `xmatrix agent add` command to run there; do not claim it was added.
+  The first time a harness is added on a machine, its owner confirms what it may do there. The command prints exactly what xMatrix adds to that harness's launch for full access (arguments, environment variables, session settings, and whether its permission requests are answered with allow) and adds nothing until that is confirmed. At a terminal it asks; you are not at one, so it stops. Show the human those printed lines word for word, and only after they agree run the same command again with `--access full`. When the command also offers `--access ask` (the harness then asks in its Channel before each file or command it needs permission for), tell them about it and pass the one they pick. Never pass `--access full` on your own judgment: the files on that machine are theirs.
+
+  When this session was itself launched by the xMatrix daemon, it runs as an Agent: it may add an Agent for its owner on this machine in its own Space with the same command (when the Space lets members add Agents). That works only for a harness whose access the owner already confirmed on this machine; otherwise the Hub refuses and names the command the owner runs. For another machine, tell the human the exact `xmatrix agent add` command to run there; do not claim it was added.
 
 - Agents run only when summoned: the daemon starts a Run for each summon. Do not start the runtime by hand to "register" it.
 

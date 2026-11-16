@@ -9,7 +9,7 @@ import { stripeAccountCredentials } from "./stripe-accounts";
 import { deliverStripeAccountEvents, type StripeIngressDependencies } from "./stripe-app-ingress";
 import { STRIPE_ACCOUNT_ID } from "./stripe-oauth";
 import { trimmedConnectorEnv } from "./connector-env";
-import { stripeEvent } from "./wave2-events";
+import { stripeEvent } from "./stripe-event";
 
 type PublisherDependencies = StripeIngressDependencies & { grant: typeof stripeAccountCredentials };
 const DEPENDENCIES: PublisherDependencies = {

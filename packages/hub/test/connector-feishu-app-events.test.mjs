@@ -89,7 +89,7 @@ test("grant revocation before append prevents delivery and acknowledgement; fail
   const deps = { ...FEISHU_INGRESS_DEPENDENCIES, native: async () => native, authority: () => ({}), apps: () => ({}),
     rooms: () => ({ route: async () => ({ connectionId: "s:feishu", spaceId: "s", chatSpace: "tenantA/oc_AbCd", grantGeneration: "fixture" }), current: async () => live }),
     deliver: async (_env, _apps, append) => { live = false; const response = await append(); if (!response.ok) throw new Error("commit refused"); },
-    append: async () => { appended++; return new Response(); }, automate: async () => { automated++; } };
+    append: async () => { appended++; return new Response(); }, events: async () => { automated++; } };
   const f = await signed(message()), result = await handleFeishuAppDelivery({}, f.request(), deps);
   assert.equal(result.status, 503); assert.equal(appended, 0); assert.equal(automated, 0);
   const ticket = await signed(lifecycle());

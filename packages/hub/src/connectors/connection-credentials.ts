@@ -57,7 +57,7 @@ export async function connectionCredentialGrant(env: Env, spaceId: string, provi
   let version = resolved?.version ?? 0;
   const verify = grantVerifier(providerId, credentials);
   let refreshed = await refreshOAuthFields(env, providerId, credentials).catch(error => {
-    if (verify || ["google", "googlecalendar", "googlesearchconsole", "googleadsense", "googleanalytics", "googleads", "googlebusinessprofile", "gcp", "bitbucket", "pagerduty", "sentry", "discord", "stripe"].includes(providerId)) throw error;
+    if (verify || ["google", "googlecalendar", "googlesearchconsole", "googleadsense", "googleanalytics", "googleads", "googlebusinessprofile", "gcp", "googleplay", "bitbucket", "pagerduty", "sentry", "discord", "stripe"].includes(providerId)) throw error;
     return undefined;
   });
   const persist = async (fields: Record<string, string | null>) => {

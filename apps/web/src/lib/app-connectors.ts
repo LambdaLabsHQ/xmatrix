@@ -20,7 +20,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   ],
   webhook: [
     "Route deploy, CI, and monitor notifications into the channel where agents work.",
-    "Wake a page Automation when an internal system reports an event.",
+    "Start a program on a page when an internal system reports an event.",
   ],
   sentry: [
     "Hand a new or regressed error to an agent in the channel that owns the service.",
@@ -75,7 +75,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   googlesearchconsole: [
     "Pull clicks, impressions, CTR and ranking for every site the connected Google account manages.",
     "Verify site ownership, manage properties and sitemaps, and inspect search performance.",
-    "Run a scheduled Automation that reports search traffic changes into the channel.",
+    "Run a program on a schedule that reports search traffic changes into the channel.",
   ],
   bingwebmaster: [
     "Read Bing clicks, impressions, top queries, top pages and crawl errors next to Search Console.",
@@ -84,7 +84,7 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   googleadsense: [
     "Read daily AdSense earnings, page views, RPM and viewability by site, ad format, ad unit, country or page.",
     "Check ad units, payments, alerts and policy issues without opening AdSense.",
-    "Let a scheduled Automation track each site's revenue next to its search traffic.",
+    "Let a program on a schedule track each site's revenue next to its search traffic.",
   ],
   googleanalytics: [
     "Read sessions, users and key events by landing page, channel or country, or only organic search traffic.",
@@ -97,6 +97,10 @@ const AGENT_USE_CASES: Record<AppConnectorProviderManifest["id"], string[]> = {
   googlebusinessprofile: [
     "Read each location's search and Maps views, website clicks, calls and direction requests.",
     "Read new reviews and post a reply once a Space admin allows it in the channel.",
+  ],
+  googleplay: [
+    "Release an Android build from a channel: upload the app bundle, roll it out to internal, closed or production testing and commit.",
+    "Manage testers, store listings, subscriptions and base plans, and read reviews and purchases without opening Play Console.",
   ],
   pagespeed: [
     "Run a Lighthouse audit on a page and list its scores, lab metrics and failing SEO and performance checks.",

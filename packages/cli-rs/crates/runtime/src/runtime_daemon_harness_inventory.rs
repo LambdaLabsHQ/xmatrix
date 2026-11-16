@@ -61,20 +61,30 @@ pub(crate) fn harness_command(program: &Path, args: &[impl AsRef<OsStr>]) -> Com
     command
 }
 
-/// Cursor's generic `agent` name is also used by other vendors. Prefer its
-/// unambiguous launcher and accept a generic alias only beside that launcher.
+/// The launcher a daemon-started Run of this preset would execute: searched
+/// on the PATH that Run gets (`agent_spawn_path`), so inventory reports
+/// installed exactly when a launch finds the file.
 pub(crate) fn resolve_launcher(preset: &AgentPreset) -> Option<PathBuf> {
+    resolve_launcher_on(preset, None)
+}
+
+/// `resolve_launcher` for a Run whose profile sets its own PATH.
+pub(crate) fn resolve_launcher_on(
+    preset: &AgentPreset,
+    profile_path: Option<&str>,
+) -> Option<PathBuf> {
     let home = dirs::home_dir()?;
-    let mut paths = std::env::var_os("PATH")
-        .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
-        .unwrap_or_default();
-    paths.push(home.join(".local").join("bin"));
-    paths.extend(xmatrix_cli_agent::native_launcher_dirs(&preset.id));
-    let paths = std::env::join_paths(paths).ok()?;
+    let paths = xmatrix_cli_agent::agent_spawn_path(profile_path)?;
     resolve_launcher_in(preset, &paths, &home)
 }
 
-fn resolve_launcher_in(preset: &AgentPreset, paths: &OsStr, cwd: &Path) -> Option<PathBuf> {
+/// Cursor's generic `agent` name is also used by other vendors. Prefer its
+/// unambiguous launcher and accept a generic alias only beside that launcher.
+pub(crate) fn resolve_launcher_in(
+    preset: &AgentPreset,
+    paths: &OsStr,
+    cwd: &Path,
+) -> Option<PathBuf> {
     let cursor = preset.id == "cursor";
     let mut names = preset.launcher_names.iter().collect::<Vec<_>>();
     if cursor {
@@ -232,38 +242,45 @@ fn harness_own_words(detail: &str) -> String {
 pub(crate) async fn refresh_readiness() -> bool {
     let mut changed = false;
     for preset in agent_presets() {
-        let has_status = preset
-            .management
-            .as_ref()
-            .and_then(|management| management.login.as_ref())
-            .is_some_and(|login| login.status.is_some());
-        if has_status || !matches!(preset.backend.as_str(), "acp" | "grok-acp") {
-            continue;
-        }
-        let state = match resolve_launcher(preset) {
-            None => None,
-            Some(launcher) => match crate::acp_harness_readiness(preset, &launcher).await {
-                Some(Ok(())) => Some(("signed_in", None)),
-                Some(Err(reason)) => {
-                    eprintln!("{} cannot take work: {reason}", preset.display_name);
-                    Some(("signed_out", Some(harness_own_words(&reason))))
-                }
-                None => None,
-            },
-        };
-        let Ok(mut answers) = READINESS.lock() else {
-            return changed;
-        };
-        let previous = match state.clone() {
-            Some(state) => answers.insert(preset.id.clone(), state),
-            None => answers.remove(&preset.id),
-        };
-        changed |= previous != state;
+        changed |= refresh_readiness_of(preset).await;
     }
     changed
 }
 
-async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
+/// The same for one preset: a harness with a status command is asked by that
+/// command when probed, so only a status-less ACP harness is started here.
+/// True when its answer changed.
+pub(crate) async fn refresh_readiness_of(preset: &AgentPreset) -> bool {
+    let has_status = preset
+        .management
+        .as_ref()
+        .and_then(|management| management.login.as_ref())
+        .is_some_and(|login| login.status.is_some());
+    if has_status || !matches!(preset.backend.as_str(), "acp" | "grok-acp") {
+        return false;
+    }
+    let state = match resolve_launcher(preset) {
+        None => None,
+        Some(launcher) => match crate::acp_harness_readiness(preset, &launcher).await {
+            Some(Ok(())) => Some(("signed_in", None)),
+            Some(Err(reason)) => {
+                eprintln!("{} cannot take work: {reason}", preset.display_name);
+                Some(("signed_out", Some(harness_own_words(&reason))))
+            }
+            None => None,
+        },
+    };
+    let Ok(mut answers) = READINESS.lock() else {
+        return false;
+    };
+    let previous = match state.clone() {
+        Some(state) => answers.insert(preset.id.clone(), state),
+        None => answers.remove(&preset.id),
+    };
+    previous != state
+}
+
+pub(crate) async fn probe_launcher(preset: &AgentPreset) -> InventoryItem {
     let path = resolve_launcher(preset);
     let mut item = InventoryItem {
         id: preset.id.clone(),

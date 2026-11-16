@@ -73,7 +73,6 @@ import {
   ChevronRight,
   CircleArrowUp,
   CircleHelp,
-  Clock,
   Bot,
   HardDrive,
   Hash,
@@ -95,7 +94,7 @@ import {
   Users,
 } from "lucide-react";
 import { SearchGlyph } from "@/components/ui/search-glyph";
-import { useConversationPages } from "@/components/pages/conversation-page-cards";
+import type { ConversationPage } from "@/components/pages/conversation-page-cards";
 
 import {
   CenteredDialogShell,
@@ -128,6 +127,7 @@ import {
   type SerializedAgentInstance,
   type HumanProfile,
   type ChannelSnapshot,
+  type LiveChannel,
   type SerializedSpace,
 } from "@xmatrix/protocol";
 
@@ -198,7 +198,6 @@ export const WorkspaceRail = memo(function WorkspaceRail({
         <RailButton active={activeView === "status"} icon={statusLive ? StatusPulseIconLive : StatusPulseIcon} label="Status"
           onClick={() => onChangeView("status")} />
         <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
-        <RailButton active={activeView === "automation"} icon={Clock} label="Schedules" onClick={() => onChangeView("automation")} />
         <RailButton active={activeView === "agents"} icon={Bot} label="Agents" onClick={() => onChangeView("agents")} />
         <RailButton active={activeView === "apps"} icon={PlugZap} label="App" onClick={() => onChangeView("apps")} />
         <RailButton
@@ -555,6 +554,7 @@ export function TopWorkspaceBar({
   composing = false,
   onCloseComposing,
   channel,
+  hasConversationHead = false,
   spaces,
   currentSpaceId,
   view,
@@ -579,6 +579,7 @@ export function TopWorkspaceBar({
   composing?: boolean;
   onCloseComposing?: () => void;
   channel: ChannelSnapshot | null;
+  hasConversationHead?: boolean;
   spaces: SerializedSpace[];
   currentSpaceId: string | null;
   view: AppView;
@@ -637,6 +638,7 @@ export function TopWorkspaceBar({
       className={cn(
         "app-topbar flex h-12 shrink-0 items-center gap-2 bg-background px-3 text-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)]",
         showBack && "app-mobile-channel-detail-bar",
+        conversationOpen && hasConversationHead && "app-mobile-channel-head-bar",
         tabRoot && "app-mobile-tab-root-bar",
         ghost
       )}
@@ -769,25 +771,20 @@ export function TopWorkspaceBar({
   );
 }
 
-/* Summary sits on the same paper as the messages, outside their scroller.
-   It stays below the fixed-height wood navigation bar and has no card frame. */
+/* Summary and linked pages share the navigation bar's paper tone, outside
+   the message scroller. Their parent supplies the same content to both. */
 export function MobileChannelSummaryPlaque({
   summary,
   onOpen,
-  spaceId,
-  conversationId,
-  token,
+  pages,
   onOpenPage,
 }: {
   summary?: string;
   onOpen: () => void;
-  spaceId: string;
-  conversationId: string;
-  token: string | null;
+  pages: ConversationPage[];
   onOpenPage: (pageId: string) => void;
 }) {
   const text = summary?.trim();
-  const pages = useConversationPages({ spaceId, conversationId, token });
   if (!text && pages.length === 0) return null;
   /* Summary and linked pages share the paper content inset. No extra
      SUMMARY eyebrow or pin column takes width from the text. */
@@ -799,7 +796,10 @@ export function MobileChannelSummaryPlaque({
             type="button"
             aria-label="Open channel Summary"
             onClick={onOpen}
-            className="app-mobile-channel-about-summary flex w-full items-start gap-2 px-[var(--mobile-content-inset,1rem)] pb-2.5 pt-2.5 text-left active:opacity-80"
+            className={cn(
+              "app-mobile-channel-about-summary flex w-full items-start gap-2 px-[var(--mobile-content-inset,1rem)] pt-[var(--app-mobile-head-room,1.5rem)] text-left active:opacity-80",
+              pages.length > 0 ? "pb-2.5" : "pb-[18px]"
+            )}
           >
             {/* No `block` here: it and line-clamp both set `display`, and the
                 clamp needs -webkit-box. Losing that clipped the card mid-line
@@ -813,8 +813,8 @@ export function MobileChannelSummaryPlaque({
         {pages.length > 0 && (
           <div
             className={cn(
-              "app-mobile-channel-pages flex gap-1.5 overflow-x-auto px-[var(--mobile-content-inset,1rem)] pb-3",
-              !text && "pt-2.5"
+              "app-mobile-channel-pages flex gap-4 overflow-x-auto px-[var(--mobile-content-inset,1rem)] pb-[18px]",
+              !text && "pt-[var(--app-mobile-head-room,1.5rem)]"
             )}
             data-testid="mobile-conversation-pages"
           >
@@ -824,7 +824,7 @@ export function MobileChannelSummaryPlaque({
                 type="button"
                 title={section ? `${page.title} › ${section.title}` : page.title}
                 onClick={() => onOpenPage(pageId)}
-                className="app-mobile-channel-page-chip flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 rounded-full pl-2 pr-2.5 text-xs font-semibold active:opacity-80"
+                className="app-mobile-channel-page-chip flex h-7 max-w-[13rem] shrink-0 items-center gap-1.5 text-[13px] font-semibold active:opacity-60"
               >
                 <FileText className="size-3.5 shrink-0" aria-hidden="true" />
                 <span className="truncate">{page.title}</span>
@@ -1276,7 +1276,7 @@ export function ChannelPresenceAvatars({
   avatarItems,
   maxVisible,
 }: {
-  channel: ChannelSnapshot;
+  channel: LiveChannel;
   events: readonly ObservabilityEvent[];
   humanMembers: string[];
   avatarItems: ChannelAgentAvatarItem[];
@@ -1361,7 +1361,7 @@ export function channelAgentAvatarStatus(
 }
 
 /** The conversation's Instances with work in hand, as its row's avatars show: busy, or waiting on something. */
-export function channelWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]) {
+export function channelWorkInHand(channel: LiveChannel, events: readonly ObservabilityEvent[]) {
   return channelOnlineAgentAvatarItems(channel).flatMap((item) => {
     const presence = memberPresence(channel, item.member);
     if (presence.kind !== "agent" || !item.instance) return [];
@@ -1371,11 +1371,11 @@ export function channelWorkInHand(channel: ChannelSnapshot, events: readonly Obs
   });
 }
 
-export function channelWorkInHandInstanceIds(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): string[] {
+export function channelWorkInHandInstanceIds(channel: LiveChannel, events: readonly ObservabilityEvent[]): string[] {
   return channelWorkInHand(channel, events).map((item) => item.instance.id);
 }
 
-export function channelHasWorkInHand(channel: ChannelSnapshot, events: readonly ObservabilityEvent[]): boolean {
+export function channelHasWorkInHand(channel: LiveChannel, events: readonly ObservabilityEvent[]): boolean {
   return channelWorkInHandInstanceIds(channel, events).length > 0;
 }
 

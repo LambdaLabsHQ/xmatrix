@@ -1,7 +1,7 @@
 import type { GmailRoutingJob } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { connectorAppRepository, connectorCredentialRepository, gmailRoutingRepository } from "./credentials";
 import { appendToRoutes, connectorEventMessageId } from "./event-ingress";
 import type { ConnectorEvent } from "./provider";
@@ -11,6 +11,7 @@ import { writeConnectorPrivateResult } from "./private-result-content";
 import { gmailWatchIdentity,gmailWatchToken,renewGmailWatch,verifyGmailWatchMailbox } from "./gmail-watch-client";
 import { gmailIncomingChanges } from "./gmail-notification-api";
 import { ProviderRequestError } from "./http";
+import { reportGmailNotificationFailure } from "./gmail-read-failure";
 import { gmailPollConfig,gmailPollIdentity,gmailPollToken,gmailInboxFingerprint,
   gmailComposioBaseline,gmailComposioNotificationGet } from "./gmail-poll-client";
 
@@ -56,7 +57,7 @@ async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { crede
     summary: "A new Gmail message is available", body: autoRead && "unread" in autoRead ? `${body} ${autoRead.unread}` : body };
   await post(env, job, event, feature, targets, privateRead === undefined ? undefined : { xmatrixPrivateConnectorResultOwner: job.userId });
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
-  await fireConnectorAutomationTriggers(env, { spaceId: job.spaceId, provider: "gmail", event, authorizedUserId: job.userId });
+  await connectorEventArrived(env, { spaceId: job.spaceId, provider: "gmail", event, authorizedUserId: job.userId });
   await repository.delivered(job,id);
 }
 async function process(env: Env, job: GmailRoutingJob) {
@@ -128,6 +129,7 @@ export async function drainGmailNotifications(env: Env) {
       // 403 may be Gmail quota throttling; lease loss and delivery conflicts also retry.
       // Only definitive authorization failure retires the native grant.
       const revoked=error instanceof ProviderRequestError && error.status===401;
+      if(!revoked)reportGmailNotificationFailure(error);
       if(revoked && await repository.current(job)) {
         try {await post(env,job,notice(job,`stopped:${job.id}`,`${job.selection.address}: Gmail notifications need attention. Turn notifications on again in Apps → Gmail; existing search, read and reply remain available.`));}
         catch {await repository.finish(job,"retry");return;}

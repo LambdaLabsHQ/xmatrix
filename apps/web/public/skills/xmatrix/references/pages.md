@@ -15,17 +15,18 @@ outcome, do not open the conversation to recover it.
 A page is read far more often than it is written, so keep it what a newcomer
 needs to act now:
 
-- **Current truth only.** State, decisions in force (with the reason in one
-  line), and open work. Done work shrinks to a line or goes; a superseded
-  decision is deleted, not kept as history.
+- **Three things per section.** Conclusions (what is true now: state,
+  numbers, decisions in force with their reason in one line), key history
+  (one line each for what was tried, the result and why it was dropped, kept
+  only where a later decision needs it) and open work. Delete what is
+  resolved or superseded.
 - **No evidence on the page.** Commit SHAs, CI and release run ids,
-  timestamps of steps, test counts and who did what when belong in the pull
-  request and the conversation. A PR number is enough.
+  timestamps of steps, test counts, receipts, quoted mail and who did what
+  when belong in the pull request and the conversation. A PR number or a
+  conversation link is enough.
 - **One fact, one place.** Link to the page, section or repository file that
-  owns a fact instead of copying it.
-- **Small.** A section is a few lines; status is a table with one short
-  sentence per cell. When a page grows past a screen or two, cut what is no
-  longer true or split it into child pages.
+  owns a fact instead of copying it. A fact you learn that another section
+  owns is updated there, in place.
 - **Rewrite, never append.** When a section has become a log, rewrite it in
   place to the current state and leave how it changed in the conversation.
 

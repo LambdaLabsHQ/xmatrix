@@ -1,5 +1,6 @@
 import { plainRecord, repoSummonReference } from "@xmatrix/protocol";
-import type { AgentInstanceOfflineReason, AgentStatus, LiveAgentStatus, LlmUsage } from "@xmatrix/protocol";
+import type { AgentInstanceOfflineReason, AgentStatus, InstanceActivity, InstanceRevision, LiveAgentStatus,
+  LlmUsage } from "@xmatrix/protocol";
 import { isLiveAgentStatus } from "@xmatrix/protocol";
 import type { AgentInstanceRuntimeSession } from "./agent-instance-port";
 import {
@@ -37,6 +38,8 @@ export interface LiveAgentSessionSnapshot {
   connectedAt: string;
   lastSeenAt: string;
   presentation?: AgentInstancePresentation;
+  /** The connection's revision: the version it claimed and how many reports it has made. */
+  revision?: InstanceRevision;
 }
 
 /** The route of the Machine Daemon that hosts one live Instance's Run. */
@@ -112,9 +115,27 @@ export function liveAgentSessionSnapshots(
       ...(session.presentation
         ? { presentation: sanitizeAgentInstancePresentation(session.presentation) }
         : {}),
+      ...(session.run.connectionVersion !== undefined
+        ? { revision: { version: session.run.connectionVersion, sequence: session.run.presenceSequence ?? 0 } }
+        : {}),
     });
   }
   return snapshots;
+}
+
+/** What a live Instance another cell holds is doing now, at its connection's revision. */
+export function liveAgentSnapshotActivity(snapshot: Readonly<Pick<LiveAgentSessionSnapshot, "instanceId" | "channelId" | "revision" | "presentation">>): InstanceActivity | undefined {
+  if (!snapshot.revision) return undefined;
+  const presentation = snapshot.presentation;
+  return {
+    instanceId: snapshot.instanceId,
+    channelId: snapshot.channelId,
+    revision: snapshot.revision,
+    ...(presentation?.activity ? { activity: presentation.activity } : {}),
+    ...(presentation?.intent ? { intent: presentation.intent } : {}),
+    ...(presentation?.files ? { files: presentation.files } : {}),
+    ...(presentation?.runtimeState ? { runtimeState: presentation.runtimeState } : {}),
+  };
 }
 
 function sessionSelected(
@@ -261,6 +282,10 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
   const repositoryText = boundedText(value.repository, 2_048);
   const repository = repositoryText ? repoSummonReference(repositoryText) : undefined;
   const machineOffline = value.machineOffline === true;
+  const revision = record(value.revision) && Number.isSafeInteger(value.revision.version) &&
+      Number(value.revision.version) >= 1 && Number.isSafeInteger(value.revision.sequence) &&
+      Number(value.revision.sequence) >= 0
+    ? { version: Number(value.revision.version), sequence: Number(value.revision.sequence) } : undefined;
   const presentation = value.presentation === undefined
     ? undefined
     : sanitizeAgentInstancePresentation(value.presentation);
@@ -282,6 +307,7 @@ function parseLiveAgentSessionSnapshot(value: unknown): LiveAgentSessionSnapshot
     connectedAt,
     lastSeenAt,
     ...(presentation ? { presentation } : {}),
+    ...(revision ? { revision } : {}),
   }];
 }
 

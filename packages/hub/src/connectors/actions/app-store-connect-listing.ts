@@ -243,7 +243,7 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
     const { demoAccountRequired, ...texts } = parsed.fields;
     const names = Object.keys(texts);
     if ((!names.length && demoAccountRequired === undefined) || names.some(name => !Object.hasOwn(CONTACT_LIMITS, name))) {
-      return `set any of ${Object.keys(CONTACT_LIMITS).join(", ")}, demoAccountRequired; the sign-in password is entered in App Store Connect, never here`;
+      return `set any of ${Object.keys(CONTACT_LIMITS).join(", ")}, demoAccountRequired; save demo credentials in private reviewSetup Credentials and use set_review_setup; never paste them here`;
     }
     const problem = names.map(name => textFieldProblem(name, texts[name], CONTACT_LIMITS[name]!)).find(Boolean);
     if (problem) return problem;
@@ -261,6 +261,6 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
         relationships: { appStoreVersion: relation("appStoreVersions", version.id) } } });
     }
     return `Set the App Review ${Object.keys(attributes).join(", ")} of ${input.app} ${input.version}.` +
-      (attributes.demoAccountRequired === true ? " Enter the sign-in password in App Store Connect; it is never taken from a channel." : "");
+      (attributes.demoAccountRequired === true ? " Save demo credentials in private reviewSetup Credentials and apply set_review_setup for this version." : "");
   }),
 };

@@ -377,11 +377,13 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
     sqlMaxMs: 0, commitMs: 0, roundTrips: 1, queries: 0 };
   const { result } = await run([{ body: issue }, { body: { ...event,
     tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
-    context: { database_failure_attempts: JSON.stringify([{ ...failure, session }, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+    context: { database_failure_attempts: JSON.stringify([{ ...failure, session, code: "CONNECTION_TERMINATED",
+      driverReason: "hyperdrive_egress_severed" }, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
       user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
   } }], undefined, "123");
   assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
-  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
+  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · CONNECTION_TERMINATED · 5000 ms/);
+  assert.match(result.summary, /Database driver reason 1: hyperdrive_egress_severed/);
   assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
   assert.match(result.summary, /Database session 1: wall=5012 ms .*checkout=12 ms .*round_trips=1 · queries=0/);
   assert.doesNotMatch(result.summary, /Database session 2:/, "historical events need no session snapshot");
@@ -389,6 +391,9 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
   for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
     JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
     JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }]),
+    ...["private-reason", "hyperdrive_egress_severed private-sql", "toString", "__proto__",
+      "hyperdrive_egress_severed", null, {}]
+      .map(driverReason => JSON.stringify([{ ...failure, driverReason }])),
     ...[null, { ...session, sql: "private-sql" }, { ...session, wallMs: -1 }, { ...session, checkoutMs: 120001 },
       { ...session, queries: 1.5 }, { ...session, beginMs: "private-duration" }, { wallMs: 12 }]
       .map(session => JSON.stringify([{ ...failure, session }]))]) {

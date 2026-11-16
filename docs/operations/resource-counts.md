@@ -18,7 +18,7 @@ eviction. The following fixed count limits have been removed:
 | Shared Memory | Refused a new key beyond 10,000 per workspace | Admission uses the existing encoded-byte budgets |
 | GitHub installations | Refused list append after 32 and returned only 32 linker records | Preserve appended installations and read every linker record |
 | Page Automations | Reconciliation/deletion failed beyond 200 rows | Process every Page-owned Automation in stable keyset batches |
-| Sentry installation bindings | Refused more than 50 Space bindings; uninstall failed above its read limit | No binding count quota; uninstall processes all bindings in atomic batches |
+| Sentry installation bindings | Refused more than 50 Space bindings; uninstall failed above its read limit | No binding count quota; event admission and uninstall process bindings in atomic batches |
 | Discord installation bindings | Refused more than 50 Space bindings; revocation failed above 50 | No binding count quota; revocation processes all bindings in atomic batches |
 
 `resource-pages.ts` supplies internal keyset iteration. Each SQL result remains
@@ -37,6 +37,17 @@ safety bounds. Those constrain a particular operation or measured storage
 budget rather than substituting a fixed count for storage ownership. New
 count bounds must describe that operation and must not silently drop saved
 resources. Adding an arbitrary larger number is not a repair.
+
+Sentry event admission uses the same resource-page iterator as installation
+retirement. Each page derives jobs from current configured bindings with matching
+credential versions and grant generations. The receipt and all of its jobs commit
+atomically; a later page failure rolls the whole receipt back. The existing
+1,000-pending-job backpressure per App remains an operation budget: an event that
+cannot fit is refused in full and can be retried after the backlog drains. It is
+not a limit on saved installation bindings. Claims still take at most four jobs,
+with at most eight live leases. A receipt can now have up to 1,000 children, so
+the existing two-receipt cleanup can cascade at most 2,000 job deletions within
+its owning transaction deadline.
 
 ## Migration and recovery
 
@@ -62,5 +73,7 @@ Real PostgreSQL regressions exercise secret creation past 128, complete
 multi-page catalogs, ask approval and byte-bounded bulk reads; 1,001 pins and an unreadable tail;
 121 devices and 501 recipients; 101 memory entries and 10,001 small keys;
 103 GitHub installations; 251 Page Automations; and installation retirement
-across batches. Existing owner suites retain concurrent-save, authority,
+across batches; and Sentry event admission/draining across 122 current bindings,
+with a stale credential in the tail, replay and a later-page backlog overflow
+that rolls back the entire receipt. Existing owner suites retain concurrent-save, authority,
 provider-evidence, rollback/retry and stale-installation coverage.

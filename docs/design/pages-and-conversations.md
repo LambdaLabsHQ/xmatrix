@@ -105,7 +105,8 @@ The production x-matrix Space on 2026-09-26:
   true now, what is in progress and what is blocked. The document proper
   follows: goals, decisions in force, how things work, and open questions.
 - Metadata:
-  - title;
+  - title, read from the document itself: its first top-level heading
+    (`pages-live-document.md` §4.1), never stored beside it;
   - parent and position;
   - permissions (§7);
   - attached configuration: launch targets,
@@ -128,7 +129,18 @@ The production x-matrix Space on 2026-09-26:
   conversation's draft as a block on the line after the caret, quoted with a
   link back to the message. A draft holds as many quotes as its author puts
   in, each among what is written around it, and the message sent carries them
-  in that order; each shows as its own slip there.
+  in that order; each shows as its own slip there. A slip's removal uses its
+  current editor position, so editing earlier words cannot strand its control.
+- **Pictures within a message** name the message's attachments by position
+  (`![name](attachment:1)`). The final rendered Markdown tree records the files
+  it actually draws; remaining attachments stay beneath the message. Code,
+  quoted passages shown as text, collapsed-away content, plain-text fallback
+  and system cards cannot consume a file they do not render. Markdown image
+  references use the same image nodes and do not duplicate the fallback tile.
+  Draft picture controls, file removal and the send transform inventory actual image nodes
+  from the shared GFM tree, restricted to the composer's whole-line picture
+  syntax. Attachment-looking lines in code or HTML remain literal source;
+  sending never resolves or removes those examples as uploads.
 - **"Discuss" on any selected passage** (on a message: "Discuss in new
   channel"), of a page or of a message, starts a
   new conversation named by what its first message says, as New conversation
@@ -296,12 +308,13 @@ it belongs in the repository.**
   Instance changed from that conversation since its previous message there,
   as a tool call carries its result. It is not a chat message of its own. The
   card names the page (and the section when all changes are in one), counts
-  the changed lines, and shows up to three of them as the page marks what
-  changed since it was read: a margin bar, new words underlined, words taken
+  the changed lines, and shows up to three of them as History marks what a
+  version changed: a margin bar, new words underlined, words taken
   out struck through, a whole new or removed line labelled. No code diff, no
-  markdown syntax. Opening the card opens the page at the first change with
-  everything since that edit's base marked over the text, and a back control
-  that returns to the message. The Hub answers the cards for the Agent
+  markdown syntax. Opening the card opens the page as it is now at the first
+  change, with a back control that returns to the message; the card itself
+  unfolds to every change, and the page's History has them in place. The
+  Hub answers the cards for the Agent
   messages a reader has on screen (`POST /api/channels/:id/page-edits/query`),
   from revision authorship and the conversation the revision names; only
   pages the reader can open are named.

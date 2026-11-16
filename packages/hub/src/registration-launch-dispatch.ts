@@ -5,7 +5,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, DraftSummonIntent, HarnessSignedOut, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AutoLaunchTags, HarnessTooOld, MachineAgents, OfflineMachine, QuotaExhausted, QuotaRetryRegistration, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresQuotaRetryRepository,
@@ -45,9 +45,8 @@ export async function executeRegistrationLaunchDispatch(input: {
   onlySelectionIndex?: number;
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; evaluatorFor?: LaunchEvaluator;
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
-  /** The author's "launch anyway" for one summon Jev read as a non-request. */
+  /** "Start" on one summon its send did not launch. */
   forceMention?: string;
-  draftIntents?: DraftSummonIntent[];
 }) {
   const { placement, repository } = await channelLaunchRepository(input);
   const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? registrationLaunchChooser(input.evaluatorFor(placement.spaceId), registrationLaunchContextReader({
@@ -61,15 +60,16 @@ export async function executeRegistrationLaunchDispatch(input: {
         // an untyped value collapses to the generic rejection.
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
           ? item.code : "registration_launch_rejected",
-        ...(item.tooOld ? { tooOld: item.tooOld } : {}), ...(item.signedOut ? { signedOut: item.signedOut } : {}),
-        ...(item.offline ? { offline: item.offline } : {}), ...(item.machineAgents ? { machineAgents: item.machineAgents } : {}) })),
+        ...(item.tooOld ? { tooOld: item.tooOld } : {}),
+        ...(item.offline ? { offline: item.offline } : {}), ...(item.machineAgents ? { machineAgents: item.machineAgents } : {}),
+        ...(item.quotaExhausted ? { quotaExhausted: item.quotaExhausted } : {}) })),
     });
   }
   // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
   if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
   const rejected = [];
   /** Used-up refusals with what they rested on, for a quota retry's own re-check. */
-  const quotaRefusals: Array<{ selectionIndex: number; registrations: SpaceAgentRegistrationKey[]; refusedThrough: string }> = [];
+  const quotaRefusals: Array<{ selectionIndex: number; registrations: QuotaRetryRegistration[]; refusedThrough: string }> = [];
   for (const item of result.rejected) {
     const { quotaTargets, quotaRefusedThrough, ...publicItem } = item;
     // A refusal for used-up quota rests on a reading that may already be out
@@ -103,8 +103,8 @@ interface RegistrationInputLaunch {
 interface RegistrationInputRequest {
   /** Exclude the stable registration bound to this predecessor Instance. */
   excludeSourceInstanceId?: string;
-  /** Exclude an environment that just failed to start this work. */
-  excludeRegistration?: SpaceAgentRegistrationKey;
+  /** Exclude environments that just failed to start this work. */
+  excludeRegistrations?: readonly SpaceAgentRegistrationKey[];
   commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
   runId?: string; instanceId?: string;
   initialMessageId?: string; presentationMessageId?: string; tags?: AutoLaunchTags;
@@ -255,7 +255,10 @@ export async function wakeRestingInstances(env: Env, input: {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
   // Its card shows it waking, or waiting for its machine, now rather than at the next read.
-  if (value.woken.length > 0 || value.refused.length > 0) await publishChannelPresenceChanged(env, input.channelId);
+  if (value.woken.length > 0 || value.refused.length > 0) {
+    await publishChannelPresenceChanged(env, input.channelId,
+      [...value.woken, ...value.refused].map((entry) => entry.instanceId));
+  }
   return value;
 }
 
@@ -315,19 +318,29 @@ async function newestMessageFor(env: Env, input: { channelId: string; instanceId
   return newest ? { messageId: newest.messageId as string, body: newest.body as string } : undefined;
 }
 
-/** Holds a source Instance whose provider quota ran out until its window resets. */
+/** Records what a source Instance's refused turn used up of its provider quota. */
 export function holdRegistrationUsageLimit(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string; resetsAt?: string;
+  quotaScope?: string; usage?: unknown;
 }) {
   return executeRegistrationUsageLimitHold({ ...runtimePlacement(env), ...input });
 }
 
-/** A reborn of a source Instance as a fresh registration Run of its tuple. */
+/** A reborn of a source Instance as a fresh registration Run of its tuple,
+ * on `preferredRuntimeModel` instead of its predecessor's model when given. */
 export function prepareRegistrationReborn(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
   sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
+  preferredRuntimeModel?: string;
 }) {
   return executeRegistrationRebornPrepare({ ...runtimePlacement(env), ...input });
+}
+
+/** What decides the model a stopped Instance can continue on. */
+export async function readContinuationModelFacts(env: Env, input: {
+  commandId: string; channelId: string; sourceInstanceId: string;
+}) {
+  return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).continuationModelFacts(input);
 }
 
 /** Jev decides whether a new conversation's first message asks for an Agent;
@@ -412,10 +425,10 @@ export async function dispatchStartupFallback(env: Env, input: { channelId: stri
       const message = page.messages.map(postgresProductMessage).find(item => item.sequence === sourceSequence);
       return typeof message?.body === "string" ? message.body : undefined;
     } });
-  if (!origin) return undefined;
+  if (!origin) return handoffFallback(env, input, commandId, repository, dispatch);
   try {
     const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
-      body: origin.body, tags: origin.tags, excludeRegistration: origin.failed,
+      body: origin.body, tags: origin.tags, excludeRegistrations: [origin.failed],
       // The retry answers the same message and is drawn on its summon, like the launch it replaces.
       initialMessageId: origin.sourceMessageId, presentationMessageId: origin.sourceMessageId,
       runMetadata: { sourceMention: origin.sourceMention } });
@@ -423,6 +436,30 @@ export async function dispatchStartupFallback(env: Env, input: { channelId: stri
   } catch (error) {
     // Nothing else can take the work, or routing could not choose now: the
     // failure notice stands on its own rather than a retry arriving late.
+    if (error instanceof RegistrationAccessError) return undefined;
+    throw error;
+  }
+}
+
+/** A handoff's successor that failed to start: the handoff goes to the next
+ * Agent, never to one it already tried or back to its source
+ * (handoffFallbackOrigin). Undefined when the Run is no handoff's, or nothing
+ * else can take it. */
+async function handoffFallback(env: Env, input: { channelId: string; runId: string }, commandId: string,
+  repository: Awaited<ReturnType<typeof channelLaunchRepository>>["repository"],
+  dispatch: typeof dispatchRegistrationInput): Promise<{ agentName: string } | undefined> {
+  const origin = await repository.handoffFallbackOrigin({ commandId, channelId: input.channelId, runId: input.runId });
+  if (!origin) return undefined;
+  try {
+    const launched = await dispatch({ env, commandId, actorUserId: origin.actorUserId, channelId: input.channelId,
+      body: origin.body, tags: origin.tags, excludeRegistrations: origin.failed,
+      excludeSourceInstanceId: origin.sourceInstanceId,
+      ...(origin.handoffContext ? { handoffContext: origin.handoffContext } : {}),
+      ...(origin.presentationMessageId ? { presentationMessageId: origin.presentationMessageId } : {}),
+      runMetadata: { handoffSourceInstanceId: origin.sourceInstanceId, handoffFallbackFailed: origin.failed,
+        ...(origin.sourceMention ? { sourceMention: origin.sourceMention } : {}) } });
+    return { agentName: launched.agentName };
+  } catch (error) {
     if (error instanceof RegistrationAccessError) return undefined;
     throw error;
   }
@@ -449,7 +486,7 @@ async function placedRebornRepository(input: { env?: AppConnectorEnv; database: 
 export async function executeRegistrationRebornPrepare(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
   channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; prompt: string;
-  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
+  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission; preferredRuntimeModel?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).prepare(input);
 }
@@ -463,18 +500,19 @@ export async function executeRestingInstanceWake(input: {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
 }
 
-/** The source Instance's provider account is used up: its pool is held empty
- * until the reset. Moving its work is a separate `handoff:@auto`. */
+/** A turn of the source Instance was refused for its provider usage limit:
+ * what it used up and the reading it was told from are recorded together.
+ * Moving its work (a `handoff:@auto`, or a quota retry) is separate. */
 export async function executeRegistrationUsageLimitHold(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceInstanceId: string; resetsAt?: string;
+  channelId: string; sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown;
 }) {
   return (await placedRebornRepository(input, "handoff")).holdUsageLimit(input);
 }
 
 interface MessageLaunch {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  commandId: string; forceMention?: string; draftIntents?: DraftSummonIntent[];
+  commandId: string; forceMention?: string;
 }
 
 interface MessageLaunchResult {
@@ -482,10 +520,10 @@ interface MessageLaunchResult {
   prepared?: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[];
 }
 
-/** A summon the dispatch refused, and what it names: a program too old or signed out, offline machines,
+/** A summon the dispatch refused, and what it names: a program too old, offline machines,
  * or what a named machine runs. */
-export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld; signedOut?: HarnessSignedOut;
-  offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaRetryId?: string; selectionIndex?: number }
+export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld;
+  offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaExhausted?: QuotaExhausted; quotaRetryId?: string; selectionIndex?: number }
 
 type MessageLaunchDependencies = {
   launch?: (input: MessageLaunch) => Promise<MessageLaunchResult>;
@@ -518,7 +556,6 @@ async function dispatchFromMessage(input: MessageLaunch, dependencies: MessageLa
 
 export async function dispatchRegistrationLaunchesAfterMessage(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string;
-  draftIntents?: DraftSummonIntent[];
   scheduleBackground?: (task: Promise<unknown>) => void;
 }, dependencies: MessageLaunchDependencies = {},
 ): Promise<{ selectionCount: number; prepared: Array<{ launchId: string }>; rejected?: MessageLaunchRejection[] }> {
@@ -536,8 +573,8 @@ export async function dispatchRegistrationLaunchesAfterMessage(input: {
   return { selectionCount: result.selectionCount, prepared: result.prepared, rejected: result.rejected };
 }
 
-/** "Launch anyway": the source message's author answers the intent question
- * for one summon Jev declined. Message authority, fences and every other check
+/** "Start": the source message's author starts one summon its send did not
+ * launch. Message authority, fences and every other check
  * are the ordinary registration dispatch; only this summon is prepared. */
 export async function dispatchRegistrationLaunchAnyway(input: {
   env: Env; channelId: string; messageId: string; body: string; actorUserId: string; sourceMention: string;

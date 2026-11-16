@@ -164,7 +164,7 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/agent-instance-scheduled-unregister.test.mjs": {
+    "test/agent-instance-unregister.test.mjs": {
       "durationMs": 484,
       "peakRssBytes": 83682058,
       "peakFdCount": 19,
@@ -545,78 +545,6 @@
       "samples": 55,
       "failures": 0,
       "timeouts": 1
-    },
-    "test/automation-api.e2e.mjs": {
-      "durationMs": 12485,
-      "peakRssBytes": 522404395,
-      "peakFdCount": 67,
-      "samples": 55,
-      "failures": 2,
-      "timeouts": 1
-    },
-    "test/automation-delivery.e2e.mjs": {
-      "durationMs": 27456,
-      "peakRssBytes": 522404395,
-      "peakFdCount": 67,
-      "samples": 55,
-      "failures": 2,
-      "timeouts": 1
-    },
-    "test/automation-evaluator-binding.test.mjs": {
-      "durationMs": 379,
-      "peakRssBytes": 73007104,
-      "peakFdCount": 16,
-      "samples": 3,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-lifecycle.test.mjs": {
-      "durationMs": 285,
-      "peakRssBytes": 119794076,
-      "peakFdCount": 20,
-      "samples": 54,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-member-replacement-route.test.mjs": {
-      "durationMs": 1705,
-      "peakRssBytes": 103481826,
-      "peakFdCount": 19,
-      "samples": 3,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-occurrence-privacy.test.mjs": {
-      "durationMs": 2280,
-      "peakRssBytes": null,
-      "peakFdCount": null,
-      "samples": 2,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-rollout-config.test.mjs": {
-      "durationMs": 162,
-      "peakRssBytes": 48692412,
-      "peakFdCount": 15,
-      "samples": 52,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-triggers.e2e.mjs": {
-      "durationMs": 9775,
-      "peakRssBytes": 400000000,
-      "peakFdCount": 40,
-      "samples": 3,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/automation-triggers.test.mjs": {
-      "durationMs": 2766,
-      "peakRssBytes": 230000000,
-      "peakFdCount": 40,
-      "samples": 3,
-      "failures": 0,
-      "timeouts": 0
     },
     "test/better-auth-cookie-domain.test.mjs": {
       "durationMs": 544,
@@ -2338,14 +2266,6 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/page-automations.e2e.mjs": {
-      "durationMs": 21816,
-      "peakRssBytes": 420000000,
-      "peakFdCount": 40,
-      "samples": 3,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/page-awareness.e2e.mjs": {
       "durationMs": 9822,
       "peakRssBytes": null,
@@ -2674,22 +2594,6 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/postgres-scheduled-occurrence-fleet.test.mjs": {
-      "durationMs": 1074,
-      "peakRssBytes": 105423310,
-      "peakFdCount": 19,
-      "samples": 46,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/postgres-scheduled-run-cleanup.test.mjs": {
-      "durationMs": 980,
-      "peakRssBytes": 105238282,
-      "peakFdCount": 20,
-      "samples": 46,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/postgres-trace-access-authority.test.mjs": {
       "durationMs": 846,
       "peakRssBytes": 111173434,
@@ -2906,14 +2810,6 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/relay-authority-schedule-occurrence.contract.test.mjs": {
-      "durationMs": 903,
-      "peakRssBytes": 161426993,
-      "peakFdCount": 15,
-      "samples": 54,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/relay-postgres-channel-coordinator.e2e.mjs": {
       "durationMs": 4733,
       "peakRssBytes": 434053404,
@@ -3080,43 +2976,11 @@
       "failures": 0,
       "timeouts": 0
     },
-    "test/scheduled-message-authority.test.mjs": {
-      "durationMs": 235,
-      "peakRssBytes": 97016517,
-      "peakFdCount": 19,
-      "samples": 53,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/scheduled-run-cleanup.contract.test.mjs": {
-      "durationMs": 1006,
-      "peakRssBytes": 156978903,
-      "peakFdCount": 15,
-      "samples": 54,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/scheduled-run-terminal-reap.test.mjs": {
-      "durationMs": 1906,
-      "peakRssBytes": 135176339,
-      "peakFdCount": 19,
-      "samples": 54,
-      "failures": 0,
-      "timeouts": 0
-    },
     "test/scheduled-task-failure.test.mjs": {
       "durationMs": 1940,
       "peakRssBytes": null,
       "peakFdCount": null,
       "samples": 2,
-      "failures": 0,
-      "timeouts": 0
-    },
-    "test/scheduled-timeout-postgres.integration.test.mjs": {
-      "durationMs": 6680,
-      "peakRssBytes": null,
-      "peakFdCount": null,
-      "samples": 3,
       "failures": 0,
       "timeouts": 0
     },

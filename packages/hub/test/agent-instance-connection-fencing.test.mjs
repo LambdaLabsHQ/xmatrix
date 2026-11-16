@@ -302,3 +302,69 @@ test("a handshake refused for another owner's cell claims nothing, so the owner'
   assert.equal(ownerless.session(legacy), undefined);
   assert.equal(f.state.instanceVersion, claimed);
 });
+
+// Existing fencing tests protect connection ownership, but did not prove that
+// a refused binding identifies its failed comparison in one private-safe report.
+test("binding failures retain their source and field once, without compared values (HUB-C1/C2)", async (t) => {
+  const { captureErrorReports, exceptionEvents } = await import("./support/error-reports.mjs");
+  const { sendErrorReports } = await import("@xmatrix/protocol/error-reporting");
+  const { sentryEventMetadata } = await import("../src/connectors/actions/sentry-event-metadata.ts");
+  const envelopes = captureErrorReports(t);
+  t.mock.method(console, "warn", () => {});
+  const cases = [
+    ["connect_message", "token", f => { f.message.token = " "; }],
+    ["connect_message", "agentId", f => { f.message.identityId = "PRIVATE_SENTINEL"; }],
+    ["connect_message", "agentName", f => { f.message.name = "PRIVATE_SENTINEL"; }],
+    ...[["runId", "runId"], ["executionKey", "executionKey"], ["channelId", "autoJoinChannelId"],
+      ["machineId", "machineId"]].map(([field, contextKey]) => ["connect_message", field,
+      f => { f.message.runContext[contextKey] = "PRIVATE_SENTINEL"; }]),
+    ...["agentId", "channelId", "executionKey", "machineId"].map(field => ["authority_snapshot", field,
+      f => { f.principal[field] = "PRIVATE_SENTINEL"; }]),
+    ["authority_binding", "runId", f => { f.state.id = "PRIVATE_SENTINEL"; }],
+    ...["agentId", "executionKey", "channelId", "machineId", "instanceId", "status", "instanceStatus"].map(field =>
+      ["authority_binding", field, f => {
+        const authenticate = f.port.authenticate.bind(f.port);
+        f.port.authenticate = async (...args) => {
+          const binding = await authenticate(...args);
+          binding.run[field] = field === "instanceId" ? "" : "PRIVATE_SENTINEL";
+          return binding;
+        };
+      }]),
+    ["refresh_principal", "ownerUserId", f => { f.principal.ownerUserId = "PRIVATE_SENTINEL"; }, true],
+  ];
+  let count = 0;
+  for (const [source, field, corrupt, refresh = false] of cases) {
+    const f = fixture();
+    if (!refresh) corrupt(f);
+    const transport = new AgentInstanceRuntimeTransport(f.port);
+    const socket = new Socket(); transport.accept(socket);
+    await transport.handleFrame(socket, JSON.stringify(f.message));
+    if (refresh) {
+      corrupt(f);
+      await transport.handleFrame(socket, JSON.stringify({ type: "refresh_auth", token: "test-token" }));
+      assert.equal(transport.session(socket).principal.ownerUserId, "owner", "refused refresh cannot replace the principal");
+    } else {
+      assert.equal(socket.readyState, 3);
+      assert.equal(transport.session(socket), undefined);
+    }
+    assert.equal(socket.sent.length, refresh ? 2 : 1);
+    const response = socket.sent.at(-1);
+    assert.equal(response.failure.code, "agent_run_binding_mismatch");
+    assert.equal(response.failure.retryable, false);
+    assert.equal(response.message, "Agent credential does not match the live Authority run");
+    assert.doesNotMatch(JSON.stringify(response), /PRIVATE_SENTINEL|agent_binding_/u);
+    await sendErrorReports();
+    const events = exceptionEvents(envelopes);
+    assert.equal(events.length, ++count, `${source}/${field}: exactly one event`);
+    const event = events.at(-1);
+    assert.deepEqual(event.fingerprint, ["agent-run-binding", source, field]);
+    assert.equal(event.extra.diagnosticId, response.failure.diagnosticId);
+    const metadata = sentryEventMetadata({ context: event.extra });
+    assert.ok(metadata.includes(`Agent binding failure: ${source} · ${field}`));
+    assert.doesNotMatch(JSON.stringify(event), /PRIVATE_SENTINEL|test-token|owner@example/u);
+  }
+  for (const extra of [{ agent_binding_source: "PRIVATE_SENTINEL", agent_binding_field: "agentId" },
+    { agent_binding_source: "connect_message", agent_binding_field: "PRIVATE_SENTINEL" }]) {
+    assert.deepEqual(sentryEventMetadata({ context: extra }), []);
+  }
+});

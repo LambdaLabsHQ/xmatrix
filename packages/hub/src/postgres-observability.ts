@@ -38,7 +38,7 @@ const OPERATION_FAMILIES = new Set([
   "membership", "message", "page", "postgres", "preference-canary",
   "projection-recovery", "reborn", "registration", "reply-recovery", "role", "runtime", "scheduler",
   "secret-broker", "secret-value", "shared-memory", "slack-oauth", "space", "space-invite",
-  "space-join", "space-join-request", "space-placement", "summon-intent", "trace-access", "transfer",
+  "space-join", "space-join-request", "space-placement", "trace-access", "transfer",
   "user-preference", "wake", "workspace",
 ]);
 

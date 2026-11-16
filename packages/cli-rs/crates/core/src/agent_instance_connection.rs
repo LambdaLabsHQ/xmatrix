@@ -42,7 +42,7 @@ const HEARTBEAT_TIMEOUT_MS: u64 = 90_000;
 /// Object that owns this socket. It must match the Hub's `HUMAN_HEARTBEAT_PING`
 /// byte for byte. Its answer carries no `ts`, so it never parses as a reply:
 /// like any server frame it only proves the socket, which is all this probe asks.
-const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
+pub(crate) const EDGE_HEARTBEAT_FRAME: &str = r#"{"type":"ping","requestId":"web-heartbeat"}"#;
 const TRACE_REAP_INTERVAL_MS: u64 = HEARTBEAT_INTERVAL_MS;
 const CONNECT_TIMEOUT_MS: u64 = 15_000;
 const REGISTER_RESPONSE_TIMEOUT_SECS: u64 = 20;
@@ -303,16 +303,8 @@ fn merge_usage(current: &mut Option<LlmUsage>, incoming: &LlmUsage) {
         &mut current.context_usage_percent,
         &incoming.context_usage_percent,
     );
-    if incoming
-        .quota_usages
-        .as_ref()
-        .is_some_and(|entries| !entries.is_empty())
-        && !quota_observation_regresses(current, incoming)
-    {
-        current.quota_usages = incoming.quota_usages.clone();
-        current.quota_source = incoming.quota_source.clone();
-        current.quota_observed_at = incoming.quota_observed_at.clone();
-        current.quota_account = incoming.quota_account.clone();
+    if incoming.has_account_quota() && !quota_observation_regresses(current, incoming) {
+        current.replace_quota(incoming);
     }
     merge_present(
         &mut current.cached_input_tokens,
@@ -1839,10 +1831,7 @@ fn prepare_presence_update(
             .and_then(|s| s.usage.as_ref())
             .is_some_and(|current| quota_observation_regresses(current, incoming))
     {
-        incoming.quota_usages = None;
-        incoming.quota_source = None;
-        incoming.quota_observed_at = None;
-        incoming.quota_account = None;
+        incoming.clear_quota();
     }
     let snapshot = latest.get_or_insert_with(AgentPresenceSnapshot::default);
     snapshot.merge(message);
@@ -4311,6 +4300,7 @@ pub(crate) mod tests {
                         remaining: Some(70.0),
                         percent: Some(30.0),
                         reset_at: None,
+                        scope: None,
                     }]),
                     ..Default::default()
                 }
@@ -4566,6 +4556,9 @@ pub(crate) mod tests {
             detail: None,
             snapshot: None,
             resets_at: None,
+            quota_scope: None,
+            quota_scope_reason: None,
+            usage: None,
             pending_tasks: None,
             ts: None,
         };

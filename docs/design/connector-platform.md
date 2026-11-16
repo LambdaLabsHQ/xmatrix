@@ -136,7 +136,9 @@ Space connection tokens remain separate encrypted connection credentials.
 
 One-click connects verify current owner/admin membership in the target Space
 before signing state or creating a Composio account. The signed, expiring state
-binds the provider, Space and initiating admin. The provider's redirect to `/api/connectors/oauth/callback`
+binds the provider, Space and initiating admin. A provider that caps the
+`state` parameter (X accepts 500 characters) gets a compressed payload, and a
+state that would exceed the declared limit is refused rather than sent. The provider's redirect to `/api/connectors/oauth/callback`
 carries no xMatrix session, so the Hub only checks the state there and hands the
 grant to the app's `/connect/oauth` page. That page completes it with
 `POST /api/connectors/oauth/complete` as the signed-in user, and the Hub
@@ -416,6 +418,12 @@ API access (a request form, separate from OAuth verification) and the
 Account Management, Business Information and Performance APIs must be enabled;
 until then every call returns Google's 403.
 
+Google Play Console (`googleplay`) is another connection on the company
+Google client, holding `https://www.googleapis.com/auth/androidpublisher` and the
+read-only `playdeveloperreporting` scope that lists the account's apps for Check.
+Its operations come from the pinned androidpublisher v3 discovery document
+(`vendor/google-play`); see [the connector guide](../connectors/google-play.md).
+
 PageSpeed Insights (`pagespeed`) has no OAuth: the connection saves one Google
 Cloud API key with the PageSpeed Insights and Chrome UX Report APIs enabled,
 sent only in the `x-goog-api-key` header. `audit:<page url> [strategy=mobile|desktop]`
@@ -457,9 +465,31 @@ config therefore requests `https://mail.google.com/` alone, without the
 default profile and contacts scopes, and the Hub is the boundary the grant
 is not: every user-invoked Gmail action passes an endpoint list in `actions/gmail.ts`
 (GET profile, message list, one message, a text body Gmail stores by
-reference, and the send-as list; POST
-messages/send) and any other endpoint is refused before Composio is called.
-The only write, POST messages/send, belongs to `send` and `reply`. `send`'s
+reference, the send-as list, the draft list and one draft; POST messages/send
+and drafts/send) and any other endpoint is refused before Composio is called.
+The only writes are POST messages/send, which belongs to `send` and `reply`,
+and POST drafts/send, which belongs to `send_draft`. `drafts:*` lists a
+caller's drafts (id, sender, recipients, subject, attachment count).
+`send_draft:<draft id>` freezes the draft's sender, To, Cc, Bcc, subject,
+text and every attachment name and size for the approval card, together with
+the Gmail message id the draft holds; a draft whose recipients or attachments
+the card cannot list in full is refused, never shown in part. Sending reads the
+draft's whole message as `raw` (up to 48 MiB, the only provider response allowed
+past 4 MiB), refuses when its message id changed (Gmail gives an edited draft a
+new message) or its sender is no longer the mailbox or a verified send-as
+alias, rechecks authorization, and sends that snapshot through Gmail's upload
+endpoint (`/upload/.../drafts/send?uploadType=multipart`: the draft id as JSON
+metadata and the snapshot's own bytes as `message/rfc822`), so an edit made
+after the check is overwritten rather than sent. Gmail's ordinary JSON endpoint
+refuses a message over about 5 MB, and Composio's proxy itself refuses an
+inline body of a few MB (both answer 413), so the bytes never travel inline:
+the Hub stages the multipart body in `ATTACHMENT_BUCKET` under an unguessable
+256-bit token, serves it at `GET /api/connectors/mail-snapshots/<token>` for at
+most ten minutes, hands Composio that URL as `binary_body.url`, and deletes the
+object as soon as the send ends, sent or failed. The token is the only
+credential; the URL names no mailbox and is never shown in a Channel. A Hub
+without the bucket or `HUB_URL` refuses `send_draft` instead of sending inline. It is how an email
+with attachments, composed in Gmail, is sent after approval. `send`'s
 `from:` may name a send-as alias Gmail lists as primary or verified
 (`accepted`) on one of the caller's mailboxes: the mail goes out through that
 mailbox with the alias in its From header, the approval card names both, and
@@ -1112,7 +1142,13 @@ GitHub triggers may use either spelling.
     spawn, names only). `xmatrix connector list` reads
     `GET /api/connectors/usage` with the Run's credential: each configured
     provider of the Run's Channel's Space and the commands its manifest
-    declares. The listing grants nothing; execution checks Channel access,
+    declares. Each action carries its approval class (`effect`) and how an
+    Agent runs it (`via`): `call` for a read the Hub answers its caller
+    (`xmatrix call`), `send` for every other command. A read with no call
+    executor, the GitHub subscription, is `send`: it acts on the Channel it is
+    sent in, the CLI labels it `send` instead of `read`, and `xmatrix call`
+    answers that it is sent with `xmatrix send`. `via` changes no permission.
+    The listing grants nothing; execution checks Channel access,
     credentials and live policy again.
   - The generic Channel command handler admits only manifest-declared actions
     with an own executor whose read/write effect matches the declaration;

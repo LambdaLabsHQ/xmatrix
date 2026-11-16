@@ -15,9 +15,10 @@ import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime
  * ordinary handoff's job, exactly as if somebody had typed it.
  */
 
-function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" })) {
+function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" })) {
   const { port, commands } = recordingAgentInstancePort({
     respond: (family, input) => family === "registration-usage-limit-hold" ? hold(input) : { sequence: 7 },
+    offerUsageLimitRetry: async () => undefined,
   });
   const session = {
     principal: {
@@ -25,7 +26,8 @@ function harness(hold = async () => ({ limitedUntil: "2026-10-01T13:00:00.000Z" 
       runId: "run-1", executionKey: "execution-1",
     },
     run: { instanceId: "instance-1", channelId: "channel", channelInstanceId: "3" },
-    presentation: { model: "claude-opus-5-5" },
+    presentation: { model: "claude-opus-5-5", models: [
+      { id: "default", model: "claude-opus-5-5", displayName: "Opus 5.5", quotaScopes: ["Opus"] }] },
   };
   return { commands, port, session };
 }
@@ -35,12 +37,14 @@ const limited = {
   reason: "usage_limited", detail: "You've hit your limit · resets 1pm", resetsAt: "2026-10-01T13:00:00Z",
 };
 
-test("a usage-limited turn holds its pool, then only posts a handoff to @auto as the owner", async () => {
+test("a usage-limited turn holds its pool before its notice wakes anyone, then only posts a handoff to @auto as the owner", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, limited);
   assert.deepEqual(commands.map(command => command.family),
-    ["append-message", "registration-usage-limit-hold", "append-message"]);
-  const [notice, hold, handoff] = commands;
+    ["registration-usage-limit-hold", "append-message", "append-message"]);
+  // The notice wakes the Channel's resting Instances: those of this used-up
+  // registration must already read it held, or they wake into the same limit.
+  const [hold, notice, handoff] = commands;
   assert.equal(notice.input.residual.appMetadata.xmatrixTurnFailure, true);
   assert.deepEqual(notice.input.residual.appMetadata.xmatrixFailureEvidence.usageLimit,
     { resetsAt: "2026-10-01T13:00:00Z" });
@@ -69,6 +73,34 @@ test("a replayed usage-limit signal resolves to the same hold and handoff messag
   assert.deepEqual(second.commands.map(command => command.input.commandId ?? command.input.payload?.commandId),
     first.commands.map(command => command.input.commandId ?? command.input.payload?.commandId));
   assert.equal(second.commands[2].input.messageId, first.commands[2].input.messageId);
+});
+
+test("a turn that used up one model's quota carries its reading to the hold and waits for a retry, never a handoff", async () => {
+  const { commands, port, session } = harness(async () => ({ quotaPoolId: "pool", limitedUntil: "2026-11-19T18:00:00.000Z",
+    usedUp: "scope", scope: "Fable" }));
+  const usage = { quotaSource: "provider_api", quotaObservedAt: "2026-11-15T12:00:00Z",
+    quotaUsages: [{ label: "1w", percent: 55, resetAt: "2026-11-19T17:59:59Z" }],
+    scopedQuotaUsages: [{ label: "1w", percent: 100, resetAt: "2026-11-19T17:59:59Z", scope: "Fable" }] };
+  await port.execute(session, { ...limited, resetsAt: "2026-11-19T18:00:00Z", quotaScope: "Fable", usage });
+  assert.deepEqual(commands.map(command => command.family),
+    ["registration-usage-limit-hold", "append-message", "offer-usage-limit-retry"]);
+  const [hold, notice, retry] = commands;
+  assert.deepEqual(hold.input, { commandId: hold.input.commandId, actorUserId: "owner", channelId: "channel",
+    sourceInstanceId: "instance-1", resetsAt: "2026-11-19T18:00:00Z", quotaScope: "Fable", usage });
+  // The retry waits on the model the turn ran, by the scope that ran out.
+  assert.deepEqual(retry.input, { channelId: "channel", actorUserId: "owner", sourceMessageId: notice.input.messageId,
+    sourceMention: "@claude:3", sourceRunId: "run-1", sourceInstanceId: "instance-1",
+    model: { model: "claude-opus-5-5", quotaScopes: ["Fable"] } });
+});
+
+test("a usage limit no window explains holds the pool and waits for a retry on the model's own scopes", async () => {
+  const { commands, port, session } = harness(async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z",
+    usedUp: "unresolved" }));
+  await port.execute(session, { ...limited, quotaScope: "unresolved", quotaScopeReason: "usage_read_failed" });
+  assert.deepEqual(commands.map(command => command.family),
+    ["registration-usage-limit-hold", "append-message", "offer-usage-limit-retry"]);
+  assert.equal(commands[0].input.quotaScope, "unresolved");
+  assert.deepEqual(commands[2].input.model, { model: "claude-opus-5-5", quotaScopes: ["Opus"] });
 });
 
 test("an ordinary turn failure never starts a handoff", async () => {
@@ -106,7 +138,7 @@ test("a replayed failure whose notice is committed is not an error and still com
     // Hub may have stopped after the notice committed: the replay resumes the
     // hold and handoff, whose own ids make a repeat change nothing.
     assert.deepEqual(commands.map(command => command.family),
-      ["append-message", "registration-usage-limit-hold", "append-message"], code);
+      ["registration-usage-limit-hold", "append-message", "append-message"], code);
     assert.equal(commands[2].input.body, "@claude:3:handoff:@auto", code);
   }
 });
@@ -130,19 +162,19 @@ test("each failure has its own notice: a named failure by its id, an unnamed one
 test("Hub reads a usage limit from the original error even when the host said only turn_failed", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, { ...limited, reason: "turn_failed", resetsAt: undefined });
-  assert.deepEqual(commands.map(command => command.family), ["append-message", "registration-usage-limit-hold", "append-message"]);
-  assert.deepEqual(commands[0].input.residual.appMetadata.xmatrixFailureEvidence.usageLimit, {});
+  assert.deepEqual(commands.map(command => command.family), ["registration-usage-limit-hold", "append-message", "append-message"]);
+  assert.deepEqual(commands[1].input.residual.appMetadata.xmatrixFailureEvidence.usageLimit, {});
 });
 
 test("Claude's session-limit error reaches the card without inventing an HTTP status or reset date", async () => {
   const { commands, port, session } = harness();
   await port.execute(session, { ...limited, reason: "turn_failed", resetsAt: undefined,
     detail: "You've hit your session limit · resets 2:50am (UTC)" });
-  const notice = commands[0].input;
+  const notice = commands[1].input;
   assert.deepEqual(notice.residual.appMetadata.xmatrixFailureEvidence.usageLimit, {});
   assert.deepEqual(notice.residual.appMetadata.xmatrixFailureEvidence.httpStatuses, []);
   assert.match(notice.body, /resets 2:50am \(UTC\)/u);
-  assert.deepEqual(commands.map(command => command.family), ["append-message", "registration-usage-limit-hold", "append-message"]);
+  assert.deepEqual(commands.map(command => command.family), ["registration-usage-limit-hold", "append-message", "append-message"]);
 });
 
 test("any other refused turn-failure notice is still reported as an error", async () => {
@@ -154,7 +186,8 @@ test("any other refused turn-failure notice is still reported as an error", asyn
   // The client sees the folded code; the log names the authority's own (XMATRIX-HUB-7B).
   assert.equal(logged.error[0][1].code, "runtime.authority_rejected");
   assert.equal(logged.error[0][1].authorityCode, "message_sender_unavailable");
-  assert.deepEqual(commands.map(command => command.family), ["append-message"]);
+  // The account is used up whether or not its notice posts; nothing is handed off without it.
+  assert.deepEqual(commands.map(command => command.family), ["registration-usage-limit-hold", "append-message"]);
 });
 
 test("only an addressable Instance gets a handoff", () => {

@@ -1,5 +1,5 @@
 "use client";
-import { automaticConversationName, channelPresenceInstances, pageReferenceToken } from "@xmatrix/protocol";
+import { automaticConversationName, channelPresenceInstances, pageReferenceToken, pageTitleLine } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -7,7 +7,7 @@ import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-quer
 import type { PageDocBlock } from "@xmatrix/protocol/page-document";
 import {
   faceOfSender, isLiveAgentStatus, pageAuthorColor, pageAuthorLabel,
-  type FaceOf, type ChannelSnapshot, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
+  type FaceOf, type ChannelSnapshot, type LiveChannel, type PageAuthor, type PageConversation, type PageLink, type SpaceMember,
 } from "@xmatrix/protocol";
 import {
   Check, ChevronLeft, Clock, Files, FileText, History, Lock, MessageSquare, Plus, Share, Trash2, Undo2, X,
@@ -29,24 +29,25 @@ import { CountPill } from "@/components/dashboard/count-pill";
 import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
 import { useMessageReferenceCatalog } from "@/components/dashboard/message-reference-catalog";
+import { useRealtimeChannelsSelection } from "@/components/dashboard/realtime-channels";
 import { listenForOverlayDismissal } from "@/components/dashboard/use-overlay-dismiss";
 import { pagesViewPath } from "@/components/dashboard/workspace-shell-navigation";
 import type {
-  CursorPresence, Discussion, HeadingActions, PageCompletion, PageReading, PageSectionActions, SectionNote,
+  CursorPresence, Discussion, HeadingActions, PageCompletion, PageSectionActions, SectionNote,
   SuggestionControl,
 } from "./page-editor";
 import {
-  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PageHistory, PagePens, PageScrollMarks, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
+  ConversationList, DeletePageDialog, PageChangeMark, PageDialog, PagePens, PageScrollMarks, ShareDialog, type PagePen, type PresentPerson, type PageScrollMark,
 } from "./page-chrome";
 import { PageMargin, PageOffscreenCard, type MarginWriter, type OffscreenEntry } from "./page-margin";
 import type { PageSessionChanges } from "./page-session-changes";
 import { PageSessionChangesList, PageUndoNotice, useSessionChanges } from "./page-session-changes-panel";
 import { PagePhoneDock } from "./page-phone-dock";
-import { PageReaderChangeGutter, PageReaderChangeMark, PageReaderChangesOffer } from "./page-reader-changes-bar";
+import { PageHistoryBar, PageHistoryDocument, PageHistoryRail, usePageHistory } from "./page-history";
+import { usePageVisit } from "./page-visit";
 import type { SuggestionsReport } from "./page-suggestions";
 import { usePageSuggestions } from "./use-page-suggestions";
 import { PageWriteWith } from "./page-write-with";
-import { takeCoWriteRequest } from "@/lib/pages/co-write-request";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
 import { usePageWriters } from "./page-writers";
 import {
@@ -71,6 +72,7 @@ import { pageMentions, type PageReferenceTargets } from "./page-reference-chips"
 import type { PageSummons } from "./page-mention-summons";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { usePageSummons, type PageSummon } from "./page-summon-store";
+import { PageFind } from "./page-find";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
 
@@ -86,11 +88,10 @@ const PageDocumentStatic = dynamic(() => import("./page-document-static").then((
   loading: () => null,
 });
 
-/** The top-level heading the document opens with. That heading is the page's name. */
-function openingHeading(blocks: PageDocBlock[], markdown: string | undefined): string | null {
-  if (blocks.length > 0) return blocks[0].pos === 0 && blocks[0].depth === 1 ? blocks[0].title.trim() || null : null;
-  const line = markdown?.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
+/** The page's name as its document has it: the first top-level heading, wherever it stands. */
+function documentTitle(blocks: PageDocBlock[], markdown: string | undefined): string | null {
+  if (blocks.length > 0) return blocks.find((block) => block.depth === 1)?.title.trim() || null;
+  return pageTitleLine(markdown ?? "")?.title || null;
 }
 
 /**
@@ -308,9 +309,9 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
 }
 
 /**
- * A page's discussions with the conversations they name (its margin), its section awareness and its
- * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
- * so a page opens on what was read ahead and keeps it on screen while it is read again.
+ * A page's discussions with the conversations they name (its margin) and its section awareness. Their
+ * keys do not carry the page's revision: the live session's commits invalidate them, so a page opens on
+ * what was read ahead and keeps it on screen while it is read again.
  */
 function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
   return {
@@ -320,7 +321,7 @@ function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, 
   };
 }
 
-const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-awareness"];
+const PAGE_REVISION_QUERIES = ["page-links", "page-programs", "page-awareness"];
 // Co-writing commits arrive many a second; what they move beside the page is read again once they settle.
 const REVISION_REFRESH_MS = 1_000;
 
@@ -489,9 +490,6 @@ function liveRunOf(state: PagePresenceState, agents: readonly PageTreeAgent[]): 
 /** How long a page may take to connect before it says it is connecting. */
 const CONNECTING_SAID_AFTER_MS = 2_000;
 
-/** How long the page stays on screen at a new revision before it counts as read there. */
-const READ_AFTER_MS = 1_500;
-
 function usePresence(session: PageLiveSession | null): Array<{ clientId: number; state: PagePresenceState }> {
   const [states, setStates] = useState<Array<{ clientId: number; state: PagePresenceState }>>([]);
   useEffect(() => {
@@ -525,8 +523,8 @@ function useTicking(active: boolean): number {
   return now;
 }
 
-function liveAgents(channel: ChannelSnapshot): LiveConversation["agents"] {
-  if (!channel.presence) return undefined;
+function liveAgents(channel: LiveChannel | undefined): LiveConversation["agents"] {
+  if (!channel?.presence) return undefined;
   return channelPresenceInstances(channel.presence).flatMap(instance => {
     if (!isLiveAgentStatus(instance.status)) return [];
     const name = instance.label || instance.agentName;
@@ -706,51 +704,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   // The head whose blame is read, for the reads the editor asks for (page-blame.tsx).
   const blameRevision = useRef(headRevision);
   blameRevision.current = headRevision;
-  // How far this person has read the page, kept by the Hub on every device of theirs (§3.1): the newest
-  // revision they have seen whole, and the page as they have seen it when they saw only part of it past that.
-  // History shows a dot when the page moved past it, as Google Docs does. `opened` is where it stood as the
-  // page opened.
-  const [seenRevision, setSeenRevision] = useState<number | null>(null);
-  const [opened, setOpened] = useState<{ pageId: string; revision: number | null; seen: string | null } | null>(null);
-  // What the page was when this reader last read it, for showing what changed since as a diff.
-  const [readerBaseline, setReaderBaseline] = useState<string | null>(null);
-  // How many changes that diff holds (null until known), whether the reader has opened it over the page, and
-  // whether they have viewed it. The page opens as it is now; the diff is only offered until they ask for it.
-  const [readerChanges, setReaderChanges] = useState<number | null>(null);
-  const [diffShown, setDiffShown] = useState(false);
-  const [diffViewed, setDiffViewed] = useState(false);
-  // What of the page this reader has last told the Hub they have seen past `seenRevision`.
-  const sentSeen = useRef<string | null>(null);
-  useEffect(() => {
-    setSeenRevision(null);
-    setOpened(null);
-    setReaderBaseline(null);
-    setReaderChanges(null);
-    setDiffShown(false);
-    setDiffViewed(false);
-    if (!spaceId || !pageId || !token) return;
-    const controller = new AbortController();
-    // Unknown, nothing is marked read and nothing is shown as changed.
-    pageApi.readState(spaceId, pageId, token, controller.signal).then(({ revision, seen = null }) => {
-      setOpened({ pageId, revision, seen });
-      setSeenRevision(revision);
-      sentSeen.current = seen;
-    }, () => undefined);
-    return () => controller.abort();
-  }, [spaceId, pageId, token]);
-  const seen = useRef<number | null>(null);
-  seen.current = seenRevision;
-  /** The page read up to `revision`: seen whole, or as `seenBody` when only part of it was seen past that. */
-  const markSeen = useCallback((revision: number, seenBody: string | null) => {
-    if (!spaceId || !pageId || opened?.pageId !== pageId) return;
-    // Seen in part, it stays read as far as it was seen whole.
-    const at = seenBody === null ? Math.max(revision, seen.current ?? 0) : seen.current ?? revision;
-    if (at === seen.current && seenBody === sentSeen.current) return;
-    seen.current = at;
-    sentSeen.current = seenBody;
-    setSeenRevision(at);
-    void pageApi.markRead(spaceId, pageId, token, at, seenBody).catch(() => undefined);
-  }, [opened, pageId, spaceId, token]);
   // The GitHub files the page embeds are read through the Hub, as this reader (pages-live-document.md §6.5).
   const readGitHubFile = useCallback((href: string, signal: AbortSignal) =>
     pageApi.githubFile(spaceId!, pageId!, token, href, signal), [spaceId, pageId, token]);
@@ -764,82 +717,25 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (!spaceId || !writing) throw new Error("The page is not ready for media uploads");
     await pageApi.uploadMedia(spaceId, writing, token, file, onProgress);
   }, [spaceId, pageId, session, token]);
-  const unseen = headRevision !== null && seenRevision !== null && headRevision > seenRevision;
-  const baselineFor = useRef<typeof opened>(null);
-  useEffect(() => {
-    if (!opened || opened.pageId !== pageId || headRevision === null || baselineFor.current === opened) return;
-    baselineFor.current = opened;
-    setReaderBaseline(null);
-    // Seen in part, what changed is what the reader has not seen.
-    if (opened.seen !== null) { setReaderBaseline(opened.seen); return; }
-    // A first visit, or a page that has not moved, has nothing to show as changed.
-    if (opened.revision === null || opened.revision >= headRevision || !spaceId) { setReaderChanges(0); return; }
-    void pageApi.read(spaceId, opened.pageId, token, opened.revision).then((result) => {
-      if (baselineFor.current === opened) setReaderBaseline(result.page.body);
-    }, () => { if (baselineFor.current === opened) setReaderChanges(0); });
-  }, [headRevision, opened, pageId, spaceId, token]);
-  const reading = useRef<PageReading | null>(null);
-  const viewDiff = () => {
-    setDiffShown(false);
-    setDiffViewed(true);
-    reading.current?.seeAll();
-    if (headRevision !== null) markSeen(headRevision, null);
-  };
-  // Writing on the page, or calling an Agent to write it, is co-writing: what changes is seen as it happens,
-  // in its writer's ink, so what changed while the reader was away is no longer marked over it. It is still
-  // read only where it has been on their screen, so nothing says it was viewed.
-  const coWriting = () => {
-    if (!readerChanges || diffViewed) return;
-    setDiffViewed(true);
-    setReaderChanges(0);
-  };
-  // The page as the reader had seen it when it opened: what they see from then on is read (§3.1).
-  const readFrom = readerBaseline !== null ? readerBaseline : readerChanges === 0 ? null : undefined;
-  // What has been on the reader's screen a moment, while the tab is in front, is read as it is then: what an
-  // Agent writes in view is read as it is written, and what it writes out of view is not.
-  useEffect(() => {
-    if (mode !== "page" || !drawn || headRevision === null || readFrom === undefined) return;
-    let timer: number | undefined;
-    const read = () => {
-      window.clearTimeout(timer);
-      if (window.document.visibilityState !== "visible") return;
-      timer = window.setTimeout(() => {
-        const area = articleElement.current?.getBoundingClientRect();
-        const now = area && reading.current?.see({ top: Math.max(area.top, 0), bottom: Math.min(area.bottom, window.innerHeight) });
-        if (now) markSeen(headRevision, now.whole ? null : now.body);
-      }, READ_AFTER_MS);
-    };
-    read();
-    window.document.addEventListener("visibilitychange", read);
-    return () => { window.clearTimeout(timer); window.document.removeEventListener("visibilitychange", read); };
-  }, [drawn, headRevision, markSeen, mode, readFrom, viewport]);
-  // Opened from a message's edit card: the page shows what changed since that edit's base, marked over the text,
-  // and offers the way back to the message.
-  const [cameFrom, setCameFrom] = useState<{ pageId: string; opening: PageEditOpening; body: string | null } | null>(null);
+  // Opened from a message's edit card, the page offers the way back to that message.
+  const [cameFrom, setCameFrom] = useState<{ pageId: string; from: PageEditOpening["from"] } | null>(null);
   const openingSeq = useRef<number | null>(null);
   useEffect(() => {
     const opening = focusSection?.opening;
-    if (!opening || !spaceId || openingSeq.current === focusSection.seq) return;
+    if (!opening || openingSeq.current === focusSection.seq) return;
     openingSeq.current = focusSection.seq;
-    const target = focusSection.pageId;
-    setCameFrom({ pageId: target, opening, body: opening.since > 0 ? null : "" });
-    if (opening.since <= 0) return;
-    void pageApi.read(spaceId, target, token, opening.since).then((result) => setCameFrom((current) =>
-      current?.opening === opening ? { ...current, body: result.page.body } : current), () => undefined);
-  }, [focusSection, spaceId, token]);
-  const editBaseline = cameFrom?.pageId === pageId ? cameFrom.body : null;
-  useEffect(() => {
-    if (editBaseline === null) return;
-    setDiffViewed(false);
-    setDiffShown(true);
-  }, [editBaseline]);
-  const readerDiff = useMemo(() => {
-    const baseline = editBaseline ?? readerBaseline;
-    return baseline === null || headRevision === null || diffViewed || !drawn ? null : { body: baseline, head: headRevision };
-  }, [diffViewed, drawn, editBaseline, headRevision, readerBaseline]);
+    setCameFrom({ pageId: focusSection.pageId, from: opening.from });
+  }, [focusSection]);
   const queryClient = useQueryClient();
   const userId = user?.id ?? null;
   const userName = user?.name || user?.email || "";
+  // How far this person has read the page, and what is new to them on this visit. Read, the list of pages
+  // stops counting its changes.
+  const visit = usePageVisit({ spaceId, pageId, token, headRevision, onScreen: drawn,
+    onRead: useCallback((read: string, revision: number) => {
+      queryClient.setQueryData<PageSummary[]>(xmatrixQueryKeys.domain({ userId: userId ?? "anonymous" }, "page-tree", [spaceId]),
+        (current) => current?.map((item) => item.pageId === read ? { ...item, readRevision: revision } : item));
+    }, [queryClient, spaceId, userId]) });
   useEffect(preloadPageChunks, []);
   // What a commit moves beside the page is read again once commits settle; the page's opening revision
   // is what it was read at, so the session reporting it reads nothing again.
@@ -993,14 +889,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return started.length ? [...listed, ...started.map((link) => ({ conversationId: link.conversationId, name: null,
       activityAt: link.createdAt, headSequence: 0, readSequence: 0, lastMessage: null, agents: [] }))] : listed;
   }, [links.data, startedLinks]);
-  // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
-  const automations = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId]),
-    enabled: Boolean(spaceId && pageId), refetchInterval: () => refetchUnlessHumanPush(30_000),
-    queryFn: ({ signal }) => pageApi.automations(spaceId!, pageId!, token, signal).then((result) => result.automations),
-  });
-  const automationsById = useMemo(() => new Map((automations.data ?? []).map((item) => [item.id, item])),
-    [automations.data]);
   // A message or an Agent in one of the page's conversations brings its card up to date.
   const linkedKey = [...new Set(linkList.map((link) => link.conversationId))].sort().join(",");
   const refetchLinks = links.refetch;
@@ -1022,6 +910,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (wasBeside.current && !activeConversationId) void refetchLinks();
     wasBeside.current = activeConversationId;
   }, [activeConversationId, refetchLinks]);
+  // Each card's Agents come from the live Channel: a list copy holds none.
+  // Only a change to who is live there, or their status, redraws the cards.
+  const linkedIds = useMemo(() => linkedKey.split(",").filter(Boolean), [linkedKey]);
+  const liveAgentsOf = useRealtimeChannelsSelection(linkedIds, liveAgents);
   const liveConversation = useCallback((conversationId: string): LiveConversation | null => {
     const channel = conversation(conversationId);
     if (!channel) return null;
@@ -1030,11 +922,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       name: channel.name ?? null,
       lastMessage: last ? { face: faceOfSender(last.from), label: last.from.label, bodyPreview: last.bodyPreview,
         sentAt: last.sentAt } : null,
-      agents: liveAgents(channel),
+      agents: liveAgentsOf(conversationId),
       ...(channel.historyHeadSequence !== undefined ? { headSequence: channel.historyHeadSequence } : {}),
       ...(channel.readSequence !== undefined ? { readSequence: channel.readSequence } : {}),
     };
-  }, [conversation]);
+  }, [conversation, liveAgentsOf]);
   const conversations = useMemo(() => marginConversations({ links: linkList, conversations: listedConversations,
     live: liveConversation, now: Date.now() }), [linkList, listedConversations, liveConversation]);
   const conversationName = useCallback((conversationId: string) =>
@@ -1188,6 +1080,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     ...pageDocumentQuery(user?.id ?? null, spaceId ?? "", pageId ?? "", token),
     enabled: Boolean(spaceId && pageId && token),
   });
+  // The page's programs: asked only of a page whose text, as the editor holds it, has one.
+  const [hasProgram, setHasProgram] = useState(false);
+  const programs = useQuery({
+    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-programs", [spaceId, pageId]),
+    enabled: Boolean(spaceId && pageId && hasProgram), refetchInterval: () => refetchUnlessHumanPush(30_000),
+    queryFn: ({ signal }) => pageApi.programs(spaceId!, pageId!, token, signal).then((result) => result.programs),
+  });
+  const programsByName = useMemo(() => new Map((programs.data ?? []).map((item) => [item.name, item])), [programs.data]);
 
   const togglePublished = async () => {
     if (!spaceId || !page) return;
@@ -1210,10 +1110,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     if (pending && editorReady) setWriteOn((seq) => seq + 1);
   }, [pending, editorReady]);
 
-  // A page's name is the top-level heading its document opens with (pages-live-document.md §4.1).
-  const opening = openingHeading(blocks, document.data?.body);
+  // A page's name is its document's first top-level heading (pages-live-document.md §4.1).
+  const named = documentTitle(blocks, document.data?.body);
   // The tree catches up with a rename the heading made.
-  const renamedInDocument = Boolean(page && opening !== null && opening !== page.title.trim());
+  const renamedInDocument = Boolean(page && named !== null && named !== page.title.trim());
   useEffect(() => {
     if (renamedInDocument) void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   }, [headRevision, queryClient, renamedInDocument]);
@@ -1224,7 +1124,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
-  const marginOn = !phone && mode === "page" && articleWidth >= MARGIN_ROOM_PX;
+  // Beside a wide page there is room for a margin: the page's conversations, or History's versions.
+  const roomy = !phone && articleWidth >= MARGIN_ROOM_PX;
+  const marginOn = roomy && mode === "page";
   const openInMargin = Boolean(activeConversationId) && marginOn;
   const docked = Boolean(activeConversationId) && !phone && !openInMargin;
   useEffect(() => {
@@ -1239,11 +1141,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return ["claude", "codex", ...writers.agents.map((agent) => agent.harness)]
       .find((harness) => harness !== quiet && writers.agents.some((agent) => agent.harness === harness));
   };
-  // A page made to be co-written at once calls its Agent as it opens (co-write-request.ts).
+  // The co-writing call an `@` on the page makes (set below, once coWrite exists).
   const coWriteRef = useRef<((harness: string, blockId: string | null, summon?: PageSummon) => Promise<void>) | null>(null);
   const callInstanceRef = useRef<((instance: PageInstance, blockId: string | null, summon: PageSummon) => Promise<void>) | null>(null);
   // The `@`s this reader called Agents with on the page, each showing how its call goes.
-  const { summons, add: addSummon, update: updateSummon } = usePageSummons();
+  const { summons, add: addSummon, update: updateSummon } = usePageSummons(spaceId);
   const pageSummons = useMemo<PageSummons>(() => ({ list: summons.filter((summon) => summon.pageId === page?.pageId), token,
     conversationName: (id) => referenceActions.current.conversation(id)?.name ?? null,
     instanceStatus: (id, name) => liveOnPage.find((agent) => agent.conversationId === id && agent.name === name)?.status ?? null,
@@ -1273,14 +1175,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     },
   } : undefined, [addSummon, instances, page, queryClient, referenceCatalog?.channelActivityMs, referenceCatalog?.channels, spaceId, token, tree.data, userId,
     writers.agents]);
-  useEffect(() => {
-    if (!page || !canEdit || !coWriteRef.current) return;
-    const harness = takeCoWriteRequest(page.pageId);
-    if (harness) void coWriteRef.current(harness, null);
-    // Once per page opened, not on every change to it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page?.pageId, canEdit]);
 
+  // History, the page's other state (page-history.tsx): what it shows, and Escape as the way back to now.
+  const history = usePageHistory({ open: mode === "history" && Boolean(page), spaceId, pageId: page?.pageId ?? null, token,
+    headRevision: headRevision ?? page?.headRevision ?? null, since: visit.since,
+    // Restored, the page is that version: back to it as it is now.
+    onRestored: () => {
+      setMode("page");
+      void queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
+    } });
+  useEffect(() => {
+    if (mode !== "history") return;
+    const leave = (event: KeyboardEvent) => { if (event.key === "Escape" && !event.defaultPrevented) setMode("page"); };
+    window.addEventListener("keydown", leave);
+    return () => window.removeEventListener("keydown", leave);
+  }, [mode]);
   if (!spaceId) return <div className="p-6 text-sm text-muted-foreground">Choose a Space to see its pages.</div>;
   if (canMigrate && tree.data && (!page || reviewing === spaceId)) {
     return (
@@ -1366,7 +1275,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (summon) updateSummon(summon.id, { failure: "Another Agent was still being called. Mention it again." });
       return;
     }
-    coWriting();
     startingWriter.current = true;
     setNotice(null);
     const section = blockId ? blocks.find((block) => block.id === blockId)?.title ?? null : null;
@@ -1411,7 +1319,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       updateSummon(summon.id, { failure: "Its conversation is no longer open to you. Mention the Agent again." });
       return;
     }
-    coWriting();
     try {
       const writing = pending && session ? await session.make() : page.pageId;
       if (writing !== summon.pageId) updateSummon(summon.id, { pageId: writing });
@@ -1430,8 +1337,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   };
   callInstanceRef.current = callInstance;
   const openHistory = () => {
-    reading.current?.seeAll();
-    if (headRevision !== null) markSeen(headRevision, null);
+    visit.looked();
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
@@ -1691,13 +1597,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     await queryClient.invalidateQueries({ predicate: (query) => query.queryKey.includes("page-tree") });
   };
 
-  // What changed since the reader last read the page is offered above it until they view it; opened, it is marked
-  // over the text, and on a phone walked from a floating bar under the thumb.
-  const diffOffered = drawn && !diffViewed && !!readerChanges;
-  const phoneDiff = phone && mode === "page" && diffOffered && diffShown;
-  const readerOffer = (inMargin: boolean) => (
-    <PageReaderChangesOffer changes={readerChanges ?? 0} shown={diffShown} inMargin={inMargin}
-      onShow={() => setDiffShown(true)} onHide={() => setDiffShown(false)} onDone={viewDiff} />
+  const historyBar = <PageHistoryBar history={history} canEdit={canEdit} onClose={() => setMode("page")} />;
+  const historyRail = (
+    <PageHistoryRail history={history} fold={!roomy} conversationName={conversationName} onOpenConversation={openConversation} />
   );
   const controls = (
     <>
@@ -1715,11 +1617,10 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
             <MessageSquare /> {conversations.length}
             {conversations.some((item) => item.unread > 0) && <span aria-label="Unread conversations" className="size-1.5 rounded-full bg-destructive" />}
           </Button>
-          <Button variant="ghost" size="sm" aria-pressed={mode === "history"} title={lastEdit ?? "Version history"}
-            aria-label={`Version history${unseen ? ", changed since you last looked" : ""}`}
-            onClick={() => (mode === "history" ? setMode("page") : openHistory())} className="relative">
+          <Button variant="ghost" size="sm" title={lastEdit ?? "Version history"}
+            aria-label={`Version history${visit.fresh ? ", changed since your last visit" : ""}`} onClick={openHistory}>
             <History /> History
-            {unseen && <span className="absolute right-1 top-1 size-1.5 rounded-full bg-primary" data-testid="page-history-new" />}
+            {visit.fresh && <span className="page-new-dot" data-testid="page-history-new" />}
           </Button>
           <Button variant="ghost" size="sm" aria-expanded={dialog === "share"} onClick={(event) => {
             setShareAnchor(event.currentTarget);
@@ -1737,7 +1638,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   );
 
   // Back to the message whose edit card opened this page, named by its conversation.
-  const backTo = cameFrom?.pageId === pageId && onReturnToMessage ? cameFrom.opening.from : null;
+  const backTo = cameFrom?.pageId === pageId && onReturnToMessage ? cameFrom.from : null;
   const back = backTo ? (
     <button type="button" className="app-page-back mr-auto" data-testid="page-back-to-message"
       onClick={() => onReturnToMessage!(backTo)}>
@@ -1746,10 +1647,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     </button>
   ) : <span className="mr-auto" />;
   // The page's column, with room for the margin beside it when there is one.
-  const column = cn("mx-auto max-w-3xl", marginOn && "max-w-[calc(48rem+21.5rem)]");
+  const column = cn("mx-auto max-w-3xl", roomy && "max-w-[calc(48rem+21.5rem)]");
   return (
     <div className={cn("relative flex min-h-0 min-w-0 flex-1 overflow-hidden", marginOn && "pages-margin-on")}
       data-testid="pages-view">
+      <PageFind scope={articleElement} />
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* On a desktop the page's controls hold the band at the top, and the page scrolls below it: nothing
             passes under the band, and whatever waits at the page's top edge waits below it, clear of the
@@ -1757,14 +1659,19 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         {!phone && (
           <div className="app-page-band shrink-0 px-6 lg:px-12">
             <header className={cn(column, "app-band-header flex flex-wrap items-center gap-1.5")} data-testid="page-controls">
-              {back}
-              {/* The page speaks of saving only when something is wrong; who wrote it stands under its title. */}
-              <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="page-save-state">
-                {offline ? "Offline · your changes sync when you reconnect"
-                  : !pending && slowToConnect ? "Connecting…"
-                  : connected && !canEdit ? <><Lock className="size-3" aria-hidden="true" />Read-only</> : null}
-              </span>
-              {controls}
+              {/* History is the page's other state, and its header says so: the way back, in place of the page's controls. */}
+              {mode === "history" ? historyBar : (
+                <>
+                  {back}
+                  {/* The page speaks of saving only when something is wrong; who wrote it stands under its title. */}
+                  <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="page-save-state">
+                    {offline ? "Offline · your changes sync when you reconnect"
+                      : !pending && slowToConnect ? "Connecting…"
+                      : connected && !canEdit ? <><Lock className="size-3" aria-hidden="true" />Read-only</> : null}
+                  </span>
+                  {controls}
+                </>
+              )}
             </header>
           </div>
         )}
@@ -1781,7 +1688,11 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
           <article ref={measureArticle} className={phone ? "app-mobile-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6"
             : "app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12"}>
             <div className={column}>
-              {phone && <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">{backTo && back}{controls}</div>}
+              {phone && (
+                <div className="-mr-2 flex items-center justify-end gap-1 pb-3" data-testid="page-controls">
+                  {mode === "history" ? historyBar : <>{backTo && back}{controls}</>}
+                </div>
+              )}
               {notice && <p className={noticeClass("attention", "mb-3 rounded-md px-3 py-2 text-sm")}>{notice}</p>}
               {migration.data?.state === "proposed" && (
                 // An Agent drafted the move; it waits for an owner or admin, however many pages exist.
@@ -1792,16 +1703,22 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                 </p>
               )}
               {mode === "history" && page ? (
-                <PageHistory spaceId={spaceId} pageId={page.pageId} token={token}
-                  headRevision={headRevision ?? page.headRevision} canEdit={canEdit}
-                  conversationName={conversationName} onOpenConversation={openConversation}
-                  onClose={() => setMode("page")}
-                  onPromoted={() => void queryClient.invalidateQueries({ predicate: (query) =>
-                    query.queryKey.includes("page-tree") })} />
+                // The same column and the same margin as the page, so the text stands where it stood.
+                <div className="flex gap-6">
+                  <div className="relative min-w-0 max-w-3xl flex-1 page-byline-room">
+                    {!roomy && historyRail}
+                    <PageHistoryDocument history={history} references={references} mediaUrl={mediaUrl} />
+                  </div>
+                  {roomy && (
+                    // The versions stay beside the text as it scrolls, and a long list scrolls on its own.
+                    <aside className="w-80 shrink-0">
+                      <div className="sticky top-4 max-h-[calc(100dvh-8rem)] overflow-y-auto">{historyRail}</div>
+                    </aside>
+                  )}
+                </div>
               ) : (
                 <div className="flex gap-6">
-                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1", !pending && "page-byline-room",
-                    phone && phoneDiff && !suggestionMark && "has-reader-mark")}>
+                  <div ref={docColumn} className={cn("relative min-w-0 max-w-3xl flex-1", !pending && "page-byline-room")}>
                     <PagePens pens={edgePens} room={penRoom} onJump={jumpTo}
                       onOpen={(person) => setDialog({ kind: "agent", key: person.key })} />
                     {suggestionMark && suggestedBy && (
@@ -1824,28 +1741,21 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         </button>
                       </PageChangeMark>
                     )}
-                    {diffOffered && diffShown && <PageReaderChangeGutter column={docColumn} />}
-                    {phone && phoneDiff && !suggestionMark && (
-                      <PageReaderChangeMark column={docColumn} article={articleElement} changes={readerChanges ?? 0}
-                        onViewed={viewDiff} />
-                    )}
                     {!drawn && document.data && (
                       // Where the editor's host holds its height.
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
                     )}
-                    {diffOffered && !phoneDiff && !marginOn && readerOffer(false)}
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
                         {...(coWriter ? { placeholder: onboardingCopy.coWrite.firstLine(coWriter) } : {})}
-                        onReady={() => setEditorReady(true)} readerBaseline={readerDiff} readerShown={diffShown} commentInMargin={marginOn} onReaderChanges={setReaderChanges}
-                        onWrite={coWriting} readFrom={readFrom} reading={reading}
+                        onReady={() => setEditorReady(true)} commentInMargin={marginOn}
                         suggestions={drawn ? waiting.suggestions : null} onSuggestions={setSuggesting}
                         suggestionControl={suggestionControl}
                         actions={sectionActions} headingActions={headingActions} sections={sections}
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                        automations={automationsById} references={references} completion={completion}
+                        programs={programsByName} onProgramsPresent={setHasProgram} references={references} completion={completion}
                         summons={pageSummons}
                         focusedConversationId={activeConversationId ?? focused} readCard={readCard}
                         onFocusConversation={setFocused}
@@ -1892,7 +1802,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         {...(onCloseConversation ? { onClose: onCloseConversation } : {})}
                         {...(onExpandConversation ? { onExpand: onExpandConversation } : {})}
                         onOpen={openConversation} onResolve={(linkId) => void resolveDiscussion(linkId)}
-                        onFocus={setFocused} {...(diffOffered ? { head: readerOffer(true) } : {})} />}
+                        onFocus={setFocused} />}
                     </aside>
                   )}
                 </div>

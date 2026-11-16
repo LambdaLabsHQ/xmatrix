@@ -12,7 +12,7 @@ import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrant, githubG
 import { startChannelAbout, type ChannelAboutStart } from "./channel-about";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { githubCatalogChanged } from "./github-catalog-events";
-import { fireGitHubAutomationTriggers } from "./automation-triggers";
+import { githubEventArrived } from "./outside-events";
 import { onPullRequestNamingBlocks } from "./github-pull-request-blocks";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
@@ -295,9 +295,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       await onPullRequestNamingBlocks(c.env, payload as Record<string, unknown>)
         .catch((error: unknown) => console.error("pull request block handling failed", error));
     }
-    // Page Automations this event fires (pages-live-document.md §6.2); likewise, a failure must not lose the delivery to conversations.
-    await fireGitHubAutomationTriggers(c.env, event, payload as Record<string, unknown>)
-      .catch((error: unknown) => console.error("Automation triggers failed", error));
+    // The Norn programs that wait for this event (norn-host.md, "Events from outside");
+    // likewise, a failure must not lose the delivery to conversations.
+    await githubEventArrived(c.env, event, payload as Record<string, unknown>)
+      .catch((error: unknown) => console.error("GitHub event did not reach its programs", error));
     return c.json(await dispatchProductGitHubWebhook({
       env: c.env,
       event,
@@ -569,8 +570,13 @@ export async function linkGitHubInstallation(
     spaceId, providerId: "github", actorUserId: userId,
     body: { ...body, metadataAppend: { installationIds: installationId } } as unknown as Record<string, unknown>,
   }).then(() => true, () => false);
-  return appended && (await recordGitHubInstallationLinks(env, { spaceId, actorUserId: userId, githubUserId,
+  const linked = appended && (await recordGitHubInstallationLinks(env, { spaceId, actorUserId: userId, githubUserId,
     installationIds: [installationId] }).catch(() => [] as string[])).includes(installationId);
+  // A link is a change GitHub is asked about: the check records when the connection last
+  // worked, which is what a settings card that asked for it waits on. The link stands either way.
+  if (linked) await checkAppConnection(env, { spaceId, providerId: "github", userId,
+    commandId: `github-link-check:${crypto.randomUUID()}` }).catch(() => undefined);
+  return linked;
 }
 
 /** Record the GitHub user Connect named for installations this Space already links and they administer. */

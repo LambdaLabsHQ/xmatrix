@@ -1031,6 +1031,8 @@ html:has(.site-page) {
   position: sticky;
   top: 0;
   z-index: 20;
+  /* Inside the iOS app the page runs edge to edge: keep the bar below the status bar. */
+  padding-top: env(safe-area-inset-top, 0px);
   border-color: var(--site-wood-line);
   background: oklch(0.991 0.005 86 / 0.94);
 }

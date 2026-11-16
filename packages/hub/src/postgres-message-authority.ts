@@ -562,6 +562,7 @@ export async function postgresMessageAppend(
       attentionBody: messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND || imported ? "" : command.body,
       certifyMessageAsk: !imported,
       ...(command.awaitsResponse === true ? { awaitsResponse: true } : {}),
+      ...(command.launch === true ? { launch: true } : {}),
       ...(command.waitsOnUserIds?.length ? { waitsOnUserIds: command.waitsOnUserIds } : {}),
       invocationSelections: command.invocationSelections,
       runProof,
@@ -1110,10 +1111,12 @@ export async function postgresMessageLiveAgentPresence(
   env: Env,
   channelId: string,
   dependencies: PostgresMessageDependencies = {},
+  instanceIds?: readonly string[],
 ) {
   const context = await postgresMessageBackgroundContext(env, channelId, "message-live-agent-presence", dependencies);
   return context.messages.liveAgentPresence({
     requestId: context.requestId, spaceId: context.spaceId, channelId: context.channelId,
+    ...(instanceIds?.length ? { instanceIds } : {}),
   });
 }
 

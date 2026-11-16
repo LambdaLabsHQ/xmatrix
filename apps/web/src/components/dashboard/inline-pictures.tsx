@@ -26,6 +26,20 @@ function placeOf(node: ElementContent): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/** Record the pictures in the renderer's final tree, after citation replacement.
+ * Literal code has no image node; removed quotes have no children. The same
+ * `placeOf` also decides which image nodes the components below actually draw. */
+export function recordMessagePictures(places: Set<number>) {
+  return (tree: { children: ElementContent[] }) => {
+    const visit = (node: ElementContent) => {
+      const place = placeOf(node);
+      if (place !== null) places.add(place);
+      if (node.type === "element") for (const child of node.children) visit(child);
+    };
+    for (const child of tree.children) visit(child);
+  };
+}
+
 /** A paragraph that holds only pictures, one per line: a row of them. */
 function pictureRow(node: Element | undefined): boolean {
   if (!node?.children.length) return false;

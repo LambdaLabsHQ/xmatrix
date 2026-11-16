@@ -53,7 +53,12 @@ const posix = { skip: process.platform === "win32" };
 test("hosted installs do not restore the PNPM store from the Actions cache", () => {
   const action = readRepoFile(".github/actions/setup-pnpm-node/action.yml");
   assert.doesNotMatch(action, /pnpm-store-/u);
-  assert.match(action, /lockfile-verified-/u);
+  const version = action.match(/pnpm@(\d+\.\d+\.\d+)/u)?.[1];
+  assert.ok(version);
+  assert.match(action, new RegExp(
+    `pnpm-lockfile-verified-\\$\\{\\{ runner\\.os \\}\\}-pnpm-${version}-\\$\\{\\{ hashFiles\\('pnpm-lock\\.yaml', 'pnpm-workspace\\.yaml', '\\.npmrc'\\) \\}\\}`,
+  ));
+  assert.doesNotMatch(action, /hashFiles\([^)\n]*package\.json/u);
 });
 
 test("a bootstrap ECONNRESET retries the pinned install and publishes PNPM only after success", posix, (t) => {

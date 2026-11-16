@@ -224,6 +224,30 @@ test("new syntax completes from registrations without legacy Profiles or live in
 });
 
 
+test("with no declared models, model: completes from the runtime's own catalog where its daemon applies one", async ({ page }) => {
+  const registration = {
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "native-machine", harness: "claude" },
+    displayName: "Claude", ownerName: "Owner", machineName: "Native Mac", version: 1,
+    state: "enabled", routingReady: true, models: [], nativeModels: true, parameterModel: "claude-opus-5-5",
+    modelCatalog: [
+      { model: "claude-opus-5-5", description: "", names: ["default"], isDefault: true, efforts: [{ value: "max", description: "" }] },
+      { model: "claude-sonnet-5-5", description: "", names: ["sonnet", "Sonnet"], efforts: [{ value: "low", description: "" }] }],
+    canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  };
+  await fixtureJson(page, "registration-catalog", "**/api/xmatrix/spaces/*/agent-registrations", {
+    registrations: [registration], capabilities: [{ harness: "claude", models: [], locations: [registration] }],
+  });
+  await page.reload();
+  const input = page.locator(".composer-textarea").first();
+  await input.fill("@claude model:claude-son");
+  await page.getByRole("option").filter({ hasText: "model:claude-sonnet-5-5" }).click();
+  await expectDraft(input, "@claude model:claude-sonnet-5-5 ");
+  // A model written by the runtime's short name still offers that model's efforts.
+  await input.fill("@claude model:sonnet effort:");
+  await expect(page.getByRole("option").filter({ hasText: "effort:low" })).toBeVisible();
+  await expect(page.getByRole("option").filter({ hasText: "effort:max" })).toHaveCount(0);
+});
+
 test("typing a summon and a space opens tag choices without changing Enter submission", async ({ page }) => {
   await fixtureJson(page, "source", "**/api/xmatrix/channels/channel-general/messages",
     { message: { id: "source-id" } }, { method: "POST" });

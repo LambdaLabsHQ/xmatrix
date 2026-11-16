@@ -23,7 +23,7 @@ xmatrix send <channel-url-or-id> --recover <message-id>
 xmatrix channel send <channel-url-or-id> --recover <message-id>
 ```
 
-Recovery cannot be combined with a new body, `--final-for`, `--file`, `--stdin`,
+Recovery cannot be combined with a new body, `--final-for`, `--file`, `--attachment`, `--stdin`,
 `--escape-newlines` or `--message-id`. It queries the receipt first and rechecks
 the registered Run before retrying. Concurrent recovery of the same operation
 is rejected. A pending record can be retried within 24 hours of its creation;

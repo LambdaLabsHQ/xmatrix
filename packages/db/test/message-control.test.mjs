@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
+import { connectorReceiptAnswersCommandSql, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 
 import {
+  isBillableMessage,
   MessageAuthorityError,
   PostgresMessageRepository,
 } from "../dist/message-control.js";
@@ -73,7 +74,7 @@ function committedAppend(query, searchRank) {
   if (query.name === "message_append_commit_facts_v5") return [{
     search_rank: searchRank, content_revision: 0, channel_id: "channel-1",
   }];
-  if (query.name === "message_append_publish_unmetered_v3") return [appendPublication({
+  if (query.name === "message_append_publish_unmetered_v4") return [appendPublication({
     result_json: JSON.parse(query.values[4]),
   })];
   return undefined;
@@ -137,7 +138,7 @@ test("append commits structured invocation intent with its source and excludes o
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
       : query.name === "message_agent_targets_commit_v1" ? [{ message_id: "message-1" }]
-      : query.name === "message_append_publish_unmetered_v3"
+      : query.name === "message_append_publish_unmetered_v4"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
       : query.name === "message_live_routing_recipients_v4"
         ? [{ user_id: "alice", recipient_count: "2" }, { user_id: "bob", recipient_count: "2" }]
@@ -159,7 +160,7 @@ test("append commits structured invocation intent with its source and excludes o
       lastAttentionAt: "2026-09-20T00:00:00.000Z", lastMessageId: "message-1", lastMessageSequence: 7,
       primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: "2026-09-20T00:00:00.000Z" } } }],
     instanceOwnerUserIds: [] });
-  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v3").values[4]);
+  const receipt = JSON.parse(db.calls.find(call => call.name === "message_append_publish_unmetered_v4").values[4]);
   assert.equal("liveRouting" in receipt, false);
   const stored = JSON.parse(db.calls.find(call => call.name === "message_agent_targets_commit_v1").values[3]);
   assert.deepEqual(stored, { entityVersion: 1, bodyHash, targets: [], selections: invocationSelections });
@@ -701,12 +702,12 @@ test("a billing notice goes back with its commit, never into the stored receipt"
     query.name === "message_append_preflight_v4" ? [appendPreflight()]
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000042", content_revision: 0, channel_id: "channel-1" }]
-      : query.name === "message_append_publish_noticing_v3"
+      : query.name === "message_append_publish_noticing_v4"
         ? [appendPublication({ raised: true, result_json: JSON.parse(query.values[4]) })]
       : []));
   const result = await new PostgresMessageRepository(db, false, noticing).append(appendRequest());
   assert.deepEqual(result.billingNotice, { key: "credits:2026-09-01:1", body: "80% used" });
-  const publish = db.calls.find((call) => call.name === "message_append_publish_noticing_v3");
+  const publish = db.calls.find((call) => call.name === "message_append_publish_noticing_v4");
   assert.equal("billingNotice" in JSON.parse(publish.values[4]), false);
   assert.equal(publish.values[12], "user", "the policy is told who wrote it");
 });
@@ -732,10 +733,10 @@ test("Message append reauthorizes and commits every relational fact with one out
     "message_append_preflight_v4",
     "message_append_commit_facts_v5",
     "message_append_attention_batch_v5",
-    "message_append_publish_unmetered_v3",
+    "message_append_publish_unmetered_v4",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   const billingAdvance = db.calls.find(
-    (call) => call.name === "message_append_publish_unmetered_v3",
+    (call) => call.name === "message_append_publish_unmetered_v4",
   );
   assert.doesNotMatch(billingAdvance.text, /space_billing_/u,
     "the default deployment meters nothing, so publishing reads no billing table");
@@ -849,7 +850,7 @@ channel_instance_id: 1})]
   }
 });
 
-test("Message append writes zero, one, or ten attachments with at most one SQL call", async () => {
+test("Message append writes any number of attachments with at most one SQL call", async () => {
   const appendInput = (count) => (appendRequest({
     requestId: `request-${count}`,
     commandId: `command-${count}`,
@@ -861,7 +862,7 @@ test("Message append writes zero, one, or ten attachments with at most one SQL c
       mimeType: "text/plain", name: `file-${index}.txt`, width: index + 10,
     })),
   }));
-  for (const count of [0, 1, 10]) {
+  for (const count of [0, 1, 40]) {
     const db = database((query) => placement(query) ?? appendReservation(query) ?? (
       query.name === "message_append_preflight_v4"
         ? [appendPreflight()]
@@ -876,12 +877,6 @@ test("Message append writes zero, one, or ten attachments with at most one SQL c
       assert.match(writes[0].text, /jsonb_to_recordset/u);
     }
   }
-  const overLimitDb = database(() => []);
-  await assert.rejects(
-    new PostgresMessageRepository(overLimitDb).append(appendInput(11)),
-    (error) => error instanceof MessageAuthorityError && error.code === "invalid_command",
-  );
-  assert.equal(overLimitDb.calls.length, 0);
 });
 
 for (const [body, ambiguous, broadcast] of [
@@ -1174,7 +1169,7 @@ async function appendReplyTo(replyTarget, senderSnapshot =
       : query.name === "message_attention_authorize_v3" ? query.values[2].map(subject_id => ({ subject_id }))
       : query.name === "message_append_commit_facts_v5"
         ? [{ search_rank: "pg:00000000000000000043", content_revision: 0, channel_id: "channel-1" }]
-      : query.name === "message_append_publish_unmetered_v3"
+      : query.name === "message_append_publish_unmetered_v4"
         ? [{ accepted: true, channel_id: "channel-1", sequence_confirmed: true, result_json: JSON.parse(query.values[4]) }]
       : []));
   const result = await new PostgresMessageRepository(db).append(appendRequest({
@@ -1254,3 +1249,31 @@ function messageCommandFields() {
 function historyDatabase() {
   return database(query => placement(query) ?? (query.name === "message_history_page_v5" ? historyPage() : []));
 }
+
+test("unread messages leave out a receipt for the sender's own command", async () => {
+  const db = database(() => [{ unread: 0, replay: false }]);
+  const result = await new PostgresMessageRepository(db).unreadSince({
+    requestId: "unread-1", spaceId: "space-1", channelId: "channel-1",
+    principal: { kind: "agent", id: "instance-1" }, messageId: "next-1", afterSequence: 4,
+    activityMessageKind: "xmatrix.activity",
+    placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 },
+  });
+  assert.deepEqual(result, { unread: 0, replay: false });
+  const query = db.calls.find((call) => call.name === "message_unread_since_v3");
+  assert.equal(query.text.includes("substr("), false);
+  assert.equal(query.text.includes(connectorReceiptAnswersCommandSql(
+    "m.message_id", "command.message_id", "m.author_id")), true);
+  assert.deepEqual(query.values, ["space-1", "channel-1", "next-1", 4, "agent", "instance-1", "xmatrix.activity"]);
+});
+
+test("xMatrix's own messages never use a Space's writes", () => {
+  // People, Agents and apps write; the counter and credits read this flag.
+  assert.equal(isBillableMessage("user", "xmatrix.message.text"), true);
+  assert.equal(isBillableMessage("agent", "xmatrix.message.text"), true);
+  assert.equal(isBillableMessage("app", "xmatrix.message.text"), true);
+  // A system notice, a welcome step written under the owner's name, and the
+  // summon xMatrix sends for a first message are xMatrix speaking.
+  assert.equal(isBillableMessage("user", "xmatrix.system.runtime-failure"), false);
+  assert.equal(isBillableMessage("user", "xmatrix.onboarding.v1"), false);
+  assert.equal(isBillableMessage("system", "xmatrix.message.text"), false);
+});

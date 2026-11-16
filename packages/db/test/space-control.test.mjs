@@ -240,7 +240,7 @@ test("Space deletion revokes every membership and schedules a restorable purge a
   ]);
   for (const queryName of [
     "space_deletion_members_v1", "space_deletion_membership_routes_v1",
-    "space_deletion_automation_pause_v1", "space_deletion_schedule_v1",
+    "space_deletion_schedule_v1",
     "space_mutation_outbox_v1", "space_control_idempotency_write_v1",
   ]) assert.equal(db.calls.some((call) => call.name === queryName), true, queryName);
   assert.equal(db.calls.some((call) => /DELETE FROM data\.spaces/u.test(call.text ?? "")), false,
@@ -582,7 +582,7 @@ test("Cross-Space Channel moves reassign Space-scoped message facts", async () =
     "channel_move_delivery_cursors_v1", "channel_move_message_attention_v1",
     "channel_move_message_attention_revisions_v1", "channel_move_channel_content_counters_v1",
     "channel_move_channel_message_sequences_v1",
-    "channel_move_agent_message_executions_v1",
+    "channel_move_agent_message_executions_v1", "channel_move_norn_programs_v1", "channel_move_norn_requests_v1", "channel_move_norn_notices_v1",
     "channel_move_message_sequence_reservations_v1",
     "channel_move_reborn_intents_v1",
   ]) {
@@ -591,7 +591,7 @@ test("Cross-Space Channel moves reassign Space-scoped message facts", async () =
     assert.deepEqual(query.values.slice(0, 2), ["s", "target"]);
   }
   for (const name of [
-    "channel_move_pause_automations_v1", "channel_move_expire_trace_access_v1",
+    "channel_move_expire_trace_access_v1",
     "channel_move_remove_app_relations_v1", "channel_move_fail_reborn_v1",
   ]) {
     const query = db.calls.find((call) => call.name === name);

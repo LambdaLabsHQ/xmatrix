@@ -12,7 +12,6 @@ import {
   checkStable,
   codeqlAnalyses,
   codeqlLanguages,
-  COMPONENTS,
   inflightRef,
   intentRef,
   nextBetaVersion,
@@ -20,6 +19,7 @@ import {
   parseIntentRef,
   planTrain,
   stableVersion,
+  shipHubAlone,
 } from "./release-train.mjs";
 
 const MAIN = "c".repeat(40);
@@ -52,16 +52,34 @@ test("a scope is canonical, unique and keeps desktop with its cli", () => {
   }
 });
 
-test("no component ships unscanned; the workflows that release it are scanned too", () => {
-  for (const component of COMPONENTS) {
-    const [workflows, language, ...rest] = codeqlLanguages([component]);
-    assert.equal(workflows, "actions", component);
-    assert.equal(typeof language, "string", component);
-    assert.deepEqual(rest, [], component);
-    const analysed = codeqlAnalyses([component]);
-    assert.deepEqual([...new Set(analysed.map((analysis) => analysis.language))], [workflows, language], component);
-    assert.equal(new Set(analysed.map((analysis) => analysis.category)).size, analysed.length, "one category per analysis");
+test("client languages are scanned on stable only; hub, web and desktop on every train", () => {
+  for (const component of ["hub", "web", "desktop"]) {
+    for (const channel of ["beta", "stable"]) {
+      const languages = codeqlLanguages([component], channel);
+      assert.deepEqual(languages, ["actions", "javascript-typescript"], `${channel} ${component}`);
+      const analysed = codeqlAnalyses([component], channel);
+      assert.deepEqual([...new Set(analysed.map((analysis) => analysis.language))], languages, component);
+      assert.equal(new Set(analysed.map((analysis) => analysis.category)).size, analysed.length, component);
+    }
   }
+  for (const [component, language] of [["cli", "rust"], ["android", "java-kotlin"], ["ios", "swift"]]) {
+    assert.deepEqual(codeqlLanguages([component], "beta"), ["actions"], component);
+    assert.deepEqual(codeqlAnalyses([component], "beta").map((analysis) => analysis.language), ["actions"], component);
+    assert.deepEqual(codeqlLanguages([component], "stable"), ["actions", language], component);
+    const stable = codeqlAnalyses([component], "stable");
+    assert.deepEqual(stable.map((analysis) => analysis.language), ["actions", language], component);
+    assert.equal(stable.find((analysis) => analysis.language === language).category, `/language:${language}`);
+  }
+  assert.deepEqual(
+    codeqlLanguages(["hub", "web", "cli", "desktop", "android", "ios"], "beta"),
+    ["actions", "javascript-typescript"],
+  );
+  assert.deepEqual(
+    codeqlLanguages(["web", "cli", "desktop", "android", "ios"], "stable"),
+    ["actions", "javascript-typescript", "rust", "java-kotlin", "swift"],
+  );
+  assert.throws(() => codeqlLanguages(["cli"]), /beta or stable/u);
+  assert.throws(() => codeqlAnalyses(["cli"], "dev"), /beta or stable/u);
 });
 
 test("the JavaScript and TypeScript halves read every shipped file exactly once, and no test", () => {
@@ -82,7 +100,7 @@ test("the JavaScript and TypeScript halves read every shipped file exactly once,
     return (!paths.length || paths.some((pattern) => matches(pattern, file))) &&
       !list("paths-ignore").some((pattern) => matches(pattern, file));
   };
-  const halves = codeqlAnalyses(["hub", "web"]).filter((analysis) => analysis.language === "javascript-typescript");
+  const halves = codeqlAnalyses(["hub", "web"], "beta").filter((analysis) => analysis.language === "javascript-typescript");
   assert.deepEqual(halves.map((half) => half.part), ["web", "server"]);
   const shipped = ["apps/web/src/app/page.tsx", "apps/web/worker.mjs", "packages/hub/src/index.ts",
     "packages/protocol/src/index.ts", "packages/db/src/space-control.ts", "scripts/release-train.mjs",
@@ -229,6 +247,26 @@ test("a half-finished move keeps the in-flight copy only", () => {
   ], tags: ["xmatrix-v0.16.9"], states: { "xmatrix-v0.16.9": "active" } });
   assert.deepEqual(result.updates, [{ delete: "refs/release-intents/5/hub" }]);
   assert.deepEqual(result.eligible, []);
+});
+
+test("the rest of a request whose Hub is in flight stays open under the same id", () => {
+  const result = train({ refs: [
+    { ref: "refs/release-intents/5/web+cli", sha: OLD },
+    { ref: "refs/release-inflight/xmatrix-v0.16.9/5/hub", sha: OLD },
+  ], tags: ["xmatrix-v0.16.9"], states: { "xmatrix-v0.16.9": "active" } });
+  assert.deepEqual(result.updates, []);
+  assert.deepEqual(result.eligible.map((intent) => intent.ref), ["refs/release-intents/5/web+cli"]);
+});
+
+test("a train that ships the Hub ships it alone and leaves the rest of each request open", () => {
+  const intent = (id, ...scope) => ({ id, scope, sha: MAIN, ref: intentRef(id, scope) });
+  const mixed = shipHubAlone([intent("10", "hub", "web", "cli"), intent("20", "cli", "desktop"), intent("30", "hub")]);
+  assert.deepEqual(mixed.eligible.map(({ id, scope, rest }) => [id, scope, rest]),
+    [["10", ["hub"], ["web", "cli"]], ["30", ["hub"], undefined]], "a request without the Hub is not shipped by this train");
+  assert.equal(mixed.waiting, true);
+  for (const unchanged of [[intent("30", "hub")], [intent("20", "cli", "desktop"), intent("40", "web")], []]) {
+    assert.deepEqual(shipHubAlone(unchanged), { eligible: unchanged, waiting: false });
+  }
 });
 
 test("a beta precedes the patch after the last stable unless main or an earlier beta plans higher", () => {
@@ -381,6 +419,23 @@ test("a train planned while a client release runs ships the service and leaves c
     assert.ok(refs.includes("refs/release-inflight/xmatrix-v1.0.1-beta.2/50/web"), refs);
     assert.equal(refs.includes(intentRef("60", ["cli"])), scenario.open, refs);
     assert.equal(refs.includes("refs/release-inflight/xmatrix-v1.0.1-beta.2/60/cli"), !scenario.open, refs);
+  });
+});
+
+test("a planned train ships the Hub alone, keeps the rest open and wakes the train for it", async (t) => {
+  await eachInRepository(t, [{ name: "a Hub, Web and CLI request beside a CLI one" }], (_scenario, repo) => {
+    const source = repo.commitMain("service and client changes");
+    repo.push();
+    repo.pushRefs(`${source}:${intentRef("50", ["hub", "web", "cli"])}`, `${source}:${intentRef("60", ["cli"])}`);
+    const result = repo.plan(source, `
+      globalThis.fetch = async () => new Response(JSON.stringify({ workflow_runs: [] }));
+    `);
+    assert.equal(result.status, 0, result.stderr + result.stdout);
+    assert.match(result.stdout, /^scope=hub$/mu);
+    assert.match(result.stdout, /^betas_waiting=true$/mu);
+    const tag = /^tag=(.+)$/mu.exec(result.stdout)[1];
+    const refs = repo.remoteIntents().trim().split("\n").map((line) => line.split("\t")[1]).toSorted();
+    assert.deepEqual(refs, [intentRef("50", ["web", "cli"]), intentRef("60", ["cli"]), `refs/release-inflight/${tag}/50/hub`].toSorted());
   });
 });
 

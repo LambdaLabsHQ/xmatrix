@@ -147,6 +147,30 @@ function creditChargeCte(space: string, now: string, announces: boolean): string
       )`;
 }
 
+/**
+ * Itemize the write against its author in the same statement that counted it
+ * (docs/design/agent-credits.md#who-used-it): a Free write on the `free` meter,
+ * a charged credit on the `credit` meter. A Space whose credits are waived
+ * records the credit it would have used, so its owner still sees the real
+ * consumption. `waived` is the SQL condition for that case.
+ */
+function usageLedgerCte(input: {
+  space: string; now: string; authorKind: string; owner: string; name: string; writeKind: string; waived: string;
+}): string {
+  return `usage_ledger AS (
+        INSERT INTO data.space_credit_usage AS u
+          (space_id,period_start,meter,author_kind,owner_user_id,author_name,write_kind,units,created_at,updated_at)
+        SELECT ${input.space},date_trunc('month',${input.now} AT TIME ZONE 'UTC')::date,
+          CASE WHEN EXISTS (SELECT 1 FROM usage) THEN 'free' ELSE 'credit' END,
+          ${input.authorKind},${input.owner},${input.name},'${input.writeKind}',1,${input.now},${input.now}
+        WHERE ${input.authorKind} IN ('user','agent','app') AND (EXISTS (SELECT 1 FROM usage)
+          OR EXISTS (SELECT 1 FROM credit) OR (${input.waived}
+            AND EXISTS (SELECT 1 FROM paid_seats WHERE seat_count<=seat_quantity)))
+        ON CONFLICT (space_id,period_start,meter,author_kind,owner_user_id,author_name,write_kind)
+        DO UPDATE SET units=u.units+1,updated_at=GREATEST(u.updated_at,EXCLUDED.updated_at)
+      )`;
+}
+
 /** The credit columns an admission row carries. */
 const CREDIT_COLUMNS = `EXISTS (SELECT 1 FROM credit_meter) AS credit_metered,
           (SELECT included FROM credit_meter) AS credit_included,
@@ -326,7 +350,8 @@ export const spaceBilling: SpaceBillingPolicy = {
           AND NOT EXISTS (SELECT 1 FROM subscription WHERE status='past_due'
             AND grace_until IS NOT NULL AND grace_until>$6::timestamptz)
         RETURNING free_message_count
-      ), admission AS MATERIALIZED (
+      ), ${usageLedgerCte({ space: "$2", now: "$6::timestamptz", authorKind: "$13::text", owner: "$15::text",
+        name: "$16::text", writeKind: "message", waived: "$10 AND $13 IN ('agent','app') AND $14" })}, admission AS MATERIALIZED (
         SELECT
           (SELECT status FROM subscription) AS status,
           (SELECT grace_until FROM subscription) AS grace_until,
@@ -357,12 +382,12 @@ export const spaceBilling: SpaceBillingPolicy = {
     notice: creditNotice,
   },
 
-  async durableWrite(transaction, { spaceId, now, author, creditsWaived }) {
+  async durableWrite(transaction, { spaceId, now, author, creditsWaived, ownerUserId, authorName }) {
     // A Free Space's revision takes the same counter as its messages; a paid
     // Space charges an Agent's. A page revision has no Channel to tell, so it
     // never raises the notice level.
     const row = (await transaction.query({
-      name: "official_space_durable_write_v1",
+      name: "official_space_durable_write_v2",
       text: `WITH ${subscriptionCte("$1", "$2::timestamptz")}, ${paidSeatsCte("$1")},
         ${creditMeterCte("$2::timestamptz", "NOT $3 AND $4='agent'")}, ${creditChargeCte("$1", "$2::timestamptz", false)},
         prior_usage AS MATERIALIZED (
@@ -375,13 +400,16 @@ export const spaceBilling: SpaceBillingPolicy = {
             AND NOT EXISTS (SELECT 1 FROM subscription WHERE status IN ('active','trialing')
               OR (status='past_due' AND grace_until IS NOT NULL AND grace_until>$2::timestamptz))
           RETURNING free_message_count
-        )
+        ), ${usageLedgerCte({ space: "$1", now: "$2::timestamptz",
+          authorKind: "(CASE WHEN $4='agent' THEN 'agent' ELSE 'user' END)", owner: "$5::text", name: "$6::text",
+          writeKind: "page_revision", waived: "$3 AND $4='agent'" })}
         SELECT (SELECT status FROM subscription) AS status,
           (SELECT grace_until FROM subscription) AS grace_until,
           (SELECT free_message_count FROM prior_usage) AS prior_free_message_count,
           (SELECT free_message_count FROM usage) AS free_message_count,
           ${CREDIT_COLUMNS}`,
-      values: [spaceId, now, creditsWaived === true, author], maxRows: 1,
+      values: [spaceId, now, creditsWaived === true, author, ownerUserId.slice(0, 300),
+        author === "agent" ? authorName.slice(0, 200) : ""], maxRows: 1,
     }))[0];
     if (!row) return null;
     if (graceActive(row, now)) return PAST_DUE_READ_ONLY;

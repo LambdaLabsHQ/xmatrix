@@ -54,7 +54,7 @@ export async function handleWeComAppDelivery(env: Env, request: Request, depende
       await dependencies.deliver(env, dependencies.apps(env), append, "wecom", captured.connectionId, event,
         undefined, undefined, undefined, undefined, { appIdentity: captured.appIdentity,
           companyDigest: captured.companyDigest, grantGeneration: captured.grantGeneration });
-      if (await current()) await dependencies.automations(env, { spaceId: captured.spaceId, provider: "wecom", event });
+      if (await current()) await dependencies.events(env, { spaceId: captured.spaceId, provider: "wecom", event });
     }
     return new Response("success", { headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
   } catch (error) {

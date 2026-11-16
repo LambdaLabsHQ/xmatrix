@@ -37,6 +37,8 @@ test("a failed Check can be retried without reconnecting and only server success
   await releaseFixture(page, "sentry-failed-check");
   await expect(check).toBeEnabled();
   await expect(row.getByRole("img", { name: "Needs attention" })).toBeVisible();
+  // The reason is said once, in the block that holds the fix.
+  await expect(page.locator(".app-tool-detail-scroll:visible").getByText(connection.error)).toHaveCount(1);
   await fixtureJson(page, "sentry-passed-check", endpoint, { ok: true, connection: {
     ...connection, status: "configured", error: null, version: 6, lastCheckedAt: E2E_NOW,
   } }, { method: "POST" });

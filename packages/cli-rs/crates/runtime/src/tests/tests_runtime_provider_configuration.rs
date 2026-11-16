@@ -63,6 +63,66 @@ fn cursor_adapter_shows_readable_model_and_hides_default_agent_mode() {
 }
 
 #[test]
+fn cursor_model_rows_carry_the_pool_they_spend() {
+    let models = |runtime: &str| {
+        let adapter = agent_presentation_adapter_for_acp_runtime(runtime);
+        let mut facts = AgentPresentationFacts::default();
+        adapter.observe_acp(
+            &serde_json::json!({ "configOptions": [{
+                "id": "model", "type": "select", "currentValue": "default[]",
+                "options": [
+                    { "value": "default[]", "name": "Auto" },
+                    { "value": "composer-2.5", "name": "Composer 2.5" },
+                    { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+                ]
+            }]}),
+            &mut facts,
+        );
+        adapter.present(&facts, &[]).models.expect("models")
+    };
+    let scopes: Vec<_> = models("cursor")
+        .into_iter()
+        .map(|row| row.quota_scopes)
+        .collect();
+    let pool = |name: &str| Some(vec![name.to_string()]);
+    assert_eq!(scopes, vec![pool("Auto"), pool("Auto"), pool("API")]);
+    // Other ACP harnesses have no pools.
+    assert!(models("kimi").iter().all(|row| row.quota_scopes.is_none()));
+}
+
+#[test]
+fn cursor_marks_the_model_its_session_started_on_as_the_default() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts::default();
+    let report = |current: &str| {
+        serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": current,
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]})
+    };
+    adapter.observe_acp(&report("default[]"), &mut facts);
+    // A routed or preferred model switches the session; the default stays the one it started on.
+    adapter.observe_acp(&report("claude-4.5-sonnet"), &mut facts);
+    let defaults: Vec<_> = adapter
+        .present(&facts, &[])
+        .models
+        .expect("models")
+        .into_iter()
+        .map(|row| (row.id, row.is_default))
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![
+            ("default[]".to_string(), Some(true)),
+            ("claude-4.5-sonnet".to_string(), None)
+        ]
+    );
+}
+
+#[test]
 fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
     let mut facts = AgentPresentationFacts::default();
@@ -96,6 +156,49 @@ fn cursor_adapter_uses_parameterized_model_display_names_and_shows_plan_mode() {
     let chips = presentation.status_chips.as_ref().expect("Cursor chips");
     assert!(runtime_chip_matches(chips, "model", "Auto"));
     assert!(runtime_chip_matches(chips, "mode", "Plan"));
+}
+
+/// DeepSeek Harness 0.2.2 `session/new`: ACP select options grouped by
+/// provider, each value an opaque JSON selector.
+#[test]
+fn acp_grouped_model_options_name_the_selected_model() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("deepseek");
+    let mut facts = AgentPresentationFacts::default();
+    adapter.observe_acp(
+        &serde_json::json!({
+            "sessionId": "dsh-session",
+            "configOptions": [
+                {
+                    "id": "model", "name": "Model", "category": "model", "type": "select",
+                    "currentValue": "[\"deepseek-official\",\"deepseek-flash\"]",
+                    "options": [{
+                        "group": "deepseek-official", "name": "DeepSeek",
+                        "options": [
+                            { "value": "[\"deepseek-official\",\"deepseek-v4-flash\"]", "name": "deepseek-v4-flash" },
+                            { "value": "[\"deepseek-official\",\"deepseek-flash\"]", "name": "DeepSeek-V4.1-Flash" },
+                            { "value": "[\"deepseek-official\",\"deepseek-v4-pro\"]", "name": "DeepSeek-V4-Pro" }
+                        ]
+                    }]
+                },
+                {
+                    "id": "reasoning_effort", "name": "Reasoning effort", "category": "thought_level",
+                    "type": "select", "currentValue": "high",
+                    "options": [{ "value": "off", "name": "Off" }, { "value": "high", "name": "High" }]
+                }
+            ]
+        }),
+        &mut facts,
+    );
+    let presentation = adapter.present(&facts, &[]);
+    assert_eq!(
+        presentation.model.as_deref(),
+        Some("[\"deepseek-official\",\"deepseek-flash\"]"),
+        "the selector id stays exact for switching"
+    );
+    let models = presentation.models.as_ref().expect("grouped catalog");
+    assert_eq!(models.len(), 3);
+    let chips = presentation.status_chips.as_ref().expect("DeepSeek chips");
+    assert!(runtime_chip_matches(chips, "model", "DeepSeek-V4.1-Flash"));
 }
 
 #[test]
@@ -172,17 +275,26 @@ fn grok_runtime_detection_and_spawn_args() {
     assert!(!is_grok_tool("node"));
 
     // Grok speaks ACP over stdio: no serve port, bind address or server key.
-    let args = grok_acp_spawn_args(&[]);
-    assert_eq!(args, vec!["agent", "--always-approve", "stdio"]);
+    // Its approval flag is the launch's access grant, never a default of the
+    // bridge: an `ask` launch starts without it.
+    let full = xmatrix_cli_agent::agent_preset_by_id("grok").unwrap().full_access_grant();
+    let ask = xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        mode: "ask".into(),
+        ..Default::default()
+    };
+    assert_eq!(grok_acp_spawn_args(&[], &full), vec!["agent", "--always-approve", "stdio"]);
+    assert_eq!(grok_acp_spawn_args(&[], &ask), vec!["agent", "stdio"]);
 
-    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()]);
+    let flags = grok_acp_spawn_args(&["--effort".to_string(), "high".to_string()], &full);
     assert_eq!(flags, vec!["agent", "--effort", "high", "--always-approve", "stdio"]);
+    // The daemon already joined the grant's args to the argv it passes.
+    let joined = grok_acp_spawn_args(&["--always-approve".to_string()], &full);
+    assert_eq!(joined, vec!["agent", "--always-approve", "stdio"]);
 
-    let custom = grok_acp_spawn_args(&["stdio".to_string()]);
-    assert_eq!(custom, vec!["agent", "--always-approve", "stdio"]);
-
-    let approved = grok_acp_spawn_args(&["agent".to_string(), "--yolo".to_string(), "stdio".to_string()]);
-    assert_eq!(approved, vec!["agent", "--yolo", "stdio"]);
+    let custom = grok_acp_spawn_args(&["stdio".to_string()], &ask);
+    assert_eq!(custom, vec!["agent", "stdio"]);
+    let declared = grok_acp_spawn_args(&["stdio".to_string(), "--always-approve".to_string()], &full);
+    assert_eq!(declared, vec!["agent", "--always-approve", "stdio"]);
 
     let tail = StderrTail::default();
     assert_eq!(with_stderr_tail("closed".into(), &tail), "closed");
@@ -496,7 +608,7 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             "agy",
             "antigravity",
             "Google Antigravity",
-            &["acp", "--dangerously-skip-permissions"][..],
+            &["acp"][..],
             ".gemini/antigravity-cli",
         ),
         (
@@ -539,11 +651,12 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             "{tool}"
         );
         assert_eq!(
-            generic_acp_spawn_args(&[], config.preset_acp_args.as_deref()),
+            generic_acp_spawn_args(&[], config.preset_acp_args.as_deref(), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()),
             expected_args,
             "{tool}"
         );
-        assert!(config.quota_usage.is_none(), "{tool}");
+        // DeepSeek Harness bills a prepaid balance its API can state.
+        assert_eq!(config.quota_usage.is_some(), id == "deepseek", "{tool}");
         assert_eq!(agent_type_for_preset_or_runtime(None, tool), id, "{tool}");
     }
 
@@ -1022,17 +1135,17 @@ fn cursor_reasoning_control_is_effort_and_boolean_thinking_is_not() {
 #[test]
 fn generic_acp_spawn_args_default_to_acp_subcommand() {
     // Explicit CLI args always win and never touch the env.
-    let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None);
+    let explicit = generic_acp_spawn_args(&["acp".to_string(), "--verbose".to_string()], None, &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default());
     assert_eq!(explicit, vec!["acp".to_string(), "--verbose".to_string()]);
     // Community convention: bare `acp` subcommand (e.g. `kimi acp`).
-    assert_eq!(generic_acp_spawn_args(&[], None), vec!["acp".to_string()]);
+    assert_eq!(generic_acp_spawn_args(&[], None, &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()), vec!["acp".to_string()]);
     // The preset's acpArgs decide the subcommand: `[]` is a launcher that
     // already speaks ACP (pi-acp), so nothing is appended.
     assert_eq!(
-        generic_acp_spawn_args(&[], Some(&["acp".to_string()])),
+        generic_acp_spawn_args(&[], Some(&["acp".to_string()]), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()),
         vec!["acp".to_string()]
     );
-    assert_eq!(generic_acp_spawn_args(&[], Some(&[])), Vec::<String>::new());
+    assert_eq!(generic_acp_spawn_args(&[], Some(&[]), &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant::default()), Vec::<String>::new());
     assert_eq!(
         acp_args_from_json("[\"acp\", \"--verbose\"]"),
         Some(vec!["acp".to_string(), "--verbose".to_string()])
@@ -1291,6 +1404,21 @@ fn an_expired_claude_sign_in_reads_as_signed_out_without_a_success_prefix() {
 }
 
 #[test]
+fn a_network_block_while_authenticating_is_not_a_sign_out() {
+    // What Claude Code returned on a signed-in machine when Cloudflare blocked
+    // the request: the step that failed, not a refused credential.
+    assert!(!crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 403 Attention Required! | Cloudflare"
+    ));
+    assert!(crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"OAuth token has expired.\"}}"
+    ));
+    assert!(crate::harness_signed_out_error(
+        "Failed to authenticate. API Error: 401 Unauthorized"
+    ));
+}
+
+#[test]
 fn provider_quota_merge_keeps_windows_and_observation_metadata_together() {
     use crate::merge_llm_usage;
     let old = protocol::LlmUsage {
@@ -1387,4 +1515,26 @@ fn signed_out_start_failure_is_one_hub_keeps() {
         "error_during_execution: API Error: 529 overloaded"
     )
     .is_none());
+}
+
+#[test]
+fn a_resumed_cursor_session_marks_no_default() {
+    // A loaded session first reports the model it last ran, not the runtime's default.
+    let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
+    let mut facts = AgentPresentationFacts {
+        session_resumed: true,
+        ..AgentPresentationFacts::default()
+    };
+    adapter.observe_acp(
+        &serde_json::json!({ "configOptions": [{
+            "id": "model", "type": "select", "currentValue": "claude-4.5-sonnet",
+            "options": [
+                { "value": "default[]", "name": "Auto" },
+                { "value": "claude-4.5-sonnet", "name": "Sonnet 4.5" }
+            ]
+        }]}),
+        &mut facts,
+    );
+    let models = adapter.present(&facts, &[]).models.expect("models");
+    assert!(models.iter().all(|row| row.is_default.is_none()));
 }

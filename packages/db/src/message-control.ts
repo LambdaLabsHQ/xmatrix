@@ -7,10 +7,10 @@ import { resolveMessageAgentTargets } from "./message-agent-targets.js";
 import { channelStopScope, fenceChannelRunsForStop, releaseDeclaredWaits } from "./channel-stop-fence.js";
 import { declaredWaitStandsSql, messageIsSpeech } from "./message-attention-wait.js";
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
-import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections } from "./message-invocation-selections.js";
-import type { AgentRegistrationKey, ChannelMemberPresence, MessageCommitReceipt } from "@xmatrix/protocol";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
-import { ACTIVE_RUN_STATUS_SQL, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
+import { authorizeMessageInvocationSelections, bodyWithoutInvocationSelections, messageSummons } from "./message-invocation-selections.js";
+import { ONBOARDING_MESSAGE_KIND, type AgentRegistrationKey, type ChannelMemberPresence, type MessageCommitReceipt } from "@xmatrix/protocol";
+import { readChannelInstances, type AgentInstanceRecord } from "./channel-agent-presence.js";
+import { ACTIVE_RUN_STATUS_SQL, connectorReceiptAnswersCommandSql, parseAgentRegistrationKey, repoSummonReference, channelVisibilityScope, isReservedAnnotationNamespace, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   SYSTEM_ANNOTATION_AUTHOR , utf8ByteLength, type QuestionnaireState } from "@xmatrix/protocol";
 import { atomicAttentionTargets, MAX_ATTENTION_TARGETS } from "./message-attention-targets.js";
 
@@ -132,6 +132,8 @@ export interface AppendPostgresMessage {
   certifyMessageAsk?: boolean;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** The sender asks that the Agents this message summons start; kept with the message for every later dispatch. */
+  launch?: boolean;
   /** People a card waits on though it mentions nobody. Set by the Hub for its own cards, never by a caller. */
   waitsOnUserIds?: string[];
   /** Untrusted picker intent, validated against the canonical body and current grants. */
@@ -245,6 +247,30 @@ export interface PostgresSenderSnapshotRepair {
     expectedRecordDigest: string;
     prepared: PreparedPostgresMessageRecord;
   }>;
+}
+
+/** What xMatrix itself says is never a write the Space pays for (agent-credits.md):
+ * its system notices, the welcome steps it writes under the owner's name, and the
+ * summon it sends for a first message. Only people's, Agents' and apps' speech counts. */
+/**
+ * Who a billable message is counted against, for an itemized allowance: a
+ * person by their own id, an Agent by its registration name and owner, an app
+ * by its id. Read from the sender snapshot this append already fixed.
+ */
+function billedAuthor(senderKind: string, senderId: string, snapshot: Record<string, unknown>,
+  runOwnerUserId: string | undefined): { ownerUserId: string; name: string } {
+  const text = (value: unknown) => typeof value === "string" ? value : "";
+  if (senderKind === "user") return { ownerUserId: senderId, name: "" };
+  if (senderKind === "agent") return {
+    ownerUserId: (runOwnerUserId ?? text(snapshot.userId)).slice(0, 300),
+    name: (text(snapshot.agentName) || text(snapshot.name) || senderId).slice(0, 200),
+  };
+  return { ownerUserId: "", name: senderId.slice(0, 200) };
+}
+
+export function isBillableMessage(senderKind: string, messageKind: string): boolean {
+  return senderKind !== "system" && !messageKind.startsWith("xmatrix.system.") &&
+    messageKind !== ONBOARDING_MESSAGE_KIND;
 }
 
 function bounded(value: unknown, field: string, maximum = 300): string {
@@ -1032,10 +1058,17 @@ export class PostgresMessageRepository {
 
   /**
    * How many messages after `afterSequence` the sender has not read: what
-   * people, Agents and Apps wrote there, except the sender's own messages and
-   * the Hub's own facts (system notices, activity entries). `replay` is set
-   * when `messageId` is already committed, so a retried send is answered by
-   * its receipt rather than refused for messages that came after it.
+   * people, Agents and Apps wrote there, except the sender's own messages,
+   * the Hub's own facts (system notices, activity entries) and an App's
+   * receipt for a command the sender itself wrote in this Channel. Only the
+   * Hub writes App messages. A receipt id is `system:<execution id>:<app>`,
+   * and the execution id is the command message id or that id plus a suffix
+   * from `connectorReceiptAnswersCommandSql`. The command is then one
+   * primary-key read, and it must be the sender's own row here. A receipt
+   * named any other way, including a denial, still counts.
+   * `replay` is set when `messageId` is already committed, so a retried send
+   * is answered by its receipt rather than refused for messages that came
+   * after it.
    */
   async unreadSince(input: {
     requestId: string;
@@ -1052,15 +1085,19 @@ export class PostgresMessageRepository {
     const afterSequence = nonnegative(input.afterSequence, "afterSequence");
     return this.inSpace(requestId, "message.unread-since", spaceId, async (transaction) => {
       const row = (await transaction.query<QueryResultRow & { unread: string | number; replay: boolean }>({
-        name: "message_unread_since_v1",
+        name: "message_unread_since_v3",
         text: `SELECT EXISTS(SELECT 1 FROM data.messages
               WHERE space_id=$1 AND channel_id=$2 AND message_id=$3) AS replay,
-            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages
-              WHERE space_id=$1 AND channel_id=$2 AND timeline_sequence>$4
-                AND deleted_at IS NULL AND recalled_at IS NULL
-                AND author_kind IN ('user','agent','app')
-                AND NOT (author_kind=$5 AND author_id=$6)
-                AND message_kind<>$7
+            (SELECT COUNT(*) FROM (SELECT 1 FROM data.messages m
+              WHERE m.space_id=$1 AND m.channel_id=$2 AND m.timeline_sequence>$4
+                AND m.deleted_at IS NULL AND m.recalled_at IS NULL
+                AND m.author_kind IN ('user','agent','app')
+                AND NOT (m.author_kind=$5 AND m.author_id=$6)
+                AND m.message_kind<>$7
+                AND NOT (m.author_kind='app' AND EXISTS (SELECT 1 FROM data.messages command
+                  WHERE command.space_id=$1 AND command.channel_id=$2
+                    AND command.author_kind=$5 AND command.author_id=$6
+                    AND (${connectorReceiptAnswersCommandSql("m.message_id", "command.message_id", "m.author_id")})))
               LIMIT 100) unread) AS unread`,
         values: [spaceId, channelId, messageId, afterSequence, principal.kind, principal.id,
           bounded(input.activityMessageKind, "activityMessageKind")],
@@ -1357,6 +1394,7 @@ export class PostgresMessageRepository {
     }
     const senderId = bounded(input.senderId, "senderId");
     const messageKind = bounded(input.messageKind, "messageKind", 128);
+    const billableMessage = isBillableMessage(senderKind, messageKind);
     const sentAt = timestamp(input.sentAt, "sentAt");
     const requestDigest = digest(input.requestDigest, "requestDigest");
     const recordDigest = digest(input.prepared.recordDigest, "prepared.recordDigest");
@@ -1381,7 +1419,7 @@ export class PostgresMessageRepository {
       input.prepared.senderSnapshotDigest, "prepared.senderSnapshotDigest",
     );
     const attachmentViews = input.attachments ?? [];
-    if (!Array.isArray(attachmentViews) || attachmentViews.length > 10) {
+    if (!Array.isArray(attachmentViews)) {
       throw new MessageAuthorityError("invalid_command", 400, "attachments are invalid");
     }
     const attachmentOwnerUserId = attachmentViews.length && input.attachmentOwnerUserId
@@ -1700,12 +1738,17 @@ export class PostgresMessageRepository {
         "message_exists", 409, "Message already exists",
       );
       const searchRank = bounded(committedFacts.search_rank, "searchRank");
-      if (agentTargets.length || invocationSelections) {
+      // The launch request is kept only on a message that summons someone, so a
+      // plain message never looks addressed (message-asks RECEIVER_SQL).
+      const launch = input.launch === true && (invocationSelections !== undefined ||
+        messageSummons(input.attentionBody ?? ""));
+      if (agentTargets.length || invocationSelections || launch) {
         const written = await transaction.query({ name: "message_agent_targets_commit_v1",
           text: `UPDATE data.messages SET agent_invocation_targets_json=$4::jsonb
             WHERE space_id=$1 AND channel_id=$2 AND message_id=$3 AND entity_version=1 RETURNING message_id`,
           values: [spaceId, channelId, messageId, JSON.stringify({ entityVersion: 1, bodyHash, targets: agentTargets,
-            ...(invocationSelections ? { selections: invocationSelections } : {}) })], maxRows: 1 });
+            ...(invocationSelections ? { selections: invocationSelections } : {}),
+            ...(launch ? { launch: true } : {}) })], maxRows: 1 });
         if (written.length !== 1) throw new MessageAuthorityError("message_targets_commit_failed", 500,
           "The original message targets could not be recorded");
       }
@@ -1788,8 +1831,9 @@ export class PostgresMessageRepository {
       // Billing admission and the durable publish receipt share the final SQL
       // statement, so a metered counter is never locked across another round trip.
       const billing = this.billing.message;
+      const billed = billedAuthor(senderKind, senderId, input.senderSnapshot, runOwnerUserId);
       const admission = (await transaction.query<MessagePublishRow>({
-        name: `message_append_publish_${this.billing.id}_v3`,
+        name: `message_append_publish_${this.billing.id}_v4`,
         text: `WITH ${billing.ctes}, accepted AS MATERIALIZED (
             SELECT admission.*,$5::jsonb AS result_json FROM admission
             WHERE NOT $10 OR (${billing.accepts})
@@ -1834,11 +1878,12 @@ export class PostgresMessageRepository {
               (SELECT channel_id FROM activity_row) AS channel_id,
               EXISTS (SELECT 1 FROM accepted) AS accepted,
               EXISTS (SELECT 1 FROM reservation_commit) AS sequence_confirmed,
-              $13::text AS author_kind,$14::boolean AS credits_waived FROM admission`,
+              $13::text AS author_kind,$14::boolean AS credits_waived,
+              $15::text AS billed_owner_user_id,$16::text AS billed_author_name FROM admission`,
         values: [`message:${spaceId}:${messageId}:1`, spaceId, messageId, sequence,
           JSON.stringify(result), sentAt, commandId, requestDigest, expiresAt,
-          !messageKind.startsWith("xmatrix.system."), channelId, recordDigest, senderKind,
-          input.creditsWaived === true],
+          billableMessage, channelId, recordDigest, senderKind,
+          input.creditsWaived === true, billed.ownerUserId, billed.name],
         maxRows: 1,
       }))[0];
       if (admission?.accepted && !admission.channel_id) throw new MessageAuthorityError(
@@ -1850,7 +1895,7 @@ export class PostgresMessageRepository {
       );
       if (dingtalkEffect) await finishDingTalkEffect(transaction,dingtalkEffect);
       const published = publishedResult(admission, this.billing, {
-        billable: !messageKind.startsWith("xmatrix.system."), now: sentAt,
+        billable: billableMessage, now: sentAt,
       });
       // Who the message reaches, read in its own transaction: it is delivered
       // the moment it commits, never after a second read. Not part of the
@@ -2471,8 +2516,15 @@ export class PostgresMessageRepository {
     const annotationId = bounded(input.annotationId, "annotationId");
     const requestDigest = digest(input.requestDigest, "requestDigest");
     const commandKind = "message-system-annotation";
+    const operation = "message.system-annotation";
     const principal = { kind: "system" as const, id: "xmatrix" };
-    return this.inSpace(requestId, commandKind, spaceId, async (transaction) => {
+    const placement = await this.placement(requestId, operation, spaceId);
+    // Only database facts are recorded here; live publication follows outside
+    // this boundary. A fresh attempt rechecks the message and its annotation.
+    return retryTransactionBeforeCommit(this.database, {
+      requestId, operation,
+      placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
+    }, async (transaction) => {
       const rows = await transaction.query<MutableMessageRow>({
         name: "message_system_annotation_candidate_v1",
         text: `SELECT m.* FROM data.messages m WHERE m.space_id = $1 AND m.channel_id = $2
@@ -2946,12 +2998,17 @@ export class PostgresMessageRepository {
     requestId: string;
     spaceId: string;
     channelId: string;
-  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence> }> {
+    /** Instances whose lifecycle just changed: each is answered exactly, ended ones included. */
+    instanceIds?: readonly string[];
+  }): Promise<{ recipientUserIds: string[]; memberPresence: Record<string, ChannelMemberPresence>;
+    instanceRecords: AgentInstanceRecord[] }> {
     const { requestId, spaceId, channelId } = channelRequest(input);
-    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => ({
-      recipientUserIds: await liveRecipientUserIds(transaction, spaceId, channelId),
-      memberPresence: (await loadChannelAgentPresence(transaction, spaceId, [channelId])).get(channelId) ?? {},
-    }));
+    return this.inSpace(requestId, "message.live-agent-presence", spaceId, async (transaction) => {
+      const recipientUserIds = await liveRecipientUserIds(transaction, spaceId, channelId);
+      const instances = await readChannelInstances(transaction, spaceId, [channelId], input.instanceIds);
+      return { recipientUserIds, memberPresence: instances.memberPresence.get(channelId) ?? {},
+        instanceRecords: instances.records.get(channelId) ?? [] };
+    });
   }
 
   /** The Channel's live audience as it stands now: who may read it, and whose cells hold its Instances. */

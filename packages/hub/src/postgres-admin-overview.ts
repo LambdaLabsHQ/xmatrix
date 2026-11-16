@@ -50,8 +50,6 @@ interface TotalsRow extends QueryResultRow {
   runs: string | number;
   active_runs: string | number;
   agent_instances: string | number;
-  automations: string | number;
-  enabled_automations: string | number;
   storage_logical_bytes: string | number;
 }
 
@@ -244,8 +242,8 @@ async function readShardPartition(
           agentInstances: numberValue(totals.agent_instances),
           machines: 0,
           onlineMachines: 0,
-          scheduledTasks: numberValue(totals.automations),
-          enabledScheduledTasks: numberValue(totals.enabled_automations),
+          scheduledTasks: 0,
+          enabledScheduledTasks: 0,
           storageLogicalBytes: numberValue(totals.storage_logical_bytes),
           archivedSegmentBytes: 0,
         },

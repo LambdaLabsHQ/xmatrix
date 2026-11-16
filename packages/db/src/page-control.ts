@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -7,11 +7,11 @@ import { MessageAuthorityError } from "./message-authority-error.js";
 import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
-import { removePageAutomations } from "./automation-page-anchor.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
@@ -94,33 +94,29 @@ export function pageTitle(value: unknown): string {
   return value.trim();
 }
 
-/** What a page is called while its document does not open with a name. */
+/**
+ * What a page is called while its document has no name. A page's name is its document's first
+ * top-level heading (pages-live-document.md §4.1, `pageTitleLine`): one datum, kept in the document
+ * and nowhere else; `data.page_title` reads it the same way in SQL.
+ */
 export const UNNAMED_PAGE = "Untitled";
 
-/**
- * A page's name is the top-level heading its document opens with
- * (pages-live-document.md §4.1): one datum, kept in the document and nowhere
- * else. `data.page_name` reads it the same way in SQL.
- */
-export function pageNameFrom(body: string): string | null {
-  const line = body.trimStart().split("\n", 1)[0]?.trim() ?? "";
-  return /^#[ \t]+(\S.*)$/u.exec(line)?.[1]?.trim() ?? null;
-}
-
-/** A document that opens with a name: its own, or `name` above it. */
-export function namedPageBody(body: string, name: string): string {
-  if (pageNameFrom(body) !== null) return body;
-  const heading = `# ${pageTitle(name)}\n`;
-  return body.trim() ? `${heading}\n${body.replace(/^\s*\n/u, "")}` : heading;
-}
-
-/** The same document under another name: the heading it opens with is rewritten, or added. */
-export function renamedPageBody(body: string, name: string): string {
+/** `body` named `name`: the heading that names it is rewritten where it stands, or `name` is written above its text. */
+function withName(body: string, name: string, line = pageTitleLine(body)): string {
   const heading = `# ${pageTitle(name)}`;
-  if (pageNameFrom(body) === null) return namedPageBody(body, name);
-  const start = body.length - body.trimStart().length;
-  const end = body.indexOf("\n", start);
-  return `${body.slice(0, start)}${heading}${end < 0 ? "\n" : body.slice(end)}`;
+  if (line) return `${body.slice(0, line.start)}${heading}${line.end < body.length ? body.slice(line.end) : "\n"}`;
+  return body.trim() ? `${heading}\n\n${body.replace(/^\s*\n/u, "")}` : `${heading}\n`;
+}
+
+/** A document with a name: its own, or `name`. */
+export function namedPageBody(body: string, name: string): string {
+  const line = pageTitleLine(body);
+  return line?.title ? body : withName(body, name, line);
+}
+
+/** The same document under another name. */
+export function renamedPageBody(body: string, name: string): string {
+  return withName(body, name);
 }
 
 /** A page row joined to its head revision, whose document carries the page's name. */
@@ -145,13 +141,14 @@ function pageSearchSnippet(text: string, at: number, length: number): string {
 
 /**
  * The section whose text contains the query, or a title hit when only the page's name does: the
- * name is the heading its document opens with, so a match on that line is a title hit. Body wins.
+ * name is the heading that names its document, so a match on that line is a title hit. Body wins.
  */
 function pageSearchHit(title: string, body: string, pageId: string, query: string): PageSearchHit {
   const needle = query.toLocaleLowerCase();
-  const nameLine = body.length - body.trimStart().length;
-  const afterName = pageNameFrom(body) === null ? 0 : (body.indexOf("\n", nameLine) + 1 || body.length);
-  const bodyAt = body.toLocaleLowerCase().indexOf(needle, afterName);
+  const text = body.toLocaleLowerCase();
+  const name = pageTitleLine(body);
+  let bodyAt = text.indexOf(needle);
+  if (name && bodyAt >= name.start && bodyAt < name.end) bodyAt = text.indexOf(needle, name.end);
   if (bodyAt >= 0) {
     const blockId = pageBlockAt(body, bodyAt);
     const block = pageBlocks(body).find((item) => item.id === blockId);
@@ -263,10 +260,7 @@ interface CoWritingInput {
   requestId: string; spaceId: string; pageId: string; principal: PagePrincipal; conversationId: string;
 }
 
-/**
- * A committed revision. Its schedule lines are synced to the page's
- * Automations after the commit, by the Hub (docs/design/pages-live-document.md §6.4).
- */
+/** A committed revision. */
 export interface PageCommit {
   page: PageSummary; revision: PageRevision;
 }
@@ -330,6 +324,20 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
   return database.transaction(await activeSpaceContext(database, input, ErrorType), callback);
 }
 
+/** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
+export async function readInActiveSpace<T>(database: AuthorityDatabase,
+  input: { requestId: string; operation: string; spaceId: string },
+  ErrorType: new (code: string, status: number) => Error,
+  callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  const session = database.openSession();
+  try {
+    const context = await activeSpaceContext(session, input, ErrorType);
+    return await callback(singleReadStatements(session, context));
+  } finally {
+    await session.close();
+  }
+}
+
 /** A page as one actor sees it: their access, and whether it is the Space's governance page. */
 type TreeRow = PageRow & AccessView & { governance: boolean };
 
@@ -350,9 +358,9 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
   const detailed = (expression: string) =>
     `CASE WHEN $3::text[] IS NULL OR p.page_id=ANY($3::text[]) THEN ${expression} END`;
   const rows = await tx.query<PageRow & { actor_access: "read" | "edit" | null; is_governance: boolean }>({
-    name: "page_tree_access_v2",
+    name: "page_tree_access_v3",
     text: `SELECT p.page_id,p.parent_page_id,p.access_mode,p.head_revision,p.agent_suggest_only,
-        ${detailed(`(SELECT data.page_name(r.body) FROM data.page_revisions r
+        ${detailed(`(SELECT data.page_title(r.body) FROM data.page_revisions r
           WHERE r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision)`)} AS title,
         ${detailed("p.position")} AS position,${detailed("p.updated_at")} AS updated_at,
         ${detailed("p.version")} AS version,${detailed("p.published_at")} AS published_at,
@@ -392,33 +400,6 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
   }).filter((row) => row.canRead);
 }
 
-/** Every page a principal can read in a Space, with whether they can edit it; none when they are not a member. */
-export async function pageAccessMap(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal):
-  Promise<Map<string, { canEdit: boolean; agentSuggestOnly: boolean }>> {
-  let actor: PageActor;
-  try {
-    actor = await pageActor(tx, spaceId, principal, false);
-  } catch (error) {
-    if (error instanceof PageControlError && error.status < 500) return new Map();
-    throw error;
-  }
-  return new Map((await accessibleTree(tx, spaceId, actor, [])).map((row) =>
-    [row.page_id, { canEdit: row.canEdit, agentSuggestOnly: row.agent_suggest_only }]));
-}
-
-/**
- * What a principal may do with one page, in the caller's transaction. An
- * Agent Run acts with its owner's access, and only while it is live.
- */
-export async function pageAccess(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal,
-  pageId: string, write: boolean): Promise<{ canRead: boolean; canEdit: boolean; agentSuggestOnly: boolean;
-    actor: PageActor }> {
-  const actor = await pageActor(tx, spaceId, principal, write);
-  const row = (await accessibleTree(tx, spaceId, actor, [])).find((item) => item.page_id === pageId);
-  return { canRead: Boolean(row), canEdit: Boolean(row?.canEdit), agentSuggestOnly: Boolean(row?.agent_suggest_only),
-    actor };
-}
-
 export interface PageRepositoryOptions {
   /** The deployment's own operator Space, which is not charged Agent credits. */
   creditsWaivedSpaceId?: string;
@@ -435,7 +416,8 @@ export class PostgresPageRepository {
    */
   private async chargeRevision(tx: DatabaseTransaction, spaceId: string, actor: Actor, now: string): Promise<void> {
     const rejection = await spaceBilling.durableWrite(tx, { spaceId, now, kind: "page_revision",
-      author: actor.isAgent ? "agent" : "person", creditsWaived: spaceId === this.options.creditsWaivedSpaceId });
+      author: actor.isAgent ? "agent" : "person", creditsWaived: spaceId === this.options.creditsWaivedSpaceId,
+      ownerUserId: actor.userId, authorName: actor.isAgent ? actor.author.label : "" });
     if (rejection) throw new PageControlError(rejection.code, rejection.status, rejection.message, rejection.details);
   }
 
@@ -445,15 +427,9 @@ export class PostgresPageRepository {
   }
 
   /** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
-  private async readInSpace<T>(requestId: string, operation: string, spaceId: string,
+  private readInSpace<T>(requestId: string, operation: string, spaceId: string,
     callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
-    const session = this.database.openSession();
-    try {
-      const context = await activeSpaceContext(session, { requestId, operation, spaceId }, PageControlError);
-      return await callback(singleReadStatements(session, context));
-    } finally {
-      await session.close();
-    }
+    return readInActiveSpace(this.database, { requestId, operation, spaceId }, PageControlError, callback);
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
@@ -605,7 +581,7 @@ export class PostgresPageRepository {
   async tree(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
     Promise<{ pages: PageSummary[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       // How far a person has read each page is theirs: an Agent Run has none.
@@ -632,8 +608,8 @@ export class PostgresPageRepository {
       const tree = await this.accessibleTree(tx, spaceId, actor);
       if (tree.length === 0) return { results: [] };
       const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
-        name: "page_search_heads_v2",
-        text: `SELECT p.page_id, data.page_name(r.body) AS title, r.body
+        name: "page_search_heads_v3",
+        text: `SELECT p.page_id, data.page_title(r.body) AS title, r.body
           FROM data.pages p
           JOIN data.page_revisions r
             ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
@@ -663,7 +639,8 @@ export class PostgresPageRepository {
     revision?: number; conversationId?: string; blockId?: string }): Promise<{ page: PageDocument }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.read", spaceId, async (tx) => {
+    const requestId = bounded(input.requestId, "requestId");
+    const load = async (tx: DatabaseTransaction): Promise<{ page: PageDocument }> => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const revision = input.revision === undefined ? Number(row.head_revision) : input.revision;
@@ -683,14 +660,22 @@ export class PostgresPageRepository {
         });
       }
       return { page: { ...this.summary(row), body: rev.body ?? "", revisionInfo: revisionOf(rev) } };
-    });
+    };
+    // The conversation link is one idempotent row. A lost response before
+    // COMMIT cannot have committed it, so that attempt runs once more. A read
+    // with no link takes no lock and must not open a transaction.
+    if (input.conversationId) {
+      return retryTransactionBeforeCommit(this.database, await activeSpaceContext(this.database,
+        { requestId, operation: "page.read", spaceId }, PageControlError), load);
+    }
+    return this.readInSpace(requestId, "page.read", spaceId, load);
   }
 
   async create(input: { requestId: string; spaceId: string; principal: PagePrincipal;
     parentPageId?: string | null; title?: string; body?: string; afterPageId?: string | null;
     accessMode?: "open" | "restricted" }): Promise<{ page: PageSummary }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    // The name is written into the document, unless the document already opens with one of its own.
+    // The name is written into the document, unless the document already has a name of its own.
     // Without a name the document is as written: a page someone started writing names itself in its text.
     const newBody = pageBody(input.title === undefined ? input.body ?? "" : namedPageBody(input.body ?? "", input.title));
     const accessMode = input.accessMode ?? "open";
@@ -1408,58 +1393,47 @@ export class PostgresPageRepository {
   }
 
   /**
-   * The newest revision of a page this person has had on screen whole, or null
-   * before they first read it, and the page as they have seen it when they saw
-   * part of it past that revision (`seen`; null when it is that revision's
-   * text). It is a person's own: an Agent Run has none.
+   * The newest revision of a page this person has had open, or null before
+   * their first visit. It is a person's own: an Agent Run has none.
    */
   async readState(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ revision: number | null; seen: string | null }> {
+    Promise<{ revision: number | null }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     if (input.principal.kind !== "user") throw new PageControlError("page_read_state_human_only", 403);
     return this.inSpace(bounded(input.requestId, "requestId"), "page.read_state", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       await this.page(tx, spaceId, actor, pageId, "read");
-      const row = (await tx.query<QueryResultRow & { revision: string; seen_body: string | null }>({
-        name: "page_read_state_v2",
-        text: "SELECT revision::text, seen_body FROM data.page_reads WHERE space_id=$1 AND page_id=$2 AND user_id=$3",
+      const row = (await tx.query<QueryResultRow & { revision: string }>({
+        name: "page_read_state_v3",
+        text: "SELECT revision::text FROM data.page_reads WHERE space_id=$1 AND page_id=$2 AND user_id=$3",
         values: [spaceId, pageId, actor.userId], maxRows: 1 }))[0];
-      return { revision: row ? Number(row.revision) : null, seen: row?.seen_body ?? null };
+      return { revision: row ? Number(row.revision) : null };
     });
   }
 
-  /**
-   * Moves how far this person has read a page forward to a revision the page has; it never moves back.
-   * `seen` is the page as they have seen it past that revision, or null once they have seen it whole; it
-   * stands unless an older revision is reported.
-   */
+  /** Moves how far this person has read a page forward to a revision the page has; it never moves back. */
   async markRead(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal;
-    revision: number; seen?: string | null }): Promise<{ revision: number }> {
+    revision: number }): Promise<{ revision: number }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     if (input.principal.kind !== "user") throw new PageControlError("page_read_state_human_only", 403);
     if (!Number.isSafeInteger(input.revision) || input.revision < 1) {
       throw new PageControlError("invalid_request", 400, "revision is invalid");
     }
-    const seen = input.seen === undefined || input.seen === null ? null : pageBody(input.seen);
     return this.inSpace(bounded(input.requestId, "requestId"), "page.mark_read", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const revision = Math.min(input.revision, Number(row.head_revision));
-      const stored = (await tx.query<QueryResultRow & { revision: string }>({ name: "page_mark_read_v2",
-        text: `INSERT INTO data.page_reads (space_id,page_id,user_id,revision,seen_body,updated_at)
-          VALUES ($1,$2,$3,$4,$5,now())
+      const stored = (await tx.query<QueryResultRow & { revision: string }>({ name: "page_mark_read_v3",
+        text: `INSERT INTO data.page_reads (space_id,page_id,user_id,revision,updated_at)
+          VALUES ($1,$2,$3,$4,now())
           ON CONFLICT (space_id,page_id,user_id) DO UPDATE
             SET revision=GREATEST(data.page_reads.revision, EXCLUDED.revision),
-              seen_body=CASE WHEN EXCLUDED.revision >= data.page_reads.revision THEN EXCLUDED.seen_body
-                ELSE data.page_reads.seen_body END,
               updated_at=CASE WHEN EXCLUDED.revision > data.page_reads.revision
-                OR (EXCLUDED.revision = data.page_reads.revision
-                  AND EXCLUDED.seen_body IS DISTINCT FROM data.page_reads.seen_body)
                 THEN EXCLUDED.updated_at ELSE data.page_reads.updated_at END
           RETURNING revision::text`,
-        values: [spaceId, pageId, actor.userId, revision, seen], maxRows: 1 }))[0]!;
+        values: [spaceId, pageId, actor.userId, revision], maxRows: 1 }))[0]!;
       return { revision: Number(stored.revision) };
     });
   }
@@ -1479,8 +1453,8 @@ export class PostgresPageRepository {
         values: [spaceId], maxRows: 1 });
       if (!space[0]) return null;
       const pages = await tx.query<QueryResultRow & Pick<PageRow, "page_id" | "parent_page_id" | "access_mode" | "title">>({
-        name: "page_pull_request_tree_v1",
-        text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_name(r.body) AS title
+        name: "page_pull_request_tree_v2",
+        text: `SELECT p.page_id,p.parent_page_id,p.access_mode,data.page_title(r.body) AS title
           FROM data.pages p ${HEAD_REVISION} WHERE p.space_id=$1
           ORDER BY p.page_id LIMIT ${MAX_PAGES + 1}`, values: [spaceId], maxRows: MAX_PAGES + 1 });
       const page = pages.find((row) => row.page_id === pageId);
@@ -1534,8 +1508,8 @@ export class PostgresPageRepository {
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.public.read", spaceId, async (tx) => {
       const rows = await tx.query<PageRow>({
-        name: "page_public_tree_v2",
-        text: `SELECT p.page_id,p.parent_page_id,data.page_name(r.body) AS title,p.position,p.access_mode,
+        name: "page_public_tree_v3",
+        text: `SELECT p.page_id,p.parent_page_id,data.page_title(r.body) AS title,p.position,p.access_mode,
             p.head_revision,p.agent_suggest_only,p.updated_at,p.version,p.published_at
           FROM data.pages p ${HEAD_REVISION}
           WHERE p.space_id=$1 ORDER BY p.position, p.page_id LIMIT ${MAX_PAGES + 1}`,
@@ -1570,7 +1544,7 @@ export class PostgresPageRepository {
   }
 
   async remove(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ removed: boolean; automationChannels: string[] }> {
+    Promise<{ removed: boolean; programChannels: string[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.remove", spaceId, async (tx) => {
@@ -1586,11 +1560,15 @@ export class PostgresPageRepository {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }
-      const automationChannels = await removePageAutomations(tx, { spaceId, pageId, at: new Date().toISOString() });
       const removed = await tx.query({ name: "page_remove_v1",
         text: "DELETE FROM data.pages WHERE space_id=$1 AND page_id=$2 RETURNING page_id",
         values: [spaceId, pageId], maxRows: 1 });
-      return { removed: removed.length === 1, automationChannels };
+      // The page's Norn programs go with it: each one's next pass ends it and cancels what it left open.
+      const programChannels = (await tx.query<QueryResultRow & { channel_id: string }>({ name: "page_remove_norn_programs_v1",
+        text: `UPDATE data.norn_programs SET stop_reason='Removed with its page',updated_at=clock_timestamp()
+          WHERE space_id=$1 AND page_id=$2 AND state='running' AND stop_reason IS NULL RETURNING channel_id`,
+        values: [spaceId, pageId], maxRows: 200 })).map(row => String(row.channel_id));
+      return { removed: removed.length === 1, programChannels };
     });
   }
 

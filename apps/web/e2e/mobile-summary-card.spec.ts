@@ -49,12 +49,18 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   await expect(card).toHaveCSS("background-image", "none");
   await expect(card).toHaveCSS("box-shadow", "none");
   await expect(page.locator(".app-topbar")).toHaveCSS("box-shadow", "none");
-  // About the conversation, not part of it: its own paper tone, closed by a
-  // hairline, so the message stream visibly starts below it.
-  await expect(card).toHaveCSS("border-bottom-width", "1px");
+  // Set apart by a deeper paper tone, not a rule (user 2026-11-04:
+  // 分割线…不够简洁 / summary 那里能不能有个颜色区分).
+  await expect(card).toHaveCSS("border-bottom-width", "0px");
   const [bandFill, streamFill] = await Promise.all([card, page.locator(".app-message-surface")]
     .map((locator) => locator.evaluate((element) => getComputedStyle(element).backgroundColor)));
   expect(bandFill).not.toBe(streamFill);
+  // The bar above is the same block, so the sign's shadow falls on one tone
+  // (user 2026-11-04: 白顶栏+灰带子+阴影不协调), and the Summary starts
+  // clear of that shadow.
+  const barFill = await page.locator(".app-topbar").first().evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(barFill).toBe(bandFill);
+  await expect(card.locator(".app-mobile-channel-about-summary")).toHaveCSS("padding-top", "24px");
 
   // Two clamped lines, and the card is tall enough to show both: the dead
   // clamp used to cut the next line in half at the card's bottom edge.
@@ -83,4 +89,9 @@ test("mobile Summary stays on paper below the bar and ellipsizes at two lines", 
   // Still the way into channel details.
   await card.getByRole("button", { name: "Open channel Summary" }).tap();
   await expect(page.getByRole("heading", { name: "Summary" })).toBeVisible();
+
+  // A conversation without either kind of head content keeps its plain bar.
+  await openGeneralChannelWithHistory(page, { ...channel, summary: "  " }, history);
+  await expect(card).toHaveCount(0);
+  await expect(page.locator(".app-topbar").first()).not.toHaveCSS("background-color", bandFill);
 });

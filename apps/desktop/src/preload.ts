@@ -44,6 +44,8 @@ ipcRenderer.on("desktop:open-app-link", (_event, id: number, href: string) => {
 
 contextBridge.exposeInMainWorld("xmatrixDesktop", {
   client: "desktop",
+  /* This shell takes `xmatrix://connect/oauth`: a connect started here comes back here from the browser. */
+  connectReturn: true,
   platform: process.platform,
   getContext: () => ipcRenderer.invoke("desktop:get-context"),
   setBadge: (state: DesktopBadgeState) => ipcRenderer.invoke("desktop:set-badge", state),

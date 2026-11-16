@@ -6,10 +6,7 @@ import { createContext, Fragment, useCallback, useContext, useEffect, useId, use
 import { Popover } from "@base-ui/react/popover";
 import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "lucide-react";
-import { preparationFailureSummary, rejectionCause, WEB_PROXY_ROUTES, type FaceOf } from "@xmatrix/protocol";
-import { useAuth } from "@/lib/auth-context";
-import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
-import { declinedIntentCopy, type DeclinedIntent } from "./summon-intent";
+import { preparationFailureSummary, rejectionCause, type FaceOf } from "@xmatrix/protocol";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
 import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
@@ -150,32 +147,6 @@ export function MentionInvocationRejectionChip({ rejection, unavailable, labelCo
       terminal: true, steps: [] }} />;
 }
 
-/** Jev's confidence in its reading, from the retained decision record. The
- *  records are the author's; anyone else simply sees the reading without it. */
-function useDeclinedIntentConfidence(channelId: string, messageId: string, category: DeclinedIntent, enabled: boolean) {
-  const { user } = useAuth();
-  const fetcher = useXMatrixQueryFetch(user?.id ?? "");
-  const [confidence, setConfidence] = useState<number>();
-  const load = useCallback(async () => {
-    const route = WEB_PROXY_ROUTES.channel_message_decision_evidence(channelId, messageId);
-    const list = await fetcher(route, { cache: "no-store" });
-    if (!list.ok) return;
-    const { records } = await list.json() as { records: Array<{ refId: string; createdAt: string }> };
-    const results = records.filter(record => record.refId.endsWith(":succeeded"))
-      .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt));
-    for (const record of results.slice(0, 5)) {
-      const detail = await fetcher(`${route}?refId=${encodeURIComponent(record.refId)}`, { cache: "no-store" });
-      if (!detail.ok) continue;
-      const intent = (await detail.json() as { answers?: { intent?: { choice?: unknown; probabilities?: Record<string, unknown> } } }).answers?.intent;
-      const probability = intent?.choice === category ? intent.probabilities?.[category] : undefined;
-      if (typeof probability === "number" && Number.isFinite(probability)) { setConfidence(probability); return; }
-    }
-  }, [category, channelId, fetcher, messageId]);
-  useEffect(() => { if (enabled && user && confidence === undefined) void load().catch(() => undefined); },
-    [confidence, enabled, load, user]);
-  return confidence;
-}
-
 /** Shared activation and group selection for invocation and prose-detail cards. */
 function useInvocationPopover() {
   const group = useContext(InvocationPopoverContext);
@@ -225,43 +196,37 @@ function MentionProseCard({ card, sourceMention, labelContent, title, ariaLabel,
 }
 
 /**
- * A launch mention Jev read as naming, explaining or quoting an Agent. It
- * settles back into the author's prose — no avatar, no status pill — and keeps
- * only a dotted underline that opens why nothing started. The author can
- * answer the intent question themselves from here.
+ * A summon its send did not ask to start, such as an Agent's report naming
+ * another Agent. It settles back into the author's prose — no avatar, no
+ * status pill — with a dotted underline that opens why nothing started, and
+ * the author can start it from there.
  */
-export function MentionIntentDeclinedChip({ rejection, category, labelContent, onLaunchAnyway }: {
-  rejection: SerializedAgentInvocationRejection; category: DeclinedIntent; labelContent?: ReactNode;
-  onLaunchAnyway?: () => Promise<void>;
+export function MentionOnlyChip({ rejection, labelContent, onStart }: {
+  rejection: SerializedAgentInvocationRejection; labelContent?: ReactNode;
+  onStart?: () => Promise<void>;
 }) {
   const card = useInvocationPopover();
-  const confidence = useDeclinedIntentConfidence(rejection.channelId, rejection.sourceMessageId, category, card.open);
-  const [launching, setLaunching] = useState<"idle" | "launching" | "sent" | "failed">("idle");
-  const copy = declinedIntentCopy(category);
-  const launch = async () => {
-    if (!onLaunchAnyway || launching === "launching" || launching === "sent") return;
-    setLaunching("launching");
-    try { await onLaunchAnyway(); setLaunching("sent"); }
-    catch { setLaunching("failed"); }
+  const [starting, setStarting] = useState<"idle" | "starting" | "sent" | "failed">("idle");
+  const start = async () => {
+    if (!onStart || starting === "starting" || starting === "sent") return;
+    setStarting("starting");
+    try { await onStart(); setStarting("sent"); }
+    catch { setStarting("failed"); }
   };
-  return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title="Not a summon"
+  return <MentionProseCard card={card} sourceMention={rejection.sourceMention} labelContent={labelContent} title="Mentioned"
     className="app-mention-intent-declined"
-    launching={launching === "launching" || launching === "sent"}
-    ariaLabel={`${rejection.sourceMention}: not a summon. xMatrix read this as ${copy.reading}. Show details`}>
+    launching={starting === "starting" || starting === "sent"}
+    ariaLabel={`${rejection.sourceMention}: mentioned, not started. Show details`}>
     <Popover.Description className="app-intent-reading">
-      xMatrix read this as <strong>{copy.reading}</strong>, so no Agent was started.
+      This message names the Agent without asking it to start, so none was started.
     </Popover.Description>
-    {confidence !== undefined && <div className="app-intent-confidence" aria-label={`Routing confidence ${Math.round(confidence * 100)}%`}>
-      <span className="app-intent-confidence-bar"><span style={{ width: `${Math.round(confidence * 100)}%` }} /></span>
-      <span>{Math.round(confidence * 100)}%</span>
-    </div>}
-    {onLaunchAnyway && <button type="button" className="app-intent-launch" data-state={launching}
-      disabled={launching === "launching" || launching === "sent"} onClick={() => void launch()}>
+    {onStart && <button type="button" className="app-intent-launch" data-state={starting}
+      disabled={starting === "starting" || starting === "sent"} onClick={() => void start()}>
       <AnimatedIcon icon={Zap} aria-hidden="true" size={14} />
-      {launching === "launching" ? "Starting…" : launching === "sent" ? "Launch requested" : "Launch anyway"}
+      {starting === "starting" ? "Starting…" : starting === "sent" ? "Start requested" : "Start"}
     </button>}
-    {launching === "failed" && <p role="alert" className="app-invocation-action-error">The launch was not accepted. Refresh the message and try again.</p>}
-    <p className="app-invocation-description">To start an Agent directly next time, write <code>launch:force</code> after the mention.</p>
+    {starting === "failed" && <p role="alert" className="app-invocation-action-error">The start was not accepted. Refresh the message and try again.</p>}
+    <p className="app-invocation-description">An Agent starts one with <code>xmatrix send --launch</code>.</p>
   </MentionProseCard>;
 }
 
@@ -373,16 +338,16 @@ export function MentionLaunchHintChip({ rejection, labelContent }: {
   </MentionProseCard>;
 }
 
-/** A written summon the Hub has not answered yet. Right after sending, Jev is
- *  reading it; the shimmer stops at the reading window even with no answer.
- *  `fillKey` remembers that reading, so parameters that arrive afterwards
- *  highlight once inside the same mention. */
-export function MentionSummonPending({ labelContent, reading, fillKey }: { labelContent: ReactNode; reading: boolean; fillKey?: string }) {
-  useEffect(() => { if (reading && fillKey) noteJevReading(fillKey); }, [reading, fillKey]);
-  return <span className="app-mention-chip app-mention-invocation app-mention-summon-written" data-reading={reading ? "true" : undefined}>
+/** A written summon the Hub has not answered yet. Right after sending it is
+ *  starting: xMatrix is choosing where it runs. The shimmer stops at the
+ *  starting window even with no answer. `fillKey` remembers that moment, so
+ *  parameters that arrive afterwards highlight once inside the same mention. */
+export function MentionSummonPending({ labelContent, starting, fillKey }: { labelContent: ReactNode; starting: boolean; fillKey?: string }) {
+  useEffect(() => { if (starting && fillKey) noteJevReading(fillKey); }, [starting, fillKey]);
+  return <span className="app-mention-chip app-mention-invocation app-mention-summon-written" data-reading={starting ? "true" : undefined}>
     <span className="app-mention-chip-label">{labelContent}</span>
-    {reading && <span className="app-mention-invocation-status" role="status">
-      <span aria-hidden="true">·</span><span className="app-intent-reading-label">xMatrix is reading</span>
+    {starting && <span className="app-mention-invocation-status" role="status">
+      <span aria-hidden="true">·</span><span className="app-intent-reading-label">Starting</span>
     </span>}
   </span>;
 }

@@ -1,9 +1,9 @@
 import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
-import type { ChannelAttachment, DraftSummonIntent } from "@xmatrix/protocol";
+import type { ChannelAttachment } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
   isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
-  REGISTRATION_PREPARATION_REJECTION_CODES, HARNESS_SIGNED_OUT_NOTICE_KIND, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
+  REGISTRATION_PREPARATION_REJECTION_CODES, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
   AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
 import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
 import {
@@ -12,6 +12,7 @@ import {
   dispatchProductAgentSystemNotice,
   type ProductAgentMentionAuthorityEnv,
 } from "./product-agent-mention-authority-adapter";
+import { startNornProgram } from "./norn-programs";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import {
   dispatchProductAgentInterventionAfterAuthorityMessage,
@@ -66,8 +67,6 @@ export interface ProductMessagePostCommitInput {
   scheduleBackground?: (task: Promise<unknown>) => void;
   /** Set by the append when this message replies to a cross-Channel link. */
   replyOrigin?: CrossChannelReplyOrigin;
-  /** Jev's reading of each summon while its Human author typed it. */
-  draftIntents?: DraftSummonIntent[];
 }
 
 /**
@@ -206,8 +205,8 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     await notice({ ...input, sourceMessageId: input.messageId, body: RETIRED_AGENT_LAUNCH_NOTICE });
     return true;
   }
-  // `@auto`, a harness shout or an Instance address from any author (Human,
-  // Agent, Automation), or a Human's picker selections: every launch is the
+  // `@auto`, a harness shout or an Instance address from any author (Human
+  // or Agent), or a Human's picker selections: every launch is the
   // registration dispatch, which records a refusal where the message shows it.
   const directMention = filterOperationalMentions(input.body, parseHarnessCapabilityMentions(input.body)).length > 0 ||
     parseAutoLaunchMentions(input.body).some(mention => isAutoLaunchSummonText(mention.text)) ||
@@ -221,25 +220,25 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // The system notice is source-bound and idempotent across message retries.
     // A hint already lives on the mention's card: Jev's reading, or how to
     // name the machine. A launch that failed still tells the Channel.
-    // A too-old or signed-out program is named, and a signed-out one's notice carries what to sign in
-    // and the summon to send again once it is (HARNESS_SIGNED_OUT_NOTICE_KIND).
+    // A too-old program is named, and an offline machine's notice carries the summon to send again.
     const notices = new Map<string, Record<string, unknown> | undefined>();
     for (const item of rejected ?? []) {
       if (isLaunchHintRejection(item.code)) continue;
       const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
       const code = known ? item.code : "registration_launch_rejected";
-      const signedOut = code === "registration_harness_signed_out" ? item.signedOut : undefined;
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;
       const machineAgents = code === "registration_machine_unavailable" ? item.machineAgents : undefined;
-      // What is too old, signed out or offline, or what a named machine runs, is named; any other code is its own sentence.
-      const reason = known ? preparationRejectionMessage(code, signedOut ?? offline ?? machineAgents ?? item.tooOld) ?? PREPARATION_REJECTION_MESSAGES[code]
+      const quotaExhausted = code === "registration_quota_exhausted" ? item.quotaExhausted : undefined;
+      // What is too old or offline, what a named machine runs, or until when a
+      // named model is used up, is named; any other code is its own sentence.
+      const reason = known ? preparationRejectionMessage(code, offline ?? machineAgents ?? quotaExhausted ?? item.tooOld)
+        ?? PREPARATION_REJECTION_MESSAGES[code]
         : PREPARATION_REJECTION_MESSAGES.registration_launch_rejected;
       const body = `Agent launch failed: ${reason} (${code})`;
       const noticeBody = item.quotaRetryId ? `${body}\n\n${item.sourceMention}\nRequest ${(item.selectionIndex ?? 0) + 1}` : body;
       if (!notices.has(noticeBody)) notices.set(noticeBody, item.quotaRetryId
         ? { kind: AGENT_QUOTA_RETRY_NOTICE_KIND, xmatrixQuotaRetryId: item.quotaRetryId }
         : !item.sourceMention ? undefined
-        : signedOut ? { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: item.sourceMention }
         : offline ? { kind: MACHINE_OFFLINE_NOTICE_KIND, offline, sourceMention: item.sourceMention } : undefined);
     }
     for (const [body, metadata] of notices) {
@@ -291,12 +290,19 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
  * Agent Runtime WebSocket appends (via Authority appendMessage waitUntil) must use
  * this same entry point so syntax never acquires source-specific behavior.
  */
+export interface ProductMessagePostCommitResult {
+  /** Each lifecycle command (stop, reborn, handoff) that did nothing, as its
+   * result on the message says, so the send can tell its sender. */
+  refusals: string[];
+}
+
 export async function dispatchProductMessagePostCommit(
   input: ProductMessagePostCommitInput,
-): Promise<void> {
+): Promise<ProductMessagePostCommitResult> {
+  const refusals: string[] = [];
   // An activity entry is a fact the runtime recorded, not something anyone
   // said: nothing in its body is a mention, command, page link or launch.
-  if (input.messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND) return;
+  if (input.messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND) return { refusals };
   const tasks: Promise<unknown>[] = [];
   // Interpretation nobody waits on (page links, the About) never
   // holds a launch's HTTP response: given a background scheduler, it runs there.
@@ -364,6 +370,14 @@ export async function dispatchProductMessagePostCommit(
       }),
     );
   }
+  // A message that carries a `norn run` block starts that program; its author reads why when it could not.
+  if (input.body.includes("norn run")) tasks.push(startNornProgram(input).catch((error): { refusal: string } => {
+    logPostCommitFailure("Norn program start failed", input, error);
+    return { refusal: "The program could not be started. Send it again." };
+  }).then(started => started?.refusal ? dispatchProductAgentSystemNotice({ ...input, sourceMessageId: input.messageId,
+    body: started.refusal, replyToMessageId: input.messageId }) : undefined).catch((error) => {
+    logPostCommitFailure("Norn program refusal notice failed", input, error);
+  }));
   const about = channelAboutDue(input.sequence);
   if (about) {
     // A discussion's first message names it before the About reads it.
@@ -382,7 +396,9 @@ export async function dispatchProductMessagePostCommit(
     );
   }
   if (interaction.stop) {
-    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).catch((error) => {
+    tasks.push(dispatchProductAgentInterventionAfterAuthorityMessage(input).then((result) => {
+      refusals.push(...result?.refusals ?? []);
+    }).catch((error) => {
       logPostCommitFailure("Product agent intervention orchestration failed", input, error);
     }));
   }
@@ -402,6 +418,8 @@ export async function dispatchProductMessagePostCommit(
       dispatchProductAgentMentionsAfterAuthorityMessage({
         ...postCommitTaskInput(input),
         skipCreateInstanceMentions,
+      }).then((result) => {
+        refusals.push(...result.notices);
       }).catch((error) => {
         logPostCommitFailure("Product agent mention orchestration failed", input, error);
       }),
@@ -412,4 +430,5 @@ export async function dispatchProductMessagePostCommit(
     catch { tasks.push(...sideTasks); }
   } else tasks.push(...sideTasks);
   await Promise.all(tasks);
+  return { refusals };
 }

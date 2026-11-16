@@ -3,10 +3,10 @@ import { agentInstanceMemberPresence } from "./channel-presence-selectors.js";
 import type { SerializedAgentInstance } from "./authority-foundation.js";
 import { withRegistrationQuota, type ChannelMemberPresence, type SerializedChannel } from "./authority-runtime.js";
 import { emptyChannelPresence, presenceInstanceId, reduceChannelPresence,
-  type AgentInstancePresence, type ChannelPresence, type ChannelSnapshot, type HumanPresence } from "./channel-presence.js";
+  type AgentInstancePresence, type ChannelPresence, type LiveChannel, type HumanPresence } from "./channel-presence.js";
 
 /** Legacy wire compatibility ends here. Never infer Instance identity from a member key. */
-export function decodeChannelSnapshot(channel: SerializedChannel | ChannelSnapshot): ChannelSnapshot {
+export function decodeChannelSnapshot(channel: SerializedChannel | LiveChannel): LiveChannel {
   try {
     return decodePresence(channel);
   } catch {
@@ -19,12 +19,12 @@ export function decodeChannelSnapshot(channel: SerializedChannel | ChannelSnapsh
   }
 }
 
-function decodePresence(channel: SerializedChannel | ChannelSnapshot): ChannelSnapshot {
+function decodePresence(channel: SerializedChannel | LiveChannel): LiveChannel {
   if ("presence" in channel && !Object.prototype.hasOwnProperty.call(channel, "memberPresence")) {
     if (channel.presence && (!(channel.presence.instances instanceof Map) || !(channel.presence.humans instanceof Map))) {
       throw new TypeError("Invalid internal Channel presence model");
     }
-    return channel as ChannelSnapshot;
+    return channel as LiveChannel;
   }
   const { memberPresence, presenceCoverage, ...metadata } = channel as SerializedChannel;
   if (memberPresence === undefined) return { ...metadata, presence: undefined };
@@ -81,7 +81,7 @@ export function decodeChannelAgentPresence(channelId: string, memberPresence: un
 }
 
 /** Encode only at an external boundary: one legacy member for each Instance. */
-export function encodeChannelSnapshot(channel: ChannelSnapshot): SerializedChannel {
+export function encodeChannelSnapshot(channel: LiveChannel): SerializedChannel {
   const { presence, ...metadata } = channel;
   if (presence === undefined) return metadata;
   return {

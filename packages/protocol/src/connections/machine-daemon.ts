@@ -314,6 +314,12 @@ export interface MachineDaemonRunSnapshotReport {
   /** Diagnostic wall-clock timestamp; ordering is defined by registrySequence. */
   capturedAt?: string;
   machineResources?: import("../agent-routing.js").MachineResourceObservation;
+  /**
+   * Minute samples the daemon kept since its last report (the latest per
+   * minute, at most 120), batched onto a report it sends anyway. Older Hubs
+   * ignore this field.
+   */
+  machineResourceHistory?: import("../agent-routing.js").MachineResourceObservation[];
   /** Additive, bounded observation; older Hubs ignore this field. */
   harnessInventory?: import("../harness-management.js").HarnessInventory;
   /** What the daemon's CLI update is doing; from a daemon declaring `machine_cli_update_check_v1`. */

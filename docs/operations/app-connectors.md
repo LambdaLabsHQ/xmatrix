@@ -108,7 +108,16 @@ adding a login never changes it. Every command may name another account by
 its id (`<account id>/<worker>`); `@cloudflare:list_accounts:*` lists the
 accounts the logins reach. Which login serves an account is read from
 Cloudflare on every call, and a refused login does not hide the accounts the
-others reach.
+others reach. When several logins reach one account, a zone, DNS, registrar or
+D1 call that one login's grant refuses (a grant from before that scope was
+offered) is retried with the next; a refused call changed nothing, so writes
+retry too. When every login reaching the account refuses, the error names the
+account and each login that reaches it by the date Apps → Cloudflare lists it
+under, and says what to do: connect again as a Cloudflare user of that account,
+select it with full access on the consent page, and check the account allows
+public OAuth apps. Connecting as a different Cloudflare user adds or replaces a
+different login and leaves the refused one in place. `put_dns` adds A, AAAA and CNAME records DNS-only unless
+the command ends in `proxied` (a Pages branch hostname needs the proxy).
 
 Nothing is configured in the Cloudflare dashboard. The Space's subscriptions
 are the authority for which notifications reach xMatrix:
@@ -151,6 +160,16 @@ before that reconnect succeeds. D1 is unchanged and stays read-only.
 
 ### App Store Connect
 
+The fixed official API catalog also supports resources without dedicated
+business commands: `api_operations` searches, `api_schema` describes,
+`api_read` performs a catalog GET, and `api_plan`/`api_write` bind a mutation to
+an exact request and current resource digest. It covers subscription and IAP
+configuration, TestFlight management, pricing/offers, notifications, team,
+signing, assets and reporting through the provider's schemas. Secrets cannot
+enter invocation JSON; review credentials are removed from generic results.
+Use private reads for personal/financial data. See the complete
+[operation and recovery contract](../connectors/app-store-connect-api.md).
+
 App Store Connect connects with an API key from Users and Access →
 Integrations → App Store Connect API: save its Key ID, the Issuer ID shown
 above the team keys (leave it empty for an individual key) and the contents of
@@ -178,10 +197,11 @@ Apple's event id, so an Automation can use
 `--on appstoreconnect:version:com.example.app`.
 
 Apple gives no API for creating the app record, answering App Privacy,
-accepting agreements, or replying to App Review. The first two, and reading
-App Review's messages, go through the App Store Connect website with the
+accepting agreements, or replying to App Review. App records, privacy and
+App Review's messages, attachments and draft replies use the website with the
 optional Web session credential (`create_app`, `set_privacy` and `privacy`,
-`review_messages`); accepting agreements and replying to App Review stay in
+`review_messages`, `review_attachments`, `review_attachment`, `review_draft`,
+`edit_review_draft`, `send_review_draft`). Accepting agreements stays in
 App Store Connect, as does the App Review sign-in password. The Web session is
 saved like this. In the xMatrix desktop app, Sign in
 to App Store Connect under Credentials opens Apple's own sign-in page in a
@@ -195,6 +215,25 @@ stays signed in longer than the copy the Hub holds. `read_app`
 shows what a new app still lacks. A first version's App Review contact is set
 with `set_review_contact`; later versions inherit it through `create_version`.
 
+Review actions prove the thread belongs to the named app before reading a
+message, attachment or draft. Reads follow at most five pages of each fixed
+relationship; malformed or incomplete ownership data cannot authorize a write.
+Attachment lists omit signed URLs. `review_attachment` returns one expiring
+single-file URL from Apple's CDN; download it without a Cookie or API JWT.
+Existing `review_messages:<bundle id>` calls still select the newest thread;
+optional thread and message IDs select older threads or longer message text.
+
+Draft creation refuses an existing draft. Update, delete and send require the
+current draft ID and digest from `review_draft`; the digest includes the body
+and attachment identities, checksums and processing states. A changed draft
+stops before mutation. Send requires processed attachments, performs one POST,
+then verifies the returned message ID and body in that same thread. A timeout
+or failed verification remains uncertain and is never blindly retried. Each
+web mutation rechecks the current connection write grant immediately before
+fetch. Apple offers no conditional draft update, so this is a pre-write
+snapshot check, not a provider-side transaction. See the
+[App Review workflow](../connectors/app-store-connect-review.md).
+
 Uploads are reserve, send, commit. `upload_build` and `upload_screenshot`
 answer with the parts to send: each has a method, a URL at Apple's storage, a
 byte range and headers. Whoever has the file sends those bytes without an
@@ -206,7 +245,9 @@ sizes are exact: read them with `screenshot_specs` before exporting images.
 `create_certificate` spends one of the team's few distribution certificates
 on every call. Use `signing` first to see whether one already exists whose
 private key the build machine still has; revoke unused ones in the Apple
-Developer portal, which this connector never does.
+Developer portal. The dedicated signing workflow never revokes certificates;
+the explicit catalog mutation can do so only through a checked write plan and
+the Channel's current write policy.
 
 ### Outbound Actions And Policy
 
@@ -225,8 +266,8 @@ section, and none is ever shown again.
 | Bitbucket Cloud | `read_pull_request:<workspace/repo!5>` (read), `comment:<workspace/repo!5> <text>` |
 | Jira | `read_issue:<ENG-9>` (read), `comment:<ENG-9>`, `transition:<ENG-9> <status>` |
 | Vercel | `redeploy:<deployment id>` |
-| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>`, `list_zones:<account id>\|*`, `list_dns:[<account id>/]<zone>`, `list_domains:<account id>\|*`, `check_domain:[<account id>/]<domain>`, `list_workers:<account id>\|*` (reads), `rollback:[<account id>/]<worker> [version id] [reason]`, `create_zone:[<account id>/]<domain>`, `put_dns:[<account id>/]<zone> <TYPE> <name> <content>`, `register_domain:[<account id>/]<domain>`, `attach_domain:[<account id>/]<hostname> <worker>` |
-| App Store Connect | `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `sales:<bundle id>\|* [vendor=<vendor number>, kept after the first time] [by=day\|month] [days=…] [months=…]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `subscriptions:<bundle id>`, `in_app_purchases:<bundle id>` (read), `submit_subscriptions:<bundle id> [product id …]`, `submit_in_app_purchases:<bundle id> [<product id> …]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
+| Cloudflare | `list_accounts:*`, `query_logs:[<account id>/]<worker> [minutes] [error\|warn\|log]`, `list_deployments:[<account id>/]<worker>`, `list_databases:<account id>\|*`, `query_database:[<account id>/]<database> <SELECT …>`, `list_zones:<account id>\|*`, `list_dns:[<account id>/]<zone>`, `list_domains:<account id>\|*`, `check_domain:[<account id>/]<domain>`, `list_workers:<account id>\|*` (reads), `rollback:[<account id>/]<worker> [version id] [reason]`, `create_zone:[<account id>/]<domain>`, `put_dns:[<account id>/]<zone> <TYPE> <name> <content> [proxied]`, `register_domain:[<account id>/]<domain>`, `attach_domain:[<account id>/]<hostname> <worker>` |
+| App Store Connect | `api_operations:* [resource]`, `api_schema:<operation/schema> [field path]`, `api_read:<operation> {json}`, `api_plan:<operation> {json}` (reads), `api_write:<operation> {json}` (write); `list_apps:*`, `status:<bundle id>`, `builds:<bundle id> [version]`, `read_version:<bundle id> <version>`, `reviews:<bundle id> [unanswered]`, `sales:<bundle id>\|* [vendor=<vendor number>, kept after the first time] [by=day\|month] [days=…] [months=…]`, `read_app:<bundle id>`, `review_messages:<bundle id>`, `web_session:*` (reads), `create_version:<bundle id> <version> [release=manual\|after_approval]`, `set_metadata:<bundle id> <version> {json}`, `set_build:<bundle id> <version> <build number>`, `submit:<bundle id> <version>`, `cancel_submission:<bundle id> [platform]`, `subscriptions:<bundle id>`, `in_app_purchases:<bundle id>` (read), `submit_subscriptions:<bundle id> [product id …]`, `submit_in_app_purchases:<bundle id> [<product id> …]`, `release:<bundle id> <version> [phased]`, `pause_phased_release:<bundle id> <version>`, `resume_phased_release:<bundle id> <version>`, `complete_phased_release:<bundle id> <version>`, `reply_review:<review id> <text>`, `set_app_info:<bundle id> {json}`, `set_age_rating:<bundle id> {json}`, `set_price:<bundle id> free\|<amount> [territory]`, `set_availability:<bundle id> all\|<codes> [new=on\|off]`, `set_review_contact:<bundle id> <version> {json}`, `upload_build:<bundle id> <version> <build number> <file> <bytes>`, `upload_screenshot:<bundle id> <file> <bytes>`, `commit_upload:<id> build\|image`, `delete_upload:<id> build\|image`, `set_screenshots:<bundle id> <version> {json}`, `declare_encryption:<bundle id> <version> <build number> exempt\|non_exempt`; more reads: `read_upload:<id> build\|image [from]`, `build_uploads:<bundle id> [build number]`, `screenshot_specs:* [store]`, `screenshots:<bundle id> <version> [locale]`. Signing: `signing:<bundle id>`, `read_certificate:<id>`, `read_profile:<id>` (reads), `register_bundle_id:<bundle id> <name> [platform=…]`, `enable_capability:<bundle id> <CAPABILITY>`, `create_certificate:<type> <signing request>`, `create_profile:<bundle id> <certificate id> [store=…]`. TestFlight: `testflight:<bundle id>`, `feedback:<bundle id> [crashes]`, `crash_log:<feedback id>` (reads), `add_to_group:<bundle id> <version> <build number> <group>`, `submit_beta_review:<bundle id> <version> <build number>`, `set_test_notes:<bundle id> <version> <build number> <locale> <notes>` |
 | Feishu | `send:<chat id>` |
 | Telegram | `send:<chat id>` |
 | Discord | `post:<channel id>` (mentions never ping) |
@@ -237,6 +278,7 @@ section, and none is ever shown again.
 | Google AdSense | `list_accounts:*`, `list_sites:<pub-…>`, `list_adunits:<pub-…>`, `report:<pub-…> [by=…] [days=…] [limit=…] [domain=…] [include_today]`, `list_payments:<pub-…>`, `list_alerts:<pub-…>`, `list_policy_issues:<pub-…>` (reads). See the [AdSense contract](../connectors/google-adsense.md). |
 | Google Ads | `list_accounts:*`, `read_account:<customer ID>`, `query:<customer ID> <SELECT GAQL>`, `validate_mutations:<customer ID> {json}` (reads), `mutate:<customer ID> {json}`, `set_campaign_status:<customer ID>/<campaign ID> {json}` (writes, ask by default). See the [Google Ads contract](../connectors/google-ads.md). |
 | Bing Webmaster Tools | `list_sites:*`, `traffic:<site>`, `queries:<site>`, `pages:<site>`, `crawl_stats:<site>` (reads), `submit_urls:<site> <url …>`, `submit_sitemap:<site> <sitemap url>`, `indexnow:<site> <url …>` |
+| Google Play Console | `list_apps:*`, `tracks:<package>[/<editId>] [custom track…]` (no edit opened), `base_plans:<package>/<subscription> [region]` (reads); `release:<package>[/<editId>] {…}`, `base_plan:<package>/<subscription>/<base plan> {…}` (writes); catalog `api_operations`/`api_schema`/`api_read`/`api_plan`, `api_write` (large bodies as the command's attached file), `api_upload` (`xmatrix call` only) ([guide](../connectors/google-play.md)) |
 | Google Business Profile | `list_accounts:*`, `list_locations:<account>`, `performance:<location> [days=…]`, `reviews:<location>` (reads), `reply_review:<review> <text>` |
 | PageSpeed Insights | `audit:<page url> [strategy=mobile\|desktop]`, `field:<page url or origin> [form=phone\|desktop\|all] [scope=page\|origin]` (reads; Google API key) |
 | Yandex Webmaster | `list_hosts:*`, `summary:<host id>`, `queries:<host id>` (reads), `recrawl:<host id> <page url>` |
@@ -459,7 +501,9 @@ Space admin action; use a fresh alias for a new one-time-code attempt.
   and actions requiring approval use `xmatrix send`; their visible receipt
   replies to the command message.
 - The launch prompt names the Space's connected apps. `xmatrix connector list`
-  prints each one's commands for the Run's Channel.
+  prints each one's commands for the Run's Channel. A row labelled `send`
+  (GitHub subscribe) runs only as a Channel message with `xmatrix send`;
+  `xmatrix call` refuses it and says so.
 
 **Automations.** `--on <connector>:<event|*>[:<source>]` fires a page
 Automation on a connector event in the same Space, for example
@@ -720,7 +764,7 @@ In the xMatrix Apps view, configure GitHub for each space that should use it:
   Ask is rejected because these specialized actions have no approval executor.
   App installation capabilities still constrain every operation; no Channel
   rules or legacy `@github:policy` commands remain.
-- A GitHub App installation belongs to exactly one User or Organization; a Space links up to 32 of them, and its repositories, webhook delivery and org/repo completion cover every linked installation. The GitHub connector's `GitHub accounts` section, shown whether or not the Space is connected, lists each linked account with `Manage on GitHub` (repository selection for that installation) and `Unlink` (forgets it here; unlinking the last one disconnects). After Connect, or `Find my GitHub accounts`, the installations the grant names but the Space has not linked are listed with `Link`, which links them directly, since GitHub does not return to xMatrix for an installation that is unchanged. `Install on another account` installs the App on a new account. None of these change xMatrix-owned channel/agent/write settings.
+- A GitHub App installation belongs to exactly one User or Organization; a Space links up to 32 of them, and its repositories, webhook delivery and org/repo completion cover every linked installation. The GitHub connector's `GitHub accounts` section, shown whether or not the Space is connected, lists each linked account with `Manage on GitHub` (repository selection for that installation) and `Unlink` (forgets it here; unlinking the last one disconnects). After Connect, or `Find my GitHub accounts`, the installations the grant names but the Space has not linked are listed with `Link`, which links them directly, since GitHub does not return to xMatrix for an installation that is unchanged. `Install on another account` installs the App on a new account. None of these change xMatrix-owned channel/agent/write settings. A GitHub command against a repository of an installation the Space has not linked answers with that step in its Channel receipt (a Space admin links the account here; installing on github.com alone does not link it) and the receipt's settings card opens this view; the execution keeps `github_installation_not_linked_to_space`.
 - Use full issue URLs or `owner/repo#42` when no default repository is configured.
 
 After setup, a channel message such as:

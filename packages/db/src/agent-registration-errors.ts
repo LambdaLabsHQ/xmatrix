@@ -1,22 +1,25 @@
-import type { HarnessSignedOut, HarnessTooOld, LaunchRefusal, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { HarnessTooOld, LaunchRefusal, OfflineMachine, QuotaRetryRegistration } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { ControlError } from "./control-error.js";
 
 export class RegistrationAccessError extends ControlError {
   override name = "RegistrationAccessError";
   /** `tooOld`: what a `registration_harness_outdated` refusal says is too old;
-   * `signedOut`: what a `registration_harness_signed_out` refusal says to sign in;
    * `offline`: the machines a `registration_daemon_offline` refusal waits for. */
-  constructor(code: string, status: number, readonly tooOld?: HarnessTooOld, readonly signedOut?: HarnessSignedOut,
-    readonly offline?: OfflineMachine[], readonly quotaTargets?: SpaceAgentRegistrationKey[],
+  constructor(code: string, status: number, readonly tooOld?: HarnessTooOld,
+    readonly offline?: OfflineMachine[],
+    /** For a used-up refusal: the registrations it names, each with the model it would run. */
+    readonly quotaTargets?: QuotaRetryRegistration[],
     /** For a used-up refusal: the reading it rested on, so only a newer one is news. */
-    readonly quotaRefusedThrough?: string) {
+    readonly quotaRefusedThrough?: string,
+    /** For a refusal of a model the author named: when its quota is next back. */
+    readonly quotaResetsAt?: string) {
     super(code, status, code, status >= 500);
   }
 
   /** A launch refusal and what it names. */
   static refusal(refusal: LaunchRefusal, status: number): RegistrationAccessError {
-    return new RegistrationAccessError(refusal.code, status, refusal.tooOld, refusal.signedOut, refusal.offline);
+    return new RegistrationAccessError(refusal.code, status, refusal.tooOld, refusal.offline);
   }
 }
 
@@ -38,6 +41,6 @@ export async function registrationRouteRefusal(tx: DatabaseTransaction, fallback
     WHERE owner_user_id=$1 AND machine_id=$2`,
   values: [route.ownerUserId, route.machineId], maxRows: 1 }))[0];
   return Number(daemons?.known ?? 0) > 0 && Number(daemons?.online ?? 0) === 0
-    ? new RegistrationAccessError("registration_daemon_offline", 409, undefined, undefined, [{ machineId: route.machineId }])
+    ? new RegistrationAccessError("registration_daemon_offline", 409, undefined, [{ machineId: route.machineId }])
     : new RegistrationAccessError(fallback, 409);
 }

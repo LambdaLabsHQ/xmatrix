@@ -58,6 +58,9 @@ export const HUMAN_CLIENT_PRESENCE_DIGEST = "presence_digest";
  */
 export const HUMAN_CLIENT_PRESENCE_COVERAGE = "presence_coverage_v1";
 
+/** Flat Instance records are independent of Channel metadata and Human presence. */
+export const HUMAN_CLIENT_INSTANCE_RECORDS = "instance_records_v1";
+
 /**
  * Agent presence for conversations this socket is not showing, batched: the
  * latest card per Agent and Instance set since the previous digest. Each card
@@ -112,7 +115,7 @@ export type HumanChannelCatalogChangedMessage = {
  * change of it, and the client re-reads it on that frame instead of on a timer.
  */
 export const WORKSPACE_RESOURCE_KINDS = [
-  "automations", "channel_transfers", "cross_space_reads", "connector_action_requests", "launch_targets",
+  "channel_transfers", "cross_space_reads", "connector_action_requests", "launch_targets",
 ] as const;
 
 export type WorkspaceResourceKind = (typeof WORKSPACE_RESOURCE_KINDS)[number];
@@ -161,6 +164,8 @@ export type HumanServerMessage =
   | { type: "presence"; online: boolean; agent: SerializedAgent }
   | { type: "enhanced_presence"; agent: SerializedAgent }
   | HumanPresenceDigestMessage
+  | { type: "instance_activity"; activities: import("../instance-record.js").InstanceActivity[] }
+  | { type: "instance_records"; records: import("../instance-record.js").InstanceRecord[] }
   | HumanRegistrationQuotaMessage
   | {
       type: "agent_lifecycle";

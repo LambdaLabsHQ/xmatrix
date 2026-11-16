@@ -63,12 +63,12 @@ export interface PageRevision {
   createdAt: string;
 }
 
-/** A schedule line that does not run as written, and why (docs/design/pages-live-document.md §6.1). */
+/** A schedule line or a `norn run` block that does not run as written, and why. */
 export interface PageScheduleProblem { source: string; problem: string }
 
 /**
  * A whole-document page edit as committed, and what it did besides its text:
- * the schedule lines it left that cannot run as written, and the top sections
+ * the schedule lines and programs it left that cannot run as written, and the top sections
  * it removed. The writer is told at once, as either is otherwise silent.
  */
 export interface PageEditResult {
@@ -376,3 +376,96 @@ export interface PageMigrationApplied {
 
 /** The Yjs shared type a page's live document lives in, in the page session and every editor. */
 export const PAGE_DOCUMENT_FRAGMENT = "prosemirror";
+
+/** One request of a Page's program: who holds it, what was asked, and how it ended. */
+export interface PageProgramRequest {
+  holder: string;
+  text: string;
+  askedAt: string;
+  /** When it closes by itself; null without a deadline. */
+  by: string | null;
+  /** How it ended; null while it is open. */
+  outcome: "answered" | "refused" | "broke" | "no_reply" | "cancelled" | "revoked" | null;
+  /** The answer, or the reason it was refused or could not be done. */
+  reply: string | null;
+  settledAt: string | null;
+}
+
+/**
+ * One step of what a program does from here on, as its flow draws it. The
+ * Hub reads the steps off the program itself: it evaluates the program on a
+ * copy of its ledger, moves the clock to what it waits for, and answers each
+ * request every way it can end.
+ */
+export type PageProgramStep =
+  /** It waits for a time, or for something outside to happen. */
+  | { kind: "wait";
+      /** The time it waits for; null when it waits only for what happens outside. */
+      at: string | null;
+      /** What outside it waits for, in words: "CI fails on acme/app". */
+      on: string[];
+      /** The flow comes back here: it is a round of work that repeats. */
+      repeats: boolean;
+      /** How long between two rounds, in milliseconds, where the clock sets the beat. */
+      every: number | null }
+  /** It asks someone for something and waits for the answer. */
+  | { kind: "ask"; verb: string; holder: string;
+      /** What the program asks of whoever takes it: `repo`, `machine`, … */
+      conditions: Record<string, string>;
+      text: string;
+      /** What `choose` offers. */
+      options: string[];
+      /** Asked already, and not answered yet. */
+      open: boolean;
+      /** When an open request closes by itself. */
+      by: string | null;
+      /** How long whoever is asked has, in milliseconds, for a request not made yet. */
+      within: number | null;
+      /** The answer the steps after this one follow, when another way it can end leads elsewhere. */
+      main: string | null;
+      /** The other ways it can end, where they lead somewhere else. */
+      otherwise: { when: string; steps: PageProgramStep[] }[] }
+  /** It tells someone something and goes on. */
+  | { kind: "say"; to: string; text: string }
+  /** The program ends here. */
+  | { kind: "end"; failed: boolean; result: string }
+  /** The flow goes back to an earlier step: the wait that repeats, or the request with this text. */
+  | { kind: "again"; text: string | null }
+  /** The flow goes on past what was read of it. */
+  | { kind: "more" };
+
+/** A program's name: a letter, then letters, digits, `_` or `-`, 40 characters at most. */
+const NORN_PROGRAM_NAME = /^\p{L}[\p{L}\p{N}_-]{0,39}$/u;
+
+/**
+ * What a fenced block's info string makes of it (docs/architecture/norn-host.md,
+ * "Programs on a Page"): `norn run <name>` is a program under that name, and
+ * `norn run` alone is `main`. A block tagged `norn run` whose name runs nothing
+ * is still that block, with why, so it is never silently no program. Anything
+ * else (`norn` alone only shows) is null. The Hub and every client read a block
+ * through this one function.
+ */
+export function nornRunBlock(info: unknown): { name: string; problem?: string } | null {
+  const [language, run, ...words] = String(info ?? "").trim().split(/\s+/u);
+  if (language !== "norn" || run !== "run") return null;
+  const name = words.length ? words.join(" ") : "main";
+  return NORN_PROGRAM_NAME.test(name) ? { name } : { name, problem:
+    `\`norn run ${name}\` names no program: a program's name is one word, a letter and then letters, digits, _ or -, at most 40 characters. Rename the block.` };
+}
+
+/** How one `norn run` block of a Page stands (docs/architecture/norn-host.md). */
+export interface PageProgramStatus {
+  /** The block's name: what follows `norn run`, or `main` (`nornRunBlock`). */
+  name: string;
+  /** The conversation the program works in; absent before its first run. */
+  channelId?: string;
+  state: "running" | "completed" | "failed" | "not_started";
+  /** Why the block as written does not run. */
+  problem?: string;
+  /** How its program ended: the result, or why it stopped. */
+  result?: string;
+  /** Each request the program made, oldest first. */
+  requests: PageProgramRequest[];
+  /** What it does from here on, beginning with what it waits for now. Empty once it has ended. */
+  next: PageProgramStep[];
+}

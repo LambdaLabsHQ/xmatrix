@@ -982,7 +982,6 @@ export function TeamView({
             <ToolDetailSection title="Members can create">
               {([
                 ["agentCreation", "Agents", "Allow members to add agents", "add agents"],
-                ["automationCreation", "Automations", "Allow members to create automations", "create automations"],
               ] as const).map(([capability, title, label, verb]) => {
                 const open = memberPermissions[capability] === "members";
                 return (

@@ -66,11 +66,17 @@ test("removing a picture from the draft takes its file along", async ({ page }) 
   await page.keyboard.press("Home");
   await page.keyboard.press("Backspace");
   await expect(pictures).toHaveCount(1);
+  // Removing the real file must not erase the same reference written as code.
+  const redLine = (await draftValue(composer))!.split("\n")[0]!;
+  const literal = `\`\`\`md\n${redLine}\n\`\`\``;
+  await page.keyboard.press("ControlOrMeta+End");
+  await page.keyboard.insertText(`\n\n${literal}`);
+  await expect(pictures).toHaveCount(1);
   await pictures.first().getByRole("button", { name: "Remove red.png" }).click();
   await expect(pictures).toHaveCount(0);
-  await expectDraft(composer, "Words");
+  await expectDraft(composer, `Words\n\n${literal}`);
   await page.getByRole("button", { name: "Send", exact: true }).click();
-  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: "Words" })]);
+  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body: `Words\n\n${literal}` })]);
   const [sent] = await fixtureRequestBodies(page, "picture-send") as { attachments?: unknown[] }[];
   expect(sent!.attachments ?? []).toEqual([]);
 });
@@ -101,3 +107,58 @@ async function around(element: import("@playwright/test").Locator) {
   const box = (await element.boundingBox())!;
   return { x: box.x - 60, y: box.y - 40, width: box.width + 140, height: box.height + 80 };
 }
+
+// Attachment fallback follows the pictures actually rendered, including Markdown
+// literals, references and the disclosure/plain-text paths. The upload tests above
+// cover generated picture rows; they cannot catch a second parser hiding a file.
+test("literal picture syntax and quoted passages keep their attachments available", async ({ page }) => {
+  const bodies = [
+    "```md\n![red.png](attachment:1)\n```",
+    "    ![red.png](attachment:1)",
+    "> ![red.png](attachment:1)\n\n— [Elsewhere](https://xmatrix.sh/app/s/channels/c#message:m1)\n\nWords",
+  ];
+  await openComposer(page, bodies.map((body, index) => ({ messageId: `literal-${index}`, channelId: E2E_CHANNEL.id,
+    sequence: index + 1, sentAt: E2E_NOW, from: E2E_USER_SENDER, body,
+    attachments: [{ id: `literal-file-${index}`, kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] })));
+  for (let index = 0; index < bodies.length; index += 1) {
+    const row = page.locator(`[id="message:literal-${index}"]`);
+    await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+    await expect(row.locator(".message-picture")).toHaveCount(0);
+  }
+});
+
+test("Markdown image references consume a file once where they render", async ({ page }) => {
+  await openComposer(page, [{ messageId: "reference-picture", channelId: E2E_CHANNEL.id, sequence: 1,
+    sentAt: E2E_NOW, from: E2E_USER_SENDER, body: "![red.png][photo]\n\n[photo]: attachment:1",
+    attachments: [{ id: "reference-file", kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] }]);
+  const row = page.locator('[id="message:reference-picture"]');
+  await expect(row.locator(".message-picture").getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+});
+
+test("a picture outside the shown text stays available through expansion and plain-text rendering", async ({ page }) => {
+  await openComposer(page, [{ messageId: "long-picture", channelId: E2E_CHANNEL.id, sequence: 1,
+    sentAt: E2E_NOW, from: E2E_USER_SENDER, body: `${"Long message. ".repeat(4_000)}\n\n![red.png](attachment:1)`,
+    attachments: [{ id: "long-file", kind: "image", name: "red.png", mimeType: "image/png", size: 68,
+      dataUrl: `data:image/png;base64,${RED}` }] }]);
+  const row = page.locator('[id="message:long-picture"]');
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+  await row.getByRole("button", { name: "Show more" }).click();
+  await expect(row.locator(".message-plain-text")).toHaveCount(1);
+  await expect(row.getByRole("button", { name: "Open red.png" })).toHaveCount(1);
+});
+
+// The composer must not turn an example in code into a picture widget. Its send
+// transform must preserve those words even when no matching file was uploaded.
+test("attachment examples in literal Markdown remain text through editing and sending", async ({ page }) => {
+  const composer = await openComposer(page);
+  const body = "```md\n![example.png](attachment:1)\n```\n\n`inline example\n![inline.png](attachment:2)\nend`\n\n<!--\n![hidden.png](attachment:3)\n-->\n\nAn example, not an uploaded picture.";
+  await composer.click();
+  await page.keyboard.insertText(body);
+  await expect(page.getByTestId("composer-picture")).toHaveCount(0);
+  await expect(composer).toContainText("![example.png](attachment:1)");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "picture-send")).toEqual([expect.objectContaining({ body })]);
+});

@@ -29,10 +29,12 @@ import {
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
-import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
+import { EventCard } from "./event-card";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
 import { SettingsCard } from "./settings-card";
-import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
+import { RealtimeChannelsContext, RealtimeEventsContext, useChannelWithInstanceIdentities,
+  useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
 import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
@@ -40,6 +42,7 @@ import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
+  prepareRichMessageContent,
   messageMarkdownComponents,
 } from "./workspace-shell-rich-message";
 
@@ -156,8 +159,8 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
-import { picturedPlaces } from "./inline-attachments";
 import { MessagePicturesContext } from "./inline-pictures";
+import { InlineRowPreview } from "./inline-row-preview";
 import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
@@ -291,13 +294,15 @@ import { useSystemBackHandler } from "./use-system-back";
 import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
+import { carriesNornBlock, MessageProgramFlow, MessageProgramProvider } from "@/components/dashboard/message-program-flow";
 import { MessageAskLine } from "./message-ask-line";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
 import { QuotaRetryNotice } from "./quota-retry-notice";
-import { quotaRetryOfferId } from "@xmatrix/protocol";
+import { eventCardOf, legacyStripeEventFacts, quotaRetryOfferId, stripeEventWords } from "@xmatrix/protocol";
 import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
@@ -450,7 +455,7 @@ const TIMELINE_VIRTUOSO_COMPONENTS: VirtuosoComponents<TimelineItem, TimelineVir
 };
 
 export const MessageTimeline = memo(function MessageTimeline({
-  channel,
+  channel: catalogChannel,
   space,
   token,
   localContext,
@@ -491,7 +496,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
-  foldsDiscussionHead = false,
+  inPageMargin = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -528,12 +533,17 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
-  foldsDiscussionHead?: boolean;
+  /** A comment thread in a page's margin: its head shows a page discussion's passage, so its first message need
+   * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
+   * would only cover what it says (user 2026-11-06). */
+  inPageMargin?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
+  // The list copy holds no Instances. Mentions and their read state need who
+  // the Channel's Instances are, not what each is doing.
+  const channel = useChannelWithInstanceIdentities(catalogChannel);
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
   const agentLaunchQuery = useChannelAgentLaunches(channel, token, timeline, visibleInvocationIds, currentUserIdentityId);
@@ -876,9 +886,20 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   /** The message a jump has scrolled toward and not yet seen centred. */
   const jumpScrollTargetRef = useRef<string | null>(null);
+  /* Whether the jump's row was already in full view when the jump began. Only
+     such a row is left where it is; one that a fetched page has just brought
+     into view is centred, or the list's prepend anchoring can push it under
+     an edge after it was counted as landed. */
+  const jumpStartRef = useRef<{ messageId: string; wasInView: boolean } | null>(null);
   const scrollToMessage = useStableCallback((messageId: string): TimelineJumpOutcome => {
     const container = timelineScrollRef.current;
     const anchorHash = `#message:${messageId}`;
+    if (jumpStartRef.current?.messageId !== messageId) {
+      jumpStartRef.current = {
+        messageId,
+        wasInView: timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container),
+      };
+    }
     const index = rows.findIndex((item) => item.messageId === messageId ||
       item.folded?.some((entry) => entry.messageId === messageId));
     if (index < 0) return "unavailable";
@@ -888,10 +909,14 @@ export const MessageTimeline = memo(function MessageTimeline({
     readingAnchor.release();
     // The list is still landing on its last row and undoes a scroll made now.
     // What the tail shows keeps its place through the handover, so a row in
-    // full view there has landed; any other jump goes on once the list has
-    // taken over.
+    // full view there since the jump began has landed; any other jump goes on
+    // once the list has taken over.
     if (opening) {
-      if (timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) return "landed";
+      if (jumpStartRef.current.wasInView &&
+        timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) {
+        jumpStartRef.current = null;
+        return "landed";
+      }
       jumpAwaitsOpeningRef.current = true;
       return "opening";
     }
@@ -910,8 +935,10 @@ export const MessageTimeline = memo(function MessageTimeline({
     // the timeline's edge is not one the reader can see, so it is centred too.
     if (jumpScrollTargetRef.current === messageId
       ? timelineRowIsOnScreen(row, container) && timelineRowIsSettled(row, container)
-      : timelineRowIsInFullView(row, container)) {
+      : jumpStartRef.current.wasInView && timelineRowIsInFullView(row, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
+      if (row) readingAnchor.hold(row.id);
       return "landed";
     }
     // Virtuoso's imperative index space is the data index; `firstItemIndex`
@@ -926,6 +953,8 @@ export const MessageTimeline = memo(function MessageTimeline({
     const placed = resolveTimelineAnchor(anchorHash, container);
     if (timelineRowIsOnScreen(placed, container) && timelineRowIsSettled(placed, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
+      if (placed) readingAnchor.hold(placed.id);
       return "landed";
     }
     return "settling";
@@ -1187,7 +1216,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
-                  foldsDiscussionHead={foldsDiscussionHead}
+                  foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1256,8 +1285,9 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
-      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
-        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
+      {!inPageMargin && <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id}
+        token={token} hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling}
+        onJump={stableOnJumpToMessage} />}
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (
@@ -1556,11 +1586,10 @@ const NO_STOPS: readonly SerializedAgentStop[] = [];
 /** Where the reader had read to, and what happened since (conversation-activity.md §3.5). */
 function SinceDivider({ digest }: { digest: SinceDigest }) {
   return (
-    <div className="app-since-divider flex items-center gap-3 px-5 py-2" role="separator"
+    /* Words only, no rules either side: the brass tone marks the place. */
+    <div className="app-since-divider flex px-5 pb-1 pt-3" role="separator"
       aria-label={sinceDigestLine(digest)}>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
-      <span className="max-w-[80%] truncate text-[11px] font-bold text-primary">{sinceDigestLine(digest)}</span>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
+      <span className="min-w-0 truncate text-[11px] font-semibold text-primary">{sinceDigestLine(digest)}</span>
     </div>
   );
 }
@@ -1705,12 +1734,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   const goal = (item: TimelineItem) =>
     goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
   const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
-  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
-    <span className={tagClass("app-sender-instance-stale-badge")}
-      title="This message came from an agent instance that is no longer live in this channel.">
-      instance offline
-    </span>
-  ) : null;
   const before = previous.senderStatusChips ?? [];
   const after = message.senderStatusChips ?? [];
   const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
@@ -1721,7 +1744,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   };
   return (
     <>
-      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
       {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
       {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
       {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
@@ -1865,14 +1887,20 @@ export const MessageRow = memo(function MessageRow({
   const avatarLongPressTriggeredRef = useRef(false);
   const rebornHoverTimerRef = useRef<number | null>(null);
   const rebornHoveringRef = useRef(false);
-  const canRebornSender = canRebornMessageSender(message);
+  const senderStatus = useMessageSenderStatus({ channelId: message.channelId,
+    instanceId: message.senderKind === "agent" ? message.senderInstanceId : undefined,
+    senderId: message.linkOrigin?.kind === "reply" ? undefined : message.senderId, name: message.author });
+  const canRebornSender = canRebornMessageSender(message, senderStatus);
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
   // A page discussion's first message shows only what was written where its thread's head shows the
   // passage; anywhere else the passage and its link back open the conversation.
+  // A program's request of an Agent carries how to answer after what it asks: that part is for the Agent alone.
+  const answerFrom = message.senderKind === "system" ? message.metadata?.nornAnswerFrom : undefined;
   const displayBody = normalizeMessageBodyForDisplay(
-    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
+    foldsDiscussionHead ? foldedDiscussionBody(message.body)
+      : typeof answerFrom === "number" && answerFrom > 0 ? message.body.slice(0, answerFrom) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
@@ -1909,6 +1937,12 @@ export const MessageRow = memo(function MessageRow({
   // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
   const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"
     && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string";
+  // A Stripe message from before events carried a card draws as the same card, read out of its text.
+  const eventCard = useMemo(() => {
+    if (message.senderKind !== "app") return undefined;
+    const legacy = message.senderId === "app:stripe" ? legacyStripeEventFacts(message.body) : undefined;
+    return eventCardOf(message.metadata) ?? (legacy ? stripeEventWords(legacy).card : undefined);
+  }, [message.senderKind, message.senderId, message.metadata, message.body]);
   const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
     : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
     : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
@@ -1923,6 +1957,7 @@ export const MessageRow = memo(function MessageRow({
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const quotaRetryId = quotaRetryOfferId(message.metadata);
   const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
+  const nornRequest = nornRequestMetadata(hubMetadata);
   const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
   const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);
   const settingsRequest = settingsCardOf(hubMetadata);
@@ -2420,23 +2455,6 @@ export const MessageRow = memo(function MessageRow({
     return observeToolbarLayout(avatar, toolbar, layoutRoot, positionRebornToolbar, false);
   }, [canRebornSender, rebornControlVisible, reborningSender, positionRebornToolbar]);
 
-  if (message.isEvent) {
-    const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
-
-    return (
-      <div className="app-message-row group flex items-center gap-2 px-5 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
-        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
-          <Icon className="size-3.5" />
-        </div>
-        <span className="message-event-text min-w-0 flex-1 truncate">
-          {message.author !== "xMatrix" ? `${message.author} - ${displayBody}` : displayBody}
-        </span>
-        <MessageCopyButton copied={copied} onCopy={() => void copyMessage()} />
-        <MessageTimestamp value={message.sentAt} />
-      </div>
-    );
-  }
-
   // An attachment of the message as it is drawn, under its words or where its words put it (inline-pictures.tsx).
   const renderAttachment = (attachment: ChannelAttachment) => {
     const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
@@ -2602,12 +2620,125 @@ export const MessageRow = memo(function MessageRow({
       </div>
     );
   };
-  const pictured = picturedPlaces(message.body);
-  const underWords = (message.attachments ?? []).filter((_attachment, index) => !pictured.has(index + 1));
-  const drawPicture = (place: number) => {
+  const cardBody = onboardingStage ? (
+    <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : crossSpaceRead ? (
+    <CrossSpaceReadCard
+      request={crossSpaceRead}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : nornRequest && channel ? (
+    <NornRequestCard request={nornRequest} channelId={channel.id} token={token}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      {...(message.commandNotices?.[0]?.body ? { outcome: message.commandNotices[0].body } : {})} />
+  ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
+    <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
+      {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
+  ) : secretRequest ? (
+    <SecretRequestCardView
+      request={secretRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : secretAccessRequest ? (
+    <SecretAccessRequestCardView
+      request={secretAccessRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : questionnaire ? (
+    <QuestionnaireMessage
+      questionnaire={questionnaire}
+      message={message}
+      onAnswer={onQuestionnaireAnswer}
+    />
+  ) : routingDecision ? (
+    <RoutingDecisionBoard decision={routingDecision} />
+  ) : quotaRetryId && channel ? (
+    <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
+      token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : signedOutNotice ? (
+    <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
+      spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
+        signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
+      notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
+  ) : offlineNotice ? (
+    <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+      onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
+        ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
+  ) : turnFailure ? (
+    <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : eventCard ? (
+    <EventCard card={eventCard} spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : connectorReceipt ? (
+    <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+      <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
+        {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
+          ? { privateResult: { channelId: channel.id, messageId: message.messageId,
+            ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
+      {channel && token && !contextOnly && message.messageId && message.sequence &&
+        connectorReceiptFixesOf(message.metadata).length ? (
+        <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+          userId={currentUserIdentityId.replace(/^user:/, "")} />
+      ) : null}
+    </div>
+  ) : isMachineRunFailureNotice(message) ? (
+    <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
+  ) : null;
+  const hasCardBody = cardBody !== null || Boolean(message.isEvent);
+  // A message that carries a program draws the program's flow over its text. An edit or a quote of it is no program.
+  const programSpaceId = !contextOnly && !recalled && carriesNornBlock(displayBody) ? channel?.spaceId : undefined;
+  const programFlow = useMemo(() => programSpaceId && token && message.messageId ? (
+    <MessageProgramFlow spaceId={programSpaceId} programId={message.messageId} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />} />
+  ) : null, [programSpaceId, token, message.messageId, currentUserIdentityId, markdownComponents]);
+  const richMessage = useMemo(() => prepareRichMessageContent({ body: hasCardBody ? "" : displayBody,
+    collapsed: collapsible && !expanded, components: markdownComponents, connector: connectorInvocation }),
+  [hasCardBody, displayBody, collapsible, expanded, markdownComponents, connectorInvocation]);
+  const presentedBody = cardBody ?? (
+    <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
+      {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
+      <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+        <MessagePicturesContext.Provider value={drawPicture}>
+          <MessageProgramProvider value={programFlow}>{richMessage.content}</MessageProgramProvider>
+        </MessagePicturesContext.Provider>
+      </div>
+    </MentionReadMessageScopeProvider>
+  );
+  const underWords = (message.attachments ?? []).filter((_attachment, index) =>
+    !richMessage.picturedPlaces.has(index + 1));
+  function drawPicture(place: number) {
     const attachment = message.attachments?.[place - 1];
     return attachment ? renderAttachment(attachment) : null;
-  };
+  }
+
+  if (message.isEvent) {
+    const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
+
+    return (
+      <div className="app-message-row group flex items-center gap-2 px-5 py-1.5 text-xs text-muted-foreground hover:bg-muted/30">
+        <div className="flex size-6 shrink-0 items-center justify-center rounded-md bg-muted">
+          <Icon className="size-3.5" />
+        </div>
+        <span className="message-event-text min-w-0 flex-1 truncate">
+          {message.author !== "xMatrix" ? `${message.author} - ${displayBody}` : displayBody}
+        </span>
+        <MessageCopyButton copied={copied} onCopy={() => void copyMessage()} />
+        <MessageTimestamp value={message.sentAt} />
+      </div>
+    );
+  }
 
   return (
     <div
@@ -2693,7 +2824,7 @@ export const MessageRow = memo(function MessageRow({
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          status={message.senderStatus}
+          status={senderStatus}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2708,7 +2839,7 @@ export const MessageRow = memo(function MessageRow({
                   instanceScoped: Boolean(message.senderInstanceId),
                   channelId: channel?.id,
                   name: message.author,
-                  status: message.senderStatus,
+                  status: senderStatus,
                   goal: message.senderGoal,
                   face: message.face,
                 })
@@ -2790,8 +2921,9 @@ export const MessageRow = memo(function MessageRow({
               App
             </span>
           )}
-          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
-          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && (
+          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice.
+              A program's request is an ask of a person, which its card says; "system fact" would call it a notice. */}
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && !nornRequest && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
@@ -2799,10 +2931,7 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
-          {message.retagged ? (
-            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
-          ) : (<>
-          {message.senderInstanceStale && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent && senderStatus === "offline" && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
               title="This message came from an agent instance that is no longer live in this channel."
@@ -2810,6 +2939,9 @@ export const MessageRow = memo(function MessageRow({
               instance offline
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderKind === "agent" && (
             <GoalStatusBadge goal={message.senderGoal} />
           )}
@@ -2876,84 +3008,7 @@ export const MessageRow = memo(function MessageRow({
             {message.replyTo && (
               <ReplyPreview reply={message.replyTo} onJump={onJumpToMessage} />
             )}
-            {onboardingStage ? (
-              <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : crossSpaceRead ? (
-              <CrossSpaceReadCard
-                request={crossSpaceRead}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
-              <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
-                {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
-            ) : secretRequest ? (
-              <SecretRequestCardView
-                request={secretRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : secretAccessRequest ? (
-              <SecretAccessRequestCardView
-                request={secretAccessRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : questionnaire ? (
-              <QuestionnaireMessage
-                questionnaire={questionnaire}
-                message={message}
-                onAnswer={onQuestionnaireAnswer}
-              />
-            ) : routingDecision ? (
-              <RoutingDecisionBoard decision={routingDecision} />
-            ) : quotaRetryId && channel ? (
-              <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
-                token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : signedOutNotice ? (
-              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
-                spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-                onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
-                  signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
-                notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
-            ) : offlineNotice ? (
-              <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
-                onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
-                  ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
-            ) : turnFailure ? (
-              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : connectorReceipt ? (
-              <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
-                  {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
-                    ? { privateResult: { channelId: channel.id, messageId: message.messageId,
-                      ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
-                {channel && token && !contextOnly && message.messageId && message.sequence &&
-                  connectorReceiptFixesOf(message.metadata).length ? (
-                  <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
-                    userId={currentUserIdentityId.replace(/^user:/, "")} />
-                ) : null}
-              </div>
-            ) : isMachineRunFailureNotice(message) ? (
-              <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
-            ) : (
-              <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
-                {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
-                <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                  <MessagePicturesContext.Provider value={drawPicture}>
-                    <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
-                      connector={connectorInvocation} />
-                  </MessagePicturesContext.Provider>
-                </div>
-              </MentionReadMessageScopeProvider>
-            )}
+            {presentedBody}
             {!recalled && collapsible && !expanded && (
               // Disclosure is a different layer from the message actions: the
               // body fades out under `.rich-message-collapsed::after` and its
@@ -3242,15 +3297,14 @@ export function ReplyPreview({
         event.preventDefault();
         onJump(reply.messageId, reply.sequence);
       }}
-      className="mb-1.5 mt-1 flex max-w-[min(36rem,100%)] items-start gap-2 border-l-2 border-primary/60 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+      /* A reply quotes the whole message, so it is the same yellow slip as a quoted passage: the words, then
+         who wrote them in quiet ink (Daniel 2026-11-06: 引用整条消息和引用某段内容可以用同一种方式表达). */
+      className="message-citation message-reply-citation"
     >
-      <Reply className="mt-0.5 size-3.5 shrink-0" />
-      <span className="min-w-0">
-        <span className="block truncate font-bold text-foreground">{reply.author}</span>
-        <span className="line-clamp-2 [overflow-wrap:anywhere]">
-          {foldedDiscussionBody(reply.body) || "Attachment"}
-        </span>
+      <span className="message-citation-text">
+        <InlineRowPreview text={foldedDiscussionBody(reply.body) || "Attachment"} />
       </span>
+      <span className="message-citation-source">{reply.author}</span>
     </a>
   );
 }
@@ -3432,8 +3486,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onRebornAgentInstance,
   onHandoffAgentInstance,
   onOpenAgentTrace,
+  inPageMargin = false,
 }: {
   approvals?: ReactNode;
+  /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
+   * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
+  inPageMargin?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
@@ -3472,11 +3530,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   // supplies an operation; readLatest always rebuilds from the current store.
   useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
   const readLatest = useCallback((key: string) => {
-    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    // Only the live Channel holds Instances to act on.
+    const channel = realtimeChannels?.get(channelId);
     if (!channel) return undefined;
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
-  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  }, [realtimeChannels, realtimeEvents, channelId, events, launches]);
   const openTrace = useStableCallback((key: string) => {
     const item = readLatest(key);
     if (item) onOpenAgentTrace(item.target);
@@ -3540,7 +3599,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
      the newest message, whose hover controls sit at its
      bottom edge. Publish the measured distance and let the padding read it. */
   useLayoutEffect(() => {
-    if (workItems.length === 0 && !approvals) {
+    // In flow, the dock covers nothing, so the timeline keeps no room for it.
+    if (inPageMargin || (workItems.length === 0 && !approvals)) {
       surfaceRef.current?.style.removeProperty("--app-agent-work-dock-clearance");
       return;
     }
@@ -3584,7 +3644,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
       window.removeEventListener("resize", publishClearance);
       surfaceElement.style.removeProperty("--app-agent-work-dock-clearance");
     };
-  }, [workItems.length, approvals]);
+  }, [workItems.length, approvals, inPageMargin]);
 
   if (workItems.length === 0 && !approvals) return null;
 

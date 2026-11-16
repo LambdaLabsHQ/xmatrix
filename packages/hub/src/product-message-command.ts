@@ -28,6 +28,9 @@ export interface AppendMessageCommand {
   finalReplyExecutionId?: string;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** The sender asks that the Agents this message summons start (`xmatrix send --launch`, the web composer).
+   * Without it a launch mention is only a mention, unless its text says `launch:force`. */
+  launch?: boolean;
   /**
    * The Channel sequence the sender has read through. The append is refused
    * while anyone else's message after it is still unread by the sender.

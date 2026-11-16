@@ -105,9 +105,17 @@ there reads the code's text without the program's name.
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
-`auto_update_off`, `refresh`, `release`, and the sign-in actions `login_start`,
+`auto_update_off`, `refresh`, `release`, `check`, and the sign-in actions `login_start`,
 `login_finish` and `login_cancel` (see [Remote sign-in](#remote-sign-in)). `harnessActionAvailable` says whether a preset has an official
 recipe or control for one; anything else is refused when issued.
+
+`check` asks one preset's program, now, whether it is installed and signed in,
+and answers with what it says: its status command, or for an ACP harness with
+none, a start the way a launch starts it. It changes nothing and needs a daemon
+with `machine_harness_check_v1`. Whether a program is signed in is its own to
+say and nothing announces a change, so a page that shows it asks when it is
+looked at; `refresh` re-probes every preset and reads every registry, which
+takes many seconds and is not for that.
 
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
   `POST /api/machine-daemons/harness-actions { machineId, hostId?, presetId,
@@ -116,8 +124,10 @@ recipe or control for one; anything else is refused when issued.
   another Machine. The one action an Agent Run may issue there is `refresh` of
   its own Machine (a read-only probe, issued as its owner): after any harness
   change it makes, and before `xmatrix request sign-in`, the CLI asks the daemon
-  to look again, so the Hub's view of that Machine (routing, sign-in) shows the
-  change at once instead of at the next six-hourly probe.
+  to look again, so the Hub's view of that Machine (installed versions, and the
+  sign-in its pages show) has the change at once instead of at the next
+  six-hourly probe. Routing does not read that sign-in
+  ([space-agent-routing](architecture/space-agent-routing.md)).
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,
@@ -215,7 +225,9 @@ validated version). For every online daemon reporting
 with `autoUpdate: "enabled"` and an installed `version` other than the latest,
 and that was not told about this preset in the last 30 minutes, Hub issues a
 `release` harness action naming the preset only. A preset with an update recipe
-but no registry is told the same way once a day, without a version. The daemon
+but no registry is told the same way once a day, without a version. Action
+admission requires an official update recipe, matching the daemon; a missing
+version registry does not reject that daily notice. The daemon
 reads the registry itself, never a version from Hub, and when the installed
 version differs (or there is no registry) runs the update: an
 `interactiveOnly` harness at once, beside live sessions as its own updater
@@ -299,6 +311,13 @@ pasted API key), dimcode prints no link even in a terminal, and codebuddy,
 droid, prime, trae, autohand, amp, reasonix and deepseek have no CLI sign-in
 (in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
 reads `DEEPSEEK_API_KEY`).
+
+A preset's `access.full.env` lists the environment variables xMatrix sets on
+the harness process, as written. DeepSeek Harness takes its permission mode from
+one: `DSH_PERMISSION_MODE=danger-full-access` lets it write outside the
+workspace and stops its per-command approval, as the full-access arguments of
+the other presets do. Left at its own default (`workspace-write`), its shell
+cannot write `~/.config/xmatrix`, and no `xmatrix` command runs there.
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

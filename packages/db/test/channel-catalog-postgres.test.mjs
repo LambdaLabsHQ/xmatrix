@@ -25,7 +25,7 @@ async function seed() {
       data.space_agent_registration_access,data.channel_transfer_proposals,data.outbox,data.idempotency_keys,data.message_mutations,control.scoped_control_command_replays,
       control.channel_space_directory,control.channel_space_routes,control.entity_space_routes,
       control.user_space_memberships,control.user_space_membership_routes,data.space_billing_usage,
-      data.message_attachments,data.message_attachment_refs,data.automations,data.trace_access_grants,
+      data.message_attachments,data.message_attachment_refs,data.trace_access_grants,
       data.app_source_relations,
       data.message_attention,data.messages,data.instances,data.runs,data.channel_access,
       data.user_space_channel_view_preferences,data.channels,data.space_control_heads,
@@ -153,9 +153,6 @@ integration("a conversation moves with its own work; other conversations keep th
       SELECT space_id,attachment_id,message_id,channel_id,owner_user_id,object_key,
         content_hash,encoded_bytes,mime_type,name,presentation_residual_json,version,created_at,updated_at
       FROM data.message_attachments WHERE attachment_id='move-attachment'`);
-    await client.query(`INSERT INTO data.automations
-      (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,created_at,updated_at)
-      VALUES ('move-automation','owner','child',$1,true,1,'{}',$1,$1)`, [now]);
     await client.query(`INSERT INTO data.trace_access_grants
       (grant_id,owner_user_id,viewer_user_id,agent_id,channel_id,duration,status,version,requested_at)
       VALUES ('move-trace','owner','user-1','agent-1','root-40','channel','approved',1,$1)`, [now]);
@@ -204,8 +201,6 @@ integration("a conversation moves with its own work; other conversations keep th
       const facts = (await client.query(`SELECT space_id FROM data.${table} WHERE channel_id='child'`)).rows;
       assert.deepEqual(facts, [{ space_id: "space-catalog" }], table);
     }
-    assert.equal((await client.query("SELECT enabled FROM data.automations WHERE automation_id='move-automation'"))
-      .rows[0].enabled, true, "an Automation of a conversation that did not move keeps running");
     assert.equal((await client.query("SELECT count(*)::int AS n FROM data.app_source_relations WHERE relation_id='move-relation'"))
       .rows[0].n, 1);
   } finally {
@@ -636,7 +631,7 @@ integration("startup resolve omits participants, full reads hydrate them, and AC
     assert.equal(Object.hasOwn(channel, "memberPresence"), false);
     assert.equal(Object.hasOwn(channel, "visibleHumanMemberIds"), false);
   }
-  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v10"), false);
+  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v12"), false);
   assert.equal(observations.some(event => event.queryName === "channel_catalog_open_space_members_v2"), false);
   const full = await catalog.resolve(input);
   assert.equal(catalogInstances(full.channels.find(channel => channel.id === "root-40")).length, 2);

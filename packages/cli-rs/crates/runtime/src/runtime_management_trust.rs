@@ -337,6 +337,8 @@ struct DaemonSpawnRequest {
     agent_preset_id: Option<String>,
     harness: Option<xmatrix_cli_core::machine_daemon_connection::AgentHarnessSpec>,
     agent_acp_args: Vec<String>,
+    /// What the launch adds for its access mode (see `MachineSpawnAgent`).
+    access: Option<xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant>,
     agent_name: String,
     identity_id: Option<String>,
     /// The registration's instructions (see `MachineSpawnAgent`).
@@ -367,6 +369,7 @@ struct DaemonSpawnRequest {
     source_message_id: Option<String>,
     initial_message_source: Option<protocol::AgentRuntimeMessageSource>,
     requested_model: Option<String>,
+    preferred_model: Option<String>,
     requested_effort: Option<String>,
     requested_parameters: Option<BTreeMap<String, String>>,
     prompt: String,
@@ -395,6 +398,7 @@ impl DaemonSpawnRequest {
             agent_preset_id,
             harness,
             agent_acp_args,
+            access,
             agent_name,
             identity_id,
             role_initial_prompt,
@@ -445,6 +449,7 @@ impl DaemonSpawnRequest {
             agent_preset_id,
             harness,
             agent_acp_args: agent_acp_args.unwrap_or_default(),
+            access,
             agent_name,
             identity_id,
             role_initial_prompt,
@@ -469,6 +474,9 @@ impl DaemonSpawnRequest {
             requested_model: context
                 .as_ref()
                 .and_then(|value| value.requested_model.clone()),
+            preferred_model: context
+                .as_ref()
+                .and_then(|value| value.preferred_model.clone()),
             requested_parameters: context
                 .as_ref()
                 .and_then(|value| value.requested_parameters.clone()),

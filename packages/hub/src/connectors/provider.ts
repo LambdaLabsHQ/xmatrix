@@ -1,4 +1,4 @@
-import type { ConnectorReceiptFix } from "@xmatrix/protocol";
+import type { ConnectorReceiptFix, EventCard } from "@xmatrix/protocol";
 import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 import type { XActionCapability } from "./x-accounts";
@@ -48,8 +48,18 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** X accounts scoped to this caller; grants remain inside the Hub. */
   x?: XActionCapability;
+  /** Private App Review setup; the capability keeps credentials in the Hub. */
+  appReviewSetup?:import("./app-store-connect-review-setup").ReviewSetupCapability;
+  /** Read only commerce notification status scoped by the server to this Channel and caller. */
+  appleCommerce?: { status(bundleId:string):Promise<string> };
   /** Channel attachment access and account-bound X video upload receipts. */
   xMedia?: XMediaCapability;
+  /** Short-lived Hub URLs that let Composio fetch an approved Gmail draft snapshot too large to send inline. */
+  mailSnapshot?: import("./mail-snapshot-link").MailSnapshotLinks;
+  /** The files on a Gmail send or reply command, read as its Human through the Channel attachment authority. */
+  mailAttachments?: import("./gmail-attachments").MailAttachments;
+  /** The files attached to the command message, for an action that takes a request body too large for a command. */
+  commandFiles?: import("./gmail-attachments").MailAttachments;
   /** Revalidates current app permission immediately before an outbound write. */
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
@@ -90,6 +100,11 @@ export interface ConnectorActionResult {
 
 export interface ConnectorAction {
   effect: "read" | "write";
+  /**
+   * A write whose result is a capability for its caller alone (an upload URL anyone could use). It runs only as
+   * a call, where the app permission allows writes without asking, and its Channel receipt is always masked.
+   */
+  callerOnly?: true;
   /** Credential fields the action cannot run without. */
   requires: readonly string[];
   /** Validates the statement before any provider call; a string is the reason it is invalid. */
@@ -107,6 +122,8 @@ export interface ConnectorCommandInput {
   /** The original command for a later attempt; null publishes an unthreaded decision with no retained message reference. */
   commandMessageId?: string | null;
   body: string;
+  /** The files on the command message, as committed. */
+  attachments?: readonly { id: string }[];
   actorUserId: string;
   /** Who wrote the message; an Agent runs write actions only where the Channel allows it. */
   senderKind?: "user" | "agent";
@@ -134,18 +151,22 @@ export interface ConnectorDelivery {
   credentials: Readonly<Record<string, string>>;
 }
 
-/** A provider event in the one shape routing, messages and Automations read. */
+/** A provider event in the one shape routing, messages and programs read. */
 export interface ConnectorEvent {
-  /** Stable per delivery: message ids and Automation events dedupe on it. */
+  /** Stable per delivery: message ids dedupe on it. */
   eventId: string;
   /** Lower-case source ref a Channel subscribes to, e.g. `webhook:deploys`. */
   sourceRef: string;
   /** One of the manifest's `events.features` ids. */
   feature: string;
-  /** One line, used by Automation occurrences. */
+  /** One line, said to the programs that wait for the event. */
   summary: string;
   /** Bounded markdown posted to subscribed Channels. Untrusted content. */
   body: string;
+  /** The same message in another language a Space can choose; a Space set to it gets this instead of `body`. */
+  localizedBody?: { zh?: string };
+  /** What the Web draws in place of `body` (EVENT_CARD_METADATA_KEY); `body` stays what Agents, search and notifications read. */
+  card?: EventCard;
   url?: string;
   /**
    * The provider object the event is about, for a provider whose one delivery

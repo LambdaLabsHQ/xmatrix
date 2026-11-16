@@ -7,6 +7,7 @@ import { postgresTransactionConflict, retryablePostgresFailure, TRANSACTION_CONF
 import { safeServerDiagnosticId } from "../server-error-diagnostic";
 import { reportRuntimeDatabaseFailure } from "./runtime-database-failure";
 import { reportMachineRegistryCausalityFailure } from "./machine-registry-causality";
+import { reportAgentBindingFailure, type AgentBindingFailure } from "./agent-binding-failure";
 
 import type { RuntimeOperationFailure } from "@xmatrix/protocol";
 export type { RuntimeOperationFailure } from "@xmatrix/protocol";
@@ -33,6 +34,9 @@ const COMMITTED_IDENTITY_CONFLICT_CODES = new Set(["idempotency_conflict", "mess
 // daemon connected again. Only a connect advances the epoch, so the authority's
 // fence did its job; the Hub has not failed.
 const SUPERSEDED_CONNECTION_CODE = "machine_daemon_stale_epoch";
+// The caller no longer holds the command lease (`complete.owner`, `renew.status`,
+// and the other static reasons). The 409 is that fence; the Hub has not failed.
+const STALE_COMMAND_LEASE_CODE = "machine_command_stale_lease";
 const AUTHORITY_CODE = /^[a-z][a-z0-9_.]{0,79}$/u;
 
 /** Keeps safe classification across an authority rejection without copying its body. */
@@ -60,10 +64,22 @@ export class RuntimeAuthorityOperationError extends Error {
     // Which fence refused, and on what command type (static labels, e.g. a stale lease's).
     const label = (field: unknown) => typeof field === "string" && AUTHORITY_CODE.test(field) ? field : undefined;
     const authorityReason = label(value.reason), commandType = label(value.commandType);
-    (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
+    (reported || this.committedIdentityConflict || code === SUPERSEDED_CONNECTION_CODE ||
+      code === STALE_COMMAND_LEASE_CODE || code === TRANSACTION_CONFLICT.code ? console.warn : console.error)(
       "xMatrix runtime authority rejection", { ...this.failure, authorityCode, operation, status,
-        ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}) });
+        ...(authorityReason ? { authorityReason } : {}), ...(commandType ? { commandType } : {}),
+        ...leaseTimingDiagnostic(value) });
   }
+}
+
+/** Fixed durations only; never copy an authority's arbitrary diagnostic object. */
+function leaseTimingDiagnostic(value: Record<string, unknown>): Record<string, number> {
+  if (value.code !== "machine_command_stale_lease" || !value.leaseTiming || typeof value.leaseTiming !== "object") return {};
+  const timing = value.leaseTiming as Record<string, unknown>;
+  return Object.fromEntries(["leaseWindowMs", "leaseExpiredForMs", "commandAgeMs"].flatMap(key => {
+    const ms = timing[key], max = key === "leaseWindowMs" ? 60_000 : 86_400_000;
+    return typeof ms === "number" && Number.isInteger(ms) && ms >= 0 && ms <= max ? [[key, ms]] : [];
+  }));
 }
 
 /**
@@ -87,8 +103,9 @@ const rejections = new WeakMap<object, RuntimeAuthorityOperationError>();
 
 function authorityRejection(error: object): RuntimeAuthorityOperationError | undefined {
   if (error instanceof ControlError) {
-    const { reason, commandType } = error as ControlError & { reason?: unknown; commandType?: unknown };
-    const body = { code: error.code, retryable: error.retryable, reason, commandType };
+    const { reason, commandType, leaseTiming } = error as ControlError & {
+      reason?: unknown; commandType?: unknown; leaseTiming?: unknown };
+    const body = { code: error.code, retryable: error.retryable, reason, commandType, leaseTiming };
     return Object.hasOwn(APPROVAL_MESSAGES, error.code)
       ? new RuntimeApprovalOperationError(error.name, error.status, body)
       : new RuntimeAuthorityOperationError(error.name, error.status, body);
@@ -109,7 +126,7 @@ function authorityRejection(error: object): RuntimeAuthorityOperationError | und
 
 /** Whether a socket failure's original already owns its report, so a stage log only warns. */
 export function runtimeFailureReported(error: unknown): boolean {
-  return authorityOperationError(error)?.reported === true;
+  return error instanceof RuntimeClientOperationError || authorityOperationError(error)?.reported === true;
 }
 
 /** The authority fenced this frame because a newer connect replaced its connection. */
@@ -133,9 +150,10 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
   const failure = { code: "runtime.session_failed", diagnosticId: `diag_${crypto.randomUUID()}`,
     retryable: false, stage: "runtime.session" };
   // Where it was thrown, never what it said: an unclassified error's message
-  // may carry request data, so the log keeps only its class and call sites.
-  // Typed credential and database reports own their event and fixed diagnosis.
-  // A second console capture would discard those fields and duplicate it.
+  // may carry request data, so the log keeps its class, call sites and a fixed
+  // shape token (XMATRIX-HUB-AX). Typed credential and database reports own
+  // their event and fixed diagnosis. A second console capture would discard
+  // those fields and duplicate it.
   const reported = reportMachineDaemonCredentialFailure(error, failure.diagnosticId) ||
     reportMachineRegistryCausalityFailure(error, failure.diagnosticId) ||
     reportRuntimeDatabaseFailure(error, failure.diagnosticId);
@@ -144,11 +162,13 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
 }
 
 /**
- * The error's class and its innermost function names: code locations only.
+ * The error's class, its innermost function names, and a fixed shape token.
  * Keep names in a scalar: Sentry normalizes nested console arguments before
  * building the title, replacing an array here with the literal `[Array]`.
+ * The shape never copies the message: a platform sentence maps to one token,
+ * anything else is only how long that sentence was.
  */
-export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string } {
+export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string; errorShape: string } {
   const errorClass = error instanceof Error && /^[A-Za-z_$][\w$]{0,79}$/u.test(error.constructor.name)
     ? error.constructor.name : typeof error;
   const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : "";
@@ -156,7 +176,54 @@ export function runtimeFailureOrigin(error: unknown): { errorClass: string; orig
     .map((line) => /^\s*at (?:async )?([A-Za-z_$][\w$.<>]{0,119}) \(/u.exec(line)?.[1])
     .filter((name): name is string => name !== undefined)
     .slice(0, 4).join(",");
-  return { errorClass, origin };
+  return { errorClass, origin, errorShape: boundedRuntimeErrorShape(error) };
+}
+
+/** Exact platform sentences. The circular-JSON prefix is the one exception: V8 appends a constructor path, and the token stops before that tail. */
+const RUNTIME_ERROR_SHAPES: ReadonlyMap<string, string> = new Map([
+  ["Can't call WebSocket send() after close()", "websocket_send_after_close"],
+  ["Network connection lost.", "network_connection_lost"],
+  ["The operation was aborted.", "aborted"],
+  ["The user aborted a request.", "aborted"],
+  ["Converting circular structure to JSON", "json_circular"],
+  ["Do not know how to serialize a BigInt", "json_bigint"],
+  ["BigInt value can't be serialized in JSON", "json_bigint"],
+]);
+
+const RUNTIME_ERROR_SHAPE_TOKENS = new Set([
+  "empty", "websocket_send_after_close", "network_connection_lost", "aborted",
+  "json_circular", "json_bigint", "unlisted_1_16", "unlisted_17_80", "unlisted_81_240", "unlisted_241_plus",
+]);
+
+function boundedRuntimeErrorShape(error: unknown): string {
+  if (!(error instanceof Error) || typeof error.message !== "string" || error.message.length === 0) return "empty";
+  const known = RUNTIME_ERROR_SHAPES.get(error.message);
+  if (known) return known;
+  // V8 continues the circular-structure sentence with a constructor path.
+  // That tail can name a type; the token stops at the fixed prefix.
+  if (error.message.startsWith("Converting circular structure to JSON")) return "json_circular";
+  const length = error.message.length;
+  return length <= 16 ? "unlisted_1_16" : length <= 80 ? "unlisted_17_80"
+    : length <= 240 ? "unlisted_81_240" : "unlisted_241_plus";
+}
+
+/** The class, call sites and shape a console capture already recorded. Anything else is dropped. */
+export function runtimeSessionOriginMetadata(extra: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const errorClass = extra.errorClass;
+  if (typeof errorClass === "string" &&
+      /^(?:string|number|boolean|undefined|object|function|symbol|bigint|[A-Za-z_$][\w$]{0,79})$/u.test(errorClass)) {
+    lines.push(`Runtime error class: ${errorClass}`);
+  }
+  const origin = extra.origin;
+  if (typeof origin === "string" &&
+      /^(?:[A-Za-z_$][\w$.<>]{0,119})(?:,[A-Za-z_$][\w$.<>]{0,119}){0,3}$/u.test(origin)) {
+    lines.push(`Runtime error origin: ${origin}`);
+  }
+  if (typeof extra.errorShape === "string" && RUNTIME_ERROR_SHAPE_TOKENS.has(extra.errorShape)) {
+    lines.push(`Runtime error shape: ${extra.errorShape}`);
+  }
+  return lines;
 }
 
 const CLIENT_FAILURES = {
@@ -192,13 +259,15 @@ export class RuntimeClientOperationError extends Error {
   readonly publicMessage: string;
   /** The client's ordinary state: logged, never reported as a Hub error. */
   readonly ordinary: boolean;
-  constructor(code: keyof typeof CLIENT_FAILURES) {
+  constructor(code: keyof typeof CLIENT_FAILURES, binding?: AgentBindingFailure) {
     const [message, stage] = CLIENT_FAILURES[code];
     super(message);
     this.publicMessage = message;
     this.failure = { code, stage, diagnosticId: `diag_${crypto.randomUUID()}`, retryable: false };
     this.ordinary = ORDINARY_CLIENT_FAILURES.has(code);
-    (this.ordinary ? console.warn : console.error)("xMatrix runtime product rejection", this.failure);
+    const bindingReported = code === "agent_run_binding_mismatch" && binding !== undefined;
+    if (bindingReported) reportAgentBindingFailure(this, this.failure.diagnosticId, binding);
+    (this.ordinary || bindingReported ? console.warn : console.error)("xMatrix runtime product rejection", this.failure);
   }
 }
 

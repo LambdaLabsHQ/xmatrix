@@ -58,6 +58,15 @@ on 2026-10-17 there were about 50,000 such rows that nothing had ever cleaned.
 Live sessions are never touched by maintenance; a person ends their own from
 Settings, and signing out ends the one they used.
 
+Machine daemon commands (`data.machine_daemon_commands`) are removed a week
+after they expire and were created; the expiry index from migration 0254
+bounds each batch. Commands live from 15 seconds (quota probes) to 30 days,
+and every claim, replay and status read already refuses an expired one. The
+week is for readers that look back by creation time instead, at most a day:
+the harness action list, the harness release repeat and the quota probe
+spacing. Removing a ten-minute release notice at expiry would resend it. On
+2026-11-15 about 69,000 of 88,800 rows (a 440 MB table) were past that week.
+
 Financial receipts (`data.space_credit_purchases` and
 `data.paid_call_receipts`) are not TTL replays. Preserve them for the lifetime
 of their Space; they move with the Space and are removed only by its existing

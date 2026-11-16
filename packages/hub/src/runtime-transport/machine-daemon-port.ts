@@ -78,11 +78,38 @@ export const MACHINE_DAEMON_ROUTE_CLOSE = Object.freeze({
     code: 4002,
     reason: "Duplicate Machine Daemon route self-healed",
   }),
+  /* Never 4003: that is CLIENT_UPGRADE_REQUIRED_CLOSE_CODE, which tells a daemon
+     to stop reconnecting until it is updated. A failed delivery must reconnect. */
   failedDeliver: Object.freeze({
-    code: 4003,
+    code: 4004,
     reason: "Machine Daemon reverse delivery failed",
   }),
+  silentHeartbeat: Object.freeze({
+    code: 4005,
+    reason: "Machine Daemon edge heartbeat went silent",
+  }),
 });
+
+/**
+ * A daemon with this capability writes the edge heartbeat
+ * (`HUMAN_HEARTBEAT_PING`) every {@link MACHINE_DAEMON_EDGE_HEARTBEAT_MS}. The
+ * platform answers it without waking the Runtime and remembers when it last
+ * did, so liveness is read from that timestamp instead of from frames that
+ * wake the object.
+ */
+export const MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY = "machine_daemon_edge_heartbeat_v1";
+export const MACHINE_DAEMON_EDGE_HEARTBEAT_MS = 15_000;
+/** Three missed edge heartbeats: the socket is gone even though nothing closed it. */
+export const MACHINE_DAEMON_EDGE_SILENCE_MS = 3 * MACHINE_DAEMON_EDGE_HEARTBEAT_MS;
+/**
+ * While a machine has a Run, nothing else may wake its cell: the person is
+ * waiting on a reply. The cell then checks its daemons this often, and stops
+ * once no Run is left, so an idle machine is still watched by events alone.
+ */
+export const MACHINE_DAEMON_RUN_WATCH_MS = 30_000;
+
+/** When the platform last auto-answered this socket's edge heartbeat, if ever. */
+export type MachineDaemonEdgeHeartbeatAt = (ws: WebSocket) => Date | null | undefined;
 
 export interface MachineDaemonAuthorityPrincipal {
   ownerUserId: string;
@@ -186,7 +213,8 @@ type RouteCloseReason =
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.replacedByConnect
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.replacedByRehydrate
   | typeof MACHINE_DAEMON_ROUTE_CLOSE.selfHealedDuplicate
-  | typeof MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver;
+  | typeof MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver
+  | typeof MACHINE_DAEMON_ROUTE_CLOSE.silentHeartbeat;
 
 /** A reverse claim outlived its exact socket binding; never a client request. */
 class MachineDaemonDeliveryBindingLost extends Error {}
@@ -290,9 +318,11 @@ export class MachineDaemonRuntimeTransport {
    * wake wrote the catalog offline. The pong and the caller's frame are not
    * delayed on the catalog write. A heal that finishes after the socket is
    * gone unregisters that same generation, so it cannot resurrect a replaced
-   * connection. One check per interval is enough: the daemon's probes wake
-   * this object every minute, and each wake would otherwise cost a catalog
-   * transaction that almost always finds the row already online.
+   * connection. One check per interval is enough: each wake would otherwise
+   * cost a catalog transaction that almost always finds the row already online.
+   * An edge-heartbeat daemon rarely wakes this object at all; its catalog can
+   * only go offline with its socket closed (failed delivery or silence evict),
+   * after which it reconnects.
    */
   private scheduleCatalogHeal(ws: WebSocket): void {
     const confirm = this.backend.confirmOnline;
@@ -331,6 +361,45 @@ export class MachineDaemonRuntimeTransport {
       if (sameRouteIdentity(session.principal, identity) && isWebSocketOpen(ws)) return true;
     }
     return false;
+  }
+
+  /**
+   * Close every edge-heartbeat daemon whose last answered heartbeat is older
+   * than {@link MACHINE_DAEMON_EDGE_SILENCE_MS}. A clean close already reached
+   * `handleClose`; this finds the socket that vanished without one. It runs on
+   * whatever event wakes this object (a dispatch, a person connecting, any
+   * frame), never on a timer: the read that needs liveness settles it, and an
+   * idle machine costs nothing. The offline it persists is fenced to this
+   * connection, and a daemon that was in fact alive just reconnects.
+   */
+  evictSilent(heartbeatAt: MachineDaemonEdgeHeartbeatAt, options: { now?: number; except?: WebSocket } = {}): number {
+    const now = options.now ?? Date.now();
+    let evicted = 0;
+    for (const [ws, session] of Array.from(this.sockets.entries())) {
+      // The socket whose own frame woke this object is plainly alive.
+      if (ws === options.except || session.activationPhase || !session.capabilities.includes(MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY)) continue;
+      let answered: number | undefined;
+      try {
+        answered = heartbeatAt(ws)?.getTime();
+      } catch {
+        continue;
+      }
+      const last = Math.max(answered ?? 0, Date.parse(session.connectedAt) || 0);
+      if (now - last <= MACHINE_DAEMON_EDGE_SILENCE_MS) continue;
+      this.evictRouteSocket(ws, MACHINE_DAEMON_ROUTE_CLOSE.silentHeartbeat);
+      evicted += 1;
+    }
+    return evicted;
+  }
+
+  /** Routes of the live daemons whose silence {@link evictSilent} can judge. */
+  edgeHeartbeatRoutes(): MachineDaemonRouteIdentity[] {
+    const routes: MachineDaemonRouteIdentity[] = [];
+    for (const [, session] of this.sockets.entries()) {
+      if (session.activationPhase || !session.capabilities.includes(MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY)) continue;
+      routes.push(session.principal);
+    }
+    return routes;
   }
 
   private routeReachabilityChanged(identity: MachineDaemonRouteIdentity): void {
@@ -768,7 +837,8 @@ export function shouldPersistMachineDaemonOfflineAfterEvict(
   close: { code: number },
   remainingOwners: number,
 ): boolean {
-  return close.code === MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code && remainingOwners === 0;
+  return (close.code === MACHINE_DAEMON_ROUTE_CLOSE.failedDeliver.code ||
+    close.code === MACHINE_DAEMON_ROUTE_CLOSE.silentHeartbeat.code) && remainingOwners === 0;
 }
 
 function activationReceiptFromOutput(

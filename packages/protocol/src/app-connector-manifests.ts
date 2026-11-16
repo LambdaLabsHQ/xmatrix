@@ -68,6 +68,12 @@ export interface AppConnectorProviderManifest {
     clientAuth?: "body" | "basic";
     /** Confidential providers that require a server-held S256 proof. */
     pkce?: "S256";
+    /**
+     * The provider's limit on the length of the `state` parameter. X answers an
+     * authorize request with a longer state by `invalid_request` before consent,
+     * so the Hub refuses to start a connect that the provider would not show.
+     */
+    stateLimit?: number;
     tokenField: string;
     extraAuthorizeParams?: Record<string, string>;
     /**

@@ -21,8 +21,9 @@ integration("a refused summon's quota wait is made ready by the reading that cle
     const codex = { ownerUserId: "owner", machineId: "m1", harness: "codex" };
     const at = offset => new Date(Date.now() + offset).toISOString();
     const resetAt = at(3_600_000);
-    const reading = (observedAt, percent) => ({ quotaSource: "provider_api", quotaObservedAt: observedAt,
-      quotaUsages: [{ label: "5h", percent, resetAt }] });
+    // Each reset starts another window: within one, a share read used up stays so.
+    const reading = (observedAt, percent, reset = resetAt) => ({ quotaSource: "provider_api", quotaObservedAt: observedAt,
+      quotaUsages: [{ label: "5h", percent, resetAt: reset }] });
     const expiresAt = at(86_400_000);
     const wait = (channelId, refusedThrough) => waitForRegistrationQuota(database, { channelId, registrations: [codex],
       refusedThrough, expiresAt, requestId: `wait-${channelId}` });
@@ -35,14 +36,14 @@ integration("a refused summon's quota wait is made ready by the reading that cle
     assert.equal(await observeRegistrationQuota(database, codex, reading(at(-50_000), 100), "still-used-up"), false,
       "a newer reading that is still used up ends nothing");
     assert.deepEqual(await ready(), []);
-    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-40_000), 20), "reset"), true,
+    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-40_000), 20, at(2 * 3_600_000)), "reset"), true,
       "the reading that clears the pool readies the wait in its own transaction");
     const [first] = await ready();
     assert.equal(first.channelId, "a");
     assert.match(first.readyToken, /^[0-9a-f-]{36}$/u);
 
     // A newer refusal re-arms the wait between its read and its settlement: the old delivery settles nothing.
-    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-30_000), 100), "used-up-again"), false);
+    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-30_000), 100, at(3 * 3_600_000)), "used-up-again"), false);
     assert.equal(await wait("a", at(-30_000)), false);
     await settleRegistrationQuotaWaits(database, { waits: [first], requestId: "stale-settle" });
     assert.equal((await sql(`SELECT count(*) FROM control.registration_quota_waiters WHERE channel_id='a'`)).rows[0].count,
@@ -51,7 +52,7 @@ integration("a refused summon's quota wait is made ready by the reading that cle
       requestId: "waited" }), [codex], "a reconnecting machine reads again what is waited on");
 
     // A reading that landed between a refusal and its wait readies the wait as it is recorded.
-    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-20_000), 30), "cleared-again"), true);
+    assert.equal(await observeRegistrationQuota(database, codex, reading(at(-20_000), 30, at(4 * 3_600_000)), "cleared-again"), true);
     assert.equal(await wait("b", at(-25_000)), true, "the wait sees the newer reading already in");
     const both = await ready();
     assert.deepEqual(both.map(wait => wait.channelId).sort(), ["a", "b"]);

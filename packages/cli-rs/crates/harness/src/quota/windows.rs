@@ -22,6 +22,7 @@ pub(crate) fn percent_window(
         remaining: exhausted.then_some(0.0),
         percent: normalized_quota_percent(Some(percent), None, None),
         reset_at,
+        scope: None,
     }
 }
 

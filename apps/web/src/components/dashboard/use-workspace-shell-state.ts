@@ -5,6 +5,8 @@ import { channelEventViews } from "./workspace-shell-presence";
 import type { ChannelEventView } from "./realtime-channels";
 import { channelAfterMessage, createViewerReads, type ChannelMessageArrival, type ViewerReads } from "./channel-message-summary";
 import { createRealtimeCollection } from "./realtime-collection";
+import { createRealtimeChannels } from "./instance-store";
+import { fetchChannelCatalogResolve } from "./channel-catalog-query";
 import { createPresentedChannelTail } from "./presented-channel-tail";
 import { useMachineDaemonLoad } from "./use-machine-daemon-load";
 
@@ -93,19 +95,20 @@ import { removeRetiredBrowserReplica } from "@/lib/retired-browser-replica";
 import { maybePushRecipientScopedNativeMessageNotification } from "./recipient-scoped-native-message-notification";
 import { noteAgentAnswered } from "@/lib/star-prompt";
 import { useHumanFocusHistoryHttpFallback } from "./use-human-focus-history-http-fallback";
-import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying, refetchUnlessHumanPush, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
+import { humanPushConnected, invalidateWorkspaceResources, markHumanPushRetrying, setHumanPushConnected, type WorkspaceResourceChange } from "./workspace-resource-push";
 import { useSelectedChannelHeadCatchUp } from "./use-selected-channel-head-catch-up";
 import { clearProductMessageAttachmentMediaCache } from "@/lib/relay-v2/product-message-attachment-media";
 import { releaseMessageAttachmentMediaStores } from "./message-attachment-media-store";
-import { ChannelPresenceConflict, decodeChannelAgentPresence, presenceInstanceId, channelActivityOf, isAgentInstruction, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
+import { ChannelPresenceConflict, decodeChannelAgentPresence, isLiveChannel, type LiveChannel, presenceInstanceId, channelActivityOf, isAgentInstruction, isNornAskProgramMessage, DEFAULT_HUB_URL, HUMAN_AUTH_INVALID_FAILURE_CODE, HUMAN_AUTH_REQUIRED_CLOSE_CODE, HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_COVERAGE, HUMAN_CLIENT_PRESENCE_DIGEST, normalizeHubUrl, parseHumanChannelCatalogChangedMessage, parseHumanWorkspaceResourceChangedMessage } from "@xmatrix/protocol";
 import type {
   ChannelAttachment,
   ChannelMessage,
   ObservabilityEvent,
   SerializedAgent,
   ChannelSnapshot,
+  InstanceRecord,
+  ChannelPresence,
   SerializedMachineDaemon,
-  SerializedAutomation,
   SerializedSpace,
   SerializedWorkspace,
   HumanServerMessage,
@@ -131,7 +134,6 @@ import {
   HUMAN_HEARTBEAT_PING,
   RELAY_PUSH_PING_INTERVAL_MS,
   RELAY_PUSH_PONG_TIMEOUT_MS,
-  AUTOMATION_REFRESH_INTERVAL_MS,
   TRACE_EVENT_LIMIT,
   TimelineItem,
   WorkspaceMessageSearch,
@@ -156,7 +158,6 @@ import {
   fetchChannelHistory,
   fetchEvents,
   fetchProjects,
-  fetchAutomations,
   fetchSpacesForLanding,
   fetchWorkingSpace,
   historyMessageCountEstimate,
@@ -302,7 +303,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const accessTokenRef = useRef<string | undefined>(token);
   const channelReadStateUserIdRef = useRef<string | null>(null);
   const desktopBridgeRef = useRef<DesktopBridge | null>(desktopBridge);
-  const channelsRef = useRef<ChannelSnapshot[]>([]);
+  const channelsRef = useRef<LiveChannel[]>([]);
   const spacesRef = useRef<SerializedSpace[]>([]);
 
   const routeSpaceIdRef = useRef<string | null>(null);
@@ -428,7 +429,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     settleMessageJump,
   } = useMessageJump({ timelineScrollRef, setBrowserHash });
 
-  const [realtimeChannels] = useState(() => createRealtimeCollection<ChannelSnapshot>(mobileListFixture?.channels ?? []));
+  const [realtimeChannels] = useState(() => createRealtimeChannels(mobileListFixture?.channels ?? []));
   const channels = useSyncExternalStore(
     view === "messages" || view === "pages" ? realtimeChannels.subscribeCatalog : realtimeChannels.subscribe,
     view === "messages" || view === "pages" ? realtimeChannels.getCatalogSnapshot : realtimeChannels.getSnapshot,
@@ -443,12 +444,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const [spacesLoadedUserId, setSpacesLoadedUserId] = useState<string | null>(null);
 
   const [projects, setProjects] = useState<SerializedWorkspace[]>([]);
-
-  const [automations, setAutomations] = useState<SerializedAutomation[]>([]);
-
-  const [automationExecutionEnabled, setAutomationExecutionEnabled] = useState<boolean | null>(null);
-
-  const [scheduleFocusId, setScheduleFocusId] = useState<string | null>(null);
 
   const [events, setEvents] = useState<ObservabilityEvent[]>([]);
   const [realtimeEventViews] = useState(() => createRealtimeCollection<ChannelEventView>());
@@ -592,14 +587,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const [localActionBusy, setLocalActionBusy] = useState<string | null>(null);
 
   const [localActionError, setLocalActionError] = useState<string | null>(null);
-
-  const [automationBusy, setAutomationBusy] = useState<string | null>(null);
-
-  const [automationError, setAutomationError] = useState<string | null>(null);
-
-  const [automationLoadError, setAutomationLoadError] = useState<string | null>(null);
-
-  const [loadingAutomations, setLoadingAutomations] = useState(false);
 
   const [runtimeCheck, setRuntimeCheck] = useState<DesktopRuntimeCheckResult | null>(null);
 
@@ -893,7 +880,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         reads: createViewerReads((channel, arrival: ChannelMessageArrival) => {
           const summarized = channelAfterMessage(channel, arrival);
           // A replay says nothing new about its sender either.
-          return arrival.known ? summarized : patchChannelAgentPresenceFromMessage(summarized, arrival.entry);
+          // Only a Channel that carries its Instances has one to mark busy.
+          return arrival.known || !isLiveChannel(summarized) ? summarized
+            : patchChannelAgentPresenceFromMessage(summarized, arrival.entry);
         }),
       };
     }
@@ -909,8 +898,52 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
      Channels are gone, and so is the claim that their read state is known. */
   const clearChannels = useCallback(() => {
     viewerReadsRef.current = null;
+    realtimeChannels.instances.clear();
     setChannels([]);
-  }, [setChannels]);
+  }, [setChannels, realtimeChannels]);
+
+  // Exact reads reconcile held facts after a transport gap. Window reads never
+  // imply deletion; a miss may remove only the observation actually requested.
+  const reconcileInstances = useCallback(async (onlyChannelId?: string) => {
+    const requestToken = tokenRef.current;
+    if (!requestToken) return;
+    const groups = new Map<string, string[]>();
+    for (const record of realtimeChannels.instances.getSnapshot()) {
+      if (onlyChannelId && record.channelId !== onlyChannelId) continue;
+      const spaceId = realtimeChannels.get(record.channelId)?.spaceId;
+      if (spaceId) groups.set(spaceId, [...groups.get(spaceId) ?? [], record.id]);
+    }
+    for (const [spaceId, ids] of groups) {
+      for (let offset = 0; offset < ids.length; offset += 100) {
+        if (tokenRef.current !== requestToken) return;
+        const knownInstanceIds = ids.slice(offset, offset + 100);
+        const asked = new Map(knownInstanceIds.flatMap(id => {
+          const record = realtimeChannels.instances.get(id);
+          return record ? [[id, record] as const] : [];
+        }));
+        const channelIds = [...new Set([...asked.values()].map(record => record.channelId))];
+        if (!channelIds.length) continue;
+        try {
+          const result = await fetchChannelCatalogResolve({ token: requestToken, spaceId, channelIds,
+            knownInstanceIds, includeParticipants: true, signal: AbortSignal.timeout(20_000) });
+          if (tokenRef.current !== requestToken) return;
+          for (const channel of result.channels) {
+            if (!realtimeChannels.get(channel.id)) continue;
+            if (channel.instanceRecords) realtimeChannels.instances.receive(channel.instanceRecords, channel.id);
+            if (channel.missingInstanceIds) realtimeChannels.instances.reconcileMissing(channel.missingInstanceIds, asked);
+          }
+        } catch {
+          // Retain known facts on an unanswered read. Reconnect/focus retries;
+          // a network failure is never evidence that an Instance ended.
+        }
+      }
+    }
+  }, [realtimeChannels]);
+
+  useEffect(() => {
+    void reconcileInstances(selectedChannelId ?? undefined);
+    return listenForForegroundRefresh(() => { void reconcileInstances(selectedChannelId ?? undefined); });
+  }, [selectedChannelId, reconcileInstances]);
 
   const rememberChannelHistory = useCallback((
     channelId: string,
@@ -1468,6 +1501,38 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setChannelMentionClearedAt(readChannelMentionClearedAt(authenticatedUserId));
   }, [authenticatedUserId, clearChannels, resetChannelReadSync, realtimeAgents]);
 
+  /* A deleted Channel leaves every place that still holds it: the list, its
+     history, and the address. An address left naming it kept the reader on a
+     Channel that no longer exists, so the deletion read as having failed. */
+  const forgetDeletedChannel = useCallback((channelId: string) => {
+    const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
+    invalidateAgentTraceChannels([channelId], "close");
+    historyCacheRef.current.delete(channelId);
+    historyTailBaseGenerationRef.current.delete(channelId);
+    purgeProductTailCacheChannel(channelId);
+    setChannels((current) => current.filter((channel) => channel.id !== channelId));
+    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
+      detail: { kind: "structure" },
+    }));
+    if (selectedChannelIdRef.current === channelId) {
+      historyChannelIdRef.current = null;
+      historyRef.current = [];
+      hasOlderMessagesRef.current = false;
+      setHistory([]);
+      setHasOlderMessages(false);
+      setSelectedChannelId(null);
+    }
+    const route = appRouteInfo(currentBrowserLocation());
+    const routeKey = route.channelKey || route.legacyChannelId;
+    const named = resolveChannelRouteKey(channelsRef.current, routeKey,
+      resolveSpaceRouteKey(spacesRef.current, route.spaceKey))?.id ?? exactChannelIdFromRouteKey(routeKey || "") ?? routeKey;
+    if (named !== channelId) return;
+    const list = spaceId ? `${spaceAppPath(spaceId, spacesRef.current)}/channels` : "/app";
+    setHistoryError(null);
+    replaceBrowserPath(list);
+    setBrowserPath(list);
+  }, [historyTailBaseGenerationRef, invalidateAgentTraceChannels, purgeProductTailCacheChannel, setChannels]);
+
   const humanHistoryFallback = useHumanFocusHistoryHttpFallback({ token, selectedChannelIdRef, historyChannelIdRef, channelsRef, applyHistory: (channelId, messages, hasOlderMessages) => applyChannelHistory(channelId, messages, hasOlderMessages), recordTailBase: recordHistoryTailBase, authorizeOnlineHistory: (channelId) => { if (user?.id) authorizeHistoryRender({ userId: user.id, channelId, historyRevision: historyRevisionRef.current }); }, setHistoryError, setLoadingHistory });
 
   useEffect(() => {
@@ -1495,6 +1560,19 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       window.dispatchEvent(new Event(AUTH_TOKEN_REJECTED_EVENT));
       connection.backOff();
     }
+
+    const refreshEndedWaits = (held: LiveChannel | undefined, presence: ChannelPresence | undefined) => {
+      if (!held || !presence || !agentPresenceEndsWaits(held.presence, presence)) return;
+      void queryClient.invalidateQueries({ exact: true,
+        queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
+      void queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.channels({ userId, spaceId: held.spaceId }),
+        predicate: query => query.queryKey[5] === "catalog" && query.queryKey[7] === "unread" });
+    };
+    const receiveInstanceRecords = (records: readonly InstanceRecord[], channelId?: string) => {
+      const before = new Map(records.map(record => [record.channelId, realtimeChannels.get(record.channelId)]));
+      realtimeChannels.instances.receive(records, channelId);
+      for (const [id, held] of before) refreshEndedWaits(held, realtimeChannels.get(id)?.presence);
+    };
 
     const repairPresenceConflict = createChannelPresenceRepair(channelId => {
       const channel = realtimeChannels.get(channelId);
@@ -1582,7 +1660,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
               const incoming = (frame.type === "presence_digest" ? frame.agents : [frame.agent])
                 .filter(agent => typeof agent?.id === "string" && agent.id.length > 0);
               agents.push(...incoming);
-              presence.push(...incoming);
+              // Legacy cards cannot overwrite or repair the modern Instance table.
+              presence.push(...incoming.filter(agent => !(agent.instances ?? []).some(instance =>
+                instance.channelId && realtimeChannels.instances.hasChannel(instance.channelId))));
             } else if (frame.type === "channel_updated") {
               flushPresence();
               let presenceOnly = false;
@@ -1627,6 +1707,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
     function handleRelayMessage(message: ChannelSnapshotFrame) {
       switch (message.type) {
+        case "instance_activity":
+          realtimeChannels.instances.receiveActivity(message.activities);
+          break;
+        case "instance_records":
+          receiveInstanceRecords(message.records);
+          break;
         case "error":
           if (message.requestId === "web-subscribe" && !relayPushConnectedRef.current &&
               message.failure?.code === HUMAN_AUTH_INVALID_FAILURE_CODE) {
@@ -1661,6 +1747,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
             invalidateWorkspaceResources(queryClient);
             void queryClient.invalidateQueries({ queryKey: ["agent-launches"] });
           }
+          void reconcileInstances();
           connectedBefore = true;
           reconcileUnconfirmedOnReconnectRef.current?.();
           sendHumanChannelFocus({
@@ -1740,21 +1827,18 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // Channel to be read again.
           if (message.event.type === "presence_updated" && message.event.channelId) {
             const channelId = message.event.channelId;
+            const records = message.event.metadata?.instanceRecords;
+            if (Array.isArray(records)) {
+              receiveInstanceRecords(records, channelId);
+              break;
+            }
+            if (realtimeChannels.instances.hasChannel(channelId)) break;
             const agents = message.event.metadata?.presenceCoverage === "agents"
               ? decodeChannelAgentPresence(channelId, message.event.metadata.memberPresence) : undefined;
             if (agents) {
               const held = channelsRef.current.find((channel) => channel.id === channelId);
               setChannels((current) => channelsWithAgentPresence(current, channelId, agents));
-              // An asker that stopped, or whose wake failed, waits no more: only
-              // the counts and the unread list count waits, so only they are read.
-              if (held && userId && agentPresenceEndsWaits(held.presence, agents)) {
-                void queryClient.invalidateQueries({ exact: true,
-                  queryKey: xmatrixQueryKeys.channelCatalogCounts({ userId, spaceId: held.spaceId }) });
-                void queryClient.invalidateQueries({
-                  queryKey: xmatrixQueryKeys.channels({ userId, spaceId: held.spaceId }),
-                  predicate: (query) => query.queryKey[5] === "catalog" && query.queryKey[7] === "unread",
-                });
-              }
+              refreshEndedWaits(held, agents);
             } else {
               const spaceId = channelsRef.current.find((channel) => channel.id === channelId)?.spaceId;
               if (spaceId) window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
@@ -1845,6 +1929,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           setAgentsError(null);
           break;
         case "registration_quota":
+          realtimeChannels.instances.receiveQuota(message.registration, message.usage);
           setChannels((current) => patchChannelsRegistrationQuota(current, message.registration, message.usage));
           // The Agents page shows the same reading: read its catalog again.
           // That read asks no provider; only opening the page does.
@@ -1859,7 +1944,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         case "app_connector_result_channels": {
           setChannels((current) =>
-            message.channels.reduce(
+            message.channels.reduce<readonly ChannelSnapshot[]>(
               (nextChannels, resultChannel) => replaceChannel(nextChannels, resultChannel),
               current,
             ),
@@ -1883,22 +1968,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           break;
         }
         case "channel_deleted":
-          invalidateAgentTraceChannels([message.channelId], "close");
-          historyCacheRef.current.delete(message.channelId);
-          historyTailBaseGenerationRef.current.delete(message.channelId);
-          purgeProductTailCacheChannel(message.channelId);
-          setChannels((current) => current.filter((channel) => channel.id !== message.channelId));
-          window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", {
-            detail: { kind: "structure" },
-          }));
-          if (selectedChannelIdRef.current === message.channelId) {
-            historyChannelIdRef.current = null;
-            historyRef.current = [];
-            hasOlderMessagesRef.current = false;
-            setHistory([]);
-            setHasOlderMessages(false);
-            setSelectedChannelId(null);
-          }
+          forgetDeletedChannel(message.channelId);
           break;
         case "channel_topic_updated":
           setChannels((current) =>
@@ -2037,8 +2107,9 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
              now. For any other, the rows that show it do, and the shell is
              told when the catalog window below reorders the list, instead of
              once per message (use-channel-catalog-paging.ts). */
-          // An instruction to one Agent Instance neither previews nor needs reading.
-          const instruction = isAgentInstruction(entry.metadata);
+          // An instruction to one Agent Instance neither previews nor needs reading, nor does the program or end
+          // of a question an Agent asked with a command: its card is what a person reads.
+          const instruction = isAgentInstruction(entry.metadata) || isNornAskProgramMessage(entry.messageId);
           const arrival = {
             entry,
             preview: instruction ? undefined : channelLastMessagePreviewFromEntry(entry),
@@ -2102,7 +2173,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
           // Presence for conversations not on screen may come as a once-a-second
           // digest, and a Channel snapshot may speak for its Agents alone.
           device: { ...browserDevicePresence(desktopBridgeRef.current),
-            capabilities: [HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE] },
+            capabilities: [HUMAN_CLIENT_INSTANCE_RECORDS, HUMAN_CLIENT_PRESENCE_DIGEST, HUMAN_CLIENT_PRESENCE_COVERAGE] },
         }));
       },
       onPacket: (_live, frames) => {
@@ -2157,6 +2228,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     };
   }, [
     viewerReadsOf,
+    reconcileInstances,
     applyChannelHistory,
     heldChannelWindow,
     authorizeHistoryRender,
@@ -2165,10 +2237,10 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     clearReplyTarget,
     clearChannelHistory,
     invalidateAgentTraceChannels,
+    forgetDeletedChannel,
     commitChannelHistory,
     mergeAndRememberChannelHistory,
     observeChannelReadSequence,
-    purgeProductTailCacheChannel,
     queueChannelTimelineScroll,
     recordHistoryTailBase,
     reconcileAgentTraceChannelAccess,
@@ -2285,8 +2357,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       setSpaces([]);
       setSpacesLoadedUserId(null);
       setProjects([]);
-      setAutomations([]);
-      setAutomationExecutionEnabled(null);
       setEvents([]);
       setAgentTraceReplicas([]);
       setLoadingWorkspace(false);
@@ -2402,48 +2472,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   );
 
   const renderableHistory = historyRenderAuthorized ? history : EMPTY_CHANNEL_HISTORY;
-
-  const automationsQuery = useQuery({
-    queryKey: xmatrixQueryKeys.domain(
-      { userId: authenticatedUserId || "anonymous" }, "automations",
-      [resolvedSpaceId ?? null],
-    ),
-    queryFn: ({ signal }) => fetchAutomations(token!, {
-      spaceId: resolvedSpaceId!,
-      signal,
-    }),
-    enabled: Boolean(token && authenticatedUserId && resolvedSpaceId && startupBackgroundReady),
-    staleTime: 15_000,
-    refetchInterval: () => refetchUnlessHumanPush(AUTOMATION_REFRESH_INTERVAL_MS),
-    refetchIntervalInBackground: false,
-  });
-  useEffect(() => {
-    if (!token || !resolvedSpaceId) {
-      setAutomations([]);
-      setAutomationExecutionEnabled(null);
-      setAutomationLoadError(null);
-      setLoadingAutomations(false);
-      return;
-    }
-    setLoadingAutomations(automationsQuery.isPending);
-    setAutomations(automationsQuery.data?.automations ?? []);
-    if (automationsQuery.error) {
-      // TanStack Query retains the last successful data during a failed
-      // background refetch. Keep painting it, but revoke mutation capability
-      // until a fresh authoritative response succeeds.
-      setAutomationExecutionEnabled(null);
-      setAutomationLoadError(userErrorMessage(automationsQuery.error, "Couldn't load Automations"));
-    } else if (automationsQuery.data) {
-      setAutomationExecutionEnabled(automationsQuery.data.executionEnabled);
-      setAutomationLoadError(null);
-    }
-  }, [
-    resolvedSpaceId,
-    automationsQuery.data,
-    automationsQuery.error,
-    automationsQuery.isPending,
-    token,
-  ]);
 
   useMachineDaemonLoad({
     token,
@@ -2758,7 +2786,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   // (presented-channel-tail.ts). Published before paint, so the row and the
   // timeline change in the same frame.
   const presentedEntry = selectedChannelId && history.at(-1)?.channelId === selectedChannelId
-    ? latestHistoryEntry(history)
+    ? latestHistoryEntry(history.filter((message) => !isAgentInstruction(message.metadata) && !isNornAskProgramMessage(message.messageId)))
     : undefined;
   useLayoutEffect(() => {
     const preview = presentedEntry ? channelLastMessagePreviewFromEntry(presentedEntry) : undefined;
@@ -3065,11 +3093,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setSpaces,
     projects,
     setProjects,
-    automations,
-    setAutomations,
-    automationExecutionEnabled,
-    scheduleFocusId,
-    setScheduleFocusId,
     events,
     setEvents,
     agentTraceReplicas,
@@ -3084,6 +3107,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setChannelReadCountsBaselineReady,
     selectedChannelId,
     setSelectedChannelId,
+    forgetDeletedChannel,
     selectedPageId,
     setSelectedPageId,
     setPendingExplicitSpaceId,
@@ -3144,12 +3168,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setLocalActionBusy,
     localActionError,
     setLocalActionError,
-    automationBusy,
-    setAutomationBusy,
-    automationError,
-    setAutomationError,
-    automationLoadError,
-    loadingAutomations,
     runtimeCheck,
     setRuntimeCheck,
     checkingDesktopUpdates,

@@ -8,13 +8,11 @@ import {
   parseRestrictedChannelContentScope,
   AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE,
   HUB_ROUTES,
-  isAutomationIntervalMinutes,
   hmacBytes,
   timingSafeEqual,
   type AgentRunPermission,
   spaceVisibilityScope,
   trimEnd,
-  utf8ByteLength,
 } from "@xmatrix/protocol";
 import type {
   ChannelAppMention,
@@ -53,7 +51,6 @@ import {
   RELAY_V2_MESSAGE_ATTACHMENT_PRODUCT_MEDIA_PATH,
 } from "./relay-r2-private-api";
 import { agentRunUploadScopeId } from "./agent-run-upload-scope";
-import { automationDatumFromPayload } from "./relay-authority-schedule-occurrence";
 import { base64UrlEncodeValue } from "./relay-v2-primitives";
 import { AgentRunDelegationError, requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
 import { reportError, type ErrorReportContext } from "@xmatrix/protocol/error-reporting";
@@ -64,6 +61,7 @@ import { machineRunLifecycleReport } from "./machine-run-lifecycle-report";
 import { runtimeRepository } from "./runtime";
 import { getChannel, getSpace } from "./spaces";
 export { privateResponse } from "./private-response";
+export { transientError } from "./error-contract";
 
 export const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
 export const MAX_INVITE_EMAILS_PER_REQUEST = 100;
@@ -431,6 +429,12 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "GET" && path === HUB_ROUTES.connector_usage) return true;
   // Private connector reads are scoped to the live requesting Run's own Channel.
   if (request.method === "POST" && path === HUB_ROUTES.connector_call) return true;
+  // Norn requests in its own Channel: the route proves the Run holds the one it answers.
+  if (request.method === "GET" && path === HUB_ROUTES.norn_requests) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_answer) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_delegate) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_call_off) return true;
+  if (request.method === "POST" && path === HUB_ROUTES.norn_request_ask) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;
@@ -444,7 +448,7 @@ export function agentRunHttpRouteAllowed(
   // the owner's alone, so the decision route never admits a Run.
   // Pages authorize the exact Run in the repository, with its owner's page
   // access: Agents read, edit, arrange, restore and publish pages as the owner may.
-  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
+  if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/pages(?:\/[^/]+(?:\/history|\/awareness|\/changes|\/programs|\/github-file|\/media\/[^/]+)?)?$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/pages$/u.test(path)) return true;
   // The page route authorizes the live Run and edit access before issuing a
   // co-writer ticket; Runs cannot join as raw document-sync clients.
@@ -458,7 +462,8 @@ export function agentRunHttpRouteAllowed(
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims$/u.test(path)) return true;
   if (request.method === "DELETE" && /^\/api\/spaces\/[^/]+\/pages\/[^/]+\/claims\/[^/]+$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-writeback$/u.test(path)) return true;
-  // A page's Automations are the page's: a Run that may edit the page manages them as its owner.
+  // A CLI released while schedule lines ran still calls a page's schedule routes; its Run is told they are retired
+  // (index-routes-automation.ts).
   if (/^\/api\/spaces\/[^/]+\/pages\/[^/]+\/automations(?:\/[^/]+(?:\/(?:pause|resume|run|reference))?)?$/u.test(path)) return true;
   if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/page-links$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/page-links\/[^/]+\/resolution$/u.test(path)) return true;
@@ -528,6 +533,7 @@ export function agentRunHttpRouteAllowed(
   }
   // Hub-defined CLI commands; each acts only through routes this check admits on its own.
   if (request.method === "POST" && path === "/api/cli/commands/run") return true;
+  // Likewise the Space-wide Automation routes, which answer every caller the same (index-routes-automation.ts).
   if (
     (request.method === "GET" || request.method === "POST") &&
     path === HUB_ROUTES.automations
@@ -606,18 +612,6 @@ async function requireRunStillAdmitted(
   )) {
     throw new PermissionFailure(inactive);
   }
-}
-
-export function automationAgentContext(principal: AgentRunPrincipal): Record<string, unknown> {
-  return {
-    ownerUserId: principal.ownerUserId,
-    runId: principal.runId,
-    executionKey: principal.executionKey,
-    ...(principal.instanceId ? { instanceId: principal.instanceId } : {}),
-    channelId: principal.channelId,
-    machineId: principal.machineId,
-    hostId: principal.hostId,
-  };
 }
 
 /**
@@ -985,109 +979,6 @@ export function getDeviceAuthBroker(env: Env) {
   return env.DEVICE_AUTH.get(id);
 }
 
-export {
-  AUTOMATION_MAX_INTERVAL_MINUTES,
-  AUTOMATION_MIN_INTERVAL_MINUTES,
-} from "@xmatrix/protocol";
-export const AUTOMATION_MUTABLE_PAYLOAD_FIELDS = [
-  "name",
-  "expression",
-  "message",
-  "intervalMinutes",
-] as const;
-export function automationPayload(
-  current: Record<string, unknown>,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
-  const nested = input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)
-    ? input.payload as Record<string, unknown>
-    : {};
-  const { input: _serviceOwnedInput, ...safeNested } = nested;
-  const payload = { ...current, ...safeNested };
-  for (const field of AUTOMATION_MUTABLE_PAYLOAD_FIELDS) {
-    if (input[field] !== undefined) payload[field] = input[field];
-  }
-  const suppliedLegacyDatum = input.message !== undefined || input.expression !== undefined ||
-    nested.message !== undefined || nested.expression !== undefined;
-  if (suppliedLegacyDatum) {
-    delete payload.input;
-    if (input.message !== undefined || nested.message !== undefined) delete payload.expression;
-    if (input.expression !== undefined || nested.expression !== undefined) delete payload.message;
-  }
-  return payload;
-}
-export function automationIntervalMinutes(payload: Record<string, unknown>): number | undefined {
-  const intervalMinutes = Math.floor(Number(payload.intervalMinutes));
-  return isAutomationIntervalMinutes(intervalMinutes) ? intervalMinutes : undefined;
-}
-export function automationMessage(payload: Record<string, unknown>): Record<string, unknown> | undefined {
-  const expression = automationDatumFromPayload(payload);
-  const raw = expression
-    ? { body: expression.text, appMentions: expression.appMentions }
-    : payload.message;
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  const message = raw as Record<string, unknown>;
-  if (typeof message.body !== "string") return undefined;
-  const body = message.body.trim();
-  if (!body || utf8ByteLength(body) > 64 * 1024) return undefined;
-  if (message.appMentions !== undefined && !Array.isArray(message.appMentions)) return undefined;
-  const explicitAppMentions = Array.isArray(message.appMentions)
-    ? message.appMentions.filter((value): value is ChannelAppMention => {
-        if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-        const mention = value as Record<string, unknown>;
-        return typeof mention.token === "string" && typeof mention.appId === "string" &&
-          typeof mention.appName === "string" &&
-          (mention.status === "available" || mention.status === "planned");
-      })
-    : undefined;
-  if (Array.isArray(message.appMentions) && explicitAppMentions?.length !== message.appMentions.length) {
-    return undefined;
-  }
-  const interpreted = channelAppMentionsForPublicMessage(body, explicitAppMentions);
-  const normalized = {
-    body: interpreted.body || body,
-    ...(interpreted.appMentions?.length ? { appMentions: interpreted.appMentions } : {}),
-  };
-  return utf8ByteLength(JSON.stringify(normalized)) <= 80 * 1024
-    ? normalized
-    : undefined;
-}
-
-export function automationExpression(
-  payload: Record<string, unknown>,
-  ref: string,
-): Record<string, unknown> | undefined {
-  const message = automationMessage(payload);
-  if (!message) return undefined;
-  const raw = payload.expression && typeof payload.expression === "object" &&
-      !Array.isArray(payload.expression)
-    ? payload.expression as Record<string, unknown>
-    : undefined;
-  if (raw && (raw.kind !== "text" || raw.language !== "natural-language" ||
-      (raw.ref !== undefined && typeof raw.ref !== "string"))) return undefined;
-  return {
-    kind: "text",
-    ref: typeof raw?.ref === "string" && raw.ref.trim() ? raw.ref.trim() : ref,
-    language: "natural-language",
-    text: message.body,
-    ...(Array.isArray(message.appMentions) ? { appMentions: message.appMentions } : {}),
-  };
-}
-export function automationEvalInput(
-  expression: Record<string, unknown>,
-  channelId: unknown,
-  actor: { kind: "user" | "agent"; id: string },
-  authorityRootUserId: string,
-  intervalMinutes: number,
-  lineage: unknown,
-): Record<string, unknown> {
-  return {
-    datum: expression,
-    envRef: { root: { kind: "channel", id: channelId }, actor, authorityRootUserId },
-    resume: { kind: "interval", intervalMinutes },
-    lineage,
-  };
-}
 // Product UX media read-through companion to Authority channel-history: stream one
 // attachment after Authority rechecks channel ACL without requiring Local Replica
 // readiness. Replica capability path above remains the verified primary path.

@@ -22,7 +22,7 @@ integration("composite registration commands preserve identity, configuration an
         lease_until timestamptz,version bigint,updated_at timestamptz,finished_at timestamptz)`));
     for (const file of ["0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql", "0062_expand_registration_execution_revision.sql", "0067_expand_registration_grant_execution_revision.sql", "0063_expand_registration_authority.sql", "0064_expand_registration_enrollments.sql",
       "0061_expand_registration_commands.sql", "0065_expand_registration_environment.sql", "0068_expand_registration_run_bindings.sql",
-      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0069_expand_registration_stop_intents.sql", "0101_expand_registration_role.sql", "0102_contract_registration_create_command.sql", "0185_expand_space_harness_profiles.sql"]) await client.query(sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
+      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0255_expand_registration_quota_scoped_windows.sql", "0069_expand_registration_stop_intents.sql", "0101_expand_registration_role.sql", "0102_contract_registration_create_command.sql", "0185_expand_space_harness_profiles.sql"]) await client.query(sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
     await client.query(`INSERT INTO ${schema}.agent_registration_authority (space_id,mode,manifest_digest,version)
       VALUES ('a','composite',repeat('a',64),1),('b','composite',repeat('b',64),1)`);
     await client.query(`CREATE TABLE ${schema}.space_members (space_id text,user_id text,role text)`);
@@ -37,6 +37,7 @@ integration("composite registration commands preserve identity, configuration an
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN status text DEFAULT 'online'`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN connection_epoch bigint DEFAULT 3`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN metadata_json jsonb DEFAULT '{}'`);
+    await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN capabilities_json jsonb DEFAULT '[]'`);
     await client.query(`CREATE TABLE ${schema}.machines (owner_user_id text,machine_id text,name text)`);
     await client.query(`CREATE TABLE ${schema}.workspaces (workspace_id text,owner_user_id text,machine_id text,canonical_cwd text)`);
     const placement = { spaceId: "a", shardId: "test", placementEpoch: 1 };
@@ -198,12 +199,12 @@ integration("composite registration commands preserve identity, configuration an
     assert.deepEqual((await codexLive("member")).running.map(row => row.instanceId), ["open-instance"],
       "a closed Channel the reader may not read is not named");
     assert.equal(ownerLive.quota, undefined, "no observation, no quota");
-    await client.query(`INSERT INTO ${schema}.registration_quota_observations VALUES
-      ('owner','registration:machine:codex',14,now()-interval '1 minute',now()+interval '1 hour','provider')`);
+    await client.query(`INSERT INTO ${schema}.registration_quota_observations (owner_user_id,quota_pool_id,remaining,
+        observed_at,expires_at,source,windows_json) VALUES ('owner','registration:machine:codex',14,
+        now()-interval '1 minute',now()+interval '1 hour','provider','[{"usedPercent":86}]')`);
     assert.equal((await codexLive("owner")).quota.remainingPercent, 14);
     assert.equal((await codexLive("admin")).quota.remainingPercent, 14);
     assert.equal((await codexLive("member")).quota, undefined, "another member's provider account stays theirs");
-    assert.equal((await codexLive("owner")).quota.windows, undefined, "a reading from before windows has none");
     const weekly = new Date(Date.now() + 86_400_000).toISOString();
     await client.query(`UPDATE ${schema}.registration_quota_observations SET windows_json=$1::jsonb`,
       [JSON.stringify([{ label: "5h", usedPercent: 30, resetAt: new Date(Date.now() - 1000).toISOString() },
@@ -284,6 +285,23 @@ integration("composite registration commands preserve identity, configuration an
     assert.deepEqual(createdAccess.grant_limits.workspaces, ["ws-1", "ws-2"]);
     assert.equal((await client.query(`SELECT declaration_json->'launch'->>'runtime' AS runtime FROM
       ${schema}.agent_registration_environments WHERE harness='gemini'`)).rows[0].runtime, "gemini");
+    // Its owner was not asked what it may do on the machine, so the catalog
+    // reports the full access it runs with as unconfirmed. An add that carries
+    // a confirmed mode writes it onto the kept declaration, and only once: the
+    // rest of the declaration and a mode already held are never overwritten.
+    const launchAccess = async () => (await repo.list(listing)).registrations.find(row => row.key.harness === "gemini").access;
+    assert.deepEqual([(await launchAccess()).mode, (await launchAccess()).confirmed, (await launchAccess()).approvesRequests], ["full", false, true]);
+    const confirming = { ...creation, commandId: "create-gemini-confirm", environment: { ...creation.environment,
+      models: [], launch: { runtime: "other-gemini", access: "full" } } };
+    await repo.create(confirming);
+    const held = async () => (await client.query(`SELECT declaration_json AS declaration,version FROM
+      ${schema}.agent_registration_environments WHERE harness='gemini'`)).rows[0];
+    assert.deepEqual([(await held()).declaration.launch, (await held()).declaration.models, Number((await held()).version)],
+      [{ runtime: "gemini", runtimeArgs: [], access: "full" }, ["model-g"], 2]);
+    assert.equal((await launchAccess()).confirmed, true);
+    await repo.create({ ...confirming, commandId: "create-gemini-ask", environment: { ...confirming.environment,
+      launch: { runtime: "gemini", access: "ask" } } });
+    assert.deepEqual([(await held()).declaration.launch.access, Number((await held()).version)], ["full", 2]);
     // A Workspace registered after the Agent was added reaches it when the owner
     // adds it again (#3162): configured, granted and allowed by the Space.
     await client.query(`INSERT INTO ${schema}.workspaces VALUES ('ws-3','owner','machine','/repo/three')`);

@@ -301,6 +301,30 @@ The frames are compared byte for byte, so both sides import the same constant.
 A page session pings only when its ticket names the heartbeat
 (`heartbeat: "ping"`), so an editor never times out a Hub that predates it.
 
+Agent Instances and Machine Daemons send the Human frame too (daemons every
+15 s, beside a protocol ping every 2 s). Any text answer
+proves a daemon's socket: the platform only auto-answers a socket the Runtime
+still holds, and the Hub never writes a held socket offline without closing
+it.
+
+### Machine Daemon liveness
+
+The platform records when it last auto-answered each socket
+(`getWebSocketAutoResponseTimestamp`). A daemon that advertises
+`machine_daemon_edge_heartbeat_v1` is judged by that timestamp: past 45 s
+(three missed heartbeats) the Hub closes it with `4005`, persists that
+connection offline and pushes `machine_offline` to the Instances on it.
+
+- A clean disconnect reaches `webSocketClose` at once.
+- A silent one is settled by the next event that wakes the owner's cell: a
+  dispatch, the owner's web connecting, any frame. An idle machine costs
+  nothing between events.
+- While a daemon carries a live Run nothing else may wake the cell, so the cell
+  sets one 30 s alarm and renews it only while such a Run remains.
+
+Route closes never use `4003`: that is the client-upgrade code, after which a
+daemon stops reconnecting.
+
 ### Tokens
 
 A token renewal does not tear a connection down. The Human socket reads the

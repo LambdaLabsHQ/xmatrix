@@ -41,7 +41,6 @@ export async function dispatchPreparedAgentLaunchWake(input: {
 
 export interface ProductAgentMentionAuthorityEnv extends HubAuthorityEnv {
   XMATRIX_MOCK_AUTH_TOKEN?: string;
-  XMATRIX_MOCK_SCHEDULE_DELAY_MS?: string;
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
 }
 

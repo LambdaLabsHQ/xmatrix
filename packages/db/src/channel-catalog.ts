@@ -4,11 +4,12 @@ import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
-import { loadChannelAgentPresence } from "./channel-agent-presence.js";
+import { readChannelInstances, withChannelInstanceRecords } from "./channel-agent-presence.js";
 import {
   channelVisibilityScope,
   CHANNEL_ACTIVITY_MESSAGE_KIND,
   AGENT_INSTRUCTION_MESSAGE_KINDS,
+  NORN_ASK_MESSAGE_PREFIX,
   type ChannelCatalogPageFilter,
   type ChannelCatalogPageView, utf8ByteLength } from "@xmatrix/protocol";
 import { DatabaseContractError } from "./errors.js";
@@ -69,6 +70,11 @@ export interface ChannelCatalogResolveInput {
   routeToken?: string;
   /** False returns metadata only; member/presence fields are omitted, not cleared. */
   includeParticipants?: boolean;
+  /**
+   * Instance ids the reader holds. Each resolved Channel answers for its own
+   * ids exactly, ended ones included, in `missingInstanceIds` when gone.
+   */
+  knownInstanceIds?: readonly string[];
 }
 
 interface CatalogRow extends ChannelPresentationRow {
@@ -385,6 +391,10 @@ const NOT_FOR_READING_KINDS = [CHANNEL_ACTIVITY_MESSAGE_KIND, ...AGENT_INSTRUCTI
 /* What a list row previews: the newest message a person reads, never an instruction. */
 const NOT_FOR_PREVIEW_KINDS = [...AGENT_INSTRUCTION_MESSAGE_KINDS, "xmatrix.system.control-switch"]
   .map((kind) => `'${kind}'`).join(",");
+/* A question an Agent asked with a command is read on its card: its program and its end are the asker's
+   alone (isNornAskProgramMessage), so they neither preview nor need reading. */
+const notNornAskSql = (alias: string): string => `${alias}.message_id NOT LIKE '${NORN_ASK_MESSAGE_PREFIX}%'
+        AND ${alias}.message_id NOT LIKE 'norn-end:${NORN_ASK_MESSAGE_PREFIX}%'`;
 
 /**
  * How far the principal has read a conversation. Activity entries after the
@@ -400,7 +410,7 @@ function effectiveReadSequenceSql(head: string): string {
       WHERE unread.space_id=channel.space_id AND unread.channel_id=channel.channel_id
         AND unread.deleted_at IS NULL
         AND unread.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND unread.message_kind NOT IN (${NOT_FOR_READING_KINDS})
+        AND unread.message_kind NOT IN (${NOT_FOR_READING_KINDS}) AND ${notNornAskSql("unread")}
     ),GREATEST(${head},COALESCE(cursor_row.acknowledged_sequence,0)))`;
 }
 
@@ -409,7 +419,7 @@ const UNREAD_MESSAGE_EXISTS_SQL = `EXISTS (SELECT 1 FROM data.messages message
       WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
         AND message.deleted_at IS NULL
         AND message.timeline_sequence>COALESCE(cursor_row.acknowledged_sequence,0)
-        AND message.message_kind NOT IN (${NOT_FOR_READING_KINDS}))`;
+        AND message.message_kind NOT IN (${NOT_FOR_READING_KINDS}) AND ${notNornAskSql("message")})`;
 
 function catalogIndexCtes(filter: ChannelCatalogPageFilter): string {
   const hasUnread = filter === "unread" ? UNREAD_MESSAGE_EXISTS_SQL : "FALSE";
@@ -547,7 +557,7 @@ export class PostgresChannelCatalogRepository {
           AND channel_id>(SELECT cursor_channel_id FROM catalog_input))
       )` : "";
       const envelopes = input.countsOnly ? [] : await transaction.query<CatalogPageEnvelope>({
-        name: `channel_catalog_page_${input.view}_${input.filter}_v14`,
+        name: `channel_catalog_page_${input.view}_${input.filter}_v15`,
         text: `WITH RECURSIVE catalog_input AS (
           SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
             $4::text AS search_query,
@@ -600,6 +610,7 @@ export class PostgresChannelCatalogRepository {
             SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
             WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
               AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+              AND ${notNornAskSql("message")}
             ORDER BY message.timeline_sequence DESC LIMIT 1
           ) preview ON TRUE
           LEFT JOIN data.delivery_cursors cursor_row
@@ -637,7 +648,7 @@ export class PostgresChannelCatalogRepository {
       }
       const statsRows = input.countsOnly || input.includeCounts !== false
         ? await transaction.query<StatsRow>({
-        name: "channel_catalog_counts_v12",
+        name: "channel_catalog_counts_v13",
         // Per-channel index probes, never a join against an aggregate of the
         // principal's attention: PostgreSQL estimates both sides at a handful of
         // rows and nested-loops them, which for a Space of thousands of
@@ -676,7 +687,7 @@ export class PostgresChannelCatalogRepository {
       if (!envelope && !stats) throw new DatabaseContractError("Catalog page is unavailable");
       const rows = envelope?.page_rows ?? [];
       const page = rows.slice(0, limit);
-      const presence = await loadChannelAgentPresence(
+      const instances = await readChannelInstances(
         transaction, spaceId, page.map((row) => row.channel_id),
       );
       const last = page.at(-1);
@@ -686,7 +697,8 @@ export class PostgresChannelCatalogRepository {
         openChannelHumanMemberIdsBySpace:
           await openChannelHumanMemberIdsBySpace(transaction, spaceId, page),
         rows: page.map((row) => ({
-          channel: serialize(row, presence.get(row.channel_id)),
+          channel: withChannelInstanceRecords(serialize(row, instances.memberPresence.get(row.channel_id)),
+            instances, row.channel_id),
           ownActivityAt: iso(row.activity_at),
         })),
         nextCursor: rows.length > limit && last ? {
@@ -720,7 +732,7 @@ export class PostgresChannelCatalogRepository {
     return this.withPlacedReads(
       requestId, "channel-catalog.resolve", spaceId, async (transaction) => {
       const envelopes = await transaction.query<CatalogResolveEnvelope>({
-        name: "channel_catalog_resolve_v16",
+        name: "channel_catalog_resolve_v17",
         text: `WITH catalog_input AS (
             SELECT $1::text AS space_id,$2::text AS principal_id,$3::text AS principal_kind,
               $4::text[] AS requested_channel_ids,$5::text[] AS route_range_lowers,
@@ -785,6 +797,7 @@ export class PostgresChannelCatalogRepository {
               SELECT ${HEAD_MESSAGE_COLUMNS} FROM data.messages message
               WHERE message.space_id=channel.space_id AND message.channel_id=channel.channel_id
                 AND message.deleted_at IS NULL AND message.message_kind NOT IN (${NOT_FOR_PREVIEW_KINDS})
+              AND ${notNornAskSql("message")}
               ORDER BY message.timeline_sequence DESC LIMIT 1
             ) preview ON TRUE
             LEFT JOIN data.delivery_cursors cursor_row
@@ -831,12 +844,13 @@ export class PostgresChannelCatalogRepository {
         const key = row.requested_route_token ?? row.requested_channel_id;
         (paths[key] ??= []).push(row.channel_id);
       }
-      const presence = input.includeParticipants === false ? new Map()
-        : await loadChannelAgentPresence(transaction, spaceId, [...byId.keys()]);
+      const instances = input.includeParticipants === false ? undefined
+        : await readChannelInstances(transaction, spaceId, [...byId.keys()], input.knownInstanceIds);
       return {
         protocolVersion: 1,
         channels: [...byId.values()].map((row) => {
-          const channel = serialize(row, presence.get(row.channel_id));
+          const channel = serialize(row, instances?.memberPresence.get(row.channel_id));
+          if (instances) withChannelInstanceRecords(channel, instances, row.channel_id);
           if (input.includeParticipants === false) {
             delete channel.memberPresence;
             delete channel.visibleHumanMemberIds;

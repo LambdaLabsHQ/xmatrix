@@ -48,7 +48,6 @@ function headerTags(item: TimelineItem): Map<string, string> {
     ["branch", item.senderGitBranch ?? ""],
     ["owner", item.senderOwnerLabel ?? ""],
     ["machine", [item.senderMachineLabel, item.senderMachineId, item.senderMachineOwnerUserId].join("|")],
-    ["stale", item.senderInstanceStale ? "1" : ""],
     ["goal", `${item.senderGoal?.objective ?? ""}|${item.senderGoal?.status ?? ""}`],
   ]);
   for (const chip of item.senderStatusChips ?? []) {
@@ -132,8 +131,6 @@ function foldRow(items: TimelineItem[]): TimelineItem {
     senderKind: last.senderKind,
     senderId: last.senderId,
     senderInstanceId: last.senderInstanceId,
-    senderStatus: last.senderStatus,
-    senderInstanceStale: last.senderInstanceStale,
     folded: items,
   };
 }

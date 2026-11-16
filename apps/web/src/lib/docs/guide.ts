@@ -7,6 +7,7 @@ import concepts from "../../../../../docs/guide/concepts.md";
 import connectors from "../../../../../docs/guide/connectors.md";
 import index from "../../../../../docs/guide/index.md";
 import pages from "../../../../../docs/guide/pages.md";
+import programs from "../../../../../docs/guide/programs.md";
 import projectWiki from "../../../../../docs/guide/project-wiki.md";
 import syntax from "../../../../../docs/guide/syntax.md";
 
@@ -22,6 +23,7 @@ const sources: [file: string, markdown: string][] = [
   ["syntax", syntax],
   ["agents", agents],
   ["pages", pages],
+  ["programs", programs],
   ["connectors", connectors],
   ["ai-apps", aiApps],
   ["cli", cli],

@@ -4,6 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import Link from "next/link";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { AppleSpaceBillingSection } from "./settings-apple-billing";
+import { GooglePlaySpaceBillingSection } from "./settings-google-play-billing";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, ExternalLink, Loader2, RefreshCw } from "lucide-react";
@@ -16,6 +17,7 @@ import { billingCheckoutReturn } from "@/lib/billing-checkout-return";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { spacePlanMark } from "./space-plan-mark";
+import { allowanceUsed, SpaceUsage } from "./space-usage";
 import { replaceBrowserPath } from "./workspace-shell-navigation";
 import { spaceBillingKey, useSpaceBilling, type SpaceBilling, type SpaceCredits } from "./space-billing";
 
@@ -151,7 +153,8 @@ function StripeSpaceBillingSection({ userId, space }: {
             state={mark && mark.state !== "active" ? { label: mark.state === "blocked" ? "Blocked" : capitalized(subscription?.status ?? "Ending"), title: mark.title, alert: mark.state === "blocked" } : null}
           >
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
-            {billing.credits && <CreditUsage credits={billing.credits} />}
+            {billing.credits && <CreditUsage billing={billing} credits={billing.credits} />}
+            <SpaceUsage billing={billing} userId={userId} />
             <PlanFeatures features={PRO_PLAN_FEATURES} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -159,14 +162,15 @@ function StripeSpaceBillingSection({ userId, space }: {
             <p className="text-sm text-muted-foreground">Only the Space owner can change its plan.</p>
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
+              {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a>
+                : subscription?.billingProvider === "google" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://play.google.com/store/account/subscriptions">Manage in Google Play</a> : <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run("portal")}>
                 {busy === "portal" ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <ExternalLink className="size-4" />}
                 Manage subscription
               </button>}
-              <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
+              {subscription?.billingProvider !== "google" && <button type="button" className={actionClass({ variant: "secondary", size: "md" })} disabled={busy !== null} onClick={() => void run(subscription?.billingProvider === "apple" ? "apple-reconcile" : "reconcile")}>
                 <AnimatedIcon icon={RefreshCw} className={cn("size-4", busy === "reconcile" && "animate-spin")} />
                 Refresh from {subscription?.billingProvider === "apple" ? "App Store" : "Stripe"}
-              </button>
+              </button>}
               {billing.credits && <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
                 disabled={busy !== null || subscription?.access === "read_only"} onClick={() => void run("credits/checkout")}>
                 {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
@@ -179,6 +183,7 @@ function StripeSpaceBillingSection({ userId, space }: {
         <>
           <PlanCard plan="free" name="Free" title={space.name}>
             <PlanMeter label="Messages & page edits" used={billing.freeUsage.acceptedMessages} limit={billing.freeUsage.limit} />
+            <SpaceUsage billing={billing} userId={userId} />
             <SeatPips used={billing.seats.used} limit={billing.seats.limit} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
@@ -310,8 +315,9 @@ function SeatPips({ used, limit }: { used: number; limit: number }) {
 }
 
 /** The month's Agent credits: included first, then packs, then the grace. */
-function CreditUsage({ credits }: { credits: SpaceCredits }) {
-  const extra = [
+function CreditUsage({ billing, credits }: { billing: SpaceBilling; credits: SpaceCredits }) {
+  const waived = billing.usage?.waived === true;
+  const extra = waived ? `not charged · resets ${formatPlanDate(credits.resetsOn)}` : [
     credits.packBalance > 0 || credits.packUsed > 0
       ? `${credits.packBalance.toLocaleString()} pack credits left` : null,
     credits.graceUsed > 0 ? `${credits.graceUsed.toLocaleString()} of ${credits.grace.toLocaleString()} grace used` : null,
@@ -319,17 +325,18 @@ function CreditUsage({ credits }: { credits: SpaceCredits }) {
   ].filter(Boolean).join(" · ");
   return (
     <div className="space-y-1">
-      <PlanMeter label="Agent credits" used={credits.includedUsed} limit={credits.included} />
+      <PlanMeter label="Agent credits" used={waived ? allowanceUsed(billing) : credits.includedUsed} limit={credits.included}
+        charged={!waived} />
       <p className="text-xs text-muted-foreground">{extra}</p>
-      <p className="text-xs text-muted-foreground">Paid X actions use this balance too. <a className="underline" href="/#pricing" target="_blank" rel="noreferrer">See credit prices</a>.</p>
     </div>
   );
 }
 
-function PlanMeter({ label, used, limit }: { label: string; used: number; limit: number }) {
+/** `charged` false: an allowance counted but never enforced, so reaching it is no alarm. */
+function PlanMeter({ label, used, limit, charged = true }: { label: string; used: number; limit: number; charged?: boolean }) {
   const ratio = limit > 0 ? Math.min(1, used / limit) : 0;
   return (
-    <div className="app-plan-meter" data-full={ratio >= 1 ? "true" : undefined}>
+    <div className="app-plan-meter" data-full={charged && ratio >= 1 ? "true" : undefined}>
       <div className="flex items-baseline justify-between gap-3">
         <span className="app-plan-meter-label">{label}</span>
         <span className="app-plan-meter-label tabular-nums">{used.toLocaleString()} of {limit.toLocaleString()}</span>
@@ -355,9 +362,17 @@ function PlanFeatures({ features }: { features: readonly string[] }) {
 }
 
 
+/**
+ * The store app a Space is bought through decides who charges: the iPhone and
+ * Android apps sell through their own store, never Stripe checkout.
+ */
 export function SpaceBillingSection(props: { userId: string; space: { id: string; name: string } | null }) {
-  const [nativeIOS, setNativeIOS] = useState<boolean | null>(null);
-  useEffect(() => { setNativeIOS(getDesktopBridge()?.platform === "ios"); }, []);
-  if (nativeIOS === null) return <p>Loading plan…</p>;
-  return nativeIOS ? <AppleSpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
+  const [store, setStore] = useState<"apple" | "google" | "web" | null>(null);
+  useEffect(() => {
+    const platform = getDesktopBridge()?.platform;
+    setStore(platform === "ios" ? "apple" : platform === "android" ? "google" : "web");
+  }, []);
+  if (store === null) return <p>Loading plan…</p>;
+  return store === "apple" ? <AppleSpaceBillingSection {...props} />
+    : store === "google" ? <GooglePlaySpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
 }

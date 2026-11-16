@@ -8,21 +8,30 @@ AWS region as the Worker placement hint. It is a deliberate single-node cluster
 
 ## Connection budget
 
-The origin allows 50 connections, 3 of them reserved for superusers. Both
-shards share it, and the provider's own sessions (`pscale_admin`,
+The origin allows 25 connections, 3 of them reserved for superusers. The
+provider sets that number, not us: it was 50 until PlanetScale's forced
+PostgreSQL 17.12 maintenance restart on 2026-11-14 and 25 after it, which left
+the pools pinned for 50 holding every slot. Raising it again is a cluster
+parameter in the PlanetScale console and restarts Postgres. Both shards share
+the origin, and the provider's own sessions (`pscale_admin`,
 `pscale_exporter`) hold about 4. Hyperdrive limits are soft: on 2026-10-08 the
-primary pool held 36 connections against a limit of 30, and with 30 + 10
-configured the origin refused every other login (`remaining connection slots
-are reserved for roles with the SUPERUSER attribute`), which failed release
-verification and Hyperdrive's own reconnects. So
-`scripts/production-hyperdrive-prepare.mjs` pins them at 24 (primary) and 8
-(shard 1): an overshoot of that size still leaves room for migrations,
-release verification and operators. Any other Hyperdrive configuration
-pointing at the same origin counts against the same 50; delete retired ones
-rather than leaving them idle.
+primary pool held 36 connections against a limit of 30, and the origin refused
+every other login (`remaining connection slots are reserved for roles with the
+SUPERUSER attribute`), which failed release verification and Hyperdrive's own
+reconnects. So `scripts/production-hyperdrive-prepare.mjs` pins them at 8
+(primary) and 5 (shard 1, the provider's minimum): an overshoot of that size
+still leaves room for migrations, release verification and operators. The Hub
+keeps under one connection busy, so the primary pool can grow back toward 24
+once the origin allows 50 again. Any other Hyperdrive configuration pointing at
+the same origin counts against the same budget; delete retired ones rather
+than leaving them idle.
+
+After a provider restart, compare `max_connections` with the pinned limits
+before anything else.
 
 To see who holds the origin, read `pg_stat_activity` grouped by `usename`
-(the runtime secret can, while a slot is free) and sum
+(the runtime secret can, while a slot is free; when none is, a Worker bound to
+the same Hyperdrive configuration reads it over a pooled connection) and sum
 `hyperdrivePoolSizesAdaptiveGroups.max.currentPoolSize` over `poolShardId` per
 minute: the per-shard maximum alone hides the overshoot.
 
@@ -47,6 +56,19 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Launch candidate selection uses independent `single_read` statements for its
+registration grants, model/parameter observations, response latencies and
+directory enrichment (HUB-BZ). Each lost response retries once on a fresh
+connection, with the placed reads checking their fence again. Selection remains
+advisory: preparation and commit recheck current admission under their existing
+locks, and unknown launch commits retain their existing reconciliation.
+
+Channel transfer proposal lists combine the current Human admin check and the
+bounded queue in one placed `single_read` (HUB-BW). A lost response retries once
+on a fresh connection and rechecks both membership and placement; repeated loss
+still fails. An outer join distinguishes an authorized empty queue from denied
+access. Transfer confirmations and writes keep their transaction boundaries.
+
 Billing summaries use the client's independent `single_read` statements on one
 request session, including membership and placement checks. Each lost response
 may recover once on a fresh checkout; repeated loss still fails the request.
@@ -61,8 +83,16 @@ these fields and the response's diagnostic reference. Deployed `index.js`
 frames retain source-map resolution; driver messages, SQL details and causes
 are excluded. Exact documented Hyperdrive `58000` messages map to finite
 internal, pool-acquisition or connection-refused labels; other text stays
-unclassified. A missing code or capture-boundary stack remains insufficient
-to diagnose an outage or authorize a transaction replay.
+unclassified. Each `CONNECTION_TERMINATED` attempt also retains a fixed
+`driverReason` for pg's generic termination, pg's unexpected termination, or
+Hyperdrive's explicit egress-severed response. These labels distinguish the
+observed driver messages, not the underlying cause; no raw message or cause
+is stored. Historical events without the field remain readable. A missing code
+or capture-boundary stack remains insufficient
+to diagnose an outage or authorize a transaction replay. A termination recorded
+by the database client returns the existing retryable unavailable response after
+its single replay is exhausted. Raw generic termination text or `58000` without
+that evidence does not change classification; explicit SQL rejections keep theirs.
 
 Message authority failures also explicitly report the original exception and
 bounded database evidence, rather than relying on console serialization.
@@ -209,6 +239,15 @@ Delivery and provider effects stay outside the transaction. An answered database
 or domain rejection is not replayed; a second transport loss retains both
 failures. Unknown COMMIT still escapes to the Hub's existing append receipt
 reconciliation, never to immediate replay.
+System annotations, including Machine command results and other Hub judgments
+(HUB-BV), use the same one-replay database-only boundary. Each fresh session
+relocks the live message and rechecks the annotation payload, so a concurrent
+recall stops the write and a repeated judgment remains idempotent. Publication
+runs only after success; answered rejections, a second loss and unknown COMMIT
+still escape without another immediate replay. This repairs the missing
+recovery without attributing the underlying stall.
+Its operation is `message.system-annotation`, so bounded telemetry retains it
+in the message family instead of collapsing the old hyphenated name to `other`.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
 Channel detail reads use the same request-local, per-statement recovery for
@@ -233,6 +272,15 @@ without changing attempts, leases or receipt cleanup; the minute recovery wake
 tries again. Successful claims still serialize the eight-active-lease bound.
 Webhook admission retains its waiting lock to enforce receipt and backlog bounds;
 database failures other than a busy try-lock still propagate normally.
+For an unknown claim COMMIT (HUB-BY), four independent lease nonces are created
+before the transaction and retained across its bounded pre-COMMIT replay.
+A fresh `single_read` reconciles only committed, unexpired leases with those
+nonces and a live receipt; it never claims another batch. No matching rows do
+not prove rollback: minute recovery and lease expiry still own any late commit.
+A failed reconciliation retains both database failures. Each delivery continues
+to recheck the current grant and lease; that lock-free check also uses
+`single_read` recovery. The eight-active-lease bound, per-job fencing and
+provider effect idempotency remain unchanged.
 
 Gmail pending notification IDs use one lock-free `single_read`; retrying a
 completion never reruns provider calls or delivery. Its lease ID and expiry

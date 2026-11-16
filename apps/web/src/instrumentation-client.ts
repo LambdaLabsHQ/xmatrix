@@ -1,4 +1,4 @@
-import { isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
+import { earlyScriptLocation, isBrowserNoticeReport, isStaleBuild } from "./lib/error-noise";
 
 // The Desktop and iOS apps load this same Web app, so this also reports their
 // page errors. A build without a DSN (local, self-hosted) reports nothing.
@@ -8,9 +8,11 @@ const dsn = process.env.NEXT_PUBLIC_SENTRY_DSN;
 const pathOnly = (url: string) => url.replace(/[?#].*$/u, "");
 
 /** Uncaught errors and rejections raised before error reporting has loaded. */
-const early: unknown[] = [];
-const holdError = (event: ErrorEvent) => { early.push(event.error ?? event.message); };
-const holdRejection = (event: PromiseRejectionEvent) => { early.push(event.reason); };
+const early: { error: unknown; where: ReturnType<typeof earlyScriptLocation> }[] = [];
+const holdError = (event: ErrorEvent) => {
+  early.push({ error: event.error ?? event.message, where: earlyScriptLocation(event) });
+};
+const holdRejection = (event: PromiseRejectionEvent) => { early.push({ error: event.reason, where: {} }); };
 
 // Error reporting is not part of the first screen: it loads once the page has
 // loaded and the browser is idle. What fails before then is held here and sent
@@ -42,8 +44,17 @@ async function startErrorReporting(dsn: string) {
   });
   removeEventListener("error", holdError);
   removeEventListener("unhandledrejection", holdRejection);
-  for (const error of early.splice(0)) {
-    captureException(error, { mechanism: { type: "onerror", handled: false } });
+  for (const held of early.splice(0)) {
+    const extra: Record<string, string | number> = {};
+    if (held.where.script !== undefined) extra.script = held.where.script;
+    if (held.where.line !== undefined) extra.line = held.where.line;
+    if (held.where.column !== undefined) extra.column = held.where.column;
+    // `mechanism` and `extra` are exclusive on this capture call. The location
+    // is capture context, which is what a later report shows.
+    captureException(held.error, {
+      mechanism: { type: "onerror", handled: false },
+      ...(Object.keys(extra).length > 0 ? { captureContext: { extra } } : {}),
+    });
   }
 }
 

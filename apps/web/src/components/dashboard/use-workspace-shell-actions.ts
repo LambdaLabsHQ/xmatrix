@@ -3,7 +3,6 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { appViewSelectionQuery, discussionHead, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
 
-import type { ObservabilityEvent } from "@xmatrix/protocol";
 import { pageShellActions } from "./page-shell-actions";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
@@ -116,6 +115,7 @@ import {
   clearBrowserHash,
   copyTextToClipboard,
   daemonStatusNeedsSessionSync,
+  desktopDaemonNeedsFirstSession,
   defaultAgentName,
   parseConfigList,
   deleteWorkspace,
@@ -164,20 +164,19 @@ import {
 } from "./workspace-shell-modules";
 import { MESSAGE_SEND_FAILED_FALLBACK, type UnsentMessageAction } from "./message-unsent-notice";
 import { refreshSpaceAllowanceAfterRefusal } from "./space-allowance-notice";
-import { channelEventViews } from "./workspace-shell-presence";
 import { sameValue, shareByKey } from "../../lib/same-value";
+import { createSenderDirectory, useRealtimeChannelValue } from "./realtime-channels";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { registrationSpaceCommand } from "./registration-space-command";
 import { errorFromResponse, xmatrixApiRequest, requireResponseOk, unexpectedResponse } from "@/lib/query/api-client";
 import { UserFacingProblem, userErrorMessage } from "../../lib/user-facing-error";
+import { confirmAccessForAdd } from "./agent-access";
 import type { WorkspaceShellState } from "./use-workspace-shell-state";
-import { useWorkspaceAutomationActions } from "./use-workspace-automation-actions";
 import { spaceMemberCanCreate } from "./space-member-permissions";
 import { questionnaireAnswerPayload, type QuestionnaireAnswer } from "./questionnaire-card";
 import { SCROLLING_MOVES_NO_ROWS, timelineScrollRest } from "./timeline-scroll-rest";
 import { SentUploadFailed, settleSentUploads } from "./sent-upload";
 
-const NO_TIMELINE_EVENTS: readonly ObservabilityEvent[] = [];
 
 export function useWorkspaceShellActions(s: WorkspaceShellState) {
   const fetch = useXMatrixQueryFetch(s.authenticatedUserId);
@@ -195,7 +194,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setChannels,
     setSpaces,
     setProjects,
-    setScheduleFocusId,
     setEvents,
     setChannelReadCounts,
     setChannelReadCountsBaselineReady,
@@ -407,31 +405,32 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     });
   }, [s.outgoingMessages, s.renderableHistory]);
 
-  const timelineEventViewsRef = useRef<ReadonlyMap<string, readonly ObservabilityEvent[]>>(new Map());
-  const timelineEventViews = useMemo(() => {
-    const ids = s.selectedChannel ? [s.selectedChannel.id,
-      metadataString(s.selectedChannel.metadata, "threadRootChannelId")].filter(Boolean) : [];
-    const views = channelEventViews(s.agentStatusEvents, ids, timelineEventViewsRef.current);
-    timelineEventViewsRef.current = views;
-    return views;
-  }, [s.agentStatusEvents, s.selectedChannel]);
-  const timelineEvents = timelineEventViews.get(s.selectedChannel?.id ?? "") ?? NO_TIMELINE_EVENTS;
-  const parentTimelineEvents = timelineEventViews.get(
-    metadataString(s.selectedChannel?.metadata, "threadRootChannelId")) ?? NO_TIMELINE_EVENTS;
-
-  /* The timeline is rebuilt whenever a Channel or Agent presence changes, which
-     in a busy Space is many times a second. Items that say the same keep their
-     identity, so everything keyed on them (row memos, the launch query's
-     per-message key) recomputes only for messages that changed. */
+  // History and author identity build the rows. Live sender status subscribes
+  // at the visible affordance, so activity never rebuilds Markdown models.
+  // The list copy holds no Instances: rows read who each sender is from the
+  // Channel's sender directory (name, registration, machine) as they are
+  // built. The shell watches only one thing: an Instance that wrote a loaded
+  // message arriving after the rows named it unknown. That string is empty
+  // otherwise, so no Instance report re-renders the shell.
+  const [senderDirectory] = useState(createSenderDirectory);
+  const agentSenderIds = useMemo(() => [...new Set(s.renderableHistory.flatMap((message) =>
+    message.from.kind === "agent" && message.from.instanceId ? [message.from.instanceId] : []))], [s.renderableHistory]);
+  const selectedChannelId = s.selectedChannel?.id;
+  const lateSenders = useRealtimeChannelValue(s.selectedChannel, useCallback((live) => !live || !selectedChannelId ? ""
+    : agentSenderIds.filter((id) => live.presence?.instances.has(presenceInstanceId(id)) &&
+      !senderDirectory.knows(selectedChannelId, id)).join("\n"), [agentSenderIds, selectedChannelId, senderDirectory]),
+    s.realtimeChannels);
   const previousTimelineRef = useRef<readonly TimelineItem[]>([]);
   const timeline = useMemo(
     () => {
+      void lateSenders;
+      const timelineChannel = senderDirectory.read(s.selectedChannel,
+        s.selectedChannel ? s.realtimeChannels.get(s.selectedChannel.id) : undefined);
       const shared = shareByKey(previousTimelineRef.current, appendOutgoingTimelineItems(
         buildTimeline(
           s.renderableHistory,
-          s.selectedChannel,
+          timelineChannel,
           s.channels,
-          timelineEvents,
           s.user,
           s.channelReadCounts,
           renderableHistoryCache,
@@ -447,13 +446,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return shared;
     },
     [
-      timelineEvents,
       s.currentSpace?.members,
       s.channelReadCounts,
       s.channels,
       renderableHistoryCache,
       renderableOutgoingMessages,
+      senderDirectory,
+      lateSenders,
       s.selectedChannel,
+      s.realtimeChannels,
       s.renderableHistory,
       s.user, s.outboundPreviewByClientIdRef, s.outboundClientIdsByMessageIdRef,
     ]
@@ -462,6 +463,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   // The root is rebuilt with every Channel change; while it says the same it
   // stays the message it was, as the timeline's own items do.
   const threadRootRef = useRef<TimelineItem | undefined>(undefined);
+  const [threadSenderDirectory] = useState(createSenderDirectory);
   const selectedThreadRootContext = useMemo(() => {
     if (!s.selectedChannel || !isThreadChannel(s.selectedChannel)) return null;
     const parentChannelId = metadataString(s.selectedChannel.metadata, "threadRootChannelId");
@@ -477,7 +479,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     ) {
       return null;
     }
-    const parentChannel = s.channels.find((item) => item.id === parentChannelId);
+    const parentCatalog = s.channels.find((item) => item.id === parentChannelId);
+    const parentChannel = parentCatalog
+      ? threadSenderDirectory.read(parentCatalog, s.realtimeChannels.get(parentChannelId)) ?? undefined : undefined;
     const rootMessage = renderableHistoryCache.get(parentChannelId)?.messages
       .find((item) => item.messageId === rootMessageId);
     if (!parentChannel || !rootMessage) return null;
@@ -485,7 +489,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       [rootMessage],
       parentChannel,
       s.channels,
-      parentTimelineEvents,
       s.user,
       s.channelReadCounts,
       renderableHistoryCache,
@@ -498,7 +501,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const held = threadRootRef.current;
     return { message: (threadRootRef.current = held && sameValue(held, message) ? held : message), channel: parentChannel };
   }, [
-    parentTimelineEvents,
+    threadSenderDirectory,
+    s.realtimeChannels,
     s.currentSpace?.members,
     s.channelReadCounts,
     s.channels,
@@ -931,7 +935,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
           Authorization: `Bearer ${currentToken}`,
           "content-type": "application/json",
         },
-        body: JSON.stringify({ body: text }),
+        // A person typed it: it starts the Agents it summons, as the composer does.
+        body: JSON.stringify({ body: text, launch: true }),
         cache: "no-store",
       })
         .then(async (res) => {
@@ -981,11 +986,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   useEffect(() => {
     const desktopBridge = s.desktopBridge;
+    // An App that can install its own CLI but finds none has never handed this
+    // computer a session: the App's own sign-in did not reach it. Without that
+    // session it cannot install the CLI, and nothing else asks for one.
+    const firstSession = desktopDaemonNeedsFirstSession(s.desktopDaemonStatus, Boolean(desktopBridge?.installCli));
     if (
       !desktopBridge?.saveCliSession ||
       !desktopBridge.startDaemon ||
       !s.token ||
-      !daemonStatusNeedsSessionSync(s.desktopDaemonStatus)
+      !(firstSession || daemonStatusNeedsSessionSync(s.desktopDaemonStatus))
     ) {
       return;
     }
@@ -999,6 +1008,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     void exchangeDesktopCliSession(s.token)
       .then((cliSession) => desktopBridge.saveCliSession?.(cliSession))
       .then(async () => {
+        // As after the App's own sign-in: installing names the machine itself.
+        if (firstSession) return desktopBridge.startDaemon?.();
         const context = await desktopBridge.getContext();
         if (cancelled) return undefined;
         setDesktopContext(context);
@@ -1258,20 +1269,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  const {
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
-  } = useWorkspaceAutomationActions({
-    token: s.token,
-    currentSpaceId: s.currentSpaceId,
-    automations: s.automations,
-    busy: s.automationBusy,
-    setAutomations: s.setAutomations,
-    setBusy: s.setAutomationBusy,
-    setError: s.setAutomationError,
-  });
-
   function openLocalAgentDiscovery() {
     setView("local");
     const nextPath = appViewPath(s.selectedChannel, "local", s.currentSpaceId, s.spaces);
@@ -1319,8 +1316,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     pushBrowserPath(nextPath);
     setBrowserPath(nextPath);
   }
-
-  const clearScheduleFocus = useCallback(() => setScheduleFocusId(null), [setScheduleFocusId]);
 
   function openAppsForSpace(spaceId: string) {
     setPendingExplicitSpaceId(spaceId);
@@ -1454,10 +1449,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!token || !userId) throw new UserFacingProblem("Sign in again to start a conversation");
     const requestKey = crypto.randomUUID();
     const channel = await plannedConversation({ ...request, userId, requestKey });
-    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => {
-      s.channelsRef.current = next(s.channelsRef.current);
-      setChannels(next);
-    };
+    // The store publishes synchronously, and channelsRef follows each publication.
+    const show = (next: (current: ChannelSnapshot[]) => ChannelSnapshot[]) => setChannels(next);
     const settled = () => {
       s.channelCreationsRef.current.delete(channel.id);
       s.setCreatingChannelIds((current) => {
@@ -1630,7 +1623,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setChannels(nextChannels);
       s.spacesRef.current = nextSpaces;
       setSpaces(s.spacesRef.current);
-      s.channelsRef.current = nextChannels;
       setHistoryError(null);
       navigateToChannel(nextChannel.id, link.messageId);
     } catch (error) {
@@ -1842,7 +1834,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       attachments: snapshot.attachments,
       uploads: snapshot.uploads,
       invocationSelections: snapshot.invocationSelections,
-      summonIntents: snapshot.summonIntents,
       appMentions: parseAppMentions(snapshot.body, APP_CONNECTORS),
     });
   }
@@ -2286,7 +2277,10 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     if (!s.token || !s.selectedChannel || !s.canUseSelectedChannel) return;
     if (s.reborningAgentInstanceId || s.stoppingAgentInstanceId) return;
 
-    const rebornBody = rebornBodyForMessageSender(message);
+    const instance = message.senderInstanceId
+      ? s.realtimeChannels.get(message.channelId ?? "")?.presence?.instances.get(presenceInstanceId(message.senderInstanceId))
+      : undefined;
+    const rebornBody = rebornBodyForMessageSender(message, instance?.rest || instance?.offlineReason ? undefined : instance?.status);
     if (!rebornBody) {
       const error = "This message sender cannot be reborn.";
       setAgentsError(error);
@@ -2392,12 +2386,17 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setAgentsError(null);
     try {
       const routing = s.agentConfigForm.routing;
+      const harness = canonicalRegistrationHarness(preset.id === "custom" ? runtime : preset.id);
+      // The machine's owner confirms what the Agent may do here before it is written.
+      const confirmed = await confirmAccessForAdd(s.token, [{ key: { ownerUserId: s.user.id, machineId, harness },
+        name: preset.id === "custom" ? name : preset.displayName }]);
+      if (!confirmed) return;
       await xmatrixApiRequest({
         url: WEB_PROXY_ROUTES.space_agent_registration_command(targetSpace.id), token: s.token, method: "POST",
         body: {
           action: "create",
           commandId: `registration-create:${crypto.randomUUID()}`,
-          key: { spaceId: targetSpace.id, ownerUserId: s.user.id, machineId, harness: canonicalRegistrationHarness(preset.id === "custom" ? runtime : preset.id) },
+          key: { spaceId: targetSpace.id, ownerUserId: s.user.id, machineId, harness },
           displayName: name,
           environment: {
             schemaVersion: 1,
@@ -2410,6 +2409,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
               runtime: agentLaunchExecutable(runtime),
               runtimeArgs: parseConfigList(s.agentConfigForm.argsText),
               ...(preset.backend ? { backend: preset.backend } : {}),
+              ...(confirmed.get(harness) ? { access: confirmed.get(harness) } : {}),
             },
           },
           ...(routing?.defaultWorkspace ? { defaultWorkspace: routing.defaultWorkspace } : {}),
@@ -2485,7 +2485,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     const channelId = channel.id;
 
     const invocationSelections = fromComposer ? composerSnapshot?.invocationSelections : undefined;
-    const summonIntents = fromComposer ? composerSnapshot?.summonIntents : undefined;
     const appMentions = parseAppMentions(body, APP_CONNECTORS);
     const replyToMessageId = replySnapshot?.messageId;
     const replyTo = replySnapshot?.messageId
@@ -2510,15 +2509,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReplyTarget(null);
     }
     await deliverOutgoingMessage(channel, {
-      body, invocationSelections, summonIntents, attachments, uploads, replyToMessageId, replyTo, appMentions,
+      body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions,
     });
   }
 
   /** Shows the message as pending in its channel at once, then appends it. */
   async function deliverOutgoingMessage(
     channel: ChannelSnapshot,
-    { body, invocationSelections, summonIntents, attachments, uploads, replyToMessageId, replyTo, appMentions }:
-      Pick<OutgoingMessage, "body" | "invocationSelections" | "summonIntents" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
+    { body, invocationSelections, attachments, uploads, replyToMessageId, replyTo, appMentions }:
+      Pick<OutgoingMessage, "body" | "invocationSelections" | "attachments" | "uploads" | "replyToMessageId" | "replyTo" | "appMentions">,
   ): Promise<string | null> {
     if (!s.token) return null;
     const channelId = channel.id;
@@ -2535,7 +2534,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       channelId,
       body,
       invocationSelections,
-      summonIntents,
       attachments,
       ...(uploads?.length ? { uploads } : {}),
       replyToMessageId,
@@ -2557,7 +2555,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * Answers the stored message's id, or null when the row stayed unsent or unconfirmed.
    */
   async function attemptOutgoingSend(token: string, channel: ChannelSnapshot, outgoing: OutgoingMessage): Promise<string | null> {
-    const { clientMessageId, body, invocationSelections, summonIntents, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
+    const { clientMessageId, body, invocationSelections, replyToMessageId, appMentions, sentAt, uploads } = outgoing;
     let { attachments } = outgoing;
     const channelId = channel.id;
     try {
@@ -2580,7 +2578,6 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
         clientMessageId,
         body,
         invocationSelections,
-        summonIntents,
         attachments,
         replyToMessageId,
         appMentions,
@@ -2626,7 +2623,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       }
       if (payload.appConnectorResultChannels?.length) {
         setChannels((current) =>
-          payload.appConnectorResultChannels!.reduce(
+          payload.appConnectorResultChannels!.reduce<readonly ChannelSnapshot[]>(
             (nextChannels, resultChannel) => replaceChannel(nextChannels, resultChannel),
             current
           )
@@ -2919,15 +2916,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     revealLocalWorkspace,
     checkLocalRuntime,
     completeDesktopSetup,
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
     openHumanProfile,
     profileUserId,
-    clearScheduleFocus,
     openAppsForSpace,
     backToMore,
     selectSpace,

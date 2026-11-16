@@ -9,7 +9,7 @@ import { ProviderRequestError } from "./http";
 
 export const TELEGRAM_INGRESS_DEPENDENCIES = { native: telegramNativeApp, rooms: connectorTelegramRoomRepository,
   apps: connectorAppRepository, client: telegramBotClient, deliver: deliverEvent,
-  append: CONNECTOR_DELIVERY_EFFECTS.append, automate: CONNECTOR_DELIVERY_EFFECTS.automations };
+  append: CONNECTOR_DELIVERY_EFFECTS.append, events: CONNECTOR_DELIVERY_EFFECTS.events };
 export async function handleTelegramAppDelivery(env: Env, request: Request, dependencies = TELEGRAM_INGRESS_DEPENDENCIES): Promise<Response> {
   try {
     const native = await dependencies.native(env);
@@ -38,7 +38,7 @@ export async function handleTelegramAppDelivery(env: Env, request: Request, depe
     const append: typeof dependencies.append = async (...args) => await current() ? dependencies.append(...args) : new Response(null, { status: 503 });
     await dependencies.deliver(env, dependencies.apps(env), append, "telegram", binding.connectionId, event.event,
       undefined, undefined, undefined, { appIdentity: telegramAppIdentity(native.app), chatSpace: binding.chatSpace, grantGeneration: binding.grantGeneration });
-    if (await current()) await dependencies.automate(env, { spaceId: binding.spaceId, provider: "telegram", event: event.event });
+    if (await current()) await dependencies.events(env, { spaceId: binding.spaceId, provider: "telegram", event: event.event });
     return Response.json({ ok: true });
   } catch (error) {
     if (error instanceof ProviderRequestError && [400, 401, 413].includes(error.status)) return Response.json({ error: error.message }, { status: error.status });

@@ -3,6 +3,7 @@ import { clientDefectAction } from "@xmatrix/protocol";
 import { machineDaemonCredentialFailureMetadata } from "../../connections/machine-daemon/credential-failure";
 import { parseHarnessReleaseWatchEvidence } from "../../harness-release-watch-failure";
 import { parseCliReleaseNoticeEvidence } from "../../cli-release-notice-failure";
+import { parseAppleCommerceWatchEvidence } from "../apple-commerce-watch-failure";
 import { postgresConflictMetadata } from "../../postgres-conflict-diagnostic";
 import { messageSearchFailureMetadata } from "../../postgres-request-failure";
 import { safeServerDiagnosticId } from "../../server-error-diagnostic";
@@ -10,6 +11,9 @@ import { runtimeDatabaseFailureMetadata } from "../../runtime-transport/runtime-
 import { machineRegistryCausalityMetadata } from "../../runtime-transport/machine-registry-causality";
 import { durableObjectFailureMetadata } from "../../durable-object-request-failure";
 import { gmailReadFailureMetadata } from "../gmail-read-failure";
+import { oauthStateMetadata } from "../../oauth-state-diagnostic";
+import { agentBindingFailureMetadata } from "../../runtime-transport/agent-binding-failure";
+import { runtimeSessionOriginMetadata } from "../../runtime-transport/runtime-operation-failure";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -47,11 +51,11 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       if (!tag || typeof tag !== "object") continue;
       if (tag.key === "component" && ["hub", "web"].includes(tag.value)) lines.push(`Component: ${tag.value}`);
       if (tag.key === "environment" && token(tag.value)) lines.push(`Environment: ${tag.value}`);
-      if (tag.key === "operation" && ["launch.dispatch.registration", "postgres.transaction-conflict", "postgres.unavailable", "runtime.database", "runtime.machine-credential", "runtime.machine-registry"].includes(tag.value)) {
+      if (tag.key === "operation" && ["launch.dispatch.registration", "postgres.transaction-conflict", "postgres.unavailable", "runtime.database", "runtime.machine-credential", "runtime.machine-registry", "runtime.agent-binding"].includes(tag.value)) {
         lines.push(`Capture operation: ${tag.value}`);
       }
       if (tag.key === "operation" && typeof tag.value === "string" &&
-          /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|CLI release notice|Machine load history maintenance|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
+          /^scheduled: (?:Account deletion maintenance|Channel deletion maintenance|Sentry event recovery|Gmail notification recovery and renewal|Harness release watch|CLI release notice|Machine load history maintenance|Apple commerce recovery|(?:Teams|Google Chat|Feishu|Telegram) lifecycle maintenance)$/u.test(tag.value)) {
         lines.push(`Scheduled task: ${tag.value.slice("scheduled: ".length)}`);
       }
       // The browser defect endpoint sets this prefix. Only fixed application copy is readable.
@@ -65,6 +69,8 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
   // Sentry serializes SDK `extra` as `context` in its issue-event API.
   const extra = event.context;
   if (extra && typeof extra === "object") {
+    lines.push(...oauthStateMetadata(extra as Record<string, unknown>));
+    lines.push(...agentBindingFailureMetadata(extra as Record<string, unknown>));
     lines.push(...gmailReadFailureMetadata(extra as Record<string, unknown>));
     lines.push(...conversationPushConditions(extra as Record<string, unknown>));
     lines.push(...postgresConflictMetadata(extra as Record<string, unknown>));
@@ -73,9 +79,20 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason,
       (extra as Record<string, unknown>).machine_credential_expired_for_s));
     lines.push(...machineRegistryCausalityMetadata(extra as Record<string, unknown>));
+    lines.push(...runtimeSessionOriginMetadata(extra as Record<string, unknown>));
     lines.push(...durableObjectFailureMetadata((extra as Record<string, unknown>).durable_object_failure));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
     if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);
+  }
+  const commerce = extra && typeof extra === "object" ? (extra as Record<string, unknown>).apple_commerce_watch_failure : undefined;
+  if (typeof commerce === "string" && commerce.length <= 8192) {
+    try {
+      for (const evidence of parseAppleCommerceWatchEvidence(JSON.parse(commerce))) {
+        lines.push(`Apple commerce watch failure: ${evidence.phase} · ${evidence.kind} · ` +
+          `${evidence.status ? `HTTP ${evidence.status}` : "no status"} · ${evidence.code} · ` +
+          `retry ${evidence.retryRecorded ? "recorded" : "not recorded"}`);
+      }
+    } catch { /* Malformed optional diagnostics do not fail the issue read. */ }
   }
   const harness = extra && typeof extra === "object" ? (extra as Record<string, unknown>).harness_release_watch_failure : undefined;
   const cliRelease = extra && typeof extra === "object" ? (extra as Record<string, unknown>).cli_release_notice_failure : undefined;
@@ -100,6 +117,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
       for (const [index, failure] of parseDatabaseFailureEvidence(JSON.parse(attempts)).entries()) {
         lines.push(`Database failure ${index + 1}: ${failure.operation} · ${failure.shardId} · ${failure.statement} · ` +
           `${failure.phase} · ${failure.queryName} · ${failure.code} · ${failure.durationMs} ms`);
+        if (failure.driverReason) lines.push(`Database driver reason ${index + 1}: ${failure.driverReason}`);
         const session = failure.session;
         if (session) lines.push(`Database session ${index + 1}: wall=${session.wallMs} ms · queue=${session.queueMs} ms · ` +
           `checkout=${session.checkoutMs} ms · begin=${session.beginMs} ms · sql=${session.sqlMs} ms · ` +

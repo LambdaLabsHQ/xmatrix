@@ -41,7 +41,7 @@ The words after the target select which kinds of event to post. Without them the
 
 GitHub's kinds are `issues`, `pulls`, `comments`, `reviews`, `commits`, `checks`, `status` and `releases`. A pull request an agent opens is subscribed to the agent's conversation automatically, so its CI result, reviews and merge arrive where the work was asked for.
 
-An event can also start an agent: see [Automation triggers](pages.md#when-it-runs).
+An event can also start an agent: a [program](programs.md#events-from-connected-apps) on a page waits on it.
 
 ## GitHub
 
@@ -87,6 +87,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | Google Calendar | `googlecalendar` | | `list_calendars`, `list_events`, `get_event`, `freebusy`, `create_event`, `update_event`, `delete_event` (writes ask by default; [guide](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/google-calendar.md)) |
 | Google Analytics | `googleanalytics` | | `list_properties`, `report` |
 | Google Ads | `googleads` | | `list_accounts`, `read_account`, `query`, `validate_mutations`; `mutate`, `set_campaign_status` (ask by default) |
+| Google Play Console | `googleplay` | | `list_apps`, `tracks`, `release`, `base_plans`, `base_plan`, `api_operations`, `api_schema`, `api_read`, `api_plan`, `api_write`, `api_upload` |
 | Google Business Profile | `googlebusinessprofile` | | `list_accounts`, `list_locations`, `performance`, `reviews`, `reply_review` |
 | Google AdSense | `googleadsense` | | `list_accounts`, `list_sites`, `list_adunits`, `report`, `list_payments`, `list_alerts`, `list_policy_issues` |
 | PageSpeed Insights | `pagespeed` | | `audit`, `field` |
@@ -96,7 +97,7 @@ Each app's actions are listed in its panel under **Apps** and in the composer. T
 | X | `x` | | `accounts`, `read_post`, `timeline`, `media_status`; `post`, `upload_video`, `quote` (ask by default). Explicit account selection; quote posting requires X Enterprise API access |
 | Notion | `notion` | | `read_page`, `append`, `create_page` |
 | Slack | `slack` | Messages, reactions | `post` |
-| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `sales`, `review_messages`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `subscriptions`, `submit_subscriptions`, `in_app_purchases`, `submit_in_app_purchases`, `release`, `pause_phased_release`, `resume_phased_release`, `complete_phased_release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
+| App Store Connect | `appstoreconnect` | Version state, build upload, TestFlight review and feedback | `list_apps`, `status`, `builds`, `read_version`, `reviews`, `sales`, `review_messages`, `review_attachments`, `review_attachment`, `review_draft`, `edit_review_draft`, `send_review_draft`, `api_operations`, `api_schema`, `api_read`, `api_plan`, `api_write`, `web_session`, `create_app`, `privacy`, `set_privacy`, `read_app`, `create_version`, `set_metadata`, `set_build`, `submit`, `cancel_submission`, `subscriptions`, `submit_subscriptions`, `in_app_purchases`, `submit_in_app_purchases`, `release`, `pause_phased_release`, `resume_phased_release`, `complete_phased_release`, `reply_review`, `set_app_info`, `set_age_rating`, `set_price`, `set_availability`, `set_review_contact`, `upload_build`, `upload_screenshot`, `commit_upload`, `read_upload`, `delete_upload`, `build_uploads`, `screenshot_specs`, `screenshots`, `set_screenshots`, `declare_encryption`, `signing`, `register_bundle_id`, `enable_capability`, `create_certificate`, `read_certificate`, `create_profile`, `read_profile`, `testflight`, `feedback`, `crash_log`, `add_to_group`, `submit_beta_review`, `set_test_notes` |
 | Discord | `discord` | | `post` |
 | Telegram | `telegram` | Messages | `send` |
 | Feishu / Lark | `feishu` | Messages | `send` |
@@ -174,7 +175,7 @@ With App Store Connect connected, an agent can take a build from upload to the s
 @appstoreconnect:release:com.example.app 1.2.0
 ```
 
-- `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. Use it as an [Automation trigger](pages.md#when-it-runs) to have an agent pick up a rejection.
+- `subscribe` registers the app's webhook at Apple for you. The conversation then hears when a build finishes processing and each time the version changes state: waiting for review, in review, rejected, approved, live. A [program](programs.md#events-from-connected-apps) can wait on these events to have an agent pick up a rejection.
 - `create_version` creates the next version with manual release; add `release=after_approval` to let Apple publish it as soon as it is approved. App Review contact and sign-in details carry over from the previous version without appearing in the conversation.
 - `set_build` takes the build number you uploaded, once Apple has processed it. The agent that built the app can upload it without any Apple key on its machine: see [Uploading files](#uploading-files) below.
 - `submit` sends the version to App Review. If Apple refuses because the listing is incomplete, the receipt says what is missing.
@@ -203,6 +204,12 @@ The record then needs a few things once before its first submission. `@appstorec
 ```
 
 The age rating answers are your statements to Apple about the app, so nothing is filled in for you: give every answer the questionnaire asks, and `read_app` lists the ones still unanswered as `null`.
+
+### Answering App Review
+
+`review_messages` reads the newest review thread, including its thread and message IDs and attachment metadata. Add a thread ID to read an older thread, and a message ID for its longer text. With the saved Web session, `review_attachments` lists files and `review_attachment` returns one signed, expiring download URL; fetch that file without Apple cookies or an API key.
+
+`review_draft` reads an unsent reply and its current digest. `edit_review_draft` creates a draft, or updates/deletes a named draft with its digest. `send_review_draft` sends that exact draft and verifies Apple's resulting message. Drafts remain unsent until that separate action; sending a reply does not resubmit the app. Inspect the thread before retrying an uncertain send. See the [review workflow](https://github.com/LambdaLabsHQ/xmatrix/blob/main/docs/connectors/app-store-connect-review.md) for the command arguments and limits.
 
 ### Uploading files
 
@@ -261,11 +268,23 @@ Subscribe the conversation with `feedback` among its kinds and an agent can pick
 
 ### When App Review rejects a version
 
-The conversation hears the rejection. `@appstoreconnect:review_messages:com.example.app` then reads the reasons and what the reviewer wrote, once a Space admin has saved a Web session under Credentials. In the xMatrix app that is Sign in to App Store Connect: you sign in on Apple's own page and the app saves the session. In a browser, paste the Cookie header of a signed-in appstoreconnect.apple.com page. Apple keeps it from a day to a month. Replying to the reviewer still happens in App Store Connect. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
+The conversation hears the rejection. `@appstoreconnect:review_messages:com.example.app` reads the reasons and reviewer text with the saved Web session. In the xMatrix app, Sign in to App Store Connect opens Apple's own sign-in page and saves the session. `review_attachments` lists linked files and `review_attachment` returns one expiring download URL, fetched without credentials. Read `review_draft`, create an unsent reply with `edit_review_draft`, then send its exact ID and digest with `send_review_draft`. Sending a reply does not resubmit the app. Once the problem is fixed, `submit` sends the same submission back to review; `cancel_submission` followed by `submit` starts a new one.
 
 An app's first subscriptions are reviewed together with a version. `subscriptions` lists them with their review state; `submit_subscriptions` puts every one that is ready (or the product ids named) into the draft review submission as a subscription version, and the next `submit` of a version sends them along. One-time In-App Purchases (consumables such as credit packs, non-consumables, non-renewing subscriptions) are separate: `in_app_purchases` lists them with type and review state, and `submit_in_app_purchases` puts every one that is ready (or the product ids named) into the draft review submission as an In-App Purchase version, and the next `submit` sends them with the app version.
 
-Apple keeps a few steps for a person in App Store Connect: creating the app record the first time, answering the App Privacy questions, entering the App Review sign-in password if reviewers need one, accepting agreements, and replying to App Review.
+Apple keeps sign-in, agreements, banking/tax and private review account credentials with the account owner. The saved Web session supports creating App records, App Privacy and review replies.
+
+### Other App Store Connect resources
+
+`api_operations:* <resource>` searches the pinned official API, and
+`api_schema:<operation or schema>` shows exact parameters. `api_read` covers
+other resources, including subscription/IAP configuration, TestFlight testers
+and groups, prices/offers, notifications, assets, devices, team permissions and
+reports. Use private reads for personal or financial results. For writes,
+`api_plan` validates the intended request and returns a digest without changing
+Apple; `api_write` executes that same request after checking its digest and
+current target state. Neither action accepts login secrets. An uncertain write
+must be inspected before retrying, particularly when creating a new resource.
 
 ## Agents and apps
 

@@ -51,12 +51,17 @@ export function isPublicHttpsUrl(url: URL): boolean {
  */
 const MAX_TIMEOUT_MS = 60_000;
 const MAX_LARGE_RESPONSE_BYTES = 4 * 1024 * 1024;
+/*
+ * One whole email as Gmail's base64url `raw`, read so an approved draft is sent exactly as it was checked:
+ * Gmail caps a message at 25 MB, which base64 MIME and the base64url envelope grow to about 45 MB.
+ */
+export const MAIL_SNAPSHOT_RESPONSE_BYTES = 48 * 1024 * 1024;
 
 export async function providerJson(url: URL | string, init: RequestInit & { json?: unknown; timeoutMs?: number; maxBytes?: number;
-  describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
+  mailSnapshot?: boolean; describeError?: (payload: Record<string, unknown>) => string | undefined } = {}):
   Promise<Record<string, unknown>> {
-  const { json, describeError, timeoutMs = TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES, ...rest } = init;
-  const limit = Math.min(Math.max(maxBytes, 1), MAX_LARGE_RESPONSE_BYTES);
+  const { json, describeError, timeoutMs = TIMEOUT_MS, maxBytes = MAX_RESPONSE_BYTES, mailSnapshot = false, ...rest } = init;
+  const limit = Math.min(Math.max(maxBytes, 1), mailSnapshot ? MAIL_SNAPSHOT_RESPONSE_BYTES : MAX_LARGE_RESPONSE_BYTES);
   const timeout = AbortSignal.timeout(Math.min(Math.max(timeoutMs, 1), MAX_TIMEOUT_MS));
   const headers = new Headers(rest.headers);
   if (json !== undefined) headers.set("content-type", "application/json");

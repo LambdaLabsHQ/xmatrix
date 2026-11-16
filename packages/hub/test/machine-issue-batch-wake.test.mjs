@@ -87,13 +87,13 @@ function batchDatabase(epochForLock = () => 1) {
   }));
   const database = sessionAuthorityDatabase(async query => {
       if (query.name === "machine_control_daemon_update_v3") updates.push(query);
-      if (query.name === "machine_control_daemon_lock_v1") locks.push(query);
-      if (query.name === "machine_control_daemon_lock_v1" ||
+      if (query.name.startsWith("machine_control_daemon_lock_")) locks.push(query);
+      if (query.name.startsWith("machine_control_daemon_lock_") ||
           query.name === "machine_control_daemon_update_v3") {
         return [{ daemon_id: "machine-daemon:user-1:machine-1:host-1",
           owner_user_id: "user-1", owner_email: "one@example.com", machine_id: "machine-1",
           hostname: "host-1", status: "online", capabilities_json: [], metadata_json: {},
-          connection_epoch: query.name === "machine_control_daemon_lock_v1" ? epochForLock() : 1,
+          connection_epoch: query.name.startsWith("machine_control_daemon_lock_") ? epochForLock() : 1,
           version: 2, created_at: new Date(), updated_at: new Date() }];
       }
       if (query.name === "machine_control_issue_batch_channels_v3") {

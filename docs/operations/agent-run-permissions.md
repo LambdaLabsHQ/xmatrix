@@ -191,7 +191,7 @@ share the Space upload scope; a closed Channel's scope needs the exact Run's
 access to that Channel:
 
 ```sh
-xmatrix send <channel-id> --file ./deployment-guide.md "Deployment guide"
+xmatrix send <channel-id> --attachment ./deployment-guide.md "Deployment guide"
 ```
 
 The CLI uses the checksum-verified private-R2 intent, upload, verification, and

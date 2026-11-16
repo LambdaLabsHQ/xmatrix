@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import test from "node:test";
 
 import { gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference } from "../dist/index.js";
@@ -17,6 +18,36 @@ Status: in progress
 ## Goals
 again
 `;
+
+test("page titles trim only their specified edge characters", async () => {
+  const { pageTitleLine } = await import("../dist/index.js");
+  for (const [body, title] of [
+    ["# \t A\tB \t\r\n", "A\tB"],
+    ["# \rA\r \n", "\rA"],
+    ["# \u00a0A\u00a0 \n", "\u00a0A\u00a0"],
+    ["# \u2003A\u2003 \n", "\u2003A\u2003"],
+    ["# A ##\t\r\n", "A ##"],
+    ["# \t\r\t \n", ""],
+    ["#\n# Second\n", ""],
+  ]) assert.equal(pageTitleLine(body)?.title, title, JSON.stringify(body));
+});
+
+test("page title parsing finishes on long whitespace and malformed fences", () => {
+  // Each input fits the Page body's 256 KiB limit. Isolate the operation so
+  // a backtracking regression cannot hang the runner; include startup in the bound.
+  const entrypoint = new URL("../dist/index.js", import.meta.url);
+  const script = [
+    'import assert from "node:assert/strict";',
+    "const { pageTitleLine } = await import(" + JSON.stringify(entrypoint.href) + ");",
+    'const tabs = "\\t".repeat(131_072);',
+    'assert.equal(pageTitleLine("# \\tA" + tabs + "Z \\t\\r").title, "A" + tabs + "Z");',
+    'for (const marker of [String.fromCharCode(96), "~"]) {',
+    '  const malformed = marker.repeat(131_072) + "x\\u2028y";',
+    '  assert.equal(pageTitleLine(malformed + "\\n# Next").title, "Next");',
+    '}',
+  ].join("\n");
+  execFileSync(process.execPath, ["--input-type=module", "--eval", script], { timeout: 10_000 });
+});
 
 test("blocks are headings with GitHub-style unique slugs; fenced code is not a heading", () => {
   assert.equal(pageHeadingSlug("Relay: Storage & Sync!"), "relay-storage--sync");

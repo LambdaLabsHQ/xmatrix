@@ -120,11 +120,28 @@ Harness selection lists each harness's declared models. The parameter decision t
 offers the real model/effort domain of the chosen harness's environments, including
 owner-declared versus observed provenance and observation time. Model names and harness names are unrelated values: no code
 compares, filters, aliases or derives one from the other, and no `models` list
-carries a harness name. An empty declared model list allows no model override,
-so Jev skips model/effort selection and the launch leaves the runtime defaults
-untouched. No synthetic default option or model tag is emitted. A non-empty
-list is the complete set of allowed models, compared literally; without a
-matching observed catalog entry, the declared models themselves are offered.
+carries a harness name. An empty declared model list allows no model override
+or model resource: the launch runs on the runtime-default authority. On a daemon
+that advertises `registration_native_model_v1`, its runtime's own fresh model
+catalog (at most 24 hours old) is then the model choice, the same set a live
+`/model` can already switch that runtime to. Jev's question offers the runtime's
+default first and the catalog's other entries after it, and keeps the default
+unless the author or the discussion names or asks for another model; keeping it
+selects no model (`registration-parameters-v12` records a model choice without a
+selected model). A written `model:` matches an entry by the runtime's model id or
+any name the catalog gives it (Claude's `sonnet`, a display name), ignoring case;
+nothing maps one model's name to another. The stored catalog keeps one entry per
+model and records the runtime's other selectors for it as `aliases` (Claude lists
+`default` and `opus` for the same model), so those stay nameable here and in a
+live `/model`. A chosen entry rides on the launch as
+`preferredModel`: no grant or model resource changes, the spawn context carries
+`preferredModel`, and the daemon requests it of the runtime exactly as it does an
+admitted model, so a runtime that does not accept it fails to start instead of
+running its default. A reborn of that Instance starts on the same model. Without
+such a daemon or catalog there is no model decision and a written `model:` is
+refused with `registration_model_unavailable`. A non-empty list is the complete
+set of allowed models, compared literally; without a matching observed catalog
+entry, the declared models themselves are offered.
 An explicit `model:` or `effort:` tag still requires a matching allowed option.
 An explicit effort is a feasibility constraint before fit or headroom ranking:
 the daemon must support forwarding it and a fresh runtime model catalog must
@@ -192,7 +209,8 @@ field is additive; existing consumers may omit it.
 Jev never sees machine load, provider quota or allocation counts. Explicit
 machine, workspace and parameter constraints still narrow the candidates first,
 and a measured exhausted quota still excludes an environment. When the chosen
-environment declares models, Jev chooses its model and effort. If one harness
+environment declares models, or offers its runtime's own catalog as above, Jev
+chooses its model and effort. If one harness
 remains and all its environments offer the same models, it chooses them in the
 first call, because the location changes nothing about the options. Otherwise a
 second call chooses them for the environment that runs the work.
@@ -201,7 +219,7 @@ A question with one option is answered by that option. A call in which every
 question has one option is not made, so it costs no model round trip and stores
 no decision evidence. Typical cases are a `launch:force` summon of one harness
 into a single location, using the runtime's own model or a model the message
-names. From `registration-parameters-v11`, such a choice is recorded `only`: its
+names. From `registration-parameters-v11` (and in v12), such a choice is recorded `only`: its
 answer, with certainty 1, as a fact rather than a reading. A launch for which
 Jev read nothing records its decision as `deterministic`.
 
@@ -252,9 +270,12 @@ network that levels every environment of a machine still leaves fit and reply
 time to choose among them. Remaining ties compare network quality, quota pace,
 complete bandwidth, then `balance + 0.001 × (fit + headroom)`, fewer outstanding
 Runs on the machine and candidate order. The network factor and bandwidth
-uncertainty are defined below. When the
-chosen model's quota is exhausted there (Cursor's per-model pools), the
-next-ranked environment of the same harness offering it runs the work.
+uncertainty are defined below. A model whose quota is used up is never
+offered: account windows constrain every model, and a scoped window (Claude's
+per-model week, Cursor's Auto and API pools) constrains a model only when its
+scope is one of the `quotaScopes` of that model's catalog row. The
+next-ranked environment of the chosen harness offering the chosen model with
+quota runs the work.
 
 An environment whose latest Run in the Space failed to start within the last 30
 minutes (`STARTUP_FAILURE_WINDOW_MINUTES`) ranks after every environment that did
@@ -267,13 +288,35 @@ unrecoverably, the same message is handed once to the next-ranked environment
 conditions still apply, and the retry gets no fallback of its own. An Agent the
 author named is never replaced.
 
-A harness that its machine reports as signed out, or that refused a start or
-turn as signed out within the last 24 hours with no later report answering it
-(`SIGNED_OUT_FAILURE_WINDOW_HOURS`), is not offered, like a harness that is too
-old. When nothing else can take the work, the launch is refused with
-`registration_harness_signed_out`, naming the program and machine, and the
-machine's owner can sign in from that notice. An unknown or unchecked sign-in
-is not judged.
+A harness can also start, connect and do nothing: its turn ends with no
+reply and no error, in seconds or after half an hour, so nothing above
+notices. An environment whose last three summons in the Space all went that
+way (`SILENT_SUMMONS`; the first turn completed and the Run never replied, in
+the conversation or to a program's request), the latest of them within 24 hours
+(`SILENT_SUMMON_WINDOW_HOURS`), ranks after every environment that answers,
+as a failed start does. If it is the only option it is still asked, and the
+summon reason says it ended its last summons without a reply. After 24 hours
+it is tried again; one more silent summon puts it last again, and a summon
+it answers clears it. An answer to a Norn request counts as the Run's first
+reply (`recordAgentLaunchFirstReply`), as a message in the conversation
+does.
+
+Routing keeps no record of whether a harness is signed in, and does not read
+the one its machine last reported. Only the program knows whether its provider
+accepts it now, and nothing tells xMatrix when that changes (a sign-in in a
+terminal, a token another process refreshed, a revocation), so any copy goes
+stale: a copy kept here refused summons to a signed-in program on 2026-10-22
+and again on 2026-11-13. A summon is given to its machine, and the program
+answers by taking the work or refusing it. A start or turn it refuses as signed
+out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed, with a
+notice that is its sign-in (`HARNESS_SIGNED_OUT_NOTICE_KIND`). What follows
+belongs to that one request: when the Run never answered an `@auto` summon, the
+message goes on to the next-ranked Agent, once (`dispatchStartupFallback`),
+and a `handoff:@auto` whose successor could not start goes on the same way, up
+to three successors, never back to one it tried (`handoffFallbackOrigin`);
+otherwise the notice carries the summon and sends it again once the program is
+signed in. The owner who does not want that program used turns the Agent off,
+which is the only thing that keeps routing away from it.
 
 ### Machine network measurement
 
@@ -446,34 +489,30 @@ The older sections below describe previous implementations. Their capacity
 gates and semantic prerequisite stages are superseded by this contract, and the
 headroom ranking above replaces their deterministic ranking. Historical passing tests do not prove the new contract complete.
 
-## Summon intent (2026-09-26)
+## Who starts an Agent (2026-11-04)
 
-A launch mention is language, so Jev reads whether its author is asking an
-Agent to start before any allocation. Every message-invoked launch — composite
-registration dispatch, legacy `@auto` and legacy harness shouts, from a Human or
-an Agent — adds one `intent` choice question to the same Jev request that picks
-the environment, so the check adds no model round trip. The request state
-carries the mention's text and UTF-16 offsets in the message Jev reads and the
-author kind (`user` or `agent`), never a sender identity. The answer is one of
-`summon`, `reference`, `explanation` or `example`
-(`SUMMON_INTENT_CATEGORIES` in `@xmatrix/protocol`). Only `summon` continues;
-any other answer discards the environment choice and records the bounded
-rejection `summon_intent_<category>`, so the mention's chip explains why no
-Agent started. A failed or unconfigured Jev starts nothing, as before.
+A launch mention starts an Agent only when its send asked to: the message
+request carries `launch: true` (`xmatrix send --launch`, the MCP `send_message`
+tool's `launch`). The public HTTP send endpoint refuses an operational summon
+without that request, with HTTP 400 `agent_instance_required`, before publishing
+the message. Address an existing Instance as `@<agent>:<instance>` instead, or
+resend with `--launch` to start one. `launch:force` in public message text does
+not substitute for the launch request. Code and quoted examples remain text.
+The web composer, the CLI's interactive chat and a Page schedule line always ask. An Agent's live
+reply over the Runtime WebSocket never does, so an Agent naming another in a
+report starts nothing. The request is stored with the message (in
+`agent_invocation_targets_json.launch`, only on a message that summons someone),
+so a quota retry or recovery reads the same answer. Historical messages and
+internal runtime replies that did not ask to start retain the rejection
+`launch_not_requested`; the mention's card offers its author Start. Trusted
+internal first-message summons retain their existing `launch:force` path.
 
-`launch:force` after the mention is the author's own answer: the intent
-question is not asked and the launch evidence records `intent.source =
-"author"`. Environment choice, parameter choice and every authority check are
-unchanged. Existing-Instance lifecycle addresses (`:stop`, `:reborn`,
-`:handoff`, `name:N`) never reach Jev.
-
-The labeled case set in `packages/hub/scripts/summon-intent-eval.mjs` holds the
-2026-09-26 kill-all stray summons as negatives and real requests as positives;
-run it with `--live` (or `--hub` from a live Agent Run, through the deployed
-`/api/ai/jev/evaluate`) before changing the intent rubric. On 2026-09-26 the
-`--hub` run passed 12/12: every negative read as `explanation` or `reference`
-(lowest margin 0.56, the English syntax warning) and every positive as
-`summon` (0.94–1.0).
+Jev no longer reads whether a mention is a request (the 2026-09-26 intent
+question and the composer's draft reading were removed): it chooses only the
+environment, model and repository. Old messages keep their recorded
+`summon_intent_*` rejections, which read the same as `launch_not_requested`.
+Existing-Instance lifecycle addresses (`:stop`, `:reborn`, `:handoff`, `name:N`)
+need no launch request.
 
 ## Product contract
 
@@ -600,7 +639,11 @@ change). Quota waits (`packages/hub/src/quota-waits.ts`) carry it:
   waits behind ends; with neither known it waits for an event. A wake carries a
   revision, so a check that began before it cannot put the retry back to
   sleep. Recovering a stopped Instance (`continuation`) still starts only after
-  its author chose to wait.
+  its author chose to wait. One stopped for its own model's quota does not wait
+  for that model while another model of its harness has quota: it resumes in
+  the same session on the first one a launch would offer (the runtime default,
+  then its catalog, or the registration's declared models), as the reborn's
+  `preferredRuntimeModel`.
 The owning machine command authority issues a `quota_probe` to the exact online
 Daemon epoch advertising `machine_quota_probe_v2`; older Daemons never claim it.
 Each command contains at most 32 authorized registration/configuration bindings
@@ -1176,7 +1219,9 @@ it reads the catalog every 15 seconds with `?quota=refresh`; after answering, th
 Space member and probes the Space's registrations like a routing refresh, except that a daemon asked for its quota in the
 last minute is skipped. Readers watching the page therefore share one provider read per daemon per minute. Probes the
 Hub issues set `windowLabels: true`; a daemon then names each window, and the Hub accepts a window `label` (at most 24
-bytes) only on a probe that asked for it. Older daemons ignore the flag and answer unnamed windows.
+bytes) only on a probe that asked for it. Older daemons ignore the flag and answer unnamed windows. Probes also set
+`scopedQuotaUsages: true`: a daemon then answers the windows that constrain only some models, each with its `scope`
+(at most 64 bytes), possibly as a reading's only windows, and the Hub stores them as the reading's scoped part.
 
 Repository and directory discovery does not require a legacy Profile. The
 Channel launch-target endpoint first verifies Channel access, then reads the

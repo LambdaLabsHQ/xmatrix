@@ -22,6 +22,7 @@ test("deterministic PostgreSQL SQL and schema defects are non-retryable", async 
 test("only evidenced PostgreSQL connection, serialization, and timeout failures retry", () => {
   for (const error of [
     Object.assign(new Error("connection reset"), { code: "ECONNRESET" }),
+    Object.assign(new Error("connection ended"), { code: "CONNECTION_TERMINATED" }),
     Object.assign(new Error("connection failure"), { code: "08006" }),
     Object.assign(new Error("serialization failure"), { code: "40001" }),
     Object.assign(new Error("deadlock detected"), { code: "40P01" }),
@@ -45,8 +46,10 @@ test("pg's exact code-less transport failures retry without masking explicit SQL
       assert.equal(retryablePostgresFailure(Object.assign(new Error(message), { code })), false);
     }
   }
-  for (const message of ["Connection terminated", "SQL query timeout defect", "Query read timeout: bad SQL"]) {
+  for (const message of ["Connection terminated", "Egress connection severed outside of Hyperdrive",
+    "SQL query timeout defect", "Query read timeout: bad SQL"]) {
     assert.equal(retryablePostgresFailure(new Error(message)), false);
+    assert.equal(retryablePostgresFailure(Object.assign(new Error(message), { code: "58000" })), false);
   }
 });
 

@@ -1,5 +1,5 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS, trimEnd, type AppConnectorProviderManifest } from "@xmatrix/protocol";
-import { base64UrlDecode, signGitHubAppState, verifyGitHubAppState } from "../index-shared";
+import { oauthStateProviderId, signOAuthState, verifyOAuthStateClaims } from "./oauth-state";
 import type { Env } from "../types";
 import { metered, type UpstreamMeter } from "../usage-cost-metering";
 import { ConnectorRemedy, providerJson, ProviderRequestError } from "./http";
@@ -37,6 +37,7 @@ const GOOGLE_GRANTS: Record<string, { scope: string; name: string }> = {
   googleads: { scope: "https://www.googleapis.com/auth/adwords", name: "Google Ads" },
   googlebusinessprofile: { scope: "https://www.googleapis.com/auth/business.manage", name: "Business Profile" },
   gcp: { scope: "https://www.googleapis.com/auth/cloud-platform", name: "Google Cloud" },
+  googleplay: { scope: "https://www.googleapis.com/auth/androidpublisher", name: "Google Play Console" },
 };
 
 /**
@@ -51,7 +52,7 @@ export function grantFieldsForgottenOnDisconnect(providerId: string): Record<str
 }
 
 /* Providers that sign in with another provider's company OAuth client. */
-const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google" };
+const SHARED_OAUTH_CLIENTS: Record<string, string> = { googlecalendar: "google", googlesearchconsole: "google", googleadsense: "google", googleanalytics: "google", googleads: "google", googlebusinessprofile: "google", gcp: "google", googleplay: "google" };
 
 function validateGoogleGrant(providerId: string, payload: Record<string, unknown>, initial: boolean): void {
   const { scope, name } = GOOGLE_GRANTS[providerId]!;
@@ -119,6 +120,8 @@ export function oauthRedirectUri(hubOrigin: string): string {
 
 export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: string; userId: string;
   redirectUri: string; now?: number; accountId?: string; meter?: UpstreamMeter; authorizeUrl?: string;
+  /** The desktop app started this connect; the callback hands the grant back to it instead of finishing in the browser. */
+  desktop?: boolean;
   connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string } }): Promise<string> {
   const { oauth } = client.manifest;
   const claims = { providerId: client.manifest.id, spaceId: input.spaceId, userId: input.userId,
@@ -126,8 +129,13 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
     ...(oauth.pkce || ["discord", "stripe"].includes(client.manifest.id) ? { clientId: client.clientId, redirectUri: input.redirectUri } : {}),
     ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: input.connectionSnapshot } : {}),
     ...(client.manifest.id === "x" && input.accountId ? { accountId: input.accountId } : {}),
+    ...(input.desktop ? { d: 1 } : {}),
     ...(["discord", "stripe"].includes(client.manifest.id) ? { authorizationStartedAt: input.now ?? Date.now() } : {}) };
-  const state = await signGitHubAppState(claims, client.clientSecret);
+  const state = await signOAuthState(claims, client.clientSecret);
+  /* A state the provider silently refuses before consent is a connect nobody can finish. */
+  if (oauth.stateLimit && state.length > oauth.stateLimit) {
+    throw new ProviderRequestError(500, `${client.manifest.name} connect state exceeds the provider limit; restart Connect`);
+  }
   if (oauth.flow === "composio") {
     const callback = new URL(input.redirectUri);
     callback.searchParams.set("state", state);
@@ -162,17 +170,12 @@ export async function oauthAuthorizeUrl(client: OAuthClient, input: { spaceId: s
 
 /** The state's claims, verified with the provider's own client secret; undefined when forged or expired. */
 export async function verifyOAuthState(env: Env, state: string):
-  Promise<{ client: OAuthClient; spaceId: string; userId: string; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string }; authorizationStartedAt?: number } | undefined> {
+  Promise<{ client: OAuthClient; spaceId: string; userId: string; connectionSnapshot?: { connectionVersion: number; credentialVersion: number; connectionGeneration: string }; authorizationStartedAt?: number; desktop?: boolean } | undefined> {
   if (!state || state.length > 4_096) return undefined;
-  let providerId = "";
-  try {
-    providerId = String((JSON.parse(base64UrlDecode(state.split(".")[0] ?? "")) as Record<string, unknown>).providerId ?? "");
-  } catch {
-    return undefined;
-  }
+  const providerId = await oauthStateProviderId(state);
   const client = oauthClient(env, providerId);
   if (!client) return undefined;
-  const claims = await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined);
+  const claims = await verifyOAuthStateClaims(state, client.clientSecret);
   if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" ||
       typeof claims.userId !== "string" || ((client.manifest.oauth.pkce || ["discord", "stripe"].includes(client.manifest.id)) && !validPkceClaims(client, claims))) return undefined;
   const snapshot = claims.connectionSnapshot as { connectionVersion: number; credentialVersion: number; connectionGeneration: string } | undefined;
@@ -183,7 +186,7 @@ export async function verifyOAuthState(env: Env, state: string):
       (typeof claims.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(claims.accountId))) return undefined;
   if (client.manifest.id === "stripe" && (!Number.isSafeInteger(claims.authorizationStartedAt) || Number(claims.authorizationStartedAt) > Date.now() ||
       Number(claims.authorizationStartedAt) < Date.now() - STATE_TTL_MS)) return undefined;
-  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}), ...(client.manifest.id === "stripe" ? { authorizationStartedAt: Number(claims.authorizationStartedAt) } : {}) };
+  return { client, spaceId: claims.spaceId, userId: claims.userId, ...(claims.d === 1 ? { desktop: true } : {}), ...(["discord", "x", "stripe"].includes(client.manifest.id) ? { connectionSnapshot: snapshot } : {}), ...(client.manifest.id === "stripe" ? { authorizationStartedAt: Number(claims.authorizationStartedAt) } : {}) };
 }
 
 async function tokenRequest(client: OAuthClient, grant: Record<string, string>, meter?: UpstreamMeter): Promise<Record<string, unknown>> {
@@ -284,7 +287,7 @@ async function providerContext(client: OAuthClient, token: string): Promise<Reco
 export async function exchangeOAuthGrant(client: OAuthClient, code: string, redirectUri: string, state?: string,
   meter?: UpstreamMeter): Promise<{ fields: Record<string, string | null>; installation?: AppOAuthInstallation }> {
   if (client.manifest.oauth.flow === "composio") {
-    const claims = state && state.length <= 4_096 ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
+    const claims = state && state.length <= 4_096 ? await verifyOAuthStateClaims(state, client.clientSecret) : undefined;
     if (!claims || claims.providerId !== client.manifest.id || typeof claims.spaceId !== "string" || typeof claims.nonce !== "string") {
       throw new ProviderRequestError(400, "Invalid or expired connect request; restart Connect");
     }
@@ -399,7 +402,7 @@ export async function refreshOAuthFields(env: Env, providerId: string, values: R
     }
   }
   const afterNotionUnauthorized = providerId === "notion" && options.unauthorized === true;
-  const completeGoogleGrant = providerId === "gcp" || providerId === "googleads" || providerId === "googlecalendar";
+  const completeGoogleGrant = ["gcp", "googleads", "googlecalendar", "googleplay"].includes(providerId);
   if (completeGoogleGrant && values.oauthToken &&
       (!values.oauthRefreshToken || !Number.isSafeInteger(expiresAt) || expiresAt <= 0)) {
     throw new ConnectorRemedy(401, `${GOOGLE_GRANTS[providerId]!.name} OAuth requires a complete expiring grant; reconnect`, { kind: "reconnect" });

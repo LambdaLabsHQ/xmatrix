@@ -298,7 +298,6 @@ function browserTestStages() {
       ...playwrightRuntimeEnv,
       ...playwrightFixtureEnv,
       CI: "1",
-      NEXT_TEST_WASM: "1",
       PLAYWRIGHT_PORT: String(playwrightPortBase),
       PLAYWRIGHT_PREBUILT: "1",
     },
@@ -359,6 +358,20 @@ const nodeTestLanes = [
   ...nodeTestStages({ allFiles: scriptTests }),
 ];
 const nodeStaticStages = [
+  {
+    label: "Check pinned Apple API types and operation catalog",
+    command: process.execPath,
+    args: ["scripts/app-store-connect-openapi.mjs", "--check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "apple-api-check",
+  },
+  {
+    label: "Check pinned Google Play API operation catalog",
+    command: process.execPath,
+    args: ["scripts/google-play-discovery.mjs", "--check"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "google-play-api-check",
+  },
   {
     label: "Check synchronized versions",
     command: process.execPath,

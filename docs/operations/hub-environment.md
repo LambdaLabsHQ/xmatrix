@@ -57,6 +57,7 @@ Leave unset to keep the feature off.
 | `GMAIL_WATCH_TOPIC` | secret | Pub/Sub topic in the same Google project as the OAuth application. |
 | `GOOGLE_CLIENT_ID` | secret | Google OAuth client id. Unset with its secret: Google sign-in is hidden. |
 | `GOOGLE_CLIENT_SECRET` | secret | Google OAuth client secret. |
+| `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` | secret | Private Google Play service account key, subscription and base plan ids, Pub/Sub push identity and test-purchase Space allowlist. Unset disables Google Play subscription purchases. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
 | `PUSH_CONFIG` | secret | JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open. |
 | `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
@@ -64,7 +65,6 @@ Leave unset to keep the feature off.
 | `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
 | `RATE_LIMIT_JEV_EVALUATE` | binding | Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted. |
 | `RATE_LIMIT_SEARCH_RERANK` | binding | Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted. |
-| `RATE_LIMIT_SUMMON_INTENT` | binding | Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
 | `RELAY_POSTGRES_SHARD_1_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_1; set with it in the deployment profile. |
@@ -114,8 +114,6 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RATE_LIMIT_ENFORCED` | var | Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when "true"; otherwise they are only logged. Production pins true. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_AUTHORITY_OBSERVABILITY_ENABLED` | var | Writes authority observation only when "true". |
-| `RELAY_AUTOMATION_EXECUTION_ENABLED` | var | Runs Automation occurrences; off when unset. |
-| `RELAY_AUTOMATION_RUN_TIMEOUT_MS` | var | Default deadline for Automation runs without their own timeout. |
 | `RELAY_CHANNEL_FAMILY_DATA` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_CHANNEL_FAMILY_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_CONTROL_PLANE_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
@@ -169,4 +167,3 @@ Never set these in production.
 | `XMATRIX_MOCK_AUTH_TOKEN` | secret | Bearer token that signs in the mock user; never set in production. |
 | `XMATRIX_MOCK_AUTH_USER_ID` | var | Mock user id. |
 | `XMATRIX_MOCK_AUTH_USERS` | var | JSON map of mock tokens to users. |
-| `XMATRIX_MOCK_SCHEDULE_DELAY_MS` | var | Automation cadence seed honored only with mock auth. |

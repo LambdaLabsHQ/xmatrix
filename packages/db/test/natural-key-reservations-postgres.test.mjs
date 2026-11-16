@@ -83,35 +83,3 @@ integration("concurrent reservations in one Channel never share an ordinal", asy
     await Promise.all(clients.map(client => client.end()));
   }
 });
-
-integration("a due Automation records its occurrence under a reserved natural key", async () => {
-  const { createAuthorityDatabase, PostgresAutomationRepository } = await import("../dist/index.js");
-  const client = new Client({ connectionString });
-  await client.connect();
-  const channelId = `natural-${randomUUID()}`, automationId = `automation-${randomUUID()}`;
-  try {
-    const columns = async (table) => (await client.query(`SELECT column_name,data_type FROM information_schema.columns
-      WHERE table_schema='data' AND table_name=$1 AND is_nullable='NO' AND column_default IS NULL`, [table])).rows;
-    const insert = async (table, values) => {
-      const defaults = { text: "x", bigint: 1, integer: 1, boolean: false, jsonb: {}, "timestamp with time zone": at };
-      const row = { ...Object.fromEntries((await columns(table)).map(c => [c.column_name, defaults[c.data_type] ?? "x"])), ...values };
-      const keys = Object.keys(row);
-      await client.query(`INSERT INTO data.${table} (${keys.join(",")}) VALUES (${keys.map((_, i) => `$${i + 1}`).join(",")})`,
-        keys.map(key => row[key] !== null && typeof row[key] === "object" ? JSON.stringify(row[key]) : row[key]));
-    };
-    await insert("channels", { channel_id: channelId, space_id: `space-${channelId}`, archived_at: null,
-      search_rank_sequence: Math.floor(Math.random() * 2 ** 40) });
-    await insert("automations", { automation_id: automationId, channel_id: channelId, enabled: true, version: 1,
-      next_run_at: at, owner_user_id: "owner", payload_json: { intervalMinutes: 60, input: {} } });
-    const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
-    await new PostgresAutomationRepository(database).maintain({ requestId: randomUUID(), now: "2026-09-25T00:01:00.000Z",
-      runTimeoutMs: 60_000 });
-    const occurrence = (await client.query(`SELECT run_id,instance_id FROM data.automation_occurrences WHERE automation_id=$1`,
-      [automationId])).rows[0];
-    assert.deepEqual(occurrence, { run_id: `${channelId}:1#1`, instance_id: `${channelId}:1` });
-  } finally {
-    await client.query("DELETE FROM data.automation_occurrences WHERE automation_id=$1", [automationId]);
-    await client.query("DELETE FROM data.automations WHERE automation_id=$1", [automationId]);
-    await client.end();
-  }
-});

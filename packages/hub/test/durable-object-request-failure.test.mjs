@@ -6,6 +6,8 @@ import { requestErrorResponse } from "../src/index-shared.ts";
 import { transientFailure } from "../src/error-contract.ts";
 import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
+import { routeDomainSocket } from "../src/runtime-transport/domain-socket-route.ts";
+import { RELAY_RUNTIME_CELL_HEADER } from "../src/runtime-transport/runtime-cell-locator.ts";
 
 // HUB-B5: a stackless platform exception reached the shared HTTP boundary,
 // whose console report discarded the route. Existing status-only coverage
@@ -81,5 +83,61 @@ test("DO issue metadata rejects malformed or private diagnostic fields", () => {
     JSON.stringify({ ...valid, operation: "POST /api/channels/12345678-1234-1234-1234-123456789abc" }),
     JSON.stringify({ ...valid, retryable: "private-flag" }), "x".repeat(1025)]) {
     assert.deepEqual(sentryEventMetadata({ context: { durable_object_failure: value } }), []);
+  }
+});
+
+// HUB-BS/BT: the HTTP report already names the route, but cannot distinguish
+// an immediate platform refusal from time spent waiting for the Runtime cell.
+// Exercise the real router through reporting and the Sentry reader, not a logger mock.
+test("socket overloads retain fetch duration and routing kind without replaying or exposing the owner", async t => {
+  const envelopes = captureErrorReports(t);
+  t.mock.method(console, "warn", () => {});
+  let now = 1000, calls = 0;
+  t.mock.method(Date, "now", () => now);
+  const cases = [
+    { path: "/ws/agent-instances", cell: "owner", delay: 3250, duration: 3250, remote: false, reason: "internal",
+      message: "internal error; reference = privateplatformreference" },
+    { path: "/ws/machine-daemons", cell: "unassigned", delay: 0, duration: 0, remote: true, reason: "queue_age",
+      message: "Durable Object is overloaded. Requests queued for too long." },
+    { path: "/ws/humans", cell: "owner", delay: 250000, duration: 120000, remote: "private-flag", reason: "other",
+      message: "private-message" },
+  ];
+  for (const item of cases) {
+    const app = new Hono();
+    app.onError((error, c) => requestErrorResponse(c, error));
+    const error = Object.assign(new Error(item.message), { overloaded: true, remote: item.remote });
+    error.stack = undefined;
+    Object.freeze(error);
+    app.get(item.path, c => routeDomainSocket(c.req.raw, item.path, {
+      fetch() {
+        calls++; now += item.delay;
+        if (item.cell === "owner") return Promise.reject(error);
+        throw error;
+      },
+    }));
+    const response = await app.request(`${item.path}?owner=private-owner&secret=private-query`, {
+      headers: { [RELAY_RUNTIME_CELL_HEADER]: item.cell === "owner" ? "user-private-owner" : "invalid", authorization: "private-token" },
+    });
+    assert.equal(response.status, 503);
+    assert.equal(response.headers.get("retry-after"), "1");
+    assert.equal(error.stack, undefined);
+  }
+  await sendErrorReports();
+  assert.equal(calls, cases.length, "overload is never replayed at the Worker");
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, cases.length, "annotation does not create a second report");
+  const lines = events.flatMap(event => sentryEventMetadata({ context: event.extra }));
+  for (const item of cases) {
+    assert.ok(lines.includes(`Runtime socket fetch: cell=${item.cell} · durationMs=${item.duration} · remote=${typeof item.remote === "boolean" ? item.remote : "unavailable"} · reason=${item.reason}`), lines.join("\n"));
+  }
+  assert.doesNotMatch(JSON.stringify(events.map(event => event.extra)), /private|authorization|secret/u);
+});
+
+test("socket metadata rejects private fields, unknown kinds and unbounded duration", () => {
+  const valid = { operation: "GET /ws/agent-instances", retryable: false, overloaded: true };
+  const socket = { cell: "owner", durationMs: 3250, remote: false, reason: "internal" };
+  for (const patch of [{ owner: "private-owner" }, { cell: "user-private-owner" }, { durationMs: -1 },
+    { durationMs: 120001 }, { durationMs: 1.5 }, { remote: "private-flag" }, { reason: "private-message" }]) {
+    assert.deepEqual(sentryEventMetadata({ context: { durable_object_failure: JSON.stringify({ ...valid, socket: { ...socket, ...patch } }) } }), []);
   }
 });

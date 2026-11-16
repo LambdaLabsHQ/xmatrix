@@ -36,6 +36,29 @@ async fn list_machine_daemons_api(
     Ok(response.daemons)
 }
 
+/// A preset's `access` block: per access level, what xMatrix adds to the
+/// launch, exactly as written. The launch code has no per-harness branch.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccess {
+    #[serde(default)]
+    pub full: AgentPresetAccessLevel,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccessLevel {
+    /// Joined to the launcher's argv (the ACP argv for the generic ACP backend).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variables set on the harness's own process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+}
+
 /// One harness in the shared registry (`packages/protocol/src/agent-presets.json`).
 /// The JSON is the single source of truth for launcher aliases, backends,
 /// config directories, and install hints; Rust and TypeScript both read it, so
@@ -59,6 +82,9 @@ pub struct AgentPreset {
     /// already speaks ACP with no subcommand; absent defaults to `["acp"]`.
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
+    /// What xMatrix adds to this harness's launch to give it full access.
+    #[serde(default)]
+    pub access: AgentPresetAccess,
     #[serde(default)]
     pub avatar_url: String,
     pub launcher_names: Vec<String>,
@@ -71,6 +97,20 @@ pub struct AgentPreset {
 }
 
 impl AgentPreset {
+    /// The grant of a launch in `full` access (`agentAccessGrant` in
+    /// `@xmatrix/protocol`): what a launch runs with when no Hub grant reached it.
+    pub fn full_access_grant(
+        &self,
+    ) -> xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+            mode: "full".into(),
+            args: self.access.full.args.clone(),
+            env: self.access.full.env.clone(),
+            session: self.access.full.session.clone(),
+            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp" | "claude-print"),
+        }
+    }
+
     /// The legacy `agentType` string this harness registers with the Hub.
     pub fn agent_type(&self) -> &str {
         self.agent_type.as_deref().unwrap_or(&self.id)
@@ -590,6 +630,7 @@ mod tests {
             default_args: vec![],
             backend: "claude-print".to_string(),
             acp_args: None,
+            access: Default::default(),
             avatar_url: String::new(),
             launcher_names: vec!["definitely-not-a-real-binary-xyz".to_string()],
             classic_config_dirs: vec![],
@@ -641,7 +682,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn agent_spawn_path_preserves_profile_path_and_adds_user_bins() {
-        let path = super::augmented_agent_spawn_path(Some("/custom/bin:/usr/bin")).unwrap();
+        let path = super::agent_spawn_path(Some("/custom/bin:/usr/bin")).unwrap();
         let paths: Vec<std::path::PathBuf> = std::env::split_paths(&path).collect();
 
         assert_eq!(
@@ -661,17 +702,28 @@ mod tests {
 }
 
 /// Where a harness's official installer puts its launcher outside the common
-/// user bin directories. The installer adds it to the user PATH, which a
-/// daemon started before the install never sees, so inventory, recipes and
+/// user bin directories. The installer adds it to the user's shell profile,
+/// which a service-started daemon never reads, so inventory, recipes and
 /// launches look here too.
 pub fn native_launcher_dirs(preset_id: &str) -> Vec<PathBuf> {
-    let Some(local) = dirs::data_local_dir() else {
-        return Vec::new();
-    };
+    let home = dirs::home_dir();
+    let local = dirs::data_local_dir();
     match preset_id {
-        "cursor" => vec![local.join("cursor-agent")],
+        "cursor" => local
+            .map(|local| vec![local.join("cursor-agent")])
+            .unwrap_or_default(),
         // install.ps1: %LOCALAPPDATA%\agy\bin\agy.exe. Unix installs into ~/.local/bin.
-        "antigravity" if cfg!(windows) => vec![local.join("agy").join("bin")],
+        "antigravity" if cfg!(windows) => local
+            .map(|local| vec![local.join("agy").join("bin")])
+            .unwrap_or_default(),
+        // opencode.ai/install puts the binary in ~/.opencode/bin.
+        "opencode" => home
+            .map(|home| vec![home.join(".opencode").join("bin")])
+            .unwrap_or_default(),
+        // Kimi Code's installer puts the binary in ~/.kimi-code/bin.
+        "kimi" => home
+            .map(|home| vec![home.join(".kimi-code").join("bin")])
+            .unwrap_or_default(),
         _ => Vec::new(),
     }
 }
@@ -684,7 +736,6 @@ fn common_user_bin_paths() -> Vec<PathBuf> {
         paths.push(home.join("bin"));
     }
 
-    #[cfg(windows)]
     for preset in agent_presets() {
         paths.extend(native_launcher_dirs(&preset.id));
     }
@@ -702,7 +753,12 @@ fn common_user_bin_paths() -> Vec<PathBuf> {
     paths
 }
 
-fn augmented_agent_spawn_path(profile_path: Option<&str>) -> Option<std::ffi::OsString> {
+/// The PATH a daemon-started Agent runs with, and so the one place a
+/// harness's launcher is looked for: the profile's PATH (else the daemon's),
+/// then the common user bin directories and each harness's installer
+/// directory. Inventory and launch both search this, so "installed" means a
+/// launch finds the same file.
+pub fn agent_spawn_path(profile_path: Option<&str>) -> Option<std::ffi::OsString> {
     let mut seen = HashSet::new();
     let mut paths = Vec::new();
     let base_path = profile_path
@@ -736,7 +792,7 @@ pub fn apply_agent_spawn_path(
     command: &mut std::process::Command,
     local_env: &BTreeMap<String, String>,
 ) {
-    if let Some(path) = augmented_agent_spawn_path(local_env.get("PATH").map(String::as_str)) {
+    if let Some(path) = agent_spawn_path(local_env.get("PATH").map(String::as_str)) {
         command.env("PATH", path);
     }
 }

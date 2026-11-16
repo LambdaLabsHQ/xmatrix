@@ -43,7 +43,9 @@
 	<key>NSUserNotificationsUsageDescription</key>
 	<string>xMatrix uses notifications for workspace activity and update messages.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>xMatrix uses the camera when you choose Take Photo while attaching an image.</string>
+	<string>xMatrix uses the camera when you choose to take a photo or record a video to attach to a conversation or Page.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>xMatrix uses the microphone to include sound when you choose to record a video attachment.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>xMatrix saves image and video attachments to your photo library when you download them.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

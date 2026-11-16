@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import * as machine from "../src/runtime-transport/machine-daemon-port.ts";
-import { CLI_RELEASE_FEEDS, fetchCliChannelVersion, noticeCliReleases, parseCliReleaseNotice }
-  from "../src/cli-release-notice.ts";
+import { CLI_RELEASE_FEEDS, fetchCliChannelVersion, noticeCliReleases, parseCliReleaseNotice,
+  readCliReleaseFeeds } from "../src/cli-release-notice.ts";
 import { RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH } from "../src/runtime-transport/relay-runtime-product-adapter.ts";
 import { cliReleaseNoticeEvidence } from "../src/cli-release-notice-failure.ts";
 import { FakeSocket } from "./support/runtime-transport.mjs";
@@ -161,6 +161,53 @@ test("two lost feed reads retain both causes and never start a third attempt", a
     return true;
   });
   assert.equal(calls, 2);
+});
+
+// HUB-BX: a feed started beside the cron's other header-waits ran to 15s.
+// Both feeds settle before the caller can open those connections, and a pass
+// that already has them does not fetch again.
+test("both release feeds settle before another connection can open", async () => {
+  let started = 0;
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const pending = readCliReleaseFeeds(async (url) => {
+    assert.ok(Object.values(CLI_RELEASE_FEEDS).includes(url));
+    started += 1;
+    await gate;
+    return Response.json({ version: url.endsWith("/dev") ? "2.3.1-beta.1" : "2.3.0" });
+  });
+  await Promise.resolve();
+  assert.equal(started, 2);
+  let settled = false;
+  pending.then(() => { settled = true; }, () => { settled = true; });
+  await Promise.resolve();
+  assert.equal(settled, false);
+  release();
+  const latest = await pending;
+  assert.equal(await latest("stable"), "2.3.0");
+  assert.equal(await latest("dev"), "2.3.1-beta.1");
+  assert.equal(started, 2);
+
+  const result = await noticeCliReleases({}, { latest, owners: async () => [] });
+  assert.deepEqual(result, { told: 0 });
+  assert.equal(started, 2);
+});
+
+test("a lost feed stays failed after the reads settle and is not fetched again", async () => {
+  let calls = 0;
+  const latest = await readCliReleaseFeeds(async () => {
+    calls += 1;
+    throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  });
+  assert.equal(calls, 4);
+  for (const channel of ["stable", "dev"]) {
+    await assert.rejects(latest(channel), (error) => {
+      assert.deepEqual(cliReleaseNoticeEvidence(error).map(({ attempt, phase }) => [attempt, phase]),
+        [[1, "feed_headers"], [2, "feed_headers"]]);
+      return true;
+    });
+  }
+  assert.equal(calls, 4);
 });
 
 test("invalid, oversized and HTTP failure feeds do not retry or name a release", async () => {

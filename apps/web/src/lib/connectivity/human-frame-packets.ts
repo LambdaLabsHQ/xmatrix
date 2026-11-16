@@ -4,6 +4,8 @@ import type { ParsedSocketFrame } from "./reconnecting-socket";
 export function isDeferredHumanFrame(value: unknown): boolean {
   if (!value || typeof value !== "object") return false;
   switch ((value as { type?: unknown }).type) {
+    case "instance_activity":
+    case "instance_records":
     case "presence":
     case "enhanced_presence":
     case "observable_event":

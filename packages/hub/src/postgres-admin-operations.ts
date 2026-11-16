@@ -1,9 +1,9 @@
 /**
  * Platform operations for operators: Machines and Agent runtimes, Runs,
- * Automations, billing, and paid calls.
+ * billing, and paid calls.
  *
  * Each query names its columns: metadata only. Machine host and display
- * names, capabilities, Run and Automation payloads and error text,
+ * names, capabilities, Run payloads and error text,
  * billing provider ids and payload digests, and every
  * `metadata_json` are never selected. Machines live on the directory shard;
  * everything else is read from every physical shard and merged.
@@ -37,8 +37,6 @@ import {
 } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 
-/** How late a pending Automation occurrence may be before it counts as overdue. */
-const OVERDUE_AFTER_MS = 5 * 60_000;
 const WEBHOOK_ROWS = 200;
 const HARNESS_OWNER_ROWS = 10_000;
 
@@ -56,10 +54,6 @@ interface HarnessSpacesRow extends QueryResultRow { harness: string; spaces: Adm
 interface RunTotalsRow extends QueryResultRow { active: AdminCountValue }
 
 interface RunDayRow extends QueryResultRow { day: string; started: AdminCountValue; failed: AdminCountValue }
-
-interface AutomationRow extends QueryResultRow { total: AdminCountValue; enabled: AdminCountValue; with_error: AdminCountValue }
-
-interface OverdueRow extends QueryResultRow { overdue: AdminCountValue }
 
 interface SubscriptionRow extends QueryResultRow {
   space_id: string; space_name: string | null; plan: string; status: string; seat_quantity: number;
@@ -81,8 +75,6 @@ interface ShardPart {
   activeRuns: number;
   runsByStatus: Record<string, number>;
   runDays: readonly RunDayRow[];
-  automations: { total: number; enabled: number; withError: number; overdue: number };
-  occurrencesByStatus: Record<string, number>;
   subscriptions: AdminOperationsSubscription[];
   webhookEvents: AdminBillingWebhookEvent[];
   webhooksByOutcome: Record<string, number>;
@@ -163,30 +155,6 @@ async function readShard(
       maxRows: ADMIN_OPERATIONS_DAYS,
     });
 
-    const automations = (await transaction.query<AutomationRow>({
-      name: "postgres_admin_operations_automations_v1",
-      text: `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE enabled) AS enabled,
-          COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS with_error
-        FROM data.automations`,
-      values: [],
-      maxRows: 1,
-    }))[0];
-    const occurrences = await transaction.query<StatusRow>({
-      name: "postgres_admin_operations_occurrences_v1",
-      text: `SELECT status, COUNT(*) AS total FROM data.automation_occurrences
-        WHERE scheduled_for >= $1 GROUP BY status ORDER BY status LIMIT 50`,
-      values: [since],
-      maxRows: 50,
-    });
-    const overdue = (await transaction.query<OverdueRow>({
-      name: "postgres_admin_operations_overdue_v1",
-      text: `SELECT COUNT(*) AS overdue FROM data.automation_occurrences
-        WHERE status = 'pending' AND COALESCE(next_attempt_at, scheduled_for) < $1`,
-      values: [new Date(now.getTime() - OVERDUE_AFTER_MS)],
-      maxRows: 1,
-    }))[0];
-
-
     const subscriptions = await transaction.query<SubscriptionRow>({
       name: "postgres_admin_operations_subscriptions_v1",
       text: `SELECT b.space_id, s.name AS space_name, b.plan, b.status, b.seat_quantity,
@@ -235,13 +203,6 @@ async function readShard(
       activeRuns: adminCount(runTotals?.active),
       runsByStatus: statusCounts(runStatuses),
       runDays,
-      automations: {
-        total: adminCount(automations?.total),
-        enabled: adminCount(automations?.enabled),
-        withError: adminCount(automations?.with_error),
-        overdue: adminCount(overdue?.overdue),
-      },
-      occurrencesByStatus: statusCounts(occurrences),
       subscriptions: subscriptions.slice(0, bound).map((row) => {
         const currentPeriodEnd = adminOptionalIso(row.current_period_end);
         const graceUntil = adminOptionalIso(row.grace_until);
@@ -374,6 +335,7 @@ export async function readPostgresAdminOperationsFromFleet(
       byStatus: {},
       daily: [...runDays].map(([date, value]) => ({ date, ...value })),
     },
+    // Retired: Webs before #1680 still read it (AdminOperations.automations).
     automations: { total: 0, enabled: 0, withError: 0, occurrencesByStatus: {}, overdue: 0 },
     outbox,
     billing: {
@@ -392,11 +354,6 @@ export async function readPostgresAdminOperationsFromFleet(
     addAdminCounts(merged.machinesByStatus, part.machinesByStatus);
     merged.runs.active += part.activeRuns;
     addAdminCounts(merged.runs.byStatus, part.runsByStatus);
-    merged.automations.total += part.automations.total;
-    merged.automations.enabled += part.automations.enabled;
-    merged.automations.withError += part.automations.withError;
-    merged.automations.overdue += part.automations.overdue;
-    addAdminCounts(merged.automations.occurrencesByStatus, part.occurrencesByStatus);
     addAdminCounts(merged.billing.webhooksByOutcome, part.webhooksByOutcome);
     for (const subscription of part.subscriptions) {
       merged.billing.byStatus[subscription.status] = (merged.billing.byStatus[subscription.status] ?? 0) + 1;

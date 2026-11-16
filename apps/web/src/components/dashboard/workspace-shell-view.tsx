@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
+import { AgentAccessConfirmationHost } from "./agent-access";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -21,7 +22,7 @@ import { cn } from "@/lib/utils";
 import { AttachmentDropZoneProvider } from "./composer-attachment-drop-zone";
 import { FaceSpaceContext } from "./face";
 import { realtimeCollectionAny } from "./realtime-collection";
-import { RealtimeChannelsContext, RealtimeEventsContext } from "./realtime-channels";
+import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelValue } from "./realtime-channels";
 import { PresentedChannelTailContext } from "./presented-channel-tail";
 import { channelReferences, MessageReferenceCatalogProvider, type ChannelReference, type MessageReferenceCatalog } from "./message-reference-catalog";
 import { MachineLinkProvider, type MachineLinks } from "./machine-link";
@@ -110,8 +111,7 @@ import { searchWorkspacePages } from "./workspace-message-search";
 import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog } from "./workspace-search";
 import type { SearchFilters } from "./workspace-search-model";
-import { OnboardingActionsContext, type OnboardingActions } from "./onboarding-actions";
-import { ConversationPageCards } from "@/components/pages/conversation-page-cards";
+import { ConversationPageCards, useConversationPages } from "@/components/pages/conversation-page-cards";
 import { ContentSkeleton } from "./content-skeleton";
 
 // Views the first screen does not draw load when first shown, so their code is
@@ -171,9 +171,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     spaces,
     projects,
     setProjects,
-    automations,
-    automationExecutionEnabled,
-    scheduleFocusId,
     events,
     agentTraceReplicas,
     agents,
@@ -184,6 +181,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     channelReadCountsBaselineReady,
     selectedChannelId,
     setSelectedChannelId,
+    forgetDeletedChannel,
     selectedPageId,
     toggleChannelPinned,
     markChannelResponded,
@@ -213,10 +211,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loadingAgentPresetDiscoveries,
     localActionBusy,
     localActionError,
-    automationBusy,
-    automationError,
-    automationLoadError,
-    loadingAutomations,
     runtimeCheck,
     checkingDesktopUpdates,
     draft,
@@ -313,13 +307,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     revealLocalWorkspace,
     checkLocalRuntime,
     completeDesktopSetup,
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
-    clearScheduleFocus,
     openAppsForSpace,
     backToMore,
     selectSpace,
@@ -428,10 +418,14 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     bringingLocalLock.current = true;
     setBringingLocal(true);
     try {
-      for (const presetId of presetIds) {
+      const adds = presetIds.flatMap((presetId) => {
         const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
-        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
-      }
+        return preset ? [{ key: harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId!, presetId), preset }] : [];
+      });
+      // One question for everything about to be added, not one per harness.
+      const confirmed = await installedFleet.confirmAdds(adds);
+      if (!confirmed) return;
+      for (const add of adds) if (!(await installedFleet.set(add.key, add.preset, true, confirmed))) break;
     } finally { bringingLocalLock.current = false; setBringingLocal(false); }
   }
   const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
@@ -525,6 +519,14 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
      wood carries only liquid glass and this screen has none. */
   const showSpaceFirstTask =
     !showSpaceAgentSetup && spaceFirstTask.kind !== "hidden" && !selectedChannel;
+  // The phone's bar and plaque render one head from the same data. Do not
+  // discover its presence by inspecting the whole app's descendant DOM.
+  const mobileConversationPages = useConversationPages({
+    spaceId: selectedChannel?.spaceId ?? "",
+    conversationId: selectedChannel?.id ?? "",
+    token: selectedChannel ? token ?? null : null,
+  });
+  const hasMobileConversationHead = Boolean(selectedChannel?.summary?.trim() || mobileConversationPages.length);
   const [firstTaskBusy, setFirstTaskBusy] = useState(false);
   const [firstTaskError, setFirstTaskError] = useState<string | null>(null);
   const [firstTaskWorkspace, setFirstTaskWorkspace] = useState<ChosenWorkspace | null>(null);
@@ -679,7 +681,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     : {}, [selectedChannel, view, workspaceSearchHere]);
   const pageCreation = usePageCreation(currentSpaceId, token ?? "", openPage);
   // A `page:<id>#<section>` chip opens the page at that section; a new seq scrolls there again.
-  // An edit card opens it showing what changed since, with the way back to its message.
+  // An edit card opens it with the way back to its message.
   const [pageSectionRequest, setPageSectionRequest] =
     useState<{ pageId: string; blockId: string; seq: number; opening?: PageEditOpening } | null>(null);
   const openPageAt = useStableCallback((pageId: string, blockId?: string | null, opening?: PageEditOpening) => {
@@ -829,15 +831,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       setNewConversationError(userErrorMessage(error, "Couldn't start the conversation"));
       openNewConversation();
     }));
-  const onboardingActions = useMemo<OnboardingActions>(() => ({
-    startConversation: (draft) => {
-      setNewConversationDraft(draft);
-      setNewConversationError(null);
-      openNewConversation();
-    },
-    connectAnotherComputer: () => changeAppViewRef.current("machines"),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the shell's actions are stable for its life
-  }), []);
   const createNewPage = useStableCallback(() => void pageCreation.create(null));
   const manageMachines = useStableCallback(() => changeAppView("machines"));
   // One object while what it offers is the same: the list column that shows it is memoized.
@@ -934,6 +927,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     token, canUseSelectedChannel && Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
       ["owner", "admin"].includes(transferSpaceRole(space, model.authenticatedUserId ?? "") || ""))));
 
+  // The dock reads Instances from the live store; the timeline keeps room for
+  // it from the same store, or the dock covers the last message.
+  const channelHasDockedAgents = useRealtimeChannelValue(selectedChannel, channelHasAgentMembers,
+    model.realtimeChannels);
+
   /* The timeline, the work dock and the composer are memoized, and this shell
      renders for every message and read: handlers that stay the same let those
      renders pass them by. */
@@ -978,9 +976,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   });
   const channelDeleted = useStableCallback((id: string) => {
     setDeletingChannel(null);
-    setChannels(current => current.filter(channel => channel.id !== id));
-    if (selectedChannelId === id) setSelectedChannelId(null);
-    window.dispatchEvent(new CustomEvent("xmatrix:channel-catalog-change", { detail: { kind: "structure" } }));
+    forgetDeletedChannel(id);
   });
   const canDeleteSelectedChannel = Boolean(selectedChannel && spaces.some(space => space.id === selectedChannel.spaceId &&
     ["owner", "admin"].includes(transferSpaceRole(space, user?.id ?? "") ?? "")));
@@ -1233,9 +1229,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         <MobileChannelSummaryPlaque
           summary={selectedChannel.summary}
           onOpen={openMobileChannelDetails}
-          spaceId={selectedChannel.spaceId}
-          conversationId={selectedChannel.id}
-          token={token ?? null}
+          pages={mobileConversationPages}
           onOpenPage={openPage}
         />
       )}
@@ -1259,7 +1253,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         )}
         highlightMessageId={highlightedMessageId ?? undefined}
         timeline={timeline}
-        hasWorkDock={channelHasAgentMembers(selectedChannel) || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
+        hasWorkDock={channelHasDockedAgents || channelHasPendingApprovals || Boolean(spaceAllowance.notice)}
         hasChannels={channels.length > 0 || !channelsLoaded}
         hasOlderMessages={historyRenderAuthorized && hasOlderMessages}
         olderLoading={olderLoading}
@@ -1292,7 +1286,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onMessageExposed={handleTimelineMessageExposed}
         threadRootMessage={selectedThreadRootContext?.message}
         threadRootChannel={selectedThreadRootContext?.channel}
-        foldsDiscussionHead={placement === "page-margin"}
+        inPageMargin={placement === "page-margin"}
       />
       )}
       <AgentWorkDetailsDock
@@ -1323,6 +1317,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onRebornAgentInstance={rebornDockInstance}
         onHandoffAgentInstance={handoffDockInstance}
         onOpenAgentTrace={openAgentTrace}
+        inPageMargin={placement === "page-margin"}
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
           anchored to --app-composer-height. */}
@@ -1434,8 +1429,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localManagedAgents={localManagedAgents}
       agentPresetDiscoveries={agentPresetDiscoveries}
       loadingAgentPresetDiscoveries={loadingAgentPresetDiscoveries}
-      automations={automations}
-      automationExecutionEnabled={automationExecutionEnabled}
       spaces={spaces}
       events={events}
       currentSpace={currentSpace}
@@ -1450,13 +1443,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       desktopUpdateStatus={desktopUpdateStatus}
       localActionBusy={localActionBusy}
       localActionError={localActionError}
-      automationBusy={automationBusy}
-      automationError={automationError}
-      automationLoadError={automationLoadError}
-      loadingAutomations={loadingAutomations}
-      scheduleFocusId={scheduleFocusId}
-      onScheduleFocusConsumed={clearScheduleFocus}
-      onOpenPage={openPage}
       onOpenConversation={(channelId) => navigateToChannel(channelId)}
       runtimeCheck={runtimeCheck}
       localSetupReady={localSetupReady}
@@ -1477,9 +1463,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onRevealLocalWorkspace={(workspace) => void revealLocalWorkspace(workspace)}
       onCheckLocalRuntime={(runtime) => void checkLocalRuntime(runtime)}
       onCompleteDesktopSetup={() => void completeDesktopSetup()}
-      onToggleAutomation={(automation) => void toggleAutomation(automation)}
-      onRunAutomation={(automation) => void runAutomation(automation)}
-      onDeleteAutomation={(automation) => void deleteAutomation(automation)}
       joinRequestsBySpace={joinRequestsBySpace}
       onDecideJoinRequest={resolveSpaceJoinRequest}
       onCreateSpaceInviteCode={createSpaceInviteCode}
@@ -1509,9 +1492,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    <AgentAccessConfirmationHost />
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
-    <OnboardingActionsContext.Provider value={onboardingActions}>
     <FaceSpaceContext.Provider value={currentSpaceId}>
     <RealtimeChannelsContext.Provider value={model.realtimeChannels}>
     <RealtimeEventsContext.Provider value={model.realtimeEventViews}>
@@ -1655,6 +1638,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
             composing={composingConversation}
             onCloseComposing={() => setComposingConversation(false)}
             channel={composingConversation ? null : selectedChannel}
+            hasConversationHead={hasMobileConversationHead}
             spaces={spaces}
             currentSpaceId={currentSpaceId}
             view={view}
@@ -1812,7 +1796,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     </RealtimeEventsContext.Provider>
     </RealtimeChannelsContext.Provider>
     </FaceSpaceContext.Provider>
-    </OnboardingActionsContext.Provider>
     </AttachmentDropZoneProvider>
   );
 }

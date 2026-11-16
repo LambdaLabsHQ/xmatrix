@@ -32,7 +32,7 @@ test("rail destinations reuse the chat list resize handle", async ({ page }) => 
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const handle = page.getByRole("separator", { name: "Resize sidebar" });
 
-  for (const view of ["machines", "automation", "agents", "apps", "team", "settings", "pages"]) {
+  for (const view of ["machines", "agents", "apps", "team", "settings", "pages"]) {
     await page.goto(`/app/personal-sspaceperso/${view}`);
     await expect(handle).toHaveCount(1);
     await expect(handle).toBeVisible();
@@ -343,7 +343,7 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"]`)).toBeVisible();
   const order = await sidebar.locator(".app-list-section-heading, [data-channel-row-id]").evaluateAll((nodes) =>
     nodes.map((node) => (node as HTMLElement).dataset.channelRowId ?? node.textContent?.trim()));
-  expect(order).toEqual(["Needs you1", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
+  expect(order).toEqual(["Needs you1Mark all done", waiting.id, "Pinned", pinned.id, "Recent", other.id]);
   await expect(sidebar.locator(`[data-channel-row-id="${waiting.id}"] .app-channel-row-preview`))
     .toHaveText("claude:3: which one ships?");
   // Each section's name is a paper label in its own ink, flat on the list.
@@ -364,6 +364,46 @@ test("a conversation waiting on the reader sits under Needs you, above their pin
   await expect(sidebar.getByText("Needs you", { exact: true })).toHaveCount(0);
   await expect(row.getByRole("button", { name: "Done with #design" })).toHaveCount(0);
 });
+
+/* Mark all done asks with its own second tap, not window.confirm: the iOS
+   shell's web view answered that with false and showed nothing, so on a phone
+   the action never ran. The page here answers window.confirm the same way. */
+for (const [device, context] of [["desktop", E2E_DESKTOP_CONTEXT], ["mobile", E2E_MOBILE_CONTEXT]] as const) {
+  test.describe(`Mark all done on ${device}`, () => {
+    test.use(context);
+    test("a second tap clears every conversation under Needs you", async ({ page }) => {
+      const waitingOn = (id: string, name: string) => ({
+        ...E2E_CHANNEL, id, name, messageCount: 4, historyHeadSequence: 4, readSequence: 0,
+        attention: {
+          channelId: id, unreadAttentionCount: 1, lastMessageId: `${id}-mention`, lastMessageSequence: 4,
+          primaryTriggerKind: "mention", triggerKinds: ["mention"], updatedAt: E2E_CHANNEL.updatedAt,
+        },
+      });
+      const first = waitingOn("channel-waiting-a", "design");
+      const second = waitingOn("channel-waiting-b", "launch");
+      const other = { ...E2E_CHANNEL, id: "channel-other", name: "random" };
+      await page.addInitScript(() => { window.confirm = () => false; });
+      await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [first, second, other] });
+      await fixtureJson(page, "done-a", `**/api/xmatrix/channels/${first.id}/read`, { ok: true, readSequence: 4 });
+      await fixtureJson(page, "done-b", `**/api/xmatrix/channels/${second.id}/read`, { ok: true, readSequence: 4 });
+      const list = device === "desktop"
+        ? page.locator(".app-workspace-panel > .app-sidebar")
+        : page.locator(".app-mobile-chat-list");
+      await expect(list.getByText("Needs you2")).toBeVisible();
+
+      await list.getByRole("button", { name: "Mark all done" }).click();
+      const confirm = list.getByRole("button", { name: "Mark 2 done?" });
+      await expect(confirm).toBeVisible();
+      expect(await fixtureRequestBodies(page, "done-a")).toEqual([]);
+
+      await confirm.click();
+      await expect.poll(() => fixtureRequestBodies(page, "done-a")).toEqual([{ sequence: 4, responded: true }]);
+      await expect.poll(() => fixtureRequestBodies(page, "done-b")).toEqual([{ sequence: 4, responded: true }]);
+      await expect(list.getByText("Needs you", { exact: true })).toHaveCount(0);
+      await expect(list.getByRole("button", { name: /^Mark/ })).toHaveCount(0);
+    });
+  });
+}
 
 /* The account under an open shell can change without a navigation: a session
    read on focus brings whoever the browser is signed in as now. A Done one

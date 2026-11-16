@@ -1659,18 +1659,20 @@ impl ZcodeAppSession {
         cwd: Option<&str>,
     ) -> error::Result<Option<protocol::AgentGoalStatus>> {
         let workspace_path = app_server_workspace_path(cwd)?;
-        let mode = std::env::var("XMATRIX_ZCODE_APP_MODE").unwrap_or_else(|_| "yolo".to_string());
+        // The session mode is the launch's access grant.
         let result = self
             .request(
                 "session/create",
-                serde_json::json!({
-                    "workspace": {
-                        "workspacePath": workspace_path.clone(),
-                        "workspaceKey": workspace_path,
-                    },
-                    "persistence": "deferred",
-                    "mode": mode,
-                }),
+                with_access_session(
+                    serde_json::json!({
+                        "workspace": {
+                            "workspacePath": workspace_path.clone(),
+                            "workspaceKey": workspace_path,
+                        },
+                        "persistence": "deferred",
+                    }),
+                    &launch_access(),
+                ),
             )
             .await?;
         let session_id = result
@@ -2870,7 +2872,8 @@ impl AcpInterrupter {
         let Some((id, params)) = self.questions.take(&reply.request_key) else {
             return false;
         };
-        let result = crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers);
+        let result = crate::runtime_harness_questions::acp_permission_outcome(&params, Some(&reply.answers))
+            .unwrap_or_else(|| crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers));
         write_acp_message(&self.write, &acp_result(id, result))
             .await
             .is_ok()
@@ -2878,12 +2881,10 @@ impl AcpInterrupter {
 
     /// Cancel every parked elicitation: the person typed a message instead.
     pub(crate) async fn cancel_questions(&self) {
-        for (id, _) in self.questions.drain() {
-            let _ = write_acp_message(
-                &self.write,
-                &acp_result(id, serde_json::json!({ "action": "cancel" })),
-            )
-            .await;
+        for (id, params) in self.questions.drain() {
+            let cancelled = crate::runtime_harness_questions::acp_permission_outcome(&params, None)
+                .unwrap_or_else(|| serde_json::json!({ "action": "cancel" }));
+            let _ = write_acp_message(&self.write, &acp_result(id, cancelled)).await;
         }
     }
 
@@ -3041,12 +3042,14 @@ impl AcpVendorConfig {
             goal_turn_input: None,
             goal_status_from_update: None,
             goal_status_from_text: None,
-            // OpenCode (Go subscription or ChatGPT login) and Cursor expose
-            // account quota behind their own stored credentials; every other generic ACP peer has no quota
+            // OpenCode (Go subscription or ChatGPT login), Cursor and DeepSeek
+            // (prepaid API balance) expose account quota behind their own
+            // stored credentials; every other generic ACP peer has no quota
             // source here.
             quota_usage: match stem.as_str() {
                 "opencode" => Some(opencode_quota_hook),
                 "cursor" => Some(cursor_quota_hook),
+                "deepseek" => Some(deepseek_quota_hook),
                 _ => None,
             },
             resume_namespace: format!("acp-resume-{stem}"),
@@ -3062,9 +3065,9 @@ impl AcpVendorConfig {
 
     fn acp_spawn_args(&self, cmd_args: &[String]) -> Vec<String> {
         match self.flavor {
-            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args),
+            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args, &launch_access()),
             AcpVendorFlavor::Generic => {
-                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref())
+                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref(), &launch_access())
             }
         }
     }
@@ -3082,6 +3085,13 @@ fn opencode_quota_hook(
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
     Box::pin(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
+}
+
+fn deepseek_quota_hook(
+    force: bool,
+    model: Option<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
+    Box::pin(async move { read_deepseek_balance_for_model(force, model.as_deref()).await })
 }
 
 fn cursor_quota_hook(
@@ -3110,7 +3120,11 @@ fn acp_tool_stem(tool: &str) -> String {
 /// XMATRIX_ACP_ARGS JSON array, then the preset's own `acpArgs` (an explicit
 /// `[]` for a launcher that already speaks ACP), finally the ACP community
 /// convention of an `acp` subcommand (e.g. `kimi acp`).
-fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]>) -> Vec<String> {
+fn generic_acp_spawn_args(
+    cmd_args: &[String],
+    preset_acp_args: Option<&[String]>,
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> Vec<String> {
     if !cmd_args.is_empty() {
         return cmd_args.to_vec();
     }
@@ -3119,10 +3133,9 @@ fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]
     {
         return args;
     }
-    if let Some(args) = preset_acp_args {
-        return args.to_vec();
-    }
-    vec!["acp".to_string()]
+    // No daemon passed an argv, so the launch's access args are not in one yet.
+    let args = preset_acp_args.map_or_else(|| vec!["acp".to_string()], <[String]>::to_vec);
+    access.with_args(&args)
 }
 
 fn acp_args_from_json(raw: &str) -> Option<Vec<String>> {
@@ -3148,6 +3161,9 @@ struct AcpSession {
     loaded_goal: Option<protocol::AgentGoalStatus>,
     /// `authMethods` ids the agent advertised in its initialize result.
     auth_method_ids: Vec<String>,
+    /// `promptCapabilities.image` from the initialize result. An agent that
+    /// did not advertise it rejects image blocks with -32602.
+    prompt_images: bool,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.

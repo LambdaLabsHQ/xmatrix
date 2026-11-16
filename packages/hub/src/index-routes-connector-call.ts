@@ -1,9 +1,9 @@
-import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, type ConnectorResultVisibility } from "@xmatrix/protocol";
+import { HUB_ROUTES, PRIVATE_CONNECTOR_RESULT, connectorReceiptMessageId, type ConnectorResultVisibility } from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import type { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { requireAgentRunChannelDelegation } from "./agent-run-channel-delegation";
-import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse } from "./index-shared";
+import { AuthFailure, PermissionFailure, readBoundedRequestBody, requireAuth, requireHumanAuth, requestErrorResponse, transientError } from "./index-shared";
 import { privateResponse } from "./private-response";
 import { parseActionCommand } from "./connectors/action-parse";
 import { connectorActionCatalog } from "./connectors/action-catalog";
@@ -19,6 +19,18 @@ import type { Env } from "./types";
 import { readConnectorPrivateResult, writeConnectorPrivateResult } from "./connectors/private-result-content";
 
 const NO_STORE = { "cache-control": "private, no-store" };
+
+/** The class a masked failure came from, when it is a short code-defined name
+ * or code; never its message, which may carry private content. */
+function maskedConnectorFailure(error: unknown): Error {
+  const masked = new Error("Private connector call failed");
+  const field = (key: "name" | "code"): string =>
+    error && typeof error === "object" && key in error ? String((error as Record<string, unknown>)[key] ?? "") : "";
+  const classified = [field("name"), field("code")]
+    .filter(value => value !== "" && value !== "Error" && /^[A-Za-z0-9_.:-]{1,60}$/u.test(value));
+  if (classified.length) masked.name = `PrivateConnectorCallError(${classified.join(":")})`;
+  return masked;
+}
 
 /** Recorded calls keep their invocation visible. A private result crosses
  * the calling response and the Human owner’s protected view; shared history receives a mask. */
@@ -65,6 +77,8 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       if (error instanceof ReceiptUnsaved) return c.json({ error: error.message }, 503, NO_STORE);
       // Provider errors may contain private data too. The receipt applies its
       // chosen visibility; raw exceptions never reach shared error reporting.
+      // A PostgreSQL or Durable Object outage a replay can survive keeps the
+      // Hub's retryable refusal instead of becoming an unexplained 500.
       if (error instanceof ProviderRequestError && authorizeCaller) {
         try { await authorizeCaller(); }
         catch (denied) { return privateResponse(requestErrorResponse(c,
@@ -73,7 +87,7 @@ export function registerConnectorCallRoutes(app: Hono<{ Bindings: Env }>): void 
       if (error instanceof ProviderRequestError) return c.json({ error: error.message },
         (error.status >= 400 && error.status <= 599 ? error.status : 502) as ContentfulStatusCode, NO_STORE);
       const safe = error instanceof ControlError || error instanceof AuthFailure || error instanceof PermissionFailure
-        ? error : new Error("Private connector call failed");
+        ? error : transientError(error) ? error : maskedConnectorFailure(error);
       return privateResponse(requestErrorResponse(c, safe));
     }
   });
@@ -117,8 +131,13 @@ export async function recordedRead(env: Env, call: {
   const provider = connectorForCommand(call.command);
   const parsed = provider && parseActionCommand(provider.id, call.command);
   const action = parsed && connectorActionCatalog(provider!.id, provider!.actions).get(parsed.actionId)?.executor;
-  if (!provider || !parsed || !action) throw new ProviderRequestError(400, "Unknown connector action");
-  if (action.effect !== "read") throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
+  if (!provider || !parsed) throw new ProviderRequestError(400, "Unknown connector action");
+  // The provider runs this command from a Channel message and has no call executor for it.
+  if (!action) throw new ProviderRequestError(400, `@${provider.id}:${parsed.actionId} runs only as a Channel message; ` +
+    `send it with xmatrix send <channel-id> "<command>" instead of xmatrix call`);
+  if (action.effect !== "read" && !action.callerOnly) throw new ProviderRequestError(403, "Calls support read actions only; use a Channel command for writes");
+  // A caller-only result is masked in the Channel whatever the caller asked for.
+  if (action.callerOnly) call = { ...call, visibility: "private" };
   const manifest = getAppConnectorProvider(provider.id)!;
   const input: ConnectorCommandInput = { env, channelId: call.channelId, actorUserId: call.ownerUserId,
     senderKind: call.sender.kind, senderId: call.sender.id, messageId: crypto.randomUUID(), body: call.command };
@@ -132,7 +151,7 @@ export async function recordedRead(env: Env, call: {
   const publish = async (status: "completed" | "failed" | "blocked", summary: string, masked = PRIVATE_CONNECTOR_RESULT) => {
     if (call.visibility === "private") await writeConnectorPrivateResult(env, {
       channelId: call.channelId, spaceId: call.spaceId, ownerUserId: call.ownerUserId,
-      messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200), detail: summary,
+      messageId: connectorReceiptMessageId(input.messageId, manifest.id), detail: summary,
     });
     await publishCommandStatus(manifest, input, [commandResult(manifest.name, parsed.actionId, {
       status, summary: call.visibility === "private" ? masked : summary,

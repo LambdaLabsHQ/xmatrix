@@ -1,7 +1,8 @@
 import type { Context, Hono } from "hono";
-import { ControlError } from "@xmatrix/db";
+import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { parseAgentRegistrationCommand, parseSpaceAgentRegistrationKey, groupAgentRegistrationCatalog, parseHarnessProfileCommand,
-  parseAgentEnvironmentCommand, parseAgentRegistrationKey, type AgentRegistrationSummary } from "@xmatrix/protocol";
+  parseAgentEnvironmentCommand, parseAgentRegistrationKey, agentAccessModes, agentPresetById, agentPresetForLauncher,
+  type AgentRegistrationSummary } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { readBoundedRequestBody, requireAuth, requireHumanAuth, requestFailure } from "./index-shared";
 import { failureResponse } from "./error-contract";
@@ -100,8 +101,30 @@ export function registerAgentRegistrationRoutes(app: Hono<{ Bindings: Env }>, de
           return c.json({ error: "An Agent Run adds Agents only for its owner, on its own Machine, in its own Space" }, 403);
         }
         if (scope === "physical" && key.ownerUserId !== user.id) return c.json({ error: "Registration not found" }, 404);
+        // A mode is confirmed only for a harness whose permission requests xMatrix can show.
+        const access = command && "environment" in command ? command.environment.launch?.access : undefined;
+        if (access && !agentAccessModes(agentPresetById(key.harness) ?? agentPresetForLauncher(key.harness)).includes(access)) {
+          return c.json({ error: `${key.harness} can only be given full access: xMatrix cannot show its permission requests in a Channel` }, 400);
+        }
         // An Agent Run adds an Agent as its owner, without an admin's creation exception.
         const actorUserId = user.id;
+        // What an Agent may do on a machine is its owner's to confirm, so a Run
+        // adds only a harness whose access its owner already confirmed there,
+        // and never writes a mode of its own.
+        if (run && command && "action" in command && command.action === "create") {
+          const physical = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
+          const held = await port.getEnvironment(c.env, { actorUserId, key: physical }).catch((error) => {
+            // A harness never added on this machine has no environment yet; its
+            // owner has confirmed nothing, so it is the same refusal.
+            if (error instanceof RegistrationAccessError && error.code === "registration_not_found") return undefined;
+            throw error;
+          });
+          if (!held?.environment?.launch?.access) {
+            return c.json({ error: `The owner of this machine confirms what ${key.harness} may do on it before it is added. ` +
+              `Ask them to run \`xmatrix agent add ${key.harness} --space ${spaceId}\` on it, or to add it in the app` }, 403);
+          }
+          if (command.environment.launch) delete command.environment.launch.access;
+        }
         const result = scope === "space"
           ? command ? await port.control(c.env, { actorUserId,
             command: command as ReturnType<typeof parseAgentRegistrationCommand>, byAgent: run !== undefined })

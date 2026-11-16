@@ -13,6 +13,18 @@ const state = (row) => row.attributes.appVersionState ?? row.attributes.appStore
 const query = (values) => new URLSearchParams(values).toString();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export const REQUIRED_DESCRIPTION_LINKS = Object.freeze([
+  "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
+  "https://xmatrix.sh/privacy",
+]);
+
+// App Review asked (Guideline 3.1.2(c), 2026-11-15) that the Notes field say
+// where each required subscription disclosure is, for every future submission.
+export const SUBSCRIPTION_REVIEW_NOTE = "Subscriptions: xMatrix Pro Monthly (1 month) and xMatrix Pro Annual (1 year) are sold in Settings > Billing. " +
+  "Each purchase button shows the subscription title, length and App Store price; the same screen links the Terms of Use (EULA) " +
+  "(Apple's standard EULA, https://www.apple.com/legal/internet-services/itunes/dev/stdeula/) and the Privacy Policy (https://xmatrix.sh/privacy). " +
+  "The App Description links both, and the Privacy Policy field points to https://xmatrix.sh/privacy.";
+
 export function validateMetadata(metadata) {
   const allowed = ["bundleId", "copyright", "localizations"];
   if (!metadata || Object.keys(metadata).some((key) => !allowed.includes(key)) || metadata.bundleId !== "sh.xmatrix.app") {
@@ -29,6 +41,13 @@ export function validateMetadata(metadata) {
     if (Object.keys(entry).some((key) => key !== "locale" && !(key in limits))) throw new Error("Unrecognized public metadata field.");
     for (const [key, limit] of Object.entries(limits)) {
       if (typeof entry[key] !== "string" || !entry[key].length || [...entry[key]].length > limit) throw new Error(`Invalid metadata field: ${key}.`);
+    }
+    // Guideline 3.1.2(c): every localization of an app with auto-renewable
+    // subscriptions must link the Terms of Use (EULA) and privacy policy. The
+    // release overwrites the description with this file, so a link added only
+    // in App Store Connect would be lost on the next submission.
+    for (const link of REQUIRED_DESCRIPTION_LINKS) {
+      if (!entry.description.includes(link)) throw new Error(`Metadata description must link ${link}.`);
     }
     for (const key of ["supportUrl", "marketingUrl"]) {
       let url;
@@ -94,7 +113,56 @@ export async function releaseToApple(api, { release, appId, buildNumber, metadat
   return submitRelease(api, { appId, version, buildNumber, metadata, releaseNotes, privateNotes, waitFor, attempts });
 }
 
-const CARRIED = { subscriptionVersion: "subscriptionVersions", subscriptionGroupVersion: "subscriptionGroupVersions" };
+const CARRIED = { subscriptionVersion: "subscriptionVersions", subscriptionGroupVersion: "subscriptionGroupVersions", inAppPurchaseVersion: "inAppPurchaseVersions" };
+const ITEM_TYPES = { appStoreVersion: "appStoreVersions", ...CARRIED };
+const resourceId = (value) => typeof value === "string" && /^[A-Za-z0-9-]{1,100}$/.test(value);
+
+const REVIEW_ITEM_QUERY = query({ include: Object.keys(ITEM_TYPES).join(","), limit: "200" });
+const reviewItems = (api, id) => api.list(`/v1/reviewSubmissions/${id}/items?${REVIEW_ITEM_QUERY}`);
+
+// A review may contain the app and its first products together. Prove each
+// product's parent belongs to this app before changing or canceling anything.
+async function checkedReviewItems(api, appId, versionId, items) {
+  if (items.length > 200) throw new Error("Too many review items; reconcile at Apple.");
+  const owned = new Map(), seen = new Set(), checked = [];
+  const owns = async (collection, type, id) => {
+    if (!owned.has(collection)) {
+      const rows = await api.list(`/v1/apps/${appId}/${collection}?limit=200`);
+      if (rows.some(row => row.type !== type || !resourceId(row.id))) throw new Error("Invalid Apple product ownership response.");
+      owned.set(collection, new Set(rows.map(row => row.id)));
+    }
+    return owned.get(collection).has(id);
+  };
+  const parent = async (type, id, key, expectedType) => {
+    const row = (await api.request(`/v1/${type}/${id}?include=${key}`)).data;
+    const ref = row?.relationships?.[key]?.data;
+    if (row?.type !== type || row.id !== id || ref?.type !== expectedType || !resourceId(ref.id)) {
+      throw new Error("Invalid Apple product parent response.");
+    }
+    return ref.id;
+  };
+  for (const item of items) {
+    const refs = Object.entries(item.relationships ?? {}).filter(([key, rel]) => key !== "reviewSubmission" && rel?.data != null);
+    const [key, rel] = refs[0] ?? [];
+    const ref = rel?.data;
+    if (refs.length !== 1 || !Object.hasOwn(ITEM_TYPES, key) || ref?.type !== ITEM_TYPES[key] || !resourceId(ref?.id) || seen.has(`${key}:${ref.id}`)) {
+      throw new Error("Review submission contains unrelated or ambiguous items; refusing changes.");
+    }
+    seen.add(`${key}:${ref.id}`);
+    let valid = key === "appStoreVersion" && ref.id === versionId;
+    if (key === "subscriptionGroupVersion") {
+      valid = await owns("subscriptionGroups", "subscriptionGroups", await parent(ref.type, ref.id, "subscriptionGroup", "subscriptionGroups"));
+    } else if (key === "subscriptionVersion") {
+      const subscription = await parent(ref.type, ref.id, "subscription", "subscriptions");
+      valid = await owns("subscriptionGroups", "subscriptionGroups", await parent("subscriptions", subscription, "group", "subscriptionGroups"));
+    } else if (key === "inAppPurchaseVersion") {
+      valid = await owns("inAppPurchasesV2", "inAppPurchases", await parent(ref.type, ref.id, "inAppPurchase", "inAppPurchases"));
+    }
+    if (!valid) throw new Error("Review submission contains unrelated items; refusing changes.");
+    checked.push({ key, id: ref.id });
+  }
+  return checked;
+}
 
 /**
  * Cancels the one review submission still waiting for Apple and waits, at
@@ -102,16 +170,13 @@ const CARRIED = { subscriptionVersion: "subscriptionVersions", subscriptionGroup
  * the subscription items it carried, which the replacement must carry too:
  * Apple reviews a first subscription only together with an app version.
  */
-async function withdrawQueuedReview(api, appId, waitFor, attempts = 24) {
+async function withdrawQueuedReview(api, appId, versionId, waitFor, attempts = 24) {
   const open = (await api.list(`/v1/reviewSubmissions?${query({ "filter[app]": appId, "filter[platform]": "IOS", limit: "200" })}`))
     .filter((row) => row.attributes.state !== "COMPLETE");
   if (open.length !== 1 || open[0].attributes.state !== "WAITING_FOR_REVIEW") throw new Error("The queued App Review submission is ambiguous; reconcile it at Apple.");
   const path = `/v1/reviewSubmissions/${open[0].id}`;
-  const items = await api.list(`${path}/items?${query({ "fields[reviewSubmissionItems]": "appStoreVersion,subscriptionVersion,subscriptionGroupVersion", limit: "200" })}`);
-  const carried = items.flatMap((item) => Object.keys(CARRIED).flatMap((key) => {
-    const id = item.relationships?.[key]?.data?.id;
-    return id ? [{ key, id }] : [];
-  }));
+  const items = await reviewItems(api, open[0].id);
+  const carried = (await checkedReviewItems(api, appId, versionId, items)).filter(item => item.key !== "appStoreVersion");
   await api.request(path, "PATCH", { type: "reviewSubmissions", id: open[0].id, attributes: { canceled: true } });
   for (let attempt = 0; attempt < attempts; attempt++) {
     if ((await api.request(path)).data.attributes.state === "COMPLETE") return carried;
@@ -141,7 +206,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   let replaced, carried = [];
   if (queued.length === 1 && compareVersions(queued[0].attributes.versionString, version) < 0) {
     replaced = queued[0].attributes.versionString;
-    carried = await withdrawQueuedReview(api, appId, waitFor);
+    carried = await withdrawQueuedReview(api, appId, queued[0].id, waitFor);
     versions = await listVersions();
     target = versions.find((row) => row.attributes.versionString === version);
   }
@@ -159,10 +224,8 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   if (submission && !["READY_FOR_REVIEW", "UNRESOLVED_ISSUES"].includes(submission.attributes.state)) {
     return { outcome: "deferred-existing-review", version, buildNumber };
   }
-  const items = submission ? await api.list(`/v1/reviewSubmissions/${submission.id}/items?include=appStoreVersion&limit=200`) : [];
-  if (items.length > 1 || items.some((item) => !target || item.relationships?.appStoreVersion?.data?.id !== target.id)) {
-    throw new Error("Review submission contains unrelated items; refusing changes.");
-  }
+  const items = submission ? await reviewItems(api, submission.id) : [];
+  const checkedItems = await checkedReviewItems(api, appId, target?.id, items);
   // Contact/login facts stay at Apple. Never read them from public metadata.
   // New-version creation requires an existing review configuration to inherit.
   const candidates = [target, ...versions.filter((row) => row.id !== target?.id && SUBMITTED.has(state(row)))
@@ -176,7 +239,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   }
   if (!review) throw new Error("Configure private App Review details at Apple before enabling submission.");
   const details = review.attributes;
-  const notes = privateNotes ? `${privateNotes}\n\nRelease: ${version} (${buildNumber}).` : details.notes;
+  const notes = privateNotes ? `${privateNotes}\n\n${SUBSCRIPTION_REVIEW_NOTE}\n\nRelease: ${version} (${buildNumber}).` : details.notes;
   if (typeof notes !== "string" || !notes.trim() || notes.length > 4000) throw new Error("Private App Review notes are missing or exceed Apple's limit.");
   for (const field of ["contactFirstName", "contactLastName", "contactEmail", "contactPhone"]) {
     if (!details[field]) throw new Error("Private App Review contact information is incomplete.");
@@ -232,12 +295,12 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   if (!submission) {
     submission = (await api.request("/v1/reviewSubmissions", "POST", { type: "reviewSubmissions", attributes: { platform: "IOS" }, relationships: { app: relation("apps", appId) } })).data;
   }
-  if (!items.length) {
+  if (!checkedItems.some(item => item.key === "appStoreVersion")) {
     await api.request("/v1/reviewSubmissionItems", "POST", { type: "reviewSubmissionItems", relationships: {
       reviewSubmission: relation("reviewSubmissions", submission.id), appStoreVersion: relation("appStoreVersions", target.id),
     } });
   }
-  for (const { key, id } of carried) {
+  for (const { key, id } of carried.filter(item => !checkedItems.some(existing => existing.key === item.key && existing.id === item.id))) {
     await api.request("/v1/reviewSubmissionItems", "POST", { type: "reviewSubmissionItems", relationships: {
       reviewSubmission: relation("reviewSubmissions", submission.id), [key]: relation(CARRIED[key], id),
     } });

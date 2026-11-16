@@ -19,6 +19,7 @@ import {
   type ChannelSummarySource,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
+import { NORN_DELIVERY_PREFIX } from "@xmatrix/db";
 import { readLaunchContext } from "./agent-launch-context";
 import { linkedPages } from "./index-routes-pages";
 import { runPrincipalOf } from "./run-principal";
@@ -527,6 +528,12 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         reader: run ? { agentId: run.agentId, instanceId: run.instanceId ?? undefined } : undefined,
         history: async (page) => {
           const result = await channelMessageHistory(c.env, { channelId, principal, ...page });
+          // A Run started for a Norn request reads that request and the linked pages, not the conversation
+          // behind it: the request carries what the program gives it, and a program that repeats would
+          // otherwise hand each new Run a longer history than the last.
+          if (startedForId?.startsWith(NORN_DELIVERY_PREFIX)) {
+            return { messages: (result.messages as ChannelMessage[]).filter((message) => message.messageId === startedForId), hasMore: false };
+          }
           return { messages: result.messages as ChannelMessage[], hasMore: result.hasMore === true };
         },
         about: async () => {

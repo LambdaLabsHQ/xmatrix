@@ -1,5 +1,13 @@
 import { parsePostgresLockWait, type PostgresLockWait } from "./postgres-lock-wait.js";
 
+// These messages collapse to CONNECTION_TERMINATED in the client. Preserve
+// their distinction at capture time without retaining arbitrary driver text.
+const DRIVER_REASONS = {
+  pg_connection_terminated: "Connection terminated",
+  pg_connection_terminated_unexpectedly: "Connection terminated unexpectedly",
+  hyperdrive_egress_severed: "Egress connection severed outside of Hyperdrive",
+} as const;
+
 /** Metadata-only failures. Never retain SQL, parameters, caller IDs or driver messages. */
 export interface DatabaseFailureEvidence {
   operation: string;
@@ -9,6 +17,7 @@ export interface DatabaseFailureEvidence {
   queryName: string;
   code: string;
   durationMs: number;
+  driverReason?: keyof typeof DRIVER_REASONS;
   lockWait?: PostgresLockWait;
   queryWait?: PostgresLockWait;
   /** Cumulative session progress at this failure, before rollback or retry. */
@@ -29,8 +38,8 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
   if (!Array.isArray(value) || value.length > LIMIT) return [];
   const result: DatabaseFailureEvidence[] = [];
   for (const item of value) {
-    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) + ("lockWait" in item ? 1 : 0) + ("queryWait" in item ? 1 : 0) ||
-        Object.keys(item).some(key => key !== "session" && key !== "lockWait" && key !== "queryWait" && !FIELDS.includes(key)) ||
+    if (!item || typeof item !== "object" || Object.keys(item).length !== FIELDS.length + ("session" in item ? 1 : 0) + ("lockWait" in item ? 1 : 0) + ("queryWait" in item ? 1 : 0) + ("driverReason" in item ? 1 : 0) ||
+        Object.keys(item).some(key => key !== "session" && key !== "lockWait" && key !== "queryWait" && key !== "driverReason" && !FIELDS.includes(key)) ||
         typeof item.operation !== "string" || !/^[a-z][a-z0-9_.:-]{0,119}$/u.test(item.operation) ||
         typeof item.shardId !== "string" || !/^[a-z0-9][a-z0-9_.:-]{0,79}$/u.test(item.shardId) ||
         !["single_read", "transaction"].includes(item.statement) ||
@@ -38,6 +47,8 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
         typeof item.queryName !== "string" || !/^[a-z][a-z0-9_]{0,159}$/u.test(item.queryName) ||
         typeof item.code !== "string" || !(CODES.has(item.code) || /^[0-9A-Z]{5}$/u.test(item.code)) ||
         !Number.isSafeInteger(item.durationMs) || item.durationMs < 0 || item.durationMs > 120_000) return [];
+    if ("driverReason" in item && (item.code !== "CONNECTION_TERMINATED" ||
+        typeof item.driverReason !== "string" || !Object.hasOwn(DRIVER_REASONS, item.driverReason))) return [];
     const session = "session" in item ? parseSession(item.session) : undefined;
     if (session === null) return [];
     const lockWait = "lockWait" in item ? parsePostgresLockWait(item.lockWait) : undefined;
@@ -46,6 +57,7 @@ export function parseDatabaseFailureEvidence(value: unknown): readonly DatabaseF
     if ("queryWait" in item && !queryWait) return [];
     result.push(Object.freeze({ operation: item.operation, shardId: item.shardId, statement: item.statement,
       phase: item.phase, queryName: item.queryName, code: item.code, durationMs: item.durationMs,
+      ...("driverReason" in item ? { driverReason: item.driverReason as DatabaseFailureEvidence["driverReason"] } : {}),
       ...(session ? { session } : {}), ...(lockWait ? { lockWait } : {}), ...(queryWait ? { queryWait } : {}) }));
   }
   return Object.freeze(result);
@@ -62,7 +74,10 @@ function parseSession(value: unknown): DatabaseFailureEvidence["session"] | null
 export function recordDatabaseFailure(error: unknown, evidence: DatabaseFailureEvidence): void {
   if (!error || typeof error !== "object") return;
   const code = evidence.code.toUpperCase();
+  const driverReason = code === "CONNECTION_TERMINATED" && error instanceof Error
+    ? Object.entries(DRIVER_REASONS).find(([, message]) => error.message === message)?.[0] : undefined;
   const safe = parseDatabaseFailureEvidence([{ ...evidence,
+    ...(driverReason ? { driverReason } : {}),
     code: CODES.has(code) || /^[0-9A-Z]{5}$/u.test(code) ? code : "DATABASE_ERROR",
     durationMs: Math.min(120_000, Math.max(0, Math.round(evidence.durationMs))),
     ...(evidence.session ? { session: Object.fromEntries(SESSION_FIELDS.map(key =>

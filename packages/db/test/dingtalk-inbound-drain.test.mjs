@@ -2,37 +2,35 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { drainDingTalkInbound } from '../dist/index.js';
 
-/** Contract-only scoped sinks; no real native proof, Channel append or Automation occurs. */
+/** Contract-only scoped sinks; no real native proof or Channel append occurs. */
 function fixture() {
   const app = { suiteKey: 'suiteFixture',eventKeyDigest: 'a'.repeat(64) },calls = [],states = [],stored = new Set();
   const job = { appIdentity: 'dingtalk|suiteFixture|'+'a'.repeat(64),eventDigest: 'b'.repeat(64),connectionId: 'original:dingtalk',
     spaceId: 'original',scopeDigest: 'c'.repeat(64),parentGeneration: crypto.randomUUID(),inboundGeneration: crypto.randomUUID(),leaseId: crypto.randomUUID() };
-  const state = { active: true,claim: true,failAutomation: false,revokedAfterAppend: false };
+  const state = { active: true,claim: true,failAppend: false,revokedAfterAppend: false };
   const current = { installation: { spaceId: 'original',actorUserId: 'owner',members: ['MemberCase'] },scope: {},
     candidate: { text: 'private body' },sourceRef: 'dingtalk:inbound-'+'d'.repeat(64),eventId: 'e'.repeat(64) };
   const repository = { claim: async () => state.claim ? [job] : [],current: async () => state.active ? current : null,
     finish: async ({ outcome }) => { states.push(outcome); } };
   const effects = {
     verifyNative: async (_value,signal) => { assert.equal(signal.aborted,false);calls.push('native'); },
-    append: async ({ event },fence) => { assert.equal(await fence.current(),true);calls.push(event);stored.add('channel:'+event.eventId);
+    append: async ({ event },fence) => { assert.equal(await fence.current(),true);calls.push(event);
+      if (state.failAppend) throw Error('private provider detail');stored.add('channel:'+event.eventId);
       if (state.revokedAfterAppend) state.active=false; },
-    automations: async ({ event },fence) => { assert.equal(await fence.current(),true);calls.push('automation');
-      if (state.failAutomation) throw Error('private provider detail');stored.add('automation:'+event.eventId); }
   };
   return { app,job,state,calls,states,stored,repository,effects,run: extra => drainDingTalkInbound({ app,repository,effects,...extra }) };
 }
 test('DingTalk dormant drain resolves current source, verifies native authority and emits stable scoped effect plans',async () => {
-  const f = fixture();await f.run();assert.deepEqual(f.states,['done']);assert.equal(f.stored.size,2);
+  const f = fixture();await f.run();assert.deepEqual(f.states,['done']);assert.equal(f.stored.size,1);
   const event = f.calls.find(v => typeof v==='object');assert.equal(event.feature,'message.received');assert.equal(event.body,'private body');
   assert.doesNotMatch(JSON.stringify(event),/MemberCase|owner|native-token|original/);
-  f.state.active=false;await f.run();assert.deepEqual(f.states,['done','obsolete']);assert.equal(f.calls.length,3);
+  f.state.active=false;await f.run();assert.deepEqual(f.states,['done','obsolete']);assert.equal(f.calls.length,2);
 });
-test('DingTalk dormant drain retries partial effects with identical IDs and stops between append and Automation on retirement',async () => {
-  const f = fixture();f.state.failAutomation=true;await f.run();assert.deepEqual(f.states,['retry']);assert.equal(f.stored.size,1);
-  f.state.failAutomation=false;await f.run();assert.equal(f.stored.size,2);assert.deepEqual(f.states,['retry','done']);
-  const ids = f.calls.filter(v => typeof v==='object').map(v => v.eventId);assert.equal(new Set(ids).size,1);
-  const g = fixture();g.state.revokedAfterAppend=true;await g.run();assert.deepEqual(g.states,['obsolete']);
-  assert.equal(g.calls.includes('automation'),false);
+test('DingTalk dormant drain retries a failed effect with identical IDs and is obsolete when the source retires after it',async () => {
+  const f = fixture();f.state.failAppend=true;await f.run();assert.deepEqual(f.states,['retry']);assert.equal(f.stored.size,0);
+  f.state.failAppend=false;await f.run();assert.equal(f.stored.size,1);assert.deepEqual(f.states,['retry','done']);
+  const ids = f.calls.filter(v => typeof v==='object').map(v => v.eventId);assert.equal(ids.length,2);assert.equal(new Set(ids).size,1);
+  const g = fixture();g.state.revokedAfterAppend=true;await g.run();assert.deepEqual(g.states,['obsolete']);assert.equal(g.stored.size,1);
 });
 test('DingTalk dormant drain times out ignored native verification and suppresses every later effect',async () => {
   const f = fixture();let release,signal;
@@ -72,5 +70,5 @@ test('DingTalk late initial current and late effects remain cancelled after boun
     if (await fence.current()) g.stored.add('late-effect'); };
   await g.run({ deadlineMs: 5 });assert.equal(signal.aborted,true);later();
   await new Promise(resolve => setImmediate(resolve));assert.deepEqual(g.states,['retry']);
-  assert.equal(g.stored.size,0);assert.equal(g.calls.includes('automation'),false);
+  assert.equal(g.stored.size,0);
 });

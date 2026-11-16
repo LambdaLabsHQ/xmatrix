@@ -100,9 +100,16 @@ lifecycle wiring. Every eligible interactive explicit-repo launch uses it.
   the manifest, including quarantined/missing slots. Allocation checks both
   durable records and existing filesystem entries under the pool coordinator,
   retries random IDs at most 32 times, and fails without overwriting a slot.
-- Existing `<repoKeyIdSha256>` directories take precedence and remain in place,
-  preserving live/retained worktrees, Git pointers, and reborn cwd. There is no
-  automatic move or deletion. Full `repoKeyId` / `slotId` protocol and registry
+- Existing `<repoKeyIdSha256>` directories remain in place for the sessions
+  they hold, preserving live/retained worktrees, Git pointers, and reborn cwd.
+  A layout resolves to the legacy directory only while it holds the session
+  (a binding or a rehydrate record), a handoff's predecessor, or the persisted
+  slot; every new session starts in the compact pool. Windows cannot start a
+  process whose executable or working directory passes MAX_PATH (260), and the
+  legacy layout's 88 extra characters put deep dependency trees past it. The
+  sweep keeps no warm spares in a legacy pool: its unbound Available trees are
+  evicted regardless of the idle budget, so the legacy pool drains as its
+  sessions end. Nothing is moved; the directory itself is not deleted. Full `repoKeyId` / `slotId` protocol and registry
   values are unchanged. Older daemons do not understand compact directories;
   do not downgrade while compact pools have live or retained runs. A downgrade
   requires finishing those runs first and retains compact pool data on disk.

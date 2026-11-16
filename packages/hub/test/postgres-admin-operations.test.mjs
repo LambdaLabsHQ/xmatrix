@@ -33,9 +33,6 @@ function operationsResults(overrides = {}) {
     postgres_admin_operations_active_runs_v1: [{ active: 0 }],
     postgres_admin_operations_run_statuses_v1: [],
     postgres_admin_operations_run_days_v1: [],
-    postgres_admin_operations_automations_v1: [{ total: 0, enabled: 0, with_error: 0 }],
-    postgres_admin_operations_occurrences_v1: [],
-    postgres_admin_operations_overdue_v1: [{ overdue: 0 }],
     postgres_admin_operations_subscriptions_v1: [],
     postgres_admin_operations_webhooks_v1: [],
     postgres_admin_operations_webhook_outcomes_v1: [],
@@ -97,6 +94,8 @@ test("admin operations merge shards, read Machines once, and count per-Machine w
     { harness: "codex", agents: 1, spaces: 1, owners: 1 },
   ]);
   assert.deepEqual(operations.runs.byStatus, { failed: 3, running: 1 });
+  // Webs before #1680 still read the retired Automation figures.
+  assert.deepEqual(operations.automations, { total: 0, enabled: 0, withError: 0, occurrencesByStatus: {}, overdue: 0 });
   assert.equal(operations.runs.daily.length, 30);
   assert.deepEqual(operations.runs.daily.at(-1), { date: "2026-09-30", started: 2, failed: 1 });
   assert.deepEqual(operations.outbox, { byStatus: {}, maxAttempts: 0 },
@@ -124,8 +123,6 @@ function spaceResults(overrides = {}) {
     ],
     postgres_admin_space_agents_v1: [],
     postgres_admin_space_connectors_v1: [],
-    postgres_admin_space_automations_v1: [{ total: 2, enabled: 1, with_error: 1, run_count: 9, last_run_at: null }],
-    postgres_admin_space_occurrences_v1: [{ status: "dispatched", total: 4 }, { status: "failed", total: 1 }],
     postgres_admin_space_runs_v1: [{ status: "completed", total: 3, last_at: "2026-09-29T00:00:00.000Z" }],
     postgres_admin_space_billing_v1: [],
     postgres_admin_space_webhooks_v1: [],
@@ -152,8 +149,7 @@ test("admin Space detail answers from the shard that holds the Space, metadata o
   assert.equal(detail.totals.storageLogicalBytes, 1024);
   assert.equal(detail.freeMessages, 7);
   assert.deepEqual(detail.members[1], { userId: "user-2", role: "member", joinedAt: "2026-08-02T00:00:00.000Z", messages: 1 });
-  assert.deepEqual(detail.automations.occurrencesByStatus, { dispatched: 4, failed: 1 });
-  assert.equal(detail.automations.withError, 1);
+  assert.deepEqual(detail.automations, { total: 0, enabled: 0, withError: 0, runCount: 0, occurrencesByStatus: {} });
   assert.deepEqual(detail.runs, { total: 3, byStatus: { completed: 3 }, lastRunAt: "2026-09-29T00:00:00.000Z" });
   assert.equal(detail.billing, undefined);
   assert.equal(detail.activity.length, 30);

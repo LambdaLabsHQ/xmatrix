@@ -45,27 +45,11 @@ syntax later does not restore the old target. Send validates the final body
 after substituting picked Page and Channel references; server envelope and
 authorization checks remain strict.
 
-The Web composer asks Jev about summon intent after a 350 ms typing pause,
-using the exact outgoing body, summon ranges and the author's authorized
-Channel context. Mention bands show the reading. A declined address has a clickable dotted
-underline that opens xMatrix's explanation and a **Start anyway** option at
-that mention. The option writes `launch:force` only on that summon; sending
-still owns publication and launch. Normal summons add no explanatory text,
-and no caption sits below the input. The separate intent/Force pill is removed.
-Sending takes only completed readings for the current draft and never waits
-for the preview debounce or an in-flight request. Any edit or Channel
-change discards the old reading. Forced mentions skip preview.
-
-A Human send carries the confirmed readings, bound to exact UTF-16 offsets and
-mention text. These are the author's intent choices, like `launch:force`,
-not credentials or proof of a model decision. The server accepts them only
-from Human message authors and still reads the stored source, current access,
-registration grants, launch fences, workspace, model and machine authority.
-A confirmed non-request allocates nothing; a confirmed request skips only the
-intent question and records its source as `draft`. The first four summons are
-previewed. Unread summons, old clients, first messages of new Channels and
-unavailable previews retain the ordinary post-send intent check. No durable
-launch or Run is created by preview.
+A send from the Web composer asks the Hub to start the Agents it summons
+(`launch: true`); there is no draft reading of intent. An Agent's send starts
+one only with `xmatrix send --launch`. A summon its send did not ask to start
+settles into prose with a dotted underline whose card says it was only
+mentioned and offers its author **Start**.
 
 An authenticated pre-spawn failure produces an idempotent Channel notice even
 when the Launch already marked its Run failed. A hint does not: Jev reading the

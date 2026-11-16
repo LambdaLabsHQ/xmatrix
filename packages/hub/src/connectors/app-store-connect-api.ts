@@ -1,5 +1,6 @@
 import { readBoundedStream } from "@xmatrix/protocol";
 import { pemPrivateKeyBytes } from "../push/apns";
+import { requestAppleOperation } from "./app-store-connect-schema";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
 import { connectorIngressUrl } from "./credentials";
 import { oneLine, record, text } from "./event-format";
@@ -47,11 +48,11 @@ export interface AppStoreConnectApi {
   /** One JSON:API call; `data` and `included` (resources created inline) become the request's members. A 204 answers `{}`. */
   request(path: string, init?: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; data?: unknown; included?: unknown[];
     /** Keep Apple's error text out of the receipt: the call carries review contact or sign-in details. */
-    quiet?: boolean }): Promise<Record<string, unknown>>;
+    quiet?: boolean; accept?: string }): Promise<Record<string, unknown>>;
   /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
   list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[] }>;
   /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
-  report(path: string, query: Record<string, string>): Promise<string | undefined>;
+  report(path: string, query: Record<string, string>, accept?: string): Promise<string | undefined>;
 }
 
 export function appleResource(value: unknown): AppleResource | undefined {
@@ -72,6 +73,32 @@ export function relatedIds(row: AppleResource, name: string): string[] {
 }
 
 export const relation = (type: string, id: string) => ({ data: { type, id } });
+
+/** A digest may authorize a write only from complete, unambiguous JSON:API linkage.
+ * Both public API relationship documents and embedded web relationships use this boundary.
+ * A next page or a larger provider total is evidence of a partial snapshot, never an empty remainder.
+ */
+export function appleRelationshipSnapshot(value: unknown): unknown {
+  const relationship = record(value), data = relationship.data;
+  const incomplete = () => new ProviderRequestError(502,
+    "Apple did not return a complete, unambiguous relationship snapshot; inspect the full relationship before planning a write");
+  const object = (value: unknown) => value !== null && typeof value === "object" && !Array.isArray(value);
+  if ([relationship.links, relationship.meta, record(relationship.meta).paging].some(value => value !== undefined && !object(value))) throw incomplete();
+  if (!Object.hasOwn(relationship, "data") || record(relationship.links).next != null) throw incomplete();
+  const rows = data === null ? [] : Array.isArray(data) ? data : [data];
+  const total = record(record(relationship.meta).paging).total;
+  if (total !== undefined && (typeof total !== "number" || !Number.isSafeInteger(total) || total !== rows.length)) throw incomplete();
+  const seen = new Set<string>();
+  for (const item of rows) {
+    const row = record(item);
+    if (typeof row.type !== "string" || !/^[A-Za-z][A-Za-z0-9]{0,99}$/u.test(row.type) ||
+        typeof row.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._~-]{0,199}$/u.test(row.id)) throw incomplete();
+    const key = `${row.type}:${row.id}`;
+    if (seen.has(key)) throw incomplete();
+    seen.add(key);
+  }
+  return data;
+}
 
 /** PKCS#8 bytes from the `.p8` file as pasted: with or without line breaks, or the whole file in base64. */
 function privateKeyBytes(value: string): ArrayBuffer {
@@ -131,7 +158,7 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
     let problem: string | undefined;
     try {
       return await providerJson(apiUrl(path, init.query), { method: init.method ?? "GET", maxBytes: MAX_LIST_BYTES,
-        headers: { authorization: await authorization },
+        headers: { authorization: await authorization, ...(init.accept ? { accept: init.accept } : {}) },
         ...(init.data === undefined ? {} : { json: { data: init.data, ...(init.included ? { included: init.included } : {}) } }),
         describeError: (payload) => problem = appleProblem(payload, init.quiet === true) });
     } catch (error) {
@@ -144,11 +171,11 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
   };
   return {
     request,
-    async report(path, query) {
+    async report(path, query, accept = "application/a-gzip") {
       authorization ??= bearer(credentials, Math.floor(now() / 1_000));
       const signal = AbortSignal.timeout(REPORT_TIMEOUT_MS);
       const response = await fetch(apiUrl(path, query), { redirect: "manual", signal,
-        headers: { authorization: await authorization, accept: "application/a-gzip", "user-agent": "xMatrix-Connectors" } });
+        headers: { authorization: await authorization, accept, "user-agent": "xMatrix-Connectors" } });
       const bytes = await readBoundedStream(response.body, MAX_REPORT_BYTES,
         () => new ProviderRequestError(502, "App Store Connect report is too large"), signal);
       if (response.status === 404) return undefined;
@@ -198,7 +225,7 @@ export async function appleApp(api: AppStoreConnectApi, bundleId: string): Promi
 
 /** Check: the key signs a token Apple accepts. No app is needed yet. */
 export async function verifyAppStoreConnect(credentials: Credentials): Promise<void> {
-  const response = await appStoreConnect(credentials).request("/v1/apps", { query: { "fields[apps]": "bundleId", limit: "1" } });
+  const response = await requestAppleOperation(appStoreConnect(credentials), "apps_getCollection", { query: { "fields[apps]": ["bundleId"], limit: 1 } });
   if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return an app list");
 }
 

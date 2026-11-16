@@ -458,8 +458,11 @@ async fn verify_launcher(
     recipe: &HarnessCommand,
     mut outcome: HarnessActionResult,
 ) -> HarnessActionResult {
-    if outcome.status != HarnessActionStatus::Succeeded || resolve_launcher(preset).is_some() {
+    if outcome.status != HarnessActionStatus::Succeeded {
         return outcome;
+    }
+    if resolve_launcher(preset).is_some() {
+        return verify_launcher_runs(preset, outcome).await;
     }
     let mut note = format!(
         "{} finished, but xMatrix cannot find {} on this machine's PATH.",
@@ -502,6 +505,44 @@ async fn verify_launcher(
         tail.push('\n');
     }
     tail.push_str(&note);
+    with_tail(outcome, &tail)
+}
+
+/// A launcher that is there but cannot answer its own version (an npm
+/// install whose postinstall never put the real binary in place, a binary
+/// the OS kills) would fail every Run: the install did not succeed.
+async fn verify_launcher_runs(
+    preset: &AgentPreset,
+    mut outcome: HarnessActionResult,
+) -> HarnessActionResult {
+    let probe = crate::runtime_daemon_harness_inventory::probe_launcher(preset).await;
+    let Some(why) = (match probe.probe_status {
+        "failed" => Some("exited with an error"),
+        "timeout" => Some("did not answer within 5 seconds"),
+        _ => None,
+    }) else {
+        return outcome;
+    };
+    let version = preset
+        .management
+        .as_ref()
+        .and_then(|management| management.version.as_ref())
+        .map(|recipe| {
+            std::iter::once(recipe.command.as_str())
+                .chain(recipe.args.iter().map(String::as_str))
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .unwrap_or_else(|| preset.runtime.clone());
+    outcome.status = HarnessActionStatus::Failed;
+    let mut tail = outcome.output_tail.take().unwrap_or_default();
+    if !tail.is_empty() {
+        tail.push('\n');
+    }
+    tail.push_str(&format!(
+        "{} is installed but `{version}` {why}, so it cannot start. Reinstall it, then refresh.",
+        preset.display_name
+    ));
     with_tail(outcome, &tail)
 }
 
@@ -587,6 +628,18 @@ pub(crate) async fn execute(preset_id: &str, action: HarnessAction) -> HarnessAc
     if action == HarnessAction::Release {
         // Only the daemon knows which Runs are live; a local call assumes one may be.
         return release(preset_id, true).await;
+    }
+    if action == HarnessAction::Check {
+        // Its owner is looking at this harness now: ask its program, not a
+        // probe from hours ago. A status-less ACP harness is started the way a
+        // launch starts it; any other is asked by its status command.
+        let Some(preset) = preset else {
+            return result(preset_id, action, HarnessActionStatus::Unsupported);
+        };
+        crate::runtime_daemon_harness_inventory::refresh_readiness_of(preset).await;
+        let mut checked = result(preset_id, action, HarnessActionStatus::Succeeded);
+        checked.item = probed_item(preset).await;
+        return checked;
     }
     if action == HarnessAction::Refresh {
         for preset in agent_presets() {

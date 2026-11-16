@@ -8,6 +8,7 @@
  * takes it off.
  */
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useAuth } from "@/lib/auth-context";
 import type { RealtimeCollection } from "./realtime-collection";
 import { ArrowRight, AtSign, Clock, FileText, Hash, MessageSquare, X } from "lucide-react";
 import type {
@@ -300,6 +301,8 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
   onChangeView: (view: AppView) => void;
   onCancel: () => void;
 }) {
+  const { user } = useAuth();
+  const userId = user?.id;
   // Subscribe only the open picker; Agent discovery must not require a shell
   // render or an obsolete agent_list roster on the Hub.
   const subscribeAgents = useCallback((notify: () => void) =>
@@ -383,7 +386,7 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
           author: item.author, detail: item.detail })) }];
     }
     if (!searchIsRunnable(request)) {
-      const recent = readRecentSearches(spaceId);
+      const recent = readRecentSearches({ userId, spaceId });
       return recent.length ? [{ title: "Recent", rows: recent.map((item) => ({
         key: `recent:${searchRequestKey(item)}`, kind: "recent" as const, request: item })) }] : [];
     }
@@ -393,7 +396,7 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
     return rows.length ? [{ rows }] : [];
     // `request` is rebuilt every render; its parts are the dependencies.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [agents, channels, filters, messages.more, pending, rankedRows, rerankReading, searchText, space, spaceId]);
+  }, [agents, channels, filters, messages.more, pending, rankedRows, rerankReading, searchText, space, spaceId, userId]);
 
   const rows = sections.flatMap((section) => section.rows);
   useLayoutEffect(() => {
@@ -416,7 +419,7 @@ export const WorkspaceSearchDialog = memo(function WorkspaceSearchDialog({
       inputRef.current?.focus();
       return;
     }
-    rememberRecentSearch(spaceId, request);
+    rememberRecentSearch({ userId, spaceId }, request);
     if (row.kind === "destination") return onChangeView(row.view);
     if (row.kind === "message") return onSelectMessage(row.hit.channelId, row.hit.messageId);
     if (row.kind === "page") return onSelectPage(row.hit.pageId, row.hit.blockId || undefined);

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { maintainMachineResourceHistory, readMachineResourceHistory } from "../dist/index.js";
+import { machineResourceHistoryInsert, machineResourceHistorySamples } from "../dist/machine-control.js";
 
 const HOUR = 3_600_000;
 
@@ -71,6 +72,39 @@ integration("Machine resource history is owner-scoped, rolled up hourly and prun
     await client.query(`INSERT INTO data.machine_resource_hourly (owner_user_id,machine_id,hour_start,sample_count)
       VALUES ('alice','machine:a',$1,1)`, [new Date(now - 91 * 24 * HOUR).toISOString()]);
     assert.equal((await maintainMachineResourceHistory(database, { requestId: "m", now })).prunedHours, 1);
+  } finally {
+    await isolated.close();
+  }
+});
+
+integration("A report's batched minute samples land in one statement, only for the live connection", async () => {
+  const isolated = await isolatedPostgres("machine_resource_history_batch", { migrate: false, runtimeRole: false });
+  const { client } = isolated;
+  try {
+    await client.query(`CREATE SCHEMA data;
+      CREATE TABLE data.machines (owner_user_id text, machine_id text);
+      CREATE TABLE data.machine_daemons (daemon_id text, status text, connection_epoch bigint);
+      INSERT INTO data.machine_daemons VALUES ('daemon-a','online',4);`);
+    await client.query(await readFile(new URL("../migrations/0165_expand_machine_resource_history.sql", import.meta.url), "utf8"));
+    const now = Date.parse("2026-11-06T08:00:30Z");
+    const sample = (offset, cpu) => ({ observedAt: new Date(now - offset).toISOString(), cpuUsagePercent: cpu,
+      loadAverage: [0.5, 0.5, 0.5], memoryTotalBytes: 1000, memoryAvailableBytes: 400,
+      diskTotalBytes: 100, diskAvailableBytes: 30 });
+    const samples = machineResourceHistorySamples(sample(0, 50), [sample(2 * 60_000, 10), sample(60_000, 20)], now);
+    const write = (connectionEpoch, rows) => client.query(machineResourceHistoryInsert({ ownerUserId: "alice",
+      machineId: "machine:a", daemonId: "daemon-a", connectionEpoch, samples: rows }));
+    await write(4, samples);
+    // A replaced connection writes nothing; the same minute again updates in place.
+    await write(3, machineResourceHistorySamples(sample(0, 99), [], now));
+    await write(4, machineResourceHistorySamples(sample(0, 60), [], now));
+    const { rows } = await client.query(`SELECT observed_at, cpu_usage_percent, load_average_1m, memory_available_bytes
+      FROM data.machine_resource_samples ORDER BY observed_at`);
+    assert.deepEqual(rows.map(row => [row.observed_at.toISOString(), row.cpu_usage_percent, row.load_average_1m,
+      Number(row.memory_available_bytes)]), [
+      ["2026-11-06T07:58:00.000Z", 10, 0.5, 400],
+      ["2026-11-06T07:59:00.000Z", 20, 0.5, 400],
+      ["2026-11-06T08:00:00.000Z", 60, 0.5, 400],
+    ]);
   } finally {
     await isolated.close();
   }
