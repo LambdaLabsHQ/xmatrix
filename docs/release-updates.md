@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: an Agent that cannot take work is listed under @ with why
+
+The @ list showed only Agents ready to take work, so an Agent that was enabled
+but could not run (its model unavailable, not set up on its machine, or
+needing Space setup) disappeared, and nobody could tell it from one that was
+never added. On 2026-11-16 antigravity vanished this way: its default model was
+not in the catalog its updated harness reported. It is now listed greyed out
+and cannot be chosen, with the reason where its description would be. An
+Agent its owner turned off on its machine is still left out. Web only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a refused `/model` says why, and what is true of the Instance
 
 Four `/model claude-fable-5-2` statements to one Instance failed with three
