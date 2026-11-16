@@ -1,4 +1,4 @@
-import { plainRecord } from "@xmatrix/protocol";
+import { GITHUB_PULL_REQUEST_FACT_METADATA_KEY, plainRecord } from "@xmatrix/protocol";
 import { githubCommitCheckVerdict, githubRepositoryDelegated, type GitHubCommitCheckVerdict } from "./app-connectors";
 import { ServiceUnavailable } from "./error-contract";
 import { resolveGitHubSubscriptionRoutes } from "./github-subscription-route-directory";
@@ -152,9 +152,11 @@ export async function dispatchProductGitHubWebhook(input: {
           input.delivery));
       }
       const verdict = number === undefined ? undefined : await verdicts.get(number);
-      const body = number === undefined ? repositoryBody : githubPullRequestEventMessage({
+      const said = number === undefined ? { body: repositoryBody } : githubPullRequestEventMessage({
         event: input.event, payload: input.payload, repository, number,
         ...(verdict ? { verdict } : {}) });
+      const body = said?.body;
+      const fact = said && "fact" in said ? said.fact : undefined;
       /* A closed pull request ends its subscription, said or not. */
       const end = number !== undefined && closed
         ? () => command(input.env, "remove-relation", {
@@ -181,6 +183,7 @@ export async function dispatchProductGitHubWebhook(input: {
           body,
           principal,
           appAuthorId: "github",
+          ...(fact ? { residual: { appMetadata: { [GITHUB_PULL_REQUEST_FACT_METADATA_KEY]: fact } } } : {}),
         });
         if (!response.ok) return 0;
         await wake(input.env, { commandId: `resting-wake:${messageId}`.slice(0, 200), channelId: route.channelId,

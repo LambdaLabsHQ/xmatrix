@@ -1,5 +1,7 @@
 import { appCommand, findAppConnection } from "./apps";
-import { ChannelActivityInvalid, normalizeChannelActivity } from "@xmatrix/protocol";
+import {
+  ChannelActivityInvalid, normalizeChannelActivity, type GitHubPullRequestFact,
+} from "@xmatrix/protocol";
 import {
   githubConnectionInstallationFor, readGitHubPullRequestOpen, type GitHubCommitCheckVerdict,
 } from "./app-connectors";
@@ -75,7 +77,9 @@ function login(value: unknown): string {
  * The message a subscribed pull request's event posts, or undefined for one
  * that says nothing new to its conversation: the author's own pushes, comments,
  * reviews and merge (the Agent that opened it did those itself), edits,
- * labels, and every check but the settled verdict.
+ * labels, and every check but the settled verdict. A CI verdict, merge or
+ * close also carries its fact, so the timeline draws it as a compact line;
+ * reviews and comments are people's words and stay messages.
  */
 export function githubPullRequestEventMessage(input: {
   event: string;
@@ -83,7 +87,7 @@ export function githubPullRequestEventMessage(input: {
   repository: { owner: string; repo: string; url: string };
   number: number;
   verdict?: GitHubCommitCheckVerdict;
-}): string | undefined {
+}): { body: string; fact?: GitHubPullRequestFact } | undefined {
   const { event, payload, repository, number } = input;
   const subject = record(event.startsWith("pull_request") ? payload.pull_request : payload.issue);
   const author = login(subject.user);
@@ -94,41 +98,49 @@ export function githubPullRequestEventMessage(input: {
   const link = `[${ref}](${url})`;
   const actor = text(record(payload.sender).login) || "GitHub";
   const own = author !== "" && sender === author;
+  const pullRequest = { repository: `${repository.owner}/${repository.repo}`, number, url };
   if (event === "pull_request") {
     if (payload.action !== "closed" || own) return undefined;
     const verb = subject.merged === true ? "merged" : "closed";
     // A GitHub App login (`name[bot]`) restates the merge receipt in GitHub's
     // notification voice. The receipt already named the action; this line uses
     // that voice and adds the title. A person is still named.
-    const headline = actor.endsWith("[bot]")
+    const bot = actor.endsWith("[bot]");
+    const headline = bot
       ? `${verb === "merged" ? "Merged" : "Closed"} ${link}`
       : `${actor} ${verb} pull request ${link}`;
-    return title ? `${headline}: ${title}` : headline;
+    return { body: title ? `${headline}: ${title}` : headline,
+      fact: { ...pullRequest, event: verb, title, ...(bot ? {} : { actor }) } };
   }
   if (event === "pull_request_review") {
     const review = record(payload.review);
     if (payload.action !== "submitted" || login(review.user) === author) return undefined;
     const state = text(review.state).toLowerCase().replace(/_/gu, " ") || "reviewed";
     const body = text(review.body);
-    return [`${actor} ${state === "commented" ? "reviewed" : state} ${link}`, body || undefined]
-      .filter(Boolean).join("\n\n");
+    return { body: [`${actor} ${state === "commented" ? "reviewed" : state} ${link}`, body || undefined]
+      .filter(Boolean).join("\n\n") };
   }
   if (event === "pull_request_review_comment" || event === "issue_comment") {
     const comment = record(payload.comment);
     if (payload.action !== "created" || login(comment.user) === author) return undefined;
     const path = text(comment.path);
     const at = text(comment.html_url);
-    return [`${actor} commented on ${link}${path ? ` (${path})` : ""}${at ? ` ([comment](${at}))` : ""}`,
-      text(comment.body) || undefined].filter(Boolean).join("\n\n");
+    return { body: [`${actor} commented on ${link}${path ? ` (${path})` : ""}${at ? ` ([comment](${at}))` : ""}`,
+      text(comment.body) || undefined].filter(Boolean).join("\n\n") };
   }
   if (event === "check_suite") {
     const verdict = input.verdict;
     if (!verdict || verdict.state === "pending") return undefined;
     const sha = text(record(payload.check_suite).head_sha).slice(0, 7);
-    if (verdict.state === "passed") return `CI passed on ${link} at ${sha}.`;
-    const failed = verdict.failed.slice(0, 10).map((check) => check.url ? `[${check.name}](${check.url})` : check.name);
-    const more = verdict.failed.length > failed.length ? `, and ${verdict.failed.length - failed.length} more` : "";
-    return `CI failed on ${link} at ${sha}: ${failed.join(", ")}${more}.`;
+    if (verdict.state === "passed") {
+      return { body: `CI passed on ${link} at ${sha}.`, fact: { ...pullRequest, event: "ci_passed", sha } };
+    }
+    const shown = verdict.failed.slice(0, 10);
+    const failed = shown.map((check) => check.url ? `[${check.name}](${check.url})` : check.name);
+    const hidden = verdict.failed.length - shown.length;
+    const more = hidden > 0 ? `, and ${hidden} more` : "";
+    return { body: `CI failed on ${link} at ${sha}: ${failed.join(", ")}${more}.`,
+      fact: { ...pullRequest, event: "ci_failed", sha, failed: shown, more: hidden } };
   }
   return undefined;
 }
