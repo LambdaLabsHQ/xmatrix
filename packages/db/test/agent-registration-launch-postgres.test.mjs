@@ -786,6 +786,17 @@ integration("launch survives a hostname change with stale Workspace metadata and
         { model: 'provider/model', displayName: 'Model', isDefault: true, quotaScopes: ['Model'] },
         { model: 'provider/other', displayName: 'Other' }] }]);
     const factsOf = commandId => reborn.continuationModelFacts({ commandId, channelId: 'channel', sourceInstanceId: cold.instanceId });
+    // What a `/model` statement to that Instance is decided against: the row's
+    // own catalog and state, by the Instance's number in its Channel.
+    const coldRow = (await sql(`SELECT instance.channel_instance_id,run.status FROM data.instances instance
+      JOIN data.runs run ON run.run_id=instance.run_id WHERE instance.instance_id=$1`, [cold.instanceId])).rows[0];
+    const switchTarget = await reborn.switchTargetFacts({ commandId: 'switch-target', channelId: 'channel',
+      ordinal: Number(coldRow.channel_instance_id) });
+    assert.deepEqual([switchTarget.instanceId, switchTarget.currentModel, switchTarget.reportedModels.length,
+      switchTarget.modelCatalog.map(row => row.model)],
+    [cold.instanceId, 'provider/model', 2, ['provider/model', 'provider/other']]);
+    assert.equal(switchTarget.state, ['starting', 'running'].includes(coldRow.status) ? coldRow.status : 'stopped');
+    assert.equal(await reborn.switchTargetFacts({ commandId: 'switch-target-missing', channelId: 'channel', ordinal: 9_999 }), undefined);
     // A switch keeps the Instance's kind of model: one on the runtime default
     // of a registration that now declares models has nothing to switch to.
     assert.equal(await factsOf('continuation-facts-declared'), undefined);

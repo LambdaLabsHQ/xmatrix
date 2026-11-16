@@ -57,6 +57,15 @@ test("each statement claims its own span and outcome", () => {
   assert.equal(controlView(controls[0], undefined, undefined, { fresh: true }).label, "Switching");
   assert.equal(controlView(controls[0], { kind: "model", target: "claude:9", status: "no_instance" }, undefined,
     { fresh: false }).label, "Not found");
+  // A refusal reads as the Hub worded it, and a listed catalog counts its used-up models.
+  const refused = controlView(controls[0], { kind: "model", target: "claude:1", status: "error",
+    message: "the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus.",
+    quotaExhausted: { model: "fable", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box" } }, undefined, { fresh: false });
+  assert.deepEqual([refused.label, refused.detail], ["Failed",
+    "Could not switch the model: the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus."]);
+  assert.equal(controlView({ ...controls[0], value: undefined }, { kind: "model", target: "claude:1", status: "catalog",
+    options: ["opus", "fable"], current: "opus", usedUp: [{ option: "fable", resetsAt: "2026-11-19T18:00:00.000Z" }] },
+  undefined, { fresh: false }).detail, "2 models available; current: opus; 1 used up.");
 });
 
 test("a stop that fenced nothing reads the Hub's notice as its answer", () => {

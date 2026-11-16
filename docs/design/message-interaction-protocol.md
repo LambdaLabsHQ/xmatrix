@@ -103,6 +103,27 @@ carries `stopOutcome`). Messages carry the merged `commandResult`, and a
 `channel_message_interactions_updated` event applies a new annotation to every
 client that holds the message. Because it is not a message, the answer neither
 previews in the conversation list, counts as unread, nor wakes an Agent.
+`xmatrix channel history` prints it under the command as `[result]` lines, so
+an Agent reads what a person sees.
+
+A model or effort switch is decided against the Hub's own record of the
+addressed Instance before and after its Runtime is asked
+(`decideProductAgentSwitch`):
+
+- A model whose provider quota a current reading shows used up is refused
+  without asking the Instance, which would cancel its running turn for a
+  switch the provider then refuses. The refusal names the model, the machine
+  whose account it is and when the quota is back, and the outcome carries
+  `quotaExhausted` (model, reset, machine, models that still have quota).
+- A provider's own quota refusal that a runtime passes on (a 429 with no
+  reading to explain it) is worded the same way, without a reset time.
+- The Runtime is handed the catalog the Instance row stores. A Runtime cell
+  that hibernated keeps a compact session without it, and used to answer that
+  the Instance offered no such model.
+- An Instance no cell holds is named for what it is: still starting, asleep
+  until its next message, or stopped until a reborn. Only an address that
+  names no Instance of the Channel is `no_instance`.
+- A listed catalog marks the models that are used up (`usedUp`).
 
 Live annotations and history snapshots merge by fact, through the protocol's
 same command-result reducer. A partial snapshot retains notes absent from it;

@@ -2855,7 +2855,7 @@ fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
                 "not applied: {}",
                 text(control, "message").unwrap_or_default()
             ),
-            other => format!("{}", other.unwrap_or("unknown")),
+            other => other.unwrap_or("unknown").to_string(),
         };
         lines.push(format!("{statement}: {outcome}"));
     }
@@ -3657,6 +3657,29 @@ mod tests {
         assert!(!other.contains("[thread="));
     }
 
+    /// A history message in Channel `ch-a` that carries no attachment.
+    fn bare_history_message(
+        message_id: &str,
+        sequence: u64,
+        body: &str,
+        sent_at: &str,
+    ) -> ChannelMessage {
+        let attachment: ChannelAttachment = serde_json::from_value(serde_json::json!({
+            "id": "att-none", "kind": "file", "name": "a.txt", "mimeType": "text/plain", "size": 1
+        }))
+        .unwrap();
+        let mut message = history_message(
+            message_id,
+            "ch-a",
+            sequence,
+            body.to_string(),
+            attachment,
+            sent_at,
+        );
+        message.attachments = None;
+        message
+    }
+
     /// One history message built in one place. These tests differ only in the
     /// attachment they render; re-declaring the whole message in each of them is
     /// the same hand-copied shape this module just finished removing.
@@ -3736,19 +3759,12 @@ mod tests {
 
     #[test]
     fn channel_history_output_folds_activity_to_one_line() {
-        let attachment: ChannelAttachment = serde_json::from_value(serde_json::json!({
-            "id": "att-none", "kind": "file", "name": "a.txt", "mimeType": "text/plain", "size": 1
-        }))
-        .unwrap();
-        let mut message = history_message(
+        let mut message = bare_history_message(
             "activity:r-1",
-            "ch-a",
             4,
-            "✓ Run e2e · → Open PR 2".to_string(),
-            attachment,
+            "✓ Run e2e · → Open PR 2",
             "2026-09-27T18:27:00Z",
         );
-        message.attachments = None;
         message.metadata = Some(serde_json::json!({
             "xmatrixProvenance": "activity",
             "xmatrixActivity": { "kind": "plan", "completed": ["Run e2e"],
@@ -3762,6 +3778,46 @@ mod tests {
         );
         assert!(output.contains("[messageId=activity:r-1]"), "{output}");
         assert!(output.contains("▸ ✓ Run e2e · → Open PR 2"), "{output}");
+    }
+
+    #[test]
+    fn channel_history_output_shows_what_a_command_came_to() {
+        let mut message = bare_history_message(
+            "m-1",
+            5,
+            "@claude:3 /model fable\n@claude:3 /effort\n@claude:9 /effort max",
+            "2026-11-16T20:29:30Z",
+        );
+        message.command_result = Some(serde_json::json!({
+            "controls": [
+                { "kind": "model", "target": "claude:3", "status": "error",
+                  "message": "the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC." },
+                { "kind": "effort", "target": "claude:3", "status": "catalog",
+                  "current": "high", "options": ["low", "high"] },
+                { "kind": "effort", "target": "claude:9", "status": "no_instance" },
+            ],
+            "notes": [{ "id": "n-1", "text": "It closed without an answer.", "at": "2026-11-16T20:30:00Z" }],
+        }));
+        let output = format_history_message_at(&message, None);
+        assert!(output.contains(
+            "  [result] /model @claude:3: not applied: the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC.\n"
+        ), "{output}");
+        assert!(
+            output.contains("  [result] /effort @claude:3: current high; offers low, high\n"),
+            "{output}"
+        );
+        assert!(
+            output
+                .contains("  [result] /effort @claude:9: not applied: no such running Instance\n"),
+            "{output}"
+        );
+        assert!(
+            output.contains("  [result] It closed without an answer.\n"),
+            "{output}"
+        );
+        // A recalled command has no answer left to show.
+        message.recalled_at = Some("2026-11-16T20:31:00Z".to_string());
+        assert!(!format_history_message_at(&message, None).contains("[result]"));
     }
 
     #[test]

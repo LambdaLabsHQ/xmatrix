@@ -290,16 +290,22 @@ export function MentionControlChip({ invocation, outcome, notice, sentAt }: {
     ? <>{invocation.text.slice(0, valueAt)}<span className="app-summon-condition">{value}</span></>
     : invocation.text;
   const options = outcome?.status === "catalog" ? outcome.options : [];
+  const usedUp = outcome?.status === "catalog" ? outcome.usedUp ?? [] : [];
   return <InvocationChip label={invocation.text.replace(/^[@＠]/u, "")} labelContent={labelContent}
     name={agentName} instanceOrdinal={ordinal}
     face={addressedAgentFace({ name: agentName, address: `@${agentName}` })}
     sourceAddress={invocation.text}
     subtitle={invocation.kind === "model" ? "Model" : "Effort"}
     view={view}
-    context={options.length ? <p className="app-invocation-description">
-      {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}
-        <code data-current={option === (outcome as { current?: string }).current || undefined}>{option}</code></Fragment>)}
-    </p> : undefined} />;
+    context={options.length ? <>
+      <p className="app-invocation-description">
+        {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}
+          <code data-current={option === (outcome as { current?: string }).current || undefined}>{option}</code></Fragment>)}
+      </p>
+      {/* A model the provider refuses is still listed: it says until when. */}
+      {usedUp.map(({ option, resetsAt }) => <p key={option} className="app-invocation-description">
+        <code>{option}</code> provider quota used up until {formatZonedDateTime(resetsAt)}.</p>)}
+    </> : undefined} />;
 }
 
 /** A reborn or handoff the Hub refused before any Run existed. The refusal

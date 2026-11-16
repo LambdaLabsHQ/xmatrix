@@ -1,5 +1,28 @@
 # Release Updates
 
+## Unreleased: a refused `/model` says why, and what is true of the Instance
+
+Four `/model claude-fable-5-2` statements to one Instance failed with three
+different answers, none of which said what to do: `no such running Instance`
+for one that was still starting, `is not one this instance offers` for a
+model it did offer, and the provider's raw `API error: 429 … Please try again
+later` for a model whose weekly quota was used up for three more days.
+
+- A model whose provider quota is used up is refused before the Instance is
+  asked, so its running turn is not interrupted: "the provider quota for
+  claude-fable-5-2 on <machine> is used up until 2026-11-19 18:00 UTC.
+  @claude:3 stays on claude-opus-5-5." A provider refusal with no reading
+  behind it names the machine and model the same way.
+- `/model` with no value marks the models that are used up, and until when.
+- A switch is decided by the model catalog the Instance row keeps. A Runtime
+  cell that had hibernated lost its copy and refused every model.
+- An Instance that is starting, asleep or stopped is told apart from one
+  that does not exist, and a model outside the catalog lists what is offered.
+- `xmatrix channel history` prints what each command came to (`[result]`
+  lines under the message), which only the web showed before.
+
+Hub, Web and CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent can set which model its owner's Agents run
 
 The model an Agent runs when a launch names none (**Default model** on the
