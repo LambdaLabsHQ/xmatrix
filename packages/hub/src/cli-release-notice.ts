@@ -5,6 +5,7 @@ import { postgresAuthorityDatabase } from "./postgres-authority-http";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { RELAY_RUNTIME_CLI_RELEASE_NOTICE_PATH } from "./runtime-transport/relay-runtime-product-adapter";
 import { analyticsWorkerVersion } from "./analytics-sampling";
+import { transientDurableObjectFailure } from "./durable-object-failure";
 import { CliReleaseNoticeFailure, cliReleaseNoticeEvidence, type CliReleaseNoticeEvidence } from "./cli-release-notice-failure";
 import type { Env } from "./types";
 
@@ -115,7 +116,19 @@ export async function noticeCliReleases(env: Env, dependencies: CliReleaseNotice
         const behind = await owners(notice);
         if (behind.length === 0) continue;
         phase = "cell_fetch";
-        const answers = await Promise.allSettled(cells(behind).map(cell => tellCell(env, cell, notice)));
+        const answers = await Promise.allSettled(cells(behind).map((cell, index) =>
+          tellCell(env, cell, notice).catch(async (first: unknown) => {
+            // A deploy resets the cell under its stub ("no longer active"):
+            // a fresh stub reaches the restarted cell. Telling a socket twice
+            // is harmless, since every pass repeats the notice anyway.
+            if (!(first instanceof CliReleaseNoticeFailure) || first.evidence.phase !== "cell_fetch" ||
+                !transientDurableObjectFailure(first.cause)) throw first;
+            try {
+              return await tellCell(env, cells(behind)[index]!, notice, 2);
+            } catch (second) {
+              throw new AggregateError([first, second], `CLI ${channel} release notice cell failed twice`);
+            }
+          })));
         for (const answer of answers) {
           if (answer.status === "rejected") failures.push(answer.reason);
           else if (typeof answer.value === "number") told += answer.value;
@@ -133,7 +146,7 @@ export async function noticeCliReleases(env: Env, dependencies: CliReleaseNotice
 }
 
 /** How many sockets one cell told; `undefined` for a cell still on an earlier release. */
-async function tellCell(env: Env, cell: CellFetcher, notice: MachineDaemonCliReleaseNotice):
+async function tellCell(env: Env, cell: CellFetcher, notice: MachineDaemonCliReleaseNotice, attempt = 1):
   Promise<number | undefined> {
   const started = Date.now();
   let phase: CliReleaseNoticeEvidence["phase"] = "cell_fetch", status = 0;
@@ -151,7 +164,7 @@ async function tellCell(env: Env, cell: CellFetcher, notice: MachineDaemonCliRel
         body.workerVersion !== analyticsWorkerVersion(env)) return undefined;
     throw new Error(`CLI release notice cell answered ${status}`);
   } catch (cause) {
-    throw new CliReleaseNoticeFailure(cause, notice.channel, phase, started, status);
+    throw new CliReleaseNoticeFailure(cause, notice.channel, phase, started, status, attempt);
   }
 }
 

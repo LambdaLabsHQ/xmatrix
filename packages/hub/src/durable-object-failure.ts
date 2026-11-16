@@ -1,12 +1,13 @@
 /**
  * A Durable Object call that failed because the object was moving, not
  * because the request was wrong: the Hub deployed and reset it, its
- * connection dropped, or it was briefly overloaded. The runtime marks the
+ * connection dropped (or its instance was replaced under the stub), or it
+ * was briefly overloaded. The runtime marks the
  * first two `retryable`; the messages are matched too because an error that
  * crossed another object loses its properties.
  */
 const TRANSIENT_DURABLE_OBJECT_MESSAGE =
-  /Durable Object reset because its code was updated|Network connection lost|Durable Object is overloaded/u;
+  /Durable Object reset because its code was updated|Network connection lost|Durable Object is overloaded|this Durable Object instance is no longer active/u;
 
 export function transientDurableObjectFailure(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;

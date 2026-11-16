@@ -124,6 +124,41 @@ test("a pass tells the cells of owners behind each channel and fails loudly on a
   });
 });
 
+// XMATRIX-HUB-D6: a deploy resets a Runtime cell under its stub. The pass
+// asks a fresh stub once; any other cell failure is still reported at once.
+test("a cell reset under its stub is told once more through a fresh stub", async () => {
+  const reset = () => new Error("Connection closed: this Durable Object instance is no longer active. Reconnect or retry the request.");
+  let stubs = 0;
+  const result = await noticeCliReleases({}, {
+    latest: async (channel) => (channel === "stable" ? "2.3.0" : "2.2.1-beta.20"),
+    owners: async (notice) => (notice.channel === "stable" ? ["a"] : []),
+    cells: () => {
+      const first = stubs++ === 0;
+      return [{ async fetch() { if (first) throw reset(); return Response.json({ told: 1 }); } }];
+    },
+  });
+  assert.deepEqual(result, { told: 1 });
+  assert.equal(stubs, 2);
+
+  await assert.rejects(noticeCliReleases({}, {
+    latest: async (channel) => (channel === "stable" ? "2.3.0" : "2.2.1-beta.20"),
+    owners: async (notice) => (notice.channel === "stable" ? ["a"] : []),
+    cells: () => [{ async fetch() { throw reset(); } }],
+  }), error => {
+    assert.deepEqual(cliReleaseNoticeEvidence(error).map(({ phase, attempt }) => [phase, attempt]),
+      [["cell_fetch", 1], ["cell_fetch", 2]]);
+    return true;
+  });
+
+  let calls = 0;
+  await assert.rejects(noticeCliReleases({}, {
+    latest: async (channel) => (channel === "stable" ? "2.3.0" : "2.2.1-beta.20"),
+    owners: async (notice) => (notice.channel === "stable" ? ["a"] : []),
+    cells: () => [{ async fetch() { calls++; throw new Error("boom"); } }],
+  }));
+  assert.equal(calls, 1, "a failure that is not a reset is not replayed");
+});
+
 // The feed is a read, so one lost response can recover before any owner is
 // told. Existing channel/version tests never exercised transport recovery.
 test("a feed retries a lost header or body once with a fresh five-second deadline", async t => {
