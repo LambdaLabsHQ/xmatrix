@@ -41,11 +41,12 @@ export function createChannelCatalogDeadline(input: {
       boundary: Exclude<ChannelCatalogTimeoutBoundary, "none">,
       operation: Promise<T>,
     ): Promise<T> {
-      const remainingMs = deadlineAtMs - now();
-      if (remainingMs <= 0) {
-        input.onTimeout?.(boundary);
-        throw new ChannelCatalogTimeoutError(boundary);
-      }
+      // A spent budget refuses to wait, not to take a result that has already
+      // arrived: an operation started early (runtime presence runs beside the
+      // whole catalog read) has usually settled by the time it is awaited, and
+      // throwing then would discard a catalog read in full (XMATRIX-HUB-D5).
+      // The zero-delay timer runs after the settled operation's reactions.
+      const remainingMs = Math.max(0, deadlineAtMs - now());
       let timer: ReturnType<typeof setTimeout> | undefined;
       const timeout = new Promise<never>((_resolve, reject) => {
         timer = setTimeout(() => {

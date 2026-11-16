@@ -54,7 +54,25 @@ test("the absolute budget bounds a sequence of otherwise-fast operations", async
   assert.equal(await deadline.wait("directory", Promise.resolve("ok")), "ok");
   nowMs = 12;
   await assert.rejects(
-    deadline.wait("projection", Promise.resolve("too late")),
+    deadline.wait("projection", new Promise(() => {})),
     (error) => isChannelCatalogTimeoutError(error) && error.boundary === "projection",
   );
+});
+
+test("a spent budget still takes a result that has already arrived (XMATRIX-HUB-D5)", async () => {
+  // Runtime presence starts beside the catalog read and settles long before
+  // the catalog does; refusing it once the budget is spent threw away a
+  // complete catalog as a 503.
+  let nowMs = 0;
+  const observed = [];
+  const deadline = createChannelCatalogDeadline({
+    totalTimeoutMs: 12,
+    operationTimeoutMs: 10,
+    now: () => nowMs,
+    onTimeout: (boundary) => observed.push(boundary),
+  });
+  const presence = Promise.resolve(["session"]);
+  nowMs = 20;
+  assert.deepEqual(await deadline.wait("runtime_presence", presence), ["session"]);
+  assert.deepEqual(observed, []);
 });
