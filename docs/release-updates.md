@@ -15,6 +15,7 @@ Instance that has reported no model catalog yet (its first turn still runs)
 is asked as written, since its runtime holds the catalog; before, the Hub
 refused it. `xmatrix channel history` marks used-up models in a listing.
 Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent that cannot take work is listed under @ with why
 
 The @ list showed only Agents ready to take work, so an Agent that was enabled
