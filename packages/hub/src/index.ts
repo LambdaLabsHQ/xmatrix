@@ -1,14 +1,8 @@
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
 import { drainAppleCommerce } from "./connectors/app-store-connect-commerce";
-import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
-import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
-import { maintainChannelDeletions } from "./channel-deletion-maintenance";
+import { registerAccountDeletionRoutes } from "./index-routes-account-deletion";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
-import { drainSentryEvents } from "./connectors/sentry-event-drain";
-import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
-import { noticeCliReleases, readCliReleaseFeeds } from "./cli-release-notice";
-import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
@@ -17,9 +11,7 @@ import { registerHarnessSignInRequestRoutes } from "./index-routes-harness-sign-
 import { registerSettingsRequestRoutes } from "./index-routes-settings-requests";
 import { registerWorktreeActionRoutes } from "./index-routes-worktree-actions";
 import { registerCliUpdateCheckRoutes } from "./index-routes-cli-update-check";
-import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
-import { rollUpAdminActivityOnSchedule } from "./postgres-admin-activity-rollup";
-import { redeliverOwedQuotaWakes } from "./quota-waits";
+import { registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerWelcomeRoutes } from "./index-routes-welcome";
 import { registerOnboardingFunnelRoutes } from "./index-routes-onboarding-funnel";
@@ -42,7 +34,7 @@ import { registerStripeAccountRoutes } from "./index-routes-stripe-accounts";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
 import { scheduledTaskFailed } from "./scheduled-task-failure";
-import { runScheduledLanes, scheduledPassesDue, type ScheduledPass } from "./scheduled-passes";
+import { runMinutePassesBesidePostgres } from "./scheduled-minute";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -183,36 +175,9 @@ export default {
       executionCtx.waitUntil(drainAppleCommerce(env).catch(error => scheduledTaskFailed("Apple commerce recovery",error)).finally(sendErrorReports));
       return;
     }
-    // Feeds first: a pass below holds a Hyperdrive connection, and six
-    // header-waits is the invocation's whole budget (HUB-BX).
-    const latest = await readCliReleaseFeeds();
-    // Two lanes, so the cron holds at most two PostgreSQL connections: the
-    // passes that only read or write PostgreSQL, and those that also wait on
-    // another service and must not hold the first lane up.
-    const database: ScheduledPass[] = [
-      { name: "Account deletion maintenance", work: () => maintainAccountDeletions(env) },
-      { name: "Channel deletion maintenance", work: () => maintainChannelDeletions(env) },
-      { name: "Machine load history maintenance", work: () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime) },
-      { name: "Admin activity rollup", work: () => rollUpAdminActivityOnSchedule(env, event.scheduledTime) },
-      // Delivers again quota waits a reading already made ready; never asks a provider.
-      { name: "Quota wait redelivery", work: () => redeliverOwedQuotaWakes(env) },
-      // Rows these delete have already expired for every reader, so nothing
-      // waits on them: each runs once an hour, in its own minute.
-      ...([["Teams", connectorTeamsRoomRepository, 7], ["Google Chat", connectorGoogleChatRoomRepository, 22], ["Feishu", connectorFeishuRoomRepository, 37], ["Telegram", connectorTelegramRoomRepository, 52]] as const)
-        .map(([provider, repository, hourlyAtMinute]) => ({ name: `${provider} lifecycle maintenance`, hourlyAtMinute,
-          work: () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }) })),
-    ];
-    const network: ScheduledPass[] = [
-      { name: "Sentry event recovery", work: () => drainSentryEvents(env) },
-      { name: "Gmail notification recovery and renewal", work: () => drainGmailNotifications(env) },
-      { name: "Harness release watch", work: () => watchHarnessReleasesBesidePostgres(env) },
-      { name: "CLI release notice", work: () => noticeCliReleases(env, { latest }) },
-    ];
-    // A pass that fails after its lane stopped waiting still sends its report.
-    executionCtx.waitUntil(runScheduledLanes([scheduledPassesDue(database, event.scheduledTime), network], (name, error) => {
-      scheduledTaskFailed(name, error);
-      executionCtx.waitUntil(sendErrorReports());
-    }));
+    // The passes run beside PostgreSQL, in the Runtime cell (scheduled-minute.ts).
+    executionCtx.waitUntil(runMinutePassesBesidePostgres(env, event.scheduledTime)
+      .catch(error => scheduledTaskFailed("Scheduled minute", error)).finally(sendErrorReports));
   }),
   queue: (batch: MessageBatch<unknown>) => ackRetiredExportQueue(batch),
 } satisfies ExportedHandler<Env>;

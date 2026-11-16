@@ -172,8 +172,11 @@ primary on 2026-11-16, each holding one origin connection), and a request waits
 on the pool it lands in. So what matters is how many connections one
 invocation holds at the same moment, not the day's total:
 
-- The minute cron runs its passes in two lanes, one pass at a time each
-  (`scheduled-passes.ts`). Started together, its thirteen passes queued behind
+- The minute cron hands its passes to the Runtime cell (`scheduled-minute.ts`),
+  which is created next to PostgreSQL: placement moves only fetch handlers,
+  and from where the cron itself runs a round trip took about 170 ms against
+  about 20 ms beside the database. There they run in two lanes, one pass at a
+  time each (`scheduled-passes.ts`). Started together, its thirteen passes queued behind
   each other for 0.5-1.9 s and requests in that window queued behind them.
   A pass that only deletes rows every reader already ignores (the four
   connector room cleanups) sets `hourlyAtMinute` and runs once an hour.
