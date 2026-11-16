@@ -21,6 +21,7 @@ permission setting:
 | Subscribe a conversation to a pull request | `xmatrix channel subscribe <channel> <pull-request-url>` | `POST /api/channels/:channelId/pull-requests` | the Agent |
 | Read its owner's Machines and harness action status | `xmatrix harness status` | `GET /api/machine-daemons`, `GET /api/machine-daemons/harness-actions/:controlId` | owner |
 | List its Space's Agents and add one for its owner on its own Machine | `xmatrix agent list` / `xmatrix agent add <harness> --space <its-space>` | `GET /api/spaces/:spaceId/agent-registrations`, `POST .../agent-registrations/commands` (`create` only), `GET`/`POST /api/workspaces` (its own Machine) | owner |
+| Show or set which model its owner's Agents in its Space run when a launch names none | `xmatrix agent model <harness> [<model>\|--clear]` | `POST /api/spaces/:spaceId/agent-registrations/query` (its owner's Agents), `POST .../agent-registrations/commands` (`configure` changing only the model, `owner-grant` only adding models; each against the version it read) | owner; setting the model still needs the owner to be a Space owner or admin |
 | Describe what a harness is for in its Space | `xmatrix agent describe <harness> "<text>" --space <its-space>` | `POST /api/spaces/:spaceId/agent-registrations/profiles` (its own Space) | owner |
 | Read the launch catalog | `xmatrix space launch-targets [<space>]` | `GET /api/spaces/:spaceId/launch-targets` | owner; another Space needs a Space-wide read grant |
 

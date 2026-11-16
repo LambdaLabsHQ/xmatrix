@@ -27,16 +27,20 @@ fn space_or_run(space: Option<String>) -> error::Result<String> {
 }
 
 /// A Space's Agents are its registrations: one harness on one owner's machine.
-/// Inside a Run, an Agent lists its Space's Agents and adds one for its owner
-/// on its own machine, as the owner would; the rest stays with people.
+/// Inside a Run, an Agent lists its Space's Agents, adds one for its owner on
+/// its own machine and sets the model of its owner's Agents, as the owner
+/// would; the rest stays with people.
 pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> error::Result<()> {
     let run_owner = if access::inside_agent_run() {
         if !matches!(
             command,
-            AgentCommand::List { .. } | AgentCommand::Add { .. } | AgentCommand::Describe { .. }
+            AgentCommand::List { .. }
+                | AgentCommand::Add { .. }
+                | AgentCommand::Describe { .. }
+                | AgentCommand::Model { .. }
         ) {
             return Err(CliError::Launch(
-                "Inside an Agent Run, `xmatrix agent` lists, adds and describes Agents; the owner changes or removes them".into(),
+                "Inside an Agent Run, `xmatrix agent` lists, adds and describes Agents and sets their model; the owner changes or removes them".into(),
             ));
         }
         Some(run_owner_user_id().ok_or_else(|| {
@@ -214,6 +218,18 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
                 text
             };
             describe(hub_url, token, &space_or_run(space)?, &harness, text).await
+        }
+        AgentCommand::Model {
+            harness,
+            model,
+            clear,
+            space,
+            owner,
+            machine,
+        } => {
+            let space = space_or_run(space)?;
+            let key = resolve_key(hub_url, &space, owner.or(run_owner), machine, harness).await?;
+            set_model(hub_url, token, &space, &key, model, clear).await
         }
         AgentCommand::Remove {
             harness,
@@ -493,6 +509,130 @@ fn space_state_command(key: &Value, current: &Value, enabled: bool) -> error::Re
         "key": key,
         "state": if enabled { "enabled" } else { "disabled" },
         "expectedRevision": revision,
+    }))
+}
+
+/// Shows the model an Agent runs when a launch names none, or sets it. A model
+/// runs only where its owner's grant allows it, so setting one the grant does
+/// not list adds it there first: only the owner (or a Run of theirs) can.
+async fn set_model(
+    hub_url: &str,
+    token: &str,
+    space: &str,
+    key: &Value,
+    model: Option<String>,
+    clear: bool,
+) -> error::Result<()> {
+    let current = details(hub_url, token, space, key).await?;
+    let name = current["displayName"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    let model = model.map(|model| model.trim().to_string());
+    if model.is_none() && !clear {
+        match current["configuration"]["model"].as_str() {
+            Some(model) => println!("{model}"),
+            None => println!(
+                "{name} runs its harness's default model. Set one with `xmatrix agent model {} <model> --space {space}`.",
+                key["harness"].as_str().unwrap_or_default()
+            ),
+        }
+        return Ok(());
+    }
+    if let Some(model) = model.as_deref().filter(|model| !granted(&current, model)) {
+        command_request(
+            hub_url,
+            token,
+            space,
+            grant_model_command(key, &current, model)?,
+        )
+        .await?;
+    }
+    command_request(
+        hub_url,
+        token,
+        space,
+        model_command(key, &current, model.as_deref())?,
+    )
+    .await?;
+    match model {
+        Some(model) => println!(
+            "{} {} runs {} in Space {}",
+            "✓".green(),
+            name.bold(),
+            model.bold(),
+            space
+        ),
+        None => println!(
+            "{} {} runs its harness's default model in Space {}",
+            "✓".green(),
+            name.bold(),
+            space
+        ),
+    }
+    Ok(())
+}
+
+/// Whether the owner's grant already lets the Agent run `model`.
+fn granted(current: &Value, model: &str) -> bool {
+    current["access"]["grant"]["limits"]["models"]
+        .as_array()
+        .is_some_and(|models| models.iter().any(|item| item.as_str() == Some(model)))
+}
+
+/// The owner's grant, as it stands, with `model` added to the models it allows.
+fn grant_model_command(key: &Value, current: &Value, model: &str) -> error::Result<Value> {
+    if current["canManageOwnerGrant"].as_bool() != Some(true) {
+        return Err(CliError::Launch(format!(
+            "The Agent's owner allows {model} first: only they, or a Run of theirs, can set a model their grant does not list"
+        )));
+    }
+    let grant = &current["access"]["grant"];
+    let revision = grant["revision"]
+        .as_u64()
+        .ok_or_else(|| CliError::Launch("The Agent's grant is unavailable".into()))?;
+    if grant["state"].as_str() != Some("active") {
+        return Err(CliError::Launch(
+            "The Agent is removed from this Space; add it back before setting its model".into(),
+        ));
+    }
+    let mut limits = grant["limits"].clone();
+    match limits["models"].as_array_mut() {
+        Some(models) => models.push(Value::String(model.to_string())),
+        None => return Err(CliError::Launch("The Agent's grant is unavailable".into())),
+    }
+    Ok(serde_json::json!({
+        "action": "owner-grant",
+        "commandId": format!("registration-model-grant:{}", uuid::Uuid::new_v4()),
+        "key": key,
+        "state": "active",
+        "expectedRevision": revision,
+        "limits": limits,
+    }))
+}
+
+/// The Space's configuration, as it stands, with only its model changed.
+fn model_command(key: &Value, current: &Value, model: Option<&str>) -> error::Result<Value> {
+    if current["canConfigureSpace"].as_bool() != Some(true) {
+        return Err(CliError::Launch(
+            "Only a Space owner or admin, or a Run of theirs, can set an Agent's model".into(),
+        ));
+    }
+    let mut configuration = current["configuration"].clone();
+    let fields = configuration
+        .as_object_mut()
+        .ok_or_else(|| CliError::Launch("The Agent's configuration is unavailable".into()))?;
+    match model {
+        Some(model) => fields.insert("model".into(), Value::String(model.to_string())),
+        None => fields.remove("model"),
+    };
+    Ok(serde_json::json!({
+        "action": "configure",
+        "commandId": format!("registration-model:{}", uuid::Uuid::new_v4()),
+        "key": key,
+        "displayName": current["displayName"],
+        "expectedVersion": current["version"],
+        "configuration": configuration,
     }))
 }
 
@@ -817,6 +957,68 @@ async fn command_request(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn registration_details() -> Value {
+        serde_json::json!({
+            "displayName": "antigravity", "version": 4,
+            "canManageOwnerGrant": true, "canConfigureSpace": true,
+            "configuration": {"workingMode": "autonomous", "instructions": "Keep it short.",
+                "workspaceReferences": ["ws-1"], "model": "gemini-4-argon-medium"},
+            "access": {"grant": {"state": "active", "revision": 7,
+                "limits": {"workspaces": ["ws-1"], "models": [], "capabilities": []}}},
+        })
+    }
+
+    #[test]
+    fn setting_a_model_changes_only_the_model_and_keeps_the_rest_of_the_configuration() {
+        let key = space_key(
+            "space",
+            "owner".into(),
+            "machine".into(),
+            "antigravity".into(),
+        );
+        let current = registration_details();
+        let set = model_command(&key, &current, Some("gemini-4-hydrogen-medium")).unwrap();
+        assert_eq!(set["action"], "configure");
+        assert_eq!(set["expectedVersion"], 4);
+        assert_eq!(set["displayName"], "antigravity");
+        let mut expected = current["configuration"].clone();
+        expected["model"] = "gemini-4-hydrogen-medium".into();
+        assert_eq!(set["configuration"], expected);
+        let cleared = model_command(&key, &current, None).unwrap();
+        assert!(cleared["configuration"].get("model").is_none());
+        assert_eq!(cleared["configuration"]["instructions"], "Keep it short.");
+    }
+
+    #[test]
+    fn a_model_the_grant_does_not_list_is_added_to_it_by_its_owner_only() {
+        let key = space_key(
+            "space",
+            "owner".into(),
+            "machine".into(),
+            "antigravity".into(),
+        );
+        let mut current = registration_details();
+        assert!(!granted(&current, "gemini-4-hydrogen-medium"));
+        let grant = grant_model_command(&key, &current, "gemini-4-hydrogen-medium").unwrap();
+        assert_eq!(grant["action"], "owner-grant");
+        assert_eq!(grant["state"], "active");
+        assert_eq!(grant["expectedRevision"], 7);
+        assert_eq!(
+            grant["limits"],
+            serde_json::json!({"workspaces": ["ws-1"], "models": ["gemini-4-hydrogen-medium"], "capabilities": []})
+        );
+        current["access"]["grant"]["limits"]["models"] =
+            serde_json::json!(["gemini-4-hydrogen-medium"]);
+        assert!(granted(&current, "gemini-4-hydrogen-medium"));
+        current["canManageOwnerGrant"] = false.into();
+        assert!(grant_model_command(&key, &current, "other").is_err());
+        current["canManageOwnerGrant"] = true.into();
+        current["access"]["grant"]["state"] = "revoked".into();
+        assert!(grant_model_command(&key, &current, "other").is_err());
+        current["canConfigureSpace"] = false.into();
+        assert!(model_command(&key, &current, Some("other")).is_err());
+    }
 
     #[test]
     fn a_harness_profile_is_read_from_any_of_its_registrations() {

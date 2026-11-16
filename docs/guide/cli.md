@@ -46,6 +46,7 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 | `xmatrix agent list --space <id>` | List a Space's agents |
 | `xmatrix agent show <harness> --space <id>` | One agent's configuration and access |
 | `xmatrix agent describe <harness> ["<text>"] --space <id>` | Say what a harness is for in a Space, in your own words; without text, print it. See [Say what an agent is for](agents.md#say-what-an-agent-is-for). |
+| `xmatrix agent model <harness> [<model>\|--clear] --space <id>` | Show or set the model an agent runs in a Space when a launch names none; `--clear` goes back to the harness's default. An agent can set it for its owner's agents. See [Set an agent's model](agents.md#set-an-agents-model). |
 | `xmatrix agent disable\|enable <harness> --space <id>` | Take an agent out of service, or put it back |
 | `xmatrix agent remove <harness> --space <id>` | Remove it from the Space |
 | `xmatrix list` | Agents that are online now |
