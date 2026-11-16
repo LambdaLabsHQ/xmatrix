@@ -1,7 +1,7 @@
 import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
   type AutoLaunchMention, type AgentControlInvocation, type AgentControlOutcomeRecord,
-  parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
+  agentControlHandoffStatement, parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
 import { noticesNaming, type CommandNotice } from "./command-notices";
 
 export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutral";
@@ -380,6 +380,23 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
   if (notice) return result(/^(?:Could not|xMatrix could not find)/iu.test(notice.body) ? "Failed" : "Switched", notice.body);
   return input.fresh ? result("Switching", `Waiting for the Instance to answer.`, true)
     : result("Unconfirmed", "The Instance has not answered this switch.");
+}
+
+/** What the author of a refused switch can do about it in place: one step,
+ * said as what pressing it does, and the command that does it. */
+export type ControlNextStep = { label: string; explanation?: string; body: string };
+
+export function controlNextStep(invocation: AgentControlInvocation,
+  outcome: AgentControlOutcomeRecord | undefined): ControlNextStep | undefined {
+  if (outcome?.status !== "error") return undefined;
+  // An Instance that was still starting takes the same statement once it runs.
+  if (outcome.starting) return { label: "Send again", body: invocation.text };
+  const quota = outcome.quotaExhausted;
+  const machine = quota?.elsewhere?.[0];
+  if (!quota || !machine) return undefined;
+  return { label: `Continue on ${machine.machineName}`,
+    explanation: `Stops @${invocation.target} and hands its work to a new @${machine.harness} on ${machine.machineName}, where ${quota.model} has quota.`,
+    body: agentControlHandoffStatement(invocation.target, machine.harness, machine.machineName, quota.model) };
 }
 
 /** A reborn or handoff the Hub refused before any Run existed: its notice is the answer. */

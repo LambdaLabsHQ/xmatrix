@@ -9,7 +9,7 @@ import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "
 import { preparationFailureSummary, rejectionCause, type FaceOf } from "@xmatrix/protocol";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
 import type { CommandNotice } from "./command-notices";
 import { MentionChipFace } from "./mention-chip-face";
 import { formatZonedDateTime } from "./time-display";
@@ -277,9 +277,12 @@ function NoticeLines({ notices }: { notices: readonly CommandNotice[] }) {
 /** A `/model` or `/effort` statement, highlighted whole like the `@` it starts
  * with, its value marked where it sits, and the Instance's answer beside it:
  * the switch receipt is drawn here instead of as a message of its own. */
-export function MentionControlChip({ invocation, outcome, notice, sentAt }: {
+export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunCommand }: {
   invocation: AgentControlInvocation; outcome?: AgentControlOutcomeRecord; notice?: CommandNotice; sentAt?: string;
+  /** Present only for the statement's author: sends the refused switch's next step. */
+  onRunCommand?: (body: string) => Promise<void>;
 }) {
+  const next = onRunCommand ? controlNextStep(invocation, outcome) : undefined;
   const fresh = useBefore(sentAt && !notice ? Date.parse(sentAt) + CONTROL_RECEIPT_PENDING_MS : undefined);
   const view = controlView(invocation, outcome, notice, { fresh });
   const agentName = invocation.target.replace(/:[1-9]\d*$/u, "");
@@ -297,6 +300,8 @@ export function MentionControlChip({ invocation, outcome, notice, sentAt }: {
     sourceAddress={invocation.text}
     subtitle={invocation.kind === "model" ? "Model" : "Effort"}
     view={view}
+    action={next && { label: next.label, busyLabel: "Sending…", explanation: next.explanation,
+      failure: "That was not sent. Try again.", run: () => onRunCommand!(next.body) }}
     context={options.length ? <>
       <p className="app-invocation-description">
         {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}
@@ -389,7 +394,7 @@ export function MentionInstanceCallChip({ name, harness, conversation, busy, sen
 }
 
 function InvocationChip({ label, labelContent, announcement, name, instanceOrdinal, destinationName, face, sourceAddress, subtitle, invocationId, errorCode,
-  diagnosticId, view, lead, context, details, onRetry, variant, jev }: {
+  diagnosticId, view, lead, context, details, onRetry, action: offered, variant, jev }: {
   /** A handoff draws both Agents in its label, so it has no leading avatar. */
   variant?: "handoff";
   label: string; labelContent?: ReactNode; announcement?: string; name: string; instanceOrdinal?: string; destinationName?: string;
@@ -399,11 +404,16 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
   lead?: ReactNode; context?: ReactNode;
   /** Evidence behind the answer, folded away with the address and diagnostic IDs. */
   details?: ReactNode; onRetry?: () => Promise<void>;
+  /** The one thing to do about what the chip reports, said as what it does. */
+  action?: InvocationAction;
   /** The message whose retained Jev decisions lead the timeline. */
   jev?: JevSource;
 }) {
   const { rootProps, portal } = useInvocationPopover();
+  const action: InvocationAction | undefined = offered ?? (onRetry && { label: "Retry startup", busyLabel: "Requesting retry…",
+    failure: "The retry was not confirmed. Refresh status before trying again.", run: onRetry });
   const [retrying, setRetrying] = useState(false);
+  const [done, setDone] = useState(false);
   const [actionError, setActionError] = useState<string>();
   const Icon = view.tone === "error" ? TriangleAlert : view.tone === "success" ? Check
     : view.animate ? LoaderCircle : view.tone === "waiting" ? Clock3 : CircleHelp;
@@ -415,11 +425,12 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
   const liveStage = !view.terminal && focusStep?.state === "current" ? focusStep : undefined;
   const statusText = liveStage?.status ?? view.label;
   const retry = async () => {
-    if (!onRetry || retrying) return;
+    if (!action || retrying) return;
     setActionError(undefined);
     setRetrying(true);
-    try { await onRetry(); }
-    catch { setActionError("The retry was not confirmed. Refresh status before trying again."); }
+    // A sent step answers in its own message; offering it again would send it twice.
+    try { await action.run(); setDone(offered !== undefined); }
+    catch { setActionError(action.failure); }
     finally { setRetrying(false); }
   };
   return <Popover.Root {...rootProps}>
@@ -453,7 +464,9 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
           </div><Popover.Close className="app-invocation-close" aria-label="Close invocation details"><X size={16} /></Popover.Close></div>
           <div className="app-invocation-current"><Icon size={16} aria-hidden="true" /><strong>{view.label}</strong></div>
           {view.detail && <Popover.Description className="app-invocation-description">{view.detail}</Popover.Description>}
-          {onRetry && <button type="button" className="app-invocation-retry" disabled={retrying} onClick={() => void retry()}>{retrying ? "Requesting retry…" : "Retry startup"}</button>}
+          {action && !done && <button type="button" className="app-invocation-retry" disabled={retrying} onClick={() => void retry()}>{retrying ? action.busyLabel : action.label}</button>}
+          {action?.explanation && !done && <p className="app-invocation-description">{action.explanation}</p>}
+          {done && <p role="status" className="app-invocation-description">Sent.</p>}
           {actionError && <p role="alert" className="app-invocation-action-error">{actionError}</p>}
           <InvocationPanelBody jev={jev} view={view} lead={lead} context={context} details={details}
             sourceAddress={sourceAddress} errorCode={errorCode} diagnosticId={diagnosticId} invocationId={invocationId} />
@@ -462,6 +475,8 @@ function InvocationChip({ label, labelContent, announcement, name, instanceOrdin
     </Popover.Portal>
   </Popover.Root>;
 }
+
+type InvocationAction = { label: string; busyLabel: string; explanation?: string; failure: string; run: () => Promise<void> };
 
 type JevSource = { channelId: string; messageId: string; sourceMention?: string; invocationId?: string; rejectedAt?: string;
   /** The launch's recorded choice of Agent and machine, drawn as one routing row. */

@@ -984,8 +984,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     if (mobileChannelDetailsOpen) closeMobileChannelDetails();
     else openMobileChannelDetails();
   });
+  const sendSelectedChannelCommand = useStableCallback((body: string) => sendChannelMessage({ body }));
   const runSelectedChannelCommand = useStableCallback((body: string) => {
-    void sendChannelMessage({ body });
+    void sendSelectedChannelCommand(body);
   });
   const manageSelectedApps = useStableCallback(() => {
     if (selectedChannel) openAppsForSpace(selectedChannel.spaceId);
@@ -1236,6 +1237,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       {!showSpaceAgentSetup && !showSpaceFirstTask && (
       <MessageTimeline
         channel={selectedChannel}
+        onRunChannelCommand={canUseSelectedChannel ? sendSelectedChannelCommand : undefined}
         space={currentSpace}
         token={token ?? null}
         localContext={localMentionContext}

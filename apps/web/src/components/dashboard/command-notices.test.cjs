@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { foldCommandNotices } = require("./command-notices.ts");
-const { segmentMessageInteraction, controlView, stopView } = require("./mention-invocation-state.ts");
+const { segmentMessageInteraction, controlView, controlNextStep, stopView } = require("./mention-invocation-state.ts");
 const { parseAgentControlInvocations } = require("@xmatrix/protocol");
 
 const sentAt = "2026-10-21T21:08:00Z";
@@ -112,4 +112,19 @@ test("legacy routine stop confirmations disappear without a loaded command, whil
     human("human", "Stopped @claude on build-1.", { metadata: stopped }),
   ]);
   assert.deepEqual([...folded], ["routine", "source-unloaded"]);
+});
+
+test("a refused switch offers its author one step, said as what it does", () => {
+  const [switching] = parseAgentControlInvocations("@claude:3 /model fable");
+  const refused = (extra) => ({ kind: "model", target: "claude:3", status: "error", message: "refused", ...extra });
+  assert.deepEqual(controlNextStep(switching, refused({ starting: true })), { label: "Send again", body: "@claude:3 /model fable" });
+  assert.deepEqual(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2", machineName: "build-box",
+    elsewhere: [{ machineName: "spare box", harness: "claude" }, { machineName: "third", harness: "claude" }] } })),
+  { label: "Continue on spare box",
+    explanation: "Stops @claude:3 and hands its work to a new @claude on spare box, where claude-fable-5-2 has quota.",
+    body: '@claude:3:handoff:@claude machine:"spare box" model:claude-fable-5-2' });
+  // Used up with nowhere else to run it, or refused for another reason: nothing to press.
+  assert.equal(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2" } })), undefined);
+  assert.equal(controlNextStep(switching, refused({})), undefined);
+  assert.equal(controlNextStep(switching, { kind: "model", target: "claude:3", status: "switched", selected: "fable" }), undefined);
 });
