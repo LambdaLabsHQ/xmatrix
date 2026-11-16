@@ -240,6 +240,23 @@ test("an activity entry is context for every Instance, even when a step title na
   assert.equal(agentChannelMessageDeliveryIntent(activity, recipient), "context");
 });
 
+// GitHub says in the conversation that it follows the pull request a Run just opened (#1710). That is an
+// activity entry an App writes: it wakes no resting Instance and is context for every live one, as the same
+// entry written by the Run is. An App's own event (a CI verdict) stays work.
+test("an activity entry an App writes is context and wakes nobody; an App's event is still work", async () => {
+  const { connectorMessageWakeTarget } = await import("../src/connector-message-delivery.ts");
+  const github = { kind: "app", label: "GitHub", appId: "github" };
+  const following = framed({ from: github, messageId: "app:github:follow:cmd:ch-1",
+    body: "Following [o/r#7](https://github.com/o/r/pull/7) in this conversation: its CI results, reviews, comments and merge will arrive here.",
+    metadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: { repository: "o/r", number: 7, event: "subscribed" } } });
+  const ci = framed({ from: github, messageId: "app:github:ci:sha:7", body: "CI failed on o/r#7.", metadata: {} });
+  const recipient = { agentName: "claude", instanceId: "ch-1:1" };
+  assert.equal(connectorMessageWakeTarget(following), false);
+  assert.equal(agentChannelMessageDeliveryIntent(following, recipient), "context");
+  assert.deepEqual(connectorMessageWakeTarget(ci), {});
+  assert.equal(agentChannelMessageDeliveryIntent(ci, recipient), "work");
+});
+
 test("a frame never carries raw annotations, nor a fold the Hub no longer judges", () => {
   const judged = framed({
     annotations: [

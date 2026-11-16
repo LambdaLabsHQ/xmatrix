@@ -210,7 +210,11 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   tinted receipt slip every App's message uses (`.app-connector-receipt`).
   The whole path is visible in one place, from the subscription being made
   to what it delivers: when the Hub subscribes the conversation it posts
-  GitHub's `subscribed` fact (context for Agents, never unread), and a
+  GitHub's `subscribed` fact (context for Agents, never unread, waking
+  nobody: an entry is activity by its `activity` provenance, whoever writes
+  it, and its timeline kind is derived from that at append —
+  `isChannelActivity`, `activityMessageKind`, `isAgentContextMessage` in
+  protocol), and a
   stretch of bare pull request facts (a Run's `pull_request` entry; GitHub's
   subscribed, CI verdict, merge and close, `xmatrixGitHubPullRequest`
   metadata, §3.6) is one message with one slip entry per pull request: its

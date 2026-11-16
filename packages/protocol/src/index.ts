@@ -63,7 +63,7 @@ export type {
 export {
   callerMessageMetadata, CHANNEL_ACTIVITY_MAX_COMPLETED, CHANNEL_ACTIVITY_MAX_STEP_TEXT,
   CHANNEL_ACTIVITY_MAX_STEPS, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
-  ChannelActivityInvalid, channelActivityLine, channelActivityOf, isReservedAnnotationNamespace,
+  activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity,
   SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult, mergeCommandResults,

@@ -10,6 +10,32 @@ export const CHANNEL_ACTIVITY_MESSAGE_KIND = "xmatrix.activity";
 /** Metadata provenance of an activity entry: context for Agents, never unread for people. */
 export const CHANNEL_ACTIVITY_PROVENANCE = "activity";
 
+/** The provenance of a message's metadata, when it has one. */
+const provenanceOf = (metadata: unknown): unknown =>
+  metadata && typeof metadata === "object" && !Array.isArray(metadata)
+    ? (metadata as Record<string, unknown>).xmatrixProvenance : undefined;
+
+/**
+ * Whether a message is an activity entry: the provenance says so, whoever
+ * wrote it (a Run's runtime, or an App reporting what a Run just did). Its
+ * timeline kind is derived from this at append (`activityMessageKind`), so
+ * the two can never disagree.
+ */
+export const isChannelActivity = (metadata: unknown): boolean => provenanceOf(metadata) === CHANNEL_ACTIVITY_PROVENANCE;
+
+/**
+ * Whether a message is context for Agents rather than work: a fact xMatrix
+ * or an App recorded (`system_fact`) or an activity entry. Such a message
+ * wakes no resting Instance and reaches live ones as context. The one rule
+ * every delivery path reads.
+ */
+export const isAgentContextMessage = (metadata: unknown): boolean =>
+  provenanceOf(metadata) === "system_fact" || isChannelActivity(metadata);
+
+/** The timeline kind a message is appended with: an activity entry's own, whatever the writer asked for. */
+export const activityMessageKind = (requested: string | undefined, metadata: unknown): string | undefined =>
+  isChannelActivity(metadata) ? CHANNEL_ACTIVITY_MESSAGE_KIND : requested;
+
 /** The Hub's record that a questionnaire card was answered or withdrawn. */
 export const QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE = "xmatrix.questionnaire";
 

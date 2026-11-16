@@ -14,7 +14,7 @@ import { connectorMessageWakeTarget } from "../connector-message-delivery";
  * the frame, so there is nothing left for a path to forget to copy.
  */
 import {
-  CHANNEL_ACTIVITY_PROVENANCE,
+  isAgentContextMessage,
   questionnaireStateOf,
   commandResultOf,
   mentionAddressTokens,
@@ -59,13 +59,7 @@ export function channelMessageDeliveryIntent(
   // This applies to catch-up as well as live delivery: reconnecting observers
   // must not turn a previously committed summon into another assignment.
   if (parseAutoLaunchMentions(message.body).length > 0) return "context";
-  const metadata = message.metadata;
-  if (!metadata || typeof metadata !== "object") return "work";
-  const values = metadata as Record<string, unknown>;
-  const provenance = values.xmatrixProvenance;
-  return provenance === "system_fact" || provenance === CHANNEL_ACTIVITY_PROVENANCE
-    ? "context"
-    : "work";
+  return isAgentContextMessage(message.metadata) ? "context" : "work";
 }
 
 /**

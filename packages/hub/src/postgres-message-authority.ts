@@ -21,7 +21,7 @@ import {
 } from "@xmatrix/db";
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
-import { agentAvatarUrlFromMetadata, attachmentKind, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
+import { activityMessageKind, agentAvatarUrlFromMetadata, attachmentKind, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
   questionnaireStateOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
   type QuestionnaireState } from "@xmatrix/protocol";
 import { REDACTED_CONTENT_HASH } from "./product-message-command";
@@ -421,7 +421,9 @@ export async function postgresMessageAppend(
     : undefined;
   const senderKind: AppendPostgresMessage["senderKind"] = presentedAuthor?.kind ?? command.threadRootCopyAuthorKind ?? actor.kind;
   const senderId = presentedAuthor?.id ?? bounded(command.senderId ?? actor.id, "senderId");
-  const messageKind = bounded(command.messageKind ?? "xmatrix.message.text", "messageKind");
+  // An activity entry is one by its provenance, whoever writes it: its kind keeps it out of unread and summons.
+  const messageKind = bounded(activityMessageKind(command.messageKind, command.residual?.appMetadata)
+    ?? "xmatrix.message.text", "messageKind");
   const sentAt = command.sentAt ? new Date(command.sentAt).toISOString() : new Date().toISOString();
   if (!Number.isFinite(Date.parse(sentAt)) || typeof command.body !== "string") {
     throw new MessageAuthorityError("invalid_command", 400, "message payload is invalid");
