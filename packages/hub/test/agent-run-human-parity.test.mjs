@@ -18,6 +18,8 @@ test("an Agent Run reaches the Human collaboration routes by default", () => {
   assert.equal(allowed("GET", "/api/spaces/space-2/launch-targets"), true, "read the launch catalog");
   assert.equal(allowed("GET", "/api/spaces/space-1/agent-registrations"), true, "read its Space's Agents");
   assert.equal(allowed("POST", "/api/spaces/space-1/agent-registrations/commands"), true, "add an Agent for its owner");
+  assert.equal(allowed("POST", "/api/spaces/space-1/agent-registrations/query"), true, "read its owner's Agent to set its model");
+  assert.equal(allowed("POST", "/api/agent-environments/query"), false, "a Machine environment stays with its owner");
   assert.equal(allowed("POST", "/api/workspaces"), true, "register a directory on its Machine");
   assert.equal(allowed("POST", "/api/channels/channel-2/delete-requests"), false, "archive is retired");
   assert.equal(allowed("POST", "/api/cross-space-read/requests"), true, "ask its owner to read another Space");

@@ -501,6 +501,9 @@ export function agentRunHttpRouteAllowed(
   if (["GET", "POST"].includes(request.method) && path === HUB_ROUTES.workspaces) return true;
   if (request.method === "GET" && /^\/api\/spaces\/[^/]+\/agent-registrations$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/agent-registrations\/commands$/u.test(path)) return true;
+  // It reads its owner's Agents' settings to change their model (the route
+  // bounds it to its owner's Agents in its own Space).
+  if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/agent-registrations\/query$/u.test(path)) return true;
   // It describes what a harness is for in its own Space, as its owner may (the route bounds it to that Space).
   if (request.method === "POST" && /^\/api\/spaces\/[^/]+\/agent-registrations\/profiles$/u.test(path)) return true;
   if (request.method === "GET" && path === HUB_ROUTES.agent_instances) return true;
