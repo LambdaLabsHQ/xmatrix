@@ -148,7 +148,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   `github:issue:<owner>/<repo>#<n>`, with the features `pulls`, `comments`,
   `reviews` and `checks`. It is listed in the conversation's Subscriptions
   with the repository subscriptions. A pull request the connection does not
-  reach is not subscribed; the entry is recorded either way.
+  reach is not subscribed; the entry is recorded either way. Once subscribed,
+  GitHub says so in the conversation (`Following <link> in this
+  conversation…`, a `subscribed` fact with activity provenance), so what it
+  posts later is seen to come from that subscription (§4.1).
   Webhook routes require the subscription creator's current user permission
   to append to that Channel. Legacy Agent creators and revoked or read-only
   users do not dispatch events or attempt subscription cleanup; their stored
