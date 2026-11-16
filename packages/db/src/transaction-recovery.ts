@@ -6,10 +6,9 @@ import type { DatabaseRequestContext } from "./context.js";
 /**
  * Only for database-only work: its owner closes the failed session before
  * this one replay takes a fresh checkout. COMMIT/PREPARE uncertainty and
- * answered database errors still escape to the caller's reconciliation. A
- * caller may opt into replaying one lock-deadline abort (`55P03`), which
- * released its locks and committed nothing; callers whose rejection is itself
- * the evidence (the Machine scope lock) leave it off.
+ * answered database errors still escape to the caller's reconciliation; the
+ * one exception a caller may opt into is a lock-deadline abort (`55P03`),
+ * which released its locks and committed nothing.
  */
 export async function retryBeforeCommit<T>(run: () => Promise<T>,
   options: { lockTimeout?: boolean } = {}): Promise<T> {
@@ -21,18 +20,13 @@ export async function retryBeforeCommit<T>(run: () => Promise<T>,
   }
 }
 
-/** Commands whose Channel lock is taken as authority before any write may
- * replay one lock-deadline abort. A command whose rejection is itself the
- * evidence (the Machine scope lock) stays off this list. */
-const REPLAY_LOCK_TIMEOUT = new Set(["message.append", "message.system-annotation"]);
-
 /** Database-only commands own a fresh session per attempt, even when given a request session. */
 export function retryTransactionBeforeCommit<T>(database: AuthorityDatabase, context: DatabaseRequestContext,
-  callback: (transaction: DatabaseTransaction) => Promise<T>,
-  options: { lockTimeout?: boolean } = {}): Promise<T> {
+  callback: (transaction: DatabaseTransaction) => Promise<T>): Promise<T> {
   return retryBeforeCommit(async () => {
     const session = database.openSession();
     try { return await session.transaction(context, callback); }
     finally { await session.close(); }
-  }, { lockTimeout: options.lockTimeout ?? REPLAY_LOCK_TIMEOUT.has(context.operation) });
+  }, { lockTimeout: true });
 }
+
