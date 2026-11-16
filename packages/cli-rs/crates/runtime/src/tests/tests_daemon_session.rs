@@ -417,6 +417,7 @@ use super::{
     codex_primary_output_phase, codex_raw_response_delta_text, codex_raw_response_message_text,
     codex_reconnect_attempts, codex_reconnect_wait_timeout, codex_reconnect_wait_timeout_error,
     codex_response_item_id, codex_resume_goal_objective, codex_resume_session_path,
+    codex_thread_in_use_error, load_codex_thread_writer,
     codex_runtime_trace_payload, codex_runtime_trace_value, codex_turn_error_message,
     codex_turn_error_requires_restart, codex_turn_error_retryable_before_start,
     codex_turn_input_items, codex_turn_start_params, codex_turn_text_with_unavailable_images,

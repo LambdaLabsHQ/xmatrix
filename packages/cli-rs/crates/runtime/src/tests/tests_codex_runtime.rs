@@ -3589,3 +3589,112 @@ async fn codex_trace_flushes_text_before_later_tools_and_preserves_message_ids()
     .await
     .expect("Codex trace fixture completes");
 }
+
+/// #1686: a resume Codex refuses because another live app-server writes the
+/// thread used to fail with Codex's bare refusal, which named no process and
+/// gave the user nothing to do. It must name the process that opened the
+/// thread, say how to end the conflict, keep the session's thread, and never
+/// start a new thread in its place.
+#[tokio::test]
+async fn codex_resume_refused_by_active_writer_names_the_holder_and_keeps_the_thread() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let _guard = test_process_env_lock();
+        let root = std::env::temp_dir().join(format!("codex-writer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let previous_config = std::env::var_os("XMATRIX_CONFIG_DIR");
+        let previous_run = std::env::var_os("XMATRIX_RUN_ID");
+        unsafe {
+            std::env::set_var("XMATRIX_CONFIG_DIR", &root);
+            std::env::set_var("XMATRIX_RUN_ID", "instance-held#1");
+        }
+        let key = Some("resume:owner:channel:instance-held");
+        let fixture = |capture: &Path| {
+            vec![
+                goal_runtime_fixture_path(),
+                "codex-resume-held".to_string(),
+                format!("--capture-requests={}", capture.display()),
+            ]
+        };
+
+        // The first Run opens the thread and keeps its app-server running.
+        let first_capture = root.join("first.jsonl");
+        let mut holder = CodexAppSession::spawn_stdio_with_prefix_args(
+            "node",
+            &fixture(&first_capture),
+            root.to_str(),
+            None,
+        )
+        .await
+        .unwrap();
+        holder.initialize(root.to_str(), key, false).await.unwrap();
+        let holder_pid = holder.child.id().unwrap();
+
+        // The next Run of the same session is refused by Codex.
+        let second_capture = root.join("second.jsonl");
+        let mut refused = CodexAppSession::spawn_stdio_with_prefix_args(
+            "node",
+            &fixture(&second_capture),
+            root.to_str(),
+            None,
+        )
+        .await
+        .unwrap();
+        let error = refused
+            .initialize(root.to_str(), key, true)
+            .await
+            .unwrap_err()
+            .to_string();
+        refused.shutdown().await;
+        holder.shutdown().await;
+
+        assert!(error.starts_with("harness_session_in_use: "), "{error}");
+        assert!(error.contains("codex-fixture-thread"), "{error}");
+        assert!(error.contains(&format!("Codex process {holder_pid}")), "{error}");
+        assert!(error.contains(&format!("xMatrix process {}", std::process::id())), "{error}");
+        assert!(error.contains("Run instance-held#1"), "{error}");
+        assert!(error.contains("then send the message again"), "{error}");
+        assert_eq!(
+            load_codex_resume_session_id(key).as_deref(),
+            Some("codex-fixture-thread"),
+            "the session keeps its thread"
+        );
+        let methods: Vec<String> = std::fs::read_to_string(&second_capture)
+            .unwrap()
+            .lines()
+            .filter_map(|line| {
+                serde_json::from_str::<Value>(line).ok()?["method"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .collect();
+        assert!(methods.contains(&"thread/resume".to_string()));
+        assert!(
+            !methods.contains(&"thread/start".to_string()),
+            "a refused resume must not start a new thread: {methods:?}"
+        );
+
+        // Once the holder is gone, the record no longer names a live process.
+        let gone = codex_thread_in_use_error(
+            "codex-fixture-thread",
+            load_codex_thread_writer(key).as_ref(),
+            &[],
+        )
+        .to_string();
+        assert!(gone.contains("another Codex process on this computer"), "{gone}");
+        assert!(!gone.contains(&holder_pid.to_string()), "{gone}");
+
+        unsafe {
+            match previous_config {
+                Some(value) => std::env::set_var("XMATRIX_CONFIG_DIR", value),
+                None => std::env::remove_var("XMATRIX_CONFIG_DIR"),
+            }
+            match previous_run {
+                Some(value) => std::env::set_var("XMATRIX_RUN_ID", value),
+                None => std::env::remove_var("XMATRIX_RUN_ID"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(root);
+    })
+    .await
+    .expect("Codex writer fixture completes");
+}
