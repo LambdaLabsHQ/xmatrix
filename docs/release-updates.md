@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a stall notice still lands when the message it answers is gone
+
+A turn the host reports stalled is said in its Channel as a reply to the
+message being worked on. If that message was deleted while the notice was
+being worded, the append was refused (`invalid_reply_target`, 400), the notice
+was lost, and the best-effort path logged it as an error (Sentry HUB-D3/D4,
+one event on 2026-11-16). A system notice now retries once without the reply
+when that is the refusal, so the Channel still learns the turn stalled; every
+other rejection still fails. Hub only, no migration. Recovery is a
+CI-validated beta Hub reverting this change.
+
 ## Unreleased: a pull request's GitHub messages read as one connector story
 
 What GitHub reported about a pull request an Agent opened (CI passed or

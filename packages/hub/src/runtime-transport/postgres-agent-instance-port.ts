@@ -14,6 +14,7 @@ import type {
 } from "@xmatrix/protocol/connections/agent-instance";
 import type { AgentRuntimeState, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
 import { stalledTurnNotice } from "./agent-stalled-turn-notice";
+import { appendNoticeWithReplyFallback } from "./notice-reply-fallback";
 import {
   normalizeAgentInstanceDurablePresentation,
   type AgentInstanceDurablePresentation,
@@ -717,7 +718,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     appMetadata?: Record<string, unknown>;
   }): Promise<void> {
     const ownerUserId = session.principal.ownerUserId;
-    await this.dependencies.messages.append({
+    const append = (replyToMessageId?: string) => this.dependencies.messages.append({
       commandId: runtimeCommandId("agent-append", notice.noticeId),
       messageId: notice.noticeId,
       channelId: session.run.channelId,
@@ -725,11 +726,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       messageKind: notice.messageKind,
       principal: { kind: "user", id: ownerUserId },
       senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
-      residual: { replyToMessageId: notice.replyToMessageId,
+      residual: { ...(replyToMessageId ? { replyToMessageId } : {}),
         appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, ...notice.appMetadata } },
     }, { actorUserId: ownerUserId }).catch((error) => {
       if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
     });
+    await appendNoticeWithReplyFallback(append, notice.replyToMessageId,
+      error => error instanceof RuntimeAuthorityOperationError && error.authorityCode === "invalid_reply_target");
   }
 
   /**

@@ -44,6 +44,8 @@ export class RuntimeAuthorityOperationError extends Error {
   readonly failure: RuntimeOperationFailure;
   /** A 409 saying the command or message id is already committed. */
   readonly committedIdentityConflict: boolean;
+  /** The authority's own rejection code, for a Hub caller that acts on one. */
+  readonly authorityCode: string;
   /** `reported`: the original failure already owns its Sentry event, with its evidence. */
   constructor(operation: string, status: number, body: unknown, readonly reported = false) {
     super(`PostgreSQL rejected ${operation} (${status})`);
@@ -61,6 +63,7 @@ export class RuntimeAuthorityOperationError extends Error {
     // unpublished code into `runtime.authority_rejected`, which names no cause.
     const authorityCode = typeof value.code === "string" && AUTHORITY_CODE.test(value.code)
       ? value.code : "unknown";
+    this.authorityCode = authorityCode;
     // Which fence refused, and on what command type (static labels, e.g. a stale lease's).
     const label = (field: unknown) => typeof field === "string" && AUTHORITY_CODE.test(field) ? field : undefined;
     const authorityReason = label(value.reason), commandType = label(value.commandType);
