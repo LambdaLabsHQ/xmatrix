@@ -168,6 +168,25 @@ minute means the origin connections are held too long; compare with the
 `session` points in the substrate observability dataset
 ([connectivity breaker](postgres-connectivity-breaker.md)).
 
+### Connection time report
+
+Capacity is the origin's connections divided by how long each piece of work
+holds one, and a hold is round trips times latency, not SQL time. Read where
+that time goes before adding connections or shards:
+
+```sh
+CLOUDFLARE_ACCOUNT_ID=<account> CLOUDFLARE_API_TOKEN=<analytics read token> \
+  node scripts/postgres-connection-report.mjs --hours 24 --config <primary Hyperdrive id>
+```
+
+It prints connection seconds, sessions, round trips and slow sessions per
+operation, the share spent by the cron's passes, the minutes in which a request
+waited for a connection, and any session opened inside another transaction.
+It exits 1 when a budget in `CONNECTION_BUDGETS` is exceeded (requests waiting
+in more than 5% of minutes, background work above 25% of connection time, any
+nested session, an operation above 12 round trips per session), so a scheduled
+run is the alert. Raise a budget only with the measurement that justifies it.
+
 ### Connections held at once
 
 Hyperdrive splits a configuration's limit over several pools (five for the
