@@ -16,6 +16,7 @@ import {
   DEFAULT_UPLOAD_TIMEOUT_MS,
   buildCurlUploadArgs,
 } from "./publish-github-release-upload.mjs";
+import { isGithubRateLimitBody } from "./github-rate-limit.mjs";
 
 const RETRY_ATTEMPTS = Number(process.env.GITHUB_RELEASE_RETRY_ATTEMPTS ?? "6");
 const RETRY_BASE_MS = Number(process.env.GITHUB_RELEASE_RETRY_BASE_MS ?? "1500");
@@ -105,6 +106,11 @@ function retryDelay(attempt) {
 
 function shouldRetryStatus(status) {
   return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+}
+
+// A rate-limited 403 is temporary; any other 403 is a permission refusal.
+function shouldRetryResponse(status, text) {
+  return shouldRetryStatus(status) || isGithubRateLimitBody(status, text);
 }
 
 function shouldRetryError(error) {
@@ -239,7 +245,7 @@ async function github(path, options = {}) {
       },
     });
 
-    if (!result.response.ok && shouldRetryStatus(result.response.status)) {
+    if (!result.response.ok && shouldRetryResponse(result.response.status, result.text)) {
       throw new RetryableHttpError(
         `${method} ${path} failed: ${result.response.status} ${result.text}`,
         result.response.status,
@@ -332,7 +338,7 @@ async function uploadAssetWithCurl(releaseId, assetPath, uploadName) {
     throw new RetryableHttpError(`Upload ${uploadName} hit an existing asset name after a partial attempt`, status);
   }
 
-  if (shouldRetryStatus(status)) {
+  if (shouldRetryResponse(status, body)) {
     throw new RetryableHttpError(`Upload ${uploadName} failed: ${status} ${body}`, status);
   }
 
@@ -375,7 +381,7 @@ async function uploadAsset(releaseId, assetPath, uploadName = basename(assetPath
       throw new RetryableHttpError(`Upload ${uploadName} hit an existing asset name after a partial attempt`, response.status);
     }
 
-    if (shouldRetryStatus(response.status)) {
+    if (shouldRetryResponse(response.status, text)) {
       throw new RetryableHttpError(`Upload ${uploadName} failed: ${response.status} ${text}`, response.status);
     }
 
@@ -407,7 +413,7 @@ async function getOptionalGitHubResource(url, description) {
         "X-GitHub-Api-Version": "2022-11-28",
       },
     });
-    if (result.response.status !== 404 && !result.response.ok && shouldRetryStatus(result.response.status)) {
+    if (result.response.status !== 404 && !result.response.ok && shouldRetryResponse(result.response.status, result.text)) {
       throw new RetryableHttpError(`${description} failed: ${result.response.status} ${result.text}`, result.response.status);
     }
     return result;
