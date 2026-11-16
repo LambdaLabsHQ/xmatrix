@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a Gmail notification retried after its read was saved is delivered
+
+A mailbox's new-mail notifications stopped for good when a notification pass
+failed after its automatic read had been saved privately: every retry wrote
+the private record again with the same command ids but a new expiry, which
+was refused as a reused command, so the mailbox paused with its later mail
+behind it (one mailbox from 2026-11-13). Each private-record write now uses
+its own commands for the same record, a connector result already saved for
+its message stands, and a retried notification pass is reported to Sentry by
+its error class, code and status. Hub only; a paused mailbox resumes on its
+own and delivers what waited. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a turn refused for its model's quota continues on another model
 
 When a turn is refused because its own model's quota is used up (Claude's
