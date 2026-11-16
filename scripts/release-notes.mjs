@@ -29,12 +29,50 @@ export function authoredReleaseNotes(root, version, revision) {
   return body;
 }
 
-export async function generatedBetaReleaseNotes({ repository, tag, token }) {
+const RATE_LIMIT_DELAY_CAP_MS = 60_000;
+const RELEASE_NOTES_ATTEMPTS = 4;
+
+function responseHeader(response, name) {
+  return response?.headers?.get?.(name) ?? null;
+}
+
+/**
+ * How long to wait before repeating a refused GitHub read, or null when the
+ * refusal is final. GitHub throttles with 429, or with 403 carrying rate-limit
+ * evidence (primary: remaining 0 and reset; secondary: Retry-After or a rate
+ * limit message). A 403 without that evidence is a permission refusal, so
+ * retrying it would only delay the failure.
+ */
+export function githubRetryDelayMs(response, body, attempt) {
+  if (!response) return Math.min(RATE_LIMIT_DELAY_CAP_MS, 1_000 * 2 ** attempt);
+  const retryAfter = Number(responseHeader(response, "retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return Math.min(RATE_LIMIT_DELAY_CAP_MS, retryAfter * 1_000);
+  }
+  if (response.status === 429 || response.status >= 500) {
+    return Math.min(RATE_LIMIT_DELAY_CAP_MS, 1_000 * 2 ** attempt);
+  }
+  if (response.status !== 403) return null;
+  const reset = Number(responseHeader(response, "x-ratelimit-reset"));
+  if (responseHeader(response, "x-ratelimit-remaining") === "0" && Number.isFinite(reset) && reset > 0) {
+    return Math.max(1_000, Math.min(RATE_LIMIT_DELAY_CAP_MS, reset * 1_000 - Date.now()));
+  }
+  if (/rate limit|secondary rate|abuse/iu.test(body ?? "")) {
+    return Math.min(RATE_LIMIT_DELAY_CAP_MS, 1_000 * 2 ** attempt);
+  }
+  return null;
+}
+
+export async function generatedBetaReleaseNotes({
+  repository, tag, token, attempts = RELEASE_NOTES_ATTEMPTS,
+  sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+}) {
   const version = tag.replace(/^xmatrix-v/u, "");
   assertSemver(version);
   const api = async (suffix, body) => {
     for (let attempt = 0; ; attempt++) {
       let response;
+      let text = "";
       try {
         const url = new URL(`https://api.github.com/repos/${repository}/releases${suffix}`);
         if (!body) url.searchParams.set("_xmatrix_read", randomUUID());
@@ -46,12 +84,19 @@ export async function generatedBetaReleaseNotes({ repository, tag, token }) {
           signal: AbortSignal.timeout(15_000),
         });
         if (response.ok) return await response.json();
+        text = await response.text().catch(() => "");
       } catch (error) {
-        if (attempt === 2) throw error;
+        if (error instanceof SyntaxError) throw error;
+        if (attempt + 1 >= attempts) throw error;
+        await sleep(githubRetryDelayMs(undefined, "", attempt));
+        continue;
       }
-      if (response && response.status !== 429 && response.status < 500) throw new Error(`Reading release notes failed (${response.status})`);
-      if (attempt === 2) throw new Error(`Reading release notes failed (${response?.status})`);
-      await new Promise((resolve) => setTimeout(resolve, 1_000 * (attempt + 1)));
+      const delay = attempt + 1 >= attempts ? null : githubRetryDelayMs(response, text, attempt);
+      if (delay === null) {
+        const detail = text.trim().slice(0, 300);
+        throw new Error(`Reading release notes failed (${response.status})${detail ? `: ${detail}` : ""}`);
+      }
+      await sleep(delay);
     }
   };
   // GitHub's implicit baseline can start at the first public commit when tags
