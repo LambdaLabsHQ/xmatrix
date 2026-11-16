@@ -613,8 +613,9 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
    *
    * The daemon also names the Run (`runId`, `executionKey`) the grant was
    * issued for. The token is then minted only when that Run is live on this
-   * machine, in this Channel, and was launched into this repository, so a
-   * machine cannot mint for a repository no Run of its was admitted to.
+   * machine and in this Channel. Which repository is the Run's choice: it
+   * checks out what its work needs (`xmatrix repo checkout`), within what the
+   * Space's installation covers.
    * Daemons that predate the binding send no Run; they are admitted only while
    * `GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED` is "true".
    */

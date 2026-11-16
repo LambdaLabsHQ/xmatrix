@@ -125,6 +125,9 @@ export interface RegistrationLaunchCandidate {
   /** Its daemon has the runtime switch to a preferred model from the runtime's
    * own catalog as it starts (`registration_native_model_v1`). */
   supportsNativeModel?: boolean;
+  /** Its daemon lets a Run check out repositories itself (`run_repo_checkout_v1`),
+   * so a summon naming no repository may start in the managed directory. */
+  supportsRepoCheckout?: boolean;
   supportsRequestedParameters?: boolean;
   modelAliases?: Record<string, string>;
   observations?: {
@@ -1341,6 +1344,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
           ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),
+          ...(daemonCapable(daemon, "run_repo_checkout_v1") ? { supportsRepoCheckout: true } : {}),
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),
           // A launch addressed to this Machine (one of its registrations or its id) named it.

@@ -313,6 +313,11 @@ pub enum Commands {
         #[command(subcommand)]
         command: ConnectorCliCommand,
     },
+    /// Check out a repository worktree for this Agent Run to work in
+    Repo {
+        #[command(subcommand)]
+        command: RepoCliCommand,
+    },
     /// Set, clear, or inspect the goal this agent run keeps working toward
     Goal {
         #[command(subcommand)]
@@ -1571,6 +1576,22 @@ pub enum ConnectorCliCommand {
     /// The apps connected to this Run's Channel and each action's command;
     /// act by sending one with `xmatrix send`
     List,
+}
+
+#[derive(Subcommand)]
+pub enum RepoCliCommand {
+    /// Check out a worktree of a repository this Space connects and print its path
+    ///
+    /// An Agent Run starts in its xMatrix-managed working directory. When the
+    /// work needs a repository's code, check it out here and `cd` into the
+    /// printed path; it is this Run's own worktree on a detached fresh default
+    /// branch. Asking again (also after this Instance restarts) returns the
+    /// same worktree. `xmatrix space launch-targets` lists the Space's repositories.
+    #[command(after_help = "Example:\n  cd \"$(xmatrix repo checkout LambdaLabsHQ/xmatrix)\"")]
+    Checkout {
+        /// The repository, as owner/repo.
+        repository: String,
+    },
 }
 
 #[derive(Subcommand)]

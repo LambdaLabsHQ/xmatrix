@@ -757,6 +757,29 @@ test('a listed repository comes first; directories are offered only when no repo
   assert.equal(directory.parameterEvidence.selections.repo, undefined);
 });
 
+test('a Run that checks out repositories itself starts in its managed directory; Jev guesses no repository', async () => {
+  const repo = (name) => ({ reference: `repo:owner/${name}`, repo: `owner/${name}`, machineId: 'first', description: name });
+  const candidate = { ...candidates[0], supportsRepoCheckout: true,
+    workspaceReferences: ['workspace-a', 'repo:owner/project', 'repo:owner/docs'],
+    workspaces: [candidates[0].workspaces[0], repo('project'), repo('docs')] };
+  const calls = [];
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex fix the docs site', tags: {}, candidates: [candidate], managedWorkspace: true });
+  assert.ok(calls.every(call => !call.questions.workspace || Object.keys(call.questions.workspace.criteria).length === 1));
+  assert.equal(chosen.workspaceReference, undefined);
+  assert.equal(chosen.parameterEvidence.selections.workspaceKind, 'managed');
+  // An author who names the repository still gets it checked out at launch.
+  const named = await registrationLaunchChooser(async input => answer(input))({
+    message: '@codex repo:owner/docs', tags: { repo: 'owner/docs' }, candidates: [candidate], managedWorkspace: false });
+  assert.equal(named.workspaceReference, 'repo:owner/docs');
+  // A machine whose daemon cannot check out yet still has a repository chosen for it.
+  calls.length = 0;
+  const legacy = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@codex', tags: {}, candidates: [candidate, { ...candidate, supportsRepoCheckout: undefined,
+      key: { ...candidate.key, machineId: 'second' } }], managedWorkspace: true });
+  assert.equal(legacy.parameterEvidence.selections.workspaceKind, 'repo');
+});
+
 const summon = { text: '@codex', start: 0, end: 6 };
 test('a summon its send asked to launch asks Jev no intent question', async () => {
   const calls = [];

@@ -1,8 +1,9 @@
 async fn spawn_daemon_request_broker(
     hub_url: String,
     machine_id: Option<String>,
-    auth_broker_url: Option<String>,
+    auth_broker: Option<&DaemonAuthBroker>,
     run_registry: DaemonRunRegistry,
+    relay: SharedMachineDaemonConnection,
 ) -> error::Result<Option<DaemonRequestBroker>> {
     let std_listener = std::net::TcpListener::bind("127.0.0.1:0")
         .map_err(|err| CliError::Launch(format!("Failed to bind daemon request broker: {err}")))?;
@@ -20,8 +21,10 @@ async fn spawn_daemon_request_broker(
         agent_capabilities: Arc::new(Mutex::new(HashMap::new())),
         machine_id,
         hub_url: Some(hub_url),
-        auth_broker_url,
+        auth_broker_url: auth_broker.map(|broker| broker.url.clone()),
         run_registry,
+        relay: Some(relay),
+        git_credentials: auth_broker.map(|broker| broker.git_credentials.clone()),
     };
     persist_daemon_request_broker_state(&broker.url, &broker.owner_capability);
     let broker_for_task = broker.clone();
@@ -405,6 +408,18 @@ async fn handle_daemon_request_broker_request<
                     Err(err) => Failed(err.to_string()),
                 },
                 Err(err) => Invalid(format!("invalid rebind payload: {err}")),
+            }
+        }
+        ("POST", "/request/repo-checkout") => {
+            let Some(context) = daemon_request_agent_context(&broker, &request) else {
+                return write_daemon_request_unauthorized(&mut stream, &request).await;
+            };
+            match serde_json::from_str::<DaemonRepoCheckoutPayload>(request_body) {
+                Ok(payload) => match serve_repo_checkout(&broker, &context, payload).await {
+                    Ok(body) => Served(body),
+                    Err(err) => Failed(err.to_string()),
+                },
+                Err(err) => Invalid(format!("invalid checkout payload: {err}")),
             }
         }
         ("POST", "/request/handoff-run") => {

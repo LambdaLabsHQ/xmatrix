@@ -1,13 +1,14 @@
 /**
- * Which Run a machine's repository-token request speaks for, and whether that
- * Run was launched into the repository it names.
+ * Which Run a machine's repository-token request speaks for.
  *
  * Without this binding the mint only proved that the machine's owner could see
- * the Channel: any member's machine could then mint a write token for any
- * repository of the Space's installations. With it, a token is minted only for
- * the repository the Hub itself admitted for one live Run on that machine.
+ * the Channel. With it, a token is minted only for one live Run on that
+ * machine, in that Channel. Which repository is the Run's to decide: a Run
+ * checks out the repositories its work needs as it goes (`xmatrix repo
+ * checkout`), and the Space's GitHub connection, checked on every mint, is
+ * what decides which repositories exist for it.
  */
-import { githubRepositoryReference, isActiveRunStatus } from "@xmatrix/protocol";
+import { isActiveRunStatus } from "@xmatrix/protocol";
 import type { MachineDaemonPrincipal } from "./connections/machine-daemon/auth";
 
 export interface GitHubRepositoryTokenRunClaim {
@@ -17,7 +18,7 @@ export interface GitHubRepositoryTokenRunClaim {
   repository: { owner: string; repo: string };
 }
 
-/** Why a Run cannot have a token for this repository, or `undefined` when it can. */
+/** Why a Run cannot have a token, or `undefined` when it can. */
 export function githubRepositoryTokenRunRefusal(
   run: Record<string, unknown>,
   principal: Pick<MachineDaemonPrincipal, "machineId">,
@@ -31,14 +32,7 @@ export function githubRepositoryTokenRunRefusal(
     return "github_repository_token_run_machine_mismatch";
   }
   // A stopping Run still pushes its handoff branch before its stop is reported.
-  if (!isActiveRunStatus(run.status)) return "github_repository_token_run_not_live";
-  const launched = typeof metadata.remoteRepo === "string" ? githubRepositoryReference(metadata.remoteRepo) : undefined;
-  if (!launched) return "github_repository_not_authorized_for_run";
-  // GitHub names are case-insensitive, and Git reports the path as the remote
-  // URL spells it.
-  const same = launched.owner.toLowerCase() === claim.repository.owner.toLowerCase() &&
-    launched.repo.toLowerCase() === claim.repository.repo.toLowerCase();
-  return same ? undefined : "github_repository_not_authorized_for_run";
+  return isActiveRunStatus(run.status) ? undefined : "github_repository_token_run_not_live";
 }
 
 /**
