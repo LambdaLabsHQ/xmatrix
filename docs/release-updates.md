@@ -40,6 +40,19 @@ Enter opens a fence whose info has a space in it, and the block keeps the
 whole string `nornRunBlock` reads, including a name in any language. Web.
 Recovery is a CI-validated beta reverting this change.
 
+## Unreleased: a slow Gmail notification pass keeps its lease
+
+A mailbox draining a backlog of new mail delivers one message at a time, and a
+message's automatic read can take longer than the two-minute claim lease. When
+the lease ran out mid-pass, the pass's own ownership check then failed, the
+notification that had just been posted was retried from the start on every
+later pass, and each pass reported the fence as a failed notification pass
+(one mailbox from 2026-11-16, about one error every two minutes). A delivering
+pass now renews the lease it already holds before each message, and a mailbox
+fence (`409`, the lease moved to another pass or the owner revoked access) is
+an expected stop that retries quietly instead of being reported. Hub only, no
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
 ## Unreleased: a Gmail notification retried after its read was saved is delivered
 
 A mailbox's new-mail notifications stopped for good when a notification pass

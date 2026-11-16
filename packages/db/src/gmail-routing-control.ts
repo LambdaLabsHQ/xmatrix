@@ -175,6 +175,15 @@ export class PostgresGmailRoutingRepository {
       return Promise.all(rows.map(row => this.row(row)));
     });
   }
+  /**
+   * A message read can take longer than the queue lease; a pass that is still
+   * delivering renews the lease it already holds, and never revives a route it lost.
+   */
+  async heartbeat(job: GmailRoutingJob) {
+    return retryBeforeCommit(() => this.transaction("heartbeat", tx => tx.query({ name: "gmail_route_heartbeat_v1", text: `UPDATE data.app_gmail_routes
+      SET lease_until=now()+interval '2 minutes' WHERE route_id=$1 AND enabled AND lease_id=$2::uuid AND lease_until>now()`,
+    values: [job.id, job.leaseId], maxRows: 0 })));
+  }
   async current(job: GmailRoutingJob) {
     return this.transaction("current", async tx => {
       try { await this.authorize(tx, job.spaceId, job.userId); } catch (error) {

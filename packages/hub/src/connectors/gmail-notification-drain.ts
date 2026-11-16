@@ -42,6 +42,8 @@ function notice(job: GmailRoutingJob, eventId: string, body: string): ConnectorE
 /** One message per new mail and Channel: the notification, carrying the connector's own read as its private result. */
 async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { credentials: Readonly<Record<string, string>>; mailbox: GmailMailbox }) {
   const repository = gmailRoutingRepository(env);
+  // A Gmail read can outlast the claim lease; keep the lease this pass already holds.
+  await repository.heartbeat(job);
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
   const eventId = `${job.id}:${id}`, feature = "message.received";
   const targets = await routes(env, job, feature);
@@ -129,7 +131,11 @@ export async function drainGmailNotifications(env: Env) {
       // 403 may be Gmail quota throttling; lease loss and delivery conflicts also retry.
       // Only definitive authorization failure retires the native grant.
       const revoked=error instanceof ProviderRequestError && error.status===401;
-      if(!revoked)reportGmailNotificationFailure(error);
+      // The mailbox fence only: this pass's own 409, or the routing repository's
+      // gmail_routing_unavailable. It is an expected stop, not a failure to report.
+      const fenced=(error instanceof ProviderRequestError && error.status===409) ||
+        (!!error && typeof error==="object" && "code" in error && (error as {code:unknown}).code==="gmail_routing_unavailable");
+      if(!revoked && !fenced)reportGmailNotificationFailure(error);
       if(revoked && await repository.current(job)) {
         try {await post(env,job,notice(job,`stopped:${job.id}`,`${job.selection.address}: Gmail notifications need attention. Turn notifications on again in Apps → Gmail; existing search, read and reply remain available.`));}
         catch {await repository.finish(job,"retry");return;}

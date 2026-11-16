@@ -249,3 +249,16 @@ integration("polling is leased without a push; failed confirmation survives unch
     assert.doesNotMatch(JSON.stringify((await sql("SELECT * FROM data.app_gmail_routes WHERE route_id=$1",[id])).rows),/private-cached-token|late-token|private-refresh-token/);
   });
 });
+
+integration("a delivering pass renews only the lease it still holds",async()=>{
+  await fixture(async({repository,activate,sql})=>{
+    const id=await activate();await repository.signal("signal-digest");
+    const [job]=await repository.claim();
+    await sql("UPDATE data.app_gmail_routes SET lease_until=now()+interval '5 seconds' WHERE route_id=$1",[id]);
+    await repository.heartbeat(job);
+    assert.equal((await sql("SELECT lease_until>now()+interval '1 minute' AS renewed FROM data.app_gmail_routes WHERE route_id=$1",[id])).rows[0].renewed,true);
+    await sql("UPDATE data.app_gmail_routes SET lease_until=now()-interval '1 second' WHERE route_id=$1",[id]);
+    await repository.heartbeat(job);
+    assert.equal((await sql("SELECT lease_until<now() AS expired FROM data.app_gmail_routes WHERE route_id=$1",[id])).rows[0].expired,true);
+  });
+});
