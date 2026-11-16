@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { stalledTurnNotice } from "../src/runtime-transport/agent-stalled-turn-notice.ts";
+import { appendNoticeWithReplyFallback, stalledTurnNotice } from "../src/runtime-transport/agent-stalled-turn-notice.ts";
 
 const base = { channelId: "ch-1", instanceId: "ch-1:3", address: "@deepseek:3", now: 1_000_000 + 6 * 60_000 };
 const running = (issue) => ({ status: "running", activeChannelId: "ch-1", activeMessageId: "m-1", ...(issue ? { issue } : {}) });
@@ -27,4 +27,24 @@ test("nothing is said without a stall, a running turn, or a message in this Chan
   assert.equal(stalledTurnNotice({ ...base, next: { status: "running", issue: { kind: "stalled", sinceMillis: 1 } } }), undefined);
   assert.equal(stalledTurnNotice({ ...base,
     next: { ...running({ kind: "stalled", sinceMillis: 1 }), activeChannelId: "elsewhere" } }), undefined);
+});
+
+test("a refused reply target says the notice at the top level instead", async () => {
+  // Production HUB-D3/D4: the turn's message was gone before the notice posted.
+  const seen = [];
+  await appendNoticeWithReplyFallback(async replyToMessageId => {
+    seen.push(replyToMessageId);
+    if (replyToMessageId) throw Object.assign(new Error("refused"), { code: "invalid_reply_target" });
+  }, "m-1", error => error?.code === "invalid_reply_target");
+  assert.deepEqual(seen, ["m-1", undefined]);
+});
+
+test("only a refused reply target falls back; another failure still fails the notice", async () => {
+  const seen = [];
+  const failure = Object.assign(new Error("append failed"), { code: "forbidden" });
+  await assert.rejects(appendNoticeWithReplyFallback(async replyToMessageId => {
+    seen.push(replyToMessageId);
+    throw failure;
+  }, "m-1", error => error?.code === "invalid_reply_target"), error => error === failure);
+  assert.deepEqual(seen, ["m-1"]);
 });

@@ -13,7 +13,7 @@ import type {
   AgentInstanceServerMessage,
 } from "@xmatrix/protocol/connections/agent-instance";
 import type { AgentRuntimeState, LiveAgentStatus, SerializedAgent } from "@xmatrix/protocol";
-import { stalledTurnNotice } from "./agent-stalled-turn-notice";
+import { appendNoticeWithReplyFallback, stalledTurnNotice } from "./agent-stalled-turn-notice";
 import {
   normalizeAgentInstanceDurablePresentation,
   type AgentInstanceDurablePresentation,
@@ -717,7 +717,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     appMetadata?: Record<string, unknown>;
   }): Promise<void> {
     const ownerUserId = session.principal.ownerUserId;
-    await this.dependencies.messages.append({
+    const append = (replyToMessageId: string | undefined) => this.dependencies.messages.append({
       commandId: runtimeCommandId("agent-append", notice.noticeId),
       messageId: notice.noticeId,
       channelId: session.run.channelId,
@@ -725,11 +725,16 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       messageKind: notice.messageKind,
       principal: { kind: "user", id: ownerUserId },
       senderSnapshot: productAgentSystemNoticeSenderSnapshot(ownerUserId),
-      residual: { replyToMessageId: notice.replyToMessageId,
+      residual: { ...(replyToMessageId ? { replyToMessageId } : {}),
         appMetadata: { xmatrixProvenance: "system_fact", xmatrixSystemNotice: true, ...notice.appMetadata } },
     }, { actorUserId: ownerUserId }).catch((error) => {
       if (!(error instanceof RuntimeAuthorityOperationError && error.committedIdentityConflict)) throw error;
     });
+    // The turn's message may have been recalled or deleted before the notice:
+    // the authority then refuses that reply target. Say the fact without one.
+    await appendNoticeWithReplyFallback(append, notice.replyToMessageId, error =>
+      error instanceof RuntimeAuthorityOperationError && error.status === 400 &&
+      error.authorityCode === "invalid_reply_target");
   }
 
   /**

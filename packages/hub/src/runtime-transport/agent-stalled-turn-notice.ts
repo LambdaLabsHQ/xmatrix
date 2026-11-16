@@ -30,3 +30,20 @@ export function stalledTurnNotice(input: {
       `It may be stuck: wait for it, stop it with ${input.address}:stop, or ask another Agent.`,
   };
 }
+
+/**
+ * A best-effort system notice: when the authority refuses only the reply
+ * target (the turn's message was recalled or deleted first), say the notice at
+ * the top level instead of failing it — the host's fact still matters.
+ */
+export async function appendNoticeWithReplyFallback(
+  append: (replyToMessageId: string | undefined) => Promise<unknown>,
+  replyToMessageId: string,
+  refusedReplyTarget: (error: unknown) => boolean,
+): Promise<void> {
+  try { await append(replyToMessageId); }
+  catch (error) {
+    if (!refusedReplyTarget(error)) throw error;
+    await append(undefined);
+  }
+}
