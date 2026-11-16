@@ -4,7 +4,7 @@ import { integration, isolatedPostgres, postgresDiagnosticClients } from "./post
 
 // HUB-BJ waits on the Machine advisory scope before any row query. Existing
 // Channel/head lock tests cannot retain the holder of this command boundary.
-integration("a blocked Machine report retains its scope holder without changing rejection or replay", async () => {
+integration("a blocked Machine report retains its scope holder and rejection across its one replay", async () => {
   const fixture = await isolatedPostgres("machine_scope_lock");
   const holder = fixture.client;
   const diagnostics = postgresDiagnosticClients();
@@ -34,7 +34,10 @@ integration("a blocked Machine report retains its scope holder without changing 
         [route.ownerUserId, route.machineId]);
       await assert.rejects(report(sequence), error => {
         assert.equal(error.code, "55P03", "the answered lock rejection is unchanged");
-        const [evidence] = databaseFailureEvidence(error);
+        const attempts = databaseFailureEvidence(error);
+        assert.equal(attempts.length, 2, "the lock-deadline abort replays once and keeps both attempts");
+        assert.deepEqual(attempts.map(item => item.code), ["55P03", "55P03"]);
+        const [evidence] = attempts;
         assert.equal(evidence.operation, "machine-control.report");
         assert.equal(evidence.queryName, "machine_control_scope_lock_v2");
         assert.equal(evidence.lockWait?.status, diagnostics.unavailable ? "unavailable" : "sampled");
@@ -54,12 +57,12 @@ integration("a blocked Machine report retains its scope holder without changing 
       assert.deepEqual((await holder.query("SELECT to_jsonb(d) AS value FROM data.machine_daemons d")).rows, before,
         "a rejected report changes no daemon state");
     }
-    assert.equal(observations.filter(point => point.operation === "machine-control.report").length, 2,
-      "each rejected command runs once");
-    assert.equal(diagnostics.attempts, 2, "one bounded diagnostic attempt per blocked command");
+    assert.equal(observations.filter(point => point.operation === "machine-control.report").length, 4,
+      "each rejected command runs once more: its answered lock timeout replays once");
+    assert.equal(diagnostics.attempts, 4, "one bounded diagnostic attempt per attempt");
     diagnostics.unavailable = false;
     assert.equal((await report(3)).connectionEpoch, 1, "the released scope accepts the next report");
-    assert.equal(diagnostics.attempts, 2, "uncontended commands open no diagnostic connection");
+    assert.equal(diagnostics.attempts, 4, "uncontended commands open no diagnostic connection");
   } finally {
     await holder.query("ROLLBACK").catch(() => {});
     await fixture.close();
