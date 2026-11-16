@@ -70,7 +70,7 @@ export function retryablePostgresFailure(error: unknown): boolean {
   // when Hyperdrive supplies generic 58000. Trust its captured failure, not
   // arbitrary text with no database provenance or an explicit SQL rejection.
   if ((!code || code === "58000") &&
-      databaseFailureEvidence(error).at(-1)?.code === "CONNECTION_TERMINATED") return true;
+      ["CONNECTION_TERMINATED", "CONNECT_TIMEOUT"].includes(databaseFailureEvidence(error).at(-1)?.code ?? "")) return true;
   // pg emits these exact transport failures as plain Error objects, without a
   // SQLSTATE. Never let message matching override an explicit database code.
   // pg-pool wraps a checkout that hit connectionTimeoutMillis as

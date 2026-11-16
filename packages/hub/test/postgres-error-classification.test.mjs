@@ -92,3 +92,17 @@ test("an open shard breaker answers unavailable with its cooldown as Retry-After
   assert.equal(internal.status, 500);
   assert.equal(internal.headers.get("retry-after"), null, "a defect is not worth retrying");
 });
+
+test("a Hyperdrive pool-slot timeout the db client captured is retryable (XMATRIX-HUB-DC)", async () => {
+  const { createAuthorityDatabase } = await import("@xmatrix/db");
+  const { retryPool } = await import("../../db/test/retry-pool.fixture.mjs");
+  const timedOut = () => Object.assign(new Error("Timed out while waiting for an open slot in the pool."), { code: "58000" });
+  const fake = retryPool(/single_read/u, [timedOut(), timedOut()]);
+  const error = await createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-pool-slot", poolFactory: fake.factory,
+  }).transaction({ requestId: "pool-slot", operation: "read", statement: "single_read" },
+    (transaction) => transaction.query({ name: "read_v1", text: "SELECT one", maxRows: 1 })).catch((caught) => caught);
+  assert.equal(retryablePostgresFailure(error), true);
+  // The same text without the db client's capture is not evidence of an outage.
+  assert.equal(retryablePostgresFailure(timedOut()), false);
+});

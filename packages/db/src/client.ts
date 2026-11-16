@@ -223,6 +223,10 @@ const DRIVER_ERROR_CODES = new Map([
   ["Client was closed and is not queryable", "CONNECTION_UNUSABLE"],
   ["Connection terminated due to connection timeout", "CONNECT_TIMEOUT"],
   ["timeout exceeded when trying to connect", "CONNECT_TIMEOUT"],
+  // Hyperdrive found no free origin connection for this transaction's first
+  // statement (it answers with generic 58000): nothing reached PostgreSQL
+  // (XMATRIX-HUB-DC).
+  ["Timed out while waiting for an open slot in the pool.", "CONNECT_TIMEOUT"],
 ]);
 
 function commitResultMayBeUnknown(error: unknown): boolean {

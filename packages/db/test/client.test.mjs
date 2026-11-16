@@ -601,6 +601,20 @@ test("a single read retries a severed Hyperdrive egress on a fresh checkout", as
   assert.equal(sessions[0].errorCode, "CONNECTION_TERMINATED");
 });
 
+test("a Hyperdrive pool-slot timeout replays on a fresh checkout (XMATRIX-HUB-DC)", async () => {
+  const failure = Object.assign(new Error("Timed out while waiting for an open slot in the pool."), { code: "58000" });
+  const fake = retryPool(/single_read/u, [failure]);
+  const sessions = [];
+  const session = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-pool-slot", poolFactory: fake.factory,
+    sessionObserver: (summary) => sessions.push(summary),
+  }).openSession();
+  assert.deepEqual(await session.transaction(singleRead, readOne), [{ id: 1 }]);
+  await session.close();
+  assert.equal(fake.clients.length, 2);
+  assert.equal(sessions[0].errorCode, "CONNECT_TIMEOUT");
+});
+
 test("a second single-read timeout surfaces without a third attempt", async () => {
   const second = new Error("Query read timeout");
   const fake = retryPool(/single_read/u, [new Error("Query read timeout"), second, new Error("third")]);
