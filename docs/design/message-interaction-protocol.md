@@ -135,7 +135,7 @@ A refused switch offers the person who wrote it one step, in its answer
   running the same harness, uniquely named, and with a current provider
   reading of their own account that leaves the model quota. Only a
   repository-backed Instance has any, since a directory never leaves its
-  Machine. **Continue on <machine>** sends
+  Machine. **Continue on <machine> with <model>** sends
   `@<agent>:<n>:handoff:@<harness> machine:<machine> model:<model>`, and says
   first that it stops the Instance and starts a new one there.
 

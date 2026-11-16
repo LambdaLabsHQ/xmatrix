@@ -394,8 +394,9 @@ export function controlNextStep(invocation: AgentControlInvocation,
   const quota = outcome.quotaExhausted;
   const machine = quota?.elsewhere?.[0];
   if (!quota || !machine) return undefined;
-  return { label: `Continue on ${machine.machineName}`,
-    explanation: `Stops @${invocation.target} and hands its work to a new @${machine.harness} on ${machine.machineName}, where ${quota.model} has quota.`,
+  // The step says the model it gets: the one that was asked for, on a Machine whose account still has it.
+  return { label: `Continue on ${machine.machineName} with ${quota.model}`,
+    explanation: `Stops @${invocation.target} and starts a new @${machine.harness} on ${machine.machineName} that continues its work on ${quota.model}. That machine's account still has quota for it.`,
     body: agentControlHandoffStatement(invocation.target, machine.harness, machine.machineName, quota.model) };
 }
 

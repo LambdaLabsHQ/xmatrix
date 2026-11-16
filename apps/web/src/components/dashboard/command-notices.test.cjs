@@ -120,8 +120,8 @@ test("a refused switch offers its author one step, said as what it does", () => 
   assert.deepEqual(controlNextStep(switching, refused({ starting: true })), { label: "Send again", body: "@claude:3 /model fable" });
   assert.deepEqual(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2", machineName: "build-box",
     elsewhere: [{ machineName: "spare box", harness: "claude" }, { machineName: "third", harness: "claude" }] } })),
-  { label: "Continue on spare box",
-    explanation: "Stops @claude:3 and hands its work to a new @claude on spare box, where claude-fable-5-2 has quota.",
+  { label: "Continue on spare box with claude-fable-5-2",
+    explanation: "Stops @claude:3 and starts a new @claude on spare box that continues its work on claude-fable-5-2. That machine's account still has quota for it.",
     body: '@claude:3:handoff:@claude machine:"spare box" model:claude-fable-5-2' });
   // Used up with nowhere else to run it, or refused for another reason: nothing to press.
   assert.equal(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2" } })), undefined);

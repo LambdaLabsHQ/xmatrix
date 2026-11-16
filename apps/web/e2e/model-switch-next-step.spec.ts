@@ -39,11 +39,11 @@ test("a model whose quota is used up says until when and continues on a machine 
   await chips.nth(0).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("the provider quota for claude-fable-5-2 on build-box is used up until 2026-11-19 18:00 UTC.");
-  await expect(dialog).toContainText("Stops @claude:3 and hands its work to a new @claude on spare-box, where claude-fable-5-2 has quota.");
+  await expect(dialog).toContainText("Stops @claude:3 and starts a new @claude on spare-box that continues its work on claude-fable-5-2.");
   await page.screenshot({ path: test.info().outputPath("switch-used-up.png") });
-  await dialog.getByRole("button", { name: "Continue on spare-box" }).click();
+  await dialog.getByRole("button", { name: "Continue on spare-box with claude-fable-5-2" }).click();
   await expect(dialog.getByRole("status")).toHaveText("Sent.");
-  await expect(dialog.getByRole("button", { name: "Continue on spare-box" })).toHaveCount(0);
+  await expect(dialog.getByRole("button", { name: "Continue on spare-box with claude-fable-5-2" })).toHaveCount(0);
   await expect.poll(async () => (await fixtureRequestBodies(page, "switch-send")).map((sent) => (sent as { body?: string }).body))
     .toEqual(["@claude:3:handoff:@claude machine:spare-box model:claude-fable-5-2"]);
 });

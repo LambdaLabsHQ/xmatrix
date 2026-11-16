@@ -5,7 +5,7 @@
 The answer to a refused `/model` now carries one button for the person who
 wrote it. When the model's provider quota is used up on the Instance's
 machine and another online machine of the Space runs the same Agent with
-quota for that model, **Continue on <machine>** hands the Instance's work to
+quota for that model, **Continue on <machine> with <model>** hands the Instance's work to
 a new one there on that model (an ordinary handoff; the answer says it stops
 the Instance first). It is offered only for a repository-backed Instance and
 only for a machine whose own account reading shows quota. When the Instance
