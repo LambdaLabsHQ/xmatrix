@@ -243,6 +243,16 @@ export function lostBeforeCommit(error: unknown): boolean {
     commitResultMayBeUnknown(error);
 }
 
+/**
+ * The server canceled a statement on its lock deadline (`55P03`), aborting the
+ * transaction before COMMIT. Every lock is released and nothing was written,
+ * so database-only work may run again on a fresh checkout. This is the
+ * answered counterpart of a lost response, not a reason to retry a defect.
+ */
+export function lockTimeoutBeforeCommit(error: unknown): boolean {
+  return errorCode(error).toUpperCase() === "55P03";
+}
+
 const RESULT_BYTES = new WeakMap<ResultRowStream, { bytes: number }>();
 
 /**

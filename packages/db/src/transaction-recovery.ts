@@ -1,17 +1,20 @@
 import { linkDatabaseFailures } from "./database-failure-evidence.js";
-import { lostBeforeCommit } from "./client.js";
+import { lostBeforeCommit, lockTimeoutBeforeCommit } from "./client.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabaseRequestContext } from "./context.js";
 
 /**
  * Only for database-only work: its owner closes the failed session before
  * this one replay takes a fresh checkout. COMMIT/PREPARE uncertainty and
- * answered database errors still escape to the caller's reconciliation.
+ * answered database errors still escape to the caller's reconciliation; the
+ * one exception a caller may opt into is a lock-deadline abort (`55P03`),
+ * which released its locks and committed nothing.
  */
-export async function retryBeforeCommit<T>(run: () => Promise<T>): Promise<T> {
+export async function retryBeforeCommit<T>(run: () => Promise<T>,
+  options: { lockTimeout?: boolean } = {}): Promise<T> {
   try { return await run(); }
   catch (error) {
-    if (!lostBeforeCommit(error)) throw error;
+    if (!lostBeforeCommit(error) && !(options.lockTimeout && lockTimeoutBeforeCommit(error))) throw error;
     try { return await run(); }
     catch (retryError) { linkDatabaseFailures(retryError, error); throw retryError; }
   }
@@ -24,5 +27,6 @@ export function retryTransactionBeforeCommit<T>(database: AuthorityDatabase, con
     const session = database.openSession();
     try { return await session.transaction(context, callback); }
     finally { await session.close(); }
-  });
+  }, { lockTimeout: true });
 }
+
