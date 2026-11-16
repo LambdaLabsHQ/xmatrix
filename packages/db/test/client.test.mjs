@@ -586,33 +586,24 @@ test("a timed-out single read is retried once on a fresh checkout", async () => 
   }
 });
 
-test("a single read retries a severed Hyperdrive egress on a fresh checkout", async () => {
-  const failure = Object.assign(new Error("Egress connection severed outside of Hyperdrive"), { code: "58000" });
+// A severed egress and a pool-slot timeout (XMATRIX-HUB-DC) both come as
+// generic 58000 before anything reached PostgreSQL.
+for (const [message, code, shardId] of [
+  ["Egress connection severed outside of Hyperdrive", "CONNECTION_TERMINATED", "shard-0"],
+  ["Timed out while waiting for an open slot in the pool.", "CONNECT_TIMEOUT", "shard-pool-slot"],
+]) test(`a single read retries Hyperdrive's ${code} on a fresh checkout`, async () => {
+  const failure = Object.assign(new Error(message), { code: "58000" });
   const fake = retryPool(/single_read/u, [failure]);
   const sessions = [];
   const session = createAuthorityDatabase({
-    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0", poolFactory: fake.factory,
+    connectionString: "postgres://example.invalid/xmatrix", shardId, poolFactory: fake.factory,
     sessionObserver: (summary) => sessions.push(summary),
   }).openSession();
   assert.deepEqual(await session.transaction(singleRead, readOne), [{ id: 1 }]);
   await session.close();
   assert.equal(fake.clients.length, 2);
   assert.deepEqual(fake.clients.map((client) => client.releases), [[true], [false]]);
-  assert.equal(sessions[0].errorCode, "CONNECTION_TERMINATED");
-});
-
-test("a Hyperdrive pool-slot timeout replays on a fresh checkout (XMATRIX-HUB-DC)", async () => {
-  const failure = Object.assign(new Error("Timed out while waiting for an open slot in the pool."), { code: "58000" });
-  const fake = retryPool(/single_read/u, [failure]);
-  const sessions = [];
-  const session = createAuthorityDatabase({
-    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-pool-slot", poolFactory: fake.factory,
-    sessionObserver: (summary) => sessions.push(summary),
-  }).openSession();
-  assert.deepEqual(await session.transaction(singleRead, readOne), [{ id: 1 }]);
-  await session.close();
-  assert.equal(fake.clients.length, 2);
-  assert.equal(sessions[0].errorCode, "CONNECT_TIMEOUT");
+  assert.equal(sessions[0].errorCode, code);
 });
 
 test("a second single-read timeout surfaces without a third attempt", async () => {
