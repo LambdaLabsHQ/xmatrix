@@ -858,7 +858,7 @@ export class AgentInstanceRuntimeTransport {
       if (message.type === "presence_update") {
         if (nextPresentation) session.presentation = nextPresentation;
         else delete session.presentation;
-        for (const waiter of [...this.reportWaiters]) waiter(session);
+        for (const waiter of this.reportWaiters) waiter(session);
         if (isLiveAgentStatus(message.status)) {
           session.run.instanceStatus = message.status;
         }
