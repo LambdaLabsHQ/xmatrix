@@ -84,7 +84,7 @@ test("CI speaks once, when every check has settled", () => {
     undefined, "single checks are not news");
 });
 
-test("a verdict, merge or close carries its fact; people's reviews and comments do not", () => {
+test("every said event carries its fact; a review or comment keeps its words", () => {
   const ref = { repository: "acme/app", number: 7, url: "https://github.com/acme/app/pull/7" };
   const payload = { action: "completed", check_suite: { head_sha: "abcdef1234567", pull_requests: [{ number: 7 }] } };
   assert.deepEqual(said("check_suite", payload, { state: "passed", failed: [], settledAt: "t" }).fact,
@@ -96,8 +96,12 @@ test("a verdict, merge or close carries its fact; people's reviews and comments 
     sender: { login: "xmatrix-connector[bot]" } }).fact, { ...ref, event: "merged", title: "Fix it" });
   assert.deepEqual(said("pull_request", { action: "closed", pull_request: pull, sender: { login: "yiming" } }).fact,
     { ...ref, event: "closed", title: "Fix it", actor: "yiming" });
-  assert.equal(said("issue_comment", { action: "created", issue: pull, sender: { login: "yiming" },
-    comment: { body: "Why?", user: { login: "yiming" } } }).fact, undefined);
+  assert.deepEqual(said("issue_comment", { action: "created", issue: pull, sender: { login: "yiming" },
+    comment: { body: "Why?", user: { login: "yiming" }, html_url: "https://github.com/acme/app/pull/7#c1" } }).fact,
+  { ...ref, event: "commented", actor: "yiming", words: "Why?", commentUrl: "https://github.com/acme/app/pull/7#c1" });
+  assert.deepEqual(said("pull_request_review", { action: "submitted", pull_request: pull, sender: { login: "codex" },
+    review: { state: "CHANGES_REQUESTED", body: "Handle the empty case.", user: { login: "codex" } } }).fact,
+  { ...ref, event: "reviewed", actor: "codex", verdict: "changes requested", words: "Handle the empty case." });
 });
 
 function harness({ routes, verdict = { state: "passed", failed: [], settledAt: "2026-10-08T22:00:00Z" },

@@ -2,7 +2,8 @@
 
 import { Fragment, memo, type ReactNode } from "react";
 import {
-  ChevronRight, CircleCheck, CircleDashed, CircleX, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
+  ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
+  MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -10,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
 import { formatMessageDateTime, formatMessageTimestamp } from "./channel-history";
 import { MESSAGE_HEADER_TIMESTAMP_CLASS_NAME } from "./row-frames";
+import { RichMessageContent } from "./workspace-shell-rich-message";
 import { foldSummary, timelineItemActivity, timelineItemGitHubFact } from "./conversation-activity-rows";
 import type { TimelineItem } from "./workspace-shell-message-model";
 import type { GitHubPullRequestFact } from "@xmatrix/protocol";
@@ -190,7 +192,17 @@ const GITHUB_FACT_MARK: Record<GitHubPullRequestFact["event"], { icon: LucideIco
   ci_failed: { icon: CircleX, className: statusInkClass("alert") },
   merged: { icon: GitMerge },
   closed: { icon: GitPullRequestClosed },
+  reviewed: { icon: Eye },
+  commented: { icon: MessageSquare },
 };
+
+/** The fact's mark; a review asking for changes is a person's call to act. */
+function githubFactMark(fact: GitHubPullRequestFact): { icon: LucideIcon; className?: string } {
+  if (fact.event === "reviewed" && fact.verdict === "changes requested") {
+    return { icon: Eye, className: statusInkClass("attention") };
+  }
+  return GITHUB_FACT_MARK[fact.event];
+}
 
 /** What GitHub reported, in the words of its message, with the same links. */
 function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
@@ -210,6 +222,18 @@ function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
       </>
     );
   }
+  if (fact.event === "reviewed") {
+    const verb = fact.verdict === "changes requested" ? "requested changes on" : fact.verdict;
+    return <>{fact.actor} {verb} {pull}</>;
+  }
+  if (fact.event === "commented") {
+    return (
+      <>
+        {fact.actor} {fact.commentUrl ? <ExternalLink url={fact.commentUrl}>commented</ExternalLink> : "commented"} on{" "}
+        {pull}{fact.path && <> · <span className="font-mono text-xs">{fact.path}</span></>}
+      </>
+    );
+  }
   const verb = fact.event === "merged" ? "merged" : "closed";
   return (
     <>
@@ -222,14 +246,15 @@ function GitHubFactText({ fact }: { fact: GitHubPullRequestFact }) {
 
 /**
  * A fact GitHub reported about a subscribed pull request (CI verdict, merge,
- * close), drawn as the same line as the "Opened" entry it follows: its mark in
+ * close, a person's review or comment), drawn as the same line as the "Opened" entry it follows: its mark in
  * the avatar column, then sender, time and what happened
  * (docs/design/conversation-activity.md §4.1).
  */
 export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: TimelineItem }) {
   const fact = timelineItemGitHubFact(row);
   if (!fact) return null;
-  const mark = GITHUB_FACT_MARK[fact.event];
+  const mark = githubFactMark(fact);
+  const words = fact.event === "reviewed" || fact.event === "commented" ? fact.words : "";
   const Icon = mark.icon;
   return (
     <div className="app-activity-row px-5 py-0.5 text-[13px] text-muted-foreground"
@@ -244,6 +269,12 @@ export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: Timelin
           <GitHubFactText fact={fact} />
         </span>
       </div>
+      {/* A person's words stay whole, in message ink, under the line that says who wrote them. */}
+      {words && (
+        <div className="ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] mt-0.5 mb-1 text-[15px] text-foreground">
+          <RichMessageContent body={words} />
+        </div>
+      )}
     </div>
   );
 });

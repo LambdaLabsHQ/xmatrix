@@ -78,8 +78,8 @@ function login(value: unknown): string {
  * that says nothing new to its conversation: the author's own pushes, comments,
  * reviews and merge (the Agent that opened it did those itself), edits,
  * labels, and every check but the settled verdict. A CI verdict, merge or
- * close also carries its fact, so the timeline draws it as a compact line;
- * reviews and comments are people's words and stay messages.
+ * close, review or comment also carries its fact, so the timeline draws it
+ * as a compact line; a review's or comment's words stay whole beneath it.
  */
 export function githubPullRequestEventMessage(input: {
   event: string;
@@ -116,9 +116,10 @@ export function githubPullRequestEventMessage(input: {
     const review = record(payload.review);
     if (payload.action !== "submitted" || login(review.user) === author) return undefined;
     const state = text(review.state).toLowerCase().replace(/_/gu, " ") || "reviewed";
+    const verdict = state === "commented" ? "reviewed" : state;
     const body = text(review.body);
-    return { body: [`${actor} ${state === "commented" ? "reviewed" : state} ${link}`, body || undefined]
-      .filter(Boolean).join("\n\n") };
+    return { body: [`${actor} ${verdict} ${link}`, body || undefined].filter(Boolean).join("\n\n"),
+      fact: { ...pullRequest, event: "reviewed", actor, verdict, words: body } };
   }
   if (event === "pull_request_review_comment" || event === "issue_comment") {
     const comment = record(payload.comment);
@@ -126,7 +127,9 @@ export function githubPullRequestEventMessage(input: {
     const path = text(comment.path);
     const at = text(comment.html_url);
     return { body: [`${actor} commented on ${link}${path ? ` (${path})` : ""}${at ? ` ([comment](${at}))` : ""}`,
-      text(comment.body) || undefined].filter(Boolean).join("\n\n") };
+      text(comment.body) || undefined].filter(Boolean).join("\n\n"),
+    fact: { ...pullRequest, event: "commented", actor, words: text(comment.body),
+      ...(path ? { path } : {}), ...(at ? { commentUrl: at } : {}) } };
   }
   if (event === "check_suite") {
     const verdict = input.verdict;

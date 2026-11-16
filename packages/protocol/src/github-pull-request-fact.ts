@@ -2,8 +2,8 @@
  * A fact GitHub reported about a subscribed pull request: its CI verdict, its
  * merge or its close (docs/design/conversation-activity.md §3.6, §4.1). The
  * Hub writes it beside the message text, so a timeline draws it as the same
- * compact line as the "Opened" entry before it, and people's reviews and
- * comments stay whole messages. Only the Hub writes `xmatrix*` metadata.
+ * compact line as the "Opened" entry before it; a person's review or
+ * comment keeps its words whole beneath that line. Only the Hub writes `xmatrix*` metadata.
  */
 
 export const GITHUB_PULL_REQUEST_FACT_METADATA_KEY = "xmatrixGitHubPullRequest";
@@ -23,6 +23,9 @@ export type GitHubPullRequestFact = {
   | { event: "ci_failed"; sha: string; failed: GitHubPullRequestFactCheck[]; more: number }
   /** `actor` is the person who merged or closed it; a GitHub App's bot is not named. */
   | { event: "merged" | "closed"; title: string; actor?: string }
+  /** A person's review: `verdict` is GitHub's state in words ("approved", "changes requested", "reviewed"). */
+  | { event: "reviewed"; actor: string; verdict: string; words: string }
+  | { event: "commented"; actor: string; words: string; path?: string; commentUrl?: string }
 );
 
 const GITHUB_URL = /^https:\/\/github\.com\//u;
@@ -59,9 +62,19 @@ export function githubPullRequestFactOf(metadata: unknown): GitHubPullRequestFac
     const more = typeof fact.more === "number" && Number.isSafeInteger(fact.more) && fact.more > 0 ? fact.more : 0;
     return { ...ref, event: "ci_failed", sha, failed, more };
   }
+  const actor = string(fact.actor);
   if (fact.event === "merged" || fact.event === "closed") {
-    const actor = string(fact.actor);
     return { ...ref, event: fact.event, title: string(fact.title) ?? "", ...(actor ? { actor } : {}) };
+  }
+  const words = string(fact.words) ?? "";
+  if (fact.event === "reviewed" && actor) {
+    return { ...ref, event: "reviewed", actor, verdict: string(fact.verdict) || "reviewed", words };
+  }
+  if (fact.event === "commented" && actor) {
+    const path = string(fact.path);
+    const commentUrl = string(fact.commentUrl);
+    return { ...ref, event: "commented", actor, words, ...(path ? { path } : {}),
+      ...(commentUrl && GITHUB_URL.test(commentUrl) ? { commentUrl } : {}) };
   }
   return undefined;
 }
