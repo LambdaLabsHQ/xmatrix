@@ -66,7 +66,16 @@ readline.createInterface({ input: process.stdin }).on("line", line => {
       break;
     }
     case "session/new":
-      reply(request, { sessionId: "parameter-session", configOptions: modelEffortBackend ? modelEffortOptions() : acpOptions("steady") }); break;
+      reply(request, { sessionId: "parameter-session", configOptions: modelEffortBackend ? modelEffortOptions() : acpOptions("steady"),
+        // Antigravity's shape: catalog ids join model and level; the model control takes the base name.
+        ...(backend === "acp-model-effort-catalog" ? { models: { currentModelId: "model-a-high",
+          availableModels: ["model-a-high", "model-b-low"].map(modelId => ({ modelId, name: modelId })) } } : {}) }); break;
+    case "session/set_model": {
+      const known = backend === "acp-model-effort-catalog" && ["model-a-high", "model-b-low"].includes(request.params.modelId);
+      if (!known) { send({ jsonrpc: "2.0", id: request.id, error: { code: -32602, message: "Unknown model" } }); break; }
+      [acpModel, acpEffort] = request.params.modelId.split(/-(?=[^-]+$)/);
+      reply(request, {}); break;
+    }
     case "session/set_config_option": {
       if (modelEffortBackend) {
         const { configId, value, sessionId } = request.params;

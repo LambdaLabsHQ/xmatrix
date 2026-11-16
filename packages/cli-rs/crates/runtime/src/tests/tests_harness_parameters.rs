@@ -59,6 +59,33 @@ async fn acp_model_switch_refreshes_effort_control_and_requires_confirmation() {
 }
 
 #[tokio::test]
+async fn an_acp_catalog_model_the_model_control_does_not_list_uses_set_model() {
+    tokio::time::timeout(Duration::from_secs(20), async {
+        let mut session = AcpSession::spawn_stdio_with_prefix_args(
+            "node",
+            &[harness_parameter_fixture_path(), "acp-model-effort-catalog".into()],
+            &[],
+            Some(env!("CARGO_MANIFEST_DIR")),
+            AcpVendorConfig::generic("antigravity"),
+        )
+        .await
+        .unwrap();
+        session
+            .initialize(Some(env!("CARGO_MANIFEST_DIR")), None, false, None)
+            .await
+            .unwrap();
+        // The catalog id the Hub launched with reaches the harness's own switch.
+        assert_eq!(session.set_model("model-b-low").await.unwrap(), "model-b-low");
+        // A base name the model control lists still goes through the control.
+        assert_eq!(session.set_model("model-c").await.unwrap(), "model-c");
+        assert!(session.set_model("invented").await.is_err());
+        session.shutdown().await;
+    })
+    .await
+    .expect("catalog model switch must remain bounded");
+}
+
+#[tokio::test]
 async fn codex_turn_only_fast_selection_reports_pending_without_replacing_observed_state() {
     tokio::time::timeout(Duration::from_secs(10), async {
         let mut app = CodexAppSession::spawn_stdio_with_prefix_args(
