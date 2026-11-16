@@ -1,5 +1,45 @@
 # Release Updates
 
+## Unreleased: a program that is not signed in gives its owner two answers
+
+The card for a program that could not take work because it is not signed in
+on its machine offered one thing, the sign-in. A person who does not mean to
+use that program there had no way to say so, and work kept being sent to it.
+The card now gives its owner two buttons, Sign in and one that names what it
+disables and where ("Disable Claude Code on mac-mini"), with no sentence explaining it. It is the owner's existing switch for the
+Agent on its machine, in every Space, so nothing more is sent to it; the card
+then says it is disabled and links to Agents, where the same switch turns it
+on again. The welcome
+conversation's sign-in row offers the same. An Agent's own request for a
+sign-in, and a machine with no Agent in the Space, keep the sign-in alone.
+Web only. Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: A machine's versions show what their update is really doing
+
+A machine with automatic updates on still showed a yellow Update beside its
+versions, and the desktop App applied a downloaded update only when someone
+quit it, so a Mac left open stayed on an old build. Seeing this machine's App
+behind its channel now starts one quiet update check at once (once per release
+per page), and the mark shows only the updater's real state: checking,
+downloading with progress, or downloaded with Restart to update. A downloaded
+update also applies itself once the person is away (idle five minutes or
+the screen locks); the daemon runs separately, so Agents keep running. Seeing a
+Machine's CLI behind asks its daemon to check once (per Machine and release, per
+page), and the mark shows what the daemon reports: checking, updating to vX, or
+the failure. A component that did not update reads "Not updated" with the
+reason and the fix in place. Betas are judged against the dev channel they follow. Beta Web and
+desktop; recovery is a CI-validated release reverting this change.
+
+## Unreleased: typing a `norn run` fence on a Page keeps its name
+
+Typing a fence that starts `norn` and then a space on a Page opened a code
+block tagged only `norn`, and the name never landed, so the block was not a
+program and the Page said nothing. A space still opens an ordinary language
+such as `ts`.
+Enter opens a fence whose info has a space in it, and the block keeps the
+whole string `nornRunBlock` reads, including a name in any language. Web.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a Gmail notification retried after its read was saved is delivered
 
 A mailbox's new-mail notifications stopped for good when a notification pass
