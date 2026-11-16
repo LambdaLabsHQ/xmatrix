@@ -37,7 +37,7 @@ import {
    NaturalKeyError, reserveNaturalKey } from "./natural-keys.js";
 import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
-import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
+import { retryBeforeCommit, retryTransactionBeforeCommit } from "./transaction-recovery.js";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 /** Runtime catalogs an Instance report keeps from the row when it omits them, each with its observation stamp. */
@@ -653,7 +653,7 @@ export class PostgresRuntimeRepository {
     const { at: _serverTimestamp, ...request } = input;
     const requestDigest = await digest(request);
     const placement = await this.mutationPlacement(commandId, kind, input);
-    const value: Record<string, unknown> = await this.spaces.transaction(commandId, `runtime.${kind}`, placement, async (tx) => {
+    const value: Record<string, unknown> = await retryBeforeCommit(() => this.spaces.transaction(commandId, `runtime.${kind}`, placement, async (tx) => {
       const spaceId = placement.spaceId;
       if (kind === "natural_key_reserve") {
         const channelId = text(input.channelId, "channelId", 300);
@@ -680,7 +680,7 @@ export class PostgresRuntimeRepository {
       await commitRuntime(tx, spaceId, value, at);
       await storeReplay(tx, spaceId, commandId, kind, requestDigest, value, at);
       return value;
-    });
+    }), { lockTimeout: true });
     const runId = typeof value.runId === "string" ? value.runId
       : kind === "run_transition" ? text(input.runId, "runId", 300) : null;
     const instanceId = typeof value.instanceId === "string" ? value.instanceId

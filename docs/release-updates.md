@@ -15,6 +15,19 @@ failure once per Instance, Channel and holder, so later Runs failing the same
 way add nothing. CLI, Hub and protocol. Recovery is a CI-validated beta
 reverting this change.
 
+## Unreleased: an Agent's runtime connect retries a lock timeout once
+
+A Channel row is held by whatever changes it, and a private connector result or
+an upload's multi-step commit can hold it for the seconds that commit takes. An
+Agent's `runtime.instance_connect` waiting on that row was refused at its
+two-second lock timeout (Sentry HUB-BE; the latest holder was a
+`content.ref.commit` in `content_ref_insert_v1`), while message appends already
+replayed one. Runtime mutations now use the same one bounded replay: a
+`55P03` lock deadline has already rolled the transaction back, so the command
+runs once more on a fresh session; every other answered rejection still
+escapes. Hub only, no migration. Recovery is a CI-validated beta Hub reverting
+this change.
+
 ## Unreleased: a program that is not signed in gives its owner two answers
 
 The card for a program that could not take work because it is not signed in

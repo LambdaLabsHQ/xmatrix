@@ -126,8 +126,9 @@ function connectingInstanceRows(query) {
   return registeredRunRows(query);
 }
 
-test("instance_connect retries a stale version after a timed-out predecessor claim", async () => {
-  const db = database((query) => connectingInstanceRows(query) ?? (query.name === "entity_space_route_resolve_v1"
+/** Rows for a connect whose Instance is already online at version 2. */
+function connectedInstanceRows(query) {
+  return connectingInstanceRows(query) ?? (query.name === "entity_space_route_resolve_v1"
     ? [{ entity_kind: "instance", entity_id: "instance-1", space_id: "space-1",
         shard_id: "shard-0", placement_epoch: 1, entity_version: 2, route_version: 8 }]
     : query.name === "space_placement_resolve_v1"
@@ -141,7 +142,11 @@ test("instance_connect retries a stale version after a timed-out predecessor cla
               query.name === "runtime_instance_route_source_v1"
             ? [{ entity_version: 3, route_version: 9, updated_at: "2026-09-13T00:59:00.000Z" }]
             : query.name === "entity_space_route_placement_fence_v1"
-              ? [{ shard_id: "shard-0", placement_epoch: 1 }] : []));
+              ? [{ shard_id: "shard-0", placement_epoch: 1 }] : []);
+}
+
+test("instance_connect retries a stale version after a timed-out predecessor claim", async () => {
+  const db = database(connectedInstanceRows);
   const value = await new PostgresRuntimeRepository(db).mutate({
     commandId: "connect-retry", actorUserId: "user-1", at: "2026-09-13T00:59:00.000Z",
     kind: "instance_connect", instanceId: "instance-1", expectedVersion: 1,
@@ -149,6 +154,27 @@ test("instance_connect retries a stale version after a timed-out predecessor cla
   assert.equal(value.entityVersion, 3);
   assert.equal(value.launchState, "connected");
   assert.equal(db.calls.some((call) => call.name === "runtime_instance_connect_online_v2"), true);
+});
+
+test("a lock timeout in instance_connect replays once on a fresh session", async () => {
+  const locked = Object.assign(new Error("canceling statement due to lock timeout"), { code: "55P03" });
+  const base = database(connectedInstanceRows);
+  let attempts = 0;
+  const flaky = {
+    ...base,
+    async transaction(context, callback) {
+      if (context.operation === "runtime.instance_connect" && attempts++ === 0) {
+        return callback({ async query() { throw locked; } });
+      }
+      return base.transaction(context, callback);
+    },
+  };
+  const value = await new PostgresRuntimeRepository(flaky).mutate({
+    commandId: "connect-lock-timeout", actorUserId: "user-1", at: "2026-09-13T00:59:00.000Z",
+    kind: "instance_connect", instanceId: "instance-1", expectedVersion: 1,
+  });
+  assert.equal(attempts, 2, "the transaction runs a second time");
+  assert.equal(value.launchState, "connected");
 });
 
 test("instance_connect atomically promotes Instance, Run, and Launch", async () => {
