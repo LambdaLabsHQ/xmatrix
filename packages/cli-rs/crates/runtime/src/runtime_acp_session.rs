@@ -352,13 +352,20 @@ impl AcpSession {
         }
         // Native config selection returns the complete model-dependent controls.
         // Cursor's legacy session/set_model returns {}, leaving effort stale.
-        let model_config_id = self
-            .presentation
-            .parameters
-            .as_deref()
-            .unwrap_or_default()
+        // A catalog id the model control does not list is the harness's own
+        // session/set_model id: Antigravity lists `gemini-4-hydrogen-medium`
+        // in availableModels, while its `model` control takes only
+        // `gemini-4-hydrogen` and sets the level through `thought_level`.
+        let parameters = self.presentation.parameters.as_deref().unwrap_or_default();
+        let catalog_only = self.presentation.models.iter().any(|m| m.id == model_id);
+        let model_config_id = parameters
             .iter()
             .find(|parameter| matches!(parameter.id.as_str(), "model" | "models"))
+            .filter(|parameter| {
+                !catalog_only
+                    || crate::harness_parameters::validate(parameters, &parameter.id, model_id)
+                        .is_ok()
+            })
             .map(|parameter| parameter.id.clone());
         if let Some(config_id) = model_config_id {
             return self.set_parameter(&config_id, model_id).await;
