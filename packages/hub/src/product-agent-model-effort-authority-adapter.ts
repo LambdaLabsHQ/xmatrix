@@ -1,6 +1,7 @@
 import { plainRecord as record } from "@xmatrix/protocol";
 import type { ChannelSwitchContinuation } from "@xmatrix/protocol/connections/agent-instance";
 import {
+  decideProductAgentSwitch,
   orchestrateProductAgentControlCommands,
   parseProductAgentControlCommands,
   RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH,
@@ -10,6 +11,7 @@ import {
   type ProductAgentControlResult,
 } from "./product-agent-model-effort";
 import { recordCommandResult } from "./command-result";
+import { readSwitchTargetFacts } from "./registration-launch-dispatch";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { postgresMessageLiveAudience, withPostgresMessageRequestScope } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
@@ -74,34 +76,45 @@ export function createProductAgentControlAuthorityPort(input: {
 }): ProductAgentControlPort {
   const principal = { kind: "user" as const, id: input.actorUserId };
 
+  const askRuntime = async ({ channelId, target, kind, value, reportedModels }: {
+    channelId: string; target: string; kind: "model" | "effort"; value?: string; reportedModels?: unknown[];
+  }): Promise<ProductAgentControlOutcome> => {
+    // The waiter registry is Runtime process memory, so the whole
+    // request/confirm exchange has to happen inside the Durable Object
+    // holding the Instance's socket; ask every cell that may hold it.
+    const cells = await channelInstanceCells(input.env, channelId);
+    const outcomes = await Promise.all(cells.map(async (runtime): Promise<ProductAgentControlOutcome> => {
+      const response = await runtime.fetch(
+        new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ channelId, target, kind, ...(value ? { value } : {}),
+            ...(reportedModels ? { reportedModels } : {}) }),
+        }),
+      ).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
+      if (response instanceof Error) return { status: "error", message: response.message };
+      const body = record(await response.json().catch(() => undefined));
+      if (!response.ok) {
+        const detail = typeof body?.error === "string" && body.error.trim()
+          ? body.error.trim()
+          : `Runtime responded ${response.status}`;
+        return { status: "error", message: detail };
+      }
+      return outcomeFromRuntime(body?.outcome);
+    }));
+    // The Instance lives in one cell; the others answer that they have none.
+    return outcomes.find((outcome) => outcome.status !== "no_instance" && outcome.status !== "error") ??
+      outcomes.find((outcome) => outcome.status === "error") ??
+      outcomes[0] ?? { status: "no_instance" };
+  };
+
   return {
     async switchControl({ channelId, target, kind, value }) {
-      // The waiter registry is Runtime process memory, so the whole
-      // request/confirm exchange has to happen inside the Durable Object
-      // holding the Instance's socket; ask every cell that may hold it.
-      const cells = await channelInstanceCells(input.env, channelId);
-      const outcomes = await Promise.all(cells.map(async (runtime): Promise<ProductAgentControlOutcome> => {
-        const response = await runtime.fetch(
-          new Request(`https://relay-runtime.internal${RELAY_RUNTIME_AGENT_CONTROL_SWITCH_PATH}`, {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ channelId, target, kind, ...(value ? { value } : {}) }),
-          }),
-        ).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
-        if (response instanceof Error) return { status: "error", message: response.message };
-        const body = record(await response.json().catch(() => undefined));
-        if (!response.ok) {
-          const detail = typeof body?.error === "string" && body.error.trim()
-            ? body.error.trim()
-            : `Runtime responded ${response.status}`;
-          return { status: "error", message: detail };
-        }
-        return outcomeFromRuntime(body?.outcome);
-      }));
-      // The Instance lives in one cell; the others answer that they have none.
-      return outcomes.find((outcome) => outcome.status !== "no_instance" && outcome.status !== "error") ??
-        outcomes.find((outcome) => outcome.status === "error") ??
-        outcomes[0] ?? { status: "no_instance" };
+      const ordinal = Number(/:([1-9]\d{0,8})$/u.exec(target)?.[1]);
+      const facts = Number.isSafeInteger(ordinal) ? await readSwitchTargetFacts(input.env, {
+        commandId: `product:switch-target:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId, ordinal }) : undefined;
+      return decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: Date.now(),
+        dispatch: (reportedModels) => askRuntime({ channelId, target, kind, value, reportedModels }) });
     },
 
     async recordOutcomes(channelId, outcomes) {

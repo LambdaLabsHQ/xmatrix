@@ -1,6 +1,7 @@
-import { parseAgentControlCommands as parseProductAgentControlCommands,
+import { parseAgentControlCommands as parseProductAgentControlCommands, routingModelOptionNamed, routingQuotaObservation,
   type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
-  type AgentControlKind as ProductAgentControlKind } from "@xmatrix/protocol";
+  type AgentControlQuotaExhausted, type AgentControlUsedUpOption,
+  type AgentControlKind as ProductAgentControlKind, type RoutingModelOption } from "@xmatrix/protocol";
 export { parseProductAgentControlCommands };
 export type { ProductAgentControlCommand, ProductAgentControlKind };
 
@@ -18,11 +19,119 @@ export type ProductAgentControlOutcome =
   | { status: "switched"; selected: string;
       /** The switch cancelled this Instance's running turn under `requestId`. */
       continuation?: { instanceId: string; requestId: string } }
-  | { status: "catalog"; current?: string; options: readonly string[] }
+  | { status: "catalog"; current?: string; options: readonly string[]; usedUp?: AgentControlUsedUpOption[] }
   | { status: "no_instance" }
-  | { status: "error"; message: string;
+  | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted;
       /** A refused switch still cancelled this Instance's running turn. */
       continuation?: { instanceId: string; requestId: string } };
+
+/** What the Hub's own records say about the Instance a statement addresses. */
+export interface ProductAgentSwitchTarget {
+  state: "starting" | "running" | "asleep" | "stopped";
+  agentName?: string;
+  machineName?: string;
+  currentModel?: string;
+  /** The runtime's catalog as the Instance row stores it. */
+  reportedModels?: unknown[];
+  /** That catalog while it is fresh enough to decide quota by. */
+  modelCatalog?: RoutingModelOption[];
+  /** The provider's reading of the Instance's account. */
+  usage?: unknown;
+}
+
+/** `2026-11-19 18:00 UTC`: a reset as every refusal writes it. */
+function utcMinute(at: string): string {
+  return `${new Date(Date.parse(at)).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+}
+
+/** When the provider quota of one catalog model is back, while a current
+ * reading shows it used up; undefined while it has quota or nothing was read. */
+function usedUpUntil(target: ProductAgentSwitchTarget, row: RoutingModelOption, now: number): string | undefined {
+  const quota = routingQuotaObservation(target.usage, now, { model: row });
+  return quota !== undefined && quota.value <= 0 && Date.parse(quota.expiresAt) > now ? quota.expiresAt : undefined;
+}
+
+/** The catalog models with quota left by a current reading, the runtime's
+ * default first. Empty without a reading: nothing is promised unread. */
+function modelsWithQuota(target: ProductAgentSwitchTarget, now: number): string[] {
+  if (routingQuotaObservation(target.usage, now) === undefined) return [];
+  return (target.modelCatalog ?? []).filter(row => !usedUpUntil(target, row, now))
+    .sort((left, right) => Number(right.isDefault === true) - Number(left.isDefault === true)).map(row => row.model);
+}
+
+const onMachine = (target: ProductAgentSwitchTarget) => target.machineName ? ` on ${target.machineName}` : "";
+const staysOn = (target: ProductAgentSwitchTarget, address: string) =>
+  target.currentModel ? ` @${address} stays on ${target.currentModel}.` : ` @${address} keeps its model.`;
+
+/** A provider's own refusal for quota, as a runtime passes it on. */
+const PROVIDER_QUOTA_REFUSAL = /\b429\b|rate.?limit|usage.?limit|quota/iu;
+
+/**
+ * One statement decided against what the Hub knows of its Instance, around
+ * the Runtime exchange `dispatch` performs:
+ * - a model a current provider reading shows used up is refused here, saying
+ *   until when, so the Instance's running turn is not interrupted for nothing;
+ * - the Runtime is handed the Instance row's catalog, which a cell that lost
+ *   its memory of the Instance no longer holds;
+ * - an Instance no cell holds is named for what it is (starting, asleep,
+ *   stopped) instead of as missing;
+ * - a provider's quota refusal says whose account and which model;
+ * - a listed catalog marks the models that are used up.
+ */
+export async function decideProductAgentSwitch(input: {
+  command: ProductAgentControlCommand;
+  target: ProductAgentSwitchTarget | undefined;
+  now: number;
+  dispatch(reportedModels: unknown[] | undefined): Promise<ProductAgentControlOutcome>;
+}): Promise<ProductAgentControlOutcome> {
+  const { command, now } = input;
+  const name = command.target.replace(/:[1-9]\d*$/u, "");
+  // A renamed Agent's row may still hold its old name: its facts are then not
+  // provably this address's, and the Runtime alone answers.
+  const target = input.target && (!input.target.agentName ||
+    input.target.agentName.toLowerCase() === name.toLowerCase()) ? input.target : undefined;
+  const live = target?.state === "starting" || target?.state === "running";
+  const row = target && command.kind === "model" && command.value
+    ? (target.modelCatalog ?? []).find(option => routingModelOptionNamed(option, command.value!)) : undefined;
+  const quotaRefusal = (model: string, resetsAt: string | undefined): ProductAgentControlOutcome => {
+    const available = modelsWithQuota(target!, now).filter(option => option !== model);
+    return { status: "error",
+      message: (resetsAt
+        ? `the provider quota for ${model}${onMachine(target!)} is used up until ${utcMinute(resetsAt)}.`
+        : `the provider account${onMachine(target!)} has no quota left for ${model}, and gave no reset time.`) +
+        staysOn(target!, command.target),
+      quotaExhausted: { model, ...(resetsAt ? { resetsAt } : {}),
+        ...(target!.machineName ? { machineName: target!.machineName } : {}),
+        ...(available.length ? { available } : {}) } };
+  };
+  if (target && live && row) {
+    const resetsAt = usedUpUntil(target, row, now);
+    if (resetsAt) return quotaRefusal(row.model, resetsAt);
+  }
+  const outcome = await input.dispatch(target?.reportedModels);
+  if (!target) return outcome;
+  if (outcome.status === "no_instance") {
+    const address = `@${command.target}`;
+    return { status: "error", message: target.state === "asleep"
+      ? `${address} is asleep, so it has no session to switch. It wakes on its next message; send this again then.`
+      : target.state === "stopped"
+        ? `${address} has stopped. Start it again with ${address}:reborn, then send this again.`
+        : `${address} is still starting${onMachine(target)} and has not connected yet. Send this again once it is running.` };
+  }
+  if (outcome.status === "error" && command.kind === "model" && command.value && PROVIDER_QUOTA_REFUSAL.test(outcome.message)) {
+    const refused = quotaRefusal(row?.model ?? command.value, undefined);
+    return { ...refused, ...(outcome.continuation ? { continuation: outcome.continuation } : {}) };
+  }
+  if (outcome.status === "catalog" && command.kind === "model") {
+    const usedUp = outcome.options.flatMap(option => {
+      const listed = (target.modelCatalog ?? []).find(candidate => routingModelOptionNamed(candidate, option));
+      const resetsAt = listed && usedUpUntil(target, listed, now);
+      return resetsAt ? [{ option, resetsAt }] : [];
+    });
+    return usedUp.length ? { ...outcome, usedUp } : outcome;
+  }
+  return outcome;
+}
 
 export interface ProductAgentControlPort {
   switchControl(input: {
@@ -63,9 +172,10 @@ function outcomeRecord(command: ProductAgentControlCommand, outcome: ProductAgen
   switch (outcome.status) {
     case "switched": return { ...statement, status: "switched", selected: outcome.selected };
     case "catalog": return { ...statement, status: "catalog", options: [...outcome.options],
-      ...(outcome.current ? { current: outcome.current } : {}) };
+      ...(outcome.current ? { current: outcome.current } : {}), ...(outcome.usedUp?.length ? { usedUp: outcome.usedUp } : {}) };
     case "no_instance": return { ...statement, status: "no_instance" };
-    case "error": return { ...statement, status: "error", message: outcome.message };
+    case "error": return { ...statement, status: "error", message: outcome.message,
+      ...(outcome.quotaExhausted ? { quotaExhausted: outcome.quotaExhausted } : {}) };
   }
 }
 

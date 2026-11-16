@@ -164,7 +164,7 @@ test("a value outside the catalog is refused before the socket is asked", async 
     channelId: "channel-1", target: "claude:1", kind: "model", value: "gpt-5",
   });
   assert.equal(outcome.status, "error");
-  assert.match(outcome.message, /not one this instance offers/u);
+  assert.equal(outcome.message, "`gpt-5` is not one @claude:1 offers. It offers `fable`, `opus`.");
   assert.deepEqual(socket.sent, []);
 });
 
@@ -225,3 +225,26 @@ test("a composition with no waiter registry refuses instead of half-switching", 
 function switchToFable(transport) {
   return transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model", value: "fable" });
 }
+
+test("a cell that kept no catalog decides by the one the Instance row holds", async () => {
+  let asked;
+  const { transport, socket } = liveTransport({
+    presentation: { model: "opus" },
+    awaitControlResult: (binding) => {
+      asked = binding;
+      return Promise.resolve({ value: "fable" });
+    },
+  });
+  // Without the row's catalog the cell knows no model to offer, and says so.
+  const unknown = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model", value: "fable" });
+  assert.deepEqual(unknown, { status: "error", message: "@claude:1 has not reported which models it offers." });
+  assert.equal(asked, undefined);
+
+  const listed = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model",
+    reportedModels: MODELS });
+  assert.deepEqual(listed, { status: "catalog", options: ["fable", "opus"], current: "opus" });
+  const switched = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model",
+    value: "fable", reportedModels: MODELS });
+  assert.deepEqual(switched, { status: "switched", selected: "fable" });
+  assert.equal(socket.sent.some((frame) => frame.type === "agent_model_switch_requested"), true);
+});

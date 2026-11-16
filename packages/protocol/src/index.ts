@@ -554,7 +554,7 @@ export {
   parseAgentControlCommands, parseAgentControlInvocations,
 } from "./agent-control-command.js";
 export type {
-  AgentControlCommand, AgentControlInvocation, AgentControlKind, AgentControlOutcomeRecord,
+  AgentControlCommand, AgentControlInvocation, AgentControlKind, AgentControlOutcomeRecord, AgentControlQuotaExhausted, AgentControlUsedUpOption,
 } from "./agent-control-command.js";
 export {
   parseHandoffInstanceMentions, parseRebornInstanceMentions,

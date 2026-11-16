@@ -369,7 +369,7 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
         return result("Switched", `Now on ${outcome.selected}. A turn that was running was interrupted and continues on it.`);
       case "catalog":
         return result("Options", outcome.options.length
-          ? `${outcome.options.length} ${noun === "model" ? "models" : "effort levels"} available${outcome.current ? `; current: ${outcome.current}` : ""}.`
+          ? `${outcome.options.length} ${noun === "model" ? "models" : "effort levels"} available${outcome.current ? `; current: ${outcome.current}` : ""}${outcome.usedUp?.length ? `; ${outcome.usedUp.length} used up` : ""}.`
           : `This Instance has not reported its ${noun === "model" ? "models" : "effort levels"}.`);
       case "no_instance":
         return result("Not found", `No live Instance answers to @${outcome.target}. Address one as @<agent>:<number>.`);
