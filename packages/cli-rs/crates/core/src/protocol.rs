@@ -794,6 +794,10 @@ pub struct ChannelMessage {
     pub deleted_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub recalled_by: Option<MessageSender>,
+    /// What the Hub recorded this message's commands came to (`/model`,
+    /// `/effort`, stop notes). Kept as the Hub wrote it: a reader prints it.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub command_result: Option<serde_json::Value>,
     pub sent_at: String,
 }
 

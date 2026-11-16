@@ -2795,8 +2795,81 @@ pub(crate) fn format_history_message_with_local_images(
             }
         }
     }
+    if message.recalled_at.is_none() && message.deleted_at.is_none() {
+        for line in command_result_lines(message.command_result.as_ref()) {
+            output.push_str(&format!("  [result] {line}\n"));
+        }
+    }
     output.push('\n');
     output
+}
+
+/// What the Hub recorded a message's commands came to, one line per statement
+/// or note. The web draws these on the command itself; a reader of history
+/// has no other place to learn whether a `/model` switch took effect.
+fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(result) = result else {
+        return Vec::new();
+    };
+    let text = |value: &serde_json::Value, key: &str| {
+        value
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
+    let mut lines = Vec::new();
+    for control in result
+        .get("controls")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        let statement = format!(
+            "/{} @{}",
+            text(control, "kind").unwrap_or_else(|| "control".to_string()),
+            text(control, "target").unwrap_or_default()
+        );
+        let outcome = match text(control, "status").as_deref() {
+            Some("switched") => format!(
+                "switched to {}",
+                text(control, "selected").unwrap_or_default()
+            ),
+            Some("catalog") => {
+                let options = control
+                    .get("options")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match text(control, "current") {
+                    Some(current) => format!("current {current}; offers {options}"),
+                    None => format!("offers {options}"),
+                }
+            }
+            Some("no_instance") => "not applied: no such running Instance".to_string(),
+            Some("error") => format!(
+                "not applied: {}",
+                text(control, "message").unwrap_or_default()
+            ),
+            other => format!("{}", other.unwrap_or("unknown")),
+        };
+        lines.push(format!("{statement}: {outcome}"));
+    }
+    for note in result
+        .get("notes")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+    {
+        if let Some(note) = text(note, "text") {
+            lines.push(note.replace('\n', " "));
+        }
+    }
+    lines
 }
 
 /// Download identity-backed image attachments via the product-media read path
@@ -3630,6 +3703,7 @@ mod tests {
             recalled_at: None,
             deleted_at: None,
             recalled_by: None,
+            command_result: None,
             sent_at: sent_at.to_string(),
         }
     }
