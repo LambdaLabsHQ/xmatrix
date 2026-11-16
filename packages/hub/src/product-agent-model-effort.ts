@@ -86,7 +86,8 @@ export async function decideProductAgentSwitch(input: {
   command: ProductAgentControlCommand;
   target: ProductAgentSwitchTarget | undefined;
   now: number;
-  dispatch(reportedModels: unknown[] | undefined): Promise<ProductAgentControlOutcome>;
+  /** `awaitStarting` asks the Runtime to wait for an Instance that has not reported yet. */
+  dispatch(reportedModels: unknown[] | undefined, awaitStarting?: boolean): Promise<ProductAgentControlOutcome>;
 }): Promise<ProductAgentControlOutcome> {
   const { command, now } = input;
   const name = command.target.replace(/:[1-9]\d*$/u, "");
@@ -118,15 +119,21 @@ export async function decideProductAgentSwitch(input: {
     const resetsAt = usedUpUntil(target, row, now);
     if (resetsAt) return quotaRefusal(row.model, resetsAt);
   }
-  const outcome = await input.dispatch(target?.reportedModels);
-  if (!target) return outcome;
+  const first = await input.dispatch(target?.reportedModels);
+  if (!target) return first;
+  // A Run recorded as starting has not reported yet: the statement waits for
+  // its first report and is applied then, instead of being refused.
+  const outcome = first.status === "no_instance" && target.state === "starting"
+    ? await input.dispatch(target.reportedModels, true) : first;
   if (outcome.status === "no_instance") {
     const address = `@${command.target}`;
     return { status: "error", message: target.state === "asleep"
       ? `${address} is asleep, so it has no session to switch. It wakes on its next message; send this again then.`
       : target.state === "stopped"
         ? `${address} has stopped. Start it again with ${address}:reborn, then send this again.`
-        : `${address} is still starting${onMachine(target)} and has not connected yet. Send this again once it is running.`,
+        : target.state === "starting"
+          ? `${address} is still starting${onMachine(target)} and did not come up while xMatrix waited. Send this again once it is running.`
+          : `${address} is not connected to xMatrix right now${onMachine(target)}. Send this again once it is back.`,
       ...(live ? { starting: true as const } : {}) };
   }
   if (outcome.status === "error" && command.kind === "model" && command.value && PROVIDER_QUOTA_REFUSAL.test(outcome.message)) {

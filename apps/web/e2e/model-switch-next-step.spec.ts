@@ -20,7 +20,7 @@ const usedUp = command(1, statement, { status: "error",
   quotaExhausted: { model: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box",
     elsewhere: [{ machineName: "spare-box", harness: "claude" }] } });
 const starting = command(2, statement, { status: "error", starting: true,
-  message: "@claude:3 is still starting on build-box and has not connected yet. Send this again once it is running." });
+  message: "@claude:3 is still starting on build-box and did not come up while xMatrix waited. Send this again once it is running." });
 const listed = command(3, "@claude:3 /model", { status: "catalog", current: "claude-opus-5-5",
   options: ["claude-opus-5-5", "claude-fable-5-2"], usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
 
@@ -40,6 +40,8 @@ test("a model whose quota is used up says until when and continues on a machine 
   const dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("the provider quota for claude-fable-5-2 on build-box is used up until 2026-11-19 18:00 UTC.");
   await expect(dialog).toContainText("Stops @claude:3 and starts a new @claude on spare-box that continues its work on claude-fable-5-2.");
+  await expect(dialog).toContainText("Refused by xMatrix on the provider's quota reading");
+  await expect(dialog).not.toContainText("Instance answered");
   await page.screenshot({ path: test.info().outputPath("switch-used-up.png") });
   await dialog.getByRole("button", { name: "Continue on spare-box with claude-fable-5-2" }).click();
   await expect(dialog.getByRole("status")).toHaveText("Sent.");
@@ -52,7 +54,8 @@ test("a switch sent to an Instance that was still starting is sent again from it
   const chips = await openSwitches(page);
   await chips.nth(1).click();
   const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("@claude:3 is still starting on build-box and has not connected yet.");
+  await expect(dialog).toContainText("@claude:3 is still starting on build-box and did not come up while xMatrix waited.");
+  await expect(dialog).toContainText("Instance not connected");
   await page.screenshot({ path: test.info().outputPath("switch-starting.png") });
   await dialog.getByRole("button", { name: "Send again" }).click();
   await expect.poll(async () => (await fixtureRequestBodies(page, "switch-send")).map((sent) => (sent as { body?: string }).body))

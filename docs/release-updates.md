@@ -8,8 +8,11 @@ machine and another online machine of the Space runs the same Agent with
 quota for that model, **Continue on <machine> with <model>** hands the Instance's work to
 a new one there on that model (an ordinary handoff; the answer says it stops
 the Instance first). It is offered only for a repository-backed Instance and
-only for a machine whose own account reading shows quota. When the Instance
-was still starting, **Send again** sends the same statement. Machines are
+only for a machine whose own account reading shows quota for that model. A
+statement sent to an Instance that is still starting now waits for the
+Instance's first report (up to fifteen seconds) and is applied then; only if
+it does not come up is it refused, with **Send again**. The answer no longer
+says "Instance answered" for a refusal the Instance was never asked about. Machines are
 named as their owners named them, which is what `machine:` selects. An
 Instance that has reported no model catalog yet (its first turn still runs)
 is asked as written, since its runtime holds the catalog; before, the Hub

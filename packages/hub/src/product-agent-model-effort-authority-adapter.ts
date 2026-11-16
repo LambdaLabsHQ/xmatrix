@@ -76,8 +76,8 @@ export function createProductAgentControlAuthorityPort(input: {
 }): ProductAgentControlPort {
   const principal = { kind: "user" as const, id: input.actorUserId };
 
-  const askRuntime = async ({ channelId, target, kind, value, reportedModels }: {
-    channelId: string; target: string; kind: "model" | "effort"; value?: string; reportedModels?: unknown[];
+  const askRuntime = async ({ channelId, target, kind, value, reportedModels, awaitStarting }: {
+    channelId: string; target: string; kind: "model" | "effort"; value?: string; reportedModels?: unknown[]; awaitStarting?: boolean;
   }): Promise<ProductAgentControlOutcome> => {
     // The waiter registry is Runtime process memory, so the whole
     // request/confirm exchange has to happen inside the Durable Object
@@ -89,7 +89,7 @@ export function createProductAgentControlAuthorityPort(input: {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ channelId, target, kind, ...(value ? { value } : {}),
-            ...(reportedModels ? { reportedModels } : {}) }),
+            ...(reportedModels ? { reportedModels } : {}), ...(awaitStarting ? { awaitStarting: true } : {}) }),
         }),
       ).catch((error: unknown) => error instanceof Error ? error : new Error(String(error)));
       if (response instanceof Error) return { status: "error", message: response.message };
@@ -114,7 +114,7 @@ export function createProductAgentControlAuthorityPort(input: {
       const facts = Number.isSafeInteger(ordinal) ? await readSwitchTargetFacts(input.env, {
         commandId: `product:switch-target:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId, ordinal }) : undefined;
       return decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: Date.now(),
-        dispatch: (reportedModels) => askRuntime({ channelId, target, kind, value, reportedModels }) });
+        dispatch: (reportedModels, awaitStarting) => askRuntime({ channelId, target, kind, value, reportedModels, awaitStarting }) });
     },
 
     async recordOutcomes(channelId, outcomes) {

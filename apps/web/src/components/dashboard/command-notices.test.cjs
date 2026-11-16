@@ -61,6 +61,9 @@ test("each statement claims its own span and outcome", () => {
   const refused = controlView(controls[0], { kind: "model", target: "claude:1", status: "error",
     message: "the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus.",
     quotaExhausted: { model: "fable", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box" } }, undefined, { fresh: false });
+  // The model was refused on the Hub's reading; its Instance was never asked.
+  assert.deepEqual(refused.steps.map(step => [step.label, step.state]), [["Switch to fable requested", "done"],
+    ["Refused by xMatrix on the provider's quota reading", "failed"]]);
   assert.deepEqual([refused.label, refused.detail], ["Failed",
     "Could not switch the model: the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus."]);
   assert.equal(controlView({ ...controls[0], value: undefined }, { kind: "model", target: "claude:1", status: "catalog",

@@ -354,12 +354,17 @@ export const CONTROL_RECEIPT_PENDING_MS = 15_000;
 export function controlView(invocation: AgentControlInvocation, outcome: AgentControlOutcomeRecord | undefined,
   notice: CommandNotice | undefined, input: { fresh: boolean }): InvocationView {
   const noun = invocation.kind;
+  // Who answered: a model the Hub's quota reading already shows used up, or
+  // an Instance with no connection, was never asked.
+  const answeredBy = outcome?.status !== "error" ? "Instance answered"
+    : outcome.starting ? "Instance not connected"
+      : outcome.quotaExhausted?.resetsAt ? "Refused by xMatrix on the provider's quota reading" : "Instance answered";
   const result = (label: InvocationChip, detail: string, animate = false): InvocationView => {
     const status = invocationChipStatus(label, detail, animate);
     const answered = label !== "Switching" && label !== "Unconfirmed";
     return { ...status, terminal: answered, steps: [
       { label: invocation.value ? `Switch to ${invocation.value} requested` : `${noun === "model" ? "Models" : "Efforts"} requested`, state: "done" },
-      { label: "Instance answered", at: answered ? notice?.sentAt : undefined,
+      { label: answeredBy, at: answered ? notice?.sentAt : undefined,
         state: label === "Not found" || label === "Failed" ? "failed" : answered ? "done" : label === "Switching" ? "current" : "unknown" },
     ] };
   };
