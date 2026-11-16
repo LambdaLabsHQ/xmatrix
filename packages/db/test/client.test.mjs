@@ -208,6 +208,25 @@ test("a session emits one summary splitting wait, checkout, and SQL time", async
   assert.ok(summary.wallMs >= summary.sqlMs);
 });
 
+test("a session opened inside another session's transaction names the transaction it nests in", async () => {
+  const fake = fakeFactory();
+  const sessions = [];
+  const database = createAuthorityDatabase({
+    connectionString: "postgres://example.invalid/xmatrix", shardId: "shard-0",
+    clientFactory: fake.factory, sessionObserver: (summary) => sessions.push(summary),
+  });
+  const read = { name: "one_v1", text: "SELECT one", maxRows: 1 };
+  await database.transaction({ ...context, operation: "message.append" }, async (transaction) => {
+    await transaction.query(read);
+    // A second connection while the first transaction is still open.
+    await database.transaction({ ...context, operation: "message.read" }, inner => inner.query(read));
+  });
+  // After the outer transaction ended, the same call nests in nothing.
+  await database.transaction({ ...context, operation: "message.read" }, inner => inner.query(read));
+  const byOperation = sessions.map(summary => [summary.operation, summary.nestedIn]);
+  assert.deepEqual(byOperation, [["message.read", "message.append"], ["message.append", undefined], ["message.read", undefined]]);
+});
+
 test("observations and session summaries carry the result bytes each statement received", async () => {
   const fake = fakeFactory({ rowBytes: 99 });
   const observations = [];

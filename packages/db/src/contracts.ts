@@ -82,6 +82,11 @@ export interface DatabaseSessionObservation {
   outcome: "ok" | "rollback" | "error";
   /** Code of the first database failure in the session. */
   errorCode?: string;
+  /**
+   * The session was opened inside another session's open transaction, named
+   * by that transaction's operation: this request held two connections at once.
+   */
+  nestedIn?: string;
   /** First transaction start to close. */
   wallMs: number;
   /** Time transactions spent queued behind earlier ones in this session. */

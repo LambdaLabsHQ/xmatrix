@@ -250,7 +250,8 @@ export function recordPostgresSessionObservation(
   const slow = wallMs >= SLOW_SESSION_MS;
   const outcome = input.outcome === "ok" || input.outcome === "rollback" ? input.outcome : "error";
   // A business rollback is ordinary traffic: it is thinned like a success.
-  const kept = retention(
+  // A nested session is always kept: each one is a site to fix, and they are rare.
+  const kept = input.nestedIn ? { reason: "nested", weight: 1 } : retention(
     sampleRate(env.POSTGRES_SESSION_OBSERVABILITY_SAMPLE_RATE, DEFAULT_SESSION_SAMPLE_RATE),
     outcome === "error" ? "error" : "ok",
     slow,
@@ -270,6 +271,8 @@ export function recordPostgresSessionObservation(
       "none",
       kept.reason,
       operationName(input.operation),
+      // Blob 12: the open transaction this session was nested in, or "none".
+      input.nestedIn ? operationName(input.nestedIn) : "none",
     ],
     doubles: [
       wallMs, safeRowCount(input.rows), slow ? 1 : 0, kept.weight,
