@@ -17,6 +17,8 @@ test("entity directory resolves only an exact current placement route", async ()
   });
   assert.match(source.calls[1].text, /placement\.placement_epoch = route\.placement_epoch/u);
   assert.match(source.calls[1].text, /placement\.state = 'active'/u);
+  assert.equal(source.calls[0].context.statement, "single_read",
+    "a route lookup is a lock-free read, not a transaction (HUB-D8, HUB-DB)");
 });
 
 test("entity directory publishes through placement and route-version fences", async () => {
