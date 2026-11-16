@@ -14,6 +14,22 @@ conversation's sign-in row offers the same. An Agent's own request for a
 sign-in, and a machine with no Agent in the Space, keep the sign-in alone.
 Web only. Recovery is a CI-validated beta Web reverting this change.
 
+## Unreleased: A machine's versions show what their update is really doing
+
+A machine with automatic updates on still showed a yellow Update beside its
+versions, and the desktop App applied a downloaded update only when someone
+quit it, so a Mac left open stayed on an old build. Seeing this machine's App
+behind its channel now starts one quiet update check at once (once per release
+per page), and the mark shows only the updater's real state: checking,
+downloading with progress, or downloaded with Restart to update. A downloaded
+update also applies itself once the person is away (idle five minutes or
+the screen locks); the daemon runs separately, so Agents keep running. Seeing a
+Machine's CLI behind asks its daemon to check once (per Machine and release, per
+page), and the mark shows what the daemon reports: checking, updating to vX, or
+the failure. A component that did not update reads "Not updated" with the
+reason and the fix in place. Betas are judged against the dev channel they follow. Beta Web and
+desktop; recovery is a CI-validated release reverting this change.
+
 ## Unreleased: typing a `norn run` fence on a Page keeps its name
 
 Typing a fence that starts `norn` and then a space on a Page opened a code
