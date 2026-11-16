@@ -93,16 +93,21 @@ integration("launch candidate reads recover once without preparing work (XMATRIX
 // single_read and recover once from a stalled first round trip instead of
 // failing the launch (XMATRIX-HUB-CW).
 integration("a machine-name read recovers once without opening a transaction (XMATRIX-HUB-CW)", async () => {
-  const { f, state, launches, lose, recovered } = await recoveringLaunches();
+  const { f, state, clients, launches, lose, recovered } = await recoveringLaunches();
   const name = "recovery-box";
   // TypeScript private methods are ordinary prototype methods at runtime; this
   // exercises the same read the launch preparation performs.
-  const read = () => launches.machineKnownAs(f.ids.owner, f.ids.machine, name);
+  // One launch reads the name once (before its Space transactions); each
+  // read here is a new launch's first.
+  const read = () => { launches.machineNames.clear(); return launches.machineKnownAs(f.ids.owner, f.ids.machine, name); };
   try {
     await f.client.query(`INSERT INTO data.machines (owner_user_id,machine_id,name) VALUES ($1,$2,$3)`,
       [f.ids.owner, f.ids.machine, name]);
     assert.equal(await read(), true);
     assert.equal(await launches.machineKnownAs(f.ids.owner, f.ids.machine, "someone-else"), false);
+    const opened = clients.length;
+    assert.equal(await launches.machineKnownAs(f.ids.owner, f.ids.machine, name), true);
+    assert.equal(clients.length, opened, "a launch's later checks reuse its one read");
     const machineRead = /FROM data\.machines WHERE owner_user_id/u;
     assert.equal(await recovered(machineRead, read), true);
     lose(machineRead, { remaining: 2, error: Object.assign(new Error("statement timeout"), { code: "57014" }) });

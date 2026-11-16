@@ -26,7 +26,7 @@ import { relayCrossChannelReply, type CrossChannelReplyOrigin } from "./product-
 import { recordAgentLaunchStage } from "./postgres-observability";
 import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, messageAskAction, wakeRestingInstances } from "./registration-launch-dispatch";
 import { runtimeRepository } from "./runtime";
-import { ControlError } from "@xmatrix/db";
+import { ControlError, lostBeforeCommit } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
 import { pageReferencesIn } from "@xmatrix/protocol";
 import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
@@ -121,13 +121,32 @@ function logPostCommitFailure(label: string, input: ProductMessagePostCommitInpu
   });
 }
 
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
+
 /** A thrown error's stable classification, never its message text. */
 function publicErrorCode(error: unknown): string | undefined {
   const code = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
   return typeof code === "string" && /^[a-z][a-z0-9_.-]{0,79}$/u.test(code) ? code : undefined;
 }
 
-export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string): string {
+/** Attempts of one message's launch dispatch while the database drops it before commit. */
+export const LAUNCH_DATABASE_RETRY_DELAYS_MS = [1_000, 3_000] as const;
+
+/** The launch never reached a commit: every attempt lost its database
+ * connection before COMMIT, and the message had one summon, so no attempt can
+ * have started an Agent from it (`definite`). */
+export interface LaunchDatabaseFailure { attempts: number; definite: boolean }
+
+export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string,
+  database?: LaunchDatabaseFailure): string {
+  if (database) {
+    const tried = `xMatrix tried ${database.attempts} times`;
+    return database.definite
+      ? `Agent launch failed: the xMatrix database did not respond in time (database_unavailable); ${tried}. ` +
+        `No Agent was started. Send the summon again. Diagnostic reference: ${diagnosticId}`
+      : `Agent launch could not finish: the xMatrix database did not respond in time (database_unavailable); ${tried}. ` +
+        `Check which summons in this message started before sending it again. Diagnostic reference: ${diagnosticId}`;
+  }
   const code = publicErrorCode(error);
   // The authority refused the whole dispatch below 500 only before any summon
   // was prepared (each summon's own refusal is a recorded rejection), so the
@@ -190,7 +209,8 @@ export async function summonFirstMessageHarness(input: { env: ProductMessagePost
 
 export async function dispatchProductMessageLaunches(input: ProductMessagePostCommitInput,
   dispatch: { registration: typeof dispatchRegistrationLaunchesAfterMessage;
-    newConversation?: (input: ProductMessagePostCommitInput) => Promise<unknown> } =
+    newConversation?: (input: ProductMessagePostCommitInput) => Promise<unknown>;
+    sleep?: (ms: number) => Promise<void> } =
     { registration: dispatchRegistrationLaunchesAfterMessage },
   notice = dispatchProductAgentSystemNotice): Promise<boolean> {
   const interaction = parseMessageInteraction(input.body);
@@ -213,8 +233,28 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     filterOperationalMentions(input.body, createInstanceMentions(input.body)).length > 0;
   // A conversation's first message is read the same whoever wrote it.
   if (!directMention && input.senderKind !== "user" && input.sequence !== 1) return false;
+  // The dispatch is idempotent per message (its command id), and a connection
+  // lost before COMMIT committed nothing: run it again a bounded number of times
+  // instead of leaving the summon prepared with nobody to finish it.
+  let attempts = 0;
+  let allLostBeforeCommit = true;
+  const registration = async (): Promise<Awaited<ReturnType<typeof dispatch.registration>>> => {
+    for (;;) {
+      attempts++;
+      try {
+        return await dispatch.registration(input);
+      } catch (error) {
+        const lost = lostBeforeCommit(error);
+        allLostBeforeCommit &&= lost;
+        const delay = LAUNCH_DATABASE_RETRY_DELAYS_MS[attempts - 1];
+        if (!lost || delay === undefined) throw error;
+        logPostCommitFailure("Registration launch dispatch lost its database connection; retrying", input, error);
+        await (dispatch.sleep ?? sleep)(delay);
+      }
+    }
+  };
   try {
-    const { selectionCount, rejected } = await dispatch.registration(input);
+    const { selectionCount, rejected } = await registration();
     // A successful dispatch can contain terminal preparation refusals without
     // allocating any Run. Persisted diagnose evidence alone is not a receipt.
     // The system notice is source-bound and idempotent across message retries.
@@ -277,8 +317,10 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // the Channel gets that reference plus the error's stable code, if it has one.
     const diagnostic = captureServerErrorDiagnostic("launch.dispatch.registration", error,
       { channelId: input.channelId, messageId: input.messageId });
+    const database = allLostBeforeCommit && lostBeforeCommit(error) ? { attempts,
+      definite: interaction.launches.length <= 1 && remainingInstanceMentions.length === 0 } : undefined;
     await notice({ ...input, sourceMessageId: input.messageId,
-      body: unconfirmedLaunchNoticeBody(error, diagnostic.diagnosticId),
+      body: unconfirmedLaunchNoticeBody(error, diagnostic.diagnosticId, database),
     }).catch(failure => logPostCommitFailure("Launch failure notice failed", input, failure));
     return true;
   }

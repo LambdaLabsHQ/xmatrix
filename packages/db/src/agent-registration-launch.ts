@@ -359,6 +359,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const { sourceMention: _summon, handoffSourceInstanceId: _handoffSource, ...runMetadata } = callerMetadata ?? {};
     const requestDigest = await digestCanonicalCloneCborV1({ ...identity, body: bodyHash,
       ...(Object.keys(runMetadata).length ? { runMetadata } : {}) });
+    // A `machine:` condition is checked against the Machine's name inside the
+    // Space transactions below; read it now, outside them.
+    if (/\bmachine:/u.test(input.body)) await this.machineName(key.ownerUserId, key.machineId);
     const intent = await this.database.transaction({ requestId: input.commandId, operation: "registration.launch.stage",
       placement: this.placement }, async tx => {
       const source = await this.source(tx, input);
@@ -487,11 +490,27 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   /** A machine tag may name the Machine instead of spelling its id; never its hostname. */
   private async machineKnownAs(ownerUserId: string, machineId: string, tag: string): Promise<boolean> {
     if (tag === machineId) return true;
-    const rows = await this.directory.transaction({ requestId: `registration-machine-name:${machineId}`,
-      operation: "registration.launch.machine-name", statement: "single_read" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
-      text: `SELECT name FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
-      values: [ownerUserId, machineId], maxRows: 1 }));
-    return machineTagSelects(tag, machineId, String(rows[0]?.name ?? ""));
+    return machineTagSelects(tag, machineId, await this.machineName(ownerUserId, machineId));
+  }
+
+  /** The Machine's name, read once per launch. `prepare` reads it before its
+   * Space transactions: read inside one, it held a Space connection while
+   * waiting for a directory connection, and a saturated pool timed out the
+   * launch (XMATRIX-HUB-CY). */
+  private readonly machineNames = new Map<string, Promise<string>>();
+  private machineName(ownerUserId: string, machineId: string): Promise<string> {
+    const key = `${ownerUserId}\n${machineId}`;
+    let name = this.machineNames.get(key);
+    if (!name) {
+      name = this.directory.transaction({ requestId: `registration-machine-name:${machineId}`,
+        operation: "registration.launch.machine-name", statement: "single_read" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
+        text: `SELECT name FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
+        values: [ownerUserId, machineId], maxRows: 1 })).then(rows => String(rows[0]?.name ?? ""));
+      // A failed read is not remembered: the next attempt reads again.
+      name.catch(() => this.machineNames.delete(key));
+      this.machineNames.set(key, name);
+    }
+    return name;
   }
 
   /** Undefined when no message carries the invocation. */
