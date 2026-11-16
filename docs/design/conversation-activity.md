@@ -203,11 +203,12 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   avatar column holds the fold's disclosure, or the pull request mark when a
   lone pull request leaves nothing to open.
 - **GitHub's pull request facts.** A subscribed pull request's CI verdict,
-  merge and close (§3.6) carry their fact in the message metadata
+  merge, close, reviews and comments (§3.6) carry their fact in the message metadata
   (`xmatrixGitHubPullRequest`) and render as the same line: the verdict,
   merge or close mark in the avatar column, then GitHub, time and the
-  sentence. They never fold. Reviews and comments are people's words and
-  stay whole messages.
+  sentence. They never fold. A person's review or comment is the same line
+  (`yiming requested changes on <link>`), its words whole beneath it in
+  message ink, so no GitHub avatar interrupts a pull request's thread.
 - **Folding.** Consecutive activity entries from the same Instance merge into
   one row with a time range and a count; the newest items are shown inline.
   Any entry from anyone else, or any message, ends the fold, so interleaving
