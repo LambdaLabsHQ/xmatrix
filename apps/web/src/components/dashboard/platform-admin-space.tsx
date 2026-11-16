@@ -4,7 +4,7 @@
  * One Space's detail, opened from the Spaces list (`?space=<id>`).
  *
  * Metadata only — members and roles, Agents, connectors by name and state,
- * Automation and Run counts, billing state, paid-call totals, storage. No
+ * Run counts, billing state, paid-call totals, storage. No
  * message, page, prompt, or connector content. The Hub records each open in
  * the admin audit trail.
  */
@@ -15,7 +15,7 @@ import { ChevronLeft } from "lucide-react";
 import { AdminTable } from "./admin-table";
 import { AdminPaperAction } from "./admin-paper";
 import { PaidCallsTable, WebhookEventsTable } from "./platform-admin-billing";
-import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge, adminAutomationStats, adminPercent, adminStatusLine, adminSum, adminUtc } from "./platform-admin-cells";
+import { AdminDetailHeader, TimeCell, adminTimeColumn, adminAge, adminPercent, adminStatusLine, adminUtc } from "./platform-admin-cells";
 import { openAdminUser, useAdminSpaceDetail } from "./platform-admin-data";
 import { adminTime, formatAdminBytes, formatAdminCount } from "./platform-admin-overview";
 import { ToolDetailSection, ToolFact, ToolFacts } from "./tool-split";
@@ -36,11 +36,10 @@ export function AdminSpaceDetailView({ token, spaceId, onBack }: { token?: strin
 }
 
 function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
-  const { space, totals, automations, runs, billing } = detail;
+  const { space, totals, runs, billing } = detail;
   const emails = new Map(detail.members.map((member) => [member.userId, member.email]));
   const person = (userId: string | undefined) => (userId && emails.get(userId)) || userId || "—";
   const agentShare = adminPercent(totals.agentMessages, totals.humanMessages + totals.agentMessages);
-  const occurrences = adminSum(automations.occurrencesByStatus);
   const failedRuns = runs.byStatus.failed ?? 0;
   return (
     <>
@@ -147,19 +146,11 @@ function SpaceDetailBody({ detail }: { detail: AdminSpaceDetail }) {
           ]} />
       </ToolDetailSection>
 
-      <ToolDetailSection title="Automations and Runs">
-        <AdminStatGrid stats={[
-          ...adminAutomationStats(automations, 30),
-          { label: "Automation runs", value: formatAdminCount(automations.runCount),
-            hint: automations.lastRunAt ? `last ${adminAge(automations.lastRunAt)}` : undefined },
-        ]} />
-        <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-          {occurrences > 0 && <p>Occurrences by status: {adminStatusLine(automations.occurrencesByStatus)}</p>}
-          <p>
-            Runs started in 30 days: {adminStatusLine(runs.byStatus) || "none"}
-            {runs.lastRunAt && ` · last ${adminAge(runs.lastRunAt)}`}
-          </p>
-        </div>
+      <ToolDetailSection title="Runs">
+        <p className="text-xs text-muted-foreground">
+          Runs started in 30 days: {adminStatusLine(runs.byStatus) || "none"}
+          {runs.lastRunAt && ` · last ${adminAge(runs.lastRunAt)}`}
+        </p>
       </ToolDetailSection>
 
       <ToolDetailSection title="Paid calls, last 30 days">

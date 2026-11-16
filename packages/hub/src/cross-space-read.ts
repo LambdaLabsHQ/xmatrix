@@ -9,7 +9,8 @@ import type { Context, Hono } from "hono";
 import { postgresControlErrorResponse } from "./postgres-authority-http";
 
 import type { AgentRunPrincipal } from "./auth";
-import { appendChannelMessage, markCardAnswered } from "./channel-messages";
+import { markCardAnswered } from "./channel-messages";
+import { appendHubCard } from "./settings-card";
 import { requireAuth, requestErrorResponse } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { notifyWorkspaceResource } from "./workspace-resource-notification";
@@ -84,7 +85,7 @@ function noticeBody(grant: CrossSpaceReadGrant): string {
 /** The approval card, posted by the owner's system identity into the Run's Channel. */
 async function appendNotice(env: Env, grant: CrossSpaceReadGrant, ownerEmail: string): Promise<string> {
   const messageId = `cross-space-read:${grant.id}`.slice(0, 200);
-  await appendChannelMessage(env, grant.sourceChannelId, {
+  await appendHubCard(env, grant.sourceChannelId, {
     commandId: `cross-space-read-append:${grant.id}`.slice(0, 200), messageId,
     channelId: grant.sourceChannelId, body: noticeBody(grant),
     principal: { kind: "user", id: grant.ownerUserId },

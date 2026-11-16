@@ -10,6 +10,9 @@ import { withProviderResponses } from "./support/fetch-responses.mjs";
 import { ConnectorRemedy, ProviderRequestError } from "../src/connectors/http.ts";
 import * as metering from "../src/usage-cost-metering.ts";
 import { AppControlError } from "../../db/src/app-control.ts";
+import { ControlError } from "../../db/src/control-error.ts";
+import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
+import { commandMailAttachments } from "../src/connectors/gmail-attachments.ts";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
 const id = "18f2a9c0d1e2b3a4";
@@ -22,6 +25,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
   const persisted = [], receipts = [];
   const support = await loadCommonJsSourceModule(new URL("../src/connectors/command-support.ts", import.meta.url), name => {
     if (name === "@xmatrix/protocol") return protocol;
+    if (name === "@xmatrix/db") return { ControlError };
     if (name === "../apps") return {
       appCommand: async (_env, command, input) => { persisted.push({ command, input }); },
       usableAppConnections: async () => [{ id: "space:gmail", providerId: "gmail", status: "configured" }],
@@ -41,7 +45,8 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./action-parse": { parseActionCommand },
     "./action-catalog": { connectorActionCatalog },
     "./subscription-parse": subscriptionParse,
-    "./connection-credentials": { connectionCredentials: async () => credentials },
+    "./connection-credentials": connectionCredentialsDouble(async () => credentials),
+    "./gmail-attachments": { commandMailAttachments },
     "./credentials": { connectorPermissionRepository: () => ({ mode: async () => "write" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
     "./http": { ConnectorRemedy, ProviderRequestError },
@@ -96,4 +101,38 @@ test("an approved request's receipt replies to the message that asked for it", a
   assert.equal(h.receipts[0].residual.replyToMessageId, "command-4");
   assert.equal(h.receipts[0].messageId, "system:command-4:approved:gmail");
   assert.equal(h.receipts[0].residual.appMetadata.xmatrixConnectorRequesterInstanceId, "instance");
+});
+
+test("a statement a person can fix carries its fix in the receipt's Hub-only metadata", async () => {
+  const actions = {
+    read: { effect: "read", requires: [], parse: () => ({}),
+      execute: async () => { throw new ConnectorRemedy(401, "connect Gmail again", { kind: "reconnect" }); } },
+  };
+  const h = await harness();
+  await h.commands.connectorCommands("gmail", actions).run(agentMessage("command-fix", `@gmail:read:${id}`));
+  assert.match(h.receipts[0].body, /Gmail read: failed;/u);
+  const fixes = h.receipts[0].residual.appMetadata.xmatrixConnectorFixes;
+  assert.equal(fixes.length, 1);
+  assert.deepEqual({ ...fixes[0], executionId: undefined }, { providerId: "gmail", actionId: "read", executionId: undefined,
+    remedy: { kind: "reconnect" } });
+  assert.equal(fixes[0].executionId, h.persisted.find(p => p.command === "finalize-execution").input.executionId);
+  assert.deepEqual(protocol.connectorReceiptFixesOf(h.receipts[0].residual.appMetadata), fixes, "the Web reads the same fix back");
+
+  const fine = await harness();
+  await withProviderResponses([gmail({ payload: { mimeType: "text/plain", headers: [], body: { data: "" } } })],
+    () => fine.commands.connectorCommands("gmail", GMAIL_ACTIONS).run(agentMessage("command-ok", `@gmail:read:${id}`)));
+  assert.equal(fine.receipts[0].residual.appMetadata.xmatrixConnectorFixes, undefined, "a completed command offers no fix");
+});
+
+test("a receipt's fixes are read only for a known App and a field a person types", () => {
+  const fix = (overrides) => ({ providerId: "appstoreconnect", actionId: "sales", executionId: "app-execution:m:appstoreconnect:sales",
+    remedy: { kind: "credential", field: "webSession" }, ...overrides });
+  const read = (...fixes) => protocol.connectorReceiptFixesOf({ xmatrixConnectorFixes: fixes });
+  assert.deepEqual(read(fix()), [fix()]);
+  assert.deepEqual(read(fix({ remedy: { kind: "reconnect", field: "x" } })), [fix({ remedy: { kind: "reconnect" } })]);
+  for (const bad of [fix({ providerId: "nope" }), fix({ remedy: { kind: "credential", field: "webhookSecret" } }),
+    fix({ remedy: { kind: "credential", field: "unknown" } }), fix({ actionId: "has space" }), fix({ executionId: 7 }), "fix", null]) {
+    assert.deepEqual(read(bad), [], JSON.stringify(bad));
+  }
+  assert.deepEqual(protocol.connectorReceiptFixesOf(undefined), []);
 });

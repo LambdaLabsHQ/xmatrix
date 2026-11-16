@@ -1,4 +1,4 @@
-use std::io::{BufRead, Read, Write};
+use std::io::Write;
 use std::net::TcpListener;
 
 use serde_json::{Value, json};
@@ -20,23 +20,7 @@ async fn local_upload_sends_bytes_and_returns_markdown_only_after_binding() {
         let mut upload_path = String::new();
         for step in 0..4 {
             let (mut socket, _) = listener.accept().unwrap();
-            socket
-                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-                .unwrap();
-            let mut input = std::io::BufReader::new(&mut socket);
-            let mut headers = String::new();
-            loop {
-                let mut line = String::new();
-                input.read_line(&mut line).unwrap();
-                let end = line == "\r\n";
-                headers.push_str(&line);
-                if end {
-                    break;
-                }
-            }
-            let length = http_fixture::content_length(&headers).unwrap_or(0);
-            let mut bytes = vec![0; length];
-            input.read_exact(&mut bytes).unwrap();
+            let (headers, bytes) = http_fixture::read_request(&mut socket);
             assert!(
                 headers
                     .to_ascii_lowercase()
@@ -95,9 +79,9 @@ async fn local_upload_sends_bytes_and_returns_markdown_only_after_binding() {
 }
 
 #[tokio::test]
-async fn unsupported_empty_and_oversized_files_are_refused_before_network_io() {
+async fn unsupported_and_empty_files_are_refused_before_network_io() {
     let base = std::env::temp_dir().join(format!("page-upload-limits-{}", std::process::id()));
-    for (extension, size) in [("svg", 16), ("png", 0), ("mp4", 64 * 1024 * 1024 + 1)] {
+    for (extension, size) in [("svg", 16), ("png", 0)] {
         let path = base.with_extension(extension);
         let file = std::fs::File::create(&path).unwrap();
         file.set_len(size).unwrap();

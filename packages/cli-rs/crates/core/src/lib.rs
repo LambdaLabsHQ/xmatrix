@@ -40,6 +40,7 @@ pub mod local_http_response;
 pub mod machine_daemon_connection;
 pub mod machine_naming;
 pub mod media_cache;
+pub mod media_types;
 pub mod message_interaction;
 pub mod page_assistant_output;
 pub mod page_co_write;

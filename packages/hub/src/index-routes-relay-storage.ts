@@ -11,6 +11,9 @@ import {
   RELAY_R2_UPLOAD_PREFIX,
   handleRelayR2BlobRefCommit,
   handleRelayR2BlobRefRelease,
+  handleRelayR2MultipartComplete,
+  handleRelayR2MultipartPart,
+  handleRelayR2MultipartStart,
   handleRelayR2UploadIntentCreate,
   handleRelayR2UploadPut,
   handleRelayR2UploadVerify,
@@ -151,6 +154,23 @@ export function registerRelayStorageRoutes(app: Hono<{ Bindings: Env }>): void {
       intentId: pathParam(c, "intentId"), mode, now: Date.now(),
     })));
   }
+  // A body larger than one request goes in parts (relayV2BlobUploadPaths), each
+  // bound to its path scope exactly as the direct write is.
+  const multipart = `${RELAY_R2_UPLOAD_PREFIX}/:intentId/multipart`;
+  app.post(`${multipart}/scope/:visibilityScopeId`, relayR2Route(async (c) => handleRelayR2MultipartStart({
+    ...await scopedUploadAuthorization(c, pathParam(c, "visibilityScopeId"), true),
+    intentId: pathParam(c, "intentId"), now: Date.now(),
+  })));
+  app.put(`${multipart}/parts/:partNumber/scope/:visibilityScopeId`, relayR2Route(async (c) =>
+    handleRelayR2MultipartPart({
+      request: c.req.raw,
+      ...await scopedUploadAuthorization(c, pathParam(c, "visibilityScopeId"), true),
+      intentId: pathParam(c, "intentId"), partNumber: c.req.param("partNumber") ?? "", now: Date.now(),
+    })));
+  app.post(`${multipart}/complete/scope/:visibilityScopeId`, relayR2Route(async (c) => handleRelayR2MultipartComplete({
+    ...await scopedUploadAuthorization(c, pathParam(c, "visibilityScopeId"), true),
+    intentId: pathParam(c, "intentId"), now: Date.now(),
+  })));
   app.post(`${RELAY_R2_UPLOAD_PREFIX}/:intentId/verify`, relayR2Route(async (c) => handleRelayR2UploadVerify({
     ...await uploadAuthorization(c),
     intentId: pathParam(c, "intentId"),

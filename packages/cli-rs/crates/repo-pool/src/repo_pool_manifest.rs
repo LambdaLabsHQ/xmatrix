@@ -254,7 +254,16 @@ pub struct RepoPoolLayout {
 impl RepoPoolLayout {
     /// Create trusted root (if needed), canonicalize it, then create
     /// repo component with per-level reparse checks before any lock.
+    /// An existing legacy pool directory takes precedence.
     pub fn create(trusted_pools_root: &Path, repo_key: RepoKeyId) -> Result<Self, PoolError> {
+        Self::resolve(trusted_pools_root, repo_key, LegacyPoolUse::WhenPresent)
+    }
+
+    fn resolve(
+        trusted_pools_root: &Path,
+        repo_key: RepoKeyId,
+        legacy_use: LegacyPoolUse<'_>,
+    ) -> Result<Self, PoolError> {
         if !trusted_pools_root.is_absolute() {
             return Err(PoolError::new(
                 PoolErrorCode::PathEscape,
@@ -277,11 +286,18 @@ impl RepoPoolLayout {
         // Preserve existing worktree paths, including retained/live slots.
         // Only the directory spelling is shortened; authority keeps the full key.
         let legacy = trusted.join(repo_key.as_str());
+        let compact = trusted.join(&repo_key.as_str()[..POOL_DIR_KEY_CHARS]);
         let pool_root = match std::fs::symlink_metadata(&legacy) {
-            Ok(_) => legacy,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                trusted.join(&repo_key.as_str()[..POOL_DIR_KEY_CHARS])
-            }
+            Ok(_) => match legacy_use {
+                LegacyPoolUse::WhenPresent => legacy,
+                LegacyPoolUse::Holding { sessions, slot }
+                    if legacy_pool_holds(&trusted, &repo_key, &legacy, sessions, slot) =>
+                {
+                    legacy
+                }
+                LegacyPoolUse::Holding { .. } | LegacyPoolUse::Never => compact,
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => compact,
             Err(_) => {
                 return Err(PoolError::new(
                     PoolErrorCode::Io,
@@ -1577,7 +1593,7 @@ pub async fn retained_binding_for_unissued_reborn_at(
     if !pooled {
         return Ok(None);
     }
-    let layout = RepoPoolLayout::create(trusted_pools_root, repo_key.clone())?;
+    let layout = RepoPoolLayout::for_session(trusted_pools_root, repo_key.clone(), &[session_key])?;
     {
         let _guard = acquire_pool_guard(&layout).await?;
         let Some(manifest) = load_for_update(&layout)? else {
@@ -4561,11 +4577,14 @@ impl From<GitRunError> for GitCommandError {
 /// Every Git command the pool and run worktrees start: no console window,
 /// no fsmonitor, the current grant's credentials, and no repository bindings
 /// inherited from a hook (explicit `-C` commands must not mutate the hook's
-/// caller), with prompts off and no stdin.
+/// caller), with prompts off and no stdin. On Windows, paths past MAX_PATH
+/// are allowed: a deep repository otherwise cannot be checked out at all.
 pub(crate) fn background_git_command() -> tokio::process::Command {
     let mut command = tokio::process::Command::new("git");
     xmatrix_process_tree::hide_tokio_console_window(&mut command);
     command.args(["-c", "core.fsmonitor=false"]);
+    #[cfg(windows)]
+    command.args(["-c", "core.longpaths=true"]);
     apply_git_credential_helper(&mut command);
     command
         .env_remove("GIT_DIR")

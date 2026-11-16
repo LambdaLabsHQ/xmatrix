@@ -19,7 +19,10 @@ import {
   type ChannelSummarySource,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
+import { NORN_DELIVERY_PREFIX } from "@xmatrix/db";
 import { readLaunchContext } from "./agent-launch-context";
+import { linkedPages } from "./index-routes-pages";
+import { runPrincipalOf } from "./run-principal";
 import { authorizeMachineDaemonAgentRun } from "./machine-daemon-agent-run-authorization";
 import { crossSpaceRetryOwner, retryDeniedAgentReadAcrossSpaces } from "./cross-space-read";
 import { loadLiveHumanPresenceFromRuntime, overlayChannelsWithLiveHumanPresence } from "./runtime-transport/human-presence-fanout";
@@ -525,12 +528,21 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
         reader: run ? { agentId: run.agentId, instanceId: run.instanceId ?? undefined } : undefined,
         history: async (page) => {
           const result = await channelMessageHistory(c.env, { channelId, principal, ...page });
+          // A Run started for a Norn request reads that request and the linked pages, not the conversation
+          // behind it: the request carries what the program gives it, and a program that repeats would
+          // otherwise hand each new Run a longer history than the last.
+          if (startedForId?.startsWith(NORN_DELIVERY_PREFIX)) {
+            return { messages: (result.messages as ChannelMessage[]).filter((message) => message.messageId === startedForId), hasMore: false };
+          }
           return { messages: result.messages as ChannelMessage[], hasMore: result.hasMore === true };
         },
         about: async () => {
           const { channel } = await getChannel(c.env, { channelId, principal, purpose: "launch-context" });
           return channel as { summary?: string; summarySource?: ChannelSummarySource };
         },
+        // As the caller itself; a Run's read through its owner's cross-Space grant goes without pages.
+        pages: async () => run && principal.kind !== "agent" ? []
+          : (await linkedPages(c.env, channelId, runPrincipalOf(authUser))).pages,
       }) }));
     let response = await read(run
       ? { kind: "agent", id: run.agentId, agentSpaceId: run.spaceId }

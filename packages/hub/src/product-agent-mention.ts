@@ -13,7 +13,7 @@ export type { ProductRebornInstanceMention, ProductHandoffInstanceMention };
  */
 
 import type { HandoffSuccessor } from "./handoff-successor";
-import { agentPresetForLauncher, isAutoHandoffSuccessor, sha256Hex,
+import { agentPresetForLauncher, isAutoHandoffSuccessor, parseLaunchConditions, sha256Hex,
   type ChannelAttachment } from "@xmatrix/protocol";
 
 export interface ProductRebornTarget {
@@ -29,6 +29,8 @@ export interface ProductRebornTarget {
   ownerUserId: string;
   workspace?: ProductWorkspaceRef;
   metadata: Record<string, unknown>;
+  /** Original, server-admitted machine condition, preserved across reborns. */
+  launchMachineId?: string;
 }
 
 export interface ProductWorkspaceRef {
@@ -150,7 +152,8 @@ function promptWithoutProductRebornMentions(body: string, mentions: readonly Pro
 }
 
 function promptWithoutProductHandoffMentions(body: string, mentions: readonly ProductHandoffInstanceMention[]): string {
-  return promptWithoutMentionRanges(body, mentions);
+  return promptWithoutMentionRanges(body, mentions.map(mention => ({ ...mention,
+    end: parseLaunchConditions(body, mention.end).end })));
 }
 
 /** Host-safe key for `~/.xmatrix-management/<key>/` (daemon key bound: 128). */
@@ -306,6 +309,13 @@ async function orchestrateProductAgentHandoffMentions(
   let spawned = 0;
   for (const mention of mentions) {
     const address = `@${mention.sourceAgentName}:${mention.channelInstanceId}`;
+    const options = parseLaunchConditions(input.body, mention.end);
+    const auto = isAutoHandoffSuccessor(mention.successorName);
+    const harness = auto ? undefined : agentPresetForLauncher(mention.successorName)?.id;
+    if (options.error || harness && options.tags.harness && options.tags.harness !== harness) {
+      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (invalid_registration_launch).`));
+      continue;
+    }
     const target = await resolveSource({ channelId: input.channelId,
       agentName: mention.sourceAgentName, channelInstanceId: mention.channelInstanceId });
     if (!target) {
@@ -322,14 +332,12 @@ async function orchestrateProductAgentHandoffMentions(
       notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (handoff_source_not_transferable).`));
       continue;
     }
-    const auto = isAutoHandoffSuccessor(mention.successorName);
-    const harness = auto ? undefined : agentPresetForLauncher(mention.successorName)?.id;
     if (!input.port.handOff || (!auto && !harness)) {
       notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (registration_handoff_failed).`));
       continue;
     }
-    // A handoff is an ordinary launch: routing weighs every machine, with the
-    // source's work site as its only location constraint.
+    // Placement is inherited only when it was an explicit launch condition.
+    // A manual override is reauthorized through ordinary launch admission.
     const repository = metadataString(target.metadata, "remoteRepo");
     const directory = !repository && !metadataString(target.metadata, "managedWorkspaceKey")
       ? target.workspace?.canonicalCwd : undefined;
@@ -339,6 +347,8 @@ async function orchestrateProductAgentHandoffMentions(
         actorUserId: input.actorUserId, channelId: input.channelId, sourceMessageId: input.messageId,
         sourceRunId: target.runId, sourceInstanceId: target.instanceId, sourceAddress: address,
         ...(repository ? { repository } : directory ? { directory } : {}), ...(harness ? { harness } : {}),
+        ...((target.launchMachineId || Object.keys(options.tags).length) ? { tags: {
+          ...(target.launchMachineId ? { machine: target.launchMachineId } : {}), ...options.tags } } : {}),
         request: promptWithoutProductHandoffMentions(input.body, mentions),
         sourceMention: input.body.slice(mention.start, mention.end),
       });
@@ -346,7 +356,9 @@ async function orchestrateProductAgentHandoffMentions(
     } catch (error) {
       const code = error && typeof error === "object" && typeof (error as { code?: unknown }).code === "string"
         ? (error as { code: string }).code : "registration_handoff_failed";
-      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (${code}).`));
+      const pending = code === "handoff_source_stop_pending"
+        ? " The source stop awaits its daemon's confirmation; no successor started. Retry after exit is confirmed." : "";
+      notices.push(refusal(address, `xMatrix could not hand off ${address} to @${mention.successorName} (${code}).${pending}`));
     }
   }
   await publishContinuationNotices(input, notices);

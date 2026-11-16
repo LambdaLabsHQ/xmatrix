@@ -3,7 +3,7 @@ import { machineNetworkObservation } from "./machine-network.js";
 import { configurationFields } from "./configuration-fields.js";
 import { parseLaunchParameterEvidence, type LaunchParameterEvidence } from "./launch-parameter-evidence.js";
 import { canonicalRegistrationHarness } from "./agent-registration.js";
-import { parseLlmQuotaAccount } from "./authority-runtime.js";
+import { parseLlmQuotaAccount, quotaAccountBalance } from "./authority-runtime.js";
 import { hasControlCharacter, replaceControlCharacters } from "./field-validation.js";
 
 /** Owner declarations describe an environment; they never grant access. */
@@ -34,6 +34,39 @@ export interface RoutingModelOption {
   model: string;
   description: string;
   efforts: Array<{ value: string; description: string }>;
+  /** Other names the runtime's catalog gives this model: its selectors (Claude's
+   * `opus`) and display names. */
+  names?: string[];
+  /** The runtime marks this entry as the model a new session starts on. */
+  isDefault?: true;
+  /** The `scope`s of the provider's scoped quota windows that constrain this
+   * model (`routingQuotaObservation`). */
+  quotaScopes?: string[];
+}
+
+/**
+ * Whether a written `model:` value names this catalog entry: the runtime's
+ * model, its selector or its display name, ignoring case. The runtime's own
+ * catalog is the only vocabulary; nothing here maps one model name to another.
+ */
+export function routingModelOptionNamed(option: RoutingModelOption, written: string): boolean {
+  const wanted = written.trim().toLowerCase();
+  return Boolean(wanted) && [option.model, ...option.names ?? []].some(name => name.toLowerCase() === wanted);
+}
+
+/**
+ * What a completion writes after `model:` for a catalog entry. A runtime's
+ * model id can be an opaque selector that needs quoting (DeepSeek Harness
+ * selects `["deepseek-official","deepseek-flash"]`); the entry's own catalog
+ * name (`DeepSeek-V4.1-Flash`) is then written instead, when it names no
+ * other entry: a one-word name first, else one that only needs quotes around
+ * it (`"DeepSeek V4 Pro"`). Otherwise the id is written as it is.
+ */
+export function routingModelWrittenName(option: RoutingModelOption, catalog: readonly RoutingModelOption[]): string {
+  if (!/[\s"]/u.test(option.model)) return option.model;
+  const own = (option.names ?? []).filter(name => !name.includes('"') &&
+    catalog.filter(other => routingModelOptionNamed(other, name)).length === 1);
+  return own.find(name => !/\s/u.test(name)) ?? own[0] ?? option.model;
 }
 
 /** A received catalog is an observation, not permission or a fabricated default. */
@@ -45,13 +78,29 @@ export function routingModelCatalogObservation(value: unknown, observedAt: unkno
   for (const raw of value) {
     if (!raw || typeof raw !== "object" || raw.hidden === true) continue;
     const model = clean(raw.model, 160);
-    if (!model || models.some(item => item.model === model)) continue;
+    if (!model) continue;
+    // A selector and the model it resolves to are one model: merge their names.
+    const aliases = Array.isArray(raw.aliases) ? raw.aliases.slice(0, 8).map((alias: unknown) => clean(alias, 160)) : [];
+    const names = [clean(raw.id, 160), clean(raw.displayName, 160), ...aliases].filter(name => name && name !== model);
+    const quotaScopes: string[] = Array.isArray(raw.quotaScopes)
+      ? raw.quotaScopes.slice(0, 8).map((scope: unknown) => clean(scope, 64)).filter(Boolean) : [];
+    const known = models.find(item => item.model === model);
+    if (known) {
+      const merged = [...new Set([...known.names ?? [], ...names])].slice(0, 8);
+      if (merged.length) known.names = merged;
+      if (raw.isDefault === true) known.isDefault = true;
+      const scopes = [...new Set([...known.quotaScopes ?? [], ...quotaScopes])].slice(0, 8);
+      if (scopes.length) known.quotaScopes = scopes;
+      continue;
+    }
     const efforts: RoutingModelOption["efforts"] = [];
     for (const effort of Array.isArray(raw.supportedReasoningEfforts) ? raw.supportedReasoningEfforts.slice(0, 16) : []) {
       const value = clean(effort?.reasoningEffort, 80);
       if (value && !efforts.some(item => item.value === value)) efforts.push({ value, description: clean(effort.description, 512) });
     }
-    models.push({ model, description: clean(raw.description, 512), efforts });
+    models.push({ model, description: clean(raw.description, 512), efforts,
+      ...(names.length ? { names: [...new Set(names)] } : {}), ...(raw.isDefault === true ? { isDefault: true as const } : {}),
+      ...(quotaScopes.length ? { quotaScopes: [...new Set(quotaScopes)] } : {}) });
   }
   return models.length ? { value: models, observedAt: new Date(at).toISOString(),
     expiresAt: new Date(at + 86_400_000).toISOString(), source: "launch-authority" } : undefined;
@@ -443,10 +492,11 @@ export function parseAgentRoutingRequirements(value: unknown): AgentRoutingRequi
  * past a used-up window (credits) keeps the least headroom that is still some,
  * so it stays eligible but ranks after every account with window headroom.
  *
- * Cursor reports separate Auto and API pools (plus a 1mo total). Auto/Composer/
- * Grok draw from Auto; third-party models draw from API. Without a selected
- * model, headroom is the better of those two pools — not Math.min across them.
- * With a model, only that model's pool counts.
+ * Account windows (`quotaUsages`) constrain every model. A scoped window
+ * (`scopedQuotaUsages`: Claude's per-model week, Cursor's Auto and API pools)
+ * constrains a model only when its scope is one of the `quotaScopes` of that
+ * model's catalog row, compared exactly but for case. That is the only rule:
+ * without a catalog row the scope is unknown, and no scoped window applies.
  */
 export const ROUTING_QUOTA_MAX_AGE_MS = 15 * 60_000;
 const ROUTING_EXHAUSTED_MAX_AGE_MS = 31 * 24 * 60 * 60_000;
@@ -464,88 +514,95 @@ export function routingQuotaResetTime(value: unknown): number {
   return typeof value === "string" ? Date.parse(value) : NaN;
 }
 
-/** Which Cursor usage pool a model spends: Auto (Cursor Models / Composer /
- * Grok / `default`) or API (third-party Claude/GPT/Gemini, …). */
-export function cursorQuotaBucketForModel(model: string | undefined): "Auto" | "API" {
-  const id = (model ?? "").trim().toLowerCase();
-  if (!id || id === "default" || id === "auto" || id.startsWith("default[")
-      || id.startsWith("composer") || id.startsWith("grok")) {
-    return "Auto";
-  }
-  return "API";
+/** Whether a scoped window constrains the model of this catalog row. */
+export function routingQuotaScopeConstrains(scope: unknown,
+  model: Pick<RoutingModelOption, "quotaScopes"> | undefined): boolean {
+  const wanted = typeof scope === "string" ? scope.trim().toLowerCase() : "";
+  return Boolean(wanted) && (model?.quotaScopes ?? []).some(item => item.trim().toLowerCase() === wanted);
 }
 
 export type RoutingQuotaObservationOptions = {
-  /** Only these window labels count (matched case-insensitively). */
-  windowLabels?: readonly string[];
+  /** The catalog row of the model to launch; its `quotaScopes` select the
+   * scoped windows that apply. Without it only account windows count. */
+  model?: Pick<RoutingModelOption, "quotaScopes">;
 };
 
-function quotaWindowLabel(window: Record<string, unknown>): string {
-  const raw = typeof window.label === "string" ? window.label
-    : typeof window.window === "string" ? window.window : "";
-  return raw.trim();
-}
+type QuotaWindowReading = { remaining: number; expires: number };
 
-export function routingQuotaObservation(usage: unknown, now: number,
-  options?: RoutingQuotaObservationOptions): RoutingObservation<number> | undefined {
-  if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isFinite(now)) return undefined;
-  const row = usage as Record<string, unknown>;
-  // Runtime usage marks provider reads as `provider_api`; local session estimates never qualify.
-  if (row.quotaSource !== "provider_api") return undefined;
-  const observed = typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN;
-  if (!Number.isFinite(observed) || observed > now) return undefined;
-  const windows = Array.isArray(row.quotaUsages) ? row.quotaUsages : [];
-  const allowed = parseLlmQuotaAccount(row.quotaAccount)?.allowed;
-  const prefer = new Set((options?.windowLabels ?? []).map(label => label.trim().toLowerCase()).filter(Boolean));
-  const labeled: Array<{ label: string; percent: number; resetAt: unknown }> = [];
-  for (const value of windows) {
-    if (!value || typeof value !== "object" || Array.isArray(value)) continue;
+/** Each window of one part of a reading that still counts at `now`, with the
+ * headroom it leaves and when it stops counting. */
+function quotaWindowReadings(windows: unknown, observed: number, now: number, allowed: boolean | undefined,
+  applies: (window: Record<string, unknown>) => boolean): QuotaWindowReading[] {
+  if (!Array.isArray(windows) || !Number.isFinite(observed) || observed > now) return [];
+  return windows.flatMap((value): QuotaWindowReading[] => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
     const window = value as Record<string, unknown>;
     // percent is the provider's 0..100 usage; remaining is not an inferred balance.
     if (typeof window.percent !== "number" || !Number.isFinite(window.percent) ||
-        window.percent < 0 || window.percent > 100) continue;
-    labeled.push({ label: quotaWindowLabel(window), percent: window.percent,
-      resetAt: window.resetAt ?? window.reset_at });
-  }
-  const names = new Set(labeled.map(window => window.label.toLowerCase()).filter(Boolean));
-  const cursorPools = names.has("auto") && names.has("api");
-  const selected = prefer.size
-    ? labeled.filter(window => prefer.has(window.label.toLowerCase()))
-    : cursorPools
-      // Cursor's Auto and API pools are alternatives by model family; a full API
-      // pool must not refuse Auto/Composer, and vice versa. The 1mo total is not
-      // a third gate here — Agents still shows it.
-      ? labeled.filter(window => {
-        const label = window.label.toLowerCase();
-        return label === "auto" || label === "api";
-      })
-      : labeled;
-  const readings: Array<{ remaining: number; expires: number }> = [];
-  for (const window of selected) {
-    const reset = routingQuotaResetTime(window.resetAt);
-    if (Number.isFinite(reset) && reset <= now) continue;
+        window.percent < 0 || window.percent > 100 || !applies(window)) return [];
+    const reset = routingQuotaResetTime(window.resetAt ?? window.reset_at);
+    if (Number.isFinite(reset) && reset <= now) return [];
     const hasReset = Number.isFinite(reset) && reset > observed;
     const maxAge = window.percent === 100 && hasReset && allowed !== true
       ? ROUTING_EXHAUSTED_MAX_AGE_MS : ROUTING_QUOTA_MAX_AGE_MS;
     const expires = Math.min(observed + maxAge, hasReset ? reset : Infinity);
-    if (expires > now) readings.push({ remaining: 100 - window.percent, expires });
+    return expires > now ? [{ remaining: 100 - window.percent, expires }] : [];
+  });
+}
+
+/** A provider read (`provider_api`) with its read time; local session estimates never qualify. */
+function providerQuotaReading(usage: unknown, now: number):
+  { row: Record<string, unknown>; observed: number; scopedObserved: number; allowed?: boolean } | undefined {
+  if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isFinite(now)) return undefined;
+  const row = usage as Record<string, unknown>;
+  if (row.quotaSource !== "provider_api") return undefined;
+  const observed = typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN;
+  if (!Number.isFinite(observed) || observed > now) return undefined;
+  // A stored reading keeps its scoped windows' own read time: a partial read
+  // (a rate-limit verdict) renews only the account windows.
+  const scopedObserved = typeof row.scopedQuotaObservedAt === "string" ? Date.parse(row.scopedQuotaObservedAt) : observed;
+  return { row, observed, scopedObserved, allowed: parseLlmQuotaAccount(row.quotaAccount)?.allowed };
+}
+
+/** The headroom a reading leaves one model (`options.model`): its account
+ * windows and the scoped windows that constrain it. Without a model, the
+ * account's own headroom. */
+export function routingQuotaObservation(usage: unknown, now: number,
+  options?: RoutingQuotaObservationOptions): RoutingObservation<number> | undefined {
+  const reading = providerQuotaReading(usage, now);
+  if (!reading) return undefined;
+  const { row, observed, allowed } = reading;
+  const readings = [
+    ...quotaWindowReadings(row.quotaUsages, observed, now, allowed, () => true),
+    ...quotaWindowReadings(row.scopedQuotaUsages, reading.scopedObserved, now, allowed,
+      window => routingQuotaScopeConstrains(window.scope, options?.model)),
+  ];
+  if (!readings.length) {
+    // A prepaid account has no window: the provider's verdict on it, else
+    // whether any money is left, is all the headroom there is to read.
+    const balance = quotaAccountBalance(parseLlmQuotaAccount(row.quotaAccount));
+    const expires = observed + ROUTING_QUOTA_MAX_AGE_MS;
+    if ((Array.isArray(row.quotaUsages) && row.quotaUsages.length) || !balance || expires <= now) return undefined;
+    return { value: (allowed ?? balance.amount > 0) ? 100 : 0, observedAt: new Date(observed).toISOString(),
+      expiresAt: new Date(expires).toISOString(), source: "provider" };
   }
-  if (!readings.length) return undefined;
-  // Cursor dual pools without a model: the better pool is the headroom, and its
-  // own expiry — a full API pool must not pin the Auto reading until the API reset.
-  // With a preferred label (or any other provider): the tightest selected window;
-  // an exhausted window holds until its reset.
-  const cursorBest = cursorPools && !prefer.size;
-  const windowRemaining = cursorBest
-    ? Math.max(...readings.map(reading => reading.remaining))
-    : Math.min(...readings.map(reading => reading.remaining));
-  const exhausted = readings.filter(reading => reading.remaining === 0);
-  const expires = cursorBest
-    ? Math.min(...readings.filter(reading => reading.remaining === windowRemaining).map(reading => reading.expires))
-    : exhausted.length && allowed !== true ? Math.max(...exhausted.map(reading => reading.expires))
-      : Math.min(...readings.map(reading => reading.expires));
+  // The tightest window counts; an exhausted window holds until its reset.
+  const windowRemaining = Math.min(...readings.map(item => item.remaining));
+  const exhausted = readings.filter(item => item.remaining === 0);
+  const expires = exhausted.length && allowed !== true ? Math.max(...exhausted.map(item => item.expires))
+    : Math.min(...readings.map(item => item.expires));
   const value = allowed === false ? 0
     : allowed === true ? Math.max(windowRemaining, ROUTING_SERVED_PAST_LIMIT_REMAINING) : windowRemaining;
   return { value, observedAt: new Date(observed).toISOString(),
     expiresAt: new Date(expires).toISOString(), source: "provider" };
+}
+
+/** When the last scoped window of a reading stops counting, whichever model
+ * it constrains; undefined when none counts at `now`. */
+export function routingScopedQuotaExpiry(usage: unknown, now: number): string | undefined {
+  const reading = providerQuotaReading(usage, now);
+  if (!reading) return undefined;
+  const readings = quotaWindowReadings(reading.row.scopedQuotaUsages, reading.scopedObserved, now, reading.allowed,
+    window => typeof window.scope === "string" && Boolean(window.scope.trim()));
+  return readings.length ? new Date(Math.max(...readings.map(item => item.expires))).toISOString() : undefined;
 }

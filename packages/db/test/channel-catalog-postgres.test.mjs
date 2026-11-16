@@ -9,6 +9,7 @@ import {
   PostgresChannelCatalogRepository,
   PostgresSpaceControlRepository,
 } from "../dist/index.js";
+import { planNodes, recordedStatements } from "./recording-database.fixture.mjs";
 
 const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
 const postgresRequired = process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true";
@@ -24,7 +25,7 @@ async function seed() {
       data.space_agent_registration_access,data.channel_transfer_proposals,data.outbox,data.idempotency_keys,data.message_mutations,control.scoped_control_command_replays,
       control.channel_space_directory,control.channel_space_routes,control.entity_space_routes,
       control.user_space_memberships,control.user_space_membership_routes,data.space_billing_usage,
-      data.message_attachments,data.message_attachment_refs,data.automations,data.trace_access_grants,
+      data.message_attachments,data.message_attachment_refs,data.trace_access_grants,
       data.app_source_relations,
       data.message_attention,data.messages,data.instances,data.runs,data.channel_access,
       data.user_space_channel_view_preferences,data.channels,data.space_control_heads,
@@ -152,9 +153,6 @@ integration("a conversation moves with its own work; other conversations keep th
       SELECT space_id,attachment_id,message_id,channel_id,owner_user_id,object_key,
         content_hash,encoded_bytes,mime_type,name,presentation_residual_json,version,created_at,updated_at
       FROM data.message_attachments WHERE attachment_id='move-attachment'`);
-    await client.query(`INSERT INTO data.automations
-      (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,created_at,updated_at)
-      VALUES ('move-automation','owner','child',$1,true,1,'{}',$1,$1)`, [now]);
     await client.query(`INSERT INTO data.trace_access_grants
       (grant_id,owner_user_id,viewer_user_id,agent_id,channel_id,duration,status,version,requested_at)
       VALUES ('move-trace','owner','user-1','agent-1','root-40','channel','approved',1,$1)`, [now]);
@@ -203,8 +201,6 @@ integration("a conversation moves with its own work; other conversations keep th
       const facts = (await client.query(`SELECT space_id FROM data.${table} WHERE channel_id='child'`)).rows;
       assert.deepEqual(facts, [{ space_id: "space-catalog" }], table);
     }
-    assert.equal((await client.query("SELECT enabled FROM data.automations WHERE automation_id='move-automation'"))
-      .rows[0].enabled, true, "an Automation of a conversation that did not move keeps running");
     assert.equal((await client.query("SELECT count(*)::int AS n FROM data.app_source_relations WHERE relation_id='move-relation'"))
       .rows[0].n, 1);
   } finally {
@@ -635,7 +631,7 @@ integration("startup resolve omits participants, full reads hydrate them, and AC
     assert.equal(Object.hasOwn(channel, "memberPresence"), false);
     assert.equal(Object.hasOwn(channel, "visibleHumanMemberIds"), false);
   }
-  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v10"), false);
+  assert.equal(observations.some(event => event.queryName === "channel_agent_presence_v12"), false);
   assert.equal(observations.some(event => event.queryName === "channel_catalog_open_space_members_v2"), false);
   const full = await catalog.resolve(input);
   assert.equal(catalogInstances(full.channels.find(channel => channel.id === "root-40")).length, 2);
@@ -928,4 +924,38 @@ integration("catalog counts keep older declared waits without multiplying or wid
     await client.query(`DELETE FROM data.delivery_cursors WHERE space_id='space-catalog' AND subject_id='user:user-1'`);
     assert.deepEqual((await read()).counts, { active: 60, unread: 1, mentions: 1 });
   } finally { await client.end(); }
+});
+
+// Production nested-looped every readable Channel against an aggregate of the
+// principal's attention (both estimated at a handful of rows): a Space of
+// 2,920 Channels compared 2.7 million pairs, a 2.1 s count. Whichever join the
+// planner picks, the count probes each Channel's attention by index instead.
+integration("catalog counts probe each Channel's attention instead of joining an aggregate of it", async () => {
+  await seed();
+  const client = new Client({ connectionString });
+  await client.connect();
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0" });
+  const recording = recordedStatements(database);
+  try {
+    await client.query(`INSERT INTO data.message_attention
+      (space_id,subject_id,channel_id,message_id,kind,timeline_sequence,created_at,awaiting_response)
+      SELECT 'space-catalog','user:user-1','root-'||LPAD(c::text,2,'0'),
+        'attended-'||c||'-'||s,'mention',s,$1,FALSE
+      FROM generate_series(0,54) c, generate_series(1,3) s`, [now]);
+    await client.query("ANALYZE data.message_attention");
+    const page = await new PostgresChannelCatalogRepository(recording).page({ requestId: "counts-plan",
+      spaceId: "space-catalog", principal: { kind: "user", id: "user-1" },
+      view: "flat", filter: "all", countsOnly: true });
+    // The seed already holds a mention in one more Channel.
+    assert.deepEqual(page.counts, { active: 60, unread: 56, mentions: 56 });
+    const counts = recording.statements.find((query) => query.name.startsWith("channel_catalog_counts_"));
+    for (const planner of ["RESET ALL", "SET enable_hashjoin = off; SET enable_mergejoin = off"]) {
+      await client.query(planner);
+      const plan = (await client.query(`EXPLAIN (ANALYZE, FORMAT JSON) ${counts.text}`, counts.values))
+        .rows[0]["QUERY PLAN"][0].Plan;
+      const compared = [...planNodes(plan)].reduce((total, node) =>
+        total + (node["Rows Removed by Join Filter"] ?? 0), 0);
+      assert.ok(compared <= 60, `${planner}: counting 60 Channels discarded ${compared} joined rows`);
+    }
+  } finally { await client.query("RESET ALL"); await client.end(); }
 });

@@ -1,6 +1,7 @@
 import {
   RELAY_V2_BLOB_UPLOAD_CHECKSUM_HEADER,
   RELAY_V2_BLOB_UPLOAD_PREFIX,
+  relayV2BlobUploadPaths,
 } from "@xmatrix/protocol/relay-v2/message-attachment";
 import { withRoute } from "@xmatrix/protocol";
 import { getXMatrixHubUrl } from "@/lib/xmatrix";
@@ -11,18 +12,24 @@ import {
   logProxyFailure,
 } from "@/lib/xmatrix-proxy-failure";
 
-/** Stream one browser upload to the exact scoped Hub authority selected by its intent. */
+/**
+ * Stream one browser upload — a whole body, or one part of a multipart
+ * upload — to the exact scoped Hub authority selected by its intent.
+ */
 export async function proxyMessageAttachmentUpload(input: {
   request: Request;
   intentId: string;
   visibilityScopeId?: string;
+  partNumber?: number;
 }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15 * 60_000);
-  const uploadPath = `${RELAY_V2_BLOB_UPLOAD_PREFIX}/${encodeURIComponent(input.intentId)}` +
-    (input.visibilityScopeId === undefined
-      ? ""
-      : `/scope/${encodeURIComponent(input.visibilityScopeId)}`);
+  const uploadPath = input.partNumber !== undefined && input.visibilityScopeId !== undefined
+    ? relayV2BlobUploadPaths(input.intentId, input.visibilityScopeId).part(input.partNumber)
+    : `${RELAY_V2_BLOB_UPLOAD_PREFIX}/${encodeURIComponent(input.intentId)}` +
+      (input.visibilityScopeId === undefined
+        ? ""
+        : `/scope/${encodeURIComponent(input.visibilityScopeId)}`);
 
   const startedAt = Date.now();
   try {

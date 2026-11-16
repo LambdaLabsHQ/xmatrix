@@ -1,6 +1,6 @@
 import { installRenderCounter } from "./render-counts";
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, conversationOpened, fixtureJson, fixtureRequests } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, FIXTURE_AGENT_REGISTRATION, conversationOpened, fixtureJson, fixtureRequests } from "./workspace-fixtures";
 import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./working-agents-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
@@ -125,9 +125,8 @@ test("current-Channel activity leaves Markdown and the work dock alone and opens
     } } });
     await expect(header.getByTitle("Channel details", { exact: true })).toHaveText(label);
   }
-  send({ type: "channel_updated", channel: { ...current.channels[0], memberPresence: {} } });
-  send({ type: "agent_lifecycle", channelId: current.channelId(0), agentId: agent.id,
-    instanceId: agent.instances[0].id, status: "offline", layer: "agent", ts: new Date().toISOString() });
+  send({ type: "instance_records", records: [{ ...agent.instances[0], agentName: agent.name,
+    registration: FIXTURE_AGENT_REGISTRATION, status: "offline", revision: { version: 2, sequence: 0 } }] });
   await expect(page.locator('[id="message:current-message-40"]').getByText("instance offline", { exact: true })).toBeVisible();
   // Presence-discovered cards remain searchable while the shell uses its
   // stable catalog snapshot and the Hub sends an empty agent_list.

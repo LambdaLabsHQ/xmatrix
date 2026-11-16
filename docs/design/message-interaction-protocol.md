@@ -161,3 +161,13 @@ the author's stored choice deadline. Validation covers shared TS/Rust grammar
 vectors, malformed/retired syntax, Unicode offsets, source contexts, ambiguous
 names, catalog mutation, current domain authority tests and real PostgreSQL
 late-author/Jev contention.
+
+### Connector catalog capacity
+
+Grammar revision 2 keeps the v1 descriptor and invocation format and raises the
+per-target operation bound from 64 to 256. Projection rejects overflow instead
+of silently truncating installed actions. The Hub command catalog and clients
+consume the same shared grammar; updated clients can present the complete
+catalog. Older clients retain their existing command presentation limits, while
+server execution still checks current actions, credentials and grants. This
+capacity increase does not grant permission to invoke any action.

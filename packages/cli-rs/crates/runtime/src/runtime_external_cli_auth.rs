@@ -944,7 +944,10 @@ fn spawn_daemon_auth_token_refresh(
         let mut sleep_secs = AGENT_RUN_TOKEN_REFRESH_INTERVAL_SECS;
         let mut refresh = DaemonAuthRefreshOutcomes::default();
         loop {
-            wait_for_daemon_auth_refresh(sleep_secs).await;
+            tokio::select! {
+                _ = wait_for_daemon_auth_refresh(sleep_secs) => {}
+                _ = relay.auth_refresh_requested() => {}
+            }
             let refreshed = match resolve_local_daemon_auth_token_for_refresh().await {
                 Ok(Some(token)) => {
                     sleep_secs = refresh.succeeded();
@@ -1656,18 +1659,20 @@ impl ZcodeAppSession {
         cwd: Option<&str>,
     ) -> error::Result<Option<protocol::AgentGoalStatus>> {
         let workspace_path = app_server_workspace_path(cwd)?;
-        let mode = std::env::var("XMATRIX_ZCODE_APP_MODE").unwrap_or_else(|_| "yolo".to_string());
+        // The session mode is the launch's access grant.
         let result = self
             .request(
                 "session/create",
-                serde_json::json!({
-                    "workspace": {
-                        "workspacePath": workspace_path.clone(),
-                        "workspaceKey": workspace_path,
-                    },
-                    "persistence": "deferred",
-                    "mode": mode,
-                }),
+                with_access_session(
+                    serde_json::json!({
+                        "workspace": {
+                            "workspacePath": workspace_path.clone(),
+                            "workspaceKey": workspace_path,
+                        },
+                        "persistence": "deferred",
+                    }),
+                    &launch_access(),
+                ),
             )
             .await?;
         let session_id = result
@@ -2033,17 +2038,12 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         read_initial_spawn_context_from_env().and_then(|ctx| ctx.goal);
 
     write_current_run_status(&format!("{run_phase_prefix}_app_starting"), false, None);
-    // Seed monthly credit quota from the vendor billing hook so the channel
-    // Agents panel can show remaining allowance (1mo). Turn token usage alone
-    // rarely includes subscription windows. Read before the first presence
-    // publish. Generic ACP vendors have no quota hook and simply skip this.
-    let mut latest_usage = config.read_quota_usage(false, None).await;
     let mut initial_runtime_turn = runtime_state.begin_initial_message_turn(
         &relay,
         initial_message.is_some(),
         auto_join_channel_id.as_deref(),
         None,
-        latest_usage.clone(),
+        None,
         latest_goal.clone(),
     );
 
@@ -2056,15 +2056,25 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     } else {
         None
     };
-    let mut app = AcpSession::spawn(cmd, cmd_args, cwd, config.clone()).await?;
-    let initial_presentation = app
-        .initialize(
-            cwd,
-            resume_session_key.as_deref(),
-            resume_requested && !role_active,
-            trusted_rules.as_deref(),
-        )
-        .await?;
+    // Seed monthly credit quota from the vendor billing hook so the channel
+    // Agents panel can show remaining allowance (1mo). Turn token usage alone
+    // rarely includes subscription windows. It is read beside the session's
+    // start, never ahead of it, and reaches the first full presence below.
+    // Generic ACP vendors have no quota hook and simply skip this.
+    let (seed_usage, started) = tokio::join!(config.read_quota_usage(false, None), async {
+        let mut app = AcpSession::spawn(cmd, cmd_args, cwd, config.clone()).await?;
+        let presentation = app
+            .initialize(
+                cwd,
+                resume_session_key.as_deref(),
+                resume_requested && !role_active,
+                trusted_rules.as_deref(),
+            )
+            .await?;
+        error::Result::Ok((app, presentation))
+    });
+    let (mut app, initial_presentation) = started?;
+    let mut latest_usage = seed_usage;
     // Keep bootstrap/history in ordinary user content even when the vendor
     // accepted separate trusted rules. History must never become system text.
     latest_goal = app.loaded_goal.take().or(latest_goal);
@@ -2153,6 +2163,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         cmd_args,
         cwd,
         resume_session_key: resume_session_key.as_deref(),
+        trusted_rules,
         runtime_state: &runtime_state,
         skill_overlay,
         latest_model,
@@ -2162,6 +2173,9 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         latest_usage,
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
+    // Every message's local attachment copies stay for the whole Run: its
+    // prompt names them, and the agent may open one in a later turn.
+    let mut materialized_inbound_images = Vec::new();
 
     run.sync();
     if let Some(requested) =
@@ -2270,6 +2284,9 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                                 )?;
                                 blocks.extend(message_blocks);
                                 prompt_parts.push(message_text);
+                                if !inbound_images.paths().is_empty() {
+                                    materialized_inbound_images.push(inbound_images);
+                                }
                             }
                             let text = combined_inbound_channel_prompt(prompt_parts);
                             match bootstrap.take() {
@@ -2408,6 +2425,8 @@ struct AcpRun<'a> {
     cmd_args: &'a [String],
     cwd: Option<&'a str>,
     resume_session_key: Option<&'a str>,
+    /// The trusted rules the session opened with, for a session a restart opens anew.
+    trusted_rules: Option<String>,
     runtime_state: &'a AgentRuntimeStateTracker,
     skill_overlay: Vec<String>,
     latest_model: Option<String>,
@@ -2453,6 +2472,7 @@ impl AcpRun<'_> {
             self.cmd_args,
             self.cwd,
             self.resume_session_key,
+            self.trusted_rules.as_deref(),
         )
         .await?;
         self.latest_goal = self.app.loaded_goal.take().or(self.latest_goal.take());
@@ -2719,17 +2739,97 @@ async fn submit_acp_turn_interruptible(
     .await
 }
 
+/// Start the agent again and resume its session. The model, effort and
+/// parameters chosen in the session that ended are chosen again: they were
+/// the person's, not the process's. A choice the agent no longer offers is
+/// reported and left at its default.
 async fn restart_acp_app_session(
     app: &mut AcpSession,
     cmd: &str,
     cmd_args: &[String],
     cwd: Option<&str>,
     resume_session_key: Option<&str>,
+    trusted_rules: Option<&str>,
 ) -> error::Result<()> {
+    let chosen = AcpSessionChoices::of(app);
     app.shutdown().await;
     *app = AcpSession::spawn(cmd, cmd_args, cwd, app.config.clone()).await?;
-    let _ = app.initialize(cwd, resume_session_key, true, None).await?;
+    let _ = app.initialize(cwd, resume_session_key, true, trusted_rules).await?;
+    chosen.restore(app).await;
     Ok(())
+}
+
+/// What a session had chosen: its model, effort and other parameter values.
+struct AcpSessionChoices {
+    model: Option<String>,
+    effort: Option<String>,
+    parameters: Vec<(String, String)>,
+}
+
+impl AcpSessionChoices {
+    fn of(app: &AcpSession) -> Self {
+        let effort_id = app.presentation.effort_config_id.as_deref();
+        let parameters = app
+            .presentation
+            .parameters
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|parameter| {
+                !matches!(parameter.id.as_str(), "model" | "models")
+                    && Some(parameter.id.as_str()) != effort_id
+            })
+            .filter_map(|parameter| {
+                parameter
+                    .current_value
+                    .clone()
+                    .map(|value| (parameter.id.clone(), value))
+            })
+            .collect();
+        Self {
+            model: app.current_model().map(str::to_string),
+            effort: app.current_effort().map(str::to_string),
+            parameters,
+        }
+    }
+
+    async fn restore(self, app: &mut AcpSession) {
+        let name = app.config.display_name.clone();
+        let warn = |what: &str, err: &CliError| {
+            eprintln!(
+                "{} {name} kept its default {what} after restarting: {err}",
+                "⚠".yellow().bold()
+            );
+        };
+        if let Some(model) = self.model.filter(|model| app.current_model() != Some(model.as_str()))
+            && let Err(err) = app.set_model(&model).await
+        {
+            warn("model", &err);
+        }
+        if let Some(effort) = self
+            .effort
+            .filter(|effort| app.current_effort() != Some(effort.as_str()))
+            && app.presentation.effort_config_id.is_some()
+            && let Err(err) = app.set_effort(&effort).await
+        {
+            warn("effort", &err);
+        }
+        for (id, value) in self.parameters {
+            let current = app
+                .presentation
+                .parameters
+                .as_deref()
+                .unwrap_or_default()
+                .iter()
+                .find(|parameter| parameter.id == id)
+                .and_then(|parameter| parameter.current_value.clone());
+            if current.as_deref() != Some(value.as_str())
+                && let Err(err) = app.set_parameter(&id, &value).await
+            {
+                warn(&id, &err);
+            }
+        }
+    }
 }
 
 fn acp_presentation_snapshot(
@@ -2772,7 +2872,8 @@ impl AcpInterrupter {
         let Some((id, params)) = self.questions.take(&reply.request_key) else {
             return false;
         };
-        let result = crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers);
+        let result = crate::runtime_harness_questions::acp_permission_outcome(&params, Some(&reply.answers))
+            .unwrap_or_else(|| crate::runtime_harness_questions::acp_answer_content(&params, &reply.answers));
         write_acp_message(&self.write, &acp_result(id, result))
             .await
             .is_ok()
@@ -2780,12 +2881,10 @@ impl AcpInterrupter {
 
     /// Cancel every parked elicitation: the person typed a message instead.
     pub(crate) async fn cancel_questions(&self) {
-        for (id, _) in self.questions.drain() {
-            let _ = write_acp_message(
-                &self.write,
-                &acp_result(id, serde_json::json!({ "action": "cancel" })),
-            )
-            .await;
+        for (id, params) in self.questions.drain() {
+            let cancelled = crate::runtime_harness_questions::acp_permission_outcome(&params, None)
+                .unwrap_or_else(|| serde_json::json!({ "action": "cancel" }));
+            let _ = write_acp_message(&self.write, &acp_result(id, cancelled)).await;
         }
     }
 
@@ -2943,12 +3042,14 @@ impl AcpVendorConfig {
             goal_turn_input: None,
             goal_status_from_update: None,
             goal_status_from_text: None,
-            // OpenCode (Go subscription or ChatGPT login) and Cursor expose
-            // account quota behind their own stored credentials; every other generic ACP peer has no quota
+            // OpenCode (Go subscription or ChatGPT login), Cursor and DeepSeek
+            // (prepaid API balance) expose account quota behind their own
+            // stored credentials; every other generic ACP peer has no quota
             // source here.
             quota_usage: match stem.as_str() {
                 "opencode" => Some(opencode_quota_hook),
                 "cursor" => Some(cursor_quota_hook),
+                "deepseek" => Some(deepseek_quota_hook),
                 _ => None,
             },
             resume_namespace: format!("acp-resume-{stem}"),
@@ -2964,9 +3065,9 @@ impl AcpVendorConfig {
 
     fn acp_spawn_args(&self, cmd_args: &[String]) -> Vec<String> {
         match self.flavor {
-            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args),
+            AcpVendorFlavor::Grok => grok_acp_spawn_args(cmd_args, &launch_access()),
             AcpVendorFlavor::Generic => {
-                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref())
+                generic_acp_spawn_args(cmd_args, self.preset_acp_args.as_deref(), &launch_access())
             }
         }
     }
@@ -2984,6 +3085,13 @@ fn opencode_quota_hook(
     model: Option<String>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
     Box::pin(async move { read_opencode_usage_for_model(force, model.as_deref()).await })
+}
+
+fn deepseek_quota_hook(
+    force: bool,
+    model: Option<String>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<protocol::LlmUsage>> + Send>> {
+    Box::pin(async move { read_deepseek_balance_for_model(force, model.as_deref()).await })
 }
 
 fn cursor_quota_hook(
@@ -3012,7 +3120,11 @@ fn acp_tool_stem(tool: &str) -> String {
 /// XMATRIX_ACP_ARGS JSON array, then the preset's own `acpArgs` (an explicit
 /// `[]` for a launcher that already speaks ACP), finally the ACP community
 /// convention of an `acp` subcommand (e.g. `kimi acp`).
-fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]>) -> Vec<String> {
+fn generic_acp_spawn_args(
+    cmd_args: &[String],
+    preset_acp_args: Option<&[String]>,
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> Vec<String> {
     if !cmd_args.is_empty() {
         return cmd_args.to_vec();
     }
@@ -3021,10 +3133,9 @@ fn generic_acp_spawn_args(cmd_args: &[String], preset_acp_args: Option<&[String]
     {
         return args;
     }
-    if let Some(args) = preset_acp_args {
-        return args.to_vec();
-    }
-    vec!["acp".to_string()]
+    // No daemon passed an argv, so the launch's access args are not in one yet.
+    let args = preset_acp_args.map_or_else(|| vec!["acp".to_string()], <[String]>::to_vec);
+    access.with_args(&args)
 }
 
 fn acp_args_from_json(raw: &str) -> Option<Vec<String>> {
@@ -3050,6 +3161,9 @@ struct AcpSession {
     loaded_goal: Option<protocol::AgentGoalStatus>,
     /// `authMethods` ids the agent advertised in its initialize result.
     auth_method_ids: Vec<String>,
+    /// `promptCapabilities.image` from the initialize result. An agent that
+    /// did not advertise it rejects image blocks with -32602.
+    prompt_images: bool,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
     /// The plan outlives a turn, so what it already reported does too.

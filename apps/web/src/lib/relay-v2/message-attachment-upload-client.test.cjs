@@ -37,8 +37,9 @@ class FakeXMLHttpRequest {
   setRequestHeader(name, value) {
     (this.headers ??= {})[name] = value;
   }
-  send() {
+  send(body) {
     this.sent = true;
+    this.body = body;
     this.readyState = 2;
   }
   /** Drive the upload progress the stall watchdog listens to. */
@@ -106,14 +107,6 @@ vm.runInNewContext(js, {
             };
           },
         },
-      };
-    }
-    if (specifier === "@xmatrix/protocol/relay-v2/message-attachment") {
-      return {
-        RELAY_V2_BLOB_REF_PATH: "/api/relay-v2/private-r2/blob-refs",
-        RELAY_V2_BLOB_UPLOAD_CHECKSUM_HEADER: "x-xmatrix-content-sha256",
-        RELAY_V2_BLOB_UPLOAD_INTENT_PATH: "/api/relay-v2/private-r2/upload-intents",
-        RELAY_V2_BLOB_UPLOAD_PREFIX: "/api/relay-v2/private-r2/uploads",
       };
     }
     if (specifier === "../query/api-client") return transport;
@@ -467,4 +460,50 @@ test("an upload the Hub refuses for itself is not sent again through the Web", a
   } finally {
     direct = null;
   }
+});
+
+test("a file larger than one request resumes in parts, sends a dropped part again, then publishes", async () => {
+  const calls = [];
+  fetchImpl = async (url, init) => {
+    calls.push(url);
+    if (url.endsWith("/upload-intents")) {
+      const { intentId, visibilityScopeId } = JSON.parse(init.body);
+      return Response.json({ upload: {
+        finalPath: `/api/relay-v2/private-r2/uploads/${encodeURIComponent(intentId)}/scope/${encodeURIComponent(visibilityScopeId)}`,
+        partBytes: 4,
+      } });
+    }
+    // The Hub already holds part 1 from an earlier attempt.
+    if (/\/multipart\/scope\//u.test(url)) return Response.json({ partBytes: 4, partCount: 3, uploadedParts: 1, complete: false });
+    return Response.json({ disposition: "created" });
+  };
+  requests = [];
+  const file = new Blob([new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])]);
+  const progress = [];
+  const pending = prepareMessageAttachmentUpload(uploadInput({ file, onProgress: (value) => progress.push(value) }));
+  const answer = async (index, status) => {
+    // A dropped part is sent again after the shared transient backoff.
+    for (const deadline = Date.now() + 5_000; !requests[index]?.sent && Date.now() < deadline;) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const request = await sentRequest(index);
+    if (status === 0) return request.onerror();
+    request.status = status;
+    request.responseText = "{}";
+    request.onload();
+    return request;
+  };
+  const sentBody = async (request) => [...new Uint8Array(await request.body.arrayBuffer())];
+  await answer(0, 0);
+  const second = await answer(1, 200);
+  const third = await answer(2, 200);
+  await pending;
+  assert.match(requests[0].url, /^\/api\/xmatrix\/relay-v2\/private-r2\/uploads\/id-\d+\/multipart\/parts\/2\/scope\/space%3Aspace-1$/u);
+  assert.equal(second.url, requests[0].url, "only the dropped part is sent again");
+  assert.deepEqual(await sentBody(second), [5, 6, 7, 8]);
+  assert.match(third.url, /\/multipart\/parts\/3\//u);
+  assert.deepEqual(await sentBody(third), [9, 10]);
+  assert.equal(requests.length, 3);
+  assert.match(calls.at(-1), /\/multipart\/complete\/scope\/space%3Aspace-1$/u);
+  assert.equal(progress.at(-1), 100);
 });

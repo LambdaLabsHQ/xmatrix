@@ -291,8 +291,27 @@ restriction types. Secret key values, annotations, detailed client addresses
 and arbitrary metadata are omitted. `showDeleted` is false by default; Google's
 API retains deleted keys for only 30 days. Key metadata cannot establish a
 creation actor or who used a shared key. Enable `apikeys.googleapis.com` through
-the separate typed `enable_api` action if needed; no IAM, key or restriction
-mutation is exposed. These reads use the same OAuth identity and named quota project.
+the separate typed `enable_api` action if needed. These reads use the same OAuth
+identity and named quota project; no IAM or key creation, deletion or key-string
+access is exposed.
+
+## Website restrictions on a browser key
+
+```text
+@gcp:add_key_referrers:123456789/my-key-id {"referrers":["*.example.com/*"]}
+```
+
+`add_key_referrers` adds 1-10 website patterns to an API key that already has a
+website (browser) restriction. It reads the key, keeps its API targets and every
+existing referrer, and patches only `restrictions` with the key's etag, so a
+concurrent edit fails instead of being overwritten. It never removes a referrer,
+and it refuses a key without a website restriction, because adding one would
+restrict a key that other clients may depend on. Bare or all-host wildcards are
+refused; `*.example.com/*` covers subdomains but not `example.com` itself.
+Requested referrers already present write nothing. The action is a declared write
+that uses the app permission and needs Google `apikeys.keys.get` and
+`apikeys.keys.update`. The report names the added referrers and counts, not the
+key's full referrer list.
 
 `query_audit_activity` uses a fixed project, explicit completed UTC interval
 (up to 31 days within 400 days), newest-first bounded paging, the AuditLog payload

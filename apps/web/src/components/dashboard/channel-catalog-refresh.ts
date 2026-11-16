@@ -192,8 +192,19 @@ function queryCatalogRevision(data: unknown): number {
 }
 
 /**
- * Observe one authoritative Space watermark from either HTTP or WebSocket.
- * Revision zero is the explicit legacy/unknown sentinel and never advances it.
+ * Observe a Space catalog revision from a change notice (WebSocket) or a read
+ * (HTTP). Revision zero is the explicit legacy/unknown sentinel.
+ *
+ * Only a notice says the catalog changed, so only a notice advances the Space
+ * watermark and reads again the lists read before it. A read's revision is the
+ * Space's control head, which every commit in the Space advances (runtime,
+ * billing, content, automation, trace access), not only the catalog's; a newer
+ * one from a read therefore says nothing about the other lists and refreshes
+ * none of them. (It did: every read with a newer head re-read every cached
+ * list, so one change re-read the whole cache in waves; 2026-11-03, about 2,000
+ * page reads in 30 minutes for a handful of viewers.) A read older than the
+ * newest notice was answered before that change: only that list is read again,
+ * once.
  */
 export function observeSpaceCatalogRevision(input: {
   client: QueryClient;
@@ -207,7 +218,8 @@ export function observeSpaceCatalogRevision(input: {
   if (!Number.isSafeInteger(input.revision) || input.revision < 1) return false;
   const watermarks = watermarkMap(input.client);
   const current = watermarks.get(input.spaceId) ?? 0;
-  if (input.revision < current && input.sourceQueryKey && input.sourceQueryHash) {
+  if (input.sourceQueryKey && input.sourceQueryHash) {
+    if (input.revision >= current) return false;
     let stale = staleRefetchWatermarks.get(input.client);
     if (!stale) {
       stale = new Map();

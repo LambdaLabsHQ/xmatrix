@@ -1,5 +1,5 @@
 import { recordCommandResult } from "./command-result";
-import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { publishChannelInvocationsChanged, publishChannelPresenceChanged } from "./channel-live-judgment";
 import { HANDOFF_CONTEXT_MAX_CHARS, plainRecord as record } from "@xmatrix/protocol";
 import {
   orchestrateProductAgentIntervention,
@@ -275,8 +275,12 @@ export function createProductAgentInterventionAuthorityPort(input: {
     async issueHandoffStop(target, controlId, reason, channelId, handoffExport, timeoutMs) {
       // An exited source may still be sleeping/interrupted. Retire its rest
       // before the successor can reply and wake it; its checkout stays retained.
-      await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
-        channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } });
+      const retired = await runtime().stopRestingInstances({ requestId: stableCommandId("handoff-rest-stop", controlId),
+        channelId, actorUserId: input.actorUserId, handoffSource: { instanceId: target.instanceId, runId: target.runId } }) as
+        Record<string, unknown>;
+      if (Array.isArray(retired.stopped) && retired.stopped.length > 0) {
+        await publishChannelPresenceChanged(input.env, channelId, stoppedInstanceIds(retired.stopped));
+      }
       await issueDaemonStop(target, controlId, reason, channelId, { export: handoffExport });
       const result = await awaitDaemonStopResult(target, controlId, timeoutMs, true);
       if (!result) return { stopped: false };
@@ -292,6 +296,7 @@ export function createProductAgentInterventionAuthorityPort(input: {
         exclude: [...target.exclude],
       }) as Record<string, unknown>;
       const stopped = Array.isArray(result.stopped) ? result.stopped : [];
+      if (stopped.length > 0) await publishChannelPresenceChanged(input.env, channelId, stoppedInstanceIds(stopped));
       return stopped.flatMap((raw) => {
         const value = record(raw);
         return typeof value?.instanceId === "string" && typeof value.mentionTarget === "string"
@@ -339,16 +344,25 @@ export async function dispatchProductAgentInterventionAfterAuthorityMessage(inpu
   actorUserId: string;
 }): Promise<ProductAgentInterventionResult | undefined> {
   if (!parseProductAgentStopCommand(input.body)) return undefined;
-  const result = await orchestrateProductAgentIntervention({
+  const port = createProductAgentInterventionAuthorityPort({
+    env: input.env,
+    actorUserId: input.actorUserId,
+    sourceMessageId: input.messageId,
+  });
+  // The result stays on the message; a stop that stopped nothing also goes
+  // back to whoever sent it, who may not be looking at the message.
+  const refusals: string[] = [];
+  const recordResult = port.recordResult.bind(port);
+  port.recordResult = async (channelId, text, key, outcome) => {
+    if (outcome === "not_stopped") refusals.push(text);
+    await recordResult(channelId, text, key, outcome);
+  };
+  const result = { ...await orchestrateProductAgentIntervention({
     channelId: input.channelId,
     sourceMessageId: input.messageId,
     body: input.body,
-    port: createProductAgentInterventionAuthorityPort({
-      env: input.env,
-      actorUserId: input.actorUserId,
-      sourceMessageId: input.messageId,
-    }),
-  });
+    port,
+  }), ...(refusals.length ? { refusals } : {}) };
   // The stops it issued are the command chip's next answer.
   await publishChannelInvocationsChanged(input.env, input.channelId);
   return result;
@@ -473,4 +487,11 @@ export async function stopAgentRunLeavingChannel(
   );
   await port.publishSystemNotice(channelId, `@${target.mentionTarget} left the channel.`);
   return { status: 200, body: { ok: true, stopping: true, agent: target.mentionTarget } };
+}
+
+/** The Instances a resting stop retired, as it names them. */
+function stoppedInstanceIds(stopped: readonly unknown[]): string[] {
+  return stopped.flatMap((entry) => entry && typeof entry === "object" &&
+    typeof (entry as { instanceId?: unknown }).instanceId === "string"
+    ? [(entry as { instanceId: string }).instanceId] : []);
 }

@@ -37,26 +37,41 @@ test("both maintenance jobs restore the full tagged tree before any local action
 
 // Runs the broker's own script against a fake GitHub that lists `runs` and
 // returns what it dispatched.
-async function broker(runs) {
+async function broker(runs, { releaseAfterMs = 0, releaseStatus = "in_progress", tagType = "tag", tagSha,
+  dispatched = [], elapsed = { ms: 0 } } = {}) {
   const step = parse(request).jobs.dispatch.steps.find((item) => item.name === "Dispatch from the latest successful production tag");
-  const script = new (Object.getPrototypeOf(async function () {}).constructor)("github", "context", "core", "process", step.with.script);
+  const script = new (Object.getPrototypeOf(async function () {}).constructor)("github", "context", "core", "process", "Date", "setTimeout", step.with.script);
   const shaOf = (tag) => runs.find((run) => run.head_branch === tag).head_sha;
-  const dispatched = [];
+  // Older stuck trains must remain visible too, outside any recent-date filter.
+  const newer = { id: 500, head_branch: "xmatrix-v0.17.1-beta.1", head_sha: "b".repeat(40),
+    event: "workflow_dispatch", created_at: "2020-01-01T00:00:00Z" };
   const github = {
-    paginate: async () => runs,
+    paginate: async (_method, params) => {
+      const active = elapsed.ms < releaseAfterMs;
+      const rows = [...runs, ...(releaseAfterMs ? [{ ...newer, status: active ? releaseStatus : "completed",
+        conclusion: active ? null : "success" }] : [])];
+      const result = rows.filter((run) => !params.status || (params.status === "success"
+        ? run.conclusion === "success" : run.status === params.status))
+        .filter((run) => !params.created || run.created_at >= params.created.slice(2));
+      // A queued release starts just after the in_progress list was read.
+      if (params.status === "in_progress" && releaseStatus === "queued") releaseStatus = "in_progress";
+      return result;
+    },
     rest: {
       actions: {
         listWorkflowRuns: () => {},
         createWorkflowDispatch: async ({ workflow_id, ref }) => { dispatched.push({ workflow_id, ref }); },
       },
       git: {
-        getRef: async ({ ref }) => ({ data: { object: { type: "tag", sha: `tag-object:${ref.slice("tags/".length)}` } } }),
-        getTag: async ({ tag_sha }) => ({ data: { object: { type: "commit", sha: shaOf(tag_sha.slice("tag-object:".length)) } } }),
+        getRef: async ({ ref }) => ({ data: { object: { type: tagType, sha: `tag-object:${ref.slice("tags/".length)}` } } }),
+        getTag: async ({ tag_sha }) => ({ data: { object: { type: "commit", sha: tagSha ?? (tag_sha.endsWith(newer.head_branch) ? newer.head_sha : shaOf(tag_sha.slice("tag-object:".length))) } } }),
       },
     },
   };
   await script(github, { eventName: "schedule", runId: 7, repo: {} }, { info: () => {}, notice: () => {} },
-    { env: { GITHUB_WORKSPACE: workspace, REQUEST_DRY_RUN: "", REQUEST_MAX_ROWS: "" } });
+    { env: { GITHUB_WORKSPACE: workspace, REQUEST_DRY_RUN: "", REQUEST_MAX_ROWS: "" } },
+    class extends Date { static now() { return Date.UTC(2026, 10, 1) + elapsed.ms; } },
+    (callback, ms) => { elapsed.ms += ms; callback(); });
   return dispatched;
 }
 
@@ -80,5 +95,50 @@ test("the broker dispatches the release the executor accepts, whatever order Git
   // Both sides ask for an uncached run list and the broker logs what it saw.
   assert.match(request, /uncached: `\$\{context\.runId\}-\$\{Date\.now\(\)\}`, headers: \{ "cache-control": "no-cache" \}/u);
   assert.match(workflow, /uncached: String\(context\.runId\), headers: \{ "cache-control": "no-cache" \}/u);
-  assert.match(request, /core\.info\(`Saw \$\{history\.length\} successful releases and \$\{recent\.length\} since \$\{day\}/u);
+});
+
+test("the broker waits across open release statuses and the queued-to-running read race", async () => {
+  const runs = [{ id: 400, head_branch: "xmatrix-v0.17.0-beta.1", head_sha: "a".repeat(40),
+    conclusion: "success", event: "workflow_dispatch" }];
+  for (const releaseStatus of ["queued", "in_progress", "waiting", "requested", "pending"]) {
+    const elapsed = { ms: 0 };
+    assert.deepEqual(await broker(runs, { releaseAfterMs: 30_000, releaseStatus, elapsed }),
+      [{ workflow_id: "production-postgres-lifecycle-maintenance.yml", ref: "xmatrix-v0.17.1-beta.1" }], releaseStatus);
+    assert.equal(elapsed.ms, 30_000, `must wait for ${releaseStatus}`);
+  }
+});
+
+// The policy's selection tests do not exercise the workflow's wait budget.
+// Run the actual broker script: a normal release must not skip the daily pass.
+test("the broker waits through normal and p90 releases and dispatches their new immutable tag", async () => {
+  const runs = [{ id: 400, head_branch: "xmatrix-v0.17.0-beta.1", head_sha: "a".repeat(40),
+    conclusion: "success", event: "workflow_dispatch" }];
+  for (const minutes of [9, 26]) {
+    const elapsed = { ms: 0 };
+    assert.deepEqual(await broker(runs, { releaseAfterMs: minutes * 60_000, elapsed }),
+      [{ workflow_id: "production-postgres-lifecycle-maintenance.yml", ref: "xmatrix-v0.17.1-beta.1" }]);
+    assert.ok(elapsed.ms >= minutes * 60_000);
+    assert.ok(elapsed.ms < 45 * 60_000);
+  }
+});
+
+test("a stuck release exhausts a bounded wait without dispatching the stale tag", async () => {
+  const elapsed = { ms: 0 }, dispatched = [];
+  const runs = [{ id: 400, head_branch: "xmatrix-v0.17.0-beta.1", head_sha: "a".repeat(40),
+    conclusion: "success", event: "workflow_dispatch" }];
+  await assert.rejects(broker(runs, { releaseAfterMs: Infinity, elapsed, dispatched }), /newer Production Release/u);
+  assert.deepEqual(dispatched, []);
+  assert.equal(elapsed.ms, 45 * 60_000);
+  assert.ok(parse(request).jobs.dispatch["timeout-minutes"] >= elapsed.ms / 60_000 + 10,
+    "the job must leave time for API reads, checkout and immutable-tag verification");
+});
+
+test("waiting never bypasses the annotated-tag and exact-SHA fences", async () => {
+  const runs = [{ id: 400, head_branch: "xmatrix-v0.17.0-beta.1", head_sha: "a".repeat(40),
+    conclusion: "success", event: "workflow_dispatch" }];
+  for (const drift of [{ tagType: "commit" }, { tagSha: "c".repeat(40) }]) {
+    const dispatched = [];
+    await assert.rejects(broker(runs, { releaseAfterMs: 9 * 60_000, dispatched, ...drift }), /production tag/u);
+    assert.deepEqual(dispatched, []);
+  }
 });

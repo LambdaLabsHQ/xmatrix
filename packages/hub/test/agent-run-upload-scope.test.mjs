@@ -9,7 +9,7 @@ import {
    Channel has to be named the way the domain names it: message_attachments_put
    binds a ref only when the ref sits in the message's own scope, and an open
    Channel's messages live in the Space scope. Pinning every Agent Run upload to
-   `channel:<id>` therefore made `xmatrix send --file` impossible for agents in
+   `channel:<id>` therefore made `xmatrix send --attachment` impossible for agents in
    any open Channel — it failed at bind time with "verified canonical attachment
    ref is unavailable". */
 test("open channels resolve to the Space scope their messages use", () => {

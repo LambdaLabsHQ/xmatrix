@@ -1,30 +1,46 @@
-# A Page's Automations
+# A Page's Programs
 
-An Automation is a standing rule that keeps one page section true: "every 12
-hours, have a fresh Agent audit the code and update this section". It belongs
-to that section and is referenced in its text by a link to
-`xmatrix:automation/<id>`; the editor shows it as a live chip. Each occurrence runs in a fresh
-conversation linked to the section, as a Human: when an Agent creates it, as
-the Agent's owner, so it keeps running after the Run ends. What one occurrence
-leaves for the next belongs on the page, not in its conversation.
+Work that repeats, waits for a time or an event, or asks someone is a Norn
+program: a fenced block tagged `norn run <name>` in the page section it
+keeps true, written and changed with `xmatrix page edit` like any text. A
+program runs in its own conversation linked to the page, as whoever last
+changed its block (an Agent as its owner), so it keeps running after the Run
+ends. An Agent it asks starts with the request and the page in context, so
+the text says what to do, not "read this page first". What one round leaves
+for the next belongs on the page, not in its conversation.
 
-```bash
-xmatrix page automation list <page-id>
-xmatrix page automation create <page-id> --block <heading-slug> --name "Code audit" --every 12h \
-  -m "@auto repo:<owner/repo> audit duplication and update this section"
-xmatrix page automation edit <page-id> <automation-id> --version <n> --every 1d
-xmatrix page automation pause|resume|run|delete <page-id> <automation-id> --version <n>
-xmatrix page automation attach <page-id> <automation-id> --block <heading-slug>
-xmatrix page automation create <page-id> --block architecture --name "Merge review" --every 12h \
-  --on merged:<owner/repo>@main --on ci-failed:<owner/repo>:CI -m "@auto repo:<owner/repo> review what changed"
+````markdown
+## Architecture
+
+```norn run audit
+open Std
+routine(~every=12h, ~from=2026-11-03T09:00Z, ~who=@auto(~repo="<owner/repo>"),
+  ~otherwise=@claude(~repo="<owner/repo>"), "Audit duplication and update this section")
 ```
 
-- Also run it on events: `--on merged:<owner/repo>[@branch][:path,…]` (a pull request merged into the branch, default the repository's default branch, touching one of the paths) or `--on ci-failed:<owner/repo>[@branch][:workflow]`. The Space's GitHub connection must cover the repository. An event makes it due now; events coalesce, and the occurrence's message names them.
-- `xmatrix page read <page-id>` lists the page's Automations under `automations:` with their section and state.
-- `@auto repo:<owner/repo>` addresses an Agent for each occurrence. `--every` controls the independent cadence. Use `pwd:"<registered-path>"` instead of `repo:` for a registered directory. The retired `:new` and `:once` launch suffixes are rejected.
-- Each occurrence's conversation is new, so start its Agent with a harness mention such as `@auto`; an exact `@<agent>:<channel-instance-number>` finds no live instance there; other live Agents receive context only. Without an Agent mention an occurrence only posts its text in its conversation; it does not choose or start an Agent.
-- Anyone who can edit the page manages its Automations, from any conversation. On a page that takes Agent edits as suggestions, ask a person.
-- An Automation runs as its author. Editing someone else's replaces it with one authored by your owner and points the page's reference at it.
-- Deleting its reference from the page pauses it (`detached`); `attach` puts the reference back, which resumes it or moves it to another section.
-- `run` makes a running Automation's next occurrence due now; its cadence stays.
-- Use the version from `list` for edit, pause, resume, run and delete. After a version conflict, re-read and reassess rather than retrying.
+```norn run review
+every(1d)->or(prMerged("<owner/repo>"))->or(ciFailed("<owner/repo>"))->forEach(_ =>
+  run(@auto(~repo="<owner/repo>"), "Review what changed")->wait)
+```
+
+```norn run renewal
+after(2026-11-03T01:00Z)->wait
+say(@<person>, "Renew the domain today")
+```
+````
+
+- `routine` (after `open Std`) is a round on a beat: `~every` is a duration (`30m`, `12h`, `7d`), `~from` the UTC time of the first round. `~who` does it; when that does not end in an answer, `~otherwise` is asked the same once. A round that still fails is told in the program's conversation.
+- `ciFailed("<owner/repo>")`, `prMerged("<owner/repo>")` and `appEvent("<app>", ~feature="<event>")` are the events a program can wait on, joined to a beat with `or`. The Space's connection must cover the repository or app. Events that arrive while a round runs are one more round after it, with the latest event; `ciFailed("<owner/repo>")->gather` hands the program all of them as a list.
+- `after(<UTC time>)->wait` waits once. `say(@<person>, "…")` tells them; `run(@auto(…), "…")->wait` has an Agent check something then.
+- `confirm(@<person>, "<question>", ~by=2d)`, `choose(@<person>, "<question>", [A, B])` and `ask(@<person>, "<question>")` ask a person, who answers on a card. Without an answer by `~by` the program reads `NoReply`; `decide(who, question, ~options, ~recommend, ~by)` (after `open Std`) takes the recommendation then.
+- `@auto(~repo="<owner/repo>")` asks whichever Agent fits; `~pwd`, `~machine`, `~harness`, `~model` and `~effort` are the other conditions. `@claude` or `@codex` asks that one.
+- Removing the block stops its program. Changing its text changes what the next round does; rounds already done are not run again.
+- `page edit` prints a program that does not run as written, with why.
+
+```bash
+xmatrix page read <page-id>     # how each program stands, under programs:
+xmatrix requests                # the requests you hold, and those your programs wait on
+```
+
+- An Agent asked by a program ends its turn with `xmatrix reply <request> <answer>`, `xmatrix refuse <request> <why>` or `xmatrix broke <request> <why>`, as the request's message says.
+- Anyone who can edit the page manages its programs. On a page that takes Agent edits as suggestions, ask a person.

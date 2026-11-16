@@ -4,6 +4,7 @@ import { Hono } from "hono";
 import * as protocol from "@xmatrix/protocol";
 import { ControlError } from "@xmatrix/db";
 import { AuthFailure, PermissionFailure } from "../src/index-shared.ts";
+import { transientError } from "../src/error-contract.ts";
 import { readBoundedRequestBody } from "../src/request-body.ts";
 import { privateResponse } from "../src/private-response.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
@@ -15,6 +16,8 @@ import { runCliCommand } from "../src/cli-commands.ts";
 import { CONNECTOR_CALL_COMMAND } from "../src/cli-commands-call.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
+import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
+import { commandMailAttachments } from "../src/connectors/gmail-attachments.ts";
 
 const loadRoute = await compileCommonJsSourceModule(new URL("../src/index-routes-connector-call.ts", import.meta.url));
 const loadExecutor = await compileCommonJsSourceModule(new URL("../src/connectors/connector-commands.ts", import.meta.url));
@@ -28,25 +31,29 @@ const gmail = text => ({ body: { status: 200, data: { payload: { mimeType: "text
 // their own PostgreSQL tests own membership, registration and grant validation.
 // Here we protect private response delivery, policy admission, and masking
 // before result persistence, which public Channel-command tests cannot see.
-function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false, retry } = {}) {
-  const checks = [], reports = [], policies = [], appends = [], persisted = [], privateRecords = [];
+function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMailbox = false, changeConnection = false, retry,
+  receiptRefusal, appendError, providerId = "gmail", stored } = {}) {
+  const checks = [], reports = [], refused = [], policies = [], appends = [], persisted = [], privateRecords = [];
   let scopes = 0;
   const run = { runId: "run-alpha", instanceId: "instance-alpha", agentId: "agent-alpha", channelId: "channel-alpha",
     ownerUserId: "member", spaceId: "space", executionKey: "execution-alpha" };
-  const credentials = { composioApiKey: "fixture-key", ...(noMailbox ? {} : { mailboxes: JSON.stringify([
+  const credentials = stored ?? { composioApiKey: "fixture-key", ...(noMailbox ? {} : { mailboxes: JSON.stringify([
     { account: "ca_fixture", address: "me@example.com", owner: otherMailbox ? "user:other" : "user:member" },
   ]) }) };
   const append = async (_env, channelId, command) => {
-    assert.equal(channelId, run.channelId); appends.push(command); return Response.json({});
+    assert.equal(channelId, run.channelId); appends.push(command);
+    if (appendError && appends.length === 1) throw appendError;
+    return receiptRefusal && appends.length > 1 ? receiptRefusal() : Response.json({});
   };
   const support = loadSupport(name => ({
     "@xmatrix/protocol": protocol,
     "../apps": { appCommand: async (_env, kind, input) => { persisted.push({ kind, input }); },
       usableAppConnections: async (_env, input) => {
         assert.equal(input.channelId, run.channelId); assert.equal(input.actorUserId, run.ownerUserId);
-        return [{ providerId: "gmail", status: "configured", id: changeConnection && ++scopes >= 3 ? "replaced" : "connection" }];
+        return [{ providerId, status: "configured", id: changeConnection && ++scopes >= 3 ? "replaced" : "connection" }];
       } },
     "../spaces": { getChannel: async () => ({ channel: { spaceId: "space" } }) },
+    "@xmatrix/db": { ControlError },
     "../product-message-append": { dispatchProductMessageAppend: append },
     "./agent-caller": { callingAgentOf: async () => ({ name: "claude", harness: "claude" }) },
   })[name]);
@@ -57,7 +64,8 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "../app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
     "./command-support": support,
     "./credentials": { connectorPermissionRepository: () => ({ mode: async input => { policies.push(input); return mode; } }) },
-    "./connection-credentials": { connectionCredentials: async () => credentials },
+    "./connection-credentials": connectionCredentialsDouble(async () => credentials),
+    "./gmail-attachments": { commandMailAttachments },
     "./http": { ConnectorRemedy, ProviderRequestError },
     "../usage-cost-metering": metering,
   })[name] ?? {});
@@ -68,9 +76,11 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "./apps": { appExecutionRetry: async (_env, input) => {
       assert.deepEqual(input, { spaceId: "space", executionId: "execution-1", actorUserId: "member" }); return retry; } },
     "./index-shared": { AuthFailure, PermissionFailure, readBoundedRequestBody, requireHumanAuth: user => user,
+      transientError,
       requireAuth: async request => request.headers.get("authorization") === "Bearer human" ? { id: "member" }
         : { id: "member", agentRun: run },
-      requestErrorResponse: (c, error) => { reports.push(error.message); return c.json({ error: error.message }, 403); } },
+      requestErrorResponse: (c, error) => { reports.push(error.message); refused.push(error);
+        return c.json({ error: error.message }, 403); } },
     "./agent-run-channel-delegation": { requireAgentRunChannelDelegation: async (_env, caller, channels) => {
       assert.equal(caller, run); assert.deepEqual(channels, []); checks.push(caller.runId);
       if (checks.length === failAtAuthorization) throw new PermissionFailure("Run access revoked");
@@ -85,7 +95,7 @@ function fixture({ mode = null, failAtAuthorization, otherMailbox = false, noMai
     "./product-message-append": { dispatchProductMessageAppend: append },
     "./app-connectors": { getAppConnectorProvider: providerId => protocol.APP_CONNECTOR_PROVIDER_MANIFESTS.find(p => p.id === providerId) },
   })[name]).registerConnectorCallRoutes(app);
-  return { checks, reports, policies, appends, persisted, privateRecords,
+  return { checks, reports, refused, policies, appends, persisted, privateRecords,
     retry: () => app.request("/api/spaces/space/app-executions/execution-1/retry",
       { method: "POST", headers: { authorization: "Bearer human" } }, {}),
     request: (body, token = "agent") => app.request(protocol.HUB_ROUTES.connector_call,
@@ -247,6 +257,19 @@ test("caller scope is server-owned; human, spoofed identity, malformed and overs
   }
 });
 
+test("a command that runs only as a Channel message says to send it; nothing is recorded or called", async () => {
+  for (const [command, error] of [
+    ["@github:subscribe:LambdaLabsHQ/xmatrix", /^@github:subscribe runs only as a Channel message; send it with xmatrix send /u],
+    ["@github:not_an_action:LambdaLabsHQ/xmatrix", /^Unknown connector action$/u],
+    ["@nothing:read:1", /^Unknown connector action$/u]]) {
+    const f = fixture();
+    const { result, calls } = await fetched([], () => f.request({ command }));
+    assert.equal(result.status, 400, command);
+    assert.match((await result.json()).error, error);
+    assert.equal(calls.length, 0); assert.deepEqual(f.appends, []); assert.deepEqual(f.persisted, []);
+  }
+});
+
 test("provider failures remain caller-only; unexpected errors cannot enter error reports with private content", async () => {
   for (const response of [{ body: { status: 403, data: { error: { message: privateText } } } }, { error: new Error(privateText) }]) {
     const f = fixture();
@@ -255,4 +278,54 @@ test("provider failures remain caller-only; unexpected errors cannot enter error
     assert.equal(result.headers.get("cache-control"), "private, no-store");
     assert.ok(f.reports.every(report => !report.includes("654321") && !report.includes("fixture-private")));
   }
+});
+
+test("XMATRIX-HUB-AH: a receipt the message authority refused as retryable stays its retryable refusal", async () => {
+  const f = fixture({ receiptRefusal: () => Response.json({ error: "PostgreSQL message authority is unavailable",
+    code: "postgres_message_authority_unavailable", retryable: true }, { status: 503 }) });
+  await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(f.refused.length, 1);
+  const [error] = f.refused;
+  assert.ok(error instanceof ControlError, "the Hub's own refusal is not masked as an unexpected private failure");
+  assert.equal(error.status, 503);
+  assert.equal(error.code, "postgres_message_authority_unavailable");
+  assert.equal(error.retryable, true);
+  assert.doesNotMatch(error.message, /654321|fixture-private/);
+});
+
+test("XMATRIX-HUB-AH: a connector write that met a retryable PostgreSQL outage keeps its retryable answer", async () => {
+  const outage = new Error("Query read timeout");
+  const f = fixture({ appendError: outage });
+  await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(f.refused.length, 1);
+  assert.equal(f.refused[0], outage, "a retryable outage is not masked as an unexplained private failure");
+  assert.ok(!f.reports.includes("Private connector call failed"));
+});
+
+test("XMATRIX-HUB-AH: an unexpected connector failure names its class, never its text", async () => {
+  const f = fixture({ appendError: new TypeError(privateText) });
+  await fetched([gmail(privateText)], () => f.request({ command: `@gmail:read:${id}`, resultVisibility: "private" }));
+  assert.equal(f.refused.length, 1);
+  assert.equal(f.refused[0].message, "Private connector call failed");
+  assert.equal(f.refused[0].name, "PrivateConnectorCallError(TypeError)");
+  assert.ok(f.reports.every(report => !report.includes("654321") && !report.includes("fixture-private")));
+});
+
+test("a write whose result is the caller's own capability runs only as a call and is always masked in the Channel", async () => {
+  const session = "https://androidpublisher.googleapis.com/resumable/upload/androidpublisher/v3/applications/sh.xmatrix.app/edits/e1/bundles?uploadType=resumable&upload_id=CAPABILITY";
+  const command = '@googleplay:api_upload:edits.bundles.upload {"path":{"packageName":"sh.xmatrix.app","editId":"e1"},"size":1234}';
+  const play = { providerId: "googleplay", stored: { oauthToken: "play-access" } };
+  const f = fixture(play);
+  const { result, calls } = await fetched([{ raw: "", headers: { location: session } }], () => f.request({ command, resultVisibility: "public" }));
+  assert.equal(result.status, 200, await result.clone().text());
+  assert.match((await result.json()).summary, /upload_id=CAPABILITY/u);
+  assert.equal(calls.length, 1);
+  assert.equal(f.privateRecords.length, 1, "the caller asked for a public result and still got a masked one");
+  assert.doesNotMatch(JSON.stringify([f.appends[1], f.persisted]), /CAPABILITY/u);
+  assert.match(f.appends[1].body, /hidden — private call/u);
+  // Where a write needs approval there is nobody to approve a call, so it does not run.
+  const asked = fixture({ ...play, mode: "ask" });
+  const refused = await fetched([], () => asked.request({ command }));
+  assert.equal(refused.result.status, 403);
+  assert.equal(refused.calls.length, 0);
 });

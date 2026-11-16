@@ -33,8 +33,6 @@ import {
 
 import { metadataString } from "./workspace-shell-formatters";
 
-export { channelAttachmentKindForMimeType } from "./workspace-shell-formatters";
-
 import {
   isLiveMachineDaemon,
   machineIdentityKeys,
@@ -130,7 +128,6 @@ import type {
   SerializedAgent,
   ChannelSnapshot,
   SerializedMachineDaemon,
-  SerializedAutomation,
   SerializedSpace,
   SerializedWorkspace,
   PageSummary,
@@ -290,15 +287,7 @@ export function sortProjects(projects: SerializedWorkspace[]): SerializedWorkspa
   });
 }
 
-export function sortAutomations(automations: SerializedAutomation[]): SerializedAutomation[] {
-  return [...automations].sort((a, b) => {
-    const byNextRun = timestampMs(a.nextRunAt) - timestampMs(b.nextRunAt);
-    if (byNextRun !== 0) return byNextRun;
-    return a.name.localeCompare(b.name);
-  });
-}
-
-export function sortChannels(channels: ChannelSnapshot[]): ChannelSnapshot[] {
+export function sortChannels<C extends ChannelSnapshot>(channels: readonly C[]): C[] {
   return [...channels].sort(compareChannelsForSidebar);
 }
 

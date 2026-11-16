@@ -58,3 +58,29 @@ test("post-commit Connector dispatch uses the authenticated Instance rather than
   assert.equal(commands[0].senderId, "instance");
   assert.equal(commands[0].actorUserId, "owner");
 });
+
+// A stop or reborn that did nothing is recorded on its message, which an Agent
+// sending through the CLI never sees; the send's answer must carry it back.
+test("post-commit returns every lifecycle command that did nothing, for its sender", async () => {
+  const postCommit = await loadCommonJsSourceModule(new URL("../src/product-message-post-commit.ts", import.meta.url), name => {
+    if (name === "@xmatrix/protocol") return protocol;
+    if (name === "./product-agent-intervention-authority-adapter") return {
+      dispatchProductAgentInterventionAfterAuthorityMessage: async () => ({ considered: 1, stopped: 0, failures: [],
+        refusals: ["xMatrix could not find a live instance for `@deepseek:45789d7f:1`."] }) };
+    if (name === "./product-agent-mention-authority-adapter") return {
+      dispatchProductAgentMentionsAfterAuthorityMessage: async () => ({ considered: 1, spawned: 0,
+        notices: ["xMatrix could not find @deepseek:45789d7f:3 to reborn."] }) };
+    if (name === "./registration-launch-dispatch") return { wakeRestingInstances: async () => ({}),
+      dispatchRegistrationLaunchesAfterMessage: async () => false };
+    if (name === "./postgres-observability") return { recordAgentLaunchStage: () => {} };
+    if (name === "./connectors/registry") return { connectorForCommand: () => undefined };
+    return {};
+  });
+  const send = body => postCommit.dispatchProductMessagePostCommit({ env: {}, channelId: "channel",
+    messageId: "command", body, senderKind: "agent", senderId: "registration", actorUserId: "owner" });
+  assert.deepEqual((await send("@deepseek:45789d7f:1:stop")).refusals,
+    ["xMatrix could not find a live instance for `@deepseek:45789d7f:1`."]);
+  assert.deepEqual((await send("@deepseek:45789d7f:3:reborn")).refusals,
+    ["xMatrix could not find @deepseek:45789d7f:3 to reborn."]);
+  assert.deepEqual((await send("plain text")).refusals, []);
+});

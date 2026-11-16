@@ -162,6 +162,8 @@ jobs:
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Read back and verify the missing production deployment receipt
+        # The default-branch reader binds the Web to the tagged channel;
+        # only versions before 1.3.1-beta.7 retain the shared Web surface.
         if: steps.source.outputs.recover_receipt == 'true'
         shell: bash
         env:
@@ -281,6 +283,6 @@ jobs:
               "Android release v$RELEASE_VERSION. APK: https://xmatrix.sh/api/android/releases/stable/latest.apk"
           fi
 
-      - name: Prune only verified historical R2 releases older than 90 days
+      - name: Prune R2 releases no channel, newest stable or last week keeps
         if: steps.source.outputs.recover_receipt != 'true'
         run: node scripts/prune-r2-release-assets.mjs

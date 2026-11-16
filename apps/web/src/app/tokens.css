@@ -6,7 +6,7 @@
   --font-sans-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   --font-heading-family: Manrope, var(--font-sans-family);
   --font-site-display-family: "Manrope Variable", var(--font-sans-family);
-  --font-mono-family: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
+  --font-mono-family: "Cascadia Code", ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", monospace;
   --background: oklch(0.975 0.006 235);
   --foreground: oklch(0.19 0.013 238);
   --card: oklch(0.99 0.004 235);
@@ -428,5 +428,9 @@
     --app-panel-list: var(--app-panel-paper);
     /* The list is already paper, so a pressed row deepens instead. */
     --app-panel-row-active: oklch(0.941 0.007 82);
+    /* A conversation's head (bar, Summary, pages) sits on this deeper paper,
+       and the first words under the sign start this far below the bar. */
+    --app-mobile-head-paper: oklch(0.941 0.007 82);
+    --app-mobile-head-room: 24px;
   }
 }

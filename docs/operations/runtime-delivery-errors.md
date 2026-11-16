@@ -73,6 +73,19 @@ register/unregister path (HUB-9E) that was once that caller is gone: no cell
 registers anywhere, and the directory's namespace answers 410. Message delivery
 still does not replay an unknown commit.
 
+HUB-BS/BT reached the Agent and Machine Daemon WebSocket upgrade routes with
+`overloaded=true` and an opaque platform internal-error reference. The shared
+socket router now retains the failed Runtime fetch's wall duration (capped at
+120 seconds), owner-cell versus unassigned routing, the platform's `remote`
+flag (or unavailable), and a fixed message category. Known overload messages
+distinguish request count, queued bytes, queue age and request rate; an opaque
+reference is only `internal`, not an attribution of the overload's cause.
+The HTTP report and Sentry reader expose those fields without owner/cell names,
+URLs, headers or reference values in the diagnostic. Compare the duration and
+category with Runtime traffic on recurrence. The original exception, single
+report, 503 response and client backoff remain; the router does not retry an
+overloaded connection. The underlying overload is still unconfirmed.
+
 Machine text-task answers that update a conversation's About carry the current
 Runtime's local delivery capability through the catalog mutation and its
 after-commit notification. Deliver the catalog change directly to that cell;
@@ -173,3 +186,39 @@ PostgreSQL supplied no usable detail. For a repeated deadlock, compare the
 named query, waiting relation and wait cycle before changing lock order;
 the HTTP response remains a retryable `transaction_conflict` and no transaction
 or unknown commit is automatically replayed.
+
+HUB-7F expired Machine command leases retain three integer millisecond durations
+on the existing authority rejection: `leaseWindowMs`, `leaseExpiredForMs`, and
+`commandAgeMs`. The exact locked command read supplies the PostgreSQL observation
+clock; caller and Worker clocks are not used. The grant window is the difference
+between the lease deadline and its last update (approximately 10 seconds at
+modern admission, 30 seconds at legacy admission, 60 seconds after renewal).
+The window is capped at 60 seconds and the other durations at 24 hours; missing
+timestamps omit all three. This distinguishes delayed admission from a later
+heartbeat gap without storing a new renewal counter. No timestamps, identities,
+command payloads or arbitrary diagnostic fields are reported, and durations stay
+out of socket replies. On recurrence, compare the window, lateness and command
+age with the static refusal reason and command type. These observations do not
+identify the underlying scheduler or transport delay. A same-generation renew
+whose database-clock lateness is under one second still extends the lease, and
+claim waits out that same second before taking the row: the 10 second admission
+lease otherwise loses to one read round trip while the generation fence still
+shows the original holder. Quota probes do not get that slack. A longer gap
+stays refused. Command replay and completion fencing are unchanged. A stale-lease
+409, including `complete.owner` on a harness action and `renew.status` after the
+command has left `leased`, is that fence holding. The socket still returns the
+non-retryable refusal with these fields, and the log is a warning: console
+capture records errors only, so the refusal is not a Hub error.
+
+HUB-C1/C2 were two reports of the same Agent handshake binding refusal. The
+original event did not identify the failed comparison. Binding failures now
+retain a fixed source (`connect_message`, `authority_snapshot`,
+`authority_binding`, or `refresh_principal`) and field name in one Sentry event,
+grouped by that pair. The issue reader exposes this projection and the same
+opaque diagnostic reference returned to the socket. Compared values, credentials,
+identity labels and routing ids are never recorded. On recurrence, read the
+source and field before attributing the refusal to stale context, changed
+presentation or authority state. This adds diagnostic coverage; it does not
+establish the underlying cause. Strict comparison, non-retryable refusal,
+failed-handshake close and connection fencing remain unchanged. The stage log
+warns when a typed client rejection already owns its report.

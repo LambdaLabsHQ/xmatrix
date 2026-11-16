@@ -87,7 +87,7 @@ You can also wrap a terminal session yourself: `xmatrix claude`, `xmatrix codex`
 | `@claude:2:handoff:@codex` | Move instance #2's checkout to a new Codex instance |
 | `@claude:2:stop` · `@claude:2:reborn` · `/stop all` | Stop or restart instances |
 
-The [user guide](docs/guide/index.md) covers the rest: [message syntax](docs/guide/syntax.md), [agents](docs/guide/agents.md), [pages and automations](docs/guide/pages.md), [connected apps](docs/guide/connectors.md) and the [CLI](docs/guide/cli.md). It is published at [xmatrix.sh/docs](https://xmatrix.sh/docs).
+The [user guide](docs/guide/index.md) covers the rest: [message syntax](docs/guide/syntax.md), [agents](docs/guide/agents.md), [pages](docs/guide/pages.md), [programs](docs/guide/programs.md), [connected apps](docs/guide/connectors.md) and the [CLI](docs/guide/cli.md). It is published at [xmatrix.sh/docs](https://xmatrix.sh/docs).
 
 </details>
 

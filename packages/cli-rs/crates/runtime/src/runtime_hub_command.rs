@@ -38,12 +38,29 @@ struct HubCommandOutput {
     exit_code: i32,
 }
 
+/// A Hub command takes its text (an answer, a question, a reason) only as
+/// arguments, so text an encoding conversion already flattened to `?` is
+/// refused here, as `send` and `page edit` refuse it.
+fn ensure_arguments_intact(args: &[String]) -> crate::error::Result<()> {
+    use xmatrix_cli_core::text_input::{TextRoutes, TextSource, ensure_text_intact};
+    for word in args.iter().skip(1) {
+        ensure_text_intact(
+            "command argument",
+            word,
+            TextSource::Argument,
+            TextRoutes::default(),
+        )?;
+    }
+    Ok(())
+}
+
 /// Runs `args` on the Hub. `Ok(None)` when the Hub defines no such command.
 pub(crate) async fn run_hub_command(
     hub_url: &str,
     token: &str,
     args: &[String],
 ) -> crate::error::Result<Option<i32>> {
+    ensure_arguments_intact(args)?;
     let output: HubCommandOutput = crate::http::request_json(
         &crate::with_route(hub_url, "/api/cli/commands/run"),
         "POST",
@@ -62,6 +79,19 @@ pub(crate) async fn run_hub_command(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn an_argument_that_lost_its_characters_never_reaches_the_hub() {
+        let words = |line: &[&str]| line.iter().map(|word| word.to_string()).collect::<Vec<_>>();
+        super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "池内 52 家已复查"]))
+            .unwrap();
+        let error =
+            super::ensure_arguments_intact(&words(&["reply", "rccrq6rkibr", "broken \u{fffd}"]))
+                .unwrap_err()
+                .to_string();
+        assert!(error.contains("command argument"), "{error}");
+        assert!(error.contains("Nothing was sent"), "{error}");
+    }
+
+    #[test]
     fn only_a_plain_word_that_names_no_harness_goes_to_the_hub() {
         let candidate = |line: &str| {
             let words: Vec<String> = line.split_whitespace().map(str::to_owned).collect();
@@ -70,7 +100,7 @@ mod tests {
         let _guard = crate::tests::test_process_env_lock();
         let previous = std::env::var_os("XMATRIX_SPAWN_RUNTIME");
         unsafe { std::env::remove_var("XMATRIX_SPAWN_RUNTIME") };
-        assert!(candidate("automation list"));
+        assert!(candidate("settings status"));
         assert!(candidate("commands"));
         assert!(!candidate("claude --resume"));
         assert!(!candidate("/opt/tool"));
@@ -78,7 +108,7 @@ mod tests {
         assert!(!candidate(""));
         unsafe { std::env::set_var("XMATRIX_SPAWN_RUNTIME", "/usr/local/bin/mytool") };
         assert!(!candidate("mytool"), "the Run's own runtime");
-        assert!(candidate("automation"));
+        assert!(candidate("settings"));
         match previous {
             Some(value) => unsafe { std::env::set_var("XMATRIX_SPAWN_RUNTIME", value) },
             None => unsafe { std::env::remove_var("XMATRIX_SPAWN_RUNTIME") },

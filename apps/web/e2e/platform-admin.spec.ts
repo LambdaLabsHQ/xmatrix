@@ -188,7 +188,7 @@ test("a Space opens from the list with billing, members, and usage, and a member
   await expect(billing.getByText("2026-08-11 00:00 UTC")).toBeVisible();
   await expect(page.getByRole("region", { name: "Connectors (1)" }).getByText("GitHub")).toBeVisible();
   await expect(page.getByRole("region", { name: "Paid calls", exact: true }).getByText("jev_turn")).toBeVisible();
-  await expect(page.getByText("Occurrences by status: dispatched 36 · failed 4")).toBeVisible();
+  await expect(page.getByText(/Runs started in 30 days: completed 18 · failed 2/)).toBeVisible();
   await expect(page.getByRole("img", { name: /This Space's daily messages/ })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("desktop-space-detail.png"), fullPage: true });
 
@@ -207,7 +207,7 @@ test("a Space opens from the list with billing, members, and usage, and a member
   await expect(page.getByRole("region", { name: "Spaces" }).getByText("Solo Space")).toBeVisible();
 });
 
-test("Operations shows Machines, runtimes, Runs, and Automations", async ({ page }, testInfo) => {
+test("Operations shows Machines, runtimes, and Runs", async ({ page }, testInfo) => {
   await openWorkspaceAs(page, true);
   await page.goto("/app/personal-sspaceperso/admin?section=operations");
   await expect(page.getByRole("heading", { name: "Operations" })).toBeVisible();

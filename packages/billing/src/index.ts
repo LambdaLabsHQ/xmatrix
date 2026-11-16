@@ -2,8 +2,8 @@
  * Space billing: what a deployment charges for, seen from the product core.
  *
  * The core asks one policy whether an account may create another Space, and
- * whether a Space may take another billable member or message, inside the
- * transaction that commits it. This package is the
+ * whether a Space may take another billable member, message or upload, inside
+ * the transaction that commits it, and tells it how much storage a Space holds. This package is the
  * policy every deployment gets by default: nothing is metered. A deployment
  * that charges supplies its own policy under this module name at build time
  * (see deploy/README.md), so its checkout, prices and allowances never ship
@@ -36,7 +36,10 @@ export interface BillingRejection {
  * needs) from the statement's parameters: `$2` Space id, `$6` commit time
  * (timestamptz), `$10` whether the message is billable, `$13` the author kind
  * (`user`, `agent`, `app` or `system`), `$14` whether the deployment waives the
- * Space's Agent credits (its own operator Space). `accepts` is a predicate over
+ * Space's Agent credits (its own operator Space), `$15` the user the write is
+ * on behalf of (a person themself, an Agent's owner; empty for an app) and
+ * `$16` the author's name (an Agent's registration name, an app's id; empty
+ * for a person), so a policy can itemize who used an allowance. `accepts` is a predicate over
  * `admission` columns. The core publishes when the message is not billable or
  * `accepts` holds, and returns the `admission` row to `rejection` otherwise.
  * A published billable message's row goes to `notice`, which may ask the core
@@ -94,6 +97,20 @@ export interface PaidCallPolicy {
 /** A durable write other than a Channel message. */
 export type DurableWriteKind = "page_revision";
 
+/** What a Space stores that storage is metered in (`data.space_storage_usage.category`). */
+export type StorageCategory = "attachments";
+
+/** How a Space's held storage changed, after the core recorded it in `data.space_storage_usage`. */
+export interface StorageChange {
+  spaceId: string;
+  now: string;
+  category: StorageCategory;
+  /** Bytes the Space now holds more (positive) or fewer (negative). */
+  deltaBytes: number;
+  /** Bytes the Space holds in `category` after this change. */
+  totalBytes: number;
+}
+
 export interface SpaceBillingPolicy {
   /** Distinguishes this policy's prepared statements. */
   readonly id: string;
@@ -133,8 +150,27 @@ export interface SpaceBillingPolicy {
    */
   durableWrite(
     transaction: BillingTransaction,
-    input: { spaceId: string; now: string; kind: DurableWriteKind; author: "person" | "agent"; creditsWaived?: boolean },
+    input: {
+      spaceId: string; now: string; kind: DurableWriteKind; author: "person" | "agent"; creditsWaived?: boolean;
+      /** The person, or the Agent's owner; and the Agent's registration name (empty for a person), as for messages. */
+      ownerUserId: string; authorName: string;
+    },
   ): Promise<BillingRejection | null>;
+  /**
+   * Called in the transaction that admits an upload of `bytes` into a Space
+   * (Channel attachments, Page media), before any byte is sent; a rejection
+   * refuses it, so a Space is never refused after it uploaded.
+   */
+  storageUpload(
+    transaction: BillingTransaction,
+    input: { spaceId: string; now: string; category: StorageCategory; bytes: number },
+  ): Promise<BillingRejection | null>;
+  /**
+   * Called in the transaction that changes what a Space holds, once the core
+   * has recorded the change. It cannot refuse: the bytes are already stored or
+   * already released. A charging policy prices `deltaBytes` or `totalBytes` here.
+   */
+  storageChanged(transaction: BillingTransaction, change: StorageChange): Promise<void>;
 }
 
 /** Nothing is metered: every Space, member and message is admitted. */
@@ -146,6 +182,8 @@ export const spaceBilling: SpaceBillingPolicy = {
   async spaceDeletion() { return null; },
   async seatAdmission() { return null; },
   async durableWrite() { return null; },
+  async storageUpload() { return null; },
+  async storageChanged() {},
   message: {
     ctes: "admission AS MATERIALIZED (SELECT TRUE AS unmetered)",
     accepts: "TRUE",

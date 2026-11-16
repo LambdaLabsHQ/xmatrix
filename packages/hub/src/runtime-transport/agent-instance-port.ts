@@ -110,6 +110,12 @@ export interface AgentInstanceAuthorityRunBinding {
   instanceStatus: LiveAgentStatus;
   /** Authority version claimed by this connection, retained across hibernation. */
   connectionVersion?: number;
+  /**
+   * How many reports this connection has made at `connectionVersion`: with it,
+   * the revision of everything the connection says about its Instance.
+   * Retained across hibernation, so a report never repeats a sequence.
+   */
+  presenceSequence?: number;
   /** Dense per-channel ordinal for `@agent:N` / memberPresence cards. */
   channelInstanceId?: string;
   cwd?: string;
@@ -182,6 +188,10 @@ export interface AgentInstanceSocketBackend {
     session: Readonly<AgentInstanceRuntimeSession>,
     details: { code?: number; reason?: string; wasClean?: boolean },
   ): void | Promise<void>;
+  /** How the cell tells whether a connection's machine can act on what it is sent. */
+  observeMachineReachability?(reachable: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void;
+  /** Checkpoint a connection whose machine became reachable or not, at its current report count. */
+  reproject?(session: Readonly<AgentInstanceRuntimeSession>): Promise<void>;
 }
 
 export class AgentInstanceAuthorityCapabilityError extends Error {
@@ -346,6 +356,27 @@ export class AgentInstanceRuntimeTransport {
     return Array.from(this.sockets.entries(), ([, session]) => session);
   }
 
+  /**
+   * The machine hosting the selected connections became reachable or not;
+   * nothing else about them changed. Each records that, in its socket's own
+   * order with its other reports, as its next checkpoint, then shows it.
+   */
+  reprojectMachine(selected: (session: Readonly<AgentInstanceRuntimeSession>) => boolean): void {
+    for (const [ws, session] of this.sockets.entries()) {
+      if (!selected(session)) continue;
+      void this.sockets.ordered.enqueue(ws, async () => {
+        if (this.sockets.get(ws) !== session) return;
+        session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
+        await this.backend.reproject?.(session);
+        const attachment = this.hibernationAttachment(ws);
+        if (attachment) ws.serializeAttachment?.(attachment);
+        await this.onPresenceChange?.({ reason: "update", session });
+      }).catch((error: unknown) => {
+        console.error("Agent Instance machine reachability fanout failed", error);
+      });
+    }
+  }
+
 
   /**
    * Push one committed channel message to every live Agent Instance bound to
@@ -503,7 +534,9 @@ export class AgentInstanceRuntimeTransport {
       };
     }
 
-    const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase());
+    // A model is also named by any selector or display name its runtime lists for it (Claude's `opus`).
+    const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase()) ??
+      (input.kind === "model" ? agentInstanceModelNamed(session, input.value) : undefined);
     if (!selected) {
       return {
         status: "error",
@@ -786,6 +819,9 @@ export class AgentInstanceRuntimeTransport {
       const nextPresentation = message.type === "presence_update"
         ? mergeAgentInstancePresentation(session.presentation, message)
         : undefined;
+      // Each report is the connection's next: what it persists and what it
+      // shows carry the same revision.
+      if (message.type === "presence_update") session.run.presenceSequence = (session.run.presenceSequence ?? 0) + 1;
       const output = await this.backend.execute(session, message);
       this.sockets.sendOutput(ws, output);
       if (message.type === "presence_update") {
@@ -943,6 +979,14 @@ function agentInstanceModelOptions(
   return [...seen];
 }
 
+/** The model whose runtime selector, alias or display name is `written`, ignoring case. */
+function agentInstanceModelNamed(session: Readonly<AgentInstanceRuntimeSession>, written: string): string | undefined {
+  const wanted = written.trim().toLowerCase();
+  const named = (session.presentation?.models ?? []).find((model) =>
+    [model.id, model.displayName, ...model.aliases ?? []].some((name) => name?.trim().toLowerCase() === wanted));
+  return named?.model?.trim() || named?.id?.trim() || undefined;
+}
+
 /**
  * Efforts are a property of the selected model, so scope to it and fall back to
  * the default (then any) model rather than pooling every tier's efforts.
@@ -978,21 +1022,32 @@ function sameTraceHostSession(
 function assertRunBinding(message: AgentInstanceConnectMessage, authentication: AgentInstanceAuthorityAuthentication): void {
   const { principal, run } = authentication;
   const context = message.runContext ?? {};
-  if (!message.token.trim() || message.identityId !== principal.agentId || message.name.trim() !== principal.agentName ||
-      context.runId !== principal.runId || context.executionKey !== principal.executionKey ||
-      context.autoJoinChannelId !== principal.channelId || run.runId !== principal.runId ||
-      context.machineId !== principal.machineId ||
-      run.agentId !== principal.agentId || run.executionKey !== principal.executionKey ||
-      run.channelId !== principal.channelId || run.machineId !== principal.machineId ||
-      !run.instanceId ||
-      !["starting", "running"].includes(run.status) || !isLiveAgentStatus(run.instanceStatus)) {
-    throw new RuntimeClientOperationError("agent_run_binding_mismatch");
-  }
+  const checks = [
+    ["connect_message", "token", !!message.token.trim()],
+    ["connect_message", "agentId", message.identityId === principal.agentId],
+    ["connect_message", "agentName", message.name.trim() === principal.agentName],
+    ["connect_message", "runId", context.runId === principal.runId],
+    ["connect_message", "executionKey", context.executionKey === principal.executionKey],
+    ["connect_message", "channelId", context.autoJoinChannelId === principal.channelId],
+    ["connect_message", "machineId", context.machineId === principal.machineId],
+    ["authority_binding", "runId", run.runId === principal.runId],
+    ["authority_binding", "agentId", run.agentId === principal.agentId],
+    ["authority_binding", "executionKey", run.executionKey === principal.executionKey],
+    ["authority_binding", "channelId", run.channelId === principal.channelId],
+    ["authority_binding", "machineId", run.machineId === principal.machineId],
+    ["authority_binding", "instanceId", !!run.instanceId],
+    ["authority_binding", "status", ["starting", "running"].includes(run.status)],
+    ["authority_binding", "instanceStatus", isLiveAgentStatus(run.instanceStatus)],
+  ] as const;
+  const mismatch = checks.find(([, , matches]) => !matches);
+  if (mismatch) throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+    source: mismatch[0], field: mismatch[1] });
 }
 
 function assertSamePrincipal(expected: AgentInstanceRunPrincipal, actual: AgentInstanceRunPrincipal): void {
   for (const key of ["ownerUserId", "agentId", "agentName", "spaceId", "runId", "executionKey", "channelId", "machineId"] as const) {
-    if (actual[key] !== expected[key]) throw new RuntimeClientOperationError("agent_run_binding_mismatch");
+    if (actual[key] !== expected[key]) throw new RuntimeClientOperationError("agent_run_binding_mismatch", {
+      source: "refresh_principal", field: key });
   }
 }
 

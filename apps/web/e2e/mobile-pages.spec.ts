@@ -84,7 +84,7 @@ test("a phone lists the pages, opens one as a pushed screen, with its controls o
   await list.getByRole("button", { name: "xMatrix" }).click();
   await expect(page).toHaveURL(/page=p-xm/u);
   await expect(page.getByTestId("page-preview")).toContainText("Shipping.");
-  await expect(page.locator(".app-topbar")).toContainText("xMatrix");
+  await expect(page.locator(".app-topbar:not([aria-hidden=true])")).toContainText("xMatrix");
   const painted = await paintedMainTop(page);
   expect(painted.contentTop).toBeGreaterThanOrEqual(painted.titleBottom);
   await expect(dock).toBeHidden();
@@ -174,7 +174,7 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     // It opens at once, untitled, with nothing made yet.
     await expect(page).toHaveURL(/page=new/u);
     await expect(page.getByRole("button", { name: "Back to pages", exact: true })).toBeVisible();
-    const backBar = await page.locator(".app-topbar").boundingBox();
+    const backBar = await page.locator(".app-topbar:not([aria-hidden=true])").boundingBox();
     const title = page.getByTestId("page-title");
     const titleBox = await title.boundingBox();
     expect(backBar).not.toBeNull();
@@ -183,7 +183,7 @@ for (const entry of ["FAB", "first page", "sub-page", "stale tree"] as const) {
     await expect(page.getByTestId("page-editor").locator(".page-document")).toBeFocused();
     await expect(title).toHaveAttribute("data-placeholder", "Untitled");
     expect(await fixtureRequestBodies(page, "page-create")).toEqual([]);
-    // Named, it is made under the page it was opened from, from its document: the name it opens with.
+    // Named, it is made under the page it was opened from, from its document: the name its heading gives it.
     await page.keyboard.type("New notes");
     await page.keyboard.press("Enter");
     await expect.poll(async () => (await fixtureRequestBodies(page, "page-create")).length).toBe(1);

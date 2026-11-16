@@ -51,21 +51,6 @@ export function AdminDetailHeader({ title, truncated, children }: { title: strin
   );
 }
 
-/** The Automation figures a Space and the platform both show. */
-export function adminAutomationStats(automations: {
-  total: number; enabled: number; withError: number; occurrencesByStatus: Record<string, number>;
-}, days: number): Array<{ label: string; value: string; hint?: string }> {
-  const occurrences = adminSum(automations.occurrencesByStatus);
-  const failed = automations.occurrencesByStatus.failed ?? 0;
-  return [
-    { label: "Automations", value: formatAdminCount(automations.total),
-      hint: `${formatAdminCount(automations.enabled)} enabled` },
-    { label: "Last run errored", value: formatAdminCount(automations.withError) },
-    { label: `Occurrences, ${days}d`, value: formatAdminCount(occurrences),
-      ...(occurrences > 0 ? { hint: `${adminPercent(failed, occurrences)}% failed` } : {}) },
-  ];
-}
-
 /** A sortable time column read as an age, the exact UTC time on hover. */
 export function adminTimeColumn<Row>(key: string, label: string, read: (row: Row) => string | undefined): AdminColumn<Row> {
   return { key, label, numeric: true, value: (row) => adminTime(read(row)), render: (row) => <TimeCell value={read(row)} /> };

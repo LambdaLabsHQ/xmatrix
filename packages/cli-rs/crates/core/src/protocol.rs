@@ -29,6 +29,9 @@ impl HubRoutes {
     pub const RUN_SECRETS: &str = "/api/run-secrets";
     pub const CONNECTOR_USAGE: &str = "/api/connectors/usage";
     pub const SECRET_REQUESTS: &str = "/api/secret-requests";
+    pub const HARNESS_SIGN_IN_REQUESTS: &str = "/api/harness-sign-in-requests";
+    pub const SETTINGS_REQUESTS: &str = "/api/settings-requests";
+    pub const SETTINGS_REQUEST_STATUS: &str = "/api/settings-requests/status";
     pub const DAEMON_CONTROL: &str = "/api/daemon/control";
     pub const DAEMON_COMMAND_LEASE_RENEW: &str = "/api/daemon/command-lease/renew";
     pub const DAEMON_COMMAND_ADMIT_AUTHORIZE: &str = "/api/daemon/command-admit-authorize";
@@ -46,6 +49,10 @@ impl HubRoutes {
     pub const SLACK_OAUTH_TOKEN: &str = "/api/migrations/slack/oauth/token";
     pub const CROSS_SPACE_READ_REQUESTS: &str = "/api/cross-space-read/requests";
 }
+
+/// A machine owner's harness environment: its launch and confirmed access.
+pub const AGENT_ENVIRONMENT_QUERY_ROUTE: &str = "/api/agent-environments/query";
+pub const AGENT_ENVIRONMENT_COMMAND_ROUTE: &str = "/api/agent-environments/commands";
 
 /// A Space's Agents: its registration catalog, one registration's details, and
 /// the commands that change them.
@@ -178,93 +185,6 @@ pub struct SerializedAgent {
     pub usage: Option<LlmUsage>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub instances: Option<Vec<SerializedAgentInstance>>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub(crate) struct AutomationMessage {
-    pub body: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub app_mentions: Option<Vec<serde_json::Value>>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AutomationCapabilities {
-    pub update: bool,
-    pub pause: bool,
-    pub resume: bool,
-    pub delete: bool,
-    pub reason_required: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct AutomationExecutionStatus {
-    pub status: String,
-    pub attempts: u64,
-    pub scheduled_for: String,
-    pub next_attempt_at: String,
-    pub updated_at: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub finished_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub error_code: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub error_message: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
-pub(crate) struct SerializedAutomation {
-    pub id: String,
-    pub owner_user_id: String,
-    #[serde(default)]
-    pub version: u64,
-    #[serde(default)]
-    pub authority_root_user_id: String,
-    #[serde(default)]
-    pub capabilities: AutomationCapabilities,
-    pub name: String,
-    pub channel_id: String,
-    #[serde(default)]
-    pub can_manage: bool,
-    pub message: AutomationMessage,
-    pub interval_minutes: u64,
-    pub enabled: bool,
-    pub created_at: String,
-    pub updated_at: String,
-    pub next_run_at: String,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_run_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_run_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_run_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_run_finished_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_error: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub latest_execution: Option<AutomationExecutionStatus>,
-    pub delivery_count: u64,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_delivery_at: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub last_message_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub workspace: Option<WorkspaceRef>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub agent_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub prompt: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub execution_timeout_minutes: Option<u64>,
-    pub run_count: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -446,6 +366,11 @@ pub struct AgentModelInfo {
     pub supports_personality: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub upgrade: Option<String>,
+    /// The `scope`s of the provider's scoped quota windows that constrain this
+    /// model (Claude's model family, `"Fable"`; Cursor's pool, `"Auto"` or
+    /// `"API"`). Kept apart from the names a person selects a model by.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub quota_scopes: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -1464,6 +1389,17 @@ pub enum AgentInstanceClientMessage {
         /// RFC 3339 time a `usage_limited` provider account resets, when known.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         resets_at: Option<String>,
+        /// What a `usage_limited` failure used up: `account`, the `scope` of
+        /// one scoped quota window (`"Fable"`), or `unresolved`.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        quota_scope: Option<String>,
+        /// Why an `unresolved` quota scope could not be told.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        quota_scope_reason: Option<String>,
+        /// The complete provider reading a `usage_limited` scope was told
+        /// from, when the read succeeded.
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        usage: Option<Box<LlmUsage>>,
         /// Tasks still pending when `background_tasks_interrupted` was observed.
         #[serde(skip_serializing_if = "Option::is_none", default)]
         pending_tasks: Option<u32>,
@@ -2452,63 +2388,6 @@ mod tests {
     }
 
     #[test]
-    fn serialized_automation_deserializes_channel_message_contract() {
-        let hub_json = r#"{
-            "id":"task-1",
-            "ownerUserId":"user-1",
-            "name":"Daily triage",
-            "channelId":"channel-1",
-            "canManage":true,
-            "version":3,
-            "authorityRootUserId":"user-1",
-            "capabilities":{"update":true,"pause":true,"requestPause":false,"resume":false,"delete":true,"reasonRequired":false},
-            "message":{"body":"@codex:once:/tmp/xmatrix Triage failures"},
-            "intervalMinutes":60,
-            "enabled":true,
-            "createdAt":"2026-08-04T00:00:00.000Z",
-            "updatedAt":"2026-08-04T00:00:00.000Z",
-            "nextRunAt":"2026-08-04T01:00:00.000Z",
-            "latestExecution":{
-                "status":"pending",
-                "attempts":2,
-                "scheduledFor":"2026-08-04T00:45:00.000Z",
-                "nextAttemptAt":"2026-08-04T00:47:00.000Z",
-                "updatedAt":"2026-08-04T00:46:00.000Z",
-                "errorCode":"dispatch_retry",
-                "errorMessage":"daemon unavailable"
-            },
-            "deliveryCount":1,
-            "lastDeliveryAt":"2026-08-04T00:30:00.000Z",
-            "lastMessageId":"scheduled-message:one",
-            "runCount":1
-        }"#;
-        let automation: SerializedAutomation = serde_json::from_str(hub_json).unwrap();
-        assert_eq!(
-            automation.message.body,
-            "@codex:once:/tmp/xmatrix Triage failures"
-        );
-        assert_eq!(automation.delivery_count, 1);
-        assert!(automation.can_manage);
-        assert_eq!(automation.version, 3);
-        assert!(automation.capabilities.pause);
-        assert_eq!(
-            automation
-                .latest_execution
-                .as_ref()
-                .unwrap()
-                .error_message
-                .as_deref(),
-            Some("daemon unavailable")
-        );
-        assert_eq!(
-            automation.last_message_id.as_deref(),
-            Some("scheduled-message:one")
-        );
-        assert!(automation.agent_id.is_none());
-        assert!(automation.workspace.is_none());
-    }
-
-    #[test]
     fn server_message_error_deserialize() {
         let hub_json = r#"{"type":"error","message":"bad request"}"#;
         let msg: AgentInstanceServerMessage = serde_json::from_str(hub_json).unwrap();
@@ -2551,6 +2430,9 @@ mod tests {
                 process: Some("online".into()),
             }),
             resets_at: None,
+            quota_scope: None,
+            quota_scope_reason: None,
+            usage: None,
             pending_tasks: None,
             ts: None,
         };
@@ -2559,6 +2441,48 @@ mod tests {
         assert_eq!(json["channelId"], "ch1");
         assert_eq!(json["reason"], "codex_timeout");
         assert_eq!(json["snapshot"]["run"], "failed");
+        assert!(json.get("quotaScope").is_none());
+        assert!(json.get("usage").is_none());
+    }
+
+    #[test]
+    fn usage_limited_lifecycle_carries_its_scope_and_reading() {
+        let msg = AgentInstanceClientMessage::AgentLifecycle {
+            request_id: Some("failure-1".into()),
+            channel_id: None,
+            agent_id: None,
+            instance_id: None,
+            agent_name: None,
+            layer: "application".into(),
+            status: "failed".into(),
+            reason: Some("usage_limited".into()),
+            detail: None,
+            snapshot: None,
+            resets_at: Some("2026-11-19T18:00:00Z".into()),
+            quota_scope: Some("Fable".into()),
+            quota_scope_reason: None,
+            usage: Some(Box::new(LlmUsage {
+                quota_source: Some("provider_api".into()),
+                scoped_quota_usages: Some(vec![LlmQuotaUsage {
+                    label: Some("1w".into()),
+                    percent: Some(100.0),
+                    scope: Some("Fable".into()),
+                    ..LlmQuotaUsage::default()
+                }]),
+                ..LlmUsage::default()
+            })),
+            pending_tasks: None,
+            ts: None,
+        };
+        let json = serde_json::to_value(&msg).unwrap();
+        assert_eq!(json["resetsAt"], "2026-11-19T18:00:00Z");
+        assert_eq!(json["quotaScope"], "Fable");
+        assert!(json.get("quotaScopeReason").is_none());
+        assert_eq!(
+            json["usage"],
+            serde_json::json!({ "quotaSource": "provider_api", "scopedQuotaUsages": [
+                { "label": "1w", "percent": 100.0, "scope": "Fable" }] })
+        );
     }
 
     #[test]

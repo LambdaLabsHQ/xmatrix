@@ -24,19 +24,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
   try {
     await setup.query(`CREATE SCHEMA ${schema}`);
     for (const file of ["0009_expand_remaining_control_facts.sql", "0014_expand_current_control_fact_shapes.sql", "0036_expand_agent_launches.sql",
-      "0037_expand_agent_launch_timeline.sql", "0050_expand_launch_initial_source.sql", "0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
+      "0037_expand_agent_launch_timeline.sql", "0047_expand_agent_message_executions.sql", "0050_expand_launch_initial_source.sql", "0059_expand_agent_registration_keys.sql", "0060_expand_registration_access.sql",
       "0062_expand_registration_execution_revision.sql", "0063_expand_registration_authority.sql",
       "0065_expand_registration_environment.sql", "0066_expand_registration_allocations.sql",
       "0067_expand_registration_grant_execution_revision.sql", "0068_expand_registration_run_bindings.sql",
       "0069_expand_registration_stop_intents.sql", "0070_expand_registration_launch_intents.sql", "0071_expand_registration_quota_observations.sql",
-      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql",
+      "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0255_expand_registration_quota_scoped_windows.sql",
       "0074_expand_registration_launch_request.sql", "0076_expand_nullable_profile_references.sql",
       "0078_expand_registration_launch_input.sql", "0079_expand_registration_optional_model.sql",
       "0083_expand_natural_key_reservations.sql",
       "0058_expand_reborn_intents.sql", "0073_expand_reborn_failure_notice.sql",
       "0001_expand_space_placement.sql", "0024_expand_global_space_routing.sql", "0057_expand_agent_display_names.sql",
       "0117_expand_instance_rest_state.sql", "0160_expand_instance_wake.sql", "0185_expand_space_harness_profiles.sql",
-      "0228_expand_agent_quota_retries.sql"]) {
+      "0228_expand_agent_quota_retries.sql", "0244_expand_norn_programs.sql"]) {
       await sql(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8"));
     }
     await sql(`ALTER TABLE data.instances ADD COLUMN IF NOT EXISTS presentation_json jsonb NOT NULL DEFAULT '{}'::jsonb;
@@ -96,8 +96,9 @@ integration("launch survives a hostname change with stale Workspace metadata and
         description: "", availability: "unattended", maxConcurrent: 4, capabilities: [],
         launch: { runtime: "/opt/codex/bin/codex", runtimeArgs: ["--full-auto"], backend: "codex-app", sandboxMode: "workspace-write" } } });
     const body = "@codex task", bodyHash = await digestCanonicalCloneCborV1(body);
-    const source = async id => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
-      [id, bodyHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
+    // `launch: false` is a send that did not ask to start the Agents it mentions.
+    const source = async (id, launch = true) => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
+      [id, bodyHash, { ...(launch ? { launch: true } : {}), selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     await source("message");
     const launches = new PostgresRegistrationLaunchRepository(database, database, placement);
@@ -248,7 +249,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     // An Agent Run's own summon (a Focus delegate, an Agent launching another)
     // stays valid when the staged-launch recheck runs before it commits.
     await sql(`INSERT INTO data.messages VALUES ('space','channel','agent-source','agent',$1,$2,1,1,1,$3,NULL,NULL,NULL)`,
-      [committedInstance.instance_id, bodyHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
+      [committedInstance.instance_id, bodyHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     afterCommit = async context => {
       if (context.operation === "registration.execution.reserve") {
@@ -268,7 +269,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_parameters_v1"]'::jsonb`);
     const parameterHash = await digestCanonicalCloneCborV1(parameterBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','explicit-parameters','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [parameterHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
+      [parameterHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     const explicitRequest = { ...request, commandId: "explicit-parameters", sourceMessageId: "explicit-parameters",
       body: parameterBody, requirements: { ...request.requirements, parameters: { serviceTier: "future-priority" } } };
@@ -287,7 +288,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(parameterPayload.prompt, parameterBody);
     assert.equal((await launches.prepare(explicitRequest)).launchId, parameterLaunch.launchId);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','cold-parameters','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [parameterHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
+      [parameterHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: parameterHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     const coldLaunch = await launches.dispatchFromMessage({ commandId: "cold-parameters", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "cold-parameters", body: parameterBody }, async ({ candidates }) => {
@@ -307,19 +308,17 @@ integration("launch survives a hostname change with stale Workspace metadata and
         supportedReasoningEfforts: [{ reasoningEffort: "high", description: "Thorough" }] }],
     }, parameterLaunch.instanceId]);
     await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["machine_routing_effort_v1"]'::jsonb`);
-    await source("preview-declined");
-    const declined = await launches.dispatchFromMessage({ commandId: "preview-declined", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "preview-declined", body,
-      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "explanation" }] },
-      async () => assert.fail("a confirmed non-request allocates no launch and asks no question"));
+    await source("mention-only", false);
+    const declined = await launches.dispatchFromMessage({ commandId: "mention-only", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "mention-only", body },
+      async () => assert.fail("a send that did not ask to launch allocates nothing and asks no question"));
     assert.equal(declined.selectionCount, 1);
     assert.deepEqual(declined.prepared, []);
-    assert.equal(declined.rejected[0].code, "summon_intent_explanation");
+    assert.equal(declined.rejected[0].code, "launch_not_requested");
     await source("dispatch-source");
     const dispatched = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
-      channelId: "channel", sourceMessageId: "dispatch-source", body,
-      draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }] }, async ({ candidates, sourceSequence, summon }) => {
-        assert.equal(summon.readInDraft, true);
+      channelId: "channel", sourceMessageId: "dispatch-source", body }, async ({ candidates, sourceSequence, summon }) => {
+        assert.deepEqual(summon, { text: "@codex", start: 0, end: 6 });
         const boundary = await sql("SELECT timeline_sequence FROM data.messages WHERE message_id=$1", ["dispatch-source"]);
         assert.equal(sourceSequence, Number(boundary.rows[0].timeline_sequence));
         assert.deepEqual(candidates[0].observations.quota, { remainingPercent: 100, assumed: true });
@@ -334,7 +333,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       // the persisted request, never hash services or transient picker input.
       env: { service: new URL("https://launch.internal") }, database, directory: database,
       evaluatorFor: () => assert.fail("replay must not evaluate again"),
-      forceMention: "@codex", draftIntents: [{ start: 0, end: 6, mention: "@codex", choice: "summon" }],
+      forceMention: "@codex",
     }, async () => assert.fail("replay must not select again"));
     assert.equal(dispatchReplay.prepared[0].launchId, dispatched.prepared[0].launchId);
     assert.equal(dispatchReplay.prepared[0].reused, true);
@@ -347,11 +346,12 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal((await sql(`SELECT count(*)::int AS count FROM data.runs`)).rows[0].count, 5);
     const capabilityBody = "@codex task", capabilityHash = await digestCanonicalCloneCborV1(capabilityBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','capability','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [capabilityHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: capabilityHash,
+      [capabilityHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: capabilityHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     await sql(`UPDATE control.agent_registration_environments SET declaration_json=declaration_json||'{"quotaPoolId":"pool"}'::jsonb`);
-    await sql(`INSERT INTO control.registration_quota_observations VALUES
-      ('owner','pool',0,statement_timestamp()-interval '1 second',statement_timestamp()+interval '5 minutes','provider')`);
+    await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+        expires_at,source,windows_json) VALUES ('owner','pool',0,statement_timestamp()-interval '1 second',
+        statement_timestamp()+interval '5 minutes','provider','[{"usedPercent":100}]')`);
     // An observation is current only for the connection that reported it.
     await sql(`UPDATE data.machine_daemons SET metadata_json=jsonb_build_object('machineResources',
       $1::jsonb||jsonb_build_object('connectionEpoch',connection_epoch))`, [{
@@ -455,12 +455,19 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(inputRun.sourceMessageId, undefined);
     // The caller's own summon constrains the choice.
     let offeredTags;
-    await launches.dispatchInput({ ...inputRequest, commandId: "input-constrained", runId: "run:input-constrained",
-      instanceId: "instance:input-constrained", tags: { harness: "codex", model: "model" } },
+    const pinnedLaunch = await launches.dispatchInput({ ...inputRequest, commandId: "input-constrained", runId: "run:input-constrained",
+      instanceId: "instance:input-constrained", tags: { harness: "codex", model: "model", machine: "machine" } },
     async ({ candidates, tags }) => { offeredTags = tags; return { key: candidates[0].key, model: "model" }; });
-    assert.deepEqual(offeredTags, { harness: "codex", model: "model" });
+    assert.deepEqual(offeredTags, { harness: "codex", model: "model", machine: "machine" });
     const inputReplay = await launches.dispatchInput(inputRequest, async () => assert.fail("replay must not select again"));
     assert.equal(inputReplay.launchId, managed.launchId);
+    await assert.rejects(launches.dispatchInput({ ...inputRequest, tags: { machine: "elsewhere" } },
+      async () => assert.fail("changed replay must not route")), { code: "idempotency_mismatch" });
+    // A chooser cannot relax authored constraints at allocation, even for
+    // handoff input without a source summon to reparse.
+    await assert.rejects(launches.dispatchInput({ ...inputRequest, commandId: "invalid-input-machine",
+      runId: "run:invalid-machine", instanceId: "instance:invalid-machine", tags: { machine: "elsewhere" } },
+    async ({ candidates }) => ({ key: candidates[0].key, model: "model" })), { code: "invalid_registration_launch" });
     // #3270: work that needs GitHub runs only where the daemon shows a usable
     // GitHub login on its live connection. A capability no daemon can prove
     // (`node`) stays guidance and never refuses a launch.
@@ -509,7 +516,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       VALUES ('space','space:github',1,'github','GitHub','configured','oauth','[]','[]','[]','[]','owner','repo-catalog',now(),now())`);
     const repoBody = "@codex repo:owner/project", repoHash = await digestCanonicalCloneCborV1(repoBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','repository','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [repoHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: repoHash,
+      [repoHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: repoHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const repository = await launches.dispatchFromMessage({ commandId: "repository", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "repository", body: repoBody }, async ({ candidates }) => {
@@ -602,7 +609,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       VALUES ('space','page','channel','caller',now())`);
     const coWriteBody = "@codex write the page with me", coWriteHash = await digestCanonicalCloneCborV1(coWriteBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','co-write','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [coWriteHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: coWriteHash,
+      [coWriteHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: coWriteHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const coWrite = await launches.dispatchFromMessage({ commandId: "co-write", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "co-write", body: coWriteBody }, async ({ candidates, managedWorkspace, managedOnly }) => {
@@ -621,7 +628,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     await sql(`INSERT INTO data.page_links VALUES ('space','channel','{"quote":"q"}',NULL)`);
     const commentBody = "@codex make this shorter", commentHash = await digestCanonicalCloneCborV1(commentBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','comment','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [commentHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: commentHash,
+      [commentHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: commentHash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] } }]);
     const comment = await launches.dispatchFromMessage({ commandId: "comment", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "comment", body: commentBody }, async ({ candidates, managedOnly }) => {
@@ -646,6 +653,13 @@ integration("launch survives a hostname change with stale Workspace metadata and
         WHERE instance_id=$1`, [replay.instanceId])).rows[0].channel_instance_id), actorUserId: "caller" }).catch(error => error);
     assert.equal(rebornTarget.target?.instanceId, replay.instanceId, String(rebornTarget.message ?? ""));
     assert.equal(rebornTarget.target.agentName, "Codex");
+    for (const launched of [pinnedLaunch, parameterLaunch]) {
+      const pinnedTarget = await new PostgresRuntimeRepository(database).getChannelAgentRebornTarget({ requestId: "pinned-target",
+        channelId: "channel", agentName: "Codex", actorUserId: "caller",
+        channelInstanceId: Number((await sql(`SELECT channel_instance_id FROM data.instances WHERE instance_id=$1`,
+          [launched.instanceId])).rows[0].channel_instance_id) });
+      assert.equal(pinnedTarget.target.launchMachineId, "machine", "retain any-input and original message constraints");
+    }
     // `/kill all` and `@agent:kill` read this list: a registered Instance has no
     // Profile, and must still be listed, addressed and stoppable as itself.
     const killTargets = await new PostgresRuntimeRepository(database).listChannelAgentKillTargets({
@@ -763,12 +777,77 @@ integration("launch survives a hostname change with stale Workspace metadata and
       channelId: 'channel', body: 'Continue in the registered directory' }, async () => assert.fail('nothing to choose')),
     error => error.code === 'registration_daemon_offline' && error.status === 409);
     await sql(`UPDATE data.machine_daemons SET status='online'`);
-    const defaultReborn = await reborn.prepare({ commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',
-      sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue' });
+    // What a quota retry chooses the resumed model from: the registration's
+    // allowed models bounded by its environment, the Instance's own catalog
+    // and its pool's reading.
+    const observedAt = new Date().toISOString();
+    await sql(`UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1`, [cold.instanceId,
+      { model: 'provider/model', modelsObservedAt: observedAt, models: [
+        { model: 'provider/model', displayName: 'Model', isDefault: true, quotaScopes: ['Model'] },
+        { model: 'provider/other', displayName: 'Other' }] }]);
+    const factsOf = commandId => reborn.continuationModelFacts({ commandId, channelId: 'channel', sourceInstanceId: cold.instanceId });
+    // A switch keeps the Instance's kind of model: one on the runtime default
+    // of a registration that now declares models has nothing to switch to.
+    assert.equal(await factsOf('continuation-facts-declared'), undefined);
+    const declaredConfiguration = (await sql(`SELECT configuration_json FROM data.space_agent_registrations
+      WHERE harness='codex'`)).rows[0].configuration_json;
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=jsonb_set(configuration_json-'model',
+      '{routing,models}','[]') WHERE harness='codex'`);
+    const facts = await factsOf('continuation-facts');
+    assert.deepEqual([facts.models, facts.modelCatalog.map(row => [row.model, row.quotaScopes]), facts.supportsNativeModel],
+      [[], [['provider/model', ['Model']], ['provider/other', undefined]], undefined]);
+    // And the reverse: a declared-model Instance is offered no catalog model.
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":false,"requestedRuntimeModel":"provider/model"}'
+      WHERE run_id=$1`, [cold.runId]);
+    assert.equal(await factsOf('continuation-facts-native'), undefined);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":true,"requestedRuntimeModel":null}'
+      WHERE run_id=$1`, [cold.runId]);
+    // A runtime-default Instance resumes on another catalog model only through
+    // a daemon that switches to one.
+    const switched = { commandId: 'default-reborn', actorUserId: 'caller', channelId: 'channel',
+      sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue', preferredRuntimeModel: 'provider/other' };
+    await assert.rejects(() => reborn.prepare(switched), error => error.code === 'registration_workspace_or_daemon_unavailable');
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_native_model_v1"]'::jsonb`);
+    assert.equal((await factsOf('continuation-facts-capable')).supportsNativeModel, true);
+    const defaultReborn = await reborn.prepare(switched);
     const coldSuccessor = await reborn.advance({ intentId: defaultReborn.intentId, actorUserId: 'caller', channelId: 'channel' });
     assert.equal(coldSuccessor.state, 'prepared');
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedModel'), false);
     assert.equal(Object.hasOwn(coldSuccessor.spawnPayload.context, 'requestedEffort'), false);
+    assert.equal(coldSuccessor.spawnPayload.context.preferredModel, 'provider/other');
+    const switchedRun = async runId => (await sql(`SELECT metadata_json->>'preferredRuntimeModel' AS model,
+      metadata_json->'originalRuntimeModel' AS original FROM data.runs WHERE run_id=$1`, [runId])).rows[0];
+    assert.deepEqual(await switchedRun(defaultReborn.intentId), { model: 'provider/other', original: '' },
+      "the switched Run keeps the model it was moved off (the runtime default)");
+    // Its next resume goes back to that model only once a reading shows it has quota.
+    const resumeAgain = async (sourceMessageId, scopedUsed) => {
+      await sql(`UPDATE data.agent_reborn_intents SET state='spawned' WHERE source_instance_id=$1 AND state='prepared'`,
+        [cold.instanceId]);
+      await sql(`UPDATE data.runs SET status='failed' WHERE run_id=(SELECT run_id FROM data.instances WHERE instance_id=$1)`,
+        [cold.instanceId]);
+      const week = new Date(Date.now() + 4 * 86_400_000).toISOString();
+      await sql(`DELETE FROM control.registration_quota_observations`);
+      await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+          expires_at,source,windows_json,scoped_windows_json,scoped_observed_at,scoped_expires_at)
+        SELECT owner_user_id,COALESCE(NULLIF(btrim(declaration_json->>'quotaPoolId'),''),'registration:'||machine_id||':'||harness),45,statement_timestamp()-interval '1 second',
+          statement_timestamp()+interval '10 minutes','provider',$1::jsonb,$2::jsonb,statement_timestamp()-interval '1 second',$3::timestamptz
+        FROM control.agent_registration_environments WHERE harness='codex'`,
+      [JSON.stringify([{ label: '1w', usedPercent: 55, resetAt: week }]),
+        JSON.stringify([{ label: '1w', usedPercent: scopedUsed, resetAt: week, scope: 'Model' }]), week]);
+      const prepared = await reborn.prepare({ commandId: `resume-${sourceMessageId}`, actorUserId: 'caller', channelId: 'channel',
+        sourceMessageId, sourceInstanceId: cold.instanceId, prompt: 'continue' });
+      const advanced = await reborn.advance({ intentId: prepared.intentId, actorUserId: 'caller', channelId: 'channel' });
+      return { context: advanced.spawnPayload.context, run: await switchedRun(prepared.intentId) };
+    };
+    const stillOut = await resumeAgain('message', 100);
+    assert.equal(stillOut.context.preferredModel, 'provider/other', "its own model is still used up: it stays switched");
+    assert.deepEqual(stillOut.run, { model: 'provider/other', original: '' });
+    const back = await resumeAgain('used-up', 10);
+    assert.equal(Object.hasOwn(back.context, 'preferredModel'), false, "back on the runtime default");
+    assert.deepEqual(back.run, { model: null, original: null });
+    await sql(`DELETE FROM control.registration_quota_observations`);
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=$1::jsonb WHERE harness='codex'`,
+      [JSON.stringify(declaredConfiguration)]);
 
     // Handoff moves an Instance's directory to another harness on the same
     // machine. Its successor is a new Instance, and the predecessor is fenced
@@ -851,7 +930,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const connectorBody = '@codex repo:owner/shared';
     const connectorHash = await digestCanonicalCloneCborV1(connectorBody);
     await sql(`INSERT INTO data.messages VALUES ('space','channel','connector-repository','user','caller',$1,1,1,1,$2,NULL,NULL,NULL)`,
-      [connectorHash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: connectorHash,
+      [connectorHash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: connectorHash,
         selections: [{ start: 0, end: 6, text: '@codex', target: { kind: 'capability', harness: 'codex' } }] } }]);
     const beforeConfig = (await sql(`SELECT configuration_json FROM data.space_agent_registrations`)).rows;
     const beforeAccess = (await sql(`SELECT grant_limits,policy_limits,grant_revision,policy_revision FROM data.space_agent_registration_access`)).rows;
@@ -981,6 +1060,36 @@ integration("launch survives a hostname change with stale Workspace metadata and
       await sql(`UPDATE data.runs SET status='exited' WHERE run_id=$1`, [target.runId]);
       await sql(`UPDATE data.instances SET status='offline',rest_state='sleeping' WHERE instance_id=$1`, [target.instanceId]);
     }
+    // While its provider account reads used up (a sibling just reported the
+    // limit), waking it would fail the same way: it keeps resting.
+    await sql(`INSERT INTO control.registration_quota_observations
+        (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source)
+      SELECT DISTINCT owner_user_id,COALESCE(NULLIF(btrim(declaration_json->>'quotaPoolId'),''),
+          'registration:'||machine_id||':'||harness),0,statement_timestamp()-interval '1 second',
+          statement_timestamp()+interval '1 hour','daemon'
+        FROM control.agent_registration_environments
+      ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET remaining=0,source='daemon',
+        observed_at=EXCLUDED.observed_at,expires_at=EXCLUDED.expires_at,windows_json=NULL`);
+    const usedUp = await reborn.wakeResting({ commandId: "wake-used-up", channelId: "channel", sourceMessageId: "used-up" });
+    assert.deepEqual(usedUp.woken, [], "a used-up registration's resting Instances do not wake");
+    assert.deepEqual(usedUp.refused.map(item => [item.code, item.permanent]),
+      [["registration_quota_exhausted", false], ["registration_quota_exhausted", false]]);
+    assert.equal((await sql(`SELECT count(*)::int AS count FROM data.instances WHERE instance_id=ANY($1)
+      AND rest_state='sleeping'`, [[sleeper.instanceId, repoSleeper.instanceId]])).rows[0].count, 2, "they keep resting");
+    // The model an Instance last ran decides it: its own scope used up keeps
+    // it resting while the account has quota.
+    const week = new Date(Date.now() + 4 * 86_400_000).toISOString();
+    await sql(`UPDATE control.registration_quota_observations SET source='provider',remaining=45,
+      windows_json=$1::jsonb,scoped_windows_json=$2::jsonb,scoped_observed_at=observed_at,scoped_expires_at=$3::timestamptz`,
+    [JSON.stringify([{ label: "1w", usedPercent: 55, resetAt: week }]),
+      JSON.stringify([{ label: "1w", usedPercent: 100, resetAt: week, scope: "Fable" }]), week]);
+    await sql(`UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1`, [sleeper.instanceId,
+      { model: "provider/model", modelsObservedAt: new Date().toISOString(),
+        models: [{ model: "provider/model", displayName: "Fable 5.2", quotaScopes: ["Fable"] }] }]);
+    assert.deepEqual((await reborn.wakeResting({ commandId: "wake-model-used-up", channelId: "channel",
+      sourceMessageId: "model-used-up", targetInstanceId: sleeper.instanceId })).refused.map(item => item.code),
+    ["registration_quota_exhausted"]);
+    await sql(`DELETE FROM control.registration_quota_observations`);
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
     assert.deepEqual(targeted.woken.map(item => item.instanceId), [sleeper.instanceId],
@@ -1040,7 +1149,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const managedMessage = async (id, mention, target, condition = '') => {
       const body = `${mention}${condition} QA first conversation`, hash = await digestCanonicalCloneCborV1(body);
       await sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
-        [id, hash, { selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
+        [id, hash, { launch: true, selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
           selections: [{ start: 0, end: mention.length, text: mention, target }] } }]);
       return { commandId: id, actorUserId: 'caller', channelId: 'channel', sourceMessageId: id, body };
     };
@@ -1076,6 +1185,41 @@ integration("launch survives a hostname change with stale Workspace metadata and
       assert.equal(payload.sourceMessageId, id);
       const replay = await launches.dispatchFromMessage(request, async () => assert.fail('replay must not choose a second cwd'));
       assert.equal(replay.prepared[0].runId, launch.runId);
+    }
+    // With no declared models, a summon may start the runtime on a model from
+    // its own fresh catalog: on the runtime-default authority, through a daemon
+    // that applies it, and only as the model the author wrote.
+    await sql(`UPDATE data.instances SET presentation_json=jsonb_build_object('models',$2::jsonb,'modelsObservedAt',$3::text)
+      WHERE instance_id=$1`, [managedLaunches[0].instanceId, JSON.stringify([
+      { id: 'default', model: 'codex-large', displayName: 'Default', isDefault: true },
+      { id: 'sonnet', model: 'codex-sonnet', displayName: 'Sonnet' }]), new Date().toISOString()]);
+    const prefer = (model, check = () => {}) => async ({ candidates }) => {
+      const candidate = candidates.find(candidate => candidate.key.harness === 'codex');
+      check(candidate);
+      return { key: candidate.key, model: '', useRuntimeDefaultModel: true, preferredModel: model };
+    };
+    const unapplied = await launches.dispatchFromMessage(await managedMessage('native-incapable', '@codex', target, ' model:sonnet'),
+      prefer('codex-sonnet', candidate => assert.equal(candidate.supportsNativeModel, undefined)));
+    assert.deepEqual(unapplied.rejected.map(item => item.code), ['registration_selection_invalid'],
+      'a daemon that cannot apply a native model is never asked to');
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["registration_native_model_v1"]'::jsonb`);
+    const native = await launches.dispatchFromMessage(await managedMessage('native-model', '@codex', target, ' model:Sonnet'),
+      prefer('codex-sonnet', candidate => {
+        assert.equal(candidate.supportsNativeModel, true);
+        assert.deepEqual(candidate.modelCatalog.map(option => option.model), ['codex-large', 'codex-sonnet']);
+      }));
+    assert.deepEqual(native.rejected, []);
+    const nativeRun = (await sql(`SELECT l.spawn_payload_json,r.metadata_json FROM data.agent_launches l
+      JOIN data.runs r ON r.run_id=l.run_id WHERE l.launch_id=$1`, [native.prepared[0].launchId])).rows[0];
+    const { preferredModel, requestedModel } = nativeRun.spawn_payload_json.context;
+    assert.deepEqual({ preferredModel, requestedModel }, { preferredModel: 'codex-sonnet', requestedModel: undefined });
+    assert.deepEqual(nativeRun.spawn_payload_json.registration.resources.models, [], 'no model resource is admitted');
+    assert.equal(nativeRun.metadata_json.useRuntimeDefaultModel, true);
+    assert.equal(nativeRun.metadata_json.preferredRuntimeModel, 'codex-sonnet');
+    for (const [id, condition, model] of [['native-unlisted', '', 'codex-unlisted'], ['native-other-name', ' model:opus', 'codex-sonnet']]) {
+      const refused = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition), prefer(model));
+      assert.equal(refused.prepared.length, 0, id);
+      assert.equal(refused.rejected.length, 1, id);
     }
     for (const [id, condition] of [['managed-explicit-pwd', ' pwd:"/not-authorized"'], ['managed-explicit-repo', ' repo:other/private']]) {
       const refusal = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition),

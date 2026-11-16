@@ -1,0 +1,20 @@
+name: App Store Connect specification audit
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - vendor/app-store-connect/**
+      - scripts/app-store-connect-openapi.mjs
+      - scripts/app-store-connect-upstream.mjs
+      - .github/workflows/app-store-connect-spec.yml
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/setup-pnpm-node
+      - name: Compare the current official specification without replacing the pin
+        run: node scripts/app-store-connect-upstream.mjs

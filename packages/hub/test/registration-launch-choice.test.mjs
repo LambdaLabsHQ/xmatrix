@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-  environmentHeadroom, jointRanking, registrationLaunchChooser,
+  environmentHeadroom, jointRanking, quotaRecoveryModel, registrationLaunchChooser,
 } from "../src/registration-launch-choice.ts";
 const candidates = ['first', 'last'].map(id => ({ key: { spaceId: 'space', ownerUserId: id, machineId: id, harness: 'codex' },
   description: id, models: ['small', 'large'], workspaceReferences: ['workspace-a', 'workspace-b'], workspaces: ['a', 'b'].map(letter => ({ reference: `workspace-${letter}`, machineId: id, canonicalCwd: `/projects/${letter}`, description: `Project ${letter}` })) }));
@@ -55,7 +55,7 @@ test('one harness has no fit to score; the location and its one list of models a
   assert.deepEqual(result.parameterEvidence.choices.map(choice => choice.key), ['modelEffort', 'workspace']);
   const { digestCanonicalCloneCborV1 } = await import('@xmatrix/protocol');
   assert.equal(result.parameterEvidence.inputDigest, await digestCanonicalCloneCborV1(calls), "the evidence is what Jev read");
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v12');
   assert.equal(result.parameterEvidence.harness, undefined);
   assert.equal(result.parameterEvidence.fit, undefined);
   assert.deepEqual(result.parameterEvidence.placement.ranking.map(item => item.machineId), ['first', 'last']);
@@ -232,11 +232,18 @@ test('with equal fit the work runs where the most headroom is; then the fewest o
   assert.deepEqual(chosen.key, candidates[1].key);
 });
 
+/** A stored provider reading as a launch candidate carries it (`RegistrationQuotaUsage`). */
+function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed } = {}) {
+  const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: account,
+    ...(scoped ? { scopedQuotaUsages: scoped } : {}) };
+  return { quota: { remainingPercent: assumed ? 0 : 100, assumed: assumed === true, observedAt, usage } };
+}
+
 test('an environment whose measured quota is exhausted until its reset is never offered', async () => {
   // 2026-09-29: Jev chose a Claude at 0% (reset 18:19 UTC) over one at 10%, and the turn failed at once.
   const later = new Date(Date.now() + 3_600_000).toISOString();
-  const exhausted = { quota: { remainingPercent: 0, assumed: false, source: 'provider', expiresAt: later } };
-  const remaining = { quota: { remainingPercent: 10, assumed: false, source: 'provider', expiresAt: later } };
+  const exhausted = reading({ account: [{ percent: 100, resetAt: later }] });
+  const remaining = reading({ account: [{ percent: 90, resetAt: later }] });
   const result = await registrationLaunchChooser(async input => answer(input))({
     message: '@claude', tags: {}, candidates: [{ ...candidates[0], observations: exhausted }, { ...candidates[1], observations: remaining }] });
   assert.deepEqual(result.key, candidates[1].key);
@@ -244,9 +251,17 @@ test('an environment whose measured quota is exhausted until its reset is never 
   await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
     candidates: candidates.map(candidate => ({ ...candidate, observations: exhausted })) }),
   error => error.code === 'registration_quota_exhausted');
+  // The refusal names the earliest reading it rested on: only a newer one can start the summon.
+  const observedAt = candidates.map((_, index) => new Date(Date.now() - (index + 1) * 60_000).toISOString());
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
+    candidates: candidates.map((candidate, index) => ({ ...candidate,
+      observations: reading({ observedAt: observedAt[index], account: [{ percent: 100, resetAt: later }] }) })) }),
+  error => error.code === 'registration_quota_exhausted'
+    && error.quotaRefusedThrough === observedAt.at(-1)
+    && error.quotaTargets.length === candidates.length && error.quotaTargets.every(target => !target.model));
 
   // A passed reset or an assumed default is not an exhaustion fact.
-  const reset = { quota: { ...exhausted.quota, expiresAt: new Date(Date.now() - 1000).toISOString() } };
+  const reset = reading({ account: [{ percent: 100, resetAt: new Date(Date.now() - 1000).toISOString() }] });
   const assumed = { quota: { remainingPercent: 0, assumed: true } };
   for (const observations of [reset, assumed]) {
     const kept = await registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
@@ -254,6 +269,81 @@ test('an environment whose measured quota is exhausted until its reset is never 
     assert.deepEqual(kept.key, candidates[0].key);
   }
 });
+
+test("a model whose own quota is used up is no option, and named alone it is refused until it is back", async () => {
+  // 2026-11-15: Fable's own week used up while the account's week stood at 55%.
+  const back = new Date(Date.now() + 4 * 86_400_000).toISOString();
+  const fable = reading({ account: [{ label: '1w', percent: 55, resetAt: back }],
+    scoped: [{ label: '1w', percent: 100, resetAt: back, scope: 'Fable' }] });
+  const claude = { ...candidates[0], key: { ...candidates[0].key, harness: 'claude' }, models: [], supportsNativeModel: true,
+    observations: fable, modelCatalog: [
+      { model: 'claude-fable-5-2', description: '', efforts: [], names: ['default', 'Fable 5.2'], isDefault: true,
+        quotaScopes: ['Fable'] },
+      { model: 'claude-sonnet-5-5', description: 'Everyday', efforts: [], names: ['sonnet'], quotaScopes: ['Sonnet'] },
+      { model: 'claude-haiku-5-5', description: 'Fast', efforts: [], names: ['haiku'] }] };
+  const calls = [];
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { modelEffort: 'model_0' }); })({
+    message: '@claude review this', tags: {}, candidates: [claude] });
+  // The runtime's default is Fable: neither it nor Fable is offered.
+  const offered = Object.values(calls[0].questions.modelEffort.criteria).map(value => JSON.parse(value).model);
+  assert.deepEqual(offered, ['claude-sonnet-5-5', 'claude-haiku-5-5']);
+  assert.equal(chosen.preferredModel, 'claude-sonnet-5-5');
+  // Named, the used-up model is refused with when it is back.
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude model:fable',
+    tags: { model: 'Fable 5.2' }, candidates: [claude] }),
+  error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === new Date(back).toISOString()
+    && JSON.stringify(error.quotaTargets[0].model) === JSON.stringify({ model: 'Fable 5.2', quotaScopes: ['Fable'] }));
+  // Without a catalog row the scope is unknown: a scoped window refuses nothing.
+  const unlisted = { ...claude, modelCatalog: claude.modelCatalog.map(({ quotaScopes: _scopes, ...row }) => row) };
+  const kept = await registrationLaunchChooser(async input => answer(input, { modelEffort: 'model_0' }))({
+    message: '@claude', tags: {}, candidates: [unlisted] });
+  assert.deepEqual([kept.useRuntimeDefaultModel, kept.preferredModel], [true, undefined]);
+  // An environment is out only when every model it could run is.
+  const allUsed = reading({ account: [{ label: '1w', percent: 55, resetAt: back }], scoped: ['Fable', 'Sonnet', 'Haiku']
+    .map(scope => ({ label: '1w', percent: 100, resetAt: back, scope })) });
+  const spent = { ...claude, observations: allUsed, modelCatalog: claude.modelCatalog.map(row =>
+    ({ ...row, quotaScopes: [row.names[1] === 'Fable 5.2' ? 'Fable' : row.names[0] === 'sonnet' ? 'Sonnet' : 'Haiku'] })) };
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@claude', tags: {},
+    candidates: [spent] }), error => error.code === 'registration_quota_exhausted' && error.quotaResetsAt === undefined
+    // Named no model: its retry waits on the runtime's default.
+    && JSON.stringify(error.quotaTargets[0].model) === JSON.stringify({ model: '', quotaScopes: ['Fable'] }));
+});
+
+test("a stopped Instance whose model is used up continues on the launch's first model with quota", () => {
+  const now = Date.now();
+  const back = new Date(now + 4 * 86_400_000).toISOString();
+  const week = (percent, scope) => ({ label: '1w', percent, resetAt: back, ...(scope ? { scope } : {}) });
+  const catalog = [
+    { model: 'claude-fable-5-2', description: '', efforts: [], names: ['Fable 5.2'], isDefault: true, quotaScopes: ['Fable'] },
+    { model: 'claude-sonnet-5-5', description: '', efforts: [], names: ['sonnet'], quotaScopes: ['Sonnet'] },
+    { model: 'claude-haiku-5-5', description: '', efforts: [], names: ['haiku'] }];
+  const facts = (observations, extra = {}) => ({ models: [], supportsNativeModel: true, modelCatalog: catalog, observations, ...extra });
+  const fable = { model: 'claude-fable-5-2', quotaScopes: ['Fable'] };
+  // Fable (the default) used up: the first catalog model with quota, never Fable again.
+  const fableOut = reading({ account: [week(55)], scoped: [week(100, 'Fable')] });
+  assert.equal(quotaRecoveryModel(facts(fableOut), now, fable), 'claude-sonnet-5-5');
+  // A model of its own used up: the runtime's default comes first.
+  const sonnetOut = reading({ account: [week(55)], scoped: [week(100, 'Sonnet')] });
+  assert.equal(quotaRecoveryModel(facts(sonnetOut), now, { model: 'claude-sonnet-5-5', quotaScopes: ['Sonnet'] }), '');
+  // The runtime's default used up (no model named): the default is out even
+  // before a reading shows it, and so is every model the refusal's scopes constrain.
+  const unread = reading({ account: [week(55)] });
+  assert.equal(quotaRecoveryModel(facts(unread), now, { model: '', quotaScopes: ['Fable'] }), 'claude-sonnet-5-5');
+  assert.equal(quotaRecoveryModel(facts(unread), now, { model: 'claude-opus-5-5', quotaScopes: ['fable', 'SONNET'] }),
+    'claude-haiku-5-5', "the refused scopes, compared without case, rule out Fable and Sonnet");
+  assert.equal(quotaRecoveryModel(facts(unread, { modelCatalog: catalog.slice(0, 2) }), now,
+    { model: '', quotaScopes: ['Sonnet'] }), undefined, "default and Sonnet both out");
+  // A row without its scopes cannot be told apart from the used-up model.
+  assert.equal(quotaRecoveryModel(facts(fableOut, { modelCatalog: catalog.slice(0, 1) }), now, fable), undefined);
+  // The account used up, or a daemon that cannot switch: nothing to switch to.
+  assert.equal(quotaRecoveryModel(facts(reading({ account: [week(100)] })), now, fable), undefined);
+  assert.equal(quotaRecoveryModel(facts(fableOut, { supportsNativeModel: false }), now, fable), undefined);
+  // Declared models: another declared model, by its declared name.
+  const declared = facts(fableOut, { models: ['opus', 'sonnet'], modelAliases: { opus: 'claude-fable-5-2', sonnet: 'claude-sonnet-5-5' } });
+  assert.equal(quotaRecoveryModel(declared, now, fable), 'sonnet');
+  assert.equal(quotaRecoveryModel({ ...declared, models: ['opus'] }, now, fable), undefined);
+});
+
 test('runtime model aliases preserve the declared model and its observed effort options', async () => {
   const result = await registrationLaunchChooser(async input => answer(input))({ message: '@codex effort:high', tags: { effort: 'high' },
     candidates: [{ ...candidates[0], models: ['alias'], modelAliases: { alias: 'provider/model' }, supportsRequestedEffort: true,
@@ -452,7 +542,7 @@ test('with nothing left to choose Jev is not called, and each choice is recorded
   assert.equal(result.useRuntimeDefaultModel, true);
   assert.deepEqual(result.parameterEvidence.choices,
     [{ key: 'workspace', selected: 'workspace_0', probabilities: { workspace_0: 1 }, only: true }]);
-  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v11');
+  assert.equal(result.parameterEvidence.rubricVersion, 'registration-parameters-v12');
   const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
   assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
   // A choice beside it is still Jev's to make, and the one-option question goes with it as before.
@@ -489,6 +579,42 @@ test('an empty model list skips model selection, even beside an observed catalog
         ? 'registration_effort_unavailable' : 'registration_model_unavailable'));
     }
   }
+});
+
+test("a daemon that applies a native model offers the runtime's own catalog beside its default", async () => {
+  const candidate = { ...candidates[0], key: { ...candidates[0].key, harness: 'claude' }, models: [], supportsNativeModel: true,
+    modelCatalog: [
+      { model: 'claude-opus-5-5', description: '', efforts: [], names: ['default', 'Default (recommended)'], isDefault: true },
+      { model: 'claude-sonnet-5-5', description: 'Everyday', efforts: [], names: ['sonnet', 'Sonnet'] },
+      { model: 'claude-haiku-5-5', description: 'Fast', efforts: [], names: ['haiku'] }] };
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  const choose = async (tags, options = {}) => {
+    const calls = [];
+    const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, options); })({
+      message: '@claude review this', tags, candidates: [candidate] });
+    assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+    return { chosen, calls };
+  };
+  // The runtime's default is the first option; the default entry is not offered twice.
+  const kept = await choose({}, { modelEffort: 'model_0' });
+  const offered = Object.values(kept.calls[0].questions.modelEffort.criteria).map(value => JSON.parse(value).model);
+  assert.deepEqual(offered, ['', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
+  assert.deepEqual([kept.chosen.useRuntimeDefaultModel, kept.chosen.model, kept.chosen.preferredModel], [true, '', undefined]);
+  assert.equal(Object.hasOwn(kept.chosen.parameterEvidence.selections, 'model'), false);
+  // Jev's pick from the catalog starts the runtime on it, on the runtime-default authority.
+  const picked = await choose({}, { modelEffort: 'model_1' });
+  assert.deepEqual([picked.chosen.useRuntimeDefaultModel, picked.chosen.model, picked.chosen.preferredModel],
+    [true, '', 'claude-sonnet-5-5']);
+  assert.equal(picked.chosen.parameterEvidence.selections.model, 'claude-sonnet-5-5');
+  // A written model is matched by any name the runtime gives it, and is then the only option.
+  const written = await choose({ model: 'Sonnet' });
+  assert.equal(written.chosen.preferredModel, 'claude-sonnet-5-5');
+  assert.deepEqual(Object.keys(written.calls[0].questions.modelEffort.criteria), ['model_0']);
+  await assert.rejects(choose({ model: 'gpt-6' }), error => error.code === 'registration_model_unavailable');
+  // A daemon that cannot apply it keeps the old contract: no model choice, a written model refused.
+  const old = { ...candidate, supportsNativeModel: undefined };
+  await assert.rejects(registrationLaunchChooser(async input => answer(input))({
+    message: '@claude', tags: { model: 'sonnet' }, candidates: [old] }), error => error.code === 'registration_model_unavailable');
 });
 
 test('a requested effort applies to the runtime default model without a model choice', async () => {
@@ -540,17 +666,16 @@ test('effort routing excludes unproven controls before weighing fit or machine h
   error => error.code === 'registration_effort_unavailable');
 });
 
-test('default-only harnesses read intent, location and fit in one call, then weigh machine load', async () => {
+test('default-only harnesses read location and fit in one call, then weigh machine load', async () => {
   const calls = [];
   const available = twoHarnesses.map(candidate => ({ ...candidate, models: [] }));
   available.push({ ...available[1], key: { ...available[1].key, ownerUserId: 'idle', machineId: 'idle' },
     workspaces: available[1].workspaces.map(workspace => ({ ...workspace, machineId: 'idle' })),
     observations: { outstandingMachineAllocations: 0, quota: { remainingPercent: 100, assumed: true },
       machineResources: { cpuUsagePercent: 5 } } });
-  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
-    message: '@auto inspect', tags: {}, candidates: available,
-    summon: { text: '@auto', start: 0, end: 5, authorKind: 'human' } });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['intent', 'workspace', 'fit_0', 'fit_1']]);
+  const chosen = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
+    message: '@auto inspect', tags: {}, candidates: available, summon: { text: '@auto', start: 0, end: 5 } });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'fit_0', 'fit_1']]);
   assert.equal(chosen.key.machineId, 'idle');
   assert.equal(chosen.useRuntimeDefaultModel, true);
   assert.equal(chosen.parameterEvidence.placement.ranking[0].machineId, 'idle');
@@ -632,33 +757,16 @@ test('a listed repository comes first; directories are offered only when no repo
   assert.equal(directory.parameterEvidence.selections.repo, undefined);
 });
 
-const summon = { text: '@codex', start: 0, end: 6, authorKind: 'agent' };
-test('Jev answers intent in the first call; a non-request starts nothing', async () => {
-  const calls = [];
-  const choose = registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'explanation' }); });
-  await assert.rejects(choose({ message: '@codex was started by my heading', tags: {}, candidates, summon }),
-    error => error.code === 'summon_intent_explanation' && error.status === 409);
-  assert.equal(calls.length, 1);
-  assert.deepEqual(Object.keys(calls[0].questions), ['intent', 'workspace', 'modelEffort']);
-  assert.deepEqual(calls[0].state.summon, summon);
-});
-test('a request launches and keeps the intent evidence', async () => {
-  const calls = [];
-  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input, { intent: 'summon' }); })({
-    message: '@codex inspect', tags: {}, candidates, summon });
-  assert.equal(calls.length, 1, "intent, location and model are read together");
-  assert.equal(result.parameterEvidence.intent.source, 'jev');
-  assert.equal(result.parameterEvidence.intent.probabilities.summon, 1);
-  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
-  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
-});
-test('launch:force skips only the intent question', async () => {
+const summon = { text: '@codex', start: 0, end: 6 };
+test('a summon its send asked to launch asks Jev no intent question', async () => {
   const calls = [];
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
-    message: '@auto launch:force inspect', tags: { launch: 'force' }, candidates: twoHarnesses, summon });
-  assert.deepEqual(Object.keys(calls[0].questions), ['workspace', 'fit_0', 'fit_1']);
+    message: '@codex inspect', tags: {}, candidates, summon });
+  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
   assert.equal(Object.hasOwn(calls[0].state, 'summon'), false);
   assert.deepEqual(result.parameterEvidence.intent, { source: 'author' });
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
 });
 test('a message that summons nobody asks Jev whether to start and a no refuses', async () => {
   const calls = [];
@@ -750,16 +858,6 @@ test("a laptop is the machine's own form; Jev is not asked and headroom still pi
 });
 
 
-test('a Human-confirmed draft reading skips only intent and keeps the remaining launch selection', async () => {
-  const calls = [];
-  const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
-    message: '@codex inspect', tags: {}, candidates, summon: { ...summon, readInDraft: true } });
-  assert.deepEqual(calls.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
-  assert.deepEqual(result.parameterEvidence.intent, { source: 'draft' });
-  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
-  assert.deepEqual(parseLaunchParameterEvidence(result.parameterEvidence), result.parameterEvidence);
-});
-
 test('an environment that failed to start in the last 30 minutes goes after every one that did not', async () => {
   // 2026-10-17: `@auto` sent a new user's first task to a Grok that could not start, twice in a row.
   const machine = (id, load, startupFailedAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id },
@@ -781,6 +879,24 @@ test('an environment that failed to start in the last 30 minutes goes after ever
   assert.deepEqual(chosen.key, candidates[1].key);
   assert.equal(chosen.parameterEvidence.placement.ranking[1].startupFailedAt, '2026-10-17T09:38:00.000Z');
   assert.equal(chosen.parameterEvidence.placement.ranking[0].startupFailedAt, undefined);
+});
+
+test('an environment whose latest summons all ended without a reply goes after every one that answers', async () => {
+  // 2026-11-13: a Cursor that connected and ended every turn saying nothing took `@auto` work for two days.
+  const machine = (id, unansweredAt) => ({ ...candidates[0], key: { ...candidates[0].key, machineId: id }, ...(unansweredAt ? { unansweredAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true } } });
+  const silent = machine('silent', '2026-11-13T09:10:00.000Z'), answering = machine('answering');
+  assert.deepEqual(jointRanking([silent, answering], candidate => candidate === silent ? 1 : 1 / 3).map(item => item.candidate.key.machineId),
+    ['answering', 'silent']);
+  // With nothing else to ask, it is still asked: whoever summoned it reads what comes of it.
+  assert.equal(jointRanking([silent], () => 1)[0].candidate, silent);
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...silent, key: candidates[0].key }, { ...candidates[1], observations: answering.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].unansweredAt, '2026-11-13T09:10:00.000Z');
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
 });
 
 test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {

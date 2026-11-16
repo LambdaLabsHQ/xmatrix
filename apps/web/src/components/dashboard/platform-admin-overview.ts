@@ -89,12 +89,6 @@ export function platformAdminStatTiles(totals: AdminPlatformTotals, storageMeasu
       hint: `${formatAdminCount(totals.machines)} enrolled`,
     },
     {
-      key: "automation",
-      label: "Automations",
-      value: formatAdminCount(totals.enabledScheduledTasks),
-      hint: `${formatAdminCount(totals.scheduledTasks)} total`,
-    },
-    {
       key: "storage",
       label: "Stored",
       value: formatAdminBytes(totals.storageLogicalBytes),

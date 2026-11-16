@@ -3,6 +3,29 @@ import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
 /** Both modes record the invocation; private originals stay outside shared history. */
 export type ConnectorResultVisibility = "public" | "private";
 
+/**
+ * A receipt's id is `system:<execution id>:<app>`, at most 200 characters.
+ * An immediate run's execution id is the command message id. An approved run
+ * uses `<command message id>:approved`, and a finished X video upload uses
+ * `<command message id>:upload-result`, so those executions do not collide
+ * with the command message. A denial is named from the approval request, not
+ * the command, so it is not a suffix here and still counts as unread.
+ * The writers and the unread check share this list: a new execution suffix
+ * that is not listed still counts.
+ */
+const CONNECTOR_RECEIPT_EXECUTION_SUFFIXES = ["", ":approved", ":upload-result"] as const;
+const CONNECTOR_RECEIPT_ID_LIMIT = 200;
+
+export function connectorReceiptMessageId(executionMessageId: string, appId: string): string {
+  return `system:${executionMessageId}:${appId}`.slice(0, CONNECTOR_RECEIPT_ID_LIMIT);
+}
+
+/** SQL boolean: `messageId` is a receipt for `commandId` authored as `appId`. */
+export function connectorReceiptAnswersCommandSql(messageId: string, commandId: string, appId: string): string {
+  return CONNECTOR_RECEIPT_EXECUTION_SUFFIXES.map((suffix) =>
+    `${messageId}=left('system:'||${commandId}||'${suffix}:'||${appId},${CONNECTOR_RECEIPT_ID_LIMIT})`).join(" OR ");
+}
+
 export const PRIVATE_CONNECTOR_RESULT = "Result: [hidden — private call]";
 
 const CONNECTOR_RECEIPT_HEADING = "App connector command status:";
@@ -66,4 +89,88 @@ export function connectorReceiptPreview(preview: string): string | undefined {
   if (!match) return first;
   const status = match[2]!;
   return `${receiptSubject(match[1]!)} · ${status[0]!.toUpperCase()}${status.slice(1)}`;
+}
+
+/**
+ * What stopped a statement that a person can fix right under its receipt: the
+ * credential field to save or the connection to make again. The Hub stores
+ * these under a metadata key only it writes (`xmatrixConnectorFixes`), so the
+ * card they draw names the Hub's own fix, never one a message invented.
+ */
+export interface ConnectorReceiptFix {
+  providerId: string;
+  actionId: string;
+  /** The execution whose read can run again once the fix is in; none on a card an Agent asked for. */
+  executionId?: string;
+  remedy: { kind: "credential"; field: string } | { kind: "reconnect" };
+  /** A value the asking Agent suggests for a plain field, which a person confirms before it is saved. */
+  proposed?: string;
+}
+
+/** Metadata key of a receipt's fixes. */
+export const CONNECTOR_RECEIPT_FIXES_KEY = "xmatrixConnectorFixes";
+
+const FIX_ID = /^[A-Za-z0-9._:-]{1,240}$/u;
+
+/** A suggested plain value: one short line of printable text. */
+export function proposedValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  // eslint-disable-next-line no-control-regex
+  return trimmed && trimmed.length <= 200 && !/[\u0000-\u001f\u007f]/u.test(trimmed) ? trimmed : undefined;
+}
+
+/** A receipt's fixes, keeping only well-formed ones for a known App. */
+export function connectorReceiptFixesOf(metadata: Record<string, unknown> | undefined): ConnectorReceiptFix[] {
+  const value = metadata?.[CONNECTOR_RECEIPT_FIXES_KEY];
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 8).flatMap((item): ConnectorReceiptFix[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const fix = item as Record<string, unknown>;
+    const remedy = fix.remedy && typeof fix.remedy === "object" ? fix.remedy as Record<string, unknown> : undefined;
+    const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === fix.providerId);
+    if (!manifest || typeof fix.actionId !== "string" || !FIX_ID.test(fix.actionId) || !remedy ||
+      (fix.executionId !== undefined && (typeof fix.executionId !== "string" || !FIX_ID.test(fix.executionId)))) return [];
+    const base = { providerId: manifest.id, actionId: fix.actionId,
+      ...(typeof fix.executionId === "string" ? { executionId: fix.executionId } : {}) };
+    if (remedy.kind === "reconnect") return [{ ...base, remedy: { kind: "reconnect" } }];
+    const field = manifest.credentials?.find((candidate) => candidate.id === remedy.field);
+    if (remedy.kind !== "credential" || !field || field.generated || field.managed) return [];
+    const proposed = field.plain ? proposedValue(fix.proposed) : undefined;
+    return [{ ...base, remedy: { kind: "credential", field: field.id }, ...(proposed ? { proposed } : {}) }];
+  });
+}
+
+/** Metadata key of a card an Agent posted to ask for settings (`xmatrix request settings`). */
+export const SETTINGS_REQUEST_KEY = "xmatrixSettingsRequest";
+
+/** Where a fix's setting lives: `connector:<app>/<field>`, or `connector:<app>/connect` for the connection itself. */
+export function settingAddress(fix: Pick<ConnectorReceiptFix, "providerId" | "remedy">): string {
+  return `connector:${fix.providerId}/${fix.remedy.kind === "credential" ? fix.remedy.field : "connect"}`;
+}
+
+/** The fix a setting address names, when it names a known App's typed field or its connection. */
+export function settingAddressFix(address: string): Omit<ConnectorReceiptFix, "executionId"> | undefined {
+  const match = /^connector:([a-z0-9-]{1,80})\/([A-Za-z0-9_]{1,80})$/u.exec(address.trim());
+  if (!match) return undefined;
+  const remedy = match[2] === "connect" ? { kind: "reconnect" } : { kind: "credential", field: match[2] };
+  return connectorReceiptFixesOf({ [CONNECTOR_RECEIPT_FIXES_KEY]: [{ providerId: match[1], actionId: "settings", remedy }] })[0];
+}
+
+/** The connection as a settings card reads it. */
+export interface SettingsConnectionState {
+  status: string;
+  lastCheckedAt?: string;
+  credentialFields?: string[];
+}
+
+/**
+ * Whether a connection now has what a fix asked for: the Hub checked it after
+ * the card was written, the check passed, and a field it lacked is saved.
+ */
+export function connectorFixSettled(fix: Pick<ConnectorReceiptFix, "remedy">, connection: SettingsConnectionState | undefined,
+  askedAt: string): boolean {
+  if (!connection || connection.status !== "configured" || !connection.lastCheckedAt) return false;
+  if (Date.parse(connection.lastCheckedAt) <= Date.parse(askedAt)) return false;
+  return fix.remedy.kind !== "credential" || !connection.credentialFields || connection.credentialFields.includes(fix.remedy.field);
 }

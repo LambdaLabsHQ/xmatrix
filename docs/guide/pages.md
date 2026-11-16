@@ -1,15 +1,15 @@
 ---
-title: "Living pages and scheduled AI agents · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Automations that run agents on a schedule."
+title: "Living pages and programs that keep them true · xMatrix Docs"
+description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Norn programs that run agents on a schedule or an event."
 ---
 
-# Pages and Automations
+# Pages
 
 Conversations move fast and are hard to read later. Pages are where a Space keeps what is true now: current state, decisions in force and open work. People talk; agents keep the pages current.
 
 ## The page tree
 
-Each Space has one tree of pages. Organize it by what the Space works on, not by who said what. A page is Markdown, and its headings are its sections.
+Each Space has one tree of pages. Organize it by what the Space works on, not by who said what. A page is Markdown, and its headings are its sections. Its first top-level heading (`# Name`) is its name, wherever it stands; renaming a page rewrites that heading.
 
 In the app, open **Pages**. The list starts with recent changes, then the whole tree. From a terminal:
 
@@ -57,53 +57,55 @@ A heading slug is the heading in lower case with spaces as hyphens and punctuati
 
 Select a passage in a page and start a discussion: a conversation anchored to that passage. When it reaches an outcome, write the outcome into the page and resolve the discussion.
 
-## Automations
+## Programs
 
-An Automation is a standing instruction attached to a section: on a schedule, or when something happens, it starts an agent to keep that section true. Each run happens in a fresh conversation linked to the section.
+Work that repeats, waits for a date or starts when something happens is written on the page as a program: a code block tagged `norn run` and a name, in the section it keeps true. Programs are written in [Norn](https://norn-lang.org), and saving the page starts them. You read and change one like any other text on the page.
+
+An agent that keeps a section current, every 12 hours:
+
+````markdown
+## Open work
+
+```norn run triage
+open Std
+routine(~every=12h, ~from=2026-11-16T09:00Z, ~who=@auto(~repo="acme/web"),
+  ~otherwise=@claude(~repo="acme/web"),
+  "Read the issues opened since the last run and update this section")
+```
+````
+
+A reminder on a date:
+
+````markdown
+```norn run renew-domain
+after(2026-11-03T01:00Z)->wait
+say(@alice, "Renew the domain this week")
+```
+````
+
+A round every day, and at once when CI fails:
+
+````markdown
+```norn run build-watch
+open Std
+routine(~every=1d, ~from=2026-11-16T09:00Z, ~on=ciFailed("acme/web"),
+  ~who=@auto(~repo="acme/web"), ~otherwise=@claude(~repo="acme/web"),
+  "Check the build and fix what is broken")
+```
+````
+
+Times are UTC. `~from` is when the first round happens and the beat later rounds keep, `~who` does the work, and `~otherwise` names who is asked once more when a round does not end in an answer. `~on` adds a round when an event occurs, such as `ciFailed("owner/repo")` or `prMerged("owner/repo")`. A program can also ask people, wait for their answer under a deadline, and pass work between several agents. [Programs](programs.md) covers the language, requests, events and limits.
+
+### How a program runs
+
+- Each block has its own conversation, linked to the page. Its requests, answers and results are posted there.
+- Under the block, the page shows where the program stands: what it has asked and how that ended, whom it waits for, and what it does next. A block that cannot run as written shows why, and `xmatrix page edit` prints it.
+- A program runs as the person who last saved it, with that person's access; when an agent saves it, as the agent's owner.
+- Edit the block to change the program; what it already asked is not asked again. Remove the block to stop it.
 
 ```sh
-xmatrix page automation create <page-id> \
-  --block open-work \
-  --name "Triage new issues" \
-  --every 12h \
-  -m "@auto repo:acme/web read the issues opened since the last run and update this section"
+xmatrix page read <page-id>     # lists the page's programs and how each stands
 ```
-
-The instruction is an ordinary message, read with the [same syntax](syntax.md) as one you type. Start it with `@auto` or a harness name so that an agent is started; without a mention the Automation only posts its text. Do not address a numbered instance such as `@claude:2`: each run's conversation is new, so no such instance exists there.
-
-### When it runs
-
-`--every` sets the cadence: a number with `m`, `h` or `d`, such as `30m`, `12h` or `1d`.
-
-`--on` adds an event that also runs it. It can be repeated, up to eight triggers.
-
-| Trigger | Runs when |
-| --- | --- |
-| `--on merged:owner/repo` | A pull request is merged in that repository |
-| `--on merged:owner/repo@main:src/api,docs` | The same, limited to a branch and to paths |
-| `--on ci-failed:owner/repo` | CI fails in that repository |
-| `--on ci-failed:owner/repo@main:build.yml` | The same, limited to a branch and a workflow |
-| `--on sentry:issue.created:web` | A connected app's event arrives: `<app>:<event>[:<source>]` |
-| `--on linear:*` | Any event of that app |
-
-Events that arrive close together are combined into one run, and the run's message names them.
-
-### Managing them
-
-```sh
-xmatrix page automation list <page-id>
-xmatrix page automation edit <page-id> <automation-id> --version <n> --every 6h
-xmatrix page automation pause <page-id> <automation-id> --version <n>
-xmatrix page automation resume <page-id> <automation-id> --version <n>
-xmatrix page automation run <page-id> <automation-id> --version <n>      # once now; the cadence is unchanged
-xmatrix page automation delete <page-id> <automation-id> --version <n>
-```
-
-`--version` is the version `list` prints. It stops two people from overwriting each other's change.
-
-An Automation is referenced in its section's text. Removing the reference from the page pauses it, and `xmatrix page automation attach` puts it back and resumes it. In the app the same controls are under **Schedules**.
-
-An Automation runs as the person who created it, with that person's access.
 
 ## Public pages
 

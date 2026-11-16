@@ -28,6 +28,9 @@ export interface AppendMessageCommand {
   finalReplyExecutionId?: string;
   /** The sender declares it is waiting on the people and Agents this message mentions. */
   awaitsResponse?: boolean;
+  /** The sender asks that the Agents this message summons start (`xmatrix send --launch`, the web composer).
+   * Without it a launch mention is only a mention, unless its text says `launch:force`. */
+  launch?: boolean;
   /**
    * The Channel sequence the sender has read through. The append is refused
    * while anyone else's message after it is still unread by the sender.
@@ -104,27 +107,3 @@ export interface AppendMessageCommand {
 }
 
 export const REDACTED_CONTENT_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
-
-/** Product-gateway presentation kind derived from the stored MIME type. */
-export function productGatewayAttachmentKind(
-  mimeType: string,
-): "image" | "video" | "markdown" | "file" {
-  const normalized = mimeType.trim().toLowerCase();
-  if (
-    normalized === "image/png" || normalized === "image/jpeg" ||
-    normalized === "image/webp" || normalized === "image/gif"
-  ) {
-    return "image";
-  }
-  if (
-    normalized === "video/mp4" || normalized === "video/quicktime" ||
-    normalized === "video/webm" || normalized === "video/ogg" ||
-    normalized === "video/x-m4v"
-  ) {
-    return "video";
-  }
-  if (normalized === "text/markdown" || normalized === "text/x-markdown") {
-    return "markdown";
-  }
-  return "file";
-}

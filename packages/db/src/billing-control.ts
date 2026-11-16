@@ -21,9 +21,14 @@ const PAST_DUE_GRACE_MS = 7 * 24 * 60 * 60 * 1_000;
 const STRIPE_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due", "incomplete", "incomplete_expired",
   "unpaid", "canceled", "paused"] as const;
 
+/** Who charges for a Space: Stripe on the web, or the app store a native app bought through. */
+export type BillingProvider = "stripe" | "apple" | "google";
+/** Store-managed providers bound their entitlement by the store's period end. */
+const STORE_PROVIDERS: readonly string[] = ["apple", "google"];
+
 /** A verified provider snapshot, keyed to the Space it bills. */
 export interface BillingSubscriptionFact {
-  billingProvider?: "stripe" | "apple";
+  billingProvider?: BillingProvider;
   id: string;
   customerId: string;
   priceId: string;
@@ -103,7 +108,7 @@ async function requireOwner(tx: DatabaseTransaction, spaceId: string, userId: st
 }
 
 function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boolean {
-  if (row?.billing_provider === "apple" && (!row.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
+  if (STORE_PROVIDERS.includes(String(row?.billing_provider)) && (!row?.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
   return row?.status === "active" || row?.status === "trialing" ||
     (row?.status === "past_due" && row.grace_until &&
       new Date(row.grace_until as Date | string).getTime() > now);
@@ -170,6 +175,64 @@ async function summary(
   };
 }
 
+/** One author's share of an allowance: an Agent, an app, a person, or a person's paid X calls. */
+export interface UsageItem {
+  kind: "agent" | "app" | "user" | "x";
+  /** The person, or the Agent's owner; empty for an app. */
+  ownerUserId: string;
+  ownerName: string;
+  /** An Agent's registration name or an app's id; empty for a person. */
+  name: string;
+  messages: number;
+  pageRevisions: number;
+  units: number;
+}
+
+/**
+ * Who used the Space's allowance (docs/design/agent-credits.md#who-used-it):
+ * this month's credits for a paid Space, every write for a Free one. Paid X
+ * calls are read from their permanent receipts. `since` is the first write the
+ * ledger itemized, so a caller can tell writes counted before it apart.
+ */
+async function itemizedUsage(tx: DatabaseTransaction, spaceId: string, meter: "credit" | "free",
+  creditsWaived: boolean): Promise<{ meter: "credit" | "free"; waived: boolean; since: string | null; items: UsageItem[] }> {
+  const today = new Date();
+  const periodStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
+  const rows = await tx.query<QueryResultRow>({
+    name: "billing_itemized_usage_v1",
+    text: `WITH ledger AS (
+        SELECT author_kind AS kind,owner_user_id,author_name AS name,
+          SUM(units) FILTER (WHERE write_kind='message') AS messages,
+          SUM(units) FILTER (WHERE write_kind='page_revision') AS page_revisions,
+          SUM(units) AS units,MIN(created_at) AS since
+        FROM data.space_credit_usage
+        WHERE space_id=$1 AND meter=$2 AND ($2='free' OR period_start=$3::date)
+        GROUP BY 1,2,3
+      ), x AS (
+        SELECT 'x' AS kind,actor_user_id AS owner_user_id,'' AS name,0 AS messages,0 AS page_revisions,
+          SUM(COALESCE(actual_credits,reserved_credits)) AS units,NULL::timestamptz AS since
+        FROM data.paid_call_receipts
+        WHERE space_id=$1 AND $2='credit' AND created_at>=$3::date
+        GROUP BY actor_user_id HAVING SUM(COALESCE(actual_credits,reserved_credits))>0
+      ), items AS (SELECT * FROM ledger UNION ALL SELECT * FROM x)
+      SELECT items.*,COALESCE(NULLIF(member.display_name,''),member.email,'') AS owner_name
+      FROM items LEFT JOIN data.space_members member
+        ON member.space_id=$1 AND member.user_id=items.owner_user_id
+      ORDER BY items.units DESC,items.kind,items.name LIMIT 200`,
+    values: [spaceId, meter, periodStart], maxRows: 200,
+  });
+  const since = rows.map((row) => row.since).filter((value) => value != null)
+    .map((value) => new Date(value as string | Date).toISOString()).sort()[0] ?? null;
+  return {
+    meter, waived: meter === "credit" && creditsWaived, since,
+    items: rows.map((row) => ({
+      kind: String(row.kind) as UsageItem["kind"], ownerUserId: String(row.owner_user_id ?? ""),
+      ownerName: String(row.owner_name ?? ""), name: String(row.name ?? ""),
+      messages: Number(row.messages ?? 0), pageRevisions: Number(row.page_revisions ?? 0), units: Number(row.units ?? 0),
+    })),
+  };
+}
+
 /** This month's Agent credits (docs/design/agent-credits.md). A row from an
  * earlier month has nothing used yet this month; its pack balance carries over. */
 function creditSummary(allowance: CreditAllowance, seatQuantity: number, row: QueryResultRow | undefined,
@@ -229,7 +292,14 @@ export class PostgresBillingRepository {
     });
   }
 
-  async readSpaceBilling(input: { requestId: string; spaceId: string; actorUserId: string }) {
+  /**
+   * The Space's plan for a member. `itemize` adds who used its allowance, for
+   * the Billing page; `creditsWaived` is the deployment's own operator Space,
+   * whose credits are recorded but never charged.
+   */
+  async readSpaceBilling(input: {
+    requestId: string; spaceId: string; actorUserId: string; itemize?: { creditsWaived: boolean };
+  }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
     const placement = await this.spaces.resolve(requestId, "billing.read", spaceId);
     const session = this.database.openSession();
@@ -237,7 +307,10 @@ export class PostgresBillingRepository {
       // READ COMMITTED already takes a snapshot per SELECT. These independent
       // reads need no BEGIN/COMMIT; each retains its fence and bounded recovery.
       const tx = singleReadStatements(session, { requestId, operation: "billing.read", placement });
-      return { billing: await summary(tx, spaceId, actorUserId) };
+      const billing = await summary(tx, spaceId, actorUserId);
+      if (!input.itemize) return { billing };
+      return { billing: { ...billing,
+        usage: await itemizedUsage(tx, spaceId, billing.plan === "pro" ? "credit" : "free", input.itemize.creditsWaived) } };
     } finally {
       await session.close();
     }
@@ -258,6 +331,8 @@ export class PostgresBillingRepository {
       );
       if (rows[0].billing_provider === "apple") throw new BillingControlError(
         "apple_managed_subscription", 409, "Manage this subscription in the App Store");
+      if (rows[0].billing_provider === "google") throw new BillingControlError(
+        "google_play_managed_subscription", 409, "Manage this subscription in Google Play");
       return { customerId: rows[0].provider_customer_id,
         subscriptionId: rows[0].provider_subscription_id };
     });
@@ -300,13 +375,13 @@ export class PostgresBillingRepository {
 
   async createCheckoutIntent(input: {
     requestId: string; commandId: string; spaceId: string; actorUserId: string;
-    interval: "month" | "year"; priceId: string; seatQuantity: number; billingProvider?: "stripe" | "apple";
+    interval: "month" | "year"; priceId: string; seatQuantity: number; billingProvider?: BillingProvider;
   }) {
     const { requestId, spaceId, actorUserId } = ownerRequest(input);
     const commandId = text(input.commandId, "commandId");
     const priceId = text(input.priceId, "priceId");
     const provider = input.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && input.seatQuantity !== 1)) throw new BillingControlError("invalid_billing_checkout", 400, "Billing provider or seat quantity is invalid");
+    if (!["stripe", "apple", "google"].includes(provider) || (STORE_PROVIDERS.includes(provider) && input.seatQuantity !== 1)) throw new BillingControlError("invalid_billing_checkout", 400, "Billing provider or seat quantity is invalid");
     if (!Number.isSafeInteger(input.seatQuantity) || input.seatQuantity < 1 ||
         input.seatQuantity > 99 || (input.interval !== "month" && input.interval !== "year")) {
       throw new BillingControlError("invalid_billing_checkout", 400, "Billing checkout inputs are invalid");
@@ -334,7 +409,7 @@ export class PostgresBillingRepository {
         values: [spaceId], maxRows: 1,
       });
       const used = Number(seats[0]?.count ?? 0);
-      if (input.seatQuantity < used || (provider === "apple" && used !== 1)) throw new BillingControlError(
+      if (input.seatQuantity < used || (STORE_PROVIDERS.includes(provider) && used !== 1)) throw new BillingControlError(
         "billing_seat_quantity_too_low", 409,
         "Choose at least as many seats as current billable members", false, { usedSeats: used },
       );
@@ -508,7 +583,7 @@ export class PostgresBillingRepository {
     const eventCreatedAt = text(input.eventCreatedAt, "eventCreatedAt", 64);
     const subscription = input.subscription;
     const provider = subscription.billingProvider ?? "stripe";
-    if (!["stripe", "apple"].includes(provider) || (provider === "apple" && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
+    if (!["stripe", "apple", "google"].includes(provider) || (STORE_PROVIDERS.includes(provider) && !subscription.currentPeriodEnd)) throw new BillingControlError("invalid_billing_event", 400, "Invalid billing provider fact");
     const spaceId = text(subscription.spaceId, "subscription.spaceId");
     const ownerUserId = text(subscription.billingOwnerUserId, "subscription.billingOwnerUserId");
     const subscriptionId = text(subscription.id, "subscription.id");

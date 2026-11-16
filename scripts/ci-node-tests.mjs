@@ -11,12 +11,12 @@ const pureContractFiles = Object.freeze([
   "scripts/prune-r2-release-assets.test.mjs",
   "scripts/release-publication-policy.test.mjs",
   "scripts/release-version-order.test.mjs",
-  "scripts/r2-release-store.test.mjs",
   "scripts/rust-test-threads.test.mjs",
 ]);
 
 const childProcessFiles = Object.freeze([
   "scripts/ci-progress.test.mjs",
+  "scripts/r2-release-store.test.mjs",
 ]);
 
 export const nodeTestResourceFiles = Object.freeze({

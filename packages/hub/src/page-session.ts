@@ -1,7 +1,7 @@
 import {
   PAGE_AGENT_INK_MS, PAGE_DOCUMENT_FRAGMENT, PAGE_MESSAGE_CO_WRITE, mergePageText, mergePageWords, pageAuthorColor,
   pageChangedBlocks,
-  pageRemovedSections,
+  pageRemovedSections, pageSchedules,
   parsePageCoWriteReply, type PageCoWriteRequest, type PageEditResult,
 } from "@xmatrix/protocol";
 import {
@@ -14,6 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
+import { nornProgramProblems } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -32,6 +33,12 @@ import { PageOutputReceipts, type PageOutputWrite, type PageOutputReceipt,
  */
 
 export { PAGE_DOCUMENT_FRAGMENT };
+/**
+ * What an edit answers for each task line still written as a schedule (`🔁`, `⏳`): released CLIs hint that
+ * syntax and print these problems after `xmatrix page edit`, so whoever wrote the line learns it runs nothing.
+ */
+const SCHEDULE_LINE_PROBLEM = "Schedule lines no longer run. Write this as a program: a code block tagged "
+  + "`norn run <name>` (https://xmatrix.sh/docs/programs)";
 /** Where sessions before the document kept plain markdown; read once to convert them. */
 const LEGACY_MARKDOWN_TEXT = "markdown";
 
@@ -106,7 +113,7 @@ export interface PageSessionPorts {
   observeCoWriting?(principal: PageSessionPrincipal, event: PageCoWriteObservation): void;
   loadHead(principal: PageSessionPrincipal): Promise<PageHead>;
   loadRevision(principal: PageSessionPrincipal, revision: number): Promise<string>;
-  /** Commits a revision; returns the committed revision, the page head, and the Automations it moved. */
+  /** Commits a revision; returns the committed revision and the page head. */
   commit(principal: PageSessionPrincipal, input: PageCommitInput): Promise<PageSessionCommit>;
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
@@ -116,7 +123,7 @@ export interface PageSessionPorts {
 }
 
 /** A committed revision as the repository answers it, and whether the page takes Agent edits as suggestions. */
-export type PageSessionCommit = Omit<PageEditResult, "removedSections"> & { agentSuggestOnly: boolean };
+export type PageSessionCommit = Omit<PageEditResult, "removedSections" | "scheduleProblems"> & { agentSuggestOnly: boolean };
 
 export interface PageSessionPresent {
   name: string;
@@ -658,7 +665,7 @@ export class PageSession {
     this.settle();
     await this.persist();
     this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-      headRevision: result.headRevision, author: author.label, detachedAutomations: result.detachedAutomations }));
+      headRevision: result.headRevision, author: author.label }));
     return { revision: result.revision, kind: result.kind };
   }
 
@@ -821,7 +828,7 @@ export class PageSession {
         const result = await this.ports.commit(principal, { baseRevision: input.baseRevision, body: input.body,
           conversationIds: input.conversationIds, coAuthors: [], blockIds: [] });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] } as PageEditResult;
+        return { ...result, removedSections: [], scheduleProblems: [] } as PageEditResult;
       }
       // Pending human edits commit under their own authors first.
       await this.commitNow();
@@ -859,7 +866,7 @@ export class PageSession {
       if (result.kind === "suggestion") {
         this.setHead({ ...this.base, agentSuggestOnly: result.agentSuggestOnly });
         this.ports.broadcast(encodeNotice({ type: "suggestion", revision: result.revision, author: principal.label }));
-        return { ...result, removedSections: [] } as PageEditResult;
+        return { ...result, removedSections: [], scheduleProblems: [] } as PageEditResult;
       }
       this.setHead({ ...this.base, revision: result.headRevision, body: target,
         agentSuggestOnly: result.agentSuggestOnly });
@@ -880,8 +887,10 @@ export class PageSession {
       this.settle();
       await this.persist();
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
-        headRevision: result.headRevision, author: principal.label, detachedAutomations: result.detachedAutomations }));
-      return { ...result, removedSections: pageRemovedSections(current, target) } as PageEditResult;
+        headRevision: result.headRevision, author: principal.label }));
+      return { ...result, removedSections: pageRemovedSections(current, target),
+        scheduleProblems: [...pageSchedules(target).flatMap((line) => line.status === "done"
+          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target)] } as PageEditResult;
     });
   }
 

@@ -16,6 +16,7 @@ import { platformAdminForRequest } from "./index-routes-admin";
 import { recordAgentLaunchStage } from "./postgres-observability";
 import { mintGitHubRepositoryToken } from "./app-connectors";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
+import { isXmatrixOwnedDirectory } from "./workspace-path-policy";
 import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machineRepository } from "./machines";
 import { runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
@@ -454,7 +455,10 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
     const actingUserId = run ? run.ownerUserId : authUser.id;
     // Reading the Space as the actor is the access check.
     await getSpace(c.env, { spaceId, principal: { kind: "user", id: actingUserId } });
-    const workspaces = await listOwnerWorkspaces(workspaceRepository(c.env), actingUserId);
+    // Records older clients registered inside xMatrix's own directories are
+    // not places to launch; the owner can still list and unregister them.
+    const workspaces = (await listOwnerWorkspaces(workspaceRepository(c.env), actingUserId))
+      .filter(workspace => typeof workspace.canonicalCwd !== "string" || !isXmatrixOwnedDirectory(workspace.canonicalCwd));
     const repos = await launchTargetRepos(c.env, spaceId, actingUserId);
     return c.json(
       { spaceId, ...repos, workspaces },

@@ -44,7 +44,8 @@ async function confirmProviderQuota(userId, id) {
  * plays machine A's daemon answering the handoff stop. Returns what the
  * Channel and machine B saw.
  */
-async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuota = false, cancelWaiting = false, initialQuota = false } = {}) {
+async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuota = false, cancelWaiting = false, initialQuota = false, pinned = false,
+  modelScoped = false } = {}) {
   const userId = `cross-machine-handoff-${randomUUID()}`;
   const github = await githubInstallationCatalog(installationId, [{
     id: 1, name: "xmatrix", full_name: repository, private: true, archived: false,
@@ -63,8 +64,10 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
     const { channel } = await json(await worker.fetch("/api/channels", { method: "POST", headers,
       body: JSON.stringify({ spaceId, mode: "closed", name: `cross-machine-handoff-${randomUUID()}`, access: [] }) }));
     const hostA = `handoff-host-a-${randomUUID()}`, hostB = `handoff-host-b-${randomUUID()}`;
+    // A daemon that switches its runtime to a model of the runtime's own catalog.
     const daemon = (machineId, hostId) => connectAgent(worker, { name: `xmatrix-daemon-${hostId}`, agentType: "xmatrix_daemon",
-      metadata: { kind: "daemon", machineId, hostId, hostName: hostId, capabilities } });
+      metadata: { kind: "daemon", machineId, hostId, hostName: hostId,
+        capabilities: modelScoped ? [...capabilities, "registration_native_model_v1"] : capabilities } });
     daemonA = await daemon(machineA, hostA);
     daemonB = await daemon(machineB, hostB);
     const claude = await createRoutableAgent(worker, { token: MOCK_TOKEN, spaceId, name: "claude", harness: "claude",
@@ -83,7 +86,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       }));
       const body = `@claude repo:${repository} machine:${machineA} fix the bug`;
       const response = await worker.fetch(`/api/channels/${channel.id}/messages`, { method: "POST", headers,
-        body: JSON.stringify({ body }) });
+        body: JSON.stringify({ launch: true, body }) });
       assert.equal(response.status, 200, await response.clone().text());
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
         message => message.metadata?.kind === "xmatrix.quota-retry-offer", "initial quota wait offer", 30_000);
@@ -115,11 +118,12 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       return;
     }
 
-    // claude starts on machine A in a checkout of the repository.
+    // Only machine A has claude. Selecting its harness leaves placement
+    // portable unless the owner explicitly pins this work to that machine.
     const spawnA = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "claude spawn on machine A");
     const summon = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, { method: "POST", headers,
-      body: JSON.stringify({ body: `@auto repo:${repository} machine:${machineA} fix the bug` }) });
+      body: JSON.stringify({ launch: true, body: `@claude repo:${repository}${pinned ? ` machine:${machineA}` : ""} fix the bug` }) });
     assert.equal(summon.status, 200, await summon.clone().text());
     const launch = await spawnA;
     assert.equal(launch.remoteRepo, repository);
@@ -133,6 +137,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
         runId: launch.runId, executionKey: launch.executionKey, autoJoinChannelId: channel.id } }, token);
     assert.equal((await source.request({ type: "join_channel", channelId: channel.id, historyLimit: 0 })).type, "channel_joined");
 
+    let sleepingHandoff;
     // A sleeping source has no active Run: the old handoff implementation
     // omitted it from stop targets, then the successor's reply woke it again.
     if (sleeping) {
@@ -149,14 +154,59 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       }
       assert.equal(resting.rest_state, "sleeping", JSON.stringify(resting));
       source.ws.close();
-      const response = await worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
+      // Admission now waits for the daemon's stop confirmation. Answer it
+      // below while this request is in flight, as a real daemon does.
+      sleepingHandoff = worker.fetch(`/api/channels/${encodeURIComponent(channel.id)}/messages`, {
         method: "POST", headers, body: JSON.stringify({ body: `@claude:${resting.channel_instance_id}:handoff:@auto` }) });
-      assert.equal(response.status, 200, await response.clone().text());
     }
 
     // Its provider account runs out, or the owner hands off its sleeping work.
     const stopA = daemonA.inbox.waitFor(message => message.type === "machine_stop_agent" && message.runId === launch.runId,
       "handoff stop on machine A", 30_000);
+    if (modelScoped) {
+      // Its runtime reports its catalog; it runs Fable (the default), whose own week then runs out.
+      const resetsAt = new Date(Date.now() + 4 * 86_400_000).toISOString();
+      source.ws.send(JSON.stringify({ type: "presence_update", requestId: randomUUID(), status: "online",
+        model: "claude-fable-5-2", models: [
+          { id: "default", model: "claude-fable-5-2", displayName: "Fable 5.2", isDefault: true, quotaScopes: ["Fable"] },
+          { id: "sonnet", model: "claude-sonnet-5-5", displayName: "Sonnet 5.5", quotaScopes: ["Sonnet"] }] }));
+      for (let attempt = 0; attempt < 100; attempt++) {
+        const [row] = await inTestTransaction(tx => tx.query({ text: `SELECT presentation_json->'models' AS models
+          FROM data.instances WHERE instance_id=$1`, values: [launch.instanceId] }));
+        if (row?.models?.length === 2) break;
+        await sleep(25);
+      }
+      source.ws.send(JSON.stringify({ type: "agent_lifecycle", channelId: channel.id, layer: "application",
+        status: "failed", reason: "usage_limited", detail: "You've hit your Fable limit", resetsAt, quotaScope: "Fable",
+        usage: { quotaSource: "provider_api", quotaObservedAt: new Date().toISOString(),
+          quotaUsages: [{ label: "1w", percent: 55, resetAt: resetsAt }],
+          scopedQuotaUsages: [{ label: "1w", percent: 100, resetAt: resetsAt, scope: "Fable" }] } }));
+      // No handoff: the retry its author chooses continues on Sonnet now, in the same session.
+      const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
+        message => message.metadata?.kind === "xmatrix.quota-retry-offer", "model quota retry offer", 30_000);
+      assert.match(notice.body, /another model that has quota/);
+      const { pick } = quotaChoice(worker, channel.id, notice.metadata.xmatrixQuotaRetryId, headers);
+      const resumed = daemonA.inbox.waitFor(message => message.type === "machine_spawn_agent" &&
+        message.resumeInstanceId === launch.instanceId, "resumed on another model", 30_000);
+      assert.equal((await pick("wait")).status, 202);
+      const stop = await stopA;
+      daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
+        executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
+        resumeSessionKey: stop.resumeSessionKey, worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242,
+        cleanupReason: "process_terminated", relayLease: stop.relayLease }));
+      const recovered = await resumed;
+      assert.equal(recovered.context.preferredModel, "claude-sonnet-5-5");
+      const [retry] = await inTestTransaction(tx => tx.query({ text: "SELECT resume_model FROM data.agent_quota_retries WHERE retry_id=$1",
+        values: [notice.metadata.xmatrixQuotaRetryId] }));
+      assert.equal(retry.resume_model, "claude-sonnet-5-5", "a redelivered dispatch resumes on the same model");
+      const [run] = await inTestTransaction(tx => tx.query({ text: "SELECT metadata_json FROM data.runs WHERE run_id=$1",
+        values: [recovered.runId] }));
+      assert.equal(run.metadata_json.originalRuntimeModel, "", "it goes back to the runtime default once that has quota");
+      assert.equal(recovered.resumeSessionKey, launch.resumeSessionKey);
+      assert.equal((await channelHistory(worker, MOCK_TOKEN, channel.id)).messages
+        .filter(message => /:handoff:@auto/u.test(message.body ?? "")).length, 0);
+      return { recovered };
+    }
     if (!sleeping) source.ws.send(JSON.stringify({ type: "agent_lifecycle", channelId: channel.id, layer: "application",
       status: "failed", reason: "usage_limited", detail: "You've hit your session limit · resets 10:20am (UTC)",
       resetsAt: new Date(Date.now() + 3_600_000).toISOString() }));
@@ -176,7 +226,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       assert.equal(stop.resumeSessionKey, launch.resumeSessionKey);
       for (const [key, value] of Object.entries(repoPool)) assert.equal(stop[key], value);
     }
-    const spawnB = waitForQuota ? null : daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
+    const spawnB = waitForQuota || pinned ? null : daemonB.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.channelId === channel.id,
       "codex spawn on machine B", 30_000);
     daemonA.ws.send(JSON.stringify({ type: "machine_stop_result", requestId: stop.requestId, runId: stop.runId,
       executionKey: stop.executionKey, agentId: stop.agentId, instanceId: stop.instanceId,
@@ -184,6 +234,21 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
       repoIdentity: stop.repoIdentity, repoKeyId: stop.repoKeyId, slotId: stop.slotId,
       worktreeDisposition: stop.worktreeDisposition, ok: true, pid: 4242, cleanupReason: "process_terminated",
       ...answerStop(stop), relayLease: stop.relayLease }));
+    if (sleepingHandoff) {
+      const response = await sleepingHandoff;
+      assert.equal(response.status, 200, await response.clone().text());
+    }
+
+    if (pinned) {
+      await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
+        message => message.messageId === handoff.messageId && (message.commandResult?.notes ?? []).some(note =>
+          /could not hand off.*registration_machine_unavailable/u.test(note.text)),
+        "explicit source machine prevents cross-machine handoff", 30_000);
+      const launches = await inTestTransaction(tx => tx.query({
+        text: "SELECT launch_id FROM data.agent_launches WHERE channel_id=$1", values: [channel.id] }));
+      assert.equal(launches.length, 1, "a portable successor must not bypass the owner's machine constraint");
+      return;
+    }
 
     if (waitForQuota) {
       const notice = await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
@@ -304,6 +369,10 @@ test("a machine whose daemon predates exports still hands off with branch retrie
   assert.match(successor.prompt, /If the branch never appears, its directory remains on its machine/);
 });
 
+test("an explicit source machine refuses cross-machine quota handoff", async () => {
+  await usageLimitedOnMachineA(() => ({}), { pinned: true });
+});
+
 test("handing off a sleeping source stops it before the successor's reply can wake it", async () => {
   const { branch, successor } = await usageLimitedOnMachineA(stop => ({ handoffExport: {
     branch: stop.handoffExport.branch, state: "pushed", commit: "d".repeat(40), base: "e".repeat(40), dirty: true,
@@ -314,6 +383,10 @@ test("handing off a sleeping source stops it before the successor's reply can wa
 
 test("when no successor has quota, waiting is opt-in and quota recovery resumes the original session once", async () => {
   await usageLimitedOnMachineA(() => ({}), { waitForQuota: true });
+});
+
+test("a turn refused for its model's own quota continues on another model of the same harness", async () => {
+  await usageLimitedOnMachineA(() => ({}), { modelScoped: true });
 });
 
 test("a cancelled quota wait cannot be reopened by a stale device or create a continuation", async () => {

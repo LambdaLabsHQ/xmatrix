@@ -5,13 +5,11 @@ import { useMemo } from "react";
 import {
   type AgentRegistrationSummary,
   type ObservabilityEvent,
-  type SerializedAutomation,
   type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
 import { ErrorNotice } from "@/components/ui/error-notice";
-import { formatAutomationNext } from "@/components/pages/page-automation-format";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { AgentListGroups, agentListGroups } from "./agent-list-groups";
@@ -24,32 +22,22 @@ import { MachineLoadGlance } from "./machine-load-panel";
 import { MachineListRow, machinePlatform, machineStateLine, machinesWithHostsFirst } from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import { registrationActivity, registrationListed } from "./my-agents-registrations";
-import { ScheduleListGroups, useScheduleWhere } from "./schedule-list-groups";
-import { scheduleRunning, type ScheduleState } from "./schedules-model";
 import { formatRelativeAge } from "./time-display";
 import { ToolDetailSection, ToolList, ToolListGroup, ToolPaperScroll, ToolSplit } from "./tool-split";
 import { channelWorkInHand } from "./workspace-shell-chrome";
+import { useLiveChannels } from "./realtime-channels";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** Machine rows show at most this many runtimes; the rest are counted. */
 const MACHINE_RUNTIMES_SHOWN = 3;
-const UPCOMING_SHOWN = 5;
 /** Rows the list shows before "Show more", so the whole list fits on one screen. */
 const MACHINES_SHOWN = 3;
-const SCHEDULES_SHOWN = 3;
 
 type RuntimeCount = { harness: string; working: number };
 
-/** Status lists every group of schedules among other things, so each says it is schedules. */
-const SCHEDULE_TITLES: Record<ScheduleState, string> = {
-  attention: "Schedules needing attention",
-  running: "Schedules",
-  paused: "Paused schedules",
-};
-
 /**
- * Status: the Space at work. Its list is the Agents, Machines and Schedules
- * lists one after another, each showing its first few rows with the rest a
+ * Status: the Space at work. Its list is the Agents and Machines lists one
+ * after another, each showing its first few rows with the rest a
  * click away, so the whole Space fits on one screen; a row opens in its own
  * destination. The paper beside it is the overview at a glance; on a phone
  * the overview leads the list.
@@ -61,14 +49,10 @@ export function StatusView({
   machines,
   channels,
   events,
-  automations,
-  executionEnabled,
   onOpenAgent,
   onOpenAgents,
   onOpenMachine,
   onOpenMachines,
-  onOpenSchedule,
-  onOpenSchedules,
 }: {
   spaceId: string | null;
   token: string | undefined;
@@ -76,18 +60,13 @@ export function StatusView({
   machines: MachineSummary[];
   channels: readonly ChannelSnapshot[];
   events: ObservabilityEvent[];
-  automations: SerializedAutomation[];
-  executionEnabled: boolean | null;
   onOpenAgent: (registrationId: string) => void;
   onOpenAgents: () => void;
   onOpenMachine: (machineId: string) => void;
   onOpenMachines: () => void;
-  onOpenSchedule: (automationId: string) => void;
-  onOpenSchedules: () => void;
 }) {
   const ready = Boolean(spaceId && token);
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
-  const where = useScheduleWhere(spaceId, token ?? "", channels);
   // Load samples and "seen" ages expire; re-read them between refreshes.
   const now = useNow(15_000);
 
@@ -95,8 +74,13 @@ export function StatusView({
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
   // Working is an Instance with work in hand in some conversation: a live
   // process waiting for its next message runs but does not work.
-  const working = useMemo(() => new Set(channels.flatMap((channel) => channelWorkInHand(channel, events)
-    .map((work) => work.instance.id))), [channels, events]);
+  // The list copies hold no Instances: work in hand is read from the live Channels.
+  const liveChannels = useLiveChannels();
+  const working = useMemo(() => {
+    const listed = new Set(channels.map((channel) => channel.id));
+    return new Set(liveChannels.filter((channel) => listed.has(channel.id)).flatMap((channel) =>
+      channelWorkInHand(channel, events).map((work) => work.instance.id)));
+  }, [channels, liveChannels, events]);
   const workingOf = (registration: AgentRegistrationSummary) =>
     registration.live?.running.filter((instance) => working.has(instance.instanceId)).length ?? 0;
 
@@ -143,10 +127,6 @@ export function StatusView({
     ? registrations.reduce((sum, registration) => sum + workingOf(registration), 0)
     : machineRows.reduce((sum, row) => sum + row.working, 0);
 
-  const active = automations.filter(scheduleRunning);
-  const upcoming = [...active].sort((left, right) => Date.parse(left.nextRunAt) - Date.parse(right.nextRunAt))
-    .slice(0, UPCOMING_SHOWN);
-
   const overview = (
     <>
       <header className="app-status-hero mb-8" data-testid="status-hero">
@@ -155,7 +135,7 @@ export function StatusView({
           <span className="text-lg font-semibold">{workingCount === 1 ? "agent working" : "agents working"}</span>
         </div>
         <p className="mt-2 text-sm text-muted-foreground" data-testid="status-summary">
-          {busy}/{online} machines busy · {active.length} {active.length === 1 ? "schedule" : "schedules"}
+          {busy}/{online} machines busy
         </p>
       </header>
 
@@ -215,25 +195,6 @@ export function StatusView({
             </ul>
           )}
         </ToolDetailSection>
-        <ToolDetailSection title="Schedules" action={<SeeAll label="All schedules" onClick={onOpenSchedules} />}>
-          {upcoming.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nothing runs on a schedule.</p>
-          ) : (
-            <ul className="app-tool-lines">
-              {upcoming.map((automation) => (
-                <li key={automation.id}>
-                  <button type="button" onClick={() => onOpenSchedule(automation.id)} data-testid="status-schedule-row"
-                    className="flex w-full min-w-0 items-baseline gap-3 py-2 text-left">
-                    <span className="w-20 shrink-0 text-sm tabular-nums text-muted-foreground">
-                      {formatAutomationNext(automation.nextRunAt).replace(/^next (?:run )?/u, "") || "unscheduled"}
-                    </span>
-                    <span className="min-w-0 flex-1 truncate font-semibold">{automation.name}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ToolDetailSection>
 
       </div>
     </>
@@ -261,8 +222,6 @@ export function StatusView({
           })}
         </ToolListGroup>
       )}
-      <ScheduleListGroups automations={automations} executionEnabled={executionEnabled} where={where} now={now}
-        selectedId={null} onSelect={onOpenSchedule} titles={SCHEDULE_TITLES} limit={SCHEDULES_SHOWN} />
     </ToolList>
   );
 

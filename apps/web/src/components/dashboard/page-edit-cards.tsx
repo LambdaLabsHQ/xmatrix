@@ -11,8 +11,8 @@ import { pageApi } from "@/lib/pages/page-client";
 import { usePageReferenceScope } from "./page-reference-chip";
 import { heldPageMessageEdits } from "./page-message-edits-hold";
 
-/** Where a page opened from a message's edit card: what changed since, and the message to go back to. */
-export interface PageEditOpening { since: number; from: { channelId: string; messageId: string } }
+/** Where a page opened from a message's edit card: the message to go back to. */
+export interface PageEditOpening { from: { channelId: string; messageId: string } }
 
 const NO_EDITS = new Map<string, readonly PageMessageEdit[]>();
 /** How many changed lines a folded card previews, each on one line. */
@@ -77,8 +77,8 @@ function Segments({ segments }: { segments: readonly PageEditSegment[] }) {
  * The pages an Agent's message changed, drawn with it as a tool call's result is: one folded card per page. Folded,
  * it names the page and the sections changed, counts the lines added and taken out, and previews two changes each
  * on one line, cut to where the words changed, leading with what the page says now. Unfolded, it lists every change
- * by section, new words underlined and words taken out struck through, as the page itself marks what changed since
- * it was read. Open shows the page at that change.
+ * by section, new words underlined and words taken out struck through, as History marks what a version changed.
+ * Open shows the page as it is now, at that change.
  */
 export function PageEditCards({ edits, channelId, messageId }: {
   edits: readonly PageMessageEdit[]; channelId: string; messageId: string;
@@ -89,14 +89,14 @@ export function PageEditCards({ edits, channelId, messageId }: {
     <div className="app-page-edits">
       {edits.map((edit) => (
         <PageEditCard key={edit.pageId} edit={edit} spaceId={scope.spaceId} token={scope.token}
-          onOpen={(blockId, since) => scope.onOpenPage(edit.pageId, blockId, { since, from: { channelId, messageId } })} />
+          onOpen={(blockId) => scope.onOpenPage(edit.pageId, blockId, { from: { channelId, messageId } })} />
       ))}
     </div>
   );
 }
 
 function PageEditCard({ edit, spaceId, token, onOpen }: {
-  edit: PageMessageEdit; spaceId: string; token: string; onOpen: (blockId: string | null, since: number) => void;
+  edit: PageMessageEdit; spaceId: string; token: string; onOpen: (blockId: string | null) => void;
 }) {
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
@@ -131,7 +131,6 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
   // The preview leads with what the page says now; lines only taken out come after, in page order.
   const preview = [...glimpses.filter((glimpse) => glimpse.kind !== "removed"),
     ...glimpses.filter((glimpse) => glimpse.kind === "removed")].slice(0, PREVIEW);
-  const since = runs[0]!.from;
   const body = `page-edit-${edit.messageId}-${edit.pageId}`;
   return (
     <div className="app-page-edit" data-testid="page-edit-card" data-open={open || undefined}>
@@ -163,7 +162,7 @@ function PageEditCard({ edit, spaceId, token, onOpen }: {
           {!open && glimpses.length > PREVIEW
             ? <button type="button" className="app-page-edit-more" onClick={() => setOpen(true)}>{glimpses.length - PREVIEW} more</button>
             : <span />}
-          <button type="button" className="app-page-edit-open" onClick={() => onOpen(glimpses[0]?.blockId || null, since)}>
+          <button type="button" className="app-page-edit-open" onClick={() => onOpen(glimpses[0]?.blockId || null)}>
             Open page <ArrowUpRight aria-hidden="true" />
           </button>
         </p>

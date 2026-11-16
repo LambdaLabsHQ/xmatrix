@@ -8,21 +8,30 @@ AWS region as the Worker placement hint. It is a deliberate single-node cluster
 
 ## Connection budget
 
-The origin allows 50 connections, 3 of them reserved for superusers. Both
-shards share it, and the provider's own sessions (`pscale_admin`,
+The origin allows 25 connections, 3 of them reserved for superusers. The
+provider sets that number, not us: it was 50 until PlanetScale's forced
+PostgreSQL 17.12 maintenance restart on 2026-11-14 and 25 after it, which left
+the pools pinned for 50 holding every slot. Raising it again is a cluster
+parameter in the PlanetScale console and restarts Postgres. Both shards share
+the origin, and the provider's own sessions (`pscale_admin`,
 `pscale_exporter`) hold about 4. Hyperdrive limits are soft: on 2026-10-08 the
-primary pool held 36 connections against a limit of 30, and with 30 + 10
-configured the origin refused every other login (`remaining connection slots
-are reserved for roles with the SUPERUSER attribute`), which failed release
-verification and Hyperdrive's own reconnects. So
-`scripts/production-hyperdrive-prepare.mjs` pins them at 24 (primary) and 8
-(shard 1): an overshoot of that size still leaves room for migrations,
-release verification and operators. Any other Hyperdrive configuration
-pointing at the same origin counts against the same 50; delete retired ones
-rather than leaving them idle.
+primary pool held 36 connections against a limit of 30, and the origin refused
+every other login (`remaining connection slots are reserved for roles with the
+SUPERUSER attribute`), which failed release verification and Hyperdrive's own
+reconnects. So `scripts/production-hyperdrive-prepare.mjs` pins them at 8
+(primary) and 5 (shard 1, the provider's minimum): an overshoot of that size
+still leaves room for migrations, release verification and operators. The Hub
+keeps under one connection busy, so the primary pool can grow back toward 24
+once the origin allows 50 again. Any other Hyperdrive configuration pointing at
+the same origin counts against the same budget; delete retired ones rather
+than leaving them idle.
+
+After a provider restart, compare `max_connections` with the pinned limits
+before anything else.
 
 To see who holds the origin, read `pg_stat_activity` grouped by `usename`
-(the runtime secret can, while a slot is free) and sum
+(the runtime secret can, while a slot is free; when none is, a Worker bound to
+the same Hyperdrive configuration reads it over a pooled connection) and sum
 `hyperdrivePoolSizesAdaptiveGroups.max.currentPoolSize` over `poolShardId` per
 minute: the per-shard maximum alone hides the overshoot.
 
@@ -47,6 +56,19 @@ operator) must bound its own queries.
 
 ## Session features under Hyperdrive
 
+Launch candidate selection uses independent `single_read` statements for its
+registration grants, model/parameter observations, response latencies and
+directory enrichment (HUB-BZ). Each lost response retries once on a fresh
+connection, with the placed reads checking their fence again. Selection remains
+advisory: preparation and commit recheck current admission under their existing
+locks, and unknown launch commits retain their existing reconciliation.
+
+Channel transfer proposal lists combine the current Human admin check and the
+bounded queue in one placed `single_read` (HUB-BW). A lost response retries once
+on a fresh connection and rechecks both membership and placement; repeated loss
+still fails. An outer join distinguishes an authorized empty queue from denied
+access. Transfer confirmations and writes keep their transaction boundaries.
+
 Billing summaries use the client's independent `single_read` statements on one
 request session, including membership and placement checks. Each lost response
 may recover once on a fresh checkout; repeated loss still fails the request.
@@ -61,20 +83,37 @@ these fields and the response's diagnostic reference. Deployed `index.js`
 frames retain source-map resolution; driver messages, SQL details and causes
 are excluded. Exact documented Hyperdrive `58000` messages map to finite
 internal, pool-acquisition or connection-refused labels; other text stays
-unclassified. A missing code or capture-boundary stack remains insufficient
-to diagnose an outage or authorize a transaction replay.
+unclassified. Each `CONNECTION_TERMINATED` attempt also retains a fixed
+`driverReason` for pg's generic termination, pg's unexpected termination, or
+Hyperdrive's explicit egress-severed response. These labels distinguish the
+observed driver messages, not the underlying cause; no raw message or cause
+is stored. Historical events without the field remain readable. A missing code
+or capture-boundary stack remains insufficient
+to diagnose an outage or authorize a transaction replay. A termination recorded
+by the database client returns the existing retryable unavailable response after
+its single replay is exhausted. Raw generic termination text or `58000` without
+that evidence does not change classification; explicit SQL rejections keep theirs.
 
 Message authority failures also explicitly report the original exception and
 bounded database evidence, rather than relying on console serialization.
 Text-task answer application failures retain the original exception and bounded
 database evidence while still acknowledging the completed Machine command.
-Slow execution-report owner, Channel metadata root/control-head and lifecycle
-admission locks sample the live wait edge before a lock timeout removes it: only fixed waiter/blocker
+Slow execution-report owner, Channel metadata root/control-head, runtime and
+machine-lifecycle control-head updates, Machine command advisory scopes, and
+lifecycle admission locks sample the live wait edge before a lock timeout or
+deadlock removes it: only fixed waiter/blocker
 owner categories, state, wait type and capped transaction age are retained.
 Catalog writers have their own fixed owner category. All paths share one
 additional diagnostic connection per isolate, with 250 ms connection/query
 deadlines; fast locks open none. An unavailable or
 busy sampler preserves the original error and existing recovery rules.
+For a runtime head deadlock (HUB-BH), compare the failing operation with the
+blocker's `op:<operation>`, state and wait type to locate the other code path
+before changing lock order; an unavailable sample does not establish a cause.
+For a Machine scope timeout (HUB-BJ), compare `machine-control.report` with
+the blocker's `op:<operation>`, state, wait type and age to identify which
+command held the scope. The scope preserves Machine epoch and command ordering;
+an answered `55P03` is not a lost response and does not authorize replay.
 
 Hyperdrive pools in transaction mode. Session state does not survive between
 transactions: use transaction-local settings (`set_config(..., true)` or
@@ -200,6 +239,15 @@ Delivery and provider effects stay outside the transaction. An answered database
 or domain rejection is not replayed; a second transport loss retains both
 failures. Unknown COMMIT still escapes to the Hub's existing append receipt
 reconciliation, never to immediate replay.
+System annotations, including Machine command results and other Hub judgments
+(HUB-BV), use the same one-replay database-only boundary. Each fresh session
+relocks the live message and rechecks the annotation payload, so a concurrent
+recall stops the write and a repeated judgment remains idempotent. Publication
+runs only after success; answered rejections, a second loss and unknown COMMIT
+still escape without another immediate replay. This repairs the missing
+recovery without attributing the underlying stall.
+Its operation is `message.system-annotation`, so bounded telemetry retains it
+in the message family instead of collapsing the old hyphenated name to `other`.
 Lock-free page search uses per-statement `single_read` recovery, including its
 membership and accessible-page checks (HUB-99).
 Channel detail reads use the same request-local, per-statement recovery for
@@ -224,6 +272,15 @@ without changing attempts, leases or receipt cleanup; the minute recovery wake
 tries again. Successful claims still serialize the eight-active-lease bound.
 Webhook admission retains its waiting lock to enforce receipt and backlog bounds;
 database failures other than a busy try-lock still propagate normally.
+For an unknown claim COMMIT (HUB-BY), four independent lease nonces are created
+before the transaction and retained across its bounded pre-COMMIT replay.
+A fresh `single_read` reconciles only committed, unexpired leases with those
+nonces and a live receipt; it never claims another batch. No matching rows do
+not prove rollback: minute recovery and lease expiry still own any late commit.
+A failed reconciliation retains both database failures. Each delivery continues
+to recheck the current grant and lease; that lock-free check also uses
+`single_read` recovery. The eight-active-lease bound, per-job fencing and
+provider effect idempotency remain unchanged.
 
 Gmail pending notification IDs use one lock-free `single_read`; retrying a
 completion never reruns provider calls or delivery. Its lease ID and expiry
@@ -325,6 +382,39 @@ configuration's pool from the Cloudflare dashboard (Hyperdrive → configuration
 `waitingClients` returns to 0. Keep transactions short: long ones delay a
 provider failover or restart.
 
+## Result bytes and egress attribution
+
+PlanetScale bills public egress, and Hyperdrive reports `resultBytes` per
+config and time, but neither says which query sent the bytes. The authority
+client meters them itself: node-postgres announces every DataRow with its wire
+length, and the client adds those lengths (plus the message type byte) across
+each statement. Every query point in `postgres_substrate_observability_v4`
+carries its statement's result bytes in `double5`; every session point carries
+the checkout's total, openings included, in `double16`. Rows are not a proxy:
+one catalogue page row is a JSON array of fifty Channels with their head
+messages, about 160 KB for a large Space.
+
+Rank queries and operations by bytes, weighted like every other count:
+
+```sql
+SELECT blob9 AS query, blob11 AS operation,
+  sum(double4 * _sample_interval) AS calls,
+  sum(double5 * double4 * _sample_interval) AS bytes
+FROM xmatrix_relay_authority_observability
+WHERE index1 = 'postgres_substrate_observability_v4' AND blob1 = 'query'
+  AND timestamp > NOW() - INTERVAL '1' DAY
+GROUP BY query, operation ORDER BY bytes DESC LIMIT 30 FORMAT JSON
+```
+
+Reconcile the session total (`blob1 = 'session'`, `double16`) against
+Hyperdrive's `hyperdriveQueriesAdaptiveGroups` `resultBytes` for the same UTC
+hours before treating the ranking as the whole story. The meter does not see
+clients outside the authority database: Better Auth's own pool, the lifecycle
+maintenance executor, migrations and manual read-only sessions. Hyperdrive's
+returned bytes and PlanetScale's billed egress are separate counters and are
+not converted into each other. Points written before 2026-11-03 have no result
+bytes.
+
 ## Channel catalogue counts
 
 A Space-scoped control request (including the Channel list) with no placement
@@ -334,14 +424,16 @@ blocked placement still answers retryable `space_placement_unavailable` (503).
 Malformed placement rows and database failures remain unexpected failures;
 a missing caller-selected Space is not a storage contract violation.
 
-Catalogue counters aggregate the selected principal's attention once per Space,
-then join the per-Channel result to the freshly authorized Channel set and read
-cursors. A Channel needs attention when any declared wait still stands or its
-maximum attention sequence exceeds the cursor. Keep `BOOL_OR` over all waits:
-the newest attention row alone can hide an older acknowledged question.
-Unread speech retains its separate message predicate, so activity-only entries
-do not make a Channel unread. Grouping does not grant access to hidden Channels
-or another principal's attention, and each Channel counts once.
+Catalogue counters probe each freshly authorized Channel's read cursor and the
+selected principal's attention by index, never by joining the Channel set to a
+per-Space aggregate of attention: PostgreSQL estimates both sides at a few rows
+and nested-loops them, which in a Space of 2,920 Channels compared 2.7 million
+pairs per count (p99 about 2.8 s in production, 2026-11). A Channel needs
+attention when an attention row lies past the cursor or any declared wait still
+stands; the second probe checks every waiting row, so an older acknowledged
+question still counts. Unread speech retains its separate message predicate, so
+activity-only entries do not make a Channel unread. Probes are bounded to
+readable Channels and the principal's own subject, and each Channel counts once.
 
 For query-cost work, compare old and new SQL inside a read-only repeatable-read
 snapshot. Check identical counter results, then inspect repeated
@@ -352,3 +444,21 @@ in `blob9`) to identify production frequency and tail latency. The overview
 already shares one metadata scan; adding a timestamp index cannot remove its
 all-time exact counts by itself. PostgreSQL table statistics are estimates,
 not exact row counts.
+
+### Content lock holder evidence
+
+HUB-BN waits on the Channel metadata lock while `content.ref.commit` holds
+its capability share lock. A holder being `idle in transaction` does not prove
+whether its response is delayed or the application is between statements.
+The two observed holders, `content.intent.create` and `content.ref.commit`,
+now prefix statements with an allowlisted, code-owned query label. The bounded
+lock sample projects only that label, transaction age, query age and state age;
+it never returns SQL, parameters or backend identities. Unknown labels become
+`unclassified`. Read these fields through the Sentry issue reader to locate the
+last content/billing statement before changing transaction structure. PostgreSQL
+query age includes execution and subsequent idle time; state age measures time
+in the reported state. Neither measures network latency independently.
+
+The existing single diagnostic connection, sampling deadline, lock timeout,
+capability fences, replay and unknown-COMMIT behavior remain in force. This adds
+missing attribution, rather than claiming to repair the underlying contention.

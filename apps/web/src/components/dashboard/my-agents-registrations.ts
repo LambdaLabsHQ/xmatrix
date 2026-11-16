@@ -59,6 +59,8 @@ export function registrationActivity(registration: AgentRegistrationSummary, opt
     return { state: "offline", line: seen ? `Offline · seen ${seen}` : "Offline", rank: 3 };
   }
   if (status) return { state: "attention", line: status.label, rank: 2 };
+  // A prepaid account the provider refuses, or with no money left, cannot take work.
+  if (live?.balance && (live.balance.allowed === false || live.balance.amount <= 0)) return { state: "attention", line: "Out of balance", rank: 2 };
   const quota = live?.quota;
   if (quota && quota.remainingPercent < 1) {
     const windows = currentRoutingQuotaWindows(quota.windows, options.now ?? Date.now());

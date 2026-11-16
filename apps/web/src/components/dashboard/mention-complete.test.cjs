@@ -1206,12 +1206,13 @@ test("groupedMentionCandidates separates agent, human, and app candidates with t
   );
 });
 
-test("launch conditions are one section; Auto is listed with the Agents", () => {
+test("launch conditions are one section after the Agents; Auto is listed with the Agents", () => {
+  // A fresh `@Lap` offers who to summon first, then the conditions that may open one.
   const sections = groupedMentionCandidates([
-    { id: "launch:repo:owner/app:", name: "repo:owner/app", kind: "launch", status: "offline" },
+    { id: "launch:repo:owner/app:", name: "@repo:owner/app", kind: "launch", status: "offline" },
     { id: "launch:auto", name: "Auto", kind: "agent", status: "offline" },
   ]);
-  assert.deepEqual(sections.map((section) => section.label), ["Condition", "Agent"]);
+  assert.deepEqual(sections.map((section) => section.label), ["Agent", "Condition"]);
 });
 
 test("groupedMentionCandidates expands selected sections and removes their more row", () => {

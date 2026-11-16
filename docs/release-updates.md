@@ -15,6 +15,2451 @@ page), and the mark shows what the daemon reports: checking, updating to vX, or
 the failure. A component that did not update reads "Not updated" with the
 reason and the fix in place. Betas are judged against the dev channel they follow. Beta Web and
 desktop; recovery is a CI-validated release reverting this change.
+
+## Unreleased: a Gmail notification retried after its read was saved is delivered
+
+A mailbox's new-mail notifications stopped for good when a notification pass
+failed after its automatic read had been saved privately: every retry wrote
+the private record again with the same command ids but a new expiry, which
+was refused as a reused command, so the mailbox paused with its later mail
+behind it (one mailbox from 2026-11-13). Each private-record write now uses
+its own commands for the same record, a connector result already saved for
+its message stands, and a retried notification pass is reported to Sentry by
+its error class, code and status. Hub only; a paused mailbox resumes on its
+own and delivers what waited. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: a turn refused for its model's quota continues on another model
+
+When a turn is refused because its own model's quota is used up (Claude's
+`Fable` week), the quota retry its author chooses resumes the Instance at once
+in the same session on another model of the same harness that has quota,
+chosen the way a launch chooses (the runtime default first, then its catalog,
+or the registration's declared models, never one the refused scopes
+constrain), instead of waiting for that model's reset; with none, or when the
+registration no longer offers the kind of model it ran, it waits as before.
+Its next resume goes back to the original model once a reading shows that
+model has quota. A resting Instance wakes unless the model it last ran is used
+up. The Agents page and Instance tags name a model's own window by its scope
+(`Fable · 1w`), and a summon naming a used-up model says until when. The
+stored `remaining` of a reading now agrees with the windows kept used up. Hub,
+beta Web and protocol, with expand migration 0258
+(`agent_quota_retries.resume_model`, so a redelivered dispatch resumes on the
+same model); the resumed model reaches the runtime as the preferred or
+requested model a launch already sends. Recovery is a CI-validated beta
+reverting this change; the column is then ignored.
+
+## Unreleased: an Agent that delegates its request is let go
+
+An Agent whose Run was started for a Norn request and then delegated it with
+`xmatrix delegate` stayed in the conversation; it is now let go like one
+whose request ended, unless it still holds another request or waits on a
+question. An Instance delegated a request by its address is told that
+answering does not end its Run. Hub only; expand migration 0257 adds
+`norn_requests.delegated_away_instance_id`. Recovery is a CI-validated beta
+Hub reverting this change; the column is then ignored.
+
+## Unreleased: an Agent can call off a question it asked
+
+`xmatrix cancel <request>` lets the Agent Instance that asked a question with
+`xmatrix confirm`, `choose` or `ask` call it off while it is open. The
+request ends `Cancelled`, the person's card says it is no longer asked, and
+the Agent reads the program's end. Only that Instance can, and only for such
+a question. Hub only, no migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: whoever holds a request of a Norn program can delegate it
+
+A person asked on a card can delegate the request to an Agent in the
+conversation (`@claude:2`), an Agent by name, or another member, who answers
+it for them; while it is open, **Take back** returns it. An Agent delegates
+with `xmatrix delegate`. The delegate's answer settles the request; their
+refusal gives it back. Norn is vendored at norn-lang/norn#41, which defines
+delegation; the program does not see it. Hub and beta Web; expand migration
+0256 adds `norn_requests.delegator_user_id`. Recovery is a CI-validated beta
+reverting this change: the column is then unused, a request delegated to an
+Instance meanwhile ends `Broke` at its next pass, and one delegated to a
+person or an Agent by name stays with them.
+
+## Unreleased: quota is read per account and model
+
+A provider's quota now has two kinds of window: account windows, which stop
+every model, and scoped windows, which stop only the models whose catalog row
+names their scope (Claude's per-model week such as `Fable`, Cursor's `Auto`
+and `API` pools). A launch drops a used-up model before Jev chooses, including
+the runtime default when that is the used-up one; a pool is refused whole only
+when its account, or every model it could run, is used up, and a model the
+author named is refused with when it is back. A turn refused for one model's
+quota no longer holds the pool or hands the work to another harness: its
+reading is recorded and the quota retry waits on that model's windows alone.
+A limit the daemon could not tell holds the pool until its reset and asks the
+machine for a fresh complete reading on the next launch, Channel refresh or
+reconnect; that reading releases the hold or narrows it to the window
+resetting with it. Hub's Cursor special cases are gone. Hub only, with expand
+migration 0254 (`registration_quota_observations.scoped_windows_json`,
+`scoped_observed_at`, `scoped_expires_at`; `windows_json`/`observed_at`/
+`expires_at` are the account part). A daemon that predates scopes behaves as
+before: its usage limit holds the whole pool and hands off. Recovery is a
+CI-validated beta Hub reverting this change; the added columns are ignored.
+
+## Unreleased: the retired Automation storage is dropped
+
+Contract migration 0253 drops `data.automation_occurrence_runs`,
+`data.automation_occurrence_conversation_id(text)`, `data.automation_occurrences`
+and `data.automations`, which no code reads or writes since #1682. It refuses
+while any Automation is still enabled and attached to its page; paused,
+finished and detached rows go with their tables. An administrator applied it
+through the PostgreSQL Contract Migration workflow at this change's reviewed
+PR head before it merged. No product change. Recovery is forward only: the
+rows held no Automation that could run.
+
+## Unreleased: schedule lines no longer run; scheduled work is a `norn run` program
+
+A task line ending in `🔁 every …` or `⏳ <time>` is plain text: the Hub does
+not sync it, fire it on an event or run it. An Agent edit that leaves one on a
+page is answered with the line and the advice to write it as a program, a code
+block tagged `norn run <name>` on the same page. Schedules lists are empty, and
+a CLI's `page automation` commands answer that schedule lines are retired.
+Hub only, no product change: the Automation tables it left behind are dropped
+by contract migration 0253. Recovery is a CI-validated beta Hub reverting this
+change; the rows are gone, so a revert cannot resume an Automation.
+
+## Unreleased: signing out of an app, or choosing a provider, leaves the browser's account
+
+After an app signed in with the browser's web session, signing out of the app
+(including "Use a different account" on a new account) landed on the sign-in
+page, which signed straight back in with that same account. Choosing Google or
+GitHub also returned the browser's account without opening the provider, so
+no other account could be picked. A sign-in start now declares one intent:
+only the app's own check of the browser session reads it, and a chosen
+provider always opens with its account chooser. An app window where the person
+signed out does not resume the browser session. The desktop app's browser tab
+no longer reads "Sign-in didn't finish" when the browser simply isn't signed
+in. Hub, beta Web and desktop, no migration. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: an app uses the browser's existing sign-in
+
+Opening the desktop or phone app no longer asks for Google or GitHub when that
+browser is already signed in on the web. The app's sign-in reads the browser's
+session and hands the app a code for that account; with no session it returns
+to the app's own provider buttons. The connect card no longer tells a person
+to sign in with the same account. Hub and beta Web, no migration. Recovery is
+a CI-validated beta reverting this change.
+
+## Unreleased: DeepSeek Harness is offered full access alone
+
+A DeepSeek Agent could be added asking first. In that mode xMatrix leaves
+DeepSeek Harness on its own `workspace-write` sandbox, which refuses the
+write every `xmatrix` command makes to `~/.config/xmatrix`: the Agent could
+not send a reply, and the sandbox fails the command outright instead of
+asking, so no card appeared either. The confirmation now offers DeepSeek
+Harness full access alone and the Hub refuses `ask` for it, as for Codex and
+ZCode. Hub and Web. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an Agent can be added asking first
+
+Confirming an Agent's access offered full access or nothing. A harness can now
+be added with `ask`: xMatrix adds none of the full-access parameters, the
+harness runs on its own defaults, and each time it wants permission for a file
+or a command the request appears as a card in the Channel it is working in,
+with the answers the harness offers, and waits for a person. One plain
+`xmatrix` message, page or read command is not asked about, so the Agent can
+still reply. Claude Code and the ACP harnesses can be given `ask`; Codex and
+ZCode are offered full access alone, and the Hub refuses `ask` for them. The
+add dialog and `xmatrix agent add --access ask` choose it, and the owner
+changes it later from the Agent's page or with
+`xmatrix agent access <harness> <full|ask>`. An `ask` launch runs only on a
+Machine whose CLI shows the cards; on an earlier one it does not start. Claude
+Code's grant now also states that its permission requests are answered with
+allow in full access, which the runtime always did. No schema change. Hub, Web
+and CLI. Recovery is a CI-validated beta reverting this change.
+## Unreleased: the access confirmation works for a harness never added on the machine
+
+The confirmation reads the owner's environment for the harness before the
+first add, and that read answered 404 until the harness had been added once,
+so adding a new harness from the Web or `xmatrix agent add` failed instead of
+asking. The owner now reads an empty environment, with what full access adds,
+for a harness not added yet; nobody else reads it, as before. Hub only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a machine's owner confirms an Agent's access when adding it
+
+Adding an Agent started its harness with full access without saying so. Every
+add now shows, word for word, what xMatrix adds to that harness's launch
+(arguments, environment variables, session settings, and whether its
+permission requests are answered with allow) and writes nothing until the
+machine's owner confirms. `xmatrix agent add` prints the lines and takes
+`--access full`; at a terminal it asks, and anywhere else it stops and says
+what to show the owner. The Web asks in one dialog from the New agent page, a
+harness switch, an install that turns its harness on, and "Bring them in". The
+confirmation is kept per harness on a machine, so adding the same harness to
+another Space does not ask again. An Agent Run cannot confirm for its owner:
+it adds only a harness already confirmed there. Agents added earlier keep
+running as they were; their page, `agent list` (new ACCESS column) and
+`agent show` report the access they run with, and their owner can confirm it
+from the page. No schema change. Hub, Web and CLI. A CLI or Web released
+before this adds without the confirmation, reported as unconfirmed. Recovery
+is a CI-validated beta reverting this change.
+## Unreleased: a client that predates balances no longer draws a prepaid account as "100%"
+
+A DeepSeek account's reading was listed under `live.quota` with a full share
+of headroom, so a CLI or Web older than the balance display printed "100%"
+beside an account holding a few yuan. A prepaid reading is now listed as
+`live.balance` (amount, currency, the provider's verdict) and no `quota`:
+older clients read nothing and show `-`; this CLI and Web show the money.
+Routing is unchanged. Hub, Web and CLI; a 4.2.1-beta.22 CLI shows `-` for the
+account until it updates. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: what xMatrix adds to a harness launch is declared once and reported
+
+xMatrix starts each harness so it stops asking before it touches files or runs
+a command, and did so from five places: Claude Code's
+`--dangerously-skip-permissions` in its preset's default arguments,
+Antigravity's in its ACP arguments, Grok's `--always-approve`, Codex's
+`sandbox=danger-full-access` and `approvalPolicy=never` and ZCode's
+`mode=yolo` hard-coded in the daemon, and the ACP bridges answering every
+permission request with allow. Each preset now declares its own under
+`access.full`, DeepSeek Harness's `DSH_PERMISSION_MODE=danger-full-access`
+among them, and the Hub resolves them into one grant per launch
+(`docs/design/agent-access.md`). The daemon applies that grant and nothing of
+its own, and the registration catalog reports it, so what is shown is what
+runs. A registration launch may carry `access` (`full` or `ask`); none is
+`full`, so every existing Agent launches with exactly the parameters it had.
+The undocumented `XMATRIX_CODEX_APP_SANDBOX`, `XMATRIX_CODEX_APP_APPROVAL` and
+`XMATRIX_ZCODE_APP_MODE` overrides are gone. No schema change: the launch is
+a JSON declaration. Hub and CLI; a Machine on an earlier CLI keeps its
+hard-coded behaviour and receives Claude Code's and Antigravity's flags in
+the arguments the Hub sends. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: a DeepSeek Agent can run xmatrix from its own shell
+
+DeepSeek Harness kept its own default permission mode, `workspace-write`, so
+its shell could not write `~/.config/xmatrix` and every `xmatrix` command an
+Agent ran there stopped at `Operation not permitted (os error 1)` unless the
+Agent raised its permission for that one call. xMatrix now starts it with
+`DSH_PERMISSION_MODE=danger-full-access`: it may write outside the workspace
+and no longer asks before each command, as the other harnesses already run.
+The variable is listed in the preset (`access.full.env`), the same data the launch
+reads. The harness also removes `XMATRIX_EXECUTION_KEY` from every command it
+runs, which made `send --final-for` refuse; the CLI now reads the key from
+the daemon's record of the Run whose request capability the command holds. A
+refused write to the profile lock names the file. CLI and Hub (the registry
+a Machine receives); it applies to DeepSeek Runs started after a Machine
+runs this CLI. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a summon names its model by the model's name, not its selector
+
+Picking a model for a summon wrote the id its harness selects the model with.
+DeepSeek Harness selects with a JSON pair, so the message read
+`model:"[""deepseek-official"",""deepseek-flash""]"`. The composer now writes
+the name that harness's own catalog gives the model
+(`model:DeepSeek-V4.1-Flash`) whenever the id would need quoting and no other
+model in that catalog carries the name; otherwise it writes the id as before. The Hub already resolved a written name to its model, so
+the launch is unchanged, and a message already sent keeps the text it was
+written with. Only a registration that uses the runtime's own catalog is
+affected; an owner-declared model list is still matched exactly. Beta Web
+only. Recovery is a CI-validated Web release reverting this change.
+
+## Unreleased: a DeepSeek Agent shows the balance left on its API key
+
+A DeepSeek Agent's card and its `xmatrix agent list` row said nothing about
+quota, because DeepSeek has no window to meter: an API key is billed against
+a prepaid balance. The runtime now reads DeepSeek's balance endpoint with the
+key DeepSeek Harness already holds and reports the money left with its
+currency: a tag on the card (`¥12.34`), "Balance" on the Agents page, and the
+QUOTA column of `agent list`. An account DeepSeek says can no longer pay for
+a request reads as out of quota, so routing passes it over. A missing or
+refused key leaves the reading absent, as before. The daemon's pre-launch
+quota read also covers OpenCode, whose quota was only known while one of its
+Instances ran. No schema change. Hub, Web and CLI; the balance appears once a
+Machine runs this CLI. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an execution report the Hub can never store is answered once
+
+A daemon keeps each execution report until the Hub gives it a receipt and
+sends it again every five seconds until then. A report whose Run is gone was
+answered 403, and one that conflicts with what the Hub already holds 409, so
+those reports came back forever: about 400,000 of the Hub's 470,000 requests
+a day, each one a Postgres transaction. The Hub now answers both once with a
+final receipt (`source_unavailable` / `superseded`, with a reason). Released
+daemons already accept those, so their queues drain without a client
+update. Nothing is stored for those reports. Hub only. Recovery is a
+CI-validated beta that reverts this change.
+
+## Unreleased: On a Mac or PC, bringing agents in starts with the app
+
+Most new people left within half a minute of being shown a terminal command.
+On a Mac or Windows browser the first step is now the desktop app: one button
+downloads the installer for the system, and the app connects the computer and
+finds its agents once its owner signs in. The command is one click away
+("Use a terminal instead"); Linux, with no app, still starts with it. Inside
+the app the step says it is connecting this computer instead of showing a
+command. Beta Web only; recovery is a CI-validated Web release reverting it.
+
+## Unreleased: a `norn run` block whose name runs nothing says why
+
+A Page block tagged `norn run 2nd-pass` (or `v1.2`, or two words) never ran:
+the Hub read only names that start with a letter, passed the block over and
+said nothing, while the Page drew it as a program "starting…" for good and
+`page edit` reported no problem. What a block's info string makes of it is
+now one function in protocol (`nornRunBlock`) that the Hub and the Page
+editor both read. A misnamed block is reported by `page edit`, by `page
+read` and under the block on the Page; a message carrying one is refused
+with the same words. An edit whose sync finds a block whose conversation was
+deleted now says so in its answer too, as the Page already did. Hub and Web.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an Agent's `page read` shows the Page's programs
+
+`xmatrix page read` printed no `programs:` section when an Agent ran it: the
+route it reads was not among those an Agent Run's credential may call, and
+the CLI prints nothing when that read is refused. A person's CLI showed it.
+The route is now allowed for an Agent Run, read-only. Hub only. Recovery is
+a CI-validated beta Hub reverting this change.
+
+## Unreleased: an Instance whose first start never became ready is not started again by each message
+
+A harness that refused to start because it was not signed in left its new
+Instance "interrupted", so every later message in that conversation woke it,
+failed the same way and posted the sign-in notice again: five notices in
+three minutes on 2026-11-14. Such Instances have existed since routing
+stopped refusing these launches beforehand (#1630). An Instance's first Run
+that connects and then ends before its agent is ready now leaves nothing to
+wake, like a Run that never connected. An Instance that has worked and fails
+a later start stays wakeable, so the first message after the sign-in resumes
+it. Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
+## Unreleased: a machine can be asked, now, whether one program is signed in
+
+The only way to learn whether a harness is signed in from xMatrix was the
+machine's whole inventory: every preset probed, every registry read, each
+status-less ACP harness started. That takes many seconds (16 on a server with
+four harnesses), so pages showed the reading from the daemon's last probe,
+up to six hours old. The daemon now answers a `check` for one preset: its
+status command (Claude Code 0.3 s, Codex 0.1 s), or for an ACP harness with
+none, one start the way a launch starts it. It changes nothing. Nothing uses
+it yet: the pages that show a sign-in move to it next, and then the stored
+reading goes. CLI and Hub. A daemon without `machine_harness_check_v1` is
+never issued or leased a `check`. Recovery is a CI-validated beta reverting
+this change.
+## Unreleased: a handoff whose successor cannot start goes on to the next Agent
+
+On 2026-11-13 an Agent that ran out of quota handed its work off with
+`handoff:@auto`; routing chose a harness that was not signed in on its
+machine, its start failed with the sign-in notice, and the work stayed with
+nobody for eleven hours. Since routing stopped keeping a record of sign-ins
+(#1630), nothing kept a handoff away from such a harness, and unlike an
+`@auto` summon a handoff had no second try. A handoff's successor that fails
+to start, or refuses its first turn as signed out, now passes the same
+handoff (its prompt, the predecessor's conversation and the author's
+conditions) to the next Agent, never one it already tried or its source, up
+to three times. A handoff to a harness its author named is not replaced.
+Hub only. Recovery is a CI-validated Hub beta reverting this change.
+## Unreleased: A turn that makes no progress is said in its conversation
+
+An Agent that accepted a message and then neither replied nor failed left the
+person looking at nothing: the host already reported the stall (no progress
+for five minutes), but only as a small badge on the Agent. The Hub now says it
+under the message the turn is answering, once per stall, in the failure
+notice's style: which Agent, for how long, and that it can be waited for,
+stopped (`@name:N:stop`) or another Agent asked. Hub only; no protocol or
+schema change. Recovery is a CI-validated Hub release reverting the notice.
+
+## Unreleased: a summon reaches its machine, and the program says whether it is signed in
+
+On 2026-11-13 summons to Claude Code on a signed-in machine were refused as
+"not signed in". The Hub kept its own record that the program had refused
+earlier turns as signed out, answered by a later machine report; a sign-in
+from the card updated the Hub's copy of that report, and a daemon reconnect
+40 minutes later overwrote it with the daemon's older copy, so the refusal
+stood again. The same record had refused a recovered program on 2026-10-22.
+The Hub no longer keeps or reads that state for routing: a summon is given to
+its machine, and a start or first turn the program refuses as signed out
+shows its sign-in where it failed. An `@auto` message that Run never answered
+goes on to the next Agent; any other is sent again from the notice once the
+program is signed in. A summon to a program that really is signed out is
+therefore answered a few seconds later, by the program, instead of at once by
+the Hub. A handoff whose successor turns out signed out now starts that
+successor, which shows the sign-in; after signing in, send it a message.
+Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
+## Unreleased: code draws in Cascadia Code, a Norn pipe as a spaced arrow
+
+Code named a monospace font the app never shipped, so it drew in each
+machine's own (SF Mono on a Mac), and a Norn program read as
+`after(2027-06-04T00:00Z)->wait`: the pipe jammed between two words and the
+time split into a number, a dash and loose digits. Code now draws in Cascadia
+Code, self-hosted like Inter, whose ligatures join `->`, `=>`, `>=` and `!=`
+into one sign each; a Norn pipe written tight is drawn with a character's
+room on each side, as `=>` is written, and a date or UTC time takes one ink.
+The program's text and a copy of it are unchanged. Web only. Recovery is a
+CI-validated beta Web reverting this change.
+
+## Unreleased: a request card says it waits for the reader's answer
+
+A request card that takes a written answer did not tell the person asked
+that an answer was wanted: the line to write on was a grey pencil and grey
+words, the whole of the program's text ran together as one bold headline
+with a Page's raw reference in it, and the message carried the tag
+"system fact". The card now leads with the first paragraph of what is
+asked and sets the rest under it as text, with a Page or Channel it names
+drawn as a link; the person asked reads "Waiting for your answer", and the
+line to write on is in the card's brass until they write. The message
+carries no "system fact" tag. Web only. Recovery is a CI-validated beta
+Web reverting this change.
+
+## Unreleased: a program's question is answered on the card itself
+
+The field on a request card a Norn program sends was a bare underline over
+the app's grey input well: the words touched its edge, it showed a resize
+grip, and Send and Decline sat under it at equal weight. The answer is now
+written on the card, as a pencil and a line that grows with what is
+written, the composer's round Send at its end and Cmd or Ctrl and Enter
+sending it; Decline is a quiet word at the end of the line saying who
+asks. A choice shows only its options until one that takes words is
+picked. Web only. Recovery is a CI-validated beta Web reverting this
+change.
+
+## Unreleased: a delivered request is read in full, as paragraphs
+
+Cutting a delivered request down to a one-line chip hid the task behind a
+hover. The delivery message now shows the whole request in place: the
+paragraphs it was written in, in the message's own body text with no
+highlight, under a small line saying whom it waits for or how it ended, and
+the answer once there is one. A reference to a request inside a sentence is
+still the short chip. Web only. Recovery is a CI-validated beta Web
+reverting this change.
+
+## Unreleased: a long request stays a short chip
+
+A request's chip carried the whole first line of what was asked. A
+program's task is often one long paragraph, so its delivery message drew
+the entire task as a wall of highlighted lines that nobody could read. The
+chip now says how the request starts, stopping at a sentence or a word,
+and its preview shows the whole request as body text in a wider panel that
+scrolls. The chip's mark is a task sheet instead of a question mark in a
+bubble, which read as a fault beside a task that is under way. Web only.
+Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: a request's reference reads as the request
+
+Messages about a Norn request named it by its reference (`rhqycstuhxc`),
+which tells a reader nothing. A reference is now written `request:<ref>`
+and the Web draws it as the request itself: what is asked, of whom, and
+whether it waits or how it ended, for whoever can read the request's
+conversation. The card a person is asked on carries no reference in its
+text. Agents still answer by the bare reference. Hub and Web. Recovery is
+a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: a request card says what it asks where conversations are listed
+
+A request a Norn program made of a person read, in the list of
+conversations, as "Request `r343twe5ccg` from a program" under a title made
+of the Page's name and the block's English slug: thirteen such rows told
+their reader nothing. The card's message now starts with the question
+itself, and a program block's name may be a word in any language, so the
+conversation is called what its author calls it. Hub only. Recovery is a
+CI-validated beta Hub reverting this change; a block named outside ASCII
+then stops being read as a program.
+
+## Unreleased: an Agent that works for half an hour and says nothing is asked last too
+
+The breaker for an Agent that connects and does nothing counted only first
+turns under 30 seconds. A Grok on the same machine took 28 and 43 minutes
+over its last two summons and ended both without a reply; it was chosen in
+place of the Cursor the breaker had just moved back. Over seven days no
+healthy environment ended two summons in a row unanswered, so the time
+limit is gone: three summons in a row that end without a reply, the latest
+within 24 hours, put the environment last. Hub and Web. Recovery is a
+CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: an Agent that connects and does nothing is asked last
+
+A harness that started and connected but ended every turn in about nine
+seconds, saying nothing and reporting no error, kept taking `@auto` work:
+routing saw no failure. In our Space a Cursor did this to 24 summons in a
+row over two days, among them the daily scheduled jobs sent to it, which
+therefore did nothing. An environment whose last three summons all ended
+that way (first turn under 30 seconds, no reply), the latest within 24
+hours, now ranks after every environment that answers, the same way an
+environment that just failed to start does; the summon's reason says so.
+An answer to a Norn request now counts as the Run's first reply. Hub and
+Web. Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: a Hub build that cannot read a Norn program does not end it
+
+A pass that could not check a program's text stopped the program for good
+("The program no longer checks"). Text is checked where it is written, so
+that only happened across builds: a Durable Object still on the previous
+build during a rollout, or the whole Hub after a rollback, would end every
+program that used a newer word of the language. Such a pass now leaves the
+program and its ledger untouched and tries again five minutes later; a stop
+is still taken. A request handed to another holder also no longer keeps the
+person it was first delivered to. Hub only. Recovery is a CI-validated beta
+Hub reverting this change.
+
+## Unreleased: a request a changed Norn program no longer makes is called off
+
+When a Norn program's text changed while one of its requests was out, the
+program asked again in the new words and left the old request open: its
+Agent went on working for a program that would never read the answer, and a
+person's card kept waiting on them. The Hub now ends such a request as
+`Cancelled` in the pass that finds it unreached, so the Agent is let go and
+the card says the program no longer asks. Hub only. Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: an event that arrives during a round of a Norn program is not lost
+
+A Norn program heard an event only while it waited on the stream. A second
+CI failure, or a second Sentry issue, that arrived while the round the first
+one started was still running was dropped; the scheduled jobs these programs
+replaced had coalesced such events into the next run. Norn is vendored at
+norn-lang/norn#39: a program listens while a round of its loop is out, the
+events that arrive are kept in its ledger, and when the round is over they
+are one more round with the latest event. `->gather` hands the handler all
+of them as a list. Hub and Web (the onboarding text). Recovery is a
+CI-validated beta Hub reverting this change; events kept in a ledger and not
+yet taken are then never handled.
+
+## Unreleased: Agents are taught Norn programs, and told when one does not run
+
+An Agent's launch prompt, the onboarding prompt and the xMatrix skill still
+taught schedule lines (`🔁`, `⏳`), so Agents kept writing them after the
+work they describe had moved to Norn programs. All three now teach programs:
+a `norn run` block for a routine, a dated reminder, an event and a question
+to a person. `xmatrix page edit` answers with each program block that does
+not run as written and why, as it did for schedule lines. Hub, Web and CLI.
+Recovery is a CI-validated beta Hub, Web and CLI reverting this change.
+
+## Unreleased: a Norn program can open the standard library
+
+A Norn program on the Hub was checked against the built-ins alone, so every
+repeating operation moved to Norn wrote out the same loop: its beat, the
+round, and the fallback when the first participant did not answer. `open Std`
+now gives a program Norn's standard library, vendored at norn-lang/norn#38:
+`routine` is that loop in one call, `decide` a choice whose default is taken
+only when nobody answered in time, with `remind`, `followUp`, `schedule` and
+`all`. Programs that do not open it are unchanged. Hub only. Recovery is a
+CI-validated beta Hub reverting this change; a program that opens the
+library is then refused at its next pass with the unknown name.
+
+## Unreleased: an Agent asks a person with a command and gets the answer back
+
+An Agent blocked on a person's decision mentioned them with `--wait` and
+hoped for a reply: no form for the answer, no deadline, and nothing that said
+what silence meant. An Agent Run now asks with `xmatrix confirm`, `xmatrix
+choose` or `xmatrix ask`: the Hub writes the Norn program into the Run's
+conversation, the person answers on a card, and the answer comes back to the
+Run as the program's result. `--by` closes the question at a time and
+`--otherwise` names the answer taken then. The Agent contract tells Agents to
+ask people this way and keeps `--wait` for waiting on another Agent. Hub and
+CLI. Recovery is a CI-validated beta Hub and CLI reverting this change.
+
+## Unreleased: a Norn program can ask a person
+
+A Norn program could ask Agents only: a request of `@Daniel` ended at once
+as undeliverable, so anything that waits on a person stayed a `--wait`
+message or a line of prose. A holder that names a person is now found among
+those who can read the conversation, and the request is delivered as a card
+that waits on them: Yes and No for `confirm`, the options for `choose`, a
+field for `ask`, and Decline. Only that person's answer is taken, and it is
+checked against the request's type. The request stays open until they
+answer, its deadline passes (`NoReply`), the program ends, or they lose
+access to the conversation; the card then says how it ended. Expand
+migration 0252 adds `norn_requests.holder_user_id`. Hub and Web. Recovery is
+a CI-validated beta Hub and Web reverting this change; an open request of a
+person is then settled as abandoned at its program's next pass.
+
+## Unreleased: a repeating Norn program can keep a time of the day or the week
+
+`every(7d)` in a Norn program ticked a whole number of periods after the
+program started: its first round came a week after it was written, on
+whatever weekday that was. A weekly operation moved to Norn would have
+skipped a round and changed its day. Norn is vendored at norn-lang/norn#37:
+`every(7d, ~from=2026-11-16T09:00Z)` counts the beat from that time, so the
+first round is then. Without `~from` nothing changes. Hub only. Recovery is
+a CI-validated beta Hub reverting this change; a program that uses `~from`
+then stops with the label named.
+
+## Unreleased: `xmatrix page read` says how a Page's Norn programs stand
+
+An Agent that read a Page saw its `norn run` blocks as text only: whether a
+program was running, where its work was discussed and how its latest request
+ended showed only in the Web. `page read` now prints a `programs:` section in
+its header, one line a block, from the route the Page's steps are drawn from.
+CLI only. Recovery is a CI-validated beta CLI reverting this change.
+
+
+## Unreleased: a failed round of a repeating Norn program is told in its conversation
+
+When a round of a repeating Norn program ended in anything but an answer
+(refused, broke, nobody replied), the loop went on and nothing was posted:
+the failure showed only in the steps under the program on its Page. The
+round's outcome is now posted once to the program's conversation as xMatrix,
+naming nobody, through the same notices a program's `say` uses. Hub only.
+Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: rewording a repeating Norn program does not rerun its past rounds
+
+A repeating Norn program was evaluated from its first round on every pass.
+Rewording its task on the Page changed the identity of every past round, so
+the program asked each of them again in the new words, one after another: a
+loop three rounds old ran three extra rounds at once, and one a month old
+would have run thirty. Norn is vendored at norn-lang/norn#36: when a round's
+handler finishes, the ledger keeps where the loop stands, and later passes
+begin there. Evaluation no longer grows with the program's age. Hub only.
+Recovery is a CI-validated beta Hub reverting this change; ledgers written
+meanwhile carry one extra entry that the older runtime ignores.
+
+## Unreleased: a Norn program can map an event stream
+
+A Norn program that waited on a mapped stream (`ciFailed(…)->map(…)`) ended
+at once: the vendored runtime did not implement `map`. A program that listens
+to several repositories therefore got a nested `either` and could not read
+which event woke it. Norn is vendored at norn-lang/norn#35: a mapped stream
+occurs when its stream does and the handler receives the mapped value. Hub
+only. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: a Norn program hears events from outside
+
+A Norn program could wait for time and for answers only, so work that an
+event starts (a failed CI run, a Sentry issue) had to stay an Automation. A
+program now waits on `ciFailed("owner/repo")`, `prMerged("owner/repo")` and
+`appEvent("sentry", ~feature="issue.created")`, alone or beside a beat
+(`every(1d)->or(ciFailed(…))`). Each pass stores the streams the program is
+left waiting on (expand migration 0251, `norn_programs.waits_json`); an event
+that fires Automation triggers is also recorded in the ledger of each program
+waiting on it, under the same authority rule, and the program runs at once.
+Norn is vendored at norn-lang/norn#34, which lets a program wait on the
+streams its own host declares. Hub only. Recovery is a CI-validated beta Hub
+reverting this change; the column then stays unused.
+## Unreleased: Stripe messages already in a Channel are cards too
+
+The Stripe card reached only events that arrived after it shipped; a Channel's
+history stayed five lines of record per event. The Web now reads such a
+message's text (account, event, amount in minor units, status) and draws the
+same card, so the whole history reads alike. The words for a Stripe event live
+in one place the Hub and the Web share. Web only for what a reader sees; no
+message is rewritten. Recovery is a CI-validated beta Web reverting this
+change.
+
+## Unreleased: a blocked network is not a signed-out Claude Code
+
+A signed-in Claude Code failed turns with `Failed to authenticate. API Error:
+403 Attention Required! | Cloudflare`, a block in front of the API. The
+wrapper read the bare "failed to authenticate" as a sign-out, so the
+conversation got "not signed in" cards and routing stopped choosing that
+machine. Only a refused credential (a 401, an expired or missing one) counts
+now; other failures show as the turn failure they are. CLI only. Recovery is a
+CI-validated beta CLI reverting this change.
+
+## Unreleased: an Agent whose name is not ASCII starts
+
+An Agent named `牛马` exited seconds after every summon. The Hub accepts any
+display name and binds the Run to it, but the wrapper took the name as given
+only when it was ASCII letters, digits and `._-`, and folded any other name
+into `xmatrix-agent`; the Hub then refused the handshake because the name did
+not match the credential. The wrapper now sends the name the Hub bound the Run
+to, and the sender hint keeps names over 64 bytes that the Hub allows. CLI
+only. Recovery is a CI-validated beta CLI reverting this change.
+
+## Unreleased: a Norn program can tell someone something
+
+`say(@who, "…")` in a Norn program was computed and dropped: nothing reached
+anyone. What a program says is now stored with the step that says it (expand
+migration 0250, `norn_notices`) and posted to the program's conversation as
+xMatrix, naming whom it is for. With `after(<time>)` this is a dated reminder
+written as a program. Hub only. Recovery is a CI-validated beta Hub reverting
+this change; the table then stays unused.
+
+## Unreleased: a message in the conversation no longer fails a Norn request in progress
+
+A newer message in a conversation interrupts the turns in progress there. The
+Norn host read an interrupted turn as a turn that ended without an answer:
+it settled the request `Broke` and stopped the Agent, 19 minutes into a
+diagnosis in the case that showed it. An interrupted turn now leaves the
+request with its Instance, which goes on in its next turn and may still
+answer; the request is abandoned only once that Instance has ended a later
+turn without answering, or is gone. Hub only. Recovery is a CI-validated beta
+Hub reverting this change.
+
+## Unreleased: a used-up Google Play quota is called a quota
+
+When Google refused a Play call because its quota was used up (403 or 429),
+the receipt told the reader to grant the account a permission and enable the
+API. It now says the quota is used up and to try again later. Hub only; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Billing shows who used a Space's allowance and how it is counted
+
+Settings → Billing showed one meter for the whole Space and no way to tell
+which Agent or app used it. Each counted write is now itemized against its
+author in the statement that counts it (`data.space_credit_usage`), and
+Billing lists this month's credits (or a Free Space's writes) by Agent, app
+and paid X calls, the total for you and your Agents, and how credits are
+counted. The operator's own Space, whose credits are waived, showed 0; it now
+shows what it really used, marked "not charged". The iPhone and Android apps
+show the same. Expand-only migration 0249; usage before it appears as one
+"counted before itemizing began" row. Recovery is a CI-validated Hub and Web
+release reverting the change; the table may stay.
+
+## Unreleased: a Stripe notification is a card
+
+A Stripe event in a Channel was five lines of record: the account id twice,
+the amount as `1000 USD (minor units)`, most events by their API type
+(`customer.subscription.deleted`) and a status repeating the title. It is now
+a card: the event in words with the amount in the currency's own units
+(`Payment succeeded`, `10.00 USD`; zero- and three-decimal currencies
+included), Stripe's reason under a failed payment, a dispute or a canceled
+subscription, then the status when it adds something, the account, and a link
+to the object's Stripe Dashboard page. The card reads in each reader's own
+language, English or Chinese. The message text under it, which Agents, search
+and notifications read, is two lines saying the same, written in the Space's
+language setting. Any App event can carry such a card
+(`xmatrixEventCard` on the message). Hub and Web, no schema change; a Web
+older than the Hub shows the text. Messages already posted keep theirs.
+Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: `xmatrix goal` works inside a Claude run
+
+`xmatrix goal set` from a Claude Agent's own turn answered "no goal inbox is
+bound to this shell", so a Claude Agent could not set the goal its runtime
+says it supports. The wrapper starts the Claude process before it binds the
+goal inbox, and exported the inbox to the child only when it was already
+bound. The child now gets the inbox of the run's own Instance, which is the
+file the wrapper binds and drains. CLI only. Recovery is a CI-validated beta
+CLI reverting this change.
+
+## Unreleased: a Norn program can carry work that repeats
+
+Moving the company's scheduled work onto Norn programs needed three things. A
+program's participant may carry conditions, `@auto(~repo="acme/app",
+~effort="high")`, which the delivery writes into its summon (`repo`, `pwd`,
+`machine`, `harness`, `model`, `effort`); an unknown one ends the request with
+the reason. `every(d)` now keeps the program's beat instead of drifting by the
+length of each round (norn-lang/norn#33). And a Run started for a request
+reads that request and the linked Pages, not the conversation's history, so a
+daily program does not hand each new Run a longer history. An automatically
+chosen Agent is chosen anew for each request. Hub only; Norn is re-vendored at
+e2ad669. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: reading Google Play tracks no longer deletes an upload in progress
+
+`@googleplay:tracks` opened a temporary edit to list tracks. A Google account
+has one open edit, so that deleted the edit another Agent was uploading an
+app bundle into ("This Edit has been deleted"). It now reads each track's
+releases directly and opens no edit; with an edit ID it reads that edit. The
+guide states the one-open-edit rule for `release` and `edits.insert`. Hub and
+protocol; no schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a used-up provider account's resting Instances stay resting
+
+When an Agent's provider account ran out, its failure notice woke that
+Agent's other resting Instances in the conversation. Each used the same
+empty account, failed within a second and posted its own failure card and
+handoff: a new Windows user saw three cards for one message. A registration
+whose quota pool reads empty now leaves its resting Instances asleep
+(`registration_quota_exhausted`), and the first message after the reset
+wakes them. The hold is also recorded before the failure notice commits.
+Hub only; no schema change (#1578). Recovery is a CI-validated Hub release
+reverting this change.
+
+## Unreleased: A handoff refused for a signed-out successor shows the sign-in notice
+
+When `handoff:@auto` (or a named handoff) found its successor's program signed
+out on its machine, the only trace was a line under the handoff message ending
+in `(registration_harness_signed_out)`. It now posts the same sign-in notice a
+refused summon gets, naming the program and machine, and the handoff goes
+again once the owner signs in. Hub only; no schema change. Recovery is a
+CI-validated Hub release reverting the notice.
+
+## Unreleased: an Agent's startup error on Windows reads as Windows wrote it
+
+When an Agent failed to start on a Chinese Windows, its card showed the last
+lines it wrote as mojibake: `cmd.exe`, running an npm `.cmd` shim, writes
+messages such as 「系统找不到指定的路径。」 in the console's OEM code page, and
+the stderr tail read them as UTF-8. A line that is not UTF-8 is now read in
+the OEM code page, then the ANSI one (#1576). CLI only; Recovery is a
+CI-validated beta CLI reverting this change.
+
+## Unreleased: a page's Norn program asks the same Agent again instead of starting another
+
+Every request of a Norn program started a new Run, so a review of three
+rounds started six. A program on a Page now sends its next request for the
+same participant to the Instance that last answered it for that program,
+when that Instance still takes messages: the delivery is addressed to it,
+starts nothing, and wakes only it. The program's Instances stay while it
+runs and are let go when it ends. A program in a message, where the
+conversation is shared, keeps starting and ending one Run per request. Hub
+only, with expand migration 0248 (`norn_requests.instance_id`). Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: a page's program shows its steps
+
+The one grey line under a `norn run` block is now the program's steps, joined
+to the code as one surface: a row per request with the Agent's face and name,
+what was asked, and the answer, how it failed, or how long it has left; then
+how the program ended. A block that does not run as written says why there,
+and the code is underlined where. Pressing the steps opens the program's
+conversation. The Hub's program status gains each request's outcome and
+times, and a report reads as its text. Hub and Web; an older Web against the
+new Hub keeps its one line. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: ⌘F on a page finds in that page
+
+On an open page, Ctrl/⌘+F opened the Space's search. It now finds in the
+page: a flat paper slip where the search control stands shows "n of N" with
+previous, next and close; every match is washed in wood, the current one in
+full and scrolled into view. Enter and Shift+Enter step, Esc closes. The slip
+does not cover the page, and matches follow the text as people and Agents
+change it. In a conversation ⌘F still opens the Space's search. Web only;
+recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: a page says how its Norn programs stand
+
+Under each `norn run` code block a page now says how that block's program
+stands: whom it waits on, how it finished or why it stopped, or why the block
+does not run as written. Pressing the line opens the conversation the program
+works in. The page asks the Hub only while its text holds such a block, and
+again when the page changes. Web only, reading the Hub route that shipped
+with page programs. Recovery is a CI-validated beta Web reverting this
+change.
+
+## Unreleased: a Norn program lives on a Page
+
+A `norn run` block in a Page is now a program: saving the Page starts it, as
+whoever wrote the revision, in a conversation of its own that is named for the
+Page and the block and linked to the Page. Editing the block revises the
+running program against the same ledger, so nothing already asked is asked
+again; editing it after the program ended runs it again; removing the block or
+the Page stops it. A word after the tag names the block (`norn run review`).
+`GET /api/spaces/:space/pages/:page/programs` says how each block stands. A
+program in a message works as before. Hub only, with expand migration 0247
+(`norn_programs.page_id`, `page_name`); the Page does not draw the status
+yet. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: the duplicate-code scan takes half the time
+
+The duplicate-code scan runs on every pull request and train and shared the
+end of PR CI with the Node tests. jscpd's in-memory store answered each of
+the scan's millions of lookup misses by creating an `Error`, so stack capture
+and its garbage were most of the scan's CPU, and each token and window was
+hashed through a new Hash object. The scan now passes jscpd a store with the
+same get/set contract that rejects misses with one shared reason, and the same
+MD5 hex through Node's one-shot digest. Locally the full scan drops from about
+98 to 50 seconds with the same files, tokens and zero clones; on a sample that
+has clones, both stores report identical clones. Thresholds, formats, ignores
+and the zero-clone gate are unchanged. CI only; no product or migration change.
+
+## Unreleased: Norn code is highlighted
+
+A fenced block tagged `norn` or `norn run`, in a message or on a page, was
+drawn as plain ink. It now takes the code inks: who is asked (`@codex`) reads
+like a name, what is asked of them (`run`, `ask`, `wait`) like a built-in, the
+outcomes (`Answered`, `Broke`) like types, with `~labels`, durations, strings
+and comments in their own inks. Web only; the grammar loads with the other
+grammars, after the first code block appears. Recovery is a CI-validated beta
+Web reverting this change.
+
+## Unreleased: an approved write or a finished upload no longer refuses the sender's next message
+
+Approving a connector write, or finishing an X video upload, still refused the
+command's sender on their next `xmatrix send` with "the Channel moved on after
+the last message you read". The Hub names a receipt
+`system:<execution id>:<app>`. An immediate run's execution id is the command
+message id, which the read-before-send check already left out. An approved
+write and a finished upload use `<command message id>:approved` and
+`<command message id>:upload-result`, so those receipts still counted. One
+suffix list now builds the receipt id and decides which receipts answer the
+sender's own command. A denial stays unread: its id is the approval request,
+not the command. Messages from other people, Agents and Apps are unchanged.
+No schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
+
+## Unreleased: Google Play Console reads a subscription's base plans
+
+`@googleplay:base_plans` shows each base plan of a subscription as Google Play
+stores it: state, billing period, how many regions it is priced in and its
+price in one region. A plan priced in 174 regions did not fit a catalog read,
+so a saved price could not be checked before activating. Hub and protocol; no
+schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a large Google Play request body rides as an attached file
+
+A request body that does not fit a command, such as the data safety CSV of
+about 180 KB, had no way in. `@googleplay:api_plan` and `api_write` now take
+the body from the one JSON file attached to the command message, read as the
+person the command runs for, validated against the operation and bound by the
+digest. Hub only; no schema change. Recovery is a CI-validated beta reverting
+this change.
+
+## Unreleased: Google Play reads can name the fields they want
+
+`@googleplay:api_read` accepts Google's `fields` partial-response mask in its
+query. A subscription with prices in every region did not fit the bounded
+result, so its state could not be read back; a read now asks for just the
+fields it needs. Hub only; no schema change. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: a Google Play base plan keeps its stated price at home
+
+`@googleplay:base_plan` used Google's converted price for every region,
+including the price's own, where Google's local pattern turned 10.00 into
+9.99. The command now names the region the price is for, and that region
+keeps exactly the stated price; the others take the conversion. Hub and
+protocol; no schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a Google Play upload URL reaches only the Agent that asked for it
+
+`@googleplay:api_upload` published its resumable upload URL in the Channel
+receipt, and that URL alone accepts the file. It now runs only as
+`xmatrix call`: the URL returns to the caller, the Channel receipt and
+execution history are always masked, and sent as a Channel message it is
+refused with that instruction. It needs the app permission to allow writes
+without asking. Hub and protocol; no schema change. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: Google Play Console creates a subscription base plan in one command
+
+`@googleplay:base_plan` adds an auto-renewing base plan to a subscription from
+one price: Google converts it to every region, the plan is saved with all
+regional prices, and it can be activated in the same step. The catalog write
+could not do this, because the converted prices of every region do not fit a
+bounded receipt. Hub and protocol; no schema change. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: a command checks a failed app connection again by itself
+
+A connection whose last check failed blocked every command until a Space admin
+pressed Check again in Apps, even after the cause was gone. A command by a
+Space admin, or by an Agent acting for one, now asks the provider again first,
+records the answer as Check again does, and runs when it passes; when it still
+fails the receipt carries the fresh reason. Others keep the pointer to Apps.
+Hub only; no schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a failed app check states its reason once
+
+After Check again failed, an app's page showed the same reason twice: as a red
+line above and again in the block that holds the fix. It now appears once, in
+that block. Web only. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: connecting an app from the desktop app returns to the desktop app
+
+A one-click connect started in the Mac or Windows app opened the provider's
+sign-in in the browser and then finished, and stayed, on the web. The connect
+now records that the app started it; after sign-in the browser page hands the
+grant back through `xmatrix://connect/oauth`, the app finishes the connection
+with its own sign-in and shows the connector's page, and the browser tab says
+it can be closed. It needs this desktop version; an older app keeps finishing
+on the web. Google Play Console's "API not enabled" failure now names the API
+and the Hub's Google project instead of asking to reconnect. Hub, web and
+desktop; no schema change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Google Play Console connects with one sign-in, for every app
+
+Connecting Google Play Console no longer asks for an app's package name. The
+sign-in also grants the read-only Play Developer Reporting scope, Check lists
+the apps the account can see, and `list_apps` gives Agents their package
+names. An existing connection signs in once more for the added scope. The
+Google Cloud connector's `enable_api` now accepts the two Play APIs. Hub and
+protocol only; no schema change. Recovery is a CI-validated beta reverting
+this change.
+
+## Unreleased: a Google Play Console connector
+
+Apps gains Google Play Console (`googleplay`), so Agents release Android apps
+without the Play Console website. It pins the official androidpublisher v3
+discovery document and offers every operation through `api_operations`,
+`api_schema`, `api_read`, a digest-bound `api_plan`/`api_write`, and
+`api_upload`, which opens a resumable upload the machine with the app bundle
+sends its bytes to. `tracks` and `release` read tracks and roll version codes
+out to a track and commit. It signs in with the company Google client and keeps
+its own grant for exactly the androidpublisher scope; Check reads the saved
+app's production track. Hub, protocol and web copy only; no schema change.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: the Android app sells Pro through Google Play
+
+The Android app's Billing settings buy Pro through Google Play Billing instead
+of showing Stripe checkout, as Google Play's payments policy requires for a
+subscription bought in an app. A purchase is one human seat bound for good to
+the Space it was bought for, like an App Store purchase on iPhone. The Hub
+reads every purchase from the Google Play Developer API, acknowledges it after
+recording it, and re-reads it on each Real-time developer notification
+(`/api/billing/google-play/notifications`, Pub/Sub push with an OIDC token).
+Expand migration 0246 adds `google` as a billing provider and the
+`google_play_account_tokens` and `google_play_purchase_bindings` tables.
+Purchases need the production secret `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` and an
+Android build with Play Billing; until both exist, the Android app shows that
+subscriptions are unavailable and the web keeps Stripe. Setup is in
+`docs/operations/google-play-subscriptions.md`. Recovery is a CI-validated beta
+reverting this change; the two tables then stay unused.
+## Unreleased: an Instance at rest that a Norn request started is retired too
+
+Stopping the Run a Norn request started left the Instance when that Run had
+already exited: an Instance at rest has no live Run, stays listed, and wakes
+with the conversation's next message. The release step now retires such an
+Instance as a stop of that exact address does, and stops the Instance's
+current Run when it is live. Hub only, no schema change. Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: a Run started for a Norn request ends with the request
+
+Every request of a Norn program starts a new Run, and those Runs stayed in the
+conversation after answering: a review of three rounds left ten resting
+Instances, and each later message woke all of them. Once a request has ended
+(answered, refused, broke, cancelled or past its deadline), the Channel's
+coordinator now stops the Run its delivery started, once, and the delivery
+message says that answering ends the Run. Requests that ended before this
+release have their Runs stopped at the conversation's next coordinator pass.
+Hub only, with expand migration 0245 (`norn_requests.released_at`). Recovery is
+a CI-validated beta Hub reverting this change.
+
+## Unreleased: a Norn program in a message asks Agents typed requests
+
+A message with one top-level fenced block tagged `norn run` starts that
+[Norn](https://github.com/norn-lang/norn) program with its author's authority
+([Norn host](architecture/norn-host.md)). Each request the program makes is one
+xMatrix message under it that starts a Run of the harness it names (or of
+`@auto`), and that Run ends the request with the new Hub-defined commands
+`xmatrix reply`, `xmatrix refuse` or `xmatrix broke`; `xmatrix requests` lists
+the open ones. An answer outside the form the program reads is refused. A
+request whose launch was refused, whose Run stopped or exited, or whose turn
+ended without an answer is settled `Broke`, so a program never waits in
+silence. A stop of the whole conversation ends its programs, and the result is
+posted under the program's message. A block tagged `norn` alone is only shown,
+and no existing message starts anything. Requests to people and to an existing
+Instance are refused with the reason in this version. Hub only, with expand
+migration 0244 (`norn_programs`, `norn_requests`); every CLI that passes
+unknown words to the Hub has the commands. Recovery is a CI-validated beta Hub
+reverting this change; the two tables then stay unused.
+## Unreleased: a beta train ships the Hub alone, so a Hub fix no longer waits for client builds
+
+A release holds its first component's place in line until its slowest
+component is published. On 2026-11-11 `xmatrix-v4.0.7-beta.5` shipped all six
+components: its Hub deployed five minutes in, and the release held the Hub's
+place for 41 minutes while the desktop and CLI builds ran, so a Hub fix asked
+for at 19:34 UTC started deploying at 19:55. Of the last 39 releases, 13
+carried the Hub together with the CLI or desktop and ran 14 to 57 minutes; a
+Hub release alone takes 4 to 6.
+
+A beta train whose selection includes the Hub and anything else now ships only
+the Hub. A request that names more than the Hub is shipped for its Hub, and
+the rest of it stays open under the same request id; requests without the Hub
+stay open as they are. The train wakes the next one, which ships the rest
+beside or right after that Hub release by the existing dependency rule. The
+rest of a request therefore starts a few minutes later than before, and the
+Hub's place frees after a Hub deploy. Stable trains, the dependency rule,
+concurrency groups, authorization and recovery are unchanged; nothing is
+cancelled. A request whose Hub part is in flight while its rest is open is no
+longer read as a half-finished move, which is now decided by request id and
+scope together.
+
+Release train only (`scripts/release-train.mjs`,
+`production-release-request.yml`); no product, schema or client change.
+Recovery is a CI-validated main revision reverting this change: open and
+in-flight refs written by either version are read by both.
+
+## Unreleased: the connector list says a subscription is sent, not called
+
+`xmatrix connector list` printed `read   @github:subscribe:...`. The manifest's
+`read` is the approval class, and every other `read` row is run with `xmatrix
+call`, but subscribe has no call executor: it changes the Channel it is sent in,
+and `xmatrix call` answered `Unknown connector action`. `GET
+/api/connectors/usage` now adds `via` (`call` or `send`) to each action and the
+description of a read without a call executor says to send it with `xmatrix
+send`; the CLI labels that row `send`. `xmatrix call` on a command the provider
+runs only from a Channel message now answers that it is sent with `xmatrix
+send`. No action's `effect` or approval changed. An older CLI ignores `via` and
+still prints `read`, with the new description; a new CLI against an older Hub
+prints `read` as before. Hub and CLI. Recovery is a CI-validated beta reverting
+this change.
+
+## Unreleased: a GitHub command the Space cannot reach says who links the account
+
+A GitHub command against a repository whose App installation exists but is not
+linked to the Space answered `GitHub subscribe: failed; github installation not
+linked to space.`, the internal code with its underscores removed. The receipt
+now names the repository and says a Space admin links its account in the
+Space's Apps → GitHub (Find my GitHub accounts, then Link), and that installing
+the App on github.com alone does not link it. It carries the existing
+`reconnect` fix, so the receipt draws the settings card that opens Apps →
+GitHub. A Space with no linked installation gets the same treatment; a
+repository the App is not installed on gets a sentence and no card, because a
+mistyped name gets that answer too. The execution record and every other
+caller keep the machine codes. The card does not settle by itself after
+linking, because linking an installation does not run a connection check. Hub
+only, no schema or client change. Recovery is a CI-validated beta Hub reverting
+this change.
+## Unreleased: an Agent's own connector receipt no longer refuses its next send
+
+An Agent that ran `xmatrix call "@googlesearchconsole:list_sites:*"` or sent a
+connector command such as `@cloudflare:put_dns:…` had its next `xmatrix send`
+refused with "the Channel moved on after the last message you read", once per
+command, and the identical retry went through. The read-before-send check
+counts every App message after the sender's last read as unread, and the
+receipt the Hub posts for a command is an App message: nothing related it to
+the command's own sender. The check now leaves out an App receipt whose id is
+`system:<command message id>:<app>` when that command message is the sender's
+own in the Channel. Messages from people, other Agents and sibling Instances,
+Apps' native events, and receipts for anyone else's command refuse a send as
+before. A write's outcome still reaches the Agent that sent it as queued work
+after its turn, so it may post once more before reading it. Hub only, no
+schema, protocol or client change. Recovery is a CI-validated beta Hub
+reverting this change.
+## Unreleased: a card that asks to connect GitHub offers Connect, and a link settles it
+
+A settings card for `connector:github/connect` showed a Space admin "A Space
+admin can make this." and no button. The card decided who may act by reading
+back the App's typed credential fields, and GitHub, which is connected by
+authorizing, has none, so every viewer was treated as unable to connect it.
+The card now asks the Space's admin authorization directly for such an App and
+shows **Connect GitHub**, which opens the Space's Apps page. Linking a GitHub
+account there now also runs the connection check, so the card sees a check
+after it asked, settles, and wakes the Agent that asked; before, only a manual
+Check did. The link stands when the check cannot run. Hub only, no schema or
+client change. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: a stale command lease is a fence, not a Hub error
+
+HUB-7F kept reporting `machine_command_stale_lease` after the 409 had already
+refused the caller. The latest production case is `complete.owner` on a
+harness action: the command is still leased, but to a different holder, so the
+old completion must not land. `renew.status` is the same fence after the
+command has left `leased`. The socket still returns that non-retryable refusal
+and the log keeps the static reason, command type and bounded lease timing.
+The log is a warning, so console capture no longer files it as a Hub error.
+Hub only, no schema or client change. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: daemons tell the Hub they can start a summon on a catalog model
+
+The daemon kept two copies of its capability list, one in its connect metadata
+and one in the list the Hub stores. `registration_native_model_v1` (#1510) was
+added only to the metadata copy, so the Hub saw no daemon able to start a
+runtime on a model from its own catalog: the `@` menu offered no `model:` rows
+and `@claude model:sonnet` was still refused. The daemon now builds one list
+for both. CLI only; it takes effect when a Machine's daemon restarts on this
+release. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a stop or reborn that did nothing tells whoever sent it
+
+`@<agent>:<n>:stop`, `:reborn` and `:handoff:` that address no Instance (a
+mistyped name, or the full Instance id in place of the Channel's number, as in
+`@deepseek:<id>:3:reborn`) recorded their refusal only on the message. An
+Agent sending through the CLI never saw it, and waited for a restart that was
+never queued. The send's answer now carries each refusal, and `xmatrix send`
+exits with an error that says the message was sent, quotes each refusal, and
+shows the address form to resend (`@deepseek:3:reborn`). Hub and CLI; the
+message and its recorded result are unchanged, and an older CLI ignores the
+new field. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Connect with X reaches consent again
+
+X answers an authorize request whose `state` is longer than 500 characters with
+`invalid_request` before it shows consent. The Hub's X state carried the Space,
+the admin, the PKCE claims and the connection snapshot in about 719 characters,
+so every **Connect with X** ended on "Something went wrong / You weren't able to
+give access to the App" and no X account, company or personal, could be
+connected; a different X account, permission set or callback changed nothing.
+The claims now travel compressed and signed in about 407 characters, a state
+minted before this release still finishes its flow, and a provider that
+declares a state limit refuses an oversized connect instead of letting the
+provider reject it silently. Hub only, no Web, client or schema change.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: the model tag names the model, not its selector
+
+An Agent's model tag showed whatever id its harness selects the model with.
+DeepSeek Harness selects with a JSON pair such as
+`["deepseek-official","deepseek-flash"]`, so its tag read
+`["deepseek-official","…` and never reached the model. The tag now shows the
+name the harness gives the selected model in its own catalog
+(`DeepSeek-V4.1-Flash`), on the Agent card and in message headers, and keeps
+the id only when the catalog lists no name. The CLI now also reads model
+choices a harness lists in groups, as DeepSeek Harness does per provider, so
+its models appear in the model switcher. A harness whose catalog names a
+model differently from its id (Cursor's `Composer 2.5`) shows that name too.
+Hub, Web and CLI; the selected id itself is unchanged, so switching works as
+before. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: `xmatrix send --file` is the message body, `--attachment` attaches
+
+`xmatrix send --file` attached a file while `xmatrix page edit --file` read the
+text from one, and `send` had no way to take its body from a file. An Agent
+that wrote its reply to a file therefore sent `--file reply.md`: a message with
+no text and a Markdown attachment the reader had to open. `--file <path>`
+(`-f`) now reads the message body from a UTF-8 file, as it does for a page, and
+`--attachment <path>` attaches a file beside the body. A send with attachments
+and no body is refused, and so is `--file` beside another body; each refusal
+names the other flag. The help, the Agent prompt and the guides say the same.
+CLI only: the Hub, the Web and the send wire format are unchanged, so the flags
+change with the CLI a Machine runs. A script that attached with `--file` moves
+to `--attachment`. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a page is always as it is now, and History shows what changed
+
+A page could be in a state its reader had not chosen and could not name: what
+changed since they last read it, or since an Agent's edit when they came from
+a message's edit card, marked word by word over the text until they found the
+card that hid it, and back again each time they returned. A rewritten table
+was unreadable that way. A page now has two states. The page is always its
+newest version with nothing marked in it; History is the same page, where it
+stood, at a version, with that version's changes marked in its text and the
+versions listed in the margin. *Since your last visit* is History's first
+entry, across however many versions that took, and what History opens on; a
+brass dot beside History says there is one (the old dot was drawn in a colour
+that did not show on paper). A changed block keeps its words marked one by one
+only while most of them stayed; rewritten past recognition, the old block is
+struck out and the new one stands whole, and a table keeps its rows and
+columns. A message's edit card opens the page as it is now at the change.
+
+Read now means visited: the newest version a person has had open. The Web no
+longer times which blocks were on screen or sends the page as its reader saw
+it, and the Hub no longer reads or writes `data.page_reads.seen_body`;
+contract migration 0243 drops the column once this Hub is verified. Web, Hub and
+protocol, no expand migration; an older Web keeps working against this Hub and
+this Web against an older Hub. Recovery is a CI-validated beta reverting this
+change.
+## Unreleased: Gmail paperclip attachments are no longer listed as inline images
+
+Gmail's web composer gives an ordinary paperclip attachment a Content-ID, and
+the Gmail connector counted any file part with a Content-ID as an inline
+image. A draft carrying a PDF therefore showed in `@gmail:drafts` as
+"0 attachment(s), 1 inline image(s)", and its `@gmail:send_draft` approval
+card listed no attachments. An explicit `Content-Disposition: attachment` now
+counts as an attachment. A part is inline only when its disposition says
+`inline`, or when it has a Content-ID and no disposition at all, as quoted
+signature logos do. Hub only, no schema or client migration. Recovery is a
+CI-validated beta Hub release reverting this change.
+
+## Unreleased: Gmail send and reply carry the files attached to the command
+
+`@gmail:send` and `@gmail:reply` could only send a plain-text email; a file
+attached to the command message was ignored, so the email went out without it.
+The files on the command message itself (`xmatrix send --attachment`, or a file
+attached in the composer) now go as email attachments: at most 20 files and
+25 MiB. Each is read as the Human the command runs for, through the same
+Channel attachment authority as a download. The approval card lists every
+file's name and size; the send rereads each one and refuses a file whose
+content, type or version changed after approval. A message with attachments
+goes to Gmail's upload endpoint through the short-lived Hub staging that
+`send_draft` uses. An approved send reads the files its card froze; the first beta
+refused them as unreadable and sent nothing (#1521). No new scope, no reconnect. Hub and protocol only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: a missing harness is refused by name before its Run starts
+
+When npm left `opencode` off a Mac daemon's PATH, xMatrix still listed
+OpenCode as installed there and every Run died in the wrapper on a bare
+`No such file or directory`. Inventory and launches now search one PATH,
+the one a Run gets, which carries each harness installer's directory on
+every platform (now including `~/.opencode/bin` and `~/.kimi-code/bin`). At
+launch the daemon resolves the preset's launcher on the Run's own PATH; when
+it is missing, the launch is refused as `harness_missing`, naming the program
+and its install, and the machine reports its inventory again. An install or
+update xMatrix runs fails when the launcher cannot answer its own version.
+Hub and CLI, no migration (#1516). Recovery is a CI-validated beta reverting
+this change.
+
+## Unreleased: a conversation's list copy can no longer stand in for its live Agents
+
+Since Instances became records of their own, a Channel held by a list carries
+no Agent Instances, yet its type still said it did: code that read Instances
+from a list copy compiled and found none. `ChannelSnapshot` now describes what
+lists hold (metadata and people) and `LiveChannel` the Channel with its
+Instances; only live reads return a `LiveChannel`, and every Instance reader
+takes one. The places this surfaced read live again: mentions in the message
+timeline resolve their Instance and show why a mention waits for an offline
+machine, the cards beside a Page show which Agents are live in each linked
+conversation, and Status counts work in hand while a conversation is open.
+Message rows read who wrote them from a sender directory taken when they are
+built, not from a subscription, so no Instance report re-renders the shell. Web only; recovery is a
+CI-validated beta Web release reverting this change.
+
+## Unreleased: Instance runtime catalogs keep every entry
+
+Runtime catalogs were cut at fixed counts, so a Claude Instance with many
+skills lost the tail of its slash menu (production showed exactly 64 stored
+commands), and a runtime with more than 64 parameters had its whole catalog
+rejected. Commands, capabilities, models, parameters and options now keep every
+entry; per-string length and the presence body's byte bound remain. The compact
+hibernation attachment leaves out commands and capabilities, and the Instance
+row keeps any runtime catalog a report omits (an explicit empty list still
+clears it), so a long list can neither overflow the 16 KB attachment nor be
+wiped after a restore. No schema migration. The Hub carries the fix; the CLI
+change only lifts the ACP parameter count. Recovery is a CI-validated beta Hub
+release reverting this change.
+
+## Unreleased: Summons infer and apply a model from the runtime's own catalog
+
+A summon could choose a model only from a list its Agent's owner declared, and
+no registration declares one, so `@claude model:sonnet` was refused and Jev
+never chose a model. With no declared list, a summon now chooses from the
+runtime's fresh native model catalog, the same set a live `/model` offers. Jev
+keeps the runtime's default unless the author or the discussion names or asks
+for another model; a written `model:` matches the runtime's model id or any
+selector or display name it lists (Claude's `opus`, `Sonnet 5.5`). The launch
+stays on the runtime-default authority, with no grant or model resource change,
+and carries the choice as `preferredModel`; the daemon requests it of the
+runtime as it does an admitted model, so a runtime that rejects it fails to
+start rather than running its default. A reborn restarts on the same model.
+Stored catalogs keep a collapsed selector as an alias, so live `/model opus`
+works too. Needs the Hub and daemons advertising
+`registration_native_model_v1`; on older daemons a written model is still
+refused. Evidence uses `registration-parameters-v12`. Recovery is a beta Hub
+release reverting this change; daemons ignore the field without the Hub.
+
+## Unreleased: Instance command and parameter menus retain their runtime catalogs
+
+Modern clients read versioned Instance records, but their durable projection
+omitted commands and capabilities on write and omitted models and parameters
+on read. The command palette, model choices and harness configuration therefore
+lost the runtime's advertised choices. Both boundaries now retain those catalogs,
+workspace and worktree-base presentation. A complete typed checkpoint and
+exhaustive normalizer share one field registry with the SQL reader; adding a
+presentation field without its durable mapping fails compilation. Explicit
+empty catalogs remain withdrawals, including after hibernation. Message headers keep their own smaller
+projection; temporary work stays on its live activity stream. Hub only, no
+schema or client migration. Existing connections repopulate the missing fields
+on their next presence update or ordinary reconnect. Recovery is a CI-validated
+beta Hub release reverting this change.
+
+## Unreleased: Agent sends require an Instance or an explicit launch
+
+A CLI or MCP send without an Instance number returned success even though
+its Agent summon could not route to an existing Instance. The Hub now refuses
+that send before publication with `agent_instance_required`. Use
+`@<agent>:<instance>` to address an existing Instance, or `--launch` (MCP
+`launch: true`) to start one; message text `launch:force` is insufficient.
+Human mentions and code/quoted examples remain valid. The Web composer already
+requests launch. Older CLIs receive the Hub refusal too; updated CLI help
+explains the contract. No schema migration. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: Apple relationship writes require a complete current snapshot
+
+Generic App Store API plans treated every POST as a resource creation, so
+adding members to an existing relationship did not bind its current state.
+Direct relationship reads and App Review draft attachments could also bind
+only a partial response. These paths now share one completeness check, and
+relationship POSTs bind current membership before approval and execution.
+Pagination, inconsistent totals, malformed linkage and duplicate identities
+refuse the plan or draft mutation before any provider write. Inspect the full
+relationship at Apple when its bounded response is incomplete. Existing
+resource-create plans remain valid; relationship POST plans must be refreshed.
+Hub only, no schema or client migration. Recovery is a CI-validated forward
+Hub release retaining complete snapshot checks; uncertain Apple writes still
+require inspection before retrying.
+
+## Unreleased: ACP Agents without image support still read a message with a picture
+
+A message with an image sent every ACP Agent an inline image block, and an
+Agent whose initialize result did not advertise `promptCapabilities.image`
+(DeepSeek Harness among them) rejected the whole turn with -32602. Such an
+Agent now gets the message text alone, which already names each image's local
+copy for its own tools to open. CLI only; no Hub, schema or protocol change.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Apple commerce watch failures keep their phase
+
+HUB-C0 reported only that a commerce watch would retry. The pass still retries
+that watch and does not discard its snapshot or pending events. The report now
+names the failed phase, a fixed failure kind and code, and whether the retry
+was recorded, and keeps a database failure's existing attempt evidence.
+Provider response text, bundle ids and credentials stay out of the event. Hub
+only, no schema or client migration; recovery is a CI-validated beta Hub
+release reverting this change.
+
+## Unreleased: Windows Agents work with files past 260 characters
+
+`xmatrix setup daemon` now turns on Windows' LongPathsEnabled switch before it
+starts the daemon (one administrator prompt; without one it prints the exact
+administrator command), Git run by an Agent or any tool under it has
+`core.longpaths` on, and xmatrix.exe declares itself long-path aware. Together
+they let a checkout hold files deeper than 260 characters. Windows still starts
+no program from a folder or an executable path past 260, whatever these
+settings say: the short pool path keeps checkouts within it, and an Agent whose
+Workspace folder is too long now fails naming the folder and its length
+instead of "The directory name is invalid". CLI only; no Hub, schema or
+protocol change. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: New sessions get the short pool path on Windows
+
+A repo pool created before the compact layout (`<64hex>/slots/<32hex>`) kept
+taking every new session on that machine, so each checkout was 88 characters
+longer than the compact `<8hex>/<6hex>` path. On Windows that put deep
+dependency trees past MAX_PATH (260), where a nested executable, such as a
+test runtime installed under `node_modules`, could not start. A legacy pool now keeps only the
+sessions, handoff predecessors and slots it already holds; new sessions start
+in the compact pool, and the sweep keeps no warm spares in a legacy pool, so it
+drains as its sessions end. Nothing is moved or deleted. The desktop App's git
+probes name the workspace with `-C` instead of starting git inside it, so a
+deep workspace no longer shows a blank repository, remote and branch. CLI and
+desktop App; no Hub, schema or protocol change. Recovery is a CI-validated
+beta reverting #1498.
+
+## Unreleased: Every quote opens with a large quotation mark
+
+A quote above a reply, a passage quoted in a message, and the reply or quote
+slip in the composer were a plain yellow slip that read like any other card.
+Each now opens with a large curly quotation mark in the slip's own wood, drawn
+as a vector so it is the same light mark on every system. Beta Web only;
+recovery is a CI-validated Web release reverting the style.
+
+## Unreleased: the details rail lists a conversation's Agents again
+
+Since Instances became records of their own, the right-hand details rail read
+its Agents from a Channel list that no longer holds them, listed none and hid
+its Agents block: only the Summary was left. The rail now reads the same live
+Instance store as the Agents-at-work dock. Beta Web only, no migration.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Launch candidate reads recover a lost response
+
+HUB-BZ lost the model catalog's PostgreSQL response before an Agent could be
+selected. Candidate grants, model/parameter observations, response latencies
+and directory enrichment now use independent lock-free reads, each recovering
+one lost response on a fresh connection. A repeated loss or explicit SQL error
+still fails; placed reads recheck the fence and a retried candidate read sees
+revoked grants. Preparation, launch writes and unknown-COMMIT reconciliation
+keep their existing boundaries. Hub only, no schema or client migration;
+recovery is a CI-validated beta Hub release reverting this change. The
+underlying database stall remains unattributed.
+
+## Unreleased: A signed-in desktop App with no CLI session hands it one
+
+The desktop App installs its CLI only with a CLI session, and the Web asked
+for one only when the daemon reported a sign-in error. An App signed in by a
+path that did not hand its session over found no CLI, reported the daemon
+`missing` (not an error), and showed the setup command with nothing failing
+and nothing reported. A new user on 11-08 stopped there. When the App can
+install its own CLI and finds none, the Web now exchanges a CLI session,
+saves it and starts the daemon, as after the App's own sign-in. Beta Web
+only; recovery is a CI-validated Web release reverting the effect.
+
+## Unreleased: preserve app-owned product items during iOS review updates
+
+The iOS release script accepts an app version alongside subscription, group and
+in-app purchase versions in the same review submission. Before refreshing an
+editable version or withdrawing a queued submission, it verifies each product's
+parent against the app's collections. Unknown, foreign, duplicate or ambiguous
+items stop the release before mutation. A queued replacement carries all three
+product version kinds forward. An unresolved rejection still requires a factual
+review response and explicit resubmission; updating the exact build does not
+resolve review issues automatically.
+
+## Unreleased: App Review attachments and draft replies use the saved web session
+
+Review reads now expose thread/message IDs and linked attachment metadata,
+with one-file signed downloads fetched without Apple credentials. Optional
+thread/message selectors retain the existing newest-thread command. Unsent
+drafts can be read, created, updated, deleted and sent. Edits and sends require
+the current body/attachment digest, preserve existing drafts unless explicitly
+named, and verify the provider result. Sends never retry an uncertain mutation.
+Every web-session write revalidates current app permission before fetch, and
+responses are bounded while streaming. Hub only; no schema or credential
+migration. Recovery uses a CI-validated forward Hub release preserving these
+checks. Physical-device testing, truthful review evidence and App Review
+acceptance remain independent of these connector capabilities.
+
+## Unreleased: video attachments declare microphone use, and support has a contact page
+
+Recording a video from the iOS attachment picker uses the microphone, but
+the app declared only camera use. iOS terminates an app that accesses the
+microphone without its purpose string. The app now declares sound capture
+for user-initiated video attachments and describes both camera modes;
+a hosted test checks the actual built app's capture purpose strings.
+Physical-device video capture remains a separate validation step.
+The App Store support address now names `/support`, an unauthenticated page
+with an email contact and account, purchase and troubleshooting guidance,
+reachable from the guide and footer. iOS and Web, no data or API migration.
+The new binary and support page require a verified beta followed by stable
+before App Review can use them; the old binary is unchanged by a Web deploy.
+Recovery is a CI-validated forward release preserving both capture declarations.
+
+## Unreleased: Sentry events follow all current installation bindings
+
+Installation binding storage already accepts more than 50 Spaces, but Sentry
+event admission still rejected the entire event at binding 51. Admission now
+shares the complete resource-page iterator used by installation retirement and
+writes jobs in bounded pages inside one transaction. Current grants and
+credential versions are checked on every page; replay, delivery fencing and
+the 1,000-pending-job backpressure remain. A failed later page rolls back all
+new jobs and the receipt. Cleanup still takes at most two expired receipts,
+now at most 2,000 child jobs under the existing transaction deadline. Hub only,
+no schema or client migration; recovery is a CI-validated beta Hub build that
+retains complete reads for already-saved bindings. Events already acknowledged
+by the provider are not recreated; rejected deliveries depend on its retries.
+
+## Unreleased: CLI release feeds are read before the cron opens its other connections
+
+HUB-BX lost the dev CLI feed twice while waiting for response headers. The
+waits were 15s and 7s, past the five-second abort, while the stable feed in
+the same minute succeeded and both public feeds answer within a couple of
+seconds on their own. A minute cron may keep only six connections waiting on
+headers. Each other pass opens a Hyperdrive connection, which counts, so a
+feed fetch queued behind them does not see its abort until a slot frees.
+Hyperdrive's connect wait is 15 seconds. Both feeds are now read, including
+one retry of a lost response, before any other pass opens a connection. Owner
+queries and socket delivery are unchanged and still are not replayed. Hub
+only, no schema or client change. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: Expired Machine leases retain their timing
+
+HUB-7F reports expired harness-action renewals, but the refusal alone could not
+separate delayed initial admission from a later heartbeat gap. The existing
+locked command read now supplies a database observation clock, and the single
+rejection log keeps the grant window, expiry lateness and command age as bounded
+millisecond durations. Raw timestamps, identities and payloads stay private;
+socket replies and all lease fences are unchanged. This adds missing evidence,
+not a confirmed fix of the underlying delay. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this diagnostic change.
+
+
+## Unreleased: personal browser history stays with its signed-in user
+
+Input and search history used a Space-only browser key, so signing into the
+same Space as another person on that device could offer the previous person's
+inputs and searches. Page summon markers and the preferred writer also lacked
+a reader boundary. All four now share storage addressed by the current user
+and Space, and in-memory choices follow the same scope. Old ownerless records
+are left unused because their author cannot be recovered. A blocked or full
+store never interrupts sending, searching or calling an Agent. Beta Web only;
+no Hub, schema or client protocol migration. Recovery requires a forward beta
+that preserves this ownership boundary.
+
+## Unreleased: the last message scrolls clear of the Agents at work again
+
+Since Instances became records of their own, the Conversations view asked a
+Channel list that no longer holds them whether an Agent was in the Channel,
+always heard no, and kept no room under the last message: the floating Agent
+card covered it and it could not be scrolled out from under it. The timeline
+now asks the same live Instance store the card is drawn from. Beta Web only,
+no migration. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: ↑ in an empty composer lists what was sent before
+
+The composer now keeps what the reader sent in each Space, on this device.
+↑ in an empty composer opens that history in the composer's own panel, newest
+beside the field; ↑/↓ move the highlight, Enter or Tab puts the entry back to
+edit or send, and Escape, typing or ↓ past the newest closes it. Picked pages
+and channels come back picked; Agents come back as their written `@name`.
+Beta Web only, no migration. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: a read Gmail message opens in Gmail when its card is clicked
+
+Clicking the email card a Gmail read draws in a Channel now opens that
+message in Gmail's web app, in the signed-in Google account that holds its
+mailbox (`authuser`). The card tints slightly on hover; its own links,
+toggles and text selection keep their meaning. The Hub now names the mailbox
+on every read and notification read, not only when several are connected.
+Hub and beta Web, no migration. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: Transfer proposal lists recover a lost database response
+
+HUB-BW lost its connection at BEGIN while listing Channel transfer proposals.
+This lock-free read now combines the current Human admin check and the bounded
+queue in one placed single read. One lost response retries on a fresh connection,
+rechecking both admin authority and placement; repeated loss stays visible.
+An authorized empty queue remains distinct from a denied reader. Transfer
+confirmation, writes and unknown-COMMIT recovery are unchanged. Hub only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change. The underlying connection termination is not attributed.
+
+## Unreleased: Registration presentation keeps its own clock
+
+The ordered Instance store no longer accepts writes to its derived Channel
+view. Registration quota now updates a separate account pool and joins local
+Instance counters when displayed, including on cold reads. A registration's
+name travels with its own Space-scoped version, so a rename reaches an idle or
+ended Instance on focus, reconnect or cold read without changing its lifecycle.
+The same database projection now includes the persisted goal and current Git
+branch. Hub, beta Web and additive shared protocol; no migration. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: a Gmail draft's approval card says when it carries no real attachment
+
+A reply to TradeStation was approved and sent whose card listed "7
+attachments", all the logos of the quoted signature, while the two PDFs its
+text promised had never been attached. The card and receipt now list real
+attachments and inline images (parts with a Content-ID or `inline`
+disposition) separately, and say "Attachments: none" outright, so a card of
+logos cannot read as carrying documents. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: Instance status has one ordered source
+
+A newly running Agent could speak while its message said `instance offline`:
+bounded Channel windows replaced the whole roster, while live cards could
+only update an Instance already in it. Messages also cached a second live
+status. Self-contained Instance records now merge by lifecycle version and
+socket sequence; empty or late windows cannot remove a live record. Only an
+explicit ended record means offline, and exact reads reconcile held IDs after
+reconnect or focus. Message headers, avatars, Reborn and the work dock share
+the live state without rebuilding Markdown on activity. Hub, Web and shared
+protocol; capability-negotiated legacy compatibility, no schema migration.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: A page's comment thread no longer hides its own words
+
+An open thread in a page's margin floated the Conversations view's Agent
+disc (46px) and composer over its last lines, a "back to the last person"
+capsule over its first, and showed its Agent again as a chip in the head.
+The same glass disc and composer now stand in flow under the comments at
+the thread's scale (a 32px disc on the comments' avatar column, a 40px
+composer), the head names the conversation on the passage's column without
+the chip, comment avatars drop their status dot, the jump capsule is gone
+from the margin, and text fades at the scroll edges. The Conversations view
+is unchanged. Web only.
+## Unreleased: page edit takes what page read printed, never its header alone
+
+Agents wrote `xmatrix page read`'s header into pages: 62 revisions of 10
+Lambda Labs pages since 2026-10-02 carry its lines, first written by codex,
+claude, opencode and grok. `page edit -f` took a file as the page's text, so
+each Agent cut the header off by hand; a cut one line short or mid-header
+landed above the page's heading. `page edit` and `page create` now take the
+page's text or all of what `page read` printed, whose header is left out. A
+line only that header writes (`pageId:`, `headRevision:`, the `writeLive:`
+hint) elsewhere outside fenced code means it was cut by hand: nothing is
+written, and the refusal names the line and what to give instead. CLI only;
+no Hub, schema or protocol change. Older CLIs write what they are given.
+Recovery is a CI-validated beta CLI reverting this change.
+
+## Unreleased: An idle Agent's 5h/1w usage comes back when its Channel is opened
+
+A registration's quota reading counts for fifteen minutes, and since idle
+Instances stopped polling their provider (#1328) nothing read it again while
+an Agent sat idle, so its Channel card lost its 5h/1w tags. Opening the
+Channel is now the event that reads it: when the Agents it shows have no
+reading in force, the Hub asks their machines' daemons for one (the existing
+once-a-minute-per-daemon probe), and the reading reaches the owner's card
+when the probe lands. Hub only, no schema or client protocol migration.
+Recovery is a CI-validated Hub reverting the change.
+
+## Unreleased: A page's name is its first top-level heading, wherever it stands
+
+Two Lambda Labs business-line pages read "Untitled" in the page tree,
+Schedules and root tables while their documents carried `# NomadCafe` and
+`# 酒店积分数据产品（常旅客）`: an Agent's edit had left `page read` header text
+above the heading, and only a heading a document opened with named it. There
+is no stored title to drift; production history shows 49 revisions of 18
+pages unnamed this way, by notes, stray rules and pasted headers. A page's
+name is now its document's first top-level heading outside fenced code,
+wherever it stands (`data.page_title` in SQL, `pageTitleLine` in the protocol);
+a document without one, or whose first one is empty, still reads "Untitled".
+Rename rewrites that heading where it stands; the editor draws "Untitled" only
+for a document without one, and the byline and the published page stand under
+the title wherever it is. Hub and beta Web with expand migration 0238;
+`data.page_name` stays for the Hub this replaces until contract migration 0240
+drops it. Recovery is a CI-validated beta Hub and Web reverting this change.
+
+## Unreleased: A schedule says what its latest runs produced
+
+Learning which of a Space's schedules earn their cadence took a manual,
+hours-long audit of their conversations. Each page Automation listed by its
+page or its Space now carries `outcomes`: its ten latest occurrences that were
+not cancelled, newest first, each a pull request it opened, a page it changed,
+nothing, failed to start, or still running. The Hub reads them from each
+occurrence's own conversation (its launches, Runs, page revisions and activity
+entries) in one bounded statement per list; nothing new is stored and merges
+are not shown. `xmatrix page automation list` and `page read` print
+`last 10: 4 PR · 3 page · 2 none · 1 failed to start`, and Schedules shows the
+summary in each row and every run, with its conversation, in its detail.
+Expand migration 0239 adds online indexes for those reads (a GIN index on page
+revision conversations and a partial index on activity entries and failure
+notices). Hub, Web, CLI and shared protocol; older clients ignore the additive
+field. Recovery is a CI-validated beta reverting the change; the indexes may
+stay.
+
+## Unreleased: Phone conversation heads share state without inspecting the app tree
+
+The phone navigation bar inferred its paper tone from a Summary plaque found
+by an app-root `:has()` selector. The shell now supplies the same summary and
+linked-page data to the bar and plaque, keeping their shared tone, spacing and
+page actions. A stylesheet architecture gate rejects this root dependency,
+and the existing scroll scope test now covers phones as well as desktop.
+The pre-fix bounded scroll sample passed its element-count budget; this change
+does not claim a measured jank reduction. Web only, no schema or client
+protocol migration. Recovery is a CI-validated beta Web reverting the change.
+
+## Unreleased: System judgments recover a lost database response
+
+HUB-BV lost the outbox INSERT response while recording a Machine result on
+its command message, before COMMIT. System annotations now close the failed
+session and replay their database-only transaction once on a fresh session,
+including when the caller owns a request session. Each attempt rereads the
+message and annotation, preserving recall and idempotence; live publication
+stays outside recovery. A second loss or an answered rejection still fails,
+and an unknown COMMIT is never replayed immediately. The underlying stall
+remains unconfirmed. Hub only; no schema or client migration. Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: Socket overloads keep their failed Runtime fetch evidence
+
+HUB-BS/BT reported only an opaque platform error at the Agent and Machine
+Daemon WebSocket routes. The socket router now adds bounded wall duration,
+owner/unassigned routing, the platform remote flag and a fixed message category
+to the single original report, readable through Sentry. These distinguish a
+quick refusal from a slow fetch without retaining owner names or request data;
+they do not establish the cause of the overload. No immediate retry is added,
+and existing 503 responses and client backoff remain. The same investigation
+found daily harness notices rejected for having no version registry despite
+an official update recipe: action admission now matches the daemon and accepts
+those notices. Hub and shared protocol only; no schema or client migration.
+Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: A Codex CLI too old for xMatrix is named instead of started
+
+Codex threads start with the goal tools as one namespaced dynamic tool, which
+Codex CLI 0.140 and older reject at `thread/start` ("missing field
+`inputSchema`"). A new Windows user's first message on Codex CLI 0.104.0 failed
+with only that protocol error. The Codex preset now requires 0.141.0, the first
+release with namespaced dynamic tools: routing leaves an older Codex out, the
+connect flow says it is too old, and a refusal names Codex CLI, the machine and
+its update. Protocol registry only; no schema, daemon or client migration.
+Recovery is reverting this change.
+
+## Unreleased: OAuth cookie refusals identify the failed browser binding
+
+HUB-BR found and parsed its stored OAuth state, then refused its signed browser
+cookie. Google and GitHub callbacks now retain the original error with a fixed
+cookie diagnosis and parameter-presence flags, readable through the Sentry
+connector. Request-local evidence keeps simultaneous flows separate and retains
+no state, code, cookie, URL or identity. Validation, state consumption, callback
+recovery and SDK deduplication are unchanged. This adds the missing
+diagnostic; the original browser cause remains unproven. Hub only, no schema or
+client migration. Recovery is a CI-validated beta Hub reverting the change.
+
+## Unreleased: An idle Machine Daemon no longer wakes the Hub or writes PostgreSQL
+
+The daemon's minute session probe and its at-least-minutely load report each
+woke the owner's Relay Runtime, and every report wrote PostgreSQL. The daemon
+now probes with the edge heartbeat the Runtime auto-answers without waking, and
+the Hub reads liveness from the platform's timestamp of that answer: a daemon
+silent past 45 s is closed and shown offline at the next event in its owner's
+cell, or within 30 s while it carries a Run. Load history is kept on the daemon
+one sample per minute and sent with the next report, at most five minutes late;
+placement load is reported on material change. A failed delivery no longer
+closes the daemon with the client-upgrade code that stopped it reconnecting.
+Old daemons keep the previous behaviour; no schema migration. Recovery is
+reverting this change: the Hub ignores the new capability and field.
+
+## Unreleased: A reconnected daemon keeps its fresh Machine credential
+
+HUB-A9 received a refresh credential that had expired 901 seconds earlier.
+The reconnect path could enroll a fresh token, then replay a queued old refresh
+and roll its local HTTP credential cache back.
+Refresh now captures the live connection epoch before minting and is sent only
+on that same connection. Offline and replaced-connection refreshes are discarded;
+current refreshes retain their wire format. CLI daemon only; no schema or Hub
+compatibility migration. Existing daemons receive the fix when they update to a
+release containing it. Recovery is a CI-validated CLI release reverting this
+change; Hub credential verification remains unchanged.
+
+## Unreleased: Markdown round-trip tests reuse their parsed documents
+
+The shared Node gate parsed both the original and canonical Markdown twice for
+every document in the repository corpus. The round-trip test now reuses those
+documents for its idempotence and equivalence assertions. Every corpus input,
+syntax case and assertion remains; focused tests still cover the convenience
+API. Product behavior, required gates and release authority are unchanged.
+No migration is needed.
+
+## Unreleased: Literal attachment examples survive sending in every Markdown context
+
+An attachment-looking line inside multiline inline code or HTML was treated as
+a draft picture: sending deleted it without an upload, or rewrote it when an
+upload matched. Removing a real picture also erased literal references to the
+same file. Draft widgets, file removal and sending now inventory actual image nodes in
+the shared GFM tree, using the same parser configuration as Page documents and
+operational mentions. Whole-line uploaded pictures keep their existing format
+and selection offsets. Web only; no schema, API or saved-message migration.
+Recovery is a CI-validated beta Web release reverting this change.
+
+## Unreleased: The timeline stays put while rows above the reader load
+
+A reader who had scrolled up in a conversation saw it jump when a row above
+the screen grew late, most often a Gmail card filling in its private result,
+and the same while scrolling up with a wheel or trackpad. The list made up for
+rows above the first one in view only while the reader was scrolling up, and
+that direction resets 50ms after the last scroll event. It now makes up for
+them in any direction and at rest. Web only, a react-virtuoso patch; no schema
+or client migration. Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: Release storage tests skip idle retry waits
+
+The R2 upload regression spent 24 seconds in production retry backoffs on every
+PR and release gate. It now records and fast-forwards only those waits while
+keeping real abort deadlines, child-process termination, retry counts, phase
+diagnostics and credential redaction checks. The file runs in the bounded
+child-process test lane because it launches Wrangler fixtures. Production
+transfer behavior and required gates are unchanged; no migration is needed.
+
+## Unreleased: Message files follow the pictures actually shown
+
+An attachment could disappear when its picture syntax was inside code or beyond
+a folded preview, while a Markdown image reference showed the same file twice.
+The message now prepares its displayed body and consumed attachments from one
+final Markdown tree, after quote replacement. Files not actually drawn remain
+under the words, including in long plain-text messages and system cards. The
+independent line scanner is removed. Editing before a composer quote also no
+longer strands its remove control: it reads the widget's current editor position.
+Web only; no schema, API or saved-message migration. Recovery is a CI-validated
+beta Web release reverting this change.
+
+## Unreleased: Recorded database connection terminations remain recoverable
+
+HUB-BQ failed both fresh connections at BEGIN before business SQL. Recovery
+already replayed once, but the common CONNECTION_TERMINATED code erased the
+difference between pg termination messages and Hyperdrive's explicit egress
+severance. Each failure attempt now retains a fixed driver reason, readable
+through Sentry without copying driver text, SQL, credentials or causes. This
+fills a diagnostic gap; the underlying outage remains unconfirmed. The Hub also
+uses the database's recorded termination evidence to answer retryable unavailable
+after the single replay is exhausted, instead of a permanent session failure.
+Arbitrary text and explicit SQL rejections retain their classification. Existing
+retry limits and unknown-COMMIT reconciliation are unchanged. Hub only, no
+schema or client migration; recovery is a CI-validated beta Hub reverting this
+change. Historical events remain readable.
+
+## Unreleased: A jumped-to message stays where it landed
+
+Opening a Needs-you conversation landed on and highlighted the message, then
+private result cards above it loaded their content and pushed it off screen a
+second later. The timeline now holds a landed message in place while rows above
+it change height, until the reader touches, scrolls, clicks or types, jumps
+again, or switches conversation. Web only, no schema or client migration.
+Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: Gmail hands a large approved draft to Composio by short-lived link
+
+The upload-endpoint fix still ended in 413: Composio's proxy, not Gmail,
+refuses a request body of a few MB, so an approved draft of about 5 MB of
+attachments could not be sent through it at all. The Hub now stages the
+checked snapshot under an unguessable token for at most ten minutes, lets
+Composio fetch it from `/api/connectors/mail-snapshots/<token>` and deletes it
+as soon as the send ends. What is sent is still exactly the approved snapshot.
+Hub only, no schema or client migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: Gmail sends a large draft through the upload endpoint
+
+The first real `@gmail:send_draft`, an application email of about 5 MB of
+attachments, was approved and then refused by Gmail with 413 Request Entity
+Too Large: the checked snapshot went in an ordinary JSON body, which Gmail caps
+at about 5 MB. It now goes to Gmail's upload endpoint as multipart/related
+(the draft id and the snapshot's own message bytes), which takes up to 35 MB.
+Nothing was sent by the failed attempt. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: Gmail sends a saved draft, attachments included, after approval
+
+The Gmail connector could only send a plain-text email it composed itself, so
+an email with attachments drafted in Gmail could not go out through an
+approval. `@gmail:drafts:*` now lists your drafts with their recipients and
+attachment count, and `@gmail:send_draft:<draft id>` sends one as it is. The
+approval card names its sender, recipients, subject, text and every attachment;
+a draft edited after approval is refused rather than sent. The existing Gmail
+grant covers drafts: no new scope, no reconnect. Hub and protocol only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
+
+## Unreleased: The welcome says an agent is in, in one line, with no cards
+
+Once a new person's agent was in, the welcome showed four cards (start a new
+conversation, several AIs together, write with AI, connect another computer).
+Of the external people whose agents were in, 8 of 39 in 28 days still never
+sent a message. Daniel's call (2026-11-04): no menu; the welcome says
+"@codex is in. Mention it here to give it work." and the composer below it
+already says "@ to summon an agent". A Space without GitHub is offered
+"Connect GitHub so agents can work in several repositories in parallel."
+(it used to say the repositories "become pages"); once GitHub is connected the
+welcome says nothing more, and no longer lists repositories to draft pages from.
+The welcome's one-click co-writing page and the code only it used are gone;
+co-writing from a page is unchanged. Web only; no schema or client migration.
+Recovery is a CI-validated beta release reverting this change.
+
+## Unreleased: xMatrix's own messages no longer use a Free Space's writes
+
+A Free Space's 500 writes were also spent on what xMatrix itself said: the
+welcome steps it writes into a new person's conversation (written under their
+name, kind `xmatrix.onboarding.v1`) and the `@<agent>` summon it sends for a
+first message nobody was named in. A new Space on 2026-11-03 had used 4 writes
+for one message of its owner. Only messages from people, Agents and apps now
+count, as `docs/design/agent-credits.md` already said for system notices; a
+paid Space's credits were already untouched by these. Writes counted before
+this release stay counted (the counter never goes down). Hub only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
+## Unreleased: Reloading a conversation no longer waits for a page render
+
+Reloading the app (Ctrl+R / Cmd+R) or opening a link into a Space, view or
+conversation kept the old page on screen while the Web Worker rendered the
+startup frame for that address; a cold Worker took up to about 2 s, longer from
+far networks. Only the bare `/app` was served as the prerendered page. Every
+address the app shell answers itself now gets that same prerendered page, so
+these loads wait only for a static file. Legacy addresses still redirect as
+before. Beta Web only, no API, schema or native change; recovery is a
+CI-validated beta Web release reverting the change.
+
+## Unreleased: Gmail automatic read failures retain their failing step
+
+HUB-BP reported only 502 when a notification's private message read failed,
+losing the distinction between an oversized response, a Composio HTTP/proxy
+failure, Gmail's refusal and message formatting. One explicit report now keeps
+the read step, fixed failure kind, status and uploaded Worker code locations;
+Sentry issue reads expose the same bounded diagnosis. Provider text, mail,
+credentials and mailbox/message identity remain private. Notifications still
+arrive with their manual read command after failure. This supplies missing
+evidence; the original 502's underlying cause is unconfirmed. Hub only, no
+schema or client migration. Recovery is a CI-validated beta Hub reverting this
+change.
+
+## Unreleased: Pictures are blocks of what is written, a row at a time
+
+Pictures waited in a strip above the words and showed under the message, in
+no relation to what was written. A picture now goes into the draft where the
+caret is, as its own attachment card (preview, Original, retry, ×) among the
+lines; pictures put together, or one after another, are one row that wraps,
+and words between them start a new row. Sent, each picture is named by its
+place among the message's files (`![name](attachment:1)`), so the message
+draws it where it was put and Agents read the pictures in order with the
+words; any file the words do not name, and every file of older messages,
+stays under them as before. Backspace or Delete beside a picture, or its ×,
+removes it and its file. An image card's Original toggle and × now sit over
+the picture in the light theme instead of below it. Web only; no schema or
+client migration. Recovery is a CI-validated beta release reverting this
+change.
+## Unreleased: Receipt recovery verifies the release channel's Web
+
+The archive recovery reader accepted either Web origin for every beta, so a
+current beta receipt claiming the stable Web could pass. It now requires
+`beta.xmatrix.sh` from `1.3.1-beta.7`, the first immutable train that selected
+the beta Web; older betas and stable releases require `xmatrix.sh`. Exact
+scope, SHA, tag and run checks remain required. Production validates each new
+receipt with the same reader before persisting it to R2; recovery uses the
+default branch's reader without changing historical tags or receipts. No product,
+schema or client migration is needed. A CI-validated forward change to this
+reader can recover a mistaken historical boundary; do not rewrite receipts.
+
+## Unreleased: Quotes are blocks of what is written, as many as wanted
+
+A composer held one quote, above what was typed, and a message drew only the
+quote it opened with as a slip. Quote now puts the passage into the draft as
+a yellow block on the line after the caret, so a message can quote several
+passages, each among what is written around it, in the order they were put;
+the caret steps over a block, and Backspace or Delete beside it, or its ×,
+removes it whole. The draft is the message's own Markdown (`> passage`, then
+`— [source](link)`), so drafts save, restore and send unchanged, and Agents
+read the quotes in order. A message draws every such passage as its slip
+where it was put, and previews and automatic names read what was written
+around them. Discuss in new channel opens the new conversation's draft
+holding its passage as the first block. Hub and Web; no schema or client
+migration. Recovery is a CI-validated beta release reverting this change.
+
+## Unreleased: Connected mobile conversations slide in
+
+Opening a conversation from the channel list now runs its push transition when
+the Human socket is connected. Sending channel focus stamps the incoming
+history acceptance refs before the route commits; navigation now decides
+whether the channel changes before that stamp, so it cannot mistake the new
+channel for one already open and skip the animation. The temporary browser
+Sentry push diagnostic is removed. Beta Web only, no API, schema or native
+change; recovery is a CI-validated beta Web release reverting this change.
+
+## Unreleased: Gmail reads currency and punctuation entities
+
+A Gmail read showed `&yen;` and similar named HTML entities literally, for
+example in a bank statement's amounts. Common currency, typographic and
+spacing entities now read as their characters; unknown names stay as written.
+Hub only, no schema or client migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: Gmail reads a statement-sized message body
+
+The large-body read shipped in the previous beta still failed on a real bank
+statement with "Provider response is too large": the fetched body exceeded the
+Hub's default 256 KiB provider response bound. That one call now allows up to
+3 MiB, enough for the 2 MB body limit once base64-encoded; every other provider
+call keeps its bound. Hub only, no schema or client migration. Recovery is a
+CI-validated beta Hub reverting this change.
+
+## Unreleased: Gmail reads large message bodies
+
+`@gmail:read` showed "(no text body)" for mail whose HTML body is large, such as
+a bank's credit-card statement: Gmail returns such a body by reference
+(`attachmentId`) instead of inline, and the connector did not fetch it. A read
+now fetches up to four such text bodies of at most 2 MB each through
+messages.attachments.get; real attachments are still never read. The existing
+Gmail grant covers it: no new scope, no reconnect. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: A quote is one yellow slip
+
+A quoted passage in a sent message was a grey block followed by a dashed,
+underlined "— author in #channel" link. Every quote is now one yellow paper
+slip, the open ask card's wood thinned into the paper, sized to its words:
+above the composer before it is sent, in the message once it is, and on the
+words it marks when opened. A quote of a message in the same conversation is
+its own reference: the slip alone, with no author, time or channel, which
+jumps to that message and highlights exactly the quoted words. A quote from
+another conversation keeps a quiet source line inside the slip. Same-channel
+is decided by the link's path, so quotes written on xmatrix.sh, beta or the
+desktop app all count. The Markdown Agents read is unchanged. Web only, no
+schema or client migration. Recovery is a CI-validated beta release reverting
+this change.
+## Unreleased: Desktop navigation does not report a missing mobile push
+
+The conversation push diagnostic added for WEB-Z also ran for desktop
+selections, whose driver deliberately declines mobile animation. Reporting now
+requires a mobile viewport and spends its once-per-page allowance only then;
+a desktop page later resized to a phone can still report its first failure.
+The missing-driver path supplies that same viewport flag. Animation behavior
+is unchanged. Web only, no schema or client change; recovery is a CI-validated
+beta Web release reverting the report scope.
+
+## Unreleased: Conversation push diagnostics can be read
+
+WEB-Z captured why the mobile conversation push declined, but the Sentry issue
+reader omitted the shell conditions already attached to the event. Reads now
+retain only its fixed boolean flags and allowlisted view/client labels, so an
+existing event can identify the blocking condition without exposing arbitrary
+extra data. The animation's underlying cause is still being investigated.
+Hub only, no schema or client change; recovery is a CI-validated beta Hub
+release reverting this projection.
+
+## Unreleased: Floating menus highlight edge to edge
+
+A floating paper menu's hovered item was a rounded box inset in the slip,
+and its corners did not follow the slip's. Items now run to the slip's edges,
+whose own corner cuts the first and last, with a hairline between groups: the
+message and page selection menus, the table tools, the insert and mention
+menus, a heading's menu and a message's More actions. Pill-shaped bars keep
+their round items. The shared slip clips highlights with automatic overflow,
+so a height-bounded menu still scrolls by wheel or touch; clipping with hidden
+overflow had overridden the page editor's scrolling and made later options
+unreachable by pointer. Consumers set their size, and the material owns this
+common clipping and scrolling behavior. Web only, no schema or client migration. Recovery is a
+CI-validated beta release reverting this change.
+
+## Unreleased: A list's + row is centred, quieter, and shows Ctrl/⌘+N
+
+The desktop "+ New conversation" row (and New page, Manage machines) drew a
+bold, left-aligned label behind a thin + icon. The label now sits centred in a
+lighter ink without the icon, and a faint ⌘N / Ctrl+N at the row's end, on the
+label's baseline, shows the shortcut that already worked. Only actions Ctrl/⌘+N
+performs show it; New workspace does not. Web only, no schema or protocol
+change. Recovery is a CI-validated beta Web release reverting this change.
+
+## Unreleased: Agent message headers name their repository
+
+Agent message headers omitted the repository even though the Run already knew
+it. The message commit now reads the admitted repository from the proven Run
+in the authorization transaction and captures it as a Repository status tag,
+including sends before runtime presentation arrives. A stale Instance chip
+array cannot override or erase that repository.
+It uses the sanitized repository reference rather than a managed checkout path;
+later presence changes cannot rewrite historical headers. Existing Web and
+native clients already render this tag. Hub only, no schema or client migration;
+older messages without the snapshot remain unchanged. Recovery is a CI-validated
+beta Hub release reverting this change.
+
+## Unreleased: Claude runs report xMatrix as their client
+
+Claude Code labels every request with the client that drives it. A Claude
+started headless with `--print`, as every xMatrix Agent and one-shot text task
+is, labelled itself `sdk-cli`, and Claude subscriptions currently use up the
+5-hour window about twice as fast per token under that label as under the
+interactive TUI's (anthropics/claude-code#97074). The daemon now sets
+`CLAUDE_CODE_ENTRYPOINT=xmatrix` on every Claude it starts, overwriting a value
+inherited from a parent Claude session, so transcripts and requests name
+xMatrix. Client only; Agents pick it up when their Claude process next starts.
+No schema or protocol change. Recovery is a CI-validated release reverting this
+change.
+
+## Unreleased: Quote a selected passage of a message
+
+Selecting text in a message offered only Discuss. It now offers **Quote ｜
+Discuss in new channel**: Quote puts the passage above this conversation's own
+composer, with its author and Channel, and the next message sent there opens
+with it as a quote linking back to the message; Discuss in new channel is the
+former Discuss. Floating paper menus (this one, a message's hover actions, a
+page's selection and `/` menus) are now a flat wood-tinted slip without a
+shadow. Web only, no schema or client migration. Recovery is a CI-validated
+beta release reverting this change.
+
+## Unreleased: Handoff preserves explicit placement and Instance ownership
+
+Handoff now parses launch conditions after the successor address and carries
+an explicitly selected source machine forward by its admitted identity. An
+override passes ordinary launch authorization; unavailable placement remains a
+visible refusal. A successor starts only after its source's stop is confirmed.
+Reborn stop failures retain the daemon's bounded reason. Exact Instance
+assignments remain context for peers, while unaddressed messages and broadcasts
+keep their existing behavior. Bootstrap identifies the current Instance and Run
+and asks completed temporary helpers to stop, preserving unfinished waits.
+Hub and CLI; no schema migration. Existing wrappers need a normal reborn after
+updating CLI to load the new bootstrap. Recovery is a CI-validated beta release
+reverting the change.
+
+## Unreleased: Gmail sends from a verified send-as alias
+
+`@gmail:send:<to> from:<address>` refused any address that was not a
+connected mailbox, so a verified Gmail "Send mail as" alias (a company address
+forwarded into a personal Gmail) could not be used. `from:` may now name an
+alias Gmail lists as primary or accepted on one of the caller's mailboxes; the
+mail goes out through that mailbox with the alias in From, the approval card
+names both, and the alias is checked again just before sending. A reply to mail
+addressed to such an alias goes out from it. The existing Gmail grant covers the
+send-as read: no new scope, no reconnect. Hub only, no schema or client
+migration. Recovery is a CI-validated beta Hub reverting this change.
+## Unreleased: A new Gmail message is one card
+
+A new-mail notification was followed by a separate Gmail read receipt that
+held the automatic read, so every arrival took two messages. The connector now
+reads first and posts one notification per Channel that carries the read as
+its private result: the owner sees the email card; others and every Agent see
+the unchanged notification text, which still wakes Agents and fires
+Automations. A failed read says so in that text. The 30-per-hour automatic
+read cap is removed; every read stays metered as `auto_read`. Hub and Web; no
+schema change. History keeps its earlier receipts. Recovery is a CI-validated
+beta release reverting this change.
+
+## Unreleased: Content lock holders retain their last statement
+
+HUB-BN's About write waited behind `content.ref.commit`, but the captured
+idle transaction did not identify its last statement. The existing bounded
+lock sample now retains a fixed, allowlisted content/billing query label and
+query/state ages for content intent and reference transactions. Sentry's issue
+reader exposes those fields without SQL, values or identities. This is missing
+diagnostic coverage; the underlying slow round trip remains unproven. Locks,
+timeouts, replay and unknown-COMMIT handling are unchanged. Hub only, no schema
+or client migration. Recovery is a CI-validated beta Hub reverting this change.
+
+## Unreleased: An agent that vanishes while starting says so, and Windows sees its running daemon
+
+A Run whose process ended in `relay_registered`, `channel_joined` or another
+phase before its agent was ready got no startup-failure notice and did not
+count against routing, because the Hub and the routing breaker each kept their
+own, shorter list of startup phases. Both now read one list in the protocol
+(`RUN_PHASES_BEFORE_READY`), and a process the daemon only found gone says
+that rather than the agent's bare name. A Run someone stopped is not a failed
+start. On Windows the desktop App took a running daemon for a stopped one when
+its two-second PowerShell scan ran out, reporting `service_not_up` with no
+detail and offering a restart that ends the daemon's agents. A daemon lock
+that refuses the App's read now counts as a running daemon, and the scan has
+ten seconds. Hub and Desktop; no schema change. Recovery is a CI-validated
+release reverting these files.
+
+## Unreleased: CLI release feed reads recover one lost response
+
+HUB-BM lost a CLI release feed response and flattened the failure into a
+message without its origin or stage. A feed transport failure now gets one
+fresh read, each bounded to five seconds and 64 KiB. Invalid feeds still fail;
+owner queries retain their existing single-read recovery, and socket delivery
+and the whole pass are never replayed. Failed attempts and independent cell
+failures retain their original causes and fixed channel, stage, attempt,
+duration and HTTP status in Sentry and its issue reader, without response
+content or owner/cell identities. The external timeout's cause remains unknown.
+Hub only, no schema or client change; recovery is a CI-validated beta Hub
+release reverting this change.
+
+## Unreleased: Database maintenance waits through release status changes
+
+The lifecycle broker could select an older beta when a newer release moved
+from queued to running between its separate status reads. Each poll now reads
+one complete, unfiltered release-run list for both successes and active runs,
+including waiting, requested, pending and older stuck trains. The existing
+45-minute wait, annotated tag/SHA verification and executor authority gates
+remain in force. Workflow and selection policy only, no schema or client change;
+recovery is a CI-validated revert through the same broker, never direct executor
+dispatch or a changed production tag.
+
+## Unreleased: Gmail reads the HTML body behind a "view in HTML" stub
+
+Some senders put only "Please view this email in an HTML capable client" in
+the plain-text alternative and the real message in the HTML one. Gmail reads
+and the automatic read receipt returned that stub. A short plain alternative
+that is a prompt to read the HTML, or only a template's empty value such as
+`None`, now yields its longer HTML sibling's readable text (no images,
+scripts or remote loads). Any other plain alternative still wins, even a
+short summary worded differently from the HTML or one that mentions HTML,
+and mixed segments and attachments are unchanged.
+Hub only, no schema change; recovery is a CI-validated Hub release reverting
+this change.
+
+## Unreleased: Page headings with leading separators can commit
+
+HUB-BK exposed a mismatch between generated heading slugs and the page
+repository's validator: `🚀 Launch` becomes `-launch`, which the repository
+refused because it started with a separator. Live edits then stayed pending.
+Commits, reads and discussion links now accept leading hyphens and underscores,
+preserving existing anchors, the 200-character bound and other character checks.
+Retained edits can commit through the session's existing alarm. Hub only, no
+schema or client migration; recovery is a CI-validated Hub release reverting
+the validation change.
+
+## Unreleased: Public pages declare their own language and sharing URL
+
+The Chinese homepage declared English until browser scripts ran. Separate
+static language roots now send `zh-CN` in its initial HTML, matching its
+hreflang, while sharing one document shell. English routes keep their URLs
+and static rendering. Downloads, legal pages and versioned release notes now
+name their own canonical URL in Open Graph metadata, instead of inheriting
+the old domain's homepage. The Calendar guide link opens its repository
+document directly. Web only; no schema or client change. Dual hosting, App
+redirects and robots policy remain as configured. Recovery is a CI-validated
+Web release reverting this change.
+
+## Unreleased: No page slides in over another on a phone
+
+A phone slid whole pages in and out as a stack (a View Transition) whenever
+the lists could not trade places themselves: a notification tapped in another
+conversation, a search result, and the Back from them. It is removed. A phone
+moves in its two designed ways only: a conversation and its channel list
+trade places, and the dock tabs slide. A notification tapped over the channel
+list slides its conversation in as a tapped row does; over anything else it
+replaces the screen; Back goes to the channel list. Web only; no client or
+schema change. Recovery is a CI-validated Web release reverting this change.
+
+## Unreleased: App Store Connect reads and submits one-time In-App Purchases
+
+The App Store Connect connector listed and submitted only auto-renewable
+subscriptions, so an app's consumables (credit packs), non-consumables and
+non-renewing subscriptions could not be checked before a review or included
+in one. `in_app_purchases` lists them with type and review state;
+`submit_in_app_purchases` submits the ready ones (or those named). Hub only,
+no schema change; recovery is a CI-validated release reverting this change.
+
+## Unreleased: Legacy Desktop feeds can fetch their beta installers
+
+The legacy metadata route still serves dev, but versioned file requests treated
+beta filenames as stable and returned 404. The filename's version now selects
+its channel: beta files read dev, stable files read stable, and unversioned
+metadata keeps dev. Reads remain confined to that channel's published asset
+catalog. Explicit native feeds, signing and stored artifacts are unchanged.
+Web only; no client setting or schema migration. Recovery uses a new validated
+Web release correcting the mapping, never a moved tag or changed artifact.
+
+## Unreleased: Stable Desktop manifest URLs keep their channel
+
+The dedicated and aggregate stable manifests now link every Desktop asset
+through the existing explicit stable download route. Their YAML metadata used
+the legacy unversioned route, which intentionally reads dev, so downloading it
+returned beta bytes beside a stable version and checksum. Native stable updater
+feeds were already explicit and remain unchanged; legacy URLs retain their dev
+meaning. Web only, no schema, signing, artifact or pointer change. Consumers
+follow the corrected URLs without migration. Recovery is a CI-validated forward
+Web release correcting the mapping; published releases stay immutable.
+
+## Unreleased: Settings guidance fits the CLI launch budget
+
+The settings-card guidance pushed the CLI's compiled fallback launch text past
+its existing 9,000-byte budget. Concise wording brings the default launch back
+under that bound while retaining settings cards, commands, Page scheduling,
+authority boundaries and the Channel contract. Hub-provided templates still
+replace the fallback as before. Hub and CLI, no schema or API change; recovery
+is a CI-validated forward release revising the wording. The existing bootstrap
+owner test continues to enforce the unchanged budget.
+
+## Unreleased: A web session counts only once a call needing it works
+
+App Store Connect's connection check signs with its API key, so an expired web
+session beside the key still read as checked. `xmatrix settings status` said
+`in`, and a settings card for it could settle with nothing proven. A credential
+field may now name a `verify` read in its manifest. App Store Connect's web
+session names `web_session`. The field's state follows the Space's recent calls
+that needed it: the latest one that ran makes it verified, and the latest one
+that stopped on it makes it invalid, in that call's words. Saving it on a card
+runs that read in the card's Channel. Asking for a setting now reads it as of
+the request. Hub only, no schema change; recovery is a CI-validated release
+reverting this change.
+
+## Unreleased: The Agents page asks for quota when you look, not every 15 seconds
+
+While the Agents page was open, every 15-second refresh asked the Hub to read
+provider quota again, a daemon request a minute for as long as the tab stayed
+open. It now asks when the page opens or comes back into view; a reading that
+lands meanwhile (an Agent's turn, a refused summon's check) is pushed and
+shown at once. Web only, no visual change; recovery is a CI-validated revert.
+
+## Unreleased: Any setting only a person makes goes on one card
+
+An Agent stopped on a sign-in, credential, Space secret, secret access or
+harness login can now ask for it with `xmatrix settings ask <address>…`. This
+is a Hub-defined command, so a CLI needs no update. One settings registry
+turns each address (`connector:`, `secret:`, `secret-access:`, `harness:`)
+into a descriptor from its own store. The card, the Agent's status read and
+the wake use only that descriptor. The Web draws one settings card from it,
+under a stopped connector receipt and on an Agent's request. Once every
+setting is in, xMatrix answers the card, and that answer wakes only the
+Instance that asked. Hub-written request cards (settings, secret, secret
+access, harness sign-in, cross-Space read) now arrive live instead of after a
+reload. Hub and beta Web, plus CLI help text; no schema change. Recovery is a
+CI-validated release reverting this change. See
+[settings cards](design/settings-cards.md).
+## Unreleased: Machine scope timeouts retain the command holding the lock
+
+HUB-BJ rejected a daemon report at its first SQL statement, waiting on the
+Machine's advisory scope. The event could not identify the holder because
+this lock was absent from the existing bounded wait sampler. A slow scope
+wait now retains the holder's operation, state, wait type and capped age
+before PostgreSQL removes the wait edge. The original lock rejection and
+rollback still propagate without replay; the holder's underlying cause is
+not established. Hub only, no schema or authorization change; recovery is a
+CI-validated release reverting the sampler selection.
+
+## Unreleased: Agents start without waiting on a quota read, and idle ones stop polling it
+
+A Codex, Grok, Cursor or OpenCode Instance read its provider quota over the
+network before its first turn, and a Claude Instance before announcing itself
+ready, so every start waited on that request (seconds on a slow link, up to a
+ten-second timeout). The read now runs beside the start and its reading
+follows when it lands. An idle Codex Instance no longer asks for its quota
+every minute; it reads it when a turn ends. A daemon answers a Hub probe that
+checks a refused summon (`fresh`) from the provider rather than its
+two-minute cache, so a reset or top-up is seen at once. CLI only; recovery is
+a CI-validated forward release.
+
+## Unreleased: A refused summon starts once its quota is back
+
+A summon refused because a stored reading said its provider quota was used up
+stayed refused after a reset or top-up until someone summoned again. Now the
+refusal records what it rested on and asks that pool's daemon for one fresh
+read. The reading that shows headroom, from that read or an Instance's own
+report, marks the wait in the same transaction that records it; the Hub then
+wakes the summon and the launch coordinator starts it under full admission. Many refusals of one pool
+share one read. A summon's ordinary refresh reads only quota no current
+reading covers, at most once a minute per daemon, and a waiting retry is
+checked at its reset rather than every few minutes. Recovering a stopped
+Instance still waits for its author's choice. Daemons from before this release
+may answer the fresh read from their two-minute cache; the summon then starts
+on the next newer reading. Hub release with expand migrations
+(`0236_expand_registration_quota_waiters.sql`,
+`0237_expand_quota_retry_refusal_fence.sql`); recovery is a CI-validated
+revert, and the added tables and columns are unused by older code. Deleting
+a Channel or Space erases its quota waits with its other records.
+
+## Unreleased: Follow-up messages wait for the Agent already being started
+
+Before a chosen Agent had a Run, a second message could offer another picker
+and two concurrent picks could both succeed. The Hub now treats the Channel's
+pending launch decision as startup ownership in both the Ask projection and
+its locked claim. Follow-up evidence stays available for explicit recovery
+after a failed, cancelled or expired startup; exact retries keep the original
+decision. Hub only, no schema or client change; recovery is a CI-validated
+Hub release reverting this pending-startup check.
+
+## Unreleased: Runtime control-head deadlocks retain the live blocker
+
+HUB-BH aborted a registration launch while advancing its Space control head.
+The original event names the failed query but cannot identify the other
+transaction in the cycle. Runtime and machine lifecycle head updates now use
+the existing bounded lock-wait sampler before PostgreSQL removes the wait
+edge, retaining only the other operation, state, wait type and transaction age.
+The original rejection, rollback and replay boundaries are unchanged; no
+underlying lock-order cause is claimed. Hub only, no schema or authorization
+change; recovery is a CI-validated release reverting the sampler selection.
+
+## Unreleased: Used-up quota pools are no longer re-read on a clock
+
+The minute re-read of pools held used up (#1321) is withdrawn: quota is read
+when work needs it, never on a timer. Hub only, no schema or authorization
+change; recovery is a CI-validated revert of this change.
+
+## Unreleased: An agent that quits or waits for a sign-in is not chosen
+
+The daemon's can-it-take-work check counted only credential errors, so an ACP
+agent that quit before opening a session (a WorkBuddy-bundled CodeBuddy on
+Windows) stayed "unknown" and routing kept choosing it. Any failure before a
+session opens now reads as unable to take work, in the agent's own words, with
+the existing Check again. A credential retry that waits on a browser login
+(CodeBuddy Code without a sign-in) fails as signed out after 20 seconds instead
+of hanging the start. CLI only, no protocol or schema change; recovery is a
+CI-validated CLI release reverting `runtime_acp_session.rs`.
+
+## Unreleased: Daily PostgreSQL maintenance waits for a release to finish
+
+A concurrent Production Release could outlast the lifecycle broker's six
+short polls and skip the daily cleanup. The broker now waits up to 45 minutes,
+within a 60-minute job, and reselects the latest successful beta before
+verifying its annotated tag and exact SHA. An exhausted wait still refuses
+to dispatch a stale tag. No retention, schema or credential change; recovery
+is a CI-validated revert of the broker workflow. See
+[lifecycle retention](operations/postgres-lifecycle-retention.md).
+
+## Unreleased: Update manifests name their actual publication workflow
+
+Public client update manifests now identify Production Release beside their
+exact commit and run, replacing the retired CLI workflow label shared by all
+client manifests. Beta Web only, no schema or authorization change; recovery
+is a CI-validated Web release reverting the label.
+
+## Unreleased: CLI releases use the compiler their pull requests checked
+
+Unix release builds used the runner image's default Rust while PR Clippy used
+1.96.0, so new compiler warnings could first fail a production release. Linux
+and both macOS CLI targets now install and verify the same reviewed compiler
+as PR Clippy, matching the existing Windows pin. No API or schema change;
+signing, artifact verification and release gates are unchanged. Recovery is a
+CI-validated forward release updating the shared compiler pin after native
+qualification.
+
+## Unreleased: A daemon reconnect leaves old snapshots behind
+
+HUB-BF exposed a snapshot queued before disconnect and sent after the next
+connection authenticated. The Hub correctly refused its stale epoch. The CLI
+now discards full and partial snapshots from a replaced connection at the
+socket writer boundary; reconnect captures a fresh full snapshot instead of
+restamping an old observation that could retire a newly admitted Run. Durable
+spawn results keep their original causal fields for reconciliation. CLI only,
+no protocol or schema change; existing daemons need the updated CLI. Recovery
+is a CI-validated CLI release reverting the sender check.
+
+## Unreleased: The CLI uses the panic-safe hash buffer patch
+
+The CLI now locks block-buffer 0.12.1, the same-line fix for
+[GHSA-qwgh-2vcv-g2f7](https://github.com/RustCrypto/utils/security/advisories/GHSA-qwgh-2vcv-g2f7).
+The old buffer could retain an invalid cursor after a compression or block
+generation callback panicked and its caller caught the panic and reused it.
+The CLI uses this dependency through SHA-2; no such application callback path
+has been identified. Hash formats, APIs and stored data are unchanged. CLI
+only; recovery is a CI-validated CLI release reverting the lock, which would
+restore the advisory exposure.
+
+## Unreleased: The phone's loading dock waits until it can navigate
+
+The startup frame drew enabled Pages/Channels/Status/More buttons with inert
+handlers. A tap before session resolution disappeared when the real shell
+mounted. Those placeholder buttons are now disabled; the real dock enables
+them when it can navigate. Web only, no API or schema change; recovery is a
+CI-validated release reverting the disabled startup state.
+
+## Unreleased: Codex on credits no longer shows LIMIT
+
+ChatGPT now reports a Codex account as not allowed as soon as its plan week is
+used up, even while credits keep serving it. Such Instances showed LIMIT and
+routing could treat them as refusing work. The CLI now records the account as
+serving while it has credits and no overage or spend limit is reached, so the
+Agents list shows credits and routing keeps using it. CLI only, no API or
+schema change; recovery is a CI-validated CLI release reverting the check.
+
+## Unreleased: Every client names a file's type from one table
+
+Which type a file extension names, which extension a saved copy gets and
+whether a conversation or a page shows a file inline now come from one table
+the Web, the Hub and the CLI all read. A conversation shows MKV, AVI and MPEG
+videos as video wherever the Web already did, downloads of audio get their
+extension, `xmatrix send --file` names every listed type (AVIF, Opus, WebA and
+more), and an Agent's local copy of an `audio/mp4` voice note is `.m4a`, not
+`.mp4`. Web, Hub and CLI, no API or schema change; recovery is a CI-validated
+release reverting the table.
+
 ## Unreleased: The site also answers at xmatrix.page
 
 xmatrix.sh is a country-code domain Google does not treat as generic, so the
@@ -1672,9 +4117,11 @@ All releases form one ascending SemVer line:
 - **Gates.** A train runs the CI gates for what it ships on its release
   commit. The Hub suite gates each beta that ships the Hub; the Web suites and
   client suites (Rust on Linux and Windows, Desktop, Android, the iOS
-  simulator) gate the stable that ships them. Every train runs CodeQL on its source for the
-  languages it ships before anything deploys
-  (`docs/operations/ci-lint-and-public-runners.md`).
+  simulator) gate the stable that ships them. Every train runs CodeQL on its
+  source for Hub, Web and Desktop JavaScript and TypeScript, and for the
+  workflows it releases, before anything deploys. Rust, Kotlin and Swift
+  CodeQL run on the stable train that ships that client, beside those client
+  suites (`docs/operations/ci-lint-and-public-runners.md`).
 - **Evidence.** Each tag's annotation records the `scope`, `source` and
   `channel` later trains read back. The request's authorization job is named
   `authorize <scope> production <tag>`, and stable preflight accepts only the
@@ -1847,7 +4294,8 @@ source. `server-release.yml` picks the target from the tagged version
 (`node scripts/version.mjs channel`) and `deploy-config.mjs` renders it
 (`web` or `web-beta`). A stable train may name `web`; it still never names
 `hub`. Deployment receipts record the channel's Web, and the receipt reader
-accepts either Web for betas released before the split. Before a train deploys
+requires `xmatrix.sh` for betas before `1.3.1-beta.7` and `beta.xmatrix.sh`
+from that first split train onward. Before a train deploys
 the Hub, preflight reads the live stable Web's build (`/api/web-build`) back to
 its release and refuses a Hub whose client policy would answer it with 426: a
 different protocol version or a higher minimum Web version
@@ -2477,7 +4925,7 @@ Secret recovery remains separate; this release neither generates nor rotates key
   upstream Run capability, return a retryable 503 during replacement, and never replay a written
   request. Explicit adoption disables legacy discovery. Already-running older wrappers require an ordinary instance
   Reborn recovery into the fixed CLI; a daemon-only update cannot patch those processes.
-- macOS CLI releases publish `xmatrix-macos-arm64` and `xmatrix-macos-x64`; the Apple Silicon release runner cross-compiles the Intel binary and signs both with the same Developer ID identity. `install.sh` installs the native arm64 binary when its shell runs under Rosetta.
+- macOS CLI releases publish `xmatrix-macos-arm64` and `xmatrix-macos-x64`; hosted builds use Apple Silicon and Intel respectively, and sign both with the same Developer ID identity. The self-hosted Apple Silicon runner still cross-compiles Intel. Both artifacts must execute their exact-version probe before publication. `install.sh` installs the native arm64 binary when its shell runs under Rosetta.
 - The macOS Desktop release builds one app per architecture (`arm64` and `x64`, never universal), each carrying its own architecture's CLI seed. One `latest-mac.yml` lists both; electron-updater picks the `arm64` files on Apple Silicon and the others on Intel, and its legacy top-level `path` stays on the arm64 ZIP.
 - A Windows CLI release publishes the single portable `xmatrix-windows-x64.exe` artifact through the same reviewed,
   immutable R2 handoff as the other CLI platforms. The release manifest records the exact workflow provenance, size,
@@ -2538,3 +4986,50 @@ a second failure remains visible. Nonmember rejection, private projections,
 mutation locks and unknown-COMMIT reconciliation are unchanged. Hub only, no
 migration or native update; recovery is a CI-validated beta Hub reverting
 this change. See [PostgreSQL recovery](operations/postgres-hyperdrive-origin.md).
+
+## Unreleased: A skipped check cannot announce that CI passed
+
+A pull request with a merge conflict did not start CI, but its skipped
+external-PR closer alone made the conversation hear "CI passed". The GitHub
+check reader now requires a check that actually concluded success before
+announcing a passing verdict. All-skipped or all-neutral checks stay pending;
+failures still report, and success beside skipped jobs still passes. Hub only;
+no schema or client migration. Recovery is a CI-validated beta Hub release
+reverting this verdict change.
+
+## Unreleased: The Intel CLI builds on an Intel runner
+
+GitHub's ARM64 runner capacity shortage cancelled both macOS CLI jobs before
+assigning them a machine. The Intel target now uses the standard
+`macos-26-intel` pool; ARM64 keeps `macos-26` and its native executable probe.
+Desktop also stays on Apple Silicon to retain its signed ARM app startup
+check. Target architectures, pinned Rust, Developer ID identity and R2 byte
+verification retain their existing gates. Qualification is a complete beta
+with both native CLI version probes and publication verified. Historical tags
+retain their original workflow; recovery is a CI-validated forward release
+restoring the Intel build host if needed. No client or schema migration.
+
+
+## Unreleased: Sentry event claims reconcile an unknown COMMIT
+
+HUB-BY lost the response to a Sentry recovery claim's COMMIT, leaving its jobs
+leased until expiry. Claims now assign independent lease nonces before their
+transaction. After an unknown COMMIT, one lock-free read returns only this
+invocation's committed, unexpired leases and live receipts. It never repeats
+the claim; absent results retain minute/expiry recovery, and read failures
+remain visible with the original commit evidence. Current grant checks also
+recover one lost read on a fresh connection. Capacity, grant and lease fences,
+and delivery idempotency stay intact. Hub only, no migration or client change;
+recovery is a CI-validated beta Hub release reverting this change. This repairs
+the recovery gap without attributing the underlying connection termination.
+
+## Unreleased: Agent binding refusals identify the failed comparison
+
+HUB-C1/C2 duplicated one handshake refusal without identifying which binding
+comparison failed. The Hub now reports one event with a fixed comparison source
+and field, available through the Sentry issue reader and correlated with the
+socket's diagnostic reference. Credentials, names, routing ids and compared
+values are excluded. This supplies missing diagnosis, without attributing the
+original mismatch. Existing refusal codes, retry policy, failed-handshake close,
+connection claims and strict authority checks remain unchanged. Hub only; no
+schema or native change. Recovery is a CI-validated beta Hub reverting the change.

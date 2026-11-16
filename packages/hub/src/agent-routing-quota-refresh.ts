@@ -26,14 +26,23 @@ export type QuotaProbeIssueDependencies = { issue?: (command: Record<string, unk
   machines?: Pick<PostgresMachineControlRepository, "getDaemon"> };
 
 /** Ask each target's daemon to read its quota, one probe per daemon and at
- * most 32 targets each. Targets come only from the server's registration read. */
+ * most 32 targets each. Targets come only from the server's registration read.
+ * A `fresh` read checks a refusal: one probe per target, read from the
+ * provider now and newer than `readAfter`, joining a read of the same target
+ * already under way (see machine control). A pool under a hold no window
+ * explains is always read afresh, newer than the hold: only a complete
+ * reading after it can tell what was used up. */
 export async function issueRegistrationQuotaProbes(input: {
   env: Env; directory: AuthorityDatabase; entries: readonly RegistrationQuotaProbeTarget[];
+  fresh?: { readAfter: string };
 }, dependencies: QuotaProbeIssueDependencies = {}): Promise<{ issued: number }> {
   const { entries } = input;
+  const readAfter = (entry: RegistrationQuotaProbeTarget) => input.fresh?.readAfter ?? entry.heldSince;
   const groups = new Map<string, RegistrationQuotaProbeTarget[]>();
   for (const entry of entries) {
-    const key = JSON.stringify([entry.ownerUserId, entry.machineId, entry.hostId, entry.connectionEpoch]);
+    const fresh = readAfter(entry);
+    const key = JSON.stringify([entry.ownerUserId, entry.machineId, entry.hostId, entry.connectionEpoch,
+      ...(fresh ? [entry.targetId, fresh] : [])]);
     const group = groups.get(key) ?? [];
     // A daemon answers each target id once per probe.
     if (!group.some(item => item.targetId === entry.targetId)) group.push(entry);
@@ -50,10 +59,12 @@ export async function issueRegistrationQuotaProbes(input: {
     while (next < batches.length) {
       const batch = batches[next++]!;
       const first = batch[0]!;
+      const fresh = readAfter(first);
       const requestId = `quota:${crypto.randomUUID()}`;
       const probe: RoutingQuotaProbeRequest = { requestId, connectionEpoch: first.connectionEpoch,
         targets: batch.map(entry => ({ targetId: entry.targetId, configurationDigest: entry.configurationDigest })),
-        windowLabels: true, quotaAccount: true };
+        windowLabels: true, quotaAccount: true, accountBalance: true, scopedQuotaUsages: true,
+        ...(fresh ? { fresh: true as const } : {}) };
       const route = { ownerUserId: first.ownerUserId, machineId: first.machineId, hostId: first.hostId };
       try {
         const { daemon } = await machines.getDaemon({ requestId, ...route });
@@ -62,7 +73,8 @@ export async function issueRegistrationQuotaProbes(input: {
           ...route, ownerEmail: daemon.email, daemonId: daemon.id,
           commandId: `issue:${requestId}`, action: "issue", controlId: requestId, commandType: "quota_probe",
           principal: { kind: "user", id: route.ownerUserId },
-          payload: { type: "machine_quota_probe", requestId, probe },
+          payload: { type: "machine_quota_probe", requestId, probe,
+            ...(fresh ? { readAfter: new Date(fresh).toISOString() } : {}) },
         });
         issued++;
       } catch (error) {
@@ -77,14 +89,15 @@ export async function issueRegistrationQuotaProbes(input: {
 
 /** Registration targets of a Space at its active placement; an inactive or
  * moved placement probes nothing rather than guessing. */
-export function registrationQuotaProbeTargetReader(database: AuthorityDatabase, directory: AuthorityDatabase) {
+export function registrationQuotaProbeTargetReader(database: AuthorityDatabase, directory: AuthorityDatabase,
+  options: { probedWithinMs?: number; onlyUnread?: boolean } = {}) {
   return async (spaceId: string): Promise<RegistrationQuotaProbeTarget[]> => {
     const requestId = `quota-registrations:${crypto.randomUUID()}`;
     const placement = await new PostgresSpacePlacementDirectory(directory).resolve(
       { requestId, operation: "registration.quota-probe.placement" }, spaceId);
     if (placement.state !== "active" || placement.spaceId !== spaceId) return [];
     return readRegistrationQuotaProbeTargets({ database, directory, requestId, placement: {
-      spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } });
+      spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch }, ...options });
   };
 }
 

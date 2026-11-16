@@ -3,14 +3,15 @@ const test = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
+const protocol = require("@xmatrix/protocol");
 const { extractFunctionFromShellModules, loadWorkspaceShellModuleMap } = require("./workspace-shell-source-fixture.cjs");
 
 const compiled = ts.transpileModule(fs.readFileSync(path.join(__dirname, "attachment-media-type.ts"), "utf8"), {
   compilerOptions: { module: ts.ModuleKind.CommonJS },
 }).outputText;
 const loaded = { exports: {} };
-new Function("module", "exports", compiled)(loaded, loaded.exports);
-const { attachmentMediaMimeType, attachmentMediaType, directMediaLink } = loaded.exports;
+new Function("module", "exports", "require", compiled)(loaded, loaded.exports, require);
+const { directMediaLink } = loaded.exports;
 
 function shellFunction(name, bindings) {
   const { source } = extractFunctionFromShellModules(loadWorkspaceShellModuleMap(__dirname), name);
@@ -20,44 +21,40 @@ function shellFunction(name, bindings) {
   return exported[name];
 }
 
-test("generic and missing MIME discover video/audio extensions, without overriding specific types", () => {
-  for (const name of ["handoff-anim.webm", "clip.MP4", "clip.mov", "clip.ogv", "clip.mkv"]) {
-    assert.equal(attachmentMediaType("application/octet-stream", name), "video");
-    assert.equal(attachmentMediaType("", name), "video");
+const { attachmentKind, extensionForMediaType, mediaTypeForName, mediaTypeOf } = protocol;
+const isMarkdownAttachmentFile = shellFunction("isMarkdownAttachmentFile", { attachmentKind, mediaTypeForName });
+const mimeForFile = shellFunction("attachmentMimeTypeForFile", { isMarkdownAttachmentFile, mediaTypeOf });
+const kindForFile = shellFunction("channelAttachmentKindForFile", { isMarkdownAttachmentFile, attachmentKind });
+const presentation = shellFunction("presentationAttachmentKind", { attachmentKind });
+const filename = shellFunction("attachmentFilenameForMimeType", { extensionForMediaType, mediaTypeForName });
+
+test("a dropped file is typed and drawn from the shared media table", () => {
+  assert.equal(mimeForFile({ type: "", name: "clip.webm" }), "video/webm");
+  assert.equal(kindForFile({ type: "", name: "clip.webm" }), "video");
+  assert.equal(mimeForFile({ type: "", name: "voice.opus" }), "audio/ogg");
+  assert.equal(kindForFile({ type: "image/avif", name: "photo.avif" }), "file", "AVIF is page media, not a chat image");
+  assert.equal(kindForFile({ type: "image/png", name: "screen" }), "image");
+  // Browsers often state nothing, or plain text, for Markdown.
+  for (const file of [{ type: "", name: "notes.md" }, { type: "text/plain", name: "notes.markdown" },
+    { type: "text/x-markdown", name: "notes" }]) {
+    assert.equal(mimeForFile(file), "text/markdown");
+    assert.equal(kindForFile(file), "markdown");
   }
-  for (const name of ["voice.mp3", "voice.m4a", "voice.wav", "voice.flac", "voice.opus"]) {
-    assert.equal(attachmentMediaType("application/octet-stream", name), "audio");
-  }
-  assert.equal(attachmentMediaMimeType("binary/octet-stream", "clip.webm"), "video/webm");
-  assert.equal(attachmentMediaType(" VIDEO/WEBM; codecs=vp9 ", "unknown.bin"), "video");
-  assert.equal(attachmentMediaType("audio/webm", "clip.webm"), "audio");
-  assert.equal(attachmentMediaType("text/html", "page.webm"), null);
-  assert.equal(attachmentMediaType("application/pdf", "paper.mp3"), null);
-  assert.equal(attachmentMediaType("", "clip.webm.exe"), null);
+  assert.equal(mimeForFile({ type: "not a type", name: "blob" }), "application/octet-stream");
 });
 
-test("existing file-kind WebM rows and upload files use the same presentation inference", () => {
-  const kindForMime = shellFunction("channelAttachmentKindForMimeType", {
-    attachmentMediaType,
-    IMAGE_ATTACHMENT_TYPES: new Set(["image/png"]),
-    MARKDOWN_ATTACHMENT_TYPES: new Set(["text/markdown"]),
-  });
-  const presentation = shellFunction("presentationAttachmentKind", { channelAttachmentKindForMimeType: kindForMime });
+test("existing file-kind rows keep specialized kinds and discover playable media by name", () => {
   assert.equal(presentation({ kind: "file", mimeType: "application/octet-stream", name: "handoff-anim.webm" }), "video");
   assert.equal(presentation({ mimeType: "video/webm", name: "clip" }), "video");
   assert.equal(presentation({ kind: "markdown", mimeType: "text/markdown", name: "clip.webm" }), "markdown");
-  const mimeForFile = shellFunction("attachmentMimeTypeForFile", {
-    attachmentMediaMimeType,
-    isMarkdownAttachmentFile: () => false,
-    normalizeAttachmentMimeType: (mime) => mime,
-  });
-  const kindForFile = shellFunction("channelAttachmentKindForFile", {
-    isMarkdownAttachmentFile: () => false,
-    channelAttachmentKindForMimeType: kindForMime,
-  });
-  const file = { type: "", name: "clip.webm" };
-  assert.equal(mimeForFile(file), "video/webm");
-  assert.equal(kindForFile(file), "video");
+});
+
+test("a download is named with the stored type's extension, replacing a known one", () => {
+  assert.equal(filename("track", "audio/flac"), "track.flac");
+  assert.equal(filename("IMG_1.jpeg", "image/jpeg"), "IMG_1.jpg");
+  assert.equal(filename("notes.txt", "text/markdown"), "notes.md");
+  assert.equal(filename("archive.tar", "application/zip"), "archive.tar.zip");
+  assert.equal(filename("data.bin", "application/x-unknown"), "data.bin");
 });
 
 test("direct media URLs accept HTTPS filenames with queries but reject other schemes and credential URLs", () => {

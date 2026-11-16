@@ -1,27 +1,31 @@
 // First, so that error reporting is open before anything else loads.
 import "./error-reporting";
+import { drainAppleCommerce } from "./connectors/app-store-connect-commerce";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
 import { registerAccountDeletionRoutes, maintainAccountDeletions } from "./index-routes-account-deletion";
 import { maintainChannelDeletions } from "./channel-deletion-maintenance";
 import { sendErrorReports } from "@xmatrix/protocol/error-reporting";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
-import { noticeCliReleases } from "./cli-release-notice";
+import { noticeCliReleases, readCliReleaseFeeds } from "./cli-release-notice";
 import { connectorGoogleChatRoomRepository, connectorFeishuRoomRepository, connectorTelegramRoomRepository, connectorTeamsRoomRepository } from "./connectors/credentials";
 import { ackRetiredExportQueue } from "./retired-export-queue";
 import { registerMachineNameRoutes } from "./index-routes-machine-name";
 import { registerMachineRetirementRoutes } from "./index-routes-machine-retirement";
 import { registerHarnessActionRoutes } from "./index-routes-harness-actions";
+import { registerHarnessSignInRequestRoutes } from "./index-routes-harness-sign-in-requests";
+import { registerSettingsRequestRoutes } from "./index-routes-settings-requests";
 import { registerWorktreeActionRoutes } from "./index-routes-worktree-actions";
 import { registerCliUpdateCheckRoutes } from "./index-routes-cli-update-check";
 import { maintainMachineResourceHistoryOnSchedule, registerMachineResourceRoutes } from "./index-routes-machine-resources";
 import { rollUpAdminActivityOnSchedule } from "./postgres-admin-activity-rollup";
+import { redeliverOwedQuotaWakes } from "./quota-waits";
 import { registerSetupIntentRoutes } from "./index-routes-setup-intents";
 import { registerWelcomeRoutes } from "./index-routes-welcome";
 import { registerOnboardingFunnelRoutes } from "./index-routes-onboarding-funnel";
 import { registerChannelTransferRoutes } from "./index-routes-channel-transfer";
 import { registerPageRoutes } from "./index-routes-pages";
-import { registerPageAutomationRoutes } from "./index-routes-page-automations";
+import { registerPageProgramRoutes } from "./index-routes-page-programs";
 import { registerPageMigrationRoutes } from "./index-routes-page-migration";
 import { registerGovernanceRoutes } from "./index-routes-governance";
 import { registerPageGitRoutes } from "./index-routes-page-git";
@@ -30,6 +34,7 @@ import { registerCrossSpaceReadRoutes } from "./cross-space-read";
 import { registerSecretRoutes } from "./index-routes-secrets";
 import { registerConnectorRoutes } from "./index-routes-connectors";
 import { registerConnectorOAuthRoutes } from "./index-routes-connector-oauth";
+import { registerMailSnapshotRoutes } from "./index-routes-mail-snapshot";
 import { registerSentryInstallationRoutes } from "./index-routes-sentry-installation";
 import { registerGooglePickerRoutes } from "./index-routes-google-picker";
 import { registerGmailMailboxRoutes } from "./index-routes-gmail-mailboxes";
@@ -88,6 +93,7 @@ import { registerIndexRoutesHumanAvatar } from "./index-routes-human-avatar";
 import { registerFaceRoutes } from "./index-routes-faces";
 import { registerIndexRoutesMachineDaemonAdmission } from "./index-routes-machine-daemon-admission";
 import { registerIndexRoutesAppleBilling } from "./index-routes-apple-billing";
+import { registerIndexRoutesGooglePlayBilling } from "./index-routes-google-play-billing";
 import { registerIndexRoutesPush } from "./index-routes-push";
 import { registerIndexRoutesBilling } from "./index-routes-billing";
 import { registerIndexRoutesJev } from "./index-routes-jev";
@@ -98,6 +104,7 @@ import { registerRequestBodyLimit } from "./request-body-limit";
 import { registerRequestRateLimit } from "./request-rate-limit";
 import { registerIndexRoutesPostgresReadiness } from "./postgres-readiness";
 import { registerCliCommandRoutes } from "./index-routes-cli-commands";
+import { registerNornRequestRoutes } from "./index-routes-norn-requests";
 
 const app = new Hono<{ Bindings: Env }>();
 // A failure no route answered still gets the one error contract: a transient
@@ -117,15 +124,17 @@ registerIndexRoutesAuthSpace(app);
 registerIndexRoutesMachineDaemonAdmission(app);
 registerIndexRoutesBilling(app);
 registerIndexRoutesAppleBilling(app);
+registerIndexRoutesGooglePlayBilling(app);
 registerIndexRoutesPush(app);
 registerIndexRoutesJev(app);
 registerSearchRerankRoutes(app);
 registerIndexRoutesAutomation(app);
 registerCliCommandRoutes(app);
+registerNornRequestRoutes(app);
 registerIndexRoutesSpaceJoinRequests(app);
 registerIndexRoutesChannelAgent(app);
 registerPageRoutes(app);
-registerPageAutomationRoutes(app);
+registerPageProgramRoutes(app);
 registerPageMigrationRoutes(app);
 registerGovernanceRoutes(app);
 registerPageGitRoutes(app);
@@ -134,6 +143,7 @@ registerCrossSpaceReadRoutes(app);
 registerSecretRoutes(app);
 registerConnectorRoutes(app);
 registerConnectorOAuthRoutes(app);
+registerMailSnapshotRoutes(app);
 registerGooglePickerRoutes(app);
 registerGmailMailboxRoutes(app);
 registerCloudflareLoginRoutes(app);
@@ -144,6 +154,8 @@ registerMachineNameRoutes(app);
 registerMachineResourceRoutes(app);
 registerMachineRetirementRoutes(app);
 registerHarnessActionRoutes(app);
+registerHarnessSignInRequestRoutes(app);
+registerSettingsRequestRoutes(app);
 registerWorktreeActionRoutes(app);
 registerCliUpdateCheckRoutes(app);
 registerSetupIntentRoutes(app);
@@ -165,7 +177,14 @@ export default {
       executionCtx.waitUntil(sendErrorReports());
     }
   }),
-  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(() => {
+  scheduled: (event: ScheduledController, env: Env, executionCtx: ExecutionContext) => runAsDeliveryInvocation(async () => {
+    if (event.cron === "*/5 * * * *") {
+      executionCtx.waitUntil(drainAppleCommerce(env).catch(error => scheduledTaskFailed("Apple commerce recovery",error)).finally(sendErrorReports));
+      return;
+    }
+    // Feeds first: the passes below each open a Hyperdrive connection, and six
+    // header-waits is the invocation's whole budget (HUB-BX).
+    const latest = await readCliReleaseFeeds();
     const run = (name: string, work: () => Promise<unknown>) => executionCtx.waitUntil(
       Promise.resolve().then(work).catch((error: unknown) => scheduledTaskFailed(name, error)).finally(sendErrorReports));
     run("Account deletion maintenance", () => maintainAccountDeletions(env));
@@ -173,9 +192,11 @@ export default {
     run("Sentry event recovery", () => drainSentryEvents(env));
     run("Gmail notification recovery and renewal", () => drainGmailNotifications(env));
     run("Harness release watch", () => watchHarnessReleasesBesidePostgres(env));
-    run("CLI release notice", () => noticeCliReleases(env));
+    run("CLI release notice", () => noticeCliReleases(env, { latest }));
     run("Machine load history maintenance", () => maintainMachineResourceHistoryOnSchedule(env, event.scheduledTime));
     run("Admin activity rollup", () => rollUpAdminActivityOnSchedule(env, event.scheduledTime));
+    // Delivers again quota waits a reading already made ready; never asks a provider.
+    run("Quota wait redelivery", () => redeliverOwedQuotaWakes(env));
     for (const [provider, repository] of [["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const) {
       run(`${provider} lifecycle maintenance`, () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }));
     }

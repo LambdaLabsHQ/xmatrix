@@ -12,7 +12,7 @@ function message(from, overrides = {}) {
   return { messageId: `m-${sequence}`, channelId: "c1", sequence, body: "hello",
     sentAt: `2026-10-21T10:00:${String(sequence).padStart(2, "0")}Z`, from: { email: "", ...from }, ...overrides };
 }
-const faces = (history) => buildTimeline(history, null, [], [], reader).map((item) => item.face);
+const faces = (history) => buildTimeline(history, null, [], reader).map((item) => item.face);
 
 test("a person's message is drawn with their face, by their account, whatever picture the message carried", () => {
   assert.deepEqual(faces([message({ kind: "user", label: "Grace", userId: "grace-1",
@@ -88,24 +88,4 @@ test("the dock draws a live Instance by its harness, and a launch by the Instanc
     { kind: "agent", name: "claude", id: "c1:2" },
   ]);
   assert.deepEqual(items.map((item) => item.target.face), items.map((item) => item.face), "its trace opens with the same face");
-});
-
-test("an Agent message waits for Channel presence before declaring its Instance offline", () => {
-  const { decodeChannelSnapshot } = require("@xmatrix/protocol");
-  const from = { kind: "agent", label: "codex", userId: "owner", instanceId: "c1:1", channelInstanceId: "1" };
-  const history = [message(from)];
-  const row = (channel) => buildTimeline(history, channel, [], [], reader)[0];
-  for (const channel of [null, decodeChannelSnapshot({ id: "c1" })]) {
-    assert.equal(row(channel).senderInstanceStale, false, "unavailable presence is not evidence of departure");
-    assert.equal(row(channel).senderStatus, undefined);
-  }
-  const departed = row(decodeChannelSnapshot({ id: "c1", memberPresence: {} }));
-  assert.equal(departed.senderInstanceStale, true, "an authoritative empty snapshot still records absence");
-  assert.equal(departed.senderStatus, "offline");
-  const live = row(decodeChannelSnapshot({ id: "c1", memberPresence: {
-    "c1:1": { kind: "agent", label: "codex", registration: { ownerUserId: "owner", machineId: "m", harness: "codex" },
-      instances: [{ id: "c1:1", channelInstanceId: "1", status: "busy", connectedAt: "2026-10-21T10:00:00Z" }] },
-  } }));
-  assert.equal(live.senderInstanceStale, false);
-  assert.equal(live.senderStatus, "busy");
 });

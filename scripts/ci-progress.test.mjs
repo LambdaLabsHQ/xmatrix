@@ -228,6 +228,8 @@ test("Node check resource lanes cover every discovered test exactly once", () =>
   });
   const stages = nodeTestStages({ allFiles: actual, availableParallelism: 10 });
   assert.deepEqual(stages.map((stage) => stage.parallelLane), ["pure-contract", "child-process"]);
+  const releaseStorage = stages.filter((stage) => stage.args.includes("scripts/r2-release-store.test.mjs"));
+  assert.deepEqual(releaseStorage.map((stage) => stage.parallelLane), ["child-process"]);
 });
 
 function waitForFile(file, timeoutMs = 10_000) {

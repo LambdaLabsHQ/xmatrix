@@ -87,7 +87,7 @@ Here `@auto` is the mention, the three words after it are conditions, and everyt
 | `effort:<level>` | Use this reasoning effort |
 | `fast:on` | Turn on the harness's fast mode, when it offers one |
 | `param.<id>:<value>` | Set any other option the harness advertises |
-| `launch:force` | Start even if xMatrix read the mention as not asking for work |
+| `launch:force` | Start even from a send that did not ask to start Agents |
 
 The rules:
 
@@ -130,11 +130,11 @@ Options beyond model and effort differ by harness, so they are not fixed keyword
 
 The composer lists the ids and values a harness currently advertises. `fast:on` is short for `param.fast:on`. A switch accepts `on`, `off`, `true` or `false`.
 
-### When xMatrix reads a mention as not a request
+### Who starts an agent
 
-People mention agents without wanting one started: "the diff `@codex` produced yesterday", or an example in a write-up. xMatrix reads each launch mention in context, and when it reads one as a reference, an explanation or an example, it starts nothing and says so on the mention.
+Sending from the xMatrix composer starts the agents you summon. An agent's message starts one only when it sends with `xmatrix send --launch`; without it, an `@codex` in its report is just a mention, so agents never summon each other by accident. Stop, reborn and handoff work the same either way.
 
-If you did mean it, add `launch:force`:
+A mention that started nothing says so on the mention, and its author can start it from there. `launch:force` written after a mention also starts it, whoever sends the message:
 
 ```text
 @codex launch:force
@@ -207,13 +207,20 @@ Anyone who can act in a conversation can control the instances in it, and so can
 
 **Reborn** restarts the same instance: same number, same memory, same directory. Use it when an instance is stuck, has failed to wake, or was stopped. Text after the mention is delivered to the restarted instance.
 
-**Handoff** stops the predecessor and starts a different instance, often another harness, exactly as a summon would: routing picks the machine and model among every registration with quota, on any machine. The work comes along: a repository checkout, uncommitted changes included, travels on a handoff branch; a registered directory is handed over where it is. So does the conversation, across harnesses and models: the predecessor's machine exports what it was asked, said and ran (the first request and the newest turns), and the successor reads it before continuing, as context rather than as its own session. Text after the mention is the successor's task:
+**Handoff** confirms the predecessor has stopped before starting a different instance, often another harness. Routing uses the ordinary summon authorization and validation. A source launched with an explicit machine condition keeps that machine, including automatic quota handoffs; implicit placement remains portable. If the required machine has no eligible successor, the handoff is refused visibly. A pending stop starts no successor; retry the handoff after the source's daemon confirms exit.
+
+Conditions immediately after the successor address use the ordinary summon syntax. An explicit machine override replaces the inherited condition and must pass current access and availability checks. Model, effort and harness parameters are validated normally. Repository or directory conditions must match the source work site; use a new assignment to change sites. The first non-condition word starts the task:
 
 ```text
 @claude:1:handoff:@codex you have the branch; finish the migration and open the PR
+@claude:1:handoff:@codex machine:Laptop effort:high continue in the original browser
 ```
 
 The successor is always new, so it is a name without a number. `@auto` leaves the harness to routing as well.
+
+A repository checkout, including uncommitted work, travels on a handoff branch; a registered directory stays on its machine. The predecessor's exported conversation is prior context, never the successor's identity or session. Browser sessions and other local state do not travel with the checkout.
+
+Exact Instance assignments are work for their addressed Instances and context for peers. General Channel messages remain shared work; broadcasts still address everyone. An Agent's trusted runtime Instance and Run identify it throughout recovery. Temporary helpers should send their final receipt and stop themselves when their assignment is complete; an Instance waiting on a person or CI still has work and stays available.
 
 When provider quota runs out, xMatrix tries an automatic handoff. If nobody
 eligible can take over, you can choose **Retry when quota recovers** or
@@ -262,7 +269,7 @@ The mention itself shows what happened: waiting, working, replied, failed or sto
 
 | What the mention says | What to do |
 | --- | --- |
-| Read as naming the agent, not asking one to start | Add `launch:force` after the mention |
+| Mentioned, not started | Its send did not ask to start agents: press Start on the mention, or send again with `xmatrix send --launch` |
 | No registered environment offers the requested model, effort or harness | Check the id against what the harness reports, or drop the condition; `xmatrix agent list` shows the harnesses each machine runs |
 | The requested machine does not run this Agent | `xmatrix agent list` (or the Agents page) shows each machine's harnesses, whether it is online and its quota |
 | The requested directory is not authorized | Register it with `xmatrix workspace register` on that machine |

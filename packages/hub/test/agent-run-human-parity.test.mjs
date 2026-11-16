@@ -24,6 +24,11 @@ test("an Agent Run reaches the Human collaboration routes by default", () => {
   assert.equal(allowed("GET", "/api/spaces/space-2/cross-space-read-grants/csr_1"), true, "poll that answer");
   assert.equal(allowed("GET", "/api/machine-daemons"), true, "read its owner's Machines");
   assert.equal(allowed("GET", "/api/machine-daemons/harness-actions/harness:1"), true, "follow a harness action");
+  assert.equal(allowed("POST", "/api/harness-sign-in-requests"), true, "ask its owner to sign a harness in");
+  assert.equal(allowed("POST", "/api/settings-requests"), true, "ask a Space admin for connector settings");
+  assert.equal(allowed("GET", "/api/settings-requests/status"), true, "read where the settings it asked for stand");
+  assert.equal(allowed("DELETE", "/api/settings-requests"), false);
+  assert.equal(allowed("POST", "/api/machine-daemons/harness-actions"), true, "ask its own Machine to look again");
 });
 
 test("an Agent Run arranges pages as its owner may", () => {
@@ -74,4 +79,19 @@ test("created-by attribution names the exact Run and replaces caller claims", ()
   assert.deepEqual(metadata, {
     createdBy: "agent", createdByAgentId: "agent-1", createdByAgentName: "claude", createdByRunId: "run-1",
   });
+});
+
+test("an Agent Run with attachment write sends a large file in parts, as a person does", () => {
+  const writer = { ...run, permissions: ["channel.attachments.write"] };
+  const base = "/api/relay-v2/private-r2/uploads/intent-1";
+  for (const scope of ["", "/scope/channel:channel-1"]) {
+    assert.equal(allowed("POST", `${base}/multipart${scope}`, writer), true);
+    assert.equal(allowed("PUT", `${base}/multipart/parts/1${scope}`, writer), true);
+    assert.equal(allowed("PUT", `${base}/multipart/parts/10000${scope}`, writer), true);
+    assert.equal(allowed("POST", `${base}/multipart/complete${scope}`, writer), true);
+    assert.equal(allowed("POST", `${base}/multipart${scope}`), false);
+    assert.equal(allowed("PUT", `${base}/multipart/parts/1${scope}`), false);
+  }
+  assert.equal(allowed("PUT", `${base}/multipart/parts/0`, writer), false);
+  assert.equal(allowed("PUT", `${base}/multipart`, writer), false);
 });

@@ -4,6 +4,14 @@ The production lifecycle maintenance broker runs daily and dispatches the
 existing bounded executor from the latest successful immutable production tag
 of the line that deploys the Hub: the newest beta (a stable rebuilds an older
 beta's source and never deploys the Hub, so it is never the target).
+If a newer Hub release is still running, the broker waits up to 45 minutes,
+refreshing one unfiltered, paginated release-run list every 30 seconds. A run
+moving from queued to running cannot disappear between separate status reads;
+waiting, requested and pending runs and older stuck trains also delay dispatch.
+Success and active status come from the same pass. The 60-minute
+job budget leaves room for GitHub API calls and annotated-tag verification.
+An exhausted wait fails without dispatching an older tag; inspect the failed
+request and retry the broker once the release finishes.
 For an immediate report, dispatch `production-postgres-lifecycle-maintenance-request.yml`
 with `dry_run=true` and `max_rows=10000`. Inspect its secret-free JSON artifacts
 before dispatching the same broker with `dry_run=false`.
@@ -49,6 +57,15 @@ removed in the same bounded batches. Every sign-in check already refuses them;
 on 2026-10-17 there were about 50,000 such rows that nothing had ever cleaned.
 Live sessions are never touched by maintenance; a person ends their own from
 Settings, and signing out ends the one they used.
+
+Machine daemon commands (`data.machine_daemon_commands`) are removed a week
+after they expire and were created; the expiry index from migration 0254
+bounds each batch. Commands live from 15 seconds (quota probes) to 30 days,
+and every claim, replay and status read already refuses an expired one. The
+week is for readers that look back by creation time instead, at most a day:
+the harness action list, the harness release repeat and the quota probe
+spacing. Removing a ten-minute release notice at expiry would resend it. On
+2026-11-15 about 69,000 of 88,800 rows (a 440 MB table) were past that week.
 
 Financial receipts (`data.space_credit_purchases` and
 `data.paid_call_receipts`) are not TTL replays. Preserve them for the lifetime

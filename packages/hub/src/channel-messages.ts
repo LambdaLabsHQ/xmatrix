@@ -16,7 +16,7 @@ import {
   channelMemberReadEvent,
 } from "./product-channel-read-fanout";
 import { sealMessageAttachments } from "./postgres-content-authority";
-import { messagePushNotification, pushConfig, pushDevices, pushToPeople } from "./push/notify";
+import { messagePushNotifications, pageTitles, pushConfig, pushDevices, pushToPeople } from "./push/notify";
 import {
   postgresMessageAcknowledge,
   postgresMessageAnnotations,
@@ -305,10 +305,13 @@ export async function publishChannelLiveDelivery(
   // The people this message is addressed to are also reached where no client
   // of theirs is open, whether or not one of their cells could be reached.
   const addressed = routing.recipientNotifications.flatMap((entry) => typeof entry.userId === "string" ? [entry.userId] : []);
-  const notification = addressed.length > 0 && env.PUSH_CONFIG ? messagePushNotification(channelId, payload) : null;
-  if (notification) waitUntil(Promise.resolve().then(() => pushToPeople({
-    config: pushConfig(env.PUSH_CONFIG), devices: pushDevices(env), userIds: addressed, notification,
-  })).catch(() => {
+  if (addressed.length > 0 && env.PUSH_CONFIG) waitUntil(Promise.resolve().then(async () => {
+    const config = pushConfig(env.PUSH_CONFIG), devices = pushDevices(env);
+    const notifications = await messagePushNotifications({ channelId, payload, userIds: addressed,
+      pages: () => pageTitles(env) });
+    await Promise.all(notifications.map(({ userIds, notification }) =>
+      pushToPeople({ config, devices, userIds, notification })));
+  }).catch(() => {
     // Configuration and storage errors can also contain credentials or private
     // query data. Keep the batch diagnostic independent of foreign error text.
     console.error("Push delivery failed");

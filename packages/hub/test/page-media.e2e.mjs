@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import test from "node:test";
 import { createSpace, inTestTransaction, json, MOCK_TOKEN, randomUUID, startMockUserHubWorker } from "./agent-launch-postgres.fixture.mjs";
 import { prepareAttachmentAgentRun } from "./support/message-attachment-upload.mjs";
+import { grantPageAccess } from "./support/page-agent.mjs";
 
 // A file pasted into a page is the Space's private content: a page shows it to
 // whoever can read the page, only when the page shows it (or it was pasted into
@@ -127,13 +128,7 @@ test("a live Agent uploads Page media only into a Page it and its owner may edit
       refId: `page-media:${foreign.pageId}:${hash}` });
     assert.equal(wrongSpace.status, 403, await wrongSpace.text());
 
-    await inTestTransaction(async tx => {
-      await tx.query({ text: "UPDATE data.space_members SET role='member' WHERE space_id=$1 AND user_id=$2",
-        values: [spaceId, userId] });
-      await tx.query({ text: `INSERT INTO data.page_access (space_id,page_id,subject_kind,subject_id,access,created_at)
-        VALUES ($1,$2,'user',$3,'read',now()) ON CONFLICT (space_id,page_id,subject_kind,subject_id) DO UPDATE SET access='read'`,
-        values: [spaceId, page.pageId, userId] });
-    });
+    await grantPageAccess(inTestTransaction, { spaceId, pageId: page.pageId, userId, access: "read" });
     for (const headers of [agentHeaders, auth]) {
       const readOnly = await bind({}, headers);
       assert.equal(readOnly.status, 403, await readOnly.clone().text());

@@ -3,7 +3,7 @@ export * from "./workspace-admin-views";
 export * from "./use-channel-catalog-paging";
 export * from "./workspace-channel-sidebar";
 export * from "./workspace-composer-dialogs";
-export { daemonStatusNeedsSessionSync, desktopUpdateErrorStatus } from "./workspace-shell-desktop-labels";
+export { daemonStatusNeedsSessionSync, desktopDaemonNeedsFirstSession, desktopUpdateErrorStatus } from "./workspace-shell-desktop-labels";
 export * from "./workspace-message-timeline";
 export * from "./workspace-shell-chrome";
 export * from "./workspace-shell-constants";

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { setTimeout } from "node:timers/promises";
 import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
@@ -11,6 +12,18 @@ import { createAuthorityDatabase } from "../dist/index.js";
 export const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
 export const integration = connectionString || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true"
   ? test : test.skip;
+
+/** Real command clients, with a countable diagnostic checkout that can fail independently. */
+export function postgresDiagnosticClients() {
+  const diagnostics = { attempts: 0, unavailable: false, clientFactory: config => {
+    if (config.application_name === "xmatrix-lock-diagnostic") {
+      diagnostics.attempts++;
+      if (diagnostics.unavailable) throw new Error("private-diagnostic-failure");
+    }
+    return new Client(config);
+  } };
+  return diagnostics;
+}
 
 /** Independent bounded commands plus a direct connection for connector fixture setup. */
 export async function connectorDatabase(applicationName) {
@@ -97,7 +110,7 @@ export function savepointDatabase(client, rewrite, checkContext = () => {}) {
       await client.query("ROLLBACK TO SAVEPOINT command");
       throw error;
     }
-  } };
+  }, async close() {}, openSession() { return this; } };
 }
 
 export async function applyTestMigrations(client, files, rewrite) {
@@ -143,7 +156,7 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
     url.pathname = `/${name}`;
     let applied;
     if (migrate) applied = JSON.parse((await promisify(execFile)(process.execPath,
-      [new URL("../scripts/migrate.mjs", import.meta.url).pathname, "apply", "--revision=local", "--allow-contract"], {
+      [fileURLToPath(new URL("../scripts/migrate.mjs", import.meta.url)), "apply", "--revision=local", "--allow-contract"], {
         timeout: 120_000, env: { ...process.env, DATABASE_URL: url.toString(), POSTGRES_RUNTIME_ROLE: role },
       })).stdout);
     client = new Client({ connectionString: url.toString() });
@@ -201,6 +214,17 @@ export async function seedTestSpacePlacement(client, spaceId, at) {
   await client.query(`INSERT INTO control.space_placement
     (space_id,shard_id,placement_epoch,state,target_shard_id,plan_class,created_at,updated_at)
     VALUES ($2,'shard-0',1,'active',NULL,'test',$1,$1)`, [at, spaceId]);
+}
+
+/** A placed Space with its control head, owned by `ownerUserId`, for content authority tests. */
+export async function seedOwnedTestSpace(client, spaceId, ownerUserId) {
+  await seedTestSpacePlacement(client, spaceId, new Date().toISOString());
+  await client.query("INSERT INTO data.space_control_heads VALUES ($1,0,now())", [spaceId]);
+  await client.query(`INSERT INTO data.spaces
+    (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
+    VALUES ($1,$2,$1,$1,1,'{}',now(),now())`, [spaceId, ownerUserId]);
+  await client.query(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
+    VALUES ($1,$2,'owner',1,now(),now())`, [spaceId, ownerUserId]);
 }
 
 /** A bounded authority for catalog/message integration tests with slower CI connections. */

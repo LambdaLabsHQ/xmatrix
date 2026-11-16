@@ -17,11 +17,13 @@ import org.json.JSONObject;
 public final class NativeBridge {
   private static final String CHANNEL_ID = "xmatrix-default";
   private final MainActivity activity;
+  final PlayBilling playBilling;
   /** The page waiting for an in-place sign-in to return; one at a time. */
   private Consumer<String> pendingSignIn;
 
   NativeBridge(MainActivity activity) {
     this.activity = activity;
+    this.playBilling = new PlayBilling(activity);
     ensureNotificationChannel();
   }
 
@@ -46,6 +48,10 @@ public final class NativeBridge {
           break;
         case "notify":
           value = notify(payload);
+          break;
+        case "googlePlayManage":
+          playBilling.manage(payload);
+          value = JSONObject.NULL;
           break;
         case "openExternal":
           openExternal(payload.optString("url", ""));
@@ -231,6 +237,18 @@ public final class NativeBridge {
     );
     NotificationManager manager = (NotificationManager) activity.getSystemService(Context.NOTIFICATION_SERVICE);
     manager.createNotificationChannel(channel);
+  }
+
+  static String successJson(Object value) {
+    try {
+      return success(value);
+    } catch (Exception error) {
+      return failure(error.getMessage());
+    }
+  }
+
+  static String failureJson(String error) {
+    return failure(error);
   }
 
   private static String success(Object value) throws Exception {

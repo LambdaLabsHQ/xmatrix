@@ -14,6 +14,8 @@ const VERIFY_PHASES = new Set(["caught_up", "final_copied"]);
 // Every table in data must be deliberately classified. A newly added table makes
 // the classification test fail until its shard semantics are decided.
 export const MOVABLE_SPACE_TABLES = Object.freeze([
+  "norn_shadow_comparisons", "norn_shadow_observations", "norn_shadow_transitions",
+  "norn_programs", "norn_requests", "norn_notices",
   "agent_message_executions",
   "blob_upload_intents",
   "channel_access",
@@ -53,6 +55,7 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "space_billing_webhook_events",
   "space_control_heads",
   "space_credit_state",
+  "space_credit_usage",
   "space_credit_purchases",
   "paid_call_receipts",
   "space_harness_profiles",
@@ -89,6 +92,7 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   // An approval lets one Run read a secret; it stays with the Runs.
   "run_secret_approvals",
   "app_gmail_routes",
+  "app_apple_commerce_watches",
   "app_connector_action_requests",
   "app_connector_connections",
   "app_connector_credentials",
@@ -111,8 +115,6 @@ export const BLOCKING_SPACE_TABLES = Object.freeze([
   "app_googlechat_room_bindings",
   "app_connector_executions",
   "app_source_relations",
-  "automation_occurrences",
-  "automations",
   "instances",
   "machine_run_snapshot_heads",
   "natural_key_counters",
@@ -177,6 +179,7 @@ const BLOCKER_QUERIES = Object.freeze({
   agent_reborn_intents: "space_id = $1",
   agent_quota_retries: "space_id = $1",
   app_gmail_routes: "space_id = $1",
+  app_apple_commerce_watches: "relation_id IN (SELECT relation_id FROM data.app_source_relations WHERE space_id = $1)",
   app_connector_action_requests: "space_id = $1",
   app_connector_connections: "space_id = $1",
   app_connector_credentials: "space_id = $1",
@@ -199,9 +202,6 @@ const BLOCKER_QUERIES = Object.freeze({
   app_googlechat_room_bindings: "space_id = $1",
   app_connector_executions: "space_id = $1",
   app_source_relations: "space_id = $1",
-  automation_occurrences:
-    "automation_id IN (SELECT automation_id FROM data.automations WHERE channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1))",
-  automations: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   instances: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   machine_run_snapshot_heads: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",
   runs: "channel_id IN (SELECT channel_id FROM data.channels WHERE space_id = $1)",

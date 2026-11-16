@@ -147,3 +147,21 @@ test("retired lifetime conditions fail closed without executing a different laun
     assert.match(parseAutoLaunchMentions(body)[0].error, /lifecycle option was removed/);
   }
 });
+
+test("a condition can be a summon's first word: Auto narrowed by it", () => {
+  const [mention] = parseAutoLaunchMentions("please @machine:Laptop effort:high fix the build");
+  assert.equal(mention.text, "@machine:Laptop effort:high");
+  assert.equal(mention.start, 7);
+  assert.deepEqual(mention.tags, { machine: "Laptop", effort: "high" });
+  assert.deepEqual(mention.conditions.map(item => [item.field, item.start]), [["machine", 8], ["effort", 23]]);
+  assert.equal(mention.error, undefined);
+  assert.deepEqual(parseAutoLaunchMentions('＠pwd:"/Users/me/my work" go')[0].tags, { pwd: "/Users/me/my work" });
+  assert.deepEqual(parseAutoLaunchMentions("@harness:codex go")[0].tags, { harness: "codex" });
+  // Repeats still fail closed; a field with no value, an unknown key, code and quotes are prose.
+  assert.ok(parseAutoLaunchMentions("@machine:a machine:b go")[0].error);
+  for (const body of ["@repo: go", "@colour:red go", "`@machine:Laptop`", "> @machine:Laptop", "mail@machine:Laptop"]) {
+    assert.deepEqual(parseAutoLaunchMentions(body), [], body);
+  }
+  const both = parseAutoLaunchMentions("@codex repo:a/b then @model:m");
+  assert.deepEqual(both.map(item => item.text), ["@codex repo:a/b", "@model:m"]);
+});

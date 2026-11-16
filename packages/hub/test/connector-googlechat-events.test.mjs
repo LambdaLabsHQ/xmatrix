@@ -38,7 +38,7 @@ function fixture({ linked = true, revoked = false, deny = false, appendFails = f
       }
       if (appendFails) throw new Error("append failed");
     },
-    automate: async (_env, input) => { calls.push(["automate", input]); },
+    events: async (_env, input) => { calls.push(["automate", input]); },
   };
   const send = body => handleGoogleChatAppDelivery({ HUB_URL: hubOrigin },
     new Request("https://spoofed.example/api/connectors/googlechat/events", {

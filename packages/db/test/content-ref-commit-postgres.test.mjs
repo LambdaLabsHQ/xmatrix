@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createAuthorityDatabase, PostgresContentRepository } from "../dist/index.js";
-import { integration, isolatedPostgres, seedTestSpacePlacement } from "./postgres-database.fixture.mjs";
+import { integration, isolatedPostgres, seedOwnedTestSpace } from "./postgres-database.fixture.mjs";
 
 // The repository owns intent consumption and canonical routing. SQL-call mocks
 // cannot prove that its successful reuse paths leave the same durable state.
@@ -23,13 +23,7 @@ integration("blob ref reuse completes its upload and repairs the canonical direc
     WHERE space_id=$1 ORDER BY entity_kind,entity_id`, [spaceId]);
   const pending = () => f.run("SELECT intent_id FROM data.blob_upload_intents WHERE space_id=$1 ORDER BY intent_id", [spaceId]);
   try {
-    await seedTestSpacePlacement(f.client, spaceId, new Date().toISOString());
-    await f.run("INSERT INTO data.space_control_heads VALUES ($1,0,now())", [spaceId]);
-    await f.run(`INSERT INTO data.spaces
-      (space_id,owner_user_id,name,search_rank_sequence,version,metadata_json,created_at,updated_at)
-      VALUES ($1,$2,$1,$1,1,'{}',now(),now())`, [spaceId, principal.id]);
-    await f.run(`INSERT INTO data.space_members(space_id,user_id,role,version,created_at,updated_at)
-      VALUES ($1,$2,'owner',1,now(),now())`, [spaceId, principal.id]);
+    await seedOwnedTestSpace(f.client, spaceId, principal.id);
 
     const first = await intent("first");
     const canonical = await content.commitRef(first);

@@ -17,6 +17,7 @@ shared user grant.
 | GitHub repository use | A token mint, a GitHub action, a webhook delivery, an Automation trigger or a pull request naming a page block needs the GitHub user recorded for the repository's installation to administer that repository now, read live with the installation's token. A link without a record, a repository added to the installation later, or a linker who lost the role is refused |
 | GitHub repository token | Current daemons bind the live admitted Run, Machine, execution and repository; the Channel determines the Space's linked installations; the Machine owner must be owner/admin/member there |
 | Run secret read | The exact live Run/Instance/execution, registration admission, token Space and current owner membership; `ask` approvals also join on Space |
+| Run makes a secret `ask` | The same live Run checks as a save, and the Run's owner must be a Space owner/admin now; the value is untouched and the change is audited as `space_ask`. A Run never opens a secret to `auto`, replaces its value or deletes it |
 | New ciphertext | AES-GCM additional data binds connector values to connection/version and Space secrets to Space/alias/value version |
 
 GitHub's separate App OAuth callback also hands its code to `/connect/oauth`.

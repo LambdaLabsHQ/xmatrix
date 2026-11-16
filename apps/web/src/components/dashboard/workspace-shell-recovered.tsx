@@ -1,13 +1,12 @@
 "use client";
 import { loadImage, canvasToBlob } from "./image-canvas";
 export { loadImage, canvasToBlob } from "./image-canvas";
-import { attachmentMediaMimeType } from "./attachment-media-type";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { useOpenMachine } from "./machine-link";
 import type { PresentedChannelMemberPresence as ChannelMemberPresence } from "./workspace-shell-presence";
-import { isAgentInstruction, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type DraftSummonIntent, type FaceOf, type StatusTagIcon } from "@xmatrix/protocol";
-import { formatLocalClock, formatZonedDateTime } from "./time-display";
+import { attachmentKind, mediaTypeForName, mediaTypeOf, isAgentInstruction, isNornAskProgramMessage, agentInstanceMemberPresence, channelPresenceInstances, faceOfSender, presenceInstanceId, crossChannelReplyRelay, channelVisibilityScope, digestCanonicalCloneCborV1, parseLlmQuotaAccount, parseQuotaObservedAt, isUnlistedParameterTag, statusTagIcon, type AgentInvocationSelections, type FaceOf, type StatusTagIcon, type LiveChannel } from "@xmatrix/protocol";
+import { formatLocalClock } from "./time-display";
 
 import { matchClaimableOutgoing } from "./outgoing-message-claim";
 import { currentHumanDisplayName } from "./human-profile-summary";
@@ -70,21 +69,15 @@ import {
   timelineItemId,
 } from "./workspace-shell-message-model";
 
-import {
-  agentInstanceDisplayStatus,
-} from "./workspace-shell-presence";
 
 import {
   AGENT_SPAWN_HANDOFF_GRACE_MS,
   AGENT_SPAWN_PENDING_MAX_AGE_MS,
-  MARKDOWN_ATTACHMENT_EXTENSIONS,
-  MARKDOWN_ATTACHMENT_TYPES,
   MAX_COMPRESSED_IMAGE_DIMENSION,
   MAX_IMAGE_ATTACHMENT_BYTES,
 } from "./workspace-shell-constants";
 
 import {
-  channelAttachmentKindForMimeType,
   agentInstanceUsageLimit,
   attentionSummaryFromEvent,
   formatPercent,
@@ -345,27 +338,19 @@ export function formatFileSize(bytes: number): string {
   return `${value >= 10 || unitIndex === 0 ? Math.round(value) : value.toFixed(1)} ${units[unitIndex]}`;
 }
 
+/** A Markdown file by its stated type or its name: browsers often state none, or plain text, for `.md`. */
 export function isMarkdownAttachmentFile(file: File): boolean {
-  const type = file.type.toLowerCase();
-  const name = file.name.toLowerCase();
-  return MARKDOWN_ATTACHMENT_TYPES.has(type) || MARKDOWN_ATTACHMENT_EXTENSIONS.some((extension) => name.endsWith(extension));
+  return attachmentKind(file.type) === "markdown" || mediaTypeForName(file.name) === "text/markdown";
 }
 
 export function attachmentMimeTypeForFile(file: File): string {
   if (isMarkdownAttachmentFile(file)) return "text/markdown";
-  return normalizeAttachmentMimeType(attachmentMediaMimeType(file.type, file.name));
-}
-
-export function normalizeAttachmentMimeType(mimeType: string): string {
-  const normalized = mimeType.trim().toLowerCase();
-  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(normalized)
-    ? normalized
-    : "application/octet-stream";
+  return mediaTypeOf(file.type, file.name);
 }
 
 export function channelAttachmentKindForFile(file: File): ChannelAttachment["kind"] {
   if (isMarkdownAttachmentFile(file)) return "markdown";
-  return channelAttachmentKindForMimeType(file.type, file.name);
+  return attachmentKind(file.type, file.name);
 }
 
 export function defaultAttachmentName(kind: ChannelAttachment["kind"]): string {
@@ -389,8 +374,6 @@ async function appendChannelMessageWithAttachments(input: {
   replyToMessageId?: string;
   appMentions: ReturnType<typeof parseAppMentions>;
   invocationSelections?: AgentInvocationSelections;
-  /** Jev's reading of each summon while the author typed this exact body. */
-  summonIntents?: DraftSummonIntent[];
   deadlineMs?: number;
 }): Promise<{
   message?: unknown;
@@ -413,7 +396,8 @@ async function appendChannelMessageWithAttachments(input: {
     replyToMessageId: input.replyToMessageId,
     appMentions: input.appMentions.length > 0 ? input.appMentions : undefined,
     invocationSelections: input.invocationSelections,
-    summonIntents: input.summonIntents?.length ? input.summonIntents : undefined,
+    // A person sends from here: the Agents the message summons start.
+    launch: true,
     attachments: committedAttachments.length > 0 ? committedAttachments : undefined,
   });
   // The deadline, retry bounding and outcome classification live in
@@ -786,8 +770,7 @@ export function appendOutgoingTimelineItems(
       // Who the confirmed message will be from, so the row is grouped and
       // drawn the same way before and after the server answers.
       senderId: currentUser ? `user:${currentUser.id}` : undefined,
-      senderStatus: "online",
-      sendStatus: message.status,
+        sendStatus: message.status,
       sendError: message.error,
     }));
   if (pendingItems.length === 0) return timeline;
@@ -798,9 +781,8 @@ export function appendOutgoingTimelineItems(
 
 export function buildTimeline(
   history: ChannelMessage[],
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   channels: ChannelSnapshot[],
-  events: readonly ObservabilityEvent[],
   currentUser?: { id: string; email: string; name?: string } | null,
   channelReadCounts: Record<string, number> = {},
   historyCache?: Map<string, ChannelHistoryCacheEntry>,
@@ -846,9 +828,11 @@ export function buildTimeline(
   const safeChannelHistory = channelHistory.filter(isValidChannelMessage);
   const historyById = new Map(safeChannelHistory.map((message) => [message.messageId, message]));
   const commandNotices = foldCommandNotices(safeChannelHistory);
-  // An instruction to one Agent Instance is its input, not anything said to people.
+  // An instruction to one Agent Instance is its input, not anything said to people. A question an Agent asked
+  // with a command is read on its card, which names the asker and how it was answered.
   const messageItems = safeChannelHistory.filter((message) => !isAgentSpawnStatusMessage(message) &&
-    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata)).map((message) => {
+    !commandNotices.folded.has(message.messageId) && !isAgentInstruction(message.metadata) &&
+    !isNornAskProgramMessage(message.messageId)).map((message) => {
     const senderEmail = message.from.email.trim().toLowerCase();
     const senderLabel = message.from.label.trim().toLowerCase();
     const senderIdentityId = message.from.identityId;
@@ -926,28 +910,6 @@ export function buildTimeline(
               : instance.channelInstanceId === senderChannelInstanceId
         )
       : undefined;
-    // History can arrive before the Channel's presence snapshot. Missing
-    // presence says nothing about whether this exact Instance has left.
-    const senderInstanceStale = Boolean(channel?.presence) &&
-      message.from.kind === "agent" && senderHasInstanceIdentity && !matchedInstance && !linkedSender;
-    const humanPresenceStatus =
-      kindMatchedPresence?.kind === "user" ? kindMatchedPresence.status : undefined;
-    const senderStatus =
-      message.from.kind === "agent"
-        ? senderInstanceStale
-          ? "offline"
-          : !matchedInstance
-            ? undefined
-            : agentInstanceDisplayStatus({
-              agentId: senderIdentityId,
-              channelId: message.channelId,
-              events,
-              instance: matchedInstance,
-              fallbackStatus: matchedInstance?.status || "offline",
-              name: authorLabel,
-              activity: matchedInstance?.activity || kindMatchedPresence?.activity,
-            })
-        : relayedReply ? undefined : humanPresenceStatus || (own ? "online" : "offline");
     const senderGoal =
       message.from.kind === "agent"
         ? message.from.goal
@@ -956,9 +918,14 @@ export function buildTimeline(
       message.from.kind === "agent"
         ? message.from.gitBranch
         : undefined;
+    // The Hub labels a header's model tag from that Instance's catalog when the
+    // message is sent (a selector id can be opaque JSON), so it outranks the id.
     const senderModel =
       message.from.kind === "agent"
-        ? cleanModelLabel(message.from.model)
+        ? cleanModelLabel(
+            message.from.statusChips?.find((chip) => chip.id?.toLowerCase() === "model")?.value
+              ?? message.from.model,
+          )
         : undefined;
     const senderEffort =
       message.from.kind === "agent"
@@ -1063,10 +1030,6 @@ export function buildTimeline(
         : undefined,
       senderInstanceId: reservedSystemAgent ? undefined : matchedInstance?.id || senderInstanceId,
       senderMention,
-      // xMatrix has its own product identity, while the delegated runtime
-      // remains the source of truth for whether it is actively working.
-      senderStatus,
-      senderInstanceStale: reservedSystemAgent ? false : senderInstanceStale,
       ...(linkOrigin ? { linkOrigin } : {}),
       senderGoal: reservedSystemAgent ? undefined : senderGoal,
       senderGitBranch: reservedSystemAgent ? undefined : senderGitBranch,
@@ -1281,12 +1244,18 @@ export function truncateNotificationText(value: string, maxLength = 180): string
 /* The banner is titled by where the message is, so several Agents talking in
    one channel read as one conversation; who said it leads the body. */
 export function nativeMessageNotificationTitle(message: ChannelMessage, channelName: string | undefined): string {
-  if (secretRequestMetadata(messageRichMetadata(message))) return "Secret requested";
+  if (secretRequestMetadata(hubWrittenMetadata(message))) return "Secret requested";
   return channelName || "xMatrix";
 }
 
+/** A message's metadata when the Hub wrote it; a secret request only reads as one from the Hub. */
+function hubWrittenMetadata(message: ChannelMessage): Record<string, unknown> | undefined {
+  const metadata = messageRichMetadata(message);
+  return messageProvenance(metadata) === "system_fact" ? metadata : undefined;
+}
+
 export function nativeMessageNotificationBody(message: ChannelMessage): string {
-  const secretRequest = secretRequestMetadata(messageRichMetadata(message));
+  const secretRequest = secretRequestMetadata(hubWrittenMetadata(message));
   if (secretRequest) {
     return truncateNotificationText(`${secretRequest.agentName || "An Agent"} asks for the secret ${secretRequest.secretRef}`);
   }
@@ -1535,7 +1504,7 @@ export function formatMember(
 /* moved to workspace-shell-presence (1) */
 
 export function buildAgentWorkItems(
-  channel: ChannelSnapshot | null,
+  channel: LiveChannel | null,
   events: ObservabilityEvent[],
   launches: readonly SerializedAgentLaunch[] = [],
 ): AgentWorkItem[] {
@@ -1709,7 +1678,7 @@ export function traceEventChannelInstanceLabel(event: ObservabilityEvent): strin
 
 export function latestSpawnEventsByAgent(
   events: ObservabilityEvent[],
-  channel: ChannelSnapshot
+  channel: LiveChannel
 ): ObservabilityEvent[] {
   const byAgent = new Map<string, ObservabilityEvent>();
   const visibleMembers = new Set(channelMembersByPresence(channel));
@@ -1890,7 +1859,7 @@ export function traceInnerPayload(payload: Record<string, unknown> | null): Reco
 /* moved to workspace-shell-presence (10) */
 
 export function humanChannelMembersByPresence(channel: ChannelSnapshot): string[] {
-  return channelMembersByPresence(channel).filter((member) => {
+  return [...channel.presence?.humans.keys() ?? []].filter((member) => {
     const presence = memberPresence(channel, member);
     return presence.kind === "user";
   });
@@ -1922,7 +1891,7 @@ export function channelFocusedHumanMembers(channel: ChannelSnapshot): string[] {
     .sort((left, right) => formatMember(channel, left).localeCompare(formatMember(channel, right)));
 }
 
-export function channelOnlineAgentAvatarItems(channel: ChannelSnapshot | null): ChannelAgentAvatarItem[] {
+export function channelOnlineAgentAvatarItems(channel: LiveChannel | null): ChannelAgentAvatarItem[] {
   if (!channel) return [];
 
   const items: ChannelAgentAvatarItem[] = [];
@@ -2238,6 +2207,7 @@ export function cleanEffortLabel(effort?: string): string | undefined {
 
 export function cleanStatusChips(
   chips?: Array<{ id?: string; label?: string; value?: string; percent?: number; resetAt?: string; parameterKind?: string }>,
+  /** The live model as a person reads it (catalog display name, else id). */
   modelFallback?: string,
   effortFallback?: string
 ): StatusChip[] | undefined {
@@ -2446,42 +2416,9 @@ export function eventLabel(event: ObservabilityEvent): string {
 }
 
 /* Bare local time, for a timestamp read down a column of siblings that share
-   its zone. Anything standalone wants formatDateTime instead. */
+   its zone. Anything standalone names its zone (time-display.ts formatZonedDateTime). */
 export function formatTime(value: string): string {
   return formatLocalClock(value);
-}
-
-/**
- * A standalone instant — a schedule's next run, an expiry, a last-updated —
- * so it names its zone. These are exactly the strings a reader quotes into a
- * channel or a ticket, where "Next: Sep 19, 4:23 AM" means nothing without it.
- */
-export function formatDateTime(value: string): string {
-  if (!Number.isFinite(Date.parse(value))) return "Unavailable";
-  return formatZonedDateTime(value, undefined, undefined, { month: "short" });
-}
-
-export function evaluationBindingLabel(input: unknown): string {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    return "Legacy compatibility input";
-  }
-  const record = input as Record<string, unknown>;
-  const lineage = record.lineage && typeof record.lineage === "object" && !Array.isArray(record.lineage)
-    ? record.lineage as Record<string, unknown>
-    : undefined;
-  const envRef = record.envRef && typeof record.envRef === "object" && !Array.isArray(record.envRef)
-    ? record.envRef as Record<string, unknown>
-    : undefined;
-  const actor = envRef?.actor && typeof envRef.actor === "object" && !Array.isArray(envRef.actor)
-    ? envRef.actor as Record<string, unknown>
-    : undefined;
-  const depth = lineage?.depth;
-  if (typeof depth !== "number" || !Number.isSafeInteger(depth) || typeof actor?.kind !== "string" ||
-      typeof actor.id !== "string" || !actor.kind || !actor.id) {
-    return "Legacy compatibility input";
-  }
-  const scope = depth === 0 ? "Root evaluation" : `Child evaluation · depth ${depth}`;
-  return `${scope} · actor ${actor.kind}:${actor.id}`;
 }
 
 export type { StatusChip } from "./workspace-shell-domain-types";

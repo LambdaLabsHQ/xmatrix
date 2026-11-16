@@ -7,7 +7,29 @@ import {
 
 test.use(E2E_DESKTOP_CONTEXT);
 
-const BACKGROUND_READS = ["workspaces", "automations", "machine-daemons"];
+const BACKGROUND_READS = ["workspaces", "machine-daemons"];
+
+test.describe("Phone startup navigation", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+  test("the loading dock cannot accept a tap until the workspace can respond", async ({ page }) => {
+    await installRealAuthWorkspace(page);
+    await fixtureRule(page, { id: "held-startup-session", pattern: "**/api/auth/get-session**",
+      responder: { kind: "deferred", json: SIGNED_IN_SESSION, headers: SESSION_JWT_HEADERS } });
+    await page.goto("/app", { waitUntil: "domcontentloaded" });
+    await expect.poll(async () => (await fixtureRequests(page, "held-startup-session")).length).toBeGreaterThan(0);
+    const loading = page.locator(".xmatrix-app-shell[aria-busy=true]");
+    await expect(loading).toBeVisible();
+    for (const name of ["Pages", "Channels", "Status", "More"]) {
+      await expect(loading.getByRole("button", { name, exact: true })).toBeDisabled();
+    }
+    await releaseFixture(page, "held-startup-session");
+    await expect(loading).toHaveCount(0);
+    const pages = page.getByRole("navigation", { name: "Primary" }).getByRole("button", { name: "Pages", exact: true });
+    await expect(pages).toBeEnabled();
+    await pages.tap();
+    await expect(page).toHaveURL(/\/pages$/u);
+  });
+});
 
 async function expectBackgroundReads(page: Page, started: boolean, timeout?: number) {
   for (const id of BACKGROUND_READS) {
@@ -30,8 +52,8 @@ async function openPendingStartup(page: Page, id: string, pattern: string, expec
 }
 
 async function expectStartupDeadlineEscape(page: Page) {
-  expect(await fixtureRequests(page, "automations")).toHaveLength(0);
-  await expect.poll(async () => (await fixtureRequests(page, "automations")).length,
+  expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
+  await expect.poll(async () => (await fixtureRequests(page, "workspaces")).length,
     { timeout: 12_000 }).toBeGreaterThan(0);
 }
 
@@ -46,7 +68,7 @@ test.describe("Desktop startup with no Channel named", () => {
           } } });
       await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
       await expect.poll(async () => (await fixtureRequests(page, "desktop-catalog")).length).toBe(1);
-      expect(await fixtureRequests(page, "automations")).toHaveLength(0);
+      expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
       await releaseFixture(page, "desktop-catalog");
       await expectBackgroundReads(page, true, 3_000);
     });
@@ -78,7 +100,7 @@ test("exact Channel links start history before resolve and defer secondary reque
   await expect.poll(async () => (await fixtureRequests(page, "startup-history")).length).toBe(1);
   await expect(page.getByText("Startup history ready", { exact: true })).toHaveCount(0);
   await expect.poll(async () => (await fixtureRequests(page, "startup-resolve")).length).toBe(1);
-  expect(await fixtureRequests(page, "automations")).toHaveLength(0);
+  expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
   await releaseFixture(page, "startup-resolve");
   await expect(page.getByText("Startup history ready", { exact: true })).toBeVisible();
   expect(await fixtureRequests(page, "client-compatibility")).toHaveLength(1);

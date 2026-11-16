@@ -117,6 +117,10 @@
 .page-document pre .hljs-emphasis { font-style: italic; }
 .xmatrix-app .rich-message .message-code-block .hljs-strong,
 .page-document pre .hljs-strong { font-weight: 700; }
+/* A Norn pipe (norn-grammar.ts) stands a space apart from the steps it joins, as `=>` is written, without a
+   space in the text a reader copies; the code font draws it as one arrow. */
+.xmatrix-app .rich-message .message-code-block .hljs-pipe,
+.page-document pre .hljs-pipe { margin-inline: 1ch; }
 /* A quote is a piece of tinted paper, as an ask is in a conversation: no rule beside it, its words in full ink,
    the place a page keeps a summary such as where it stands. */
 .page-document blockquote {
@@ -520,6 +524,99 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .rich-me
   font-size: 0.8125rem;
   line-height: 1.45;
 }
+/* The thread reads top to bottom (§4.4): its head, the comments, the Agents at work, and the reply box. They are the
+   Conversations view's own glass disc and composer, at the thread's scale: in that view they float over the
+   timeline's tail, but here they stand in flow under it, so nothing covers what was said, and the timeline keeps no
+   room for them. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-message-timeline {
+  scroll-padding-bottom: 0.5rem !important;
+  /* What scrolls past the head or down to the Agents fades into the paper instead of being cut. */
+  -webkit-mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
+  mask-image: linear-gradient(to bottom, transparent, black 0.5rem, black calc(100% - 0.5rem), transparent);
+}
+/* A comment's avatar says who wrote it; whether an Agent works now is said once, by its disc under the comments. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar .identity-avatar-status {
+  display: none !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-message-timeline > div,
+  .app-message-timeline-scroll-end, .app-message-timeline-scroll-end-work-dock) {
+  padding-bottom: 0.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-agent-work-dock, .app-composer) {
+  position: relative !important;
+  inset: auto !important;
+  z-index: auto !important;
+  flex: none;
+}
+/* The discs start on the comments' avatar column, a third larger than those avatars as in the Conversations view, and
+   tall enough for an island's two lines. The strip keeps no room above it: the controls stand outside it. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-dock {
+  padding: 0.25rem 0.75rem 0.5rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-scroller {
+  width: auto !important;
+  min-height: 0 !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  overflow: visible !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open[data-quiet-agents] .app-agent-work-scroller {
+  display: none;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-item {
+  --app-agent-work-disc: 2rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-avatar .identity-avatar-face {
+  font-size: 0.75rem !important;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island {
+  max-width: 100%;
+  padding-right: 0.625rem;
+}
+/* At the disc's height an island's two lines would fill it edge to edge, so what it is on follows its caption on one
+   line, keeping the room above and below that the Conversations view's island gives its words. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-text {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0.375rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-intent-caption {
+  flex: none;
+}
+/* Its controls shrink with it, so the capsule they open in stays the disc's height, with the same room around them. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-action {
+  height: 1.5rem;
+  padding-inline: 0.5rem;
+}
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-agent-work-island .app-agent-work-avatar .identity-avatar-status {
+  top: 0.2rem !important;
+  right: 0.35rem !important;
+}
+/* The composer at the thread's scale: 2.5rem tall on the comments' left edge, its controls 2rem, its words 14px. */
+html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer {
+  padding: 0 0.75rem 0.75rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box {
+  min-height: 2.5rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-input-row {
+  min-height: 2.5rem !important;
+  padding: 0.25rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .composer-inline-actions {
+  min-height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open :is(.app-composer-inline-icon, .app-composer-send) {
+  width: 2rem !important;
+  height: 2rem !important;
+}
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-composer-box .composer-textarea {
+  min-height: 2rem !important;
+  padding-top: calc((2rem - 1.38em) / 2 + 0.5px) !important;
+  padding-bottom: calc((2rem - 1.38em) / 2 - 0.5px) !important;
+  font-size: 0.875rem !important;
+}
 /* Beside its page, a conversation's head already names it (the card in the margin, the header docked, the
    sign on a phone), and for a discussion that name is its passage: an empty one just says so. */
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-page-conversation :is(.app-empty-conversation-mark, .app-empty-conversation-title) {
@@ -667,35 +764,179 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .xmatrix-app .app-mention-chip-instance[role="button"] { cursor: pointer; }
 
-/* A page's Automation (§6.1): its reference is the reminder's name in ink, and beside it, small and quiet behind a
-   clock, how often it runs and when next. No fill or accent colour: it is a line of the page, not a badge. */
-.page-document a:has(.page-automation-chip) { color: inherit; text-decoration: none; }
-.page-automation-chip { color: var(--foreground); font-weight: 600; text-decoration: none; }
-.page-automation-chip[data-state="paused"] { color: var(--muted-foreground); }
-.page-automation-chip[data-state="missing"] { color: var(--muted-foreground); text-decoration: line-through; }
-.page-automation-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3em;
-  margin-left: 0.5em;
-  color: var(--muted-foreground);
+/* A page's program is a code block with its flow joined under it: one tinted surface, the code above and, below a
+   hairline, what the program has asked, what it waits for now and what it does next (program-flow.ts). A
+   conversation draws the same flow over the program's text. No badge colours beyond the inks the code already uses. */
+.page-document pre.page-program-code { margin-bottom: 0; border-radius: 10px 10px 0 0; }
+.page-program-wrong { text-decoration: underline wavy var(--destructive); text-underline-offset: 3px; }
+.page-program-steps {
+  display: block;
+  width: 100%;
+  margin: 0 0 1em;
+  padding: 0.35em 1em 0.5em;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent);
+  border-radius: 0 0 10px 10px;
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+  color: var(--foreground);
+  font: inherit;
   font-size: 0.85em;
+  text-align: left;
   cursor: pointer;
   user-select: none;
 }
-.page-automation-status::before, .page-automation-chip[data-state="public"]::before {
-  content: "";
-  width: 0.95em;
-  height: 0.95em;
-  background: currentColor;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E") center / contain no-repeat;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E") center / contain no-repeat;
+.page-program-steps:disabled { cursor: default; }
+.page-program-steps:hover:not(:disabled) { background: color-mix(in oklch, var(--foreground) 6.5%, transparent); }
+
+/* The flow: steps down a line. A step is a mark on the line (whose face it is, or what kind of step) and its words. */
+.program-flow {
+  /* The code's string ink, for what went well and for where the program stands now. */
+  --code-ink-string: oklch(0.45 0.1 145);
+  --program-flow-mark: 1.45em;
+  --program-flow-gap: 0.65em;
+  --program-flow-line: color-mix(in oklch, var(--foreground) 16%, transparent);
+  display: block;
+  line-height: 1.45;
 }
-.page-automation-status[data-state="missing"] { color: var(--destructive); cursor: default; }
-/* A public reader sees a reminder's name behind its clock, and no schedule. */
-.page-automation-chip[data-state="public"] { display: inline-flex; align-items: baseline; gap: 0.35em; }
-.page-automation-chip[data-state="public"]::before { align-self: center; color: var(--muted-foreground); }
-.page-automation-status:hover:not(:disabled) { color: var(--foreground); }
+.program-flow-steps { display: block; }
+.program-flow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--program-flow-mark) minmax(0, 1fr);
+  column-gap: var(--program-flow-gap);
+  align-items: start;
+  padding: 0.3em 0;
+}
+/* The line from a step's mark down to the next step's. */
+.program-flow-step:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: calc(var(--program-flow-mark) / 2);
+  top: calc(0.3em + var(--program-flow-mark) + 2px);
+  bottom: calc(-0.3em + 2px);
+  width: 1px;
+  background: var(--program-flow-line);
+}
+.program-flow-mark {
+  width: var(--program-flow-mark);
+  height: var(--program-flow-mark);
+  border-radius: 0.38em;
+  display: inline-grid;
+  place-items: center;
+  object-fit: cover;
+}
+.program-flow-face { background: color-mix(in oklch, var(--foreground) 8%, transparent); font-size: 0.95em; font-weight: 600; }
+.program-flow-icon { border-radius: 50%; color: var(--muted-foreground); }
+.program-flow-icon::before { content: ""; width: 1.05em; height: 1.05em; background: currentColor; mask: var(--program-flow-icon) center / contain no-repeat; }
+.program-flow-icon[data-icon="clock"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cpath d='M12 6v6l4 2'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="event"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="say"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="done"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="stop"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M18 6 6 18'/%3E%3Cpath d='m6 6 12 12'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="again"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m17 2 4 4-4 4'/%3E%3Cpath d='M3 11v-1a4 4 0 0 1 4-4h14'/%3E%3Cpath d='m7 22-4-4 4-4'/%3E%3Cpath d='M21 13v1a4 4 0 0 1-4 4H3'/%3E%3C/svg%3E"); }
+.program-flow-icon[data-icon="more"] { --program-flow-icon: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='12' cy='12' r='1'/%3E%3Ccircle cx='19' cy='12' r='1'/%3E%3Ccircle cx='5' cy='12' r='1'/%3E%3C/svg%3E"); }
+.program-flow-body { display: block; min-width: 0; padding-top: 0.06em; }
+.program-flow-head { display: flex; align-items: baseline; flex-wrap: wrap; column-gap: 0.6em; min-width: 0; }
+.program-flow-title { font-weight: 600; overflow-wrap: anywhere; }
+.program-flow-meta { color: var(--muted-foreground); overflow-wrap: anywhere; }
+.program-flow-offered { display: block; }
+.program-flow-note {
+  margin-left: auto;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.02em 0.65em;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--foreground) 6%, transparent);
+  color: var(--muted-foreground);
+}
+.program-flow-text { display: block; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.program-flow-text[data-same] { color: var(--muted-foreground); }
+/* What is asked, drawn by a conversation as it draws a message's words, keeps the flow's own measure. */
+.xmatrix-app .program-flow-text :is(.rich-message, .rich-message *) { font-size: inherit; line-height: inherit; }
+.program-flow-text :is(p, ul, ol):first-child { margin-top: 0; }
+.program-flow-text :is(p, ul, ol):last-child { margin-bottom: 0; }
+/* Under a program's own text, what it asks is kept short: the text stands right above. */
+.program-flow[data-compact] .program-flow-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; color: var(--muted-foreground); }
+
+/* A request that has ended is one line: who, what, and the answer. */
+.program-flow-step:is([data-state="answered"], [data-state="failed"], [data-state="working"]) .program-flow-head { flex-wrap: nowrap; }
+.program-flow-head > .program-flow-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
+.program-flow-head > .program-flow-note { flex: none; max-width: 46%; }
+.program-flow-step[data-state="answered"] .program-flow-note { color: var(--code-ink-string); }
+.program-flow-step[data-state="answered"] .program-flow-note::before { content: "✓ "; }
+.program-flow-step[data-state="failed"] .program-flow-note { color: var(--destructive); }
+
+/* Where the program stands now. */
+.program-flow-step:is([data-state="now"], [data-state="working"]) > .program-flow-body > .program-flow-head > .program-flow-note { color: var(--code-ink-string); }
+.program-flow-step:is([data-state="now"], [data-state="working"]) > .program-flow-body > .program-flow-head > .program-flow-note::before {
+  content: "";
+  display: inline-block;
+  width: 0.5em;
+  height: 0.5em;
+  margin-right: 0.45em;
+  border-radius: 50%;
+  background: var(--code-ink-string);
+  vertical-align: 0.08em;
+  animation: page-program-working 1.6s ease-in-out infinite;
+}
+.program-flow-step[data-state="now"] > .program-flow-icon { color: var(--code-ink-string); }
+@keyframes page-program-working { 50% { opacity: 0.3; } }
+@media (prefers-reduced-motion: reduce) { .program-flow-note::before { animation: none !important; } }
+
+/* The ways a request can end. The word for a way sits on its line: the main way's on the flow's own line, each
+   other way's at the head of a branch that leaves the request. */
+.program-flow-when {
+  position: relative;
+  display: inline-block;
+  padding: 0.02em 0.65em;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--foreground) 9%, var(--background));
+  color: var(--muted-foreground);
+}
+.program-flow-step[data-kind="then"] { display: block; padding: 0.15em 0; }
+.program-flow-step[data-kind="then"]::before { top: 0; bottom: 0; }
+.program-flow-branch { position: relative; display: block; margin-top: 0.45em; }
+.program-flow-branch::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * (var(--program-flow-gap) + var(--program-flow-mark) / 2));
+  top: 0;
+  width: calc(var(--program-flow-gap) + var(--program-flow-mark) / 2);
+  height: 0.75em;
+  border-left: 1px solid var(--program-flow-line);
+  border-bottom: 1px solid var(--program-flow-line);
+  border-bottom-left-radius: 0.5em;
+}
+.program-flow-branch > .program-flow-steps { margin-top: 0.15em; }
+.program-flow-leads { margin-left: 0.6em; color: var(--muted-foreground); }
+
+/* How it ended takes the inks of an outcome; where the flow would end, or goes back, is said quietly: it has not happened. */
+.program-flow-step[data-kind="ended"][data-state="finished"] > .program-flow-icon { color: var(--code-ink-string); }
+.program-flow-step[data-kind="ended"]:is([data-state="stopped"], [data-state="problem"]) { color: var(--destructive); }
+.program-flow-step[data-kind="ended"]:is([data-state="stopped"], [data-state="problem"]) > .program-flow-icon { color: var(--destructive); }
+.program-flow-step[data-kind="ended"]:is([data-state="starting"], [data-state="running"]),
+.program-flow-step:is([data-kind="end"], [data-kind="again"], [data-kind="more"]) { color: var(--muted-foreground); }
+.program-flow-step:is([data-kind="end"], [data-kind="again"], [data-kind="more"]) .program-flow-title,
+.program-flow-step[data-kind="ended"]:is([data-state="starting"], [data-state="running"]) .program-flow-title { font-weight: 400; }
+
+/* In a conversation the flow stands over the program's text, the two one tinted surface. */
+.message-program-flow {
+  display: block;
+  margin-top: 1rem;
+  padding: 0.55em 1em 0.6em;
+  border-radius: 10px 10px 0 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--foreground) 7%, transparent);
+  background: color-mix(in oklch, var(--foreground) 4.5%, transparent);
+  font-size: 0.9em;
+}
+.message-program-flow:empty { display: none; }
+.xmatrix-app .rich-message .message-program-flow:not(:empty) + .message-code-block {
+  margin-top: 0;
+  border-top-left-radius: 0 !important;
+  border-top-right-radius: 0 !important;
+}
 
 /* A GitHub file the page embeds (§6.5): text on the page's paper, with its
    source in a small citation below. Long files start folded. */
@@ -799,25 +1040,57 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /*
- * What changed since this reader last read the page (§3.1), until they tick it viewed or write on it. It is
- * marked as a proofreader marks paper, in ink and never in a tinted box: each stretch of changed lines barred
- * once in the left margin (PageReaderChangeGutter), and inside a line that changed in part, new words
- * underlined and words taken out struck through in faint ink where they stood. Brass is the app's one
- * accent, kept for what a person has yet to do; reading a change is that.
+ * What a version changed, in History (§4.2): the page as it was, marked as a proofreader marks paper, in ink
+ * and never in a tinted box. Each stretch of changed lines is barred once in the left margin
+ * (PageVersionGutter); inside a line that kept most of its words, new words are underlined in brass and words
+ * taken out struck through in faint ink where they stood. A block taken out whole is struck through; one
+ * that is all new is only barred. Brass is the app's one accent, kept for what a person has yet to read.
  */
-.page-reader-bar {
+.page-version-bar {
   position: absolute;
   width: 3px;
   border-radius: 3px;
   background: var(--m-ink-attention, var(--accent));
 }
-.page-document .page-reader-change:not(.is-block) {
+.page-document ins {
   text-decoration-line: underline;
   text-decoration-color: color-mix(in oklab, var(--m-ink-attention, var(--accent)) 85%, transparent);
   text-decoration-thickness: 1.5px;
   text-underline-offset: 0.24em;
   text-decoration-skip-ink: none;
 }
+.page-document del,
+.page-document [data-change="removed"],
+.page-document [data-change="removed"] :is(td, th, li, a, code) {
+  color: var(--m-ink-secondary, var(--muted-foreground));
+  text-decoration: line-through;
+}
+/* A cell rewritten past recognition holds its old words over its new ones, each whole. */
+.page-document [data-change="replaced"] > del { display: block; }
+.page-document [data-change="replaced"] > ins { text-decoration: none; }
+/* New to this reader since their last visit: on History's button, and on what is new in History's list. */
+.page-new-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--m-ink-attention, var(--accent));
+}
+/* The sections a version changed, under its row in History's list: each the change's own bar, in small. */
+.page-version-section { position: relative; }
+.page-version-section::before {
+  content: "";
+  position: absolute;
+  top: 0.3em;
+  bottom: 0.3em;
+  left: 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--m-ink-attention, var(--accent));
+}
+
+/* A suggested block is barred once in the left margin, in brass: the app's one accent, kept for what a
+   person has yet to do. */
 .page-document :is(.page-suggest-in, .page-suggest-out).is-block {
   position: relative;
 }
@@ -832,16 +1105,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   background: var(--m-ink-attention, var(--accent));
   pointer-events: none;
 }
-.page-document .page-reader-removed {
-  color: var(--m-ink-secondary, var(--muted-foreground));
-  text-decoration: line-through;
-  white-space: pre-wrap;
-  user-select: none;
-  pointer-events: none;
-}
-.page-document .page-reader-removed.is-block { display: block; }
-.page-document .page-reader-removed:not(.is-block) + .page-reader-change:not(.is-block) { margin-left: 0.25em; }
-
 /* The Agent a page is written with, on a phone: its own face on its glass disc, floating at the right
    edge where Agents on the page show; the small ink "+" says a tap calls it. */
 .page-agent-button {
@@ -1042,8 +1305,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /*
- * Suggestions waiting on the page (§4.2), each change shown where it would land, in the same proofreading
- * ink as what changed since the reader last read: what it would put in is underlined in brass (a new block
+ * Suggestions waiting on the page (§4.2), each change shown where it would land, in proofreading
+ * ink: what it would put in is underlined in brass (a new block
  * stands ghosted, barred in the margin), what it would take out is struck through. The change in front of
  * the reader is drawn in full; the rest step back until their turn.
  */
@@ -1099,13 +1362,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 .page-change-button:active { background: color-mix(in oklab, var(--foreground) 8%, transparent); }
 .xmatrix-app .page-change-button.is-primary { background: var(--foreground); color: var(--background); }
-.page-change-count {
-  padding-top: 2px;
-  font-size: 11px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: var(--m-ink-attention, var(--accent));
-}
 
 /* The words an Agent is writing, marked in its colour (its caret's and History's) as a highlighter marks
    lines of text, so whose change it is and where it lands are seen at a glance. */
@@ -1119,8 +1375,7 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 
 /* What to do with a change stands over the text's right edge on a phone or a narrow window: the lines
    beside it end short of it, as text runs around a picture, so no word, nor a pen, runs under it. The room
-   is as tall as what stands there: ✓ and ✕ beside a suggestion (§4.2), the count, ↓ and ✓ beside what
-   changed since the reader last read the page (§3.2), while those are walked from the edge. */
+   is as tall as what stands there: ✓ and ✕ beside a suggestion (§4.2). */
 .page-document .page-edge-room {
   float: right;
   clear: right;
@@ -1129,8 +1384,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   pointer-events: none;
   user-select: none;
 }
-.page-document .page-edge-room.is-reader-change { display: none; height: 6.25rem; }
-.has-reader-mark .page-document .page-edge-room.is-reader-change { display: block; }
 @media (min-width: 1024px) { .page-document .page-edge-room.is-suggestion { display: none; } }
 
 /* The Agent's pen: its own face, in the line at the height of the words it writes and centred on them,
@@ -1164,8 +1417,9 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
 }
 
 /* The page's byline (pages-live-document.md §3.2): its authors under its title, face and name, a hairline between.
-   The title keeps the byline's room in the preview as in the editor, so nothing moves when the authors arrive. */
-.page-byline-room .page-document > h1:first-child { margin-bottom: 46px; }
+   The title (the first top-level h1, wherever it stands) keeps the byline's room in the preview as in the editor,
+   so nothing moves when the authors arrive. */
+.page-byline-room .page-document > h1:first-of-type { margin-bottom: 46px; }
 .page-byline-rule {
   width: 1px;
   height: 14px;

@@ -240,24 +240,7 @@ test("ingress delivers once to a Channel subscribed to both the source and *", a
   assert.deepEqual(appended.sort(), ["a", "b"]);
 });
 
-test("connector events fire page Automations whose event trigger concerns them", async () => {
-  const { connectorTriggerMatches } = await import("../src/automation-triggers.ts");
-  const { automationTriggersFrom } = await import("../../protocol/src/authority-foundation.ts");
-  const event = { provider: "sentry", source: "web", feature: "issue.created" };
-  const [any, web, regressed] = automationTriggersFrom([
-    { kind: "event", provider: "sentry" },
-    { kind: "event", provider: "Sentry", source: "Web", feature: "issue.created" },
-    { kind: "event", provider: "sentry", source: "web", feature: "issue.regressed" },
-  ]);
-  assert.deepEqual(any, { kind: "event", provider: "sentry", source: "*" });
-  assert.ok(connectorTriggerMatches(any, event));
-  assert.ok(connectorTriggerMatches(web, event));
-  assert.ok(!connectorTriggerMatches(regressed, event));
-  assert.ok(!connectorTriggerMatches({ kind: "event", provider: "linear", source: "*" }, event));
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "github" }]), /delivers events/u);
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "sentry", feature: "nope" }]), /Sentry events are/u);
-  assert.throws(() => automationTriggersFrom([{ kind: "event", provider: "gitlab", source: "not a path" }]), /source/u);
-
+test("a connector delivery hands its event to the Space's programs", async () => {
   const fired = [];
   await handleConnectorDelivery({ env: {},
     request: new Request("https://hub.test/x?source=deploys", { method: "POST", body: "{\"title\":\"hi\"}",
@@ -267,7 +250,7 @@ test("connector events fire page Automations whose event trigger concerns them",
       values: { ingressKey: "k" } }) }),
     apps: () => ({ connectorEventRoutes: async () => [] }),
     append: async () => new Response("{}"),
-    automations: async (_env, input) => { fired.push(input); return 1; },
+    events: async (_env, input) => { fired.push(input); },
   });
   assert.equal(fired.length, 1);
   assert.equal(fired[0].spaceId, "s");
@@ -367,7 +350,8 @@ test("webhook receivers prove deliveries only through deliveryProven", () => {
   const files = readdirSync(source, { recursive: true }).filter((file) => String(file).endsWith(".ts"));
   /* Files that sign outgoing requests or state, or verify a scheme that is not a header HMAC or token. */
   const signers = new Set(["index-shared.ts", "connectors/delivery-proof.ts", "connectors/oauth-pkce.ts",
-    "connectors/actions/chat-webhooks.ts", "connectors/wave2-events.ts", "connectors/x-media.ts"]);
+    "connectors/oauth-state.ts", "connectors/actions/chat-webhooks.ts", "connectors/wave2-events.ts",
+    "connectors/x-media.ts"]);
   for (const file of files) {
     const text = readFileSync(new URL(String(file), source), "utf8");
     if (/\bhmac(?:Hex|Bytes)\(/u.test(text)) assert.ok(signers.has(String(file).replaceAll("\\", "/")), `${file} computes an HMAC itself`);

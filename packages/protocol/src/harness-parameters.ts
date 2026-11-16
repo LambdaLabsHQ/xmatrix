@@ -89,14 +89,14 @@ function validChoices(value: unknown, options: readonly string[]): value is Harn
 
 /** Invalid/ambiguous catalogs fail closed; an empty snapshot clears removed choices. */
 export function parseHarnessParameters(value: unknown): HarnessParameter[] {
-  if (!Array.isArray(value) || value.length > 64) throw new Error("Invalid harness parameter catalog");
+  if (!Array.isArray(value)) throw new Error("Invalid harness parameter catalog");
   const seen = new Set<string>();
   const parameters = value.map((raw): HarnessParameter => {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid harness parameter");
     const row = raw as Record<string, unknown>;
     const options = row.options;
     if (!isHarnessParameterId(row.id) || seen.has(row.id) || !text(row.label) ||
-        !Array.isArray(options) || !options.length || options.length > 100 ||
+        !Array.isArray(options) || !options.length ||
         !options.every(option => text(option)) || new Set(options).size !== options.length ||
         row.currentValue !== undefined && (!text(row.currentValue) || !options.includes(row.currentValue)) ||
         row.kind !== undefined && row.kind !== "boolean" && row.kind !== "enum" ||

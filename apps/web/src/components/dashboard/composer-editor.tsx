@@ -6,7 +6,7 @@ import { baseKeymap, splitBlock } from "prosemirror-commands";
 import { keymap } from "prosemirror-keymap";
 import { EditorState, TextSelection, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, EditorView } from "prosemirror-view";
-import type { DraftSummonIntent, FaceOf } from "@xmatrix/protocol";
+import type { FaceOf } from "@xmatrix/protocol";
 import { composerHintParts } from "./composer-hints";
 import {
   composerDocFromText,
@@ -17,6 +17,7 @@ import {
   composerTextOfFragment,
 } from "./composer-editor-text";
 import { MentionChipFace } from "./mention-chip-face";
+import { composerBlocks } from "./composer-blocks";
 import { composerMentionSpans, type ComposerMentionSpan, type MentionReadIndex } from "./mention-read-state";
 
 /**
@@ -61,9 +62,6 @@ export interface ComposerEditorProps {
   currentUserIdentityId?: string;
   /** Picked channel and page references, drawn like the chips they send as. */
   references?: ReadonlyArray<{ start: number; end: number; text: string }>;
-  /** Jev's reading of each summon while the author types, matched to its chip by text. */
-  summonReadings?: ReadonlyArray<DraftSummonIntent>;
-  summonReadingPending?: boolean;
   onChange: (value: string, field: ComposerField) => void;
   /** The caret moved without the text changing. */
   onSelect?: (field: ComposerField) => void;
@@ -77,11 +75,14 @@ export interface ComposerEditorProps {
   onPointerUp?: (event: PointerEvent, field: ComposerField) => void;
   onClick?: (field: ComposerField) => void;
   onPaste?: (event: ClipboardEvent, field: ComposerField) => void;
-  /** Overlays positioned over the text (summon options). */
-  children?: ReactNode;
+  /** Whether a quote's link leads to a message of this conversation, which a quote of needs not name. */
+  quoteIsHere?: (href: string) => boolean;
+  /** A picture of the draft as the composer draws its attachment: preview, upload, quality and removal. */
+  renderPicture?: (ref: string) => ReactNode;
 }
 
 const NO_SPANS: readonly ComposerMentionSpan[] = [];
+const NEVER_HERE = () => false;
 const UNDO_GROUP_MS = 600;
 
 /**
@@ -121,6 +122,11 @@ export function ComposerEditor(props: ComposerEditorProps) {
             "Mod-Shift-z": () => restore(history.redo(snapshot())),
             "Mod-y": () => restore(history.redo(snapshot())),
             "Shift-Enter": splitBlock,
+          }),
+          // Before the base keymap, so Backspace and Delete beside a quote take it whole.
+          composerBlocks(() => propsRef.current.quoteIsHere ?? NEVER_HERE, {
+            add: (element, picture) => portals.add({ key: `picture\u0000${picture}\u0000${Math.random()}`, element, picture }),
+            remove: (element) => portals.remove(element),
           }),
           keymap(baseKeymap),
         ],
@@ -309,11 +315,11 @@ export function ComposerEditor(props: ComposerEditorProps) {
   useLayoutEffect(() => {
     viewRef.current?.setProps({});
   }, [props.disabled, props.ariaLabel, props.className, props.mentionIndex, props.currentUserIdentityId,
-    props.references, props.summonReadings, props.summonReadingPending]);
+    props.references, props.quoteIsHere]);
 
   return <div ref={hostRef} className="composer-field-host relative min-w-0 flex-1">
-    {props.children}
-    {portalEntries.map((entry) => createPortal(<MentionChipFace of={entry.face} />, entry.element, entry.key))}
+    {portalEntries.map((entry) => createPortal(entry.face ? <MentionChipFace of={entry.face} />
+      : props.renderPicture?.(entry.picture!) ?? null, entry.element, entry.key))}
     {showHint && <span ref={hintRef} className="app-composer-hint-overlay" aria-hidden="true"><ComposerHint hint={props.hint!} /></span>}
   </div>;
 }
@@ -411,7 +417,8 @@ class TextHistory {
   }
 }
 
-type PortalEntry = { key: string; element: HTMLElement; face: FaceOf };
+/** An element a decoration drew that React fills: a chip's face, or a picture of the draft by its reference. */
+type PortalEntry = { key: string; element: HTMLElement } & ({ face: FaceOf; picture?: never } | { picture: string; face?: never });
 
 /** The elements decorations drew that React fills: the chips' faces. */
 class PortalRegistry {
@@ -454,8 +461,7 @@ function spanDecorations(propsRef: RefObject<ComposerEditorProps>, portals: Port
   return (state: EditorState): DecorationSet => {
     const props = propsRef.current!;
     const text = composerTextOf(state.doc);
-    const inputs = [props.mentionIndex, props.currentUserIdentityId, props.references, props.summonReadings,
-      props.summonReadingPending];
+    const inputs = [props.mentionIndex, props.currentUserIdentityId, props.references];
     if (cache && cache.text === text && inputs.every((input, index) => input === cache!.inputs[index])) return cache.set;
     const decorations: Decoration[] = [];
     const seen = new Map<string, number>();
@@ -516,13 +522,7 @@ function draftSpans(text: string, props: ComposerEditorProps): readonly Composer
   const picked = (props.references ?? []).filter((reference) => text.slice(reference.start, reference.end) === reference.text &&
     !mentions.some((span) => span.start < reference.end && reference.start < span.end))
     .map(({ start, end }): ComposerMentionSpan => ({ start, end, kind: "reference" }));
-  const all = picked.length ? [...mentions, ...picked].sort((a, b) => a.start - b.start) : mentions;
-  return all.map((span) => {
-    if ((span.kind !== "summon" && span.kind !== "agent") || span.forced || span.invalid) return span;
-    const reading = props.summonReadings?.find((item) => item.start === span.start && text.slice(item.start, item.end) === item.mention);
-    if (reading) return { ...span, intent: reading.choice === "summon" ? "summon" as const : "declined" as const };
-    return span.kind === "summon" && props.summonReadingPending ? { ...span, intent: "reading" as const } : span;
-  });
+  return picked.length ? [...mentions, ...picked].sort((a, b) => a.start - b.start) : mentions;
 }
 
 function chipData(span: ComposerMentionSpan): Record<string, string> {
@@ -532,7 +532,6 @@ function chipData(span: ComposerMentionSpan): Record<string, string> {
     "data-kind": span.kind,
     ...(span.forced ? { "data-forced": "true" } : {}),
     ...(span.invalid ? { "data-invalid": "true" } : {}),
-    ...(span.intent ? { "data-intent": span.intent } : {}),
   };
 }
 

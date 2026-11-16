@@ -21,10 +21,10 @@ import {
 } from "@xmatrix/db";
 
 import type { AppendMessageCommand, AuthorityPrincipal } from "./product-message-command";
-import { agentAvatarUrlFromMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
+import { agentAvatarUrlFromMetadata, attachmentKind, CHANNEL_ACTIVITY_MESSAGE_KIND, messagePublicationEvidence, normalizeAgentPresetRuntime,
   questionnaireStateOf, commandResultOf, sha256Hex , utf8ByteLength, type MessageSearchHit, type MessageSearchPage,
   type QuestionnaireState } from "@xmatrix/protocol";
-import { REDACTED_CONTENT_HASH, productGatewayAttachmentKind } from "./product-message-command";
+import { REDACTED_CONTENT_HASH } from "./product-message-command";
 import { XMATRIX_SYSTEM_AVATAR_URL, XMATRIX_SYSTEM_LABEL } from "./xmatrix-system-identity";
 import {
   decodeRelayV2MessagePayloadBundle,
@@ -130,6 +130,8 @@ function postgresSenderSnapshot(
     normalizeAgentPresetRuntime(identity.runtime) ?? identity.runtime);
   const channelInstanceId = runIdentity ? String(runIdentity.channelInstanceId) : undefined;
   const instanceLabel = channelInstanceId ? `${identity.name}:${channelInstanceId}` : undefined;
+  const presentation = agentSenderPresentation(runIdentity?.presentation);
+  const statusChips = Array.isArray(presentation.statusChips) ? presentation.statusChips : [];
   return {
     /* The Instance row this append already read carries the header's tags, so
        the send-time snapshot is fixed by the same transaction that authorized
@@ -137,7 +139,13 @@ function postgresSenderSnapshot(
        wins key by key and a caller only fills what the row does not carry --
        an Instance whose first message outruns its first presentation write
        still stamps a header. */
-    ...agentSenderPresentation(runIdentity?.presentation),
+    ...presentation,
+    // The whole persisted chip array wins over a live overlay. Stamp the
+    // admitted repository here so a stale array cannot erase it at commit.
+    ...(runIdentity?.repository ? { statusChips: [
+      { id: "repo", label: "Repository", value: runIdentity.repository },
+      ...statusChips.filter(chip => typeof chip?.id === "string" && chip.id.toLowerCase() !== "repo"),
+    ] } : {}),
     identityId, kind: "agent", agentId: identity.id, label: instanceLabel ?? identity.name,
     name: identity.name, agentName: identity.name, runtime: identity.runtime,
     userId: identity.ownerUserId,
@@ -554,6 +562,7 @@ export async function postgresMessageAppend(
       attentionBody: messageKind === CHANNEL_ACTIVITY_MESSAGE_KIND || imported ? "" : command.body,
       certifyMessageAsk: !imported,
       ...(command.awaitsResponse === true ? { awaitsResponse: true } : {}),
+      ...(command.launch === true ? { launch: true } : {}),
       ...(command.waitsOnUserIds?.length ? { waitsOnUserIds: command.waitsOnUserIds } : {}),
       invocationSelections: command.invocationSelections,
       runProof,
@@ -797,7 +806,7 @@ export function postgresProductMessage(message: Record<string, unknown>): Record
             ...attachment,
             channelId: message.channelId,
             messageId: message.messageId,
-            kind: productGatewayAttachmentKind(String(attachment.mimeType ?? "")),
+            kind: attachmentKind(String(attachment.mimeType ?? ""), String(attachment.name ?? "")),
           }))
         : message.attachments,
       ...(rich.replyToMessageId ? { replyToMessageId: rich.replyToMessageId } : {}),
@@ -1094,6 +1103,20 @@ export async function postgresMessageLiveRecipientUserIds(
   const context = await postgresMessageBackgroundContext(env, channelId, "message-live-recipients", dependencies);
   return context.messages.liveRecipientUserIds({
     requestId: context.requestId, spaceId: context.spaceId, channelId: context.channelId,
+  });
+}
+
+/** The Channel's live readers and its Agents as their lists show them, read together. */
+export async function postgresMessageLiveAgentPresence(
+  env: Env,
+  channelId: string,
+  dependencies: PostgresMessageDependencies = {},
+  instanceIds?: readonly string[],
+) {
+  const context = await postgresMessageBackgroundContext(env, channelId, "message-live-agent-presence", dependencies);
+  return context.messages.liveAgentPresence({
+    requestId: context.requestId, spaceId: context.spaceId, channelId: context.channelId,
+    ...(instanceIds?.length ? { instanceIds } : {}),
   });
 }
 

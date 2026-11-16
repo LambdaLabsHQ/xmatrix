@@ -42,12 +42,12 @@ test("agent materials carry secret guidance", () => {
   }
 
   assert.match(agentOnboardingPrompt, /agent add <harness> --space <space-id>/);
-  assert.doesNotMatch(agentOnboardingPrompt, /agent (create|approve|requests|edit)\b|Agent Profile|--access /);
+  // `agent add --access full` is the owner's confirmation; the retired Profile flag took other values.
+  assert.doesNotMatch(agentOnboardingPrompt, /agent (create|approve|requests|edit)\b|Agent Profile|--access (?!(full|ask)\b)/);
+  assert.match(agentOnboardingPrompt, /Never pass `--access full` on your own judgment/);
   assert.match(agentOnboardingPrompt, /its own included/);
   assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /decides when (to stop|its work is complete)|stop work complete|stop itself/);
-  assert.match(agentOnboardingPrompt, /xmatrix page automation create <page-id> --block <heading-slug>/);
-  assert.match(agentOnboardingPrompt, /as your owner, so it keeps running after this Run ends/);
-  assert.match(agentOnboardingPrompt, /never runs someone else's text under another name/);
+  assert.doesNotMatch(`${agentOnboardingPrompt}\n${skillBundle}`, /page automation (create|edit|attach)|xmatrix:automation\//);
   assert.match(skillBundle, /agent add <harness> --space <space-id>/);
   assert.doesNotMatch(skillBundle, /agent (create|approve|requests|edit)\b|management agents|Agent Profile|--access /);
   // Roles are retired: no material teaches Role Packages, Role Cards, or `xmatrix role`.

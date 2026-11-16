@@ -1,9 +1,14 @@
 import type { ConnectorAction, ConnectorDelivery, ConnectorDeliveryResult, ConnectorProvider } from "./provider";
 import { DINGTALK_ACTIONS, GOOGLE_CHAT_ACTIONS, TEAMS_ACTIONS, TELEGRAM_ACTIONS, WECOM_ACTIONS, verifyTelegram } from "./actions/chat-webhooks";
+import { APP_STORE_CONNECT_REVIEW_SETUP_ACTIONS } from "./app-store-connect-review-setup";
+import { APP_STORE_CONNECT_COMMERCE_ACTIONS } from "./app-store-connect-commerce";
 import { APP_STORE_CONNECT_READ_ACTIONS } from "./actions/app-store-connect";
+import { APP_STORE_CONNECT_OPERATION_ACTIONS } from "./actions/app-store-connect-operations";
 import { APP_STORE_CONNECT_LISTING_ACTIONS } from "./actions/app-store-connect-listing";
 import { APP_STORE_CONNECT_MEDIA_ACTIONS } from "./actions/app-store-connect-media";
 import { APP_STORE_CONNECT_RELEASE_ACTIONS } from "./actions/app-store-connect-release";
+import { APP_STORE_CONNECT_SALES_ACTIONS } from "./actions/app-store-connect-sales";
+import { APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS } from "./actions/app-store-connect-in-app-purchases";
 import { APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS } from "./actions/app-store-connect-subscriptions";
 import { APP_STORE_CONNECT_SIGNING_ACTIONS } from "./actions/app-store-connect-signing";
 import { APP_STORE_CONNECT_TESTFLIGHT_ACTIONS } from "./actions/app-store-connect-testflight";
@@ -11,6 +16,8 @@ import { APP_STORE_CONNECT_UPLOAD_ACTIONS } from "./actions/app-store-connect-up
 import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "./app-store-connect-api";
 import { receiveAppStoreConnectDelivery } from "./app-store-connect-events";
 import { APP_STORE_CONNECT_WEB_ACTIONS } from "./app-store-connect-web";
+import { APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS } from "./app-store-connect-web-management";
+import { APP_STORE_CONNECT_REVIEW_ACTIONS } from "./app-store-connect-review";
 import { APP_STORE_CONNECT_WEB_RECORD_ACTIONS } from "./app-store-connect-web-records";
 import { BITBUCKET_ACTIONS, verifyBitbucket } from "./actions/bitbucket";
 import { DISCORD_ACTIONS, verifyDiscord } from "./actions/discord";
@@ -27,6 +34,8 @@ import { GOOGLE_ADSENSE_ACTIONS, verifyGoogleAdsense } from "./actions/google-ad
 import { GOOGLE_ANALYTICS_ACTIONS, verifyGoogleAnalytics } from "./actions/google-analytics";
 import { GOOGLE_ADS_ACTIONS, verifyGoogleAds } from "./actions/google-ads";
 import { GOOGLE_BUSINESS_PROFILE_ACTIONS, verifyGoogleBusinessProfile } from "./actions/google-business-profile";
+import { GOOGLE_PLAY_ACTIONS } from "./actions/google-play";
+import { verifyGooglePlay } from "./google-play-api";
 import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { GMAIL_SUBSCRIPTIONS } from "./gmail-mailboxes";
@@ -80,9 +89,10 @@ const PROVIDERS: Record<string, {
     subscriptions: CLOUDFLARE_SUBSCRIPTIONS },
   gcp: { receive: receiveGcpDelivery, actions: GCP_ACTIONS, verify: verifyGcp },
   appstoreconnect: { receive: (delivery) => receiveAppStoreConnectDelivery(delivery),
-    actions: { ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS,
+    actions: { ...APP_STORE_CONNECT_REVIEW_SETUP_ACTIONS, ...APP_STORE_CONNECT_COMMERCE_ACTIONS, ...APP_STORE_CONNECT_READ_ACTIONS, ...APP_STORE_CONNECT_LISTING_ACTIONS, ...APP_STORE_CONNECT_RELEASE_ACTIONS, ...APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS, ...APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS,
       ...APP_STORE_CONNECT_UPLOAD_ACTIONS, ...APP_STORE_CONNECT_MEDIA_ACTIONS, ...APP_STORE_CONNECT_SIGNING_ACTIONS,
-      ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS },
+      ...APP_STORE_CONNECT_TESTFLIGHT_ACTIONS, ...APP_STORE_CONNECT_SALES_ACTIONS, ...APP_STORE_CONNECT_WEB_ACTIONS, ...APP_STORE_CONNECT_REVIEW_ACTIONS, ...APP_STORE_CONNECT_WEB_RECORD_ACTIONS,
+      ...APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS, ...APP_STORE_CONNECT_OPERATION_ACTIONS },
     verify: verifyAppStoreConnect, subscriptions: APP_STORE_CONNECT_SUBSCRIPTIONS },
   feishu: { receive: receiveFeishuDelivery, actions: FEISHU_ACTIONS, verify: verifyFeishu },
   discord: { actions: DISCORD_ACTIONS, verify: verifyDiscord },
@@ -95,6 +105,7 @@ const PROVIDERS: Record<string, {
   googleanalytics: { actions: GOOGLE_ANALYTICS_ACTIONS, verify: verifyGoogleAnalytics },
   googleads: { actions: GOOGLE_ADS_ACTIONS, verify: verifyGoogleAds },
   googlebusinessprofile: { actions: GOOGLE_BUSINESS_PROFILE_ACTIONS, verify: verifyGoogleBusinessProfile },
+  googleplay: { actions: GOOGLE_PLAY_ACTIONS, verify: verifyGooglePlay },
   pagespeed: { actions: PAGESPEED_ACTIONS, verify: verifyPageSpeed },
   gmail: { actions: GMAIL_ACTIONS, verify: verifyGmail, subscriptions: GMAIL_SUBSCRIPTIONS },
   x: { actions: X_ACTIONS },

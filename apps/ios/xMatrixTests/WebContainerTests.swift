@@ -6,6 +6,15 @@ import AuthenticationServices
 
 @MainActor
 final class WebContainerTests: XCTestCase {
+    // The system camera can record a video from the Web attachment picker.
+    // iOS terminates the host app if either capture purpose is missing.
+    func testVideoAttachmentsHaveBundledCapturePurposeStrings() throws {
+        for key in ["NSCameraUsageDescription", "NSMicrophoneUsageDescription"] {
+            let purpose = try XCTUnwrap(Bundle.main.object(forInfoDictionaryKey: key) as? String, key)
+            XCTAssertFalse(purpose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, key)
+        }
+    }
+
     final class RecordingWebView: WKWebView {
         var requests: [URLRequest] = []
         override func load(_ request: URLRequest) -> WKNavigation? {
@@ -462,6 +471,21 @@ final class WebContainerTests: XCTestCase {
         let action = DownloadLinkAction(URL(string: "blob:https://xmatrix.sh/5f0c1d2e")!)
         let policy = await delegate.webView(webView, decidePolicyFor: action)
         XCTAssertEqual(policy, .download)
+    }
+
+    /// A web view without these panels answers window.confirm with false and shows nothing.
+    func testThePageCanAlertConfirmAndPrompt() {
+        let (coordinator, container) = makeCoordinator()
+        coordinator.load(AppConfiguration.mobileTabURL(.messages))
+        XCTAssertEqual(container.subviews.count, 1)
+        let delegate = page(coordinator).uiDelegate as! NSObject
+        for selector in [
+            "webView:runJavaScriptAlertPanelWithMessage:initiatedByFrame:completionHandler:",
+            "webView:runJavaScriptConfirmPanelWithMessage:initiatedByFrame:completionHandler:",
+            "webView:runJavaScriptTextInputPanelWithPrompt:defaultText:initiatedByFrame:completionHandler:",
+        ] {
+            XCTAssertTrue(delegate.responds(to: NSSelectorFromString(selector)), selector)
+        }
     }
 
     func testDownloadedMediaGoesToPhotosAndEverythingElseToFiles() {

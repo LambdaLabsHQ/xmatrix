@@ -77,13 +77,14 @@ Wherever a command takes a conversation id, it also takes the conversation's `xm
 ```sh
 xmatrix send <conversation> "@codex repo:acme/web review the migration diff"
 xmatrix send <conversation> --stdin < update.md
-xmatrix send <conversation> --file report.pdf --reply-to <message-id> "Here is the report."
+xmatrix send <conversation> --attachment report.pdf --reply-to <message-id> "Here is the report."
 ```
 
 | Option | Meaning |
 | --- | --- |
 | `--stdin` | Read the body from standard input. Use it for multi-line Markdown. |
-| `--file <path>` | Attach a file. Repeat for several. |
+| `--file <path>` | Read the body from a UTF-8 file. |
+| `--attachment <path>` | Attach a file beside the body. Repeat for several. |
 | `--reply-to <message-id>` | Reply to a message |
 | `--wait` | Say that you are waiting on the people and agents this message mentions. It stays in their "Needs you" list until they answer. |
 
@@ -109,14 +110,28 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | `xmatrix page history <page-id>` | List revisions |
 | `xmatrix page linked` · `link` | Pages linked to a conversation |
 | `xmatrix page resolve <page-id> <link-id>` | Resolve a discussion |
-| `xmatrix page automation …` | Automations. See [Pages and Automations](pages.md#automations). |
 
 For local images and videos, run `xmatrix page upload <page-id> ./screenshot.png`,
 then insert its returned `![media](xmatrix:page-media/…)` Markdown with
 `page edit` or live writing. Uploads require current Page edit access and accept
-PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files from 1 byte through 64 MiB.
+PNG, JPEG, GIF, WebP, AVIF, MP4, WebM and MOV files of any size from 1 byte up
+to 625 GiB; a file larger than 64 MiB is sent in 64 MiB parts read from disk.
 Uploading keeps the file for that Page; it does not change its text. Create a
 new Page before uploading media into it. Page text alone never uploads local files.
+
+## Requests
+
+A [program](programs.md) asks agents and people through requests. These commands answer one, or ask a single question without writing a program.
+
+| Command | Does |
+| --- | --- |
+| `xmatrix requests [--json]` | List the open requests you hold and those your programs wait on |
+| `xmatrix reply <request> <answer>` | Answer a request you hold, in the form its message asks for |
+| `xmatrix refuse <request> <why>` | Decline it |
+| `xmatrix broke <request> <why>` | Report that you tried and could not |
+| `xmatrix confirm <who> <question> [--by <when>] [--otherwise Yes\|No]` | Ask a person or an agent a yes-or-no question and get the answer back |
+| `xmatrix choose <who> "<question>" <options>… [--by <when>] [--otherwise <option>]` | Ask them to choose one of the options |
+| `xmatrix ask <who> <question> [--by <when>]` | Ask for an answer in words |
 
 ## Secrets and access
 

@@ -1,5 +1,7 @@
+import { spaceBilling } from "@xmatrix/billing";
 import type { QueryResultRow } from "pg";
 import type { DatabaseTransaction } from "./contracts.js";
+import { recountBlobStorage } from "./storage-usage.js";
 import { SpaceControlError } from "./space-control.js";
 import { ACTIVE_RUN_STATUS_SQL, parseRestrictedChannelContentScope, sha256Hex } from "@xmatrix/protocol";
 
@@ -15,9 +17,8 @@ const REPLAY_CHANNEL = `ARRAY[${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]`;
 
 /** Order preserves the identities needed to find indirectly owned records. */
 export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[] = [
-  { table: "data.automation_occurrences", predicate:
-    "automation_id IN (SELECT automation_id FROM data.automations WHERE channel_id=$2)" },
-  { table: "data.automations", predicate: "channel_id=$2" },
+  ...["data.norn_shadow_observations","data.norn_shadow_transitions","data.norn_shadow_comparisons",
+    "data.norn_notices","data.norn_requests","data.norn_programs"].map(table => ({ table,predicate: "channel_id=$2" })),
   ...["data.run_agent_registrations", "data.run_secret_approvals",
     "control.registration_execution_allocations", "control.registration_preparation_cancellations"]
     .map(table => ({ table, predicate: `run_id IN ${RUNS}` })),
@@ -29,6 +30,8 @@ export const CHANNEL_PURGE_STEPS: readonly { table: string; predicate: string }[
     .map(table => ({ table, predicate: "conversation_id=$2" })),
   { table: "control.scoped_control_command_replays", predicate:
     `ARRAY[CASE WHEN scope_kind='channel' THEN scope_id END, ${REPLAY_CHANNEL_IDS}] @> ARRAY[$2]` },
+  // A refused summon's wait on quota names only the Channel to wake.
+  { table: "control.registration_quota_waiters", predicate: "channel_id=$2" },
   { table: "data.content_refs", predicate: `space_id=$1 AND ${CONTENT_SCOPE}` },
   { table: "data.blob_upload_intents", predicate: `space_id=$1 AND ${UPLOAD_SCOPE}` },
   ...["data.content_objects", "data.content_gc_candidates"]
@@ -126,9 +129,13 @@ export async function purgeChannelRows(tx: DatabaseTransaction, input: {
     if (rows.length < limit) step++;
   }
   const complete = step === CHANNEL_PURGE_STEPS.length && pins.length < 500;
-  if (complete) await tx.query({ name: "channel_purge_channel_v1",
-    text: "DELETE FROM data.channels WHERE space_id=$1 AND channel_id=$2 AND mode='deleted'",
-    values: [input.spaceId, input.channelId], maxRows: 0 });
+  if (complete) {
+    await tx.query({ name: "channel_purge_channel_v1",
+      text: "DELETE FROM data.channels WHERE space_id=$1 AND channel_id=$2 AND mode='deleted'",
+      values: [input.spaceId, input.channelId], maxRows: 0 });
+    // The purge dropped the Channel's content refs in bulk, unmetered.
+    await recountBlobStorage(tx, spaceBilling, { spaceId: input.spaceId, now: input.at });
+  }
   await tx.query({ name: "channel_purge_progress_v1", text: `UPDATE data.channel_deletions SET
       step=$3,purged_rows=purged_rows+$4,updated_at=$5,state=$6,row_plan_digest=$7,
       completed_at=CASE WHEN $6='completed' THEN $5::timestamptz ELSE NULL END

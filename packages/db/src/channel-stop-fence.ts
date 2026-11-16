@@ -51,6 +51,15 @@ export async function fenceChannelRunsForStop(tx: DatabaseTransaction, input: {
       AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
         principalKindSql: "'user'", principalIdSql: "$3::text" })}`,
   values: [input.spaceId, input.channelId, input.actorUserId], maxRows: 0 });
+  // A stop of the Channel also ends its Norn programs: their next pass cancels what they left open.
+  if (input.scope.kind === "channel") await tx.query({ name: "channel_stop_norn_programs_v1", text: `UPDATE data.norn_programs program
+    SET stop_reason='Stopped in the conversation',updated_at=clock_timestamp()
+    FROM data.channels c WHERE program.space_id=$1 AND program.channel_id=$2
+      AND c.space_id=program.space_id AND c.channel_id=program.channel_id
+      AND program.state='running' AND program.stop_reason IS NULL
+      AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",
+        principalKindSql: "'user'", principalIdSql: "$3::text" })}`,
+  values: [input.spaceId, input.channelId, input.actorUserId], maxRows: 0 });
   const fenced = await tx.query<QueryResultRow>({ name: "channel_stop_fence_v4", text: `WITH authorized AS (
       SELECT c.channel_id FROM data.channels c WHERE c.space_id=$1 AND c.channel_id=$2
         AND ${channelCapabilityPredicate({ capability: "runtime_terminalize", channelAlias: "c",

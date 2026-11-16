@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "revision": "1",
+  "revision": "2",
   "limits": {
     "bodyLength": 131072,
     "statements": 8,
     "targets": 2048,
-    "operations": 64,
+    "operations": 256,
     "rules": 32,
     "terms": 32,
     "depth": 4

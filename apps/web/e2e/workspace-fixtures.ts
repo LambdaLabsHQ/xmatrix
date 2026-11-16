@@ -1,4 +1,5 @@
 import { expect, type Page } from "@playwright/test";
+import { agentAccessGrant, agentAccessModes, agentPresetById } from "@xmatrix/protocol";
 
 import {
   CREATED_CHANNEL_ID,
@@ -29,6 +30,23 @@ export {
 
 export const E2E_NOW = "2026-07-01T00:00:00.000Z";
 
+export const AGENT_ENVIRONMENT_QUERY = "**/api/xmatrix/agent-environments/query";
+/** The Hub's answer for a harness whose owner has not confirmed its access on
+ * the machine: the grant and modes of the real preset, as the Hub resolves them. */
+export function unconfirmedAccess(harness: string) {
+  const preset = agentPresetById(harness);
+  return { version: 0, environment: null, fullAccess: agentAccessGrant(preset, "full"), accessModes: agentAccessModes(preset) };
+}
+/** Several harnesses asked about in one go, answered in the order they are read. */
+export function fixtureUnconfirmedAccessEach(page: Page, harnesses: string[]): Promise<void> {
+  return fixtureRule(page, { id: "environment", pattern: AGENT_ENVIRONMENT_QUERY, method: "POST",
+    responder: { kind: "sequence", responses: harnesses.map((harness) => ({ json: unconfirmedAccess(harness) })) } });
+}
+/** One harness is asked about per fixture; a later call answers for the next. */
+export function fixtureUnconfirmedAccess(page: Page, harness: string): Promise<void> {
+  return fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, unconfirmedAccess(harness), { method: "POST" });
+}
+
 export type WorkspaceStubFixtures = {
   /** People's and Agent Instances' pictures, keyed `user:<id>` / `agent:<instanceId>`, as the faces read answers them. */
   faces?: Record<string, string>;
@@ -51,12 +69,6 @@ export type WorkspaceStubFixtures = {
     workspaces?: unknown[];
   };
   machineDaemons?: unknown[];
-  automations?: unknown[];
-  automationResponses?: unknown[][];
-  automationResponseErrors?: Array<string | null>;
-  automationsError?: string;
-  automationExecutionEnabled?: boolean;
-  automationAgentManagementEnabled?: boolean;
   channelViewPreference?: {
     version?: number;
     childViews?: Record<string, string>;
@@ -107,9 +119,11 @@ export async function routeHumanSocket(
   onFrame: (frame: HumanSocketFrame, reply: (message: unknown) => void, connection: number) => void,
 ) {
   let connections = 0;
+  let latestReply: ((message: unknown) => void) | undefined;
   await page.routeWebSocket("**/ws/humans*", (socket) => {
     const connection = ++connections;
     const reply = (message: unknown) => socket.send(JSON.stringify(message));
+    latestReply = reply;
     socket.onMessage((raw) => {
       const frame = JSON.parse(String(raw)) as HumanSocketFrame;
       if (frame.type === "human_connect") reply({
@@ -119,7 +133,10 @@ export async function routeHumanSocket(
       onFrame(frame, reply, connection);
     });
   });
-  return { connections: () => connections };
+  return { connections: () => connections, send(message: unknown) {
+    if (!latestReply) throw new Error("Human socket is not connected");
+    latestReply(message);
+  } };
 }
 
 /**
@@ -168,7 +185,7 @@ export const E2E_USER_SENDER = {
 /* Shared workspace bootstrap for shell e2e specs. Later route registrations
    win, so the catch-all goes first. Every workspace bootstrap fetch reads its
    payload defensively (data.x || []), which makes the empty-object fallback
-   safe for events/projects/Automations. */
+   safe for events/projects. */
 export async function openWorkspaceWithStubs(
   page: Page,
   fixtures: WorkspaceStubFixtures = {}
@@ -235,8 +252,6 @@ export async function fixtureSpaceResources(page: Page) {
     { error: "not found" }, { status: 404, method: "GET" });
   await fixtureJson(page, "page-recent-changes", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/recent-changes(?:\?.*)?$/u,
     { changes: [] });
-  await fixtureJson(page, "page-automations", /\/api\/xmatrix\/spaces\/[^/]+\/pages\/[^/]+\/automations$/u,
-    { automations: [] }, { method: "GET" });
   await fixtureJson(page, "page-links", /\/api\/xmatrix\/spaces\/[^/]+\/page-links(?:\?.*)?$/u, { links: [] },
     { method: "GET" });
   await fixtureJson(page, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, { pages: [] });
@@ -255,7 +270,6 @@ export async function installWorkspaceStubs(
   page: Page,
   fixtures: WorkspaceStubFixtures = {}
 ) {
-  const automationResponses = buildAutomationResponses(fixtures);
   await installApiFixtures(page);
   await fixtureJson(page, "api-catch-all", "**/api/xmatrix/**", {});
   // A search the test did not set up finds nothing, as the Hub answers it: an
@@ -270,11 +284,6 @@ export async function installWorkspaceStubs(
     code: "compatible",
     protocolVersion: 2,
     upgradeUrl: "https://xmatrix.sh/download",
-  });
-  await fixtureRule(page, {
-    id: "automations",
-    pattern: /\/api\/xmatrix\/automations(?:\?.*)?$/,
-    responder: { kind: "sequence", responses: automationResponses },
   });
   await fixtureJson(page, "workspaces", /\/api\/xmatrix\/workspaces(?:\?.*)?$/, {
     workspaces: fixtures.workspaces ?? [],
@@ -348,36 +357,6 @@ export async function installWorkspaceStubs(
   });
 }
 
-/**
- * Flatten the Automation fixture options into one response-per-call list.
- * The old handler resolved error/sequence/default on every request; the same
- * decision now happens once, up front, because the in-page responder only walks
- * a list.
- */
-function buildAutomationResponses(fixtures: WorkspaceStubFixtures) {
-  const envelope = (automations: unknown[]) => ({
-    status: 200,
-    json: {
-      automations,
-      executionEnabled: fixtures.automationExecutionEnabled ?? true,
-      agentManagementEnabled: fixtures.automationAgentManagementEnabled ?? true,
-    },
-  });
-  if (fixtures.automationsError) {
-    return [{ status: 503, json: { error: fixtures.automationsError } }];
-  }
-  const sequence = fixtures.automationResponses;
-  const errors = fixtures.automationResponseErrors;
-  const length = Math.max(sequence?.length ?? 0, errors?.length ?? 0);
-  if (length === 0) return [envelope(fixtures.automations ?? [])];
-  return Array.from({ length }, (_, index) => {
-    const error = errors?.[Math.min(index, errors.length - 1)];
-    if (error) return { status: 503, json: { error } };
-    const automations = sequence?.[Math.min(index, sequence.length - 1)] ?? fixtures.automations ?? [];
-    return envelope(automations);
-  });
-}
-
 export async function openGeneralChannelWithHistory(
   page: Page,
   channel: unknown,
@@ -404,7 +383,11 @@ export async function openGeneralChannelWithHistory(
    finished trading places, and a dock tab's bar has finished sliding in with
    its page. Layout read during either is a frame of the motion. */
 export async function screenChangeLanded(page: Page): Promise<void> {
-  await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing")).toHaveCount(0);
+  await expect(page.locator("[data-list-transition], .app-dock-tab-slide-outgoing, .app-dock-tab-slide-incoming")).toHaveCount(0);
+  // More's child views have no sliding bar copy; their track still moves.
+  await expect.poll(() => page.locator(".app-mobile-dock-track").evaluateAll(tracks =>
+    tracks.every(track => track.getAnimations().every(animation => !animation.pending && animation.playState !== "running"))))
+    .toBe(true);
 }
 
 /* A conversation opens on a plain tail of its rows and the virtual list takes
@@ -492,3 +475,11 @@ export async function openGeneralChannelWithPagedHistory(
 
 /** Registration identity shared by Codex presence fixtures. */
 export const FIXTURE_AGENT_REGISTRATION = { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" };
+
+/** A modern Instance record (codex:1) as the Hub delivers it with a Channel. */
+export function codexInstanceRecord(channelId: string, extra: Record<string, unknown> = {}) {
+  return { id: `${channelId}:1`, channelId, channelInstanceId: "1",
+    label: "codex:1", agentName: "codex", status: "busy", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
+    registration: { ownerUserId: "e2e-user", machineId: "machine", harness: "codex" },
+    revision: { version: 1, sequence: 1 }, ...extra };
+}

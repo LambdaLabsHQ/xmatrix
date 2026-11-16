@@ -77,8 +77,6 @@ new_sqlite_classes = ["RelayPostgresAutomationCoordinator"]
 
 [vars]
 RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
-RELAY_AUTOMATION_EXECUTION_ENABLED = "false"
-RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
 APP_URL = "https://xmatrix.test"
 HUB_URL = "https://xmatrix-hub.test"
 

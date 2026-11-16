@@ -671,20 +671,21 @@ test("random Agents' edits, people's typing and commits always end on one page e
   }
 });
 
-test("an Agent edit answers which sections it removed and which Automations it detached", async () => {
+test("an Agent edit answers which sections it removed, that its schedule lines run nothing, and which programs cannot run", async () => {
   const h = harness();
   const ann = await annConnected(h);
-  const original = h.ports.commit;
-  const detached = [{ automationId: "a-1", name: "Dependency sweep" }];
-  h.ports.commit = async (principal, input) => ({ ...await original(principal, input),
-    detachedAutomations: detached, attachedAutomations: [] });
-  const result = await h.session.submitEdit(agent, { baseRevision: 1, body: "# Project\n\n## Status\n\nIn progress\n",
-    conversationIds: [] });
+  const result = await h.session.submitEdit(agent, { baseRevision: 1,
+    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 12 hours\n- [-] Remind me ⏳ 2030-01-01 10:00 +08:00\n" +
+      "- [x] Swept 🔁 every day\n- [ ] Write `🔁 every day` in the guide\n\n" +
+      "```norn run sweep\nopen Std\nroutine(~every=1d, \"Sweep\")\n```\n\n" +
+      "```norn run fine\nafter(1h)->wait\n```\n", conversationIds: [] });
   assert.deepEqual(result.removedSections, ["Notes"]);
-  assert.deepEqual(result.detachedAutomations, detached);
-  assert.deepEqual(result.attachedAutomations, []);
-  assert.deepEqual(h.notices.find((notice) => notice.type === "committed").detachedAutomations, detached,
-    "people on the page see it too");
+  const retired = "Schedule lines no longer run. Write this as a program: a code block tagged `norn run <name>` (https://xmatrix.sh/docs/programs)";
+  assert.deepEqual(result.scheduleProblems.slice(0, 2), [
+    { source: "- [ ] Sweep 🔁 every 12 hours", problem: retired },
+    { source: "- [-] Remind me ⏳ 2030-01-01 10:00 +08:00", problem: retired }]);
+  assert.deepEqual(result.scheduleProblems.map((line) => line.source).slice(2), ["```norn run sweep"]);
+  assert.match(result.scheduleProblems[2].problem, /from/u);
   assert.doesNotMatch(ann.text.toString(), /## Notes/u);
 });
 
@@ -1101,7 +1102,6 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
 
 const summarySessionModule = await compileCommonJsSourceModule(new URL("../src/page-session-do.ts", import.meta.url));
 const summarySessionRequire = createRequire(new URL("../src/page-session-do.ts", import.meta.url));
-
 function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
   const data = new Map(stored ? [["summary", stored]] : []);
   const issued = [];

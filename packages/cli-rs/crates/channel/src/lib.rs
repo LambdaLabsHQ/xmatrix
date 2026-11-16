@@ -18,7 +18,6 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use xmatrix_cli_args::{ChannelCommand, ChannelVisibilityState, SpaceCommand, WorktreeState};
 use xmatrix_cli_core::channel_read_context::{OpenedChannelThread, thread_root_marker};
 use xmatrix_cli_core::error::{self, CliError};
-use xmatrix_cli_core::hex::sha256_hex;
 use xmatrix_cli_core::human_connection::{HumanConnectionClient, HumanConnectionEvent};
 use xmatrix_cli_core::media_cache::{CachedMedia, LocalCopy};
 use xmatrix_cli_core::protocol::{self, HubRoutes, with_route};
@@ -32,14 +31,12 @@ pub use read_context::{
     ChannelReadContext, LaunchContext, load_channel_read_context, load_launch_context,
 };
 
-const CHANNEL_FILE_ATTACHMENT_LIMIT: usize = 4;
-const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::media_cache::MEDIA_MAX_BYTES;
+const CHANNEL_FILE_ATTACHMENT_MAX_BYTES: u64 = xmatrix_cli_core::private_upload::BLOB_MAX_BYTES;
 // Relay authority bounds one channel-history query to 200 enriched rows (older
 // Hubs clamp to 50, and any Hub may return fewer under its page byte budget).
 // Fetching history is still unbounded from the CLI's perspective, but it must
 // advance through this bounded Authority window using its sequence cursor.
 const CHANNEL_HISTORY_PAGE_SIZE: usize = 200;
-const MAX_AGENT_NAME_LEN: usize = 64;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -596,12 +593,16 @@ pub(crate) struct SendOptions<'a> {
     pub message_parts: &'a [String],
     pub attachment_paths: &'a [PathBuf],
     pub read_stdin: bool,
+    /// A UTF-8 file holding the whole message body.
+    pub body_file: Option<&'a Path>,
     pub escape_newlines: bool,
     pub message_id: Option<&'a str>,
     pub final_for: Option<&'a str>,
     pub reply_to: Option<&'a str>,
     /// The sender is waiting on whoever the message mentions.
     pub wait: bool,
+    /// Start the Agents the message summons; without it they are only mentioned.
+    pub launch: bool,
 }
 
 pub(crate) async fn cmd_send(
@@ -614,11 +615,13 @@ pub(crate) async fn cmd_send(
         message_parts,
         attachment_paths,
         read_stdin,
+        body_file,
         escape_newlines,
         message_id,
         final_for,
         reply_to,
         wait,
+        launch,
     } = options;
     if let Some(id) = final_for
         && uuid::Uuid::parse_str(id)
@@ -649,13 +652,20 @@ pub(crate) async fn cmd_send(
         message: PublishedMessage,
         #[serde(default, rename = "sendOperation")]
         send_operation: Option<SendOperation>,
+        /// Summons this send did not ask to start: they stay mentions.
+        #[serde(default, rename = "mentionsNotLaunched")]
+        mentions_not_launched: Vec<String>,
+        /// Lifecycle commands in the message (stop, reborn, handoff) that did nothing.
+        #[serde(default, rename = "commandRefusals")]
+        command_refusals: Vec<String>,
     }
 
-    let message = build_send_message_body(message_parts, read_stdin, escape_newlines).await?;
-    let attachments = load_channel_file_attachments(attachment_paths)?;
-    if message.is_empty() && attachments.is_empty() {
-        return Err(CliError::Launch("Message or --file is required".into()));
+    let message =
+        build_send_message_body(message_parts, read_stdin, body_file, escape_newlines).await?;
+    if message.is_empty() {
+        return Err(CliError::Launch(missing_body_message(attachment_paths)));
     }
+    let attachments = load_channel_file_attachments(attachment_paths)?;
     let channel_id = &resolve_channel_reference(hub_url, token, channel_id).await?;
 
     let sender = AgentSenderIdentity::from_env();
@@ -726,6 +736,9 @@ pub(crate) async fn cmd_send(
     }
     if wait {
         payload.insert("awaitsResponse".into(), serde_json::Value::Bool(true));
+    }
+    if launch {
+        payload.insert("launch".into(), serde_json::Value::Bool(true));
     }
     payload.insert(
         "clientMessageId".into(),
@@ -801,6 +814,18 @@ pub(crate) async fn cmd_send(
             )
             .await);
         }
+        // A daemon from before --launch refuses the field before anything is
+        // sent; dropping it would send the summons as mere mentions.
+        (Err(error), _)
+            if launch
+                && error
+                    .to_string()
+                    .contains("Journaled send contains unsupported fields") =>
+        {
+            return Err(CliError::Launch(format!(
+                "{error}. This machine's xMatrix daemon is too old for --launch: run `xmatrix update`, then send again."
+            )));
+        }
         (Err(error), _) => return Err(error),
     };
 
@@ -825,8 +850,34 @@ pub(crate) async fn cmd_send(
     {
         println!("The existing receipt was recovered.");
     }
+    if !response.mentions_not_launched.is_empty() {
+        println!(
+            "Not started, only mentioned: {}. To start an Agent, send with --launch.",
+            response.mentions_not_launched.join(", ")
+        );
+    }
+    if !response.command_refusals.is_empty() {
+        return Err(CliError::Launch(command_refusal_message(
+            &response.command_refusals,
+        )));
+    }
 
     Ok(())
+}
+
+/// The message is published; its command was not carried out. Saying so as
+/// an error stops an Agent from reporting a stop or reborn that never happened.
+fn command_refusal_message(refusals: &[String]) -> String {
+    format!(
+        "The message was sent, but its command did nothing:\n{}\nAddress an Instance by its \
+         number in this Channel, as in `@deepseek:3:reborn`, never by its full Instance id. \
+         Send the corrected command as a new message.",
+        refusals
+            .iter()
+            .map(|refusal| format!("- {refusal}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    )
 }
 
 /// The Hub's refusal of a send over messages its sender has not read.
@@ -906,7 +957,8 @@ async fn show_unread_messages(
 pub struct PendingFileAttachment {
     name: String,
     mime_type: String,
-    bytes: Vec<u8>,
+    path: PathBuf,
+    size: u64,
     content_hash: String,
 }
 
@@ -936,12 +988,6 @@ impl UploadedMessageAttachment {
 pub(crate) fn load_channel_file_attachments(
     paths: &[PathBuf],
 ) -> error::Result<Vec<PendingFileAttachment>> {
-    if paths.len() > CHANNEL_FILE_ATTACHMENT_LIMIT {
-        return Err(CliError::Launch(format!(
-            "Send at most {CHANNEL_FILE_ATTACHMENT_LIMIT} files per message"
-        )));
-    }
-
     let mut attachments = Vec::with_capacity(paths.len());
     for path in paths {
         let metadata = std::fs::metadata(path)
@@ -955,15 +1001,16 @@ pub(crate) fn load_channel_file_attachments(
         let size = metadata.len();
         if size == 0 || size > CHANNEL_FILE_ATTACHMENT_MAX_BYTES {
             return Err(CliError::Launch(format!(
-                "{} must be between 1 byte and 64 MiB",
-                path.display()
+                "{} must be between 1 byte and {} GiB",
+                path.display(),
+                CHANNEL_FILE_ATTACHMENT_MAX_BYTES >> 30
             )));
         }
 
-        let mime_type = channel_file_mime_type(path);
-        let bytes = std::fs::read(path)
+        let mime_type = xmatrix_cli_core::media_types::media_type_for_path(path);
+        // Hashed from disk in chunks; the upload reads the file again as it sends it.
+        let (content_hash, size) = xmatrix_cli_core::private_upload::sha256_file(path)
             .map_err(|err| CliError::Launch(format!("Cannot read {}: {err}", path.display())))?;
-        let content_hash = sha256_hex(&bytes);
         let name = path
             .file_name()
             .and_then(|value| value.to_str())
@@ -975,7 +1022,8 @@ pub(crate) fn load_channel_file_attachments(
         attachments.push(PendingFileAttachment {
             name,
             mime_type: mime_type.to_string(),
-            bytes,
+            path: path.clone(),
+            size,
             content_hash,
         });
     }
@@ -1050,7 +1098,7 @@ async fn upload_channel_file_attachments(
     )?;
     let mut uploaded = Vec::with_capacity(attachments.len());
     for attachment in attachments {
-        let encoded_bytes = attachment.bytes.len() as u64;
+        let encoded_bytes = attachment.size;
         let requested_id = uuid::Uuid::new_v4().to_string();
         let attachment_id = xmatrix_cli_core::private_upload::upload(
             hub_url,
@@ -1062,7 +1110,8 @@ async fn upload_channel_file_attachments(
                 ref_id: &requested_id,
                 content_hash: &attachment.content_hash,
                 mime_type: &attachment.mime_type,
-                bytes: attachment.bytes,
+                path: &attachment.path,
+                size: attachment.size,
             },
         )
         .await?;
@@ -1084,40 +1133,6 @@ async fn upload_channel_file_attachments(
         });
     }
     Ok(uploaded)
-}
-
-pub fn channel_image_mime_type(path: &Path) -> Option<&'static str> {
-    match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("png") => Some("image/png"),
-        Some("jpg") | Some("jpeg") => Some("image/jpeg"),
-        Some("webp") => Some("image/webp"),
-        Some("gif") => Some("image/gif"),
-        _ => None,
-    }
-}
-
-pub(crate) fn channel_file_mime_type(path: &Path) -> &'static str {
-    if let Some(image) = channel_image_mime_type(path) {
-        return image;
-    }
-    match path
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.to_ascii_lowercase())
-        .as_deref()
-    {
-        Some("md") | Some("markdown") => "text/markdown",
-        Some("txt") | Some("log") => "text/plain",
-        Some("json") => "application/json",
-        Some("pdf") => "application/pdf",
-        Some("zip") => "application/zip",
-        _ => "application/octet-stream",
-    }
 }
 
 fn uploaded_attachment_bindings(uploaded: &[UploadedMessageAttachment]) -> Vec<serde_json::Value> {
@@ -1150,15 +1165,14 @@ impl AgentSenderIdentity {
             agent_name: agent_sender_env_value(&[
                 "XMATRIX_AGENT_NAME",
                 "XMATRIX_AGENT_NAME_OVERRIDE",
-            ])
-            .filter(|value| value.len() <= MAX_AGENT_NAME_LEN),
+            ]),
             agent_id: agent_sender_env_value(&[
                 "XMATRIX_AGENT_ID",
                 "XMATRIX_AGENT_IDENTITY_ID_OVERRIDE",
             ]),
             instance_id: agent_sender_env_value(&["XMATRIX_AGENT_INSTANCE_ID"]),
             run_id: agent_sender_env_value(&["XMATRIX_RUN_ID"]),
-            execution_key: agent_sender_env_value(&["XMATRIX_EXECUTION_KEY"]),
+            execution_key: xmatrix_cli_core::access::run_execution_key(),
         }
     }
 
@@ -1623,9 +1637,11 @@ pub async fn cmd_send_args(
         final_for,
         reply_to,
         wait,
+        launch,
         recover,
-        files,
+        attachments,
         stdin,
+        file,
         escape_newlines,
         message,
     } = args;
@@ -1639,27 +1655,58 @@ pub async fn cmd_send_args(
         &channel_id,
         SendOptions {
             message_parts: &message,
-            attachment_paths: &files,
+            attachment_paths: &attachments,
             read_stdin: stdin,
+            body_file: file.as_deref(),
             escape_newlines,
             message_id: message_id.as_deref(),
             final_for: final_for.as_deref(),
             reply_to: reply_to.as_deref(),
             wait,
+            launch,
         },
     )
     .await
 }
 
-/// Message bodies (`send`, `channel edit-message`) can be resent on `--stdin`.
+/// An edited message body can be resent on `--stdin`.
 const MESSAGE_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
     stdin: true,
     file_flag: None,
 };
 
+/// A send's body can also be resent from a file.
+const SEND_TEXT_ROUTES: TextRoutes<'static> = TextRoutes {
+    stdin: true,
+    file_flag: Some("--file"),
+};
+
+/// Why a send without a body was refused. A message is its text; a file sent alone is a reply
+/// nobody can read in the conversation.
+fn missing_body_message(attachment_paths: &[PathBuf]) -> String {
+    let Some(first) = attachment_paths.first() else {
+        return "A message needs a body: pass it as arguments, on --stdin, or with --file <path>."
+            .into();
+    };
+    let path = first.display();
+    format!(
+        "Nothing was sent: the message has no body, and --attachment only attaches a file. If {path} holds the reply, send its text with `--file {path}`. To attach it, add a body that says what it is."
+    )
+}
+
+/// Why `--file` beside another body was refused: it is the body, and the sender most likely
+/// meant to attach the file.
+fn second_body_message(path: &Path) -> String {
+    let path = path.display();
+    format!(
+        "Nothing was sent: --file reads the message body from {path}, and this send already has a body. To attach {path} to that body, use `--attachment {path}`."
+    )
+}
+
 async fn build_send_message_body(
     message_parts: &[String],
     read_stdin: bool,
+    body_file: Option<&Path>,
     escape_newlines: bool,
 ) -> error::Result<String> {
     let arguments = message_parts.join(" ");
@@ -1667,13 +1714,20 @@ async fn build_send_message_body(
         "message",
         &arguments,
         TextSource::Argument,
-        MESSAGE_TEXT_ROUTES,
+        SEND_TEXT_ROUTES,
     )?;
-    let mut message = if read_stdin {
+    let mut message = if let Some(path) = body_file {
+        if read_stdin || !arguments.trim().is_empty() {
+            return Err(CliError::Launch(second_body_message(path)));
+        }
+        let text = text_input::read_text_file(path)?;
+        text_input::ensure_text_intact("message", &text, TextSource::File, SEND_TEXT_ROUTES)?;
+        text
+    } else if read_stdin {
         let mut bytes = Vec::new();
         tokio::io::stdin().read_to_end(&mut bytes).await?;
         let input = text_input::decode_utf8_input(bytes, "stdin")?;
-        text_input::ensure_text_intact("message", &input, TextSource::Stdin, MESSAGE_TEXT_ROUTES)?;
+        text_input::ensure_text_intact("message", &input, TextSource::Stdin, SEND_TEXT_ROUTES)?;
         if message_parts.is_empty() {
             input
         } else if input.trim().is_empty() {
@@ -2517,7 +2571,9 @@ async fn cmd_channel_chat(
                             token,
                             channel_id,
                             SendOptions { message_parts: &[body.to_string()], attachment_paths: &[],
-                                read_stdin: false, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false },
+                                read_stdin: false, body_file: None, escape_newlines: false, message_id: None, final_for: None, reply_to: None, wait: false,
+                                // A person typing here starts the Agents they summon, as in the web composer.
+                                launch: true },
                         ).await?;
                     }
                 }
@@ -2986,12 +3042,23 @@ mod tests {
 
     use super::{
         OpenedChannelThread, agent_sender_env_value, attachment_visibility_scope_id,
-        channel_create_body, channel_entity_token, channel_image_mime_type, cmd_channel_create,
-        decode_send_newline_escapes, format_history_message_at, is_agent_execution_context,
-        is_intake, process_descends_from_tracked_pid, resolve_channel_selector,
+        build_send_message_body, channel_create_body, channel_entity_token, cmd_channel_create,
+        command_refusal_message, decode_send_newline_escapes, format_history_message_at,
+        is_agent_execution_context, is_intake, missing_body_message,
+        process_descends_from_tracked_pid, resolve_channel_selector,
         should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
+
+    #[test]
+    fn a_command_that_did_nothing_says_so_and_how_to_address_it() {
+        let message = command_refusal_message(&[
+            "xMatrix could not find @deepseek:45789d7f:3 to reborn.".into(),
+        ]);
+        assert!(message.starts_with("The message was sent, but its command did nothing:\n"));
+        assert!(message.contains("- xMatrix could not find @deepseek:45789d7f:3 to reborn.\n"));
+        assert!(message.contains("`@deepseek:3:reborn`"));
+    }
     use xmatrix_cli_core::protocol::{
         ChannelAttachment, ChannelMessage, MessageSender, SerializedChannel,
     };
@@ -3138,8 +3205,11 @@ mod tests {
             path.file_name().unwrap().to_string_lossy()
         );
         assert_eq!(attachments[0].mime_type, "image/png");
-        assert_eq!(attachments[0].bytes, [137, 80, 78, 71]);
-        assert_eq!(attachments[0].content_hash.len(), 64);
+        assert_eq!(attachments[0].size, 4);
+        assert_eq!(
+            attachments[0].content_hash,
+            xmatrix_cli_core::hex::sha256_hex(&[137, 80, 78, 71])
+        );
 
         let _ = std::fs::remove_file(path);
     }
@@ -3155,7 +3225,7 @@ mod tests {
 
         assert_eq!(attachments.len(), 1);
         assert_eq!(attachments[0].mime_type, "text/markdown");
-        assert_eq!(attachments[0].bytes, b"# Deployment guide\n");
+        assert_eq!(attachments[0].size, 19);
 
         let _ = std::fs::remove_file(path);
     }
@@ -3181,30 +3251,6 @@ mod tests {
                 "mimeType": "text/markdown",
                 "name": "deployment-guide.md",
             })],
-        );
-    }
-
-    #[test]
-    fn cli_send_file_accepts_supported_image_extensions() {
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.PNG")),
-            Some("image/png")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.jpeg")),
-            Some("image/jpeg")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.webp")),
-            Some("image/webp")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.gif")),
-            Some("image/gif")
-        );
-        assert_eq!(
-            channel_image_mime_type(&std::path::PathBuf::from("screen.svg")),
-            None
         );
     }
 
@@ -3386,6 +3432,36 @@ mod tests {
             decode_send_newline_escapes("Title\\n\\n- item\\r\\nnext"),
             "Title\n\n- item\nnext"
         );
+    }
+
+    #[tokio::test]
+    async fn a_reply_written_to_a_file_is_sent_as_the_body() {
+        let path =
+            std::env::temp_dir().join(format!("xmatrix-send-body-{}.md", uuid::Uuid::new_v4()));
+        std::fs::write(&path, "\u{feff}# 结论\n\n没有新回复。\n").unwrap();
+        let body = build_send_message_body(&[], false, Some(&path), false).await;
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(body.unwrap(), "# 结论\n\n没有新回复。");
+    }
+
+    #[tokio::test]
+    async fn a_file_beside_a_body_is_refused_and_points_at_attachment() {
+        let path = std::path::Path::new("report.pdf");
+        for (parts, stdin) in [(vec!["The report".to_string()], false), (vec![], true)] {
+            let refusal = build_send_message_body(&parts, stdin, Some(path), false)
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(refusal.contains("--attachment report.pdf"), "{refusal}");
+        }
+    }
+
+    #[test]
+    fn an_attachment_sent_without_a_body_is_refused_with_both_ways_out() {
+        let refusal = missing_body_message(&[std::path::PathBuf::from("reply.md")]);
+        assert!(refusal.contains("--file reply.md"), "{refusal}");
+        assert!(refusal.contains("add a body"), "{refusal}");
+        assert!(missing_body_message(&[]).contains("--file <path>"));
     }
 
     #[test]

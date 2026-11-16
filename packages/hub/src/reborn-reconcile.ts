@@ -178,7 +178,12 @@ export async function reconcileRebornWithPort(database: AuthorityDatabase, shard
         if (await daemonStep(() => port.stop(row), "reborn_stop_rejected") === undefined) return;
         const status = await daemonStep(() => port.status(row), "reborn_stop_status_rejected");
         if (!status) return;
-        if (status.status === "failed") { errorCode = "reborn_stop_failed"; return; }
+        if (status.status === "failed") {
+          errorCode = "reborn_stop_failed";
+          const result = status.result as { error?: unknown } | undefined;
+          errorDetail = failureDetail(result?.error);
+          return;
+        }
         if (status.status !== "completed") return;
         current = await step(() => port.advance(row));
       }

@@ -11,12 +11,11 @@ import {
 } from "@xmatrix/protocol";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { actionClass } from "@/components/ui/action-tone";
-import { Input } from "@/components/ui/input";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { userErrorMessage } from "@/lib/user-facing-error";
-import { useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
+import { CredentialValueForm, useCredentialStore, type CredentialStoreInput } from "./connector-credentials";
 import { ConnectorAction, ConnectorEmpty, ConnectorRows, ConnectorSection } from "./connector-page";
 import { Face } from "./face";
 import { PrivateConnectorResult } from "./private-connector-result";
@@ -201,7 +200,7 @@ function ExecutionFix({ execution, credentials, retrying, onFixed, onRetry, onRe
 }) {
   const { connector } = credentials;
   const { save } = useCredentialStore(credentials);
-  const [value, setValue] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
   const bridge = getDesktopBridge();
   const remedy = execution.remedy;
   const field = remedy?.kind === "credential"
@@ -229,9 +228,9 @@ function ExecutionFix({ execution, credentials, retrying, onFixed, onRetry, onRe
             onClick={() => signIn.mutate()}>
             {signIn.isPending ? spinner : <LogIn className="size-3.5" />} Sign in to {connector.name}
           </button>
-        ) : field && value === null ? (
+        ) : field && !editing ? (
           <button type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
-            onClick={() => setValue("")}>
+            onClick={() => setEditing(true)}>
             {field.signIn ? `Sign in to ${connector.name} again` : `Replace ${field.label}`}
           </button>
         ) : remedy?.kind === "reconnect" ? (
@@ -240,26 +239,19 @@ function ExecutionFix({ execution, credentials, retrying, onFixed, onRetry, onRe
             Reconnect {connector.name}
           </button>
         ) : null}
-        {execution.retryable && value === null ? (
+        {execution.retryable && !editing ? (
           <ConnectorAction disabled={busy} onClick={onRetry}>
             {retrying ? spinner : <RotateCcw className="size-3.5" />} Retry
           </ConnectorAction>
         ) : null}
       </div>
-      {field && value !== null ? (
-        <form className="flex flex-wrap items-center gap-2" onSubmit={(event) => {
-          event.preventDefault();
-          if (!value.trim()) return;
-          save.mutate({ fields: { [field.id]: value } }, { onSuccess: () => { setValue(null); onFixed(); } });
-        }}>
-          <Input type="password" autoComplete="off" autoFocus value={value} aria-label={field.label} placeholder={field.label}
-            className="min-w-0 flex-1 basis-56" onChange={(event) => setValue(event.target.value)} />
-          <button type="submit" disabled={busy || !value.trim()} className={actionClass({ variant: "secondary", size: "sm" })}>
-            {save.isPending ? spinner : null} {execution.retryable ? "Save and retry" : "Save"}
-          </button>
-          <ConnectorAction onClick={() => setValue(null)}>Cancel</ConnectorAction>
+      {field && editing ? (
+        <CredentialValueForm field={field} busy={busy} saving={save.isPending} autoFocus
+          submitLabel={execution.retryable ? "Save and retry" : "Save"}
+          save={(value) => save.mutateAsync({ fields: { [field.id]: value } }).then(() => { setEditing(false); onFixed(); })}>
+          <ConnectorAction onClick={() => setEditing(false)}>Cancel</ConnectorAction>
           {field.description ? <p className="basis-full text-[12px] leading-[1.45] text-muted-foreground">{field.description}</p> : null}
-        </form>
+        </CredentialValueForm>
       ) : null}
       {error ? <p role="alert" className="text-[13px] font-medium text-destructive">{error}</p> : null}
     </div>

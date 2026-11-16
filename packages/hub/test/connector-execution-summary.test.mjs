@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import * as protocol from "@xmatrix/protocol";
 import { appRequestFields } from "../../db/src/app-control.ts";
+import { ControlError } from "../../db/src/control-error.ts";
 import { SENTRY_ACTIONS } from "../src/connectors/actions/sentry.ts";
 import { loadCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
@@ -23,6 +24,7 @@ async function execute(outcome) {
     if (["../product-message-append", "../private-response",
       "../spaces"].includes(name)) return {};
     if (name === "./agent-caller") return { callingAgentOf: async () => undefined };
+    if (name === "@xmatrix/db") return { ControlError };
     assert.fail(`unexpected import: ${name}`);
   });
   let attempts = 0;

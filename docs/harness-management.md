@@ -42,10 +42,14 @@ the `pi-acp` launcher and probes `pi`; Vibe checks `vibe-acp` and probes `vibe`.
 Cursor recognizes current `agent` and legacy `cursor-agent` aliases without
 changing existing registered launch contracts. Cursor inventory and update recipes
 prefer the unambiguous `cursor-agent` launcher. A generic `agent` is accepted
-only beside that launcher, never from an unrelated vendor directory; native
-Cursor install locations are searched even before a daemon inherits updated PATH.
+only beside that launcher, never from an unrelated vendor directory.
 The official [Cursor installer](https://cursor.com/install?win32=true) installs
 both names and publishes timestamped versions such as `2026.09.28-64d2043`.
+A native installer's own directory outside the common user bins (Cursor's
+`cursor-agent` data directory; Antigravity's `%LOCALAPPDATA%\agy\bin` on
+Windows) is searched by inventory, recipes and launches, so a daemon started
+before the installer changed the user PATH still finds the launcher. A recipe
+that runs the harness's own launcher (`agy update`) runs the one inventory found.
 
 After daemon readiness, one background task probes every preset serially, then
 refreshes every six hours. Each version process has a five-second deadline,
@@ -101,15 +105,29 @@ there reads the code's text without the program's name.
 ## Harness actions
 
 `HARNESS_ACTIONS` are `install`, `update`, `uninstall`, `auto_update_on`,
-`auto_update_off`, `refresh`, `release`, and the sign-in actions `login_start`,
+`auto_update_off`, `refresh`, `release`, `check`, and the sign-in actions `login_start`,
 `login_finish` and `login_cancel` (see [Remote sign-in](#remote-sign-in)). `harnessActionAvailable` says whether a preset has an official
 recipe or control for one; anything else is refused when issued.
 
+`check` asks one preset's program, now, whether it is installed and signed in,
+and answers with what it says: its status command, or for an ACP harness with
+none, a start the way a launch starts it. It changes nothing and needs a daemon
+with `machine_harness_check_v1`. Whether a program is signed in is its own to
+say and nothing announces a change, so a page that shows it asks when it is
+looked at; `refresh` re-probes every preset and reads every registry, which
+takes many seconds and is not for that.
+
 - **Who.** Only the Machine's owner, signed in as a Human, issues an action:
   `POST /api/machine-daemons/harness-actions { machineId, hostId?, presetId,
-  action }`. Agent Runs are refused there; an Agent applies the official recipe
-  on its own Machine directly (`xmatrix harness install|update`), as its owner's
-  user, and cannot act on another Machine.
+  action }`. An Agent applies the official recipe on its own Machine directly
+  (`xmatrix harness install|update`), as its owner's user, and cannot act on
+  another Machine. The one action an Agent Run may issue there is `refresh` of
+  its own Machine (a read-only probe, issued as its owner): after any harness
+  change it makes, and before `xmatrix request sign-in`, the CLI asks the daemon
+  to look again, so the Hub's view of that Machine (installed versions, and the
+  sign-in its pages show) has the change at once instead of at the next
+  six-hourly probe. Routing does not read that sign-in
+  ([space-agent-routing](architecture/space-agent-routing.md)).
 - **Command.** Machine control (PostgreSQL in production) stores a
   `harness_action` command only for an online daemon advertising
   `machine_harness_action_v1`. The payload is exactly `{ type, requestId,
@@ -207,7 +225,9 @@ validated version). For every online daemon reporting
 with `autoUpdate: "enabled"` and an installed `version` other than the latest,
 and that was not told about this preset in the last 30 minutes, Hub issues a
 `release` harness action naming the preset only. A preset with an update recipe
-but no registry is told the same way once a day, without a version. The daemon
+but no registry is told the same way once a day, without a version. Action
+admission requires an official update recipe, matching the daemon; a missing
+version registry does not reject that daily notice. The daemon
 reads the registry itself, never a version from Hub, and when the installed
 version differs (or there is no registry) runs the update: an
 `interactiveOnly` harness at once, beside live sessions as its own updater
@@ -271,20 +291,33 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   `failed`. `login_cancel` ends the process tree. Sign-in never takes the
   preset's install/update lock and its argv only ever comes from the compiled
   registry.
+- **From an Agent.** `xmatrix request sign-in <harness> [--machine]` posts the
+  same signed-out card in the Agent's Channel; its owner signs in there for any
+  harness on any of their Machines, without an Agent for it in that Space. A
+  harness with no remote sign-in gets the card's set-up text and Check again.
 - **State.** Installed presets with a status command report `login`
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.
 
-Presets with a sign-in today: codex, claude, cline, copilot, cursor, devin
-(in a pseudo-terminal), grok, hermes, jcode, kilo, kimi, kiro, omp (paste the
-code or the address the browser ends on), opencode, qoder and zcode. gemini,
+Presets with a sign-in today: antigravity (in a pseudo-terminal; the CLI gives
+up 60 seconds after it prints the link, so paste the code within a minute),
+codex, claude, cline, copilot, cursor, devin (in a pseudo-terminal), grok,
+hermes, jcode, kilo, kimi, kiro, omp (paste the code or the address the browser
+ends on), opencode, qoder and zcode. gemini,
 goose and openclaw sign in only inside an interactive terminal; pi, vibe, junie
 and qwen have no official headless sign-in (API keys or their TUI). auggie and
 commandcode accept only a localhost browser callback (commandcode also takes a
 pasted API key), dimcode prints no link even in a terminal, and codebuddy,
-droid, prime, trae, antigravity, autohand, amp, reasonix and deepseek have no CLI sign-in
+droid, prime, trae, autohand, amp, reasonix and deepseek have no CLI sign-in
 (in-app, ACP `authenticate`, API keys or enterprise tokens; DeepSeek Harness
 reads `DEEPSEEK_API_KEY`).
+
+A preset's `access.full.env` lists the environment variables xMatrix sets on
+the harness process, as written. DeepSeek Harness takes its permission mode from
+one: `DSH_PERMISSION_MODE=danger-full-access` lets it write outside the
+workspace and stops its per-command approval, as the full-access arguments of
+the other presets do. Left at its own default (`workspace-write`), its shell
+cannot write `~/.config/xmatrix`, and no `xmatrix` command runs there.
 
 See [Machines and CLI management](harness-management-cli.md) for user commands and confirmation behavior.
 

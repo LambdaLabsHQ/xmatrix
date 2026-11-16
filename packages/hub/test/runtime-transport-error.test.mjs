@@ -10,7 +10,10 @@ import {
   RuntimeAuthorityOperationError,
   RuntimeClientOperationError,
   runtimeFailureOrigin,
+  runtimeOperationFailure,
+  runtimeSessionOriginMetadata,
 } from "../src/runtime-transport/runtime-operation-failure.ts";
+import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 import { PostgresAgentInstancePort } from "../src/runtime-transport/postgres-agent-instance-port.ts";
 import { ControlError } from "@xmatrix/db";
 import { InvalidAuthTokenError } from "../src/auth.ts";
@@ -108,6 +111,62 @@ test("a repository rejection on a socket is reported once, under the id its clie
     [["xMatrix runtime authority rejection", frame.failure.diagnosticId]]);
 });
 
+test("XMATRIX-HUB-7S: a launch transition conflict logs the bounded states", async () => {
+  const conflict = Object.assign(new ControlError("launch_transition_conflict", 409,
+    "Invalid Agent Launch transition connected -> prepared"), { reason: "connected_to_prepared" });
+  const { frame, logged } = await answered(conflict);
+  assert.equal(frame.failure.code, "runtime.authority_rejected");
+  assert.equal(frame.failure.retryable, false);
+  const [[, detail]] = logged.error.filter(([message]) => message === "xMatrix runtime authority rejection");
+  assert.equal(detail.authorityReason, "connected_to_prepared");
+  assert.equal(detail.authorityCode, "launch_transition_conflict");
+  assert.equal(detail.status, 409);
+  assert.doesNotMatch(JSON.stringify(detail), /Invalid|->/);
+  assert.doesNotMatch(JSON.stringify(frame), /connected_to_prepared/);
+});
+
+test("XMATRIX-HUB-7F: a stale lease logs which fence refused it and on what command type", async () => {
+  const stale = Object.assign(new ControlError("machine_command_stale_lease", 409, "Machine command lease is stale"),
+    { reason: "complete.owner", commandType: "harness_action" });
+  const { frame, logged } = await answered(stale);
+  assert.equal(frame.failure.code, "machine_command_stale_lease");
+  assert.equal(frame.failure.retryable, false);
+  assert.equal(logged.error.length, 0, "a lease fence that held is not a Hub error");
+  const [[, detail]] = logged.warn.filter(([message]) => message === "xMatrix runtime authority rejection");
+  assert.deepEqual([detail.authorityReason, detail.commandType], ["complete.owner", "harness_action"]);
+  assert.doesNotMatch(JSON.stringify(frame), /complete\.owner|harness_action/, "the labels stay in the Hub's log");
+  const unlabelled = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+    { reason: "Private Reason", commandType: { nested: true } }));
+  assert.equal(unlabelled.logged.error.length, 0);
+  const [[, plain]] = unlabelled.logged.warn;
+  assert.equal(plain.authorityReason, undefined);
+  assert.equal(plain.commandType, undefined);
+});
+
+test("HUB-7F lease timing is logged once, bounded and absent from the socket reply", async () => {
+  const leaseTiming = { leaseWindowMs: 10_000, leaseExpiredForMs: 2_000, commandAgeMs: 120_000 };
+  const { frame, logged } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+    { reason: "renew.expired", commandType: "harness_action", leaseTiming }));
+  assert.equal(logged.error.length, 0, "a lease fence that held is not a Hub error");
+  assert.equal(logged.warn.length, 1);
+  assert.deepEqual(logged.warn[0][1], { ...frame.failure, authorityCode: "machine_command_stale_lease",
+    operation: "Error", status: 409, authorityReason: "renew.expired", commandType: "harness_action", ...leaseTiming });
+  assert.doesNotMatch(JSON.stringify(frame), /leaseWindow|leaseExpired|commandAge/);
+  for (const [unsafe, expected] of [["private", {}], [null, {}],
+    [{ ...leaseTiming, leaseWindowMs: "10000", secret: "private" }, { leaseExpiredForMs: 2_000, commandAgeMs: 120_000 }],
+    [{ leaseWindowMs: -1, leaseExpiredForMs: Infinity, commandAgeMs: NaN }, {}],
+    [{ leaseWindowMs: 60_001, leaseExpiredForMs: 86_400_001, commandAgeMs: 1.5 }, {}]]) {
+    const { logged: rejected } = await answered(Object.assign(new ControlError("machine_command_stale_lease", 409, "stale"),
+      { leaseTiming: unsafe }));
+    assert.equal(rejected.error.length, 0);
+    const detail = rejected.warn[0][1];
+    assert.equal(detail.leaseWindowMs, expected.leaseWindowMs);
+    assert.equal(detail.leaseExpiredForMs, expected.leaseExpiredForMs);
+    assert.equal(detail.commandAgeMs, expected.commandAgeMs);
+    assert.doesNotMatch(JSON.stringify(rejected.warn), /private|secret/);
+  }
+});
+
 test("a permanent authority rejection never becomes automatically retryable", async () => {
   const failure = new RuntimeAuthorityOperationError("append-message", 403, {
     code: "agent_run_forbidden", retryable: true, diagnosticId: "Bearer private-token",
@@ -169,15 +228,36 @@ test("a secret the registration no longer allows names its fix instead of a gene
   assert.doesNotMatch(error.publicMessage, /runtime\.authority_rejected/);
 });
 
-test("an unclassified failure logs where it was thrown, never what it said", () => {
+test("an unclassified failure logs where it was thrown and its shape, never what it said (XMATRIX-HUB-AX)", async () => {
   function authenticationBinding() { throw new TypeError("token for user-secret@example.test expired"); }
   let error;
   try { authenticationBinding(); } catch (caught) { error = caught; }
   const origin = runtimeFailureOrigin(error);
   assert.equal(origin.errorClass, "TypeError");
   assert.equal(origin.origin.split(",")[0], "authenticationBinding");
+  assert.equal(origin.errorShape, "unlisted_17_80");
   assert.doesNotMatch(JSON.stringify(origin), /user-secret|expired/u);
-  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: "" });
+  assert.deepEqual(runtimeFailureOrigin("plain text"), { errorClass: "string", origin: "", errorShape: "empty" });
+  assert.equal(runtimeFailureOrigin(new TypeError("")).errorShape, "empty");
+  assert.equal(runtimeFailureOrigin(new TypeError("Can't call WebSocket send() after close()")).errorShape,
+    "websocket_send_after_close");
+  const circular = new TypeError("Converting circular structure to JSON\n    --> starting at object with constructor 'Secret'");
+  assert.equal(runtimeFailureOrigin(circular).errorShape, "json_circular");
+  assert.doesNotMatch(JSON.stringify(runtimeFailureOrigin(circular)), /Secret/u);
+  const logged = await capturingConsole(() => { runtimeOperationFailure(error); });
+  const payload = logged.error[0][1];
+  assert.equal(payload.errorShape, "unlisted_17_80");
+  assert.equal(payload.errorClass, "TypeError");
+  assert.doesNotMatch(JSON.stringify(logged), /user-secret|example\.test/u);
+  const context = { ...payload, errorShape: "user-secret@example.test", origin: "leak user-secret", errorClass: "leak user-secret" };
+  assert.deepEqual(runtimeSessionOriginMetadata(context), []);
+  assert.deepEqual(sentryEventMetadata({ context: payload }), [
+    `Runtime error class: TypeError`,
+    `Runtime error origin: ${payload.origin}`,
+    "Runtime error shape: unlisted_17_80",
+    `Diagnostic reference: ${payload.diagnosticId}`,
+  ]);
+  assert.deepEqual(sentryEventMetadata({ context }), [`Diagnostic reference: ${payload.diagnosticId}`]);
 });
 
 function credentialPort(authenticate) {

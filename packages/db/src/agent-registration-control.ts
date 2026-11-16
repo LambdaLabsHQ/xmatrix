@@ -1,17 +1,18 @@
-import { harnessParameterObservation, machineResourceObservation, hasControlCharacter } from "@xmatrix/protocol";
+import { agentLaunchAccess, agentPresetById, harnessParameterObservation, machineResourceObservation, hasControlCharacter } from "@xmatrix/protocol";
 import { ACTIVE_RUN_STATUS_SQL, digestCanonicalCloneCborV1, parseSpaceAgentRegistrationKey, parseSpaceAgentConfiguration,
   registrationLimitsWithin, spaceConfigurationResources,
   parseRegistrationResourceLimits, intersectRegistrationLimits,
   parseAgentRegistrationEnvironment, routingModelCatalogObservation,
   type AgentRegistrationEnvironment, type AgentRegistrationMachinePlatform, type AgentRegistrationRunningInstance, type AgentRegistrationSummary,
-  currentRoutingQuotaWindows, parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
+  parseLlmQuotaAccount, type SpaceAgentRegistrationKey, type SpaceAgentConfiguration , utf8ByteLength,
   parseHarnessProfileCommand, type HarnessProfileCommand, type SpaceHarnessProfile } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
 import { RegistrationAccessError } from "./agent-registration-errors.js";
 import { enrollGlobalRegistration } from "./agent-registration-enrollment.js";
-import { currentRegistrationQuotaJoin, registrationQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationLiveQuota, registrationQuotaColumns, registrationQuotaWindows,
+  registrationShownQuotaReading } from "./agent-registration-quota-probe.js";
 import { channelCapabilityPredicate } from "./channel-capability-policy.js";
 import { writeRegistrationOwnerGrant } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationAccess, registrationKeyValues, registrationOwnerGrant, spaceState } from "./agent-registration-rows.js";
@@ -159,9 +160,15 @@ export class PostgresAgentRegistrationRepository {
       await tx.query({ name: "registration_create_capacity_v1", text: `INSERT INTO control.machine_execution_capacity
         (owner_user_id,machine_id,max_concurrent,version) VALUES ($1,$2,1,1)
         ON CONFLICT (owner_user_id,machine_id) DO NOTHING`, values: [key.ownerUserId, key.machineId], maxRows: 0 });
-      await tx.query({ name: "registration_create_environment_v1", text: `INSERT INTO control.agent_registration_environments
+      // An existing declaration is kept. The one thing an add writes onto it is
+      // the access mode its owner confirms with this add, when it holds none.
+      await tx.query({ name: "registration_create_environment_v2", text: `INSERT INTO control.agent_registration_environments AS held
         (owner_user_id,machine_id,harness,declaration_json,version) VALUES ($1,$2,$3,$4::jsonb,1)
-        ON CONFLICT (owner_user_id,machine_id,harness) DO NOTHING`,
+        ON CONFLICT (owner_user_id,machine_id,harness) DO UPDATE SET
+          declaration_json=jsonb_set(held.declaration_json,'{launch,access}',EXCLUDED.declaration_json->'launch'->'access'),
+          version=held.version+1,updated_at=clock_timestamp()
+        WHERE jsonb_typeof(held.declaration_json->'launch')='object' AND NOT (held.declaration_json->'launch' ? 'access')
+          AND EXCLUDED.declaration_json->'launch' ? 'access'`,
       values: [key.ownerUserId, key.machineId, key.harness, JSON.stringify(environment)], maxRows: 0 });
       const rows = await tx.query({ name: "registration_create_workspaces_v1", text: `SELECT workspace_id,canonical_cwd
         FROM data.workspaces WHERE owner_user_id=$1 AND machine_id=$2 ORDER BY workspace_id LIMIT 101`,
@@ -408,14 +415,16 @@ export class PostgresAgentRegistrationRepository {
           parseRegistrationResourceLimits(row.grant_limits), parseRegistrationResourceLimits(row.policy_limits)) : null;
         const models = [...new Set([...(configuration.model ? [configuration.model] : []), ...(configuration.routing?.models ?? [])])]
           .filter(model => allowed?.models.includes(model)).sort();
-        // An empty model list allows only the runtime default, so no observed
-        // model is offered for it. No fresh observation stays absent.
+        // An empty model list allows the runtime default; the environment pass
+        // below offers the runtime's whole catalog where its daemon applies one.
+        // No fresh observation stays absent.
         const parameterObservation = harnessParameterObservation(row.catalog_parameters, row.parameters_observed_at,
           row.parameter_model, models, Date.now());
         return { ...parameterObservation,
           key, displayName: String(row.display_name), version: Number(row.version),
+          // With no declared models the runtime's catalog stays whole; the environment pass below narrows it.
           modelCatalog: routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value
-            .filter(model => models.includes(model.model)),
+            .filter(model => !models.length || models.includes(model.model)),
           ownerName: String(row.owner_name || "Space member"), machineName: "Registered machine", models,
           routingReady: row.current_owner !== null && row.grant_state === "active" && row.policy_state === "enabled" &&
             configuration.routing?.enabled === true && (configuration.routing.models.length === 0 ||
@@ -438,10 +447,10 @@ export class PostgresAgentRegistrationRepository {
     // while it is current.
     const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels",
       statement: "single_read" },
-      tx => tx.query({ name: "registration_catalog_machine_labels_v10", text: `SELECT
+      tx => tx.query({ name: "registration_catalog_machine_labels_v12", text: `SELECT
         requested.owner,requested.machine,requested.harness,machine.name,
-        e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,
-        quota.source,quota.remaining,quota.observed_at,quota.expires_at,quota.windows_json,quota.account_json
+        e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,daemon.native_models,
+        ${registrationQuotaColumns("quota")}
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=requested.owner
           AND e.machine_id=requested.machine AND e.harness=requested.harness
@@ -452,7 +461,9 @@ export class PostgresAgentRegistrationRepository {
             AND metadata_json->'machineResources'->>'connectionEpoch'=connection_epoch::text))[1] AS resources,
           -- The OS the machine's daemon last reported, shown with its row.
           (array_agg(metadata_json->>'platform' ORDER BY updated_at DESC)
-            FILTER (WHERE metadata_json->>'platform' IS NOT NULL))[1] AS platform
+            FILTER (WHERE metadata_json->>'platform' IS NOT NULL))[1] AS platform,
+          -- Whether its online daemon starts a runtime on a model from the runtime's own catalog.
+          bool_or(status='online' AND capabilities_json ? 'registration_native_model_v1') AS native_models
           FROM data.machine_daemons WHERE owner_user_id=requested.owner AND machine_id=requested.machine) daemon ON TRUE
         ${currentRegistrationQuotaJoin("quota")}`,
       values: [JSON.stringify(page.registrations.map(row => ({ owner: row.key.ownerUserId,
@@ -462,26 +473,31 @@ export class PostgresAgentRegistrationRepository {
       const environment = label?.declaration_json ? parseAgentRegistrationEnvironment(label.declaration_json) : null;
       // The physical environment bounds the Space's models exactly as a launch does.
       const models = row.models.filter(model => environment?.models.includes(model));
-      // With no declared models the runtime's default model is the one that runs; its efforts stay selectable.
+      // With no declared models the runtime's default model is the one that runs and its efforts stay
+      // selectable; a daemon that switches the runtime to a catalog model offers the whole catalog.
+      const nativeModels = !row.models.length && label?.native_models === true && Boolean(row.modelCatalog?.length);
       const reported = row.modelCatalog?.filter(model => row.models.length ? models.includes(model.model)
-        : model.model === row.parameterModel);
+        : nativeModels || model.model === row.parameterModel);
       const blocker: AgentRegistrationSummary["routingBlocker"] = !environment ? "owner_environment_missing"
         : !environment.enabled ? "owner_environment_disabled" : !row.routingReady ? "space_setup"
           : row.models.length && !models.length ? "model_unavailable" : undefined;
       const lastSeenAt = isoTime(label?.last_seen_at);
       const resources = label?.online === true ? machineResourceObservation(label.resources, Date.now()) : undefined;
       const platform = machinePlatform(label?.platform);
-      const reading = registrationQuotaReading(label);
-      const windows = currentRoutingQuotaWindows(label?.windows_json, Date.now());
+      const reading = registrationShownQuotaReading(label);
+      const windows = registrationQuotaWindows(label);
       const account = parseLlmQuotaAccount(label?.account_json);
       // A provider account's headroom is its owner's; the Space's owners and admins manage its use.
-      const quota = (row.canConfigureSpace || row.canManageOwnerGrant) && reading
-        ? { ...reading, ...(windows.length ? { windows } : {}), ...(account ? { account } : {}) } : undefined;
-      return { ...row, models, modelCatalog: reported, routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
+      const { quota, balance } = row.canConfigureSpace || row.canManageOwnerGrant
+        ? registrationLiveQuota(reading, windows, account) : {};
+      const resolved = environment ? agentLaunchAccess(environment.launch, agentPresetById(row.key.harness)) : undefined;
+      const access = resolved ? { ...resolved.access, confirmed: resolved.confirmed } : undefined;
+      return { ...row, ...(access ? { access } : {}), models, modelCatalog: reported, ...(nativeModels ? { nativeModels: true as const } : {}), routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
         machineName: String(label?.name || row.machineName),
         live: { machine: { online: label?.online === true, ...(lastSeenAt ? { lastSeenAt } : {}),
           ...(resources ? { resources } : {}), ...(platform ? { platform } : {}) },
-          running: row.live?.running ?? [], ...(quota ? { quota } : {}) } };
+          running: row.live?.running ?? [], ...(quota ? { quota } : {}),
+          ...(balance ? { balance } : {}) } };
     }) };
   }
 }

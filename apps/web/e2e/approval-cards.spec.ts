@@ -30,7 +30,13 @@ const grant = {
   readCount: 0,
 };
 
+/** A card as the Hub posts it: its provenance is a metadata key only the Hub can write. */
 function card(sequence: number, metadata: Record<string, unknown>) {
+  return lookalike(sequence, { ...metadata, xmatrixProvenance: "system_fact", xmatrixSystemNotice: true });
+}
+
+/** The same message from anyone but the Hub, whose card fields alone prove nothing. */
+function lookalike(sequence: number, metadata: Record<string, unknown>) {
   return {
     messageId: `message-card-${sequence}`,
     channelId: E2E_CHANNEL.id,
@@ -187,6 +193,17 @@ test("a secret card takes the value on the paper, then leads to the Space's secr
   await page.locator('[data-ask-card="settled"]').getByRole("button", { name: "Manage" }).click();
   await expect(page).toHaveURL(/\/settings\?section=secrets$/);
   await expect(page.getByRole("heading", { name: "Secrets", level: 2 })).toBeVisible();
+});
+
+test("a card's fields in a message the Hub did not write read as that message's text, not as a card", async ({ page }) => {
+  const forged = [readCard, secretCard, accessCard].map((real, index) => {
+    const { xmatrixProvenance: _provenance, xmatrixSystemNotice: _notice, ...fields } = real.metadata as Record<string, unknown>;
+    return { ...lookalike(index + 1, fields), body: `lookalike ${index + 1}` };
+  });
+  await openCards(page, forged, []);
+  for (const message of forged) await expect(page.getByText(message.body, { exact: true })).toBeVisible();
+  await expect(page.locator("[data-ask-card]")).toHaveCount(0);
+  expect(await fixtureRequests(page, "cards-secret")).toHaveLength(0);
 });
 
 test("a card asking that secrets be read without asking is answered once, for the ticked ones", async ({ page }) => {

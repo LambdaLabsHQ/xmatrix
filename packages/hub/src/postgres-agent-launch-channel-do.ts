@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 
 import { RelayPostgresAgentLaunchCoordinatorService, type CoordinatorPassPlan } from "./postgres-agent-launch-coordinator";
 import {
-  MIN_RECHECK_MS, alarmAt, effectiveDue, isScheduledStep, mergeWake, nextStalls, stallBackoff, stepsToRun,
+  MIN_RECHECK_MS, alarmAt, effectiveDue, isScheduledStep, mergeWake, nextStalls, stallBackoff, stepsToRun, storedWake,
   type PendingWake, type ScheduledStep, type StepDue, type StepStalls,
 } from "./postgres-agent-launch-schedule";
 import { AgentLaunchCoordinatorLanes } from "./postgres-agent-launch-coordinator-lanes";
@@ -44,14 +44,13 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
 
   constructor(private readonly state: DurableObjectState, env: Env) {
     super(state, env);
-    this.service = new RelayPostgresAgentLaunchCoordinatorService(env, undefined,
-      (task) => state.waitUntil(task));
+    this.service = new RelayPostgresAgentLaunchCoordinatorService(env);
     this.lanes = new AgentLaunchCoordinatorLanes({
       claim: async () => {
         const route = await this.routeKey();
         if (!route) return 0;
         // A wake since the last pass makes this pass interactive.
-        const wake = await this.state.storage.get<PendingWake>("wake");
+        const wake = storedWake(await this.state.storage.get<PendingWake>("wake"));
         if (wake) await this.state.storage.delete("wake");
         const woken = wake !== undefined;
         const admission = backgroundAdmissionFor(this.env,
@@ -122,8 +121,7 @@ export class RelayPostgresAgentLaunchChannel extends DurableObject<Env> {
     for (const step of named) delete stalls[step];
     await this.state.storage.put("stalls", stalls);
     return { due, plan: { steps: stepsToRun(effectiveDue(due, stalls), named, now),
-      includeParked: named.has("registrationStop"),
-      ...(due.automation !== undefined ? { automationDue: due.automation } : {}) } };
+      includeParked: named.has("registrationStop") } };
   }
 
   /** The alarm follows the Channel's work: each kind's due time, or its retry

@@ -4,10 +4,12 @@ import fs from "node:fs";
 import process from "node:process";
 
 import { runCliMain } from "./cli-entrypoint.mjs";
-import { RELEASE_TAG_PATTERN, releaseChannel } from "./release-version-order.mjs";
+import { RELEASE_TAG_PATTERN, compareSemver, releaseChannel } from "./release-version-order.mjs";
 
 const STABLE_WEB = "https://xmatrix.sh";
 const BETA_WEB = "https://beta.xmatrix.sh";
+// The first immutable train containing #857; beta.6 still deployed `web`.
+const FIRST_BETA_WEB_VERSION = "1.3.1-beta.7";
 
 export function verifyProductionDeploymentReceipt(receipt, expected) {
   const { scope, sha, tag, runId, runAttempt } = expected;
@@ -27,11 +29,12 @@ export function verifyProductionDeploymentReceipt(receipt, expected) {
       receipt.components.some((item, index) => item !== components[index])) {
     throw new Error("R2 deployment receipt does not match the exact production run and scope");
   }
-  // A stable deploys the stable Web; a beta deploys the beta Web, or the
-  // stable one for betas released before the Web was split per channel.
-  const webUrls = releaseChannel(receipt.version) === "stable" ? [STABLE_WEB] : [BETA_WEB, STABLE_WEB];
+  // Historical recovery must retain its original surface, without allowing
+  // later betas to claim a deployment to the stable Web.
+  const webUrl = releaseChannel(receipt.version) === "beta" &&
+    compareSemver(receipt.version, FIRST_BETA_WEB_VERSION) >= 0 ? BETA_WEB : STABLE_WEB;
   if ((components.includes("hub") ? receipt.hubUrl !== "https://xmatrix-hub.xmatrix.sh" : receipt.hubUrl !== undefined) ||
-      (components.includes("web") ? !webUrls.includes(receipt.webUrl) : receipt.webUrl !== undefined)) {
+      (components.includes("web") ? receipt.webUrl !== webUrl : receipt.webUrl !== undefined)) {
     throw new Error("R2 deployment receipt claims a different deployed surface");
   }
   return receipt;

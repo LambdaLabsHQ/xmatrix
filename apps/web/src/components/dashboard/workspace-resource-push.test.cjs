@@ -18,9 +18,6 @@ test("human push suppresses fallback polls and names the list to re-read", async
 
     globalThis.document = { hidden: false };
     const client = new QueryClient();
-    const space = ["xmatrix", "hub", "user", "automations", "space-1"];
-    const other = ["xmatrix", "hub", "user", "automations", "space-2"];
-    const page = ["xmatrix", "hub", "user", "page-automations", "space-1", "page"];
     const transfers = ["channel-transfers", "user", "space-1", "channel-1"];
     const wide = ["channel-transfers", "user", "space-1", ""];
     const pending = ["channel-pending-cross-space-reads", "user", "channel-1"];
@@ -29,7 +26,7 @@ test("human push suppresses fallback polls and names the list to re-read", async
     const elsewhere = ["connector-action-approvals", "user", "channel-2"];
     const launch = ["xmatrix", "hub", "user", "space-launch-targets", "space-1"];
     const otherLaunch = ["xmatrix", "hub", "user", "space-launch-targets", "space-2"];
-    const held = [space, other, page, transfers, wide, pending, grant, approvals, elsewhere, launch, otherLaunch];
+    const held = [transfers, wide, pending, grant, approvals, elsewhere, launch, otherLaunch];
     // A query read again is fresh; one already invalidated does not report a second invalidation.
     const read = () => { for (const queryKey of held) client.setQueryData(queryKey, { ok: true }); };
     read();
@@ -39,11 +36,6 @@ test("human push suppresses fallback polls and names the list to re-read", async
         fetched.push(event.query.queryKey);
       }
     });
-    push.invalidateWorkspaceResources(client, {
-      spaceId: "space-1", resource: "automations",
-    });
-    assert.deepEqual(fetched.map((key) => key[3] ?? key[0]).sort(), ["automations", "page-automations"]);
-    fetched.length = 0;
     push.invalidateWorkspaceResources(client, {
       spaceId: "space-1", resource: "channel_transfers", channelId: "channel-1",
     });

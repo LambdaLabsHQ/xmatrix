@@ -1,10 +1,10 @@
 import {
   DEFAULT_HUB_URL, HUB_ROUTES, PAGE_DOCUMENT_FRAGMENT, PAGE_MEDIA_OWNER_KIND, WEB_PROXY_ROUTES, normalizeHubUrl, pageMediaRefId,
   spaceVisibilityScope,
-  type PageAutomationAnchorChange, type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
+  type PageAwareness, type PageBlame, type PageConversation, type PageDocument,
   type PageGitHubFile, type PageLinkAnchor,
   type PageLink, type PageRecentChange, type PageRevision, type PageRevisionMoment, type PageSummary, type PageTreeActivity, type PageTreeAgent,
-  type SerializedAutomation,
+  type NornRequestView, type PageProgramStatus,
 } from "@xmatrix/protocol";
 
 export type {
@@ -61,16 +61,13 @@ export const pageApi = {
   publish: (spaceId: string, pageId: string, token: string, published: boolean) =>
     xmatrixApiRequest<{ page: PageSummary }>({ url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/publication`,
       token, method: "PUT", body: { published } }),
-  /**
-   * How far this person has read the page: the newest revision they have had on screen whole, and the page
-   * as they have seen it when they saw part of it past that (null when it is that revision's text).
-   */
+  /** How far this person has read the page: the newest version they have had open; null before their first visit. */
   readState: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixHubRead<{ revision: number | null; seen?: string | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
+    xmatrixHubRead<{ revision: number | null }>({ hubPath: hubPage(spaceId, pageId, "read"),
       webUrl: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token, signal }),
-  markRead: (spaceId: string, pageId: string, token: string, revision: number, seen: string | null) =>
+  markRead: (spaceId: string, pageId: string, token: string, revision: number) =>
     xmatrixApiRequest<{ revision: number }>({ url: WEB_PROXY_ROUTES.space_page_read(spaceId, pageId), token,
-      method: "PUT", body: { revision, seen } }),
+      method: "PUT", body: { revision } }),
   /** A GitHub file the page embeds, read through from GitHub by the Hub (pages-live-document.md §6.5). */
   /** Where the page's reader reads an image or video pasted into it; the session cookie authorizes it. */
   mediaUrl: (spaceId: string, pageId: string, file: string) =>
@@ -151,17 +148,18 @@ export const pageApi = {
   agents: (spaceId: string, token: string, signal?: AbortSignal) =>
     xmatrixHubRead<{ pages: PageTreeActivity[] }>({ hubPath: HUB_ROUTES.space_page_links(spaceId, "agents"),
       webUrl: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/agents`, token, signal }),
-  // A page's Automations (docs/design/pages-live-document.md §6).
-  automations: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
-    xmatrixHubRead<{ automations: SerializedAutomation[] }>({ hubPath: hubPage(spaceId, pageId, "automations"),
-      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations`, token, signal }),
-  changeAutomation: (spaceId: string, pageId: string, token: string, automation: SerializedAutomation,
-    action: "pause" | "resume" | "run" | "delete") =>
-    xmatrixApiRequest<{ automation?: SerializedAutomation }>({
-      url: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/automations/${encodeURIComponent(automation.id)}${
-        action === "delete" ? `?expectedVersion=${automation.version}` : `/${action}`}`,
-      token, method: action === "delete" ? "DELETE" : "POST",
-      ...(action === "delete" ? {} : { body: { expectedVersion: automation.version } }) }),
+  // What a `request:<ref>` reference shows in its place.
+  request: (spaceId: string, requestRef: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ request: NornRequestView }>({ hubPath: HUB_ROUTES.space_norn_request(spaceId, requestRef),
+      webUrl: WEB_PROXY_ROUTES.space_norn_request(spaceId, requestRef), token, signal }).then((result) => result.request),
+  // How the program a message carries stands and what it does next; null for a message that is no program.
+  program: (spaceId: string, programId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ program: PageProgramStatus | null }>({ hubPath: HUB_ROUTES.space_norn_program(spaceId, programId),
+      webUrl: WEB_PROXY_ROUTES.space_norn_program(spaceId, programId), token, signal }).then((result) => result.program),
+  // How each `norn run` block of a page stands.
+  programs: (spaceId: string, pageId: string, token: string, signal?: AbortSignal) =>
+    xmatrixHubRead<{ programs: PageProgramStatus[] }>({ hubPath: hubPage(spaceId, pageId, "programs"),
+      webUrl: `${WEB_PROXY_ROUTES.space_page(spaceId, pageId)}/programs`, token, signal }),
   link: (spaceId: string, token: string, input: { conversationId: string; pageId: string; blockId?: string;
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,
@@ -210,9 +208,7 @@ export interface PagePresenceState {
 
 export type PageSessionNotice =
   | { type: "session"; headRevision: number | null; canEdit: boolean }
-  /** The Automations the commit paused because their reference left the page. */
-  | { type: "committed"; revision: number; headRevision: number; author?: string;
-    detachedAutomations?: PageAutomationAnchorChange[] }
+  | { type: "committed"; revision: number; headRevision: number; author?: string }
   | { type: "suggestion"; revision: number; author: string }
   | { type: "access"; canEdit?: boolean; canRead?: boolean }
   | { type: "error"; code: string }

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  agentAccessModes,
   agentAvatarUrlFromMetadata,
   agentLaunchExecutable,
   agentPresetById,
@@ -89,7 +90,7 @@ test("ACP-native harnesses are registry entries with a launcher, ACP argv and ic
     jcode: ["jcode", ["acp"]],
     prime: ["prime-agent", ["--mode", "acp"]],
     trae: ["traecli", ["acp", "serve"]],
-    antigravity: ["agy_acp_server.par", ["--uid="]],
+    antigravity: ["agy", ["acp"]],
     autohand: ["autohand-acp", []],
     amp: ["amp-acp", []],
     reasonix: ["reasonix", ["acp"]],
@@ -139,4 +140,13 @@ test("agentPresetForLauncher never resolves the custom preset", () => {
   assert.equal(agentPresetForLauncher(""), undefined);
   assert.equal(agentPresetForLauncher("C:\\bin\\Cursor-Agent.CMD")?.id, "cursor");
   assert.equal(agentPresetForLauncher("claude_code")?.id, "claude");
+});
+
+test("a harness whose sandbox xMatrix cannot ask through is offered full access alone", () => {
+  // Claude Code and an ordinary ACP harness send permission requests the bridge can show as cards.
+  assert.deepEqual(agentAccessModes(agentPresetById("claude")), ["full", "ask"]);
+  assert.deepEqual(agentAccessModes(agentPresetById("opencode")), ["full", "ask"]);
+  // DeepSeek Harness's own sandbox fails a refused write outright, including the one every xmatrix command makes.
+  assert.deepEqual(agentAccessModes(agentPresetById("deepseek")), ["full"]);
+  assert.deepEqual(agentAccessModes(agentPresetById("codex")), ["full"]);
 });

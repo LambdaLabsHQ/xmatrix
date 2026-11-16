@@ -1,5 +1,5 @@
 "use client";
-import { decodeChannelSnapshot } from "@xmatrix/protocol";
+import { attachmentKind, channelPresenceInstances, decodeChannelSnapshot, extensionForMediaType, mediaTypeForName, type LiveChannel } from "@xmatrix/protocol";
 import type { UnsentMessageAction } from "./message-unsent-notice";
 import { loadImage as loadImageForClipboard, canvasToBlob as canvasToBlobForClipboard } from "./image-canvas";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, glideTimelineLanding, timelineLayoutMoved } from "./timeline-send-rise";
@@ -32,19 +32,15 @@ import {
 } from "./workspace-shell-constants";
 
 import {
-  channelAttachmentKindForMimeType,
-} from "./workspace-shell-formatters";
-import {
   pointerActivationAlreadyHandled,
   pointerActivationIsPending,
   rememberPointerActivation,
 } from "./pointer-activation-guard";
 
 import {
-  channelMembersByPresence,
+  isChannelResidentPresence,
   isOlderThan,
   latestAgentWorkEvent,
-  memberPresence,
   presenceStatusLabel,
   relativeTime,
 } from "./workspace-shell-presence";
@@ -152,7 +148,6 @@ export type OutgoingMessage = {
   channelId: string;
   body: string;
   invocationSelections?: ComposerSendSnapshot["invocationSelections"];
-  summonIntents?: ComposerSendSnapshot["summonIntents"];
   attachments: ChannelAttachment[];
   /** Files sent still uploading; the message is appended once they land (sent-upload.ts). */
   uploads?: SentUpload[];
@@ -564,11 +559,11 @@ export function restoreTimelineScrollTop(scrollContainer: HTMLDivElement | null,
   scrollContainer.scrollTop = Math.min(scrollTop, scrollContainer.scrollHeight);
 }
 
-export function channelHasAgentMembers(channel: ChannelSnapshot | null): boolean {
-  if (!channel) return false;
-  return channelMembersByPresence(channel).some(
-    (member) => memberPresence(channel, member).kind === "agent"
-  );
+/** Whether the work dock draws an Agent over this Channel's tail: the same
+ * resident Instances buildAgentWorkItems lists. Read it from the live Channel
+ * (useRealtimeChannelValue): the catalog's copy carries no Instances. */
+export function channelHasAgentMembers(channel: LiveChannel | null): boolean {
+  return channelPresenceInstances(channel?.presence).some(isChannelResidentPresence);
 }
 
 export function isTimelineNearBottom(scrollContainer: HTMLDivElement): boolean {
@@ -708,12 +703,12 @@ export function canMentionMessageSender(message: TimelineItem): boolean {
   return !message.recalledAt && (message.senderKind === "agent" || message.senderKind === "user");
 }
 
-export function rebornBodyForMessageSender(message: TimelineItem): string | null {
+export function rebornBodyForMessageSender(message: TimelineItem, status?: string): string | null {
   if (message.senderKind !== "agent" || message.reservedSystemAgent || message.recalledAt) {
     return null;
   }
   // Only for dead/offline instances; live controls already expose Reborn on the work dock.
-  if (!message.senderInstanceStale && message.senderStatus !== "offline") {
+  if (status !== "offline") {
     return null;
   }
   const mention = (message.senderMention || "").trim().replace(/^[@＠]/, "");
@@ -727,8 +722,8 @@ export function rebornBodyForMessageSender(message: TimelineItem): string | null
   return `@${name}:${ordinal}:reborn`;
 }
 
-export function canRebornMessageSender(message: TimelineItem): boolean {
-  return Boolean(rebornBodyForMessageSender(message));
+export function canRebornMessageSender(message: TimelineItem, status?: string): boolean {
+  return Boolean(rebornBodyForMessageSender(message, status));
 }
 
 export function isMessageActionBypassTarget(target: EventTarget): boolean {
@@ -768,7 +763,7 @@ export function presentationAttachmentKind(attachment: ChannelAttachment): Chann
   ) {
     return attachment.kind;
   }
-  return channelAttachmentKindForMimeType(attachment.mimeType, attachment.name);
+  return attachmentKind(attachment.mimeType, attachment.name);
 }
 
 export function attachmentSource(attachment: ChannelAttachment): string {
@@ -797,42 +792,11 @@ export function attachmentDownloadName(attachment: ChannelAttachment): string {
 
 export function attachmentFilenameForMimeType(name: string, mimeType: string): string {
   const safeName = name.replace(/[\\/\r\n]/g, "_").slice(0, 120) || "attachment";
-  const extension = attachmentExtensionForMimeType(mimeType);
+  const extension = extensionForMediaType(mimeType);
   if (!extension) return safeName;
-
-  const knownExtensionMatch = safeName.match(/\.(png|jpe?g|webp|gif|md|markdown|mdown|mkd|mp4|mov|webm|ogv|m4v)$/i);
-  if (knownExtensionMatch) {
-    return `${safeName.slice(0, -knownExtensionMatch[0].length)}.${extension}`;
-  }
-  return `${safeName}.${extension}`;
-}
-
-export function attachmentExtensionForMimeType(mimeType: string): string | null {
-  switch (mimeType.toLowerCase()) {
-    case "image/png":
-      return "png";
-    case "image/jpeg":
-      return "jpg";
-    case "image/webp":
-      return "webp";
-    case "image/gif":
-      return "gif";
-    case "text/markdown":
-    case "text/x-markdown":
-      return "md";
-    case "video/mp4":
-      return "mp4";
-    case "video/quicktime":
-      return "mov";
-    case "video/webm":
-      return "webm";
-    case "video/ogg":
-      return "ogv";
-    case "video/x-m4v":
-      return "m4v";
-    default:
-      return null;
-  }
+  // A known extension is replaced by the stored type's own; any other name keeps its tail.
+  const stem = mediaTypeForName(safeName) ? safeName.replace(/\.[a-z0-9]+$/iu, "") : safeName;
+  return `${stem}.${extension}`;
 }
 
 function attachmentFetchHref(attachment: ChannelAttachment): string {

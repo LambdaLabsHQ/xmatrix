@@ -24,8 +24,8 @@ const NOTICE = { messageId: "notice", channelId: CHANNEL.id, sequence: 2, sentAt
 const CLAUDE_ITEM = { id: "claude", installed: true, probeStatus: "ok", version: "2.1.292", login: "signed_out" };
 
 async function openRefusedSummon(page: Parameters<typeof openWorkspaceWithStubs>[0], ownerUserId = "e2e-user", notice = NOTICE,
-  item: Record<string, unknown> & { id: string } = CLAUDE_ITEM) {
-  const registrations = [{ key: { spaceId: E2E_SPACE.id, ownerUserId, machineId: MACHINE, harness: item.id },
+  item: Record<string, unknown> & { id: string } = CLAUDE_ITEM, registered = true) {
+  const registrations = !registered ? [] : [{ key: { spaceId: E2E_SPACE.id, ownerUserId, machineId: MACHINE, harness: item.id },
     displayName: item.id, ownerName: "E2E Tester", machineName: "mac-mini", version: 1, state: "enabled", models: [],
     routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true,
     live: { machine: { online: true, platform: "macos" }, running: [] } }];
@@ -81,6 +81,20 @@ test("a turn its program refused as signed out is signed in from its notice, and
   await signInFromNotice(page, notice);
   await expect(notice).toContainText("Send your message again to continue.");
   expect(await fixtureRequestBodies(page, "launch-anyway")).toEqual([]);
+});
+
+test("an Agent's sign-in request is signed in on its card by the machine's owner, who needs no Agent for it here", async ({ page }) => {
+  const request = { ...NOTICE, body: "**claude** asks to sign in Claude Code on mac-mini: the nightly build needs it\n\n" +
+    "The machine's owner signs it in on this card.",
+    metadata: { kind: "xmatrix.harness-signed-out.v1", signedOut, requestedBy: "claude", requestId: "r1",
+      xmatrixSystemNotice: true, xmatrixProvenance: "system_fact" } };
+  const notice = await openRefusedSummon(page, "e2e-user", request, CLAUDE_ITEM, false);
+  await expect(notice).toContainText("claude asks to sign in Claude Code on mac-mini: the nightly build needs it", { timeout: 20_000 });
+  await signInFromNotice(page, notice);
+  await expect(notice).toContainText("Signed in. Tell claude to go on.");
+  // The request answers no summon: nothing is sent again.
+  expect(await fixtureRequestBodies(page, "launch-anyway")).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath("sign-in-request-card.png") });
 });
 
 test("a program set up only on its machine shows its own words, and a check after setting it up sends the summon again", async ({ page }) => {

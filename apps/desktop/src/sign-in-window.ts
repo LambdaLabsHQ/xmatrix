@@ -59,7 +59,9 @@ export async function signInWithWindow(id: SignInServiceId, parent: BrowserWindo
     title: service.title,
     show: false,
     autoHideMenuBar: true,
-    ...(parent && !parent.isDestroyed() ? { parent } : {}),
+    // Not a child of the app's window: on a Mac a child of a full-screen window takes over its
+    // Space, and closing it left the app's window black (electron#39614). The opener is brought back instead.
+    fullscreenable: false,
     webPreferences: { partition: `persist:sign-in-${id}`, contextIsolation: true, nodeIntegration: false, sandbox: true },
   });
   const result = new Promise<SignInResult>((resolve) => {
@@ -72,6 +74,10 @@ export async function signInWithWindow(id: SignInServiceId, parent: BrowserWindo
       clearInterval(poll);
       open.delete(id);
       if (!window.isDestroyed()) window.close();
+      if (parent && !parent.isDestroyed()) {
+        parent.show();
+        parent.focus();
+      }
       resolve(value);
     };
     const check = async () => {

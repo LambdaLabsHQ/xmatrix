@@ -20,13 +20,14 @@ import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
-import { tellPageAutomationChannels } from "./page-automation-wake";
+import { syncPagePrograms } from "./norn-page-programs";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
 import { findAppConnection } from "./apps";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
 import { relayContentRepository } from "./relay-r2-upload-private-api";
+import { r2ObjectResponse, readR2Object } from "./r2-range-response";
 import { parsePageAssistantOutput, PAGE_ASSISTANT_OUTPUT_PATH } from "./page-assistant-output";
 import { relayRuntimeCellNamed, relayRuntimeOwnerCellName } from "./relay-authority-locator";
 import { RELAY_RUNTIME_CELL_HEADER } from "./runtime-transport/runtime-cell-locator";
@@ -55,6 +56,11 @@ function database(env: Env) {
 
 function repository(env: Env): PostgresPageRepository {
   return new PostgresPageRepository(database(env), { creditsWaivedSpaceId: platformAdminSpaceId(env) });
+}
+
+/** The pages a conversation is linked to, whole, as `reader` may open them. A new Run reads them at launch. */
+export function linkedPages(env: Env, conversationId: string, reader: PagePrincipal) {
+  return repository(env).conversationPages({ requestId: crypto.randomUUID(), conversationId, principal: reader });
 }
 
 /** A private media ref may only be bound by a writer of its target Page. */
@@ -165,22 +171,10 @@ async function pageMediaResponse(c: Context<{ Bindings: Env }>, input: { spaceId
   const bucket = c.env.RELAY_PAYLOAD_BUCKET;
   if (!bucket) throw new ServiceUnavailable("private_storage_unavailable", "Page media is unavailable");
   const key = immutableContentObjectKey(spaceVisibilityScope(input.spaceId), media.contentHash);
-  const ranged = c.req.raw.headers.has("range");
-  const object = await (ranged ? bucket.get(key, { range: c.req.raw.headers }).catch(() => bucket.get(key))
-    : bucket.get(key));
+  const { object, ranged } = await readR2Object(bucket, key, c.req.raw.headers);
   if (!object) return notShown();
-  const headers = new Headers({ "content-type": media.mimeType, "cache-control": input.cacheControl,
-    "x-content-type-options": "nosniff", "accept-ranges": "bytes", etag: object.httpEtag });
-  const range = ranged ? object.range : undefined;
-  if (!range) {
-    headers.set("content-length", String(object.size));
-    return new Response(object.body, { status: 200, headers });
-  }
-  const offset = "suffix" in range ? object.size - range.suffix : range.offset ?? object.size - range.length!;
-  const length = "suffix" in range ? range.suffix : range.length ?? object.size - offset;
-  headers.set("content-length", String(length));
-  headers.set("content-range", `bytes ${offset}-${offset + length - 1}/${object.size}`);
-  return new Response(object.body, { status: 206, headers });
+  return r2ObjectResponse(object, ranged, new Headers({ "content-type": media.mimeType,
+    "cache-control": input.cacheControl, "x-content-type-options": "nosniff", etag: object.httpEtag }));
 }
 
 /** A started page's document is at most this much Yjs state. */
@@ -223,9 +217,9 @@ export function sessionPrincipal(authUser: AuthUser, conversationId?: string): P
 }
 
 /**
- * A page is named by the heading its document opens with (pages-live-document.md §4.1), so a
- * rename edits that line, through the live session like any edit: people on the page see it at
- * once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
+ * A page is named by its document's first top-level heading (pages-live-document.md §4.1), so a
+ * rename edits that line where it stands, through the live session like any edit: people on the page
+ * see it at once, and what they are typing elsewhere stays. A head that moves meanwhile is read again once.
  */
 async function renamePage(env: Env, spaceId: string, pageId: string, authUser: AuthUser, title: string): Promise<void> {
   const name = pageTitle(title);
@@ -360,6 +354,9 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
     });
+    if (!started && typeof body.body === "string" && body.body.includes("norn run")) {
+      await syncPagePrograms(c.env, { spaceId, pageId: created.page.pageId, userId: authUser.agentRun?.ownerUserId ?? authUser.id });
+    }
     if (!started) return created;
     let seeded = false;
     try {
@@ -456,16 +453,15 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     })) };
   }));
 
-  // How far the caller has read the page: what changed after it is shown as a
-  // change when they open the page again (pages-live-document.md §3.1).
+  // How far the caller has read the page: History shows first what changed
+  // after it when they come to the page again (pages-live-document.md §3.2).
   app.get(`${base}/:pageId/read`, async (c) => run(c, async () => repository(c.env).readState({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
     principal: await principal(c) })));
   app.put(`${base}/:pageId/read`, async (c) => run(c, async () => {
     const body = await json(c);
     return repository(c.env).markRead({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
-      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision),
-      seen: typeof body.seen === "string" ? body.seen : null });
+      pageId: c.req.param("pageId"), principal: await principal(c), revision: integer(body.revision) });
   }));
 
   // Co-writing (docs/design/pages-live-document.md §4.2): a person starts it from the page for a
@@ -769,7 +765,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       principal: runPrincipalOf(authUser), revision: Number(c.req.param("revision")),
       baseRevision: integer(body.baseRevision),
     });
-    await tellPageAutomationChannels(c.env, result.automationChannels);
+    await syncPagePrograms(c.env, { spaceId: c.req.param("spaceId"), pageId: c.req.param("pageId"),
+      userId: authUser.agentRun?.ownerUserId ?? authUser.id });
     await refreshSession(c.env, c.req.param("spaceId"), c.req.param("pageId"), authUser);
     return { page: result.page, revision: result.revision };
   }));
@@ -845,10 +842,8 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     linkId: c.req.param("linkId"),
   })));
 
-  // The pages a conversation is linked to, whole, for the mirror a Run reads:
-  // as the caller, or through the Machine Daemon as the Machine's owner.
-  const linkedPages = (env: Env, conversationId: string, reader: PagePrincipal) =>
-    repository(env).conversationPages({ requestId: crypto.randomUUID(), conversationId, principal: reader });
+  // The pages a conversation is linked to, whole: as the caller, or through the
+  // Machine Daemon as the Machine's owner.
 
   app.get("/api/channels/:channelId/pages", async (c) => run(c, async () =>
     linkedPages(c.env, c.req.param("channelId"), await principal(c))));

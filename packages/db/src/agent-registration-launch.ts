@@ -5,14 +5,17 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
 import {
+  agentLaunchAccess,
+  REGISTRATION_ACCESS_ASK_CAPABILITY,
   agentLaunchExecutable,
   AUTO_LAUNCH_FIELDS,
+  formatAutoLaunchMention,
+  parseLaunchConditions,
   agentPresetForLauncher,
   agentPresetById,
   harnessCommandLine,
   harnessTooOld,
   parseHarnessInventory,
-  harnessItemObservedAt,
   digestCanonicalCloneCborV1,
   parseSpaceAgentRegistrationKey,
   parseSpaceAgentConfiguration,
@@ -23,12 +26,12 @@ import {
   parseAgentRoutingRequirements,
   selectionLaunchConditions,
   sameAgentRegistration,
-  type SpaceAgentRegistrationKey,
+  type QuotaRetryRegistration, type SpaceAgentRegistrationKey, type RegistrationResourceLimits,
   type AgentRoutingRequirements,
   type RegistrationLaunchBinding,
   registrationLaunchBindingForDaemon,
   parseAgentRegistrationEnvironment,
-  routingModelCatalogObservation,
+  routingModelCatalogObservation, routingModelOptionNamed,
   hostObservedRequirements,
   machineResourceObservation,
   machineMentionValue, machineTagSelects,
@@ -43,17 +46,16 @@ import {
   validateHarnessParameterValues,
   type AutoLaunchTags,
   type HarnessTooOld,
-  type MachineAgents,
-  type HarnessSignedOut,
+  type MachineAgents, type QuotaExhausted,
   type OfflineMachine,
   type LaunchMachineBlock,
   type LaunchParameterEvidence,
-  type DraftSummonIntent,
   type AgentRegistrationLaunch, utf8ByteLength, hasControlCharacter,
-  currentRoutingQuotaWindows,
+  currentRoutingQuotaWindows, RUN_PHASES_BEFORE_READY,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
+import { singleReadStatements } from "./single-read-statements.js";
 import { registrationInstructionsSpawnFields } from "./registration-instructions-spawn.js";
 import { connectedAppsSpawnFields } from "./connected-apps-spawn.js";
 import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
@@ -61,7 +63,8 @@ import { RegistrationAccessError, registrationRouteRefusal } from "./agent-regis
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
-import { currentRegistrationQuotaJoin, registrationQuotaReading } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage,
+  type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
 import { firstMessageSummonId, messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
 import { initialMessageSource, withInitialMessageSource } from "./runtime-initial-input.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -80,12 +83,17 @@ interface LaunchRequest {
   modelResource?: string;
   /** Omit model/effort overrides when no runtime model observation exists. */
   useRuntimeDefaultModel?: true;
+  /** On the runtime default: the runtime's own catalog model it switches to as
+   * it starts, as a live `/model` would. Never a model resource or a grant. */
+  preferredModel?: string;
   /** Absent means a private managed directory with no registered workspace. */
   workspaceReference?: string;
   /** Host abilities the routed daemon must currently report (e.g. `github`). */
   requiredHostCapabilities?: string[];
   /** Caller context copied onto the Run; launch-owned keys always win. */
   runMetadata?: Record<string, unknown>;
+  /** Any-input launches retain authored constraints for allocation and replay. */
+  launchConditions?: AutoLaunchTags;
   /** Caller-owned Run/Instance identities, e.g. a schedule occurrence's. */
   runId?: string; instanceId?: string;
   /** The message this launch answers; its wrapper acknowledges it. Not a fence. */
@@ -114,13 +122,18 @@ export interface RegistrationLaunchCandidate {
   supportsRequestedEffort?: boolean;
   /** Its daemon applies a requested effort to the runtime's own default model. */
   supportsDefaultModelEffort?: boolean;
+  /** Its daemon has the runtime switch to a preferred model from the runtime's
+   * own catalog as it starts (`registration_native_model_v1`). */
+  supportsNativeModel?: boolean;
   supportsRequestedParameters?: boolean;
   modelAliases?: Record<string, string>;
   observations?: {
     evaluatedAt: string; machineResources?: MachineResourceObservation;
     outstandingMachineAllocations: number; outstandingRegistrationAllocations: number;
+    /** The account's own headroom (`windows`: its account windows) and the
+     * stored reading every model's headroom is read from. */
     quota: { remainingPercent: number; assumed: boolean; observedAt?: string; expiresAt?: string; source?: string;
-      windows?: RoutingQuotaWindow[] };
+      windows?: RoutingQuotaWindow[]; usage?: RegistrationQuotaUsage };
   };
   workspaceReferences: string[];
   workspaces: Array<{ reference: string; canonicalCwd?: string; repo?: string; description: string; machineId: string }>;
@@ -132,11 +145,33 @@ export interface RegistrationLaunchCandidate {
   /** The latest Run of this environment in the Space that failed to start
    * within the last STARTUP_FAILURE_WINDOW_MINUTES; routing ranks it last. */
   startupFailedAt?: string;
+  /** When this environment last took a summon and ended its turn with
+   * no reply, within SILENT_SUMMON_WINDOW_HOURS, each of its last
+   * SILENT_SUMMONS summons in the Space having gone that way; routing ranks it last. */
+  unansweredAt?: string;
   /** The harness's median time from a connected Run to its first reply,
    * across every launch in the last RESPONSE_LATENCY_WINDOW_DAYS; absent with
    * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
   responseLatencyMs?: number;
 }
+
+/** The declared models a registration's grant and policy both allow; empty
+ * when it declares none (the runtime default). Declared models that are not
+ * allowed never widen into the runtime default: undefined then. */
+export function registrationAllowedModels(configuration: ReturnType<typeof parseSpaceAgentConfiguration>,
+  grant: RegistrationResourceLimits, policy: RegistrationResourceLimits): string[] | undefined {
+  const declared = [...new Set([...(configuration.routing?.models ?? []), ...(configuration.model ? [configuration.model] : [])])];
+  const models = declared.filter(model => grant.models.includes(model) && policy.models.includes(model));
+  return declared.length && !models.length ? undefined : models;
+}
+
+/** What decides which models an environment can run now: its declared
+ * models, its runtime's catalog, and the provider reading every model's
+ * headroom is read from. A resumed Instance's model is chosen from these. */
+export type RegistrationModelFacts = Pick<RegistrationLaunchCandidate, "models" | "modelCatalog" | "modelAliases" |
+  "parameterModel" | "supportsRequestedEffort" | "supportsDefaultModelEffort" | "supportsNativeModel"> & {
+  observations?: { quota?: Pick<NonNullable<RegistrationLaunchCandidate["observations"]>["quota"], "usage"> };
+};
 
 /** The window and the least sample a harness's measured reply latency needs. */
 export const RESPONSE_LATENCY_WINDOW_DAYS = 30;
@@ -163,13 +198,21 @@ const RECONNECT_WAIT_UNTIL_SQL = (alias: string) =>
 
 /** How long a failed start keeps an environment behind every other (the breaker). */
 export const STARTUP_FAILURE_WINDOW_MINUTES = 30;
-/** How long a start or turn refused as signed out keeps its registration out
- * of routing, unless its machine reports its harnesses again sooner. */
-export const SIGNED_OUT_FAILURE_WINDOW_HOURS = 24;
-/** Run phases a process that exits in them never started: the stored
- * (normalized) form of the phases a startup failure notice is posted for. */
-const STARTUP_FAILURE_PHASES = ["wrapper_startup_failed", "auth_resolving", "workspace_registering",
-  "relay_registering", "relay_register_retrying", "relay_auth_refresh_retrying", "runtime_starting"] as const;
+/**
+ * A harness that starts and connects but does no work ends its turn without
+ * a word and without an error, in seconds or after half an hour: nothing
+ * fails, so nothing else notices. When an environment's last SILENT_SUMMONS summons all ended
+ * that way, the latest of them within SILENT_SUMMON_WINDOW_HOURS, automatic
+ * assignment tries every other environment first. It is tried again once
+ * that window has passed, and one more silent summon puts it last again; a
+ * summon it answers clears it.
+ */
+export const SILENT_SUMMONS = 3;
+export const SILENT_SUMMON_WINDOW_HOURS = 24;
+/** How far back its summons are read. */
+export const SILENT_SUMMON_HISTORY_DAYS = 7;
+/** How many successors one handoff tries when each fails to start. */
+export const HANDOFF_FALLBACK_ATTEMPTS = 3;
 export type RegistrationLaunchChooser = (input: {
   message: string; sourceSequence?: number; tags: AutoLaunchTags; candidates: RegistrationLaunchCandidate[];
   /** Registrations seen but not offered, so an empty list can name the real cause. */
@@ -179,17 +222,16 @@ export type RegistrationLaunchChooser = (input: {
   /** The conversation co-writes a page or discusses a passage of one: only the private managed directory is
    * offered, ready at once, with no repository to check out first. */
   managedOnly?: true;
-  /** The mention being decided, when a message launches: Jev first reads
-   * whether its author is asking an Agent to start, unless `launch:force`. */
-  summon?: { text: string; start: number; end: number; authorKind: "user" | "agent";
-    /** Jev read it as a request while the author typed, and the author sent it. */
-    readInDraft?: true };
+  /** The mention being launched, when a message launches: its send asked for it to start. */
+  summon?: { text: string; start: number; end: number };
   /** A message that summons nobody: Jev first reads whether its author wants
    * an Agent to start now. */
   askToStart?: true;
   /** Told the harness as soon as Jev has read it, before the rest is chosen. */
   onHarness?: (harness: string) => Promise<void>;
 }) => Promise<{ key: SpaceAgentRegistrationKey; model: string; modelResource?: string; effort?: string; parameters?: Record<string, string>; useRuntimeDefaultModel?: true;
+  /** With the runtime default: a model from the runtime's own catalog it switches to as it starts. */
+  preferredModel?: string;
   workspaceReference?: string; parameterEvidence?: LaunchParameterEvidence }>;
 
 /** Whether Jev read anything for this launch: an intent, a harness's fit, or a choice with more than one
@@ -213,8 +255,13 @@ const text = (value: string, maximum = 300) => {
 /** A Jev choice becomes launch parameters; the chosen registration fixes the harness. */
 /** The runtime default names no model and requests no model resource. Any
  * named model must be one of the candidate's allowed models, compared
- * literally; an empty list allows none. */
-function selectedModelGranted(candidate: RegistrationLaunchCandidate, selected: { model: string; modelResource?: string; useRuntimeDefaultModel?: true }) {
+ * literally; an empty list allows none. A preferred model rides only on the
+ * runtime default of a registration that declares no models, and must be in
+ * the runtime's own fresh catalog on a daemon that applies it. */
+function selectedModelGranted(candidate: RegistrationLaunchCandidate,
+  selected: { model: string; modelResource?: string; useRuntimeDefaultModel?: true; preferredModel?: string }) {
+  if (selected.preferredModel !== undefined && (!selected.useRuntimeDefaultModel || candidate.models.length ||
+    !candidate.supportsNativeModel || !candidate.modelCatalog?.some(option => option.model === selected.preferredModel))) return false;
   if (selected.useRuntimeDefaultModel) return selected.model === "" && !selected.modelResource;
   return candidate.models.includes(selected.modelResource ?? selected.model);
 }
@@ -240,6 +287,7 @@ function validateSelectedHarnessParameters(candidate: RegistrationLaunchCandidat
 const selectedParameters = (selected: Awaited<ReturnType<RegistrationLaunchChooser>>, harness: string) => ({
   ...(selected.modelResource ? { modelResource: selected.modelResource } : {}),
   ...(selected.useRuntimeDefaultModel ? { useRuntimeDefaultModel: true as const } : {}),
+  ...(selected.preferredModel ? { preferredModel: selected.preferredModel } : {}),
   ...(selected.parameterEvidence ? { parameterEvidence: selected.parameterEvidence } : {}),
   requirements: { ...(selected.parameters ? { parameters: selected.parameters } : {}), model: selected.model, ...(selected.effort ? { effort: selected.effort } : {}),
     unattended: false, requiredCapabilities: [], harness } });
@@ -264,10 +312,12 @@ function registrationLaunchRuntime(launch: AgentRegistrationLaunch | undefined, 
  * requires to name the registration's harness; a declared runtime (e.g. an
  * absolute path) need not resolve to a preset, so the harness names it. */
 export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | undefined, harness: string) {
+  const { access, runtimeArgs, acpArgs } = agentLaunchAccess(launch, agentPresetById(harness) ?? agentPresetForLauncher(harness));
   return { runtime: registrationLaunchRuntime(launch, harness), agentPresetId: harness,
-    ...(launch?.runtimeArgs.length ? { runtimeArgs: launch.runtimeArgs } : {}),
+    ...(runtimeArgs.length ? { runtimeArgs } : {}),
     ...(launch?.backend ? { agentBackend: launch.backend } : {}),
-    ...(launch?.acpArgs?.length ? { agentAcpArgs: launch.acpArgs } : {}),
+    ...(acpArgs.length ? { agentAcpArgs: acpArgs } : {}),
+    access,
     // A daemon released before the sandbox was retired sandboxes unless told not to.
     sandboxMode: "off" as const };
 }
@@ -284,6 +334,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     if (!requirements.model && !raw.useRuntimeDefaultModel || raw.useRuntimeDefaultModel && (requirements.model || raw.modelResource)) {
+      throw new RegistrationAccessError("invalid_registration_launch", 400);
+    }
+    if (raw.preferredModel !== undefined && (!raw.useRuntimeDefaultModel || text(raw.preferredModel, 160) !== raw.preferredModel)) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
     if (Object.hasOwn(raw, "oneshot")) throw new RegistrationAccessError("invalid_registration_launch", 400);
@@ -368,8 +421,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     try {
       allocation = await capacity.reserve({ requestId: input.commandId, key, runId: String(intent.run_id),
         sourceCommandId: input.commandId, actorUserId: input.actorUserId, authorizationDigest: String(intent.authorization_digest), requirements });
-      const workspace = await this.workspace(input);
       const launch = await this.launchSettings(input, allocation.environmentVersion);
+      // An `ask` launch needs a daemon that shows permission requests instead of answering them.
+      const workspace = await this.workspace(input, launch?.access === "ask");
       // Workspace values are checked against the selected registered reference,
       // never resolved from a caller-supplied path or repository name.
       const source = await this.database.transaction({ requestId: input.commandId, operation: "registration.launch.workspace-constraints",
@@ -431,7 +485,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   private async machineKnownAs(ownerUserId: string, machineId: string, tag: string): Promise<boolean> {
     if (tag === machineId) return true;
     const rows = await this.directory.transaction({ requestId: `registration-machine-name:${machineId}`,
-      operation: "registration.launch.machine-name" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
+      operation: "registration.launch.machine-name", statement: "single_read" }, tx => tx.query({ name: "registration_launch_machine_name_v3",
       text: `SELECT name FROM data.machines WHERE owner_user_id=$1 AND machine_id=$2`,
       values: [ownerUserId, machineId], maxRows: 1 }));
     return machineTagSelects(tag, machineId, String(rows[0]?.name ?? ""));
@@ -439,7 +493,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   /** Undefined when no message carries the invocation. */
   private async source(tx: DatabaseTransaction, input: LaunchRequest) {
-    if (input.sourceMessageId === undefined) return undefined;
+    if (input.sourceMessageId === undefined) {
+      if (input.launchConditions) await this.validateConditions(tx, input,
+        parseLaunchConditions(formatAutoLaunchMention(input.launchConditions), "@auto".length));
+      return undefined;
+    }
     const source = await readMessageInvocationSelections(tx, { deriveFromText: true, spaceId: input.key.spaceId, channelId: input.channelId,
       messageId: input.sourceMessageId, actorUserId: input.actorUserId, body: input.body });
     await assertQuotaRetryAdmission(tx, { channelId: input.channelId, actorUserId: input.actorUserId, admission: input.quotaRetry,
@@ -466,24 +524,52 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw new RegistrationAccessError("registration_invocation_target_mismatch", 403);
     }
     const options = selectionLaunchConditions(input.body, selection);
+    await this.validateConditions(tx, input, options);
+    return source;
+  }
+
+  /** Whether the author's `model:` names the preferred model in the runtime's
+   * catalog this registration last reported. Selection already required a fresh
+   * catalog; this only proves the launch is the model the author wrote, so a
+   * replay after the catalog aged still matches. */
+  private async preferredModelNamed(tx: DatabaseTransaction, input: LaunchRequest, written: string): Promise<boolean> {
+    const rows = await tx.query({ name: "registration_launch_preferred_model_v1", text: `SELECT i.presentation_json->'models' AS models,
+        i.presentation_json->>'modelsObservedAt' AS observed_at
+      FROM data.run_agent_registrations r JOIN data.instances i ON i.run_id=r.run_id
+      WHERE r.space_id=$1 AND r.owner_user_id=$2 AND r.machine_id=$3 AND r.harness=$4
+        AND jsonb_typeof(i.presentation_json->'models')='array'
+        AND pg_input_is_valid(i.presentation_json->>'modelsObservedAt','timestamp with time zone')
+      ORDER BY (i.presentation_json->>'modelsObservedAt')::timestamptz DESC,i.instance_id LIMIT 1`,
+    values: [input.key.spaceId, input.key.ownerUserId, input.key.machineId, input.key.harness], maxRows: 1 });
+    const observedAt = typeof rows[0]?.observed_at === "string" ? Date.parse(rows[0].observed_at) : NaN;
+    // Read as of its own time: the catalog's age bounds selection, not this check.
+    const catalog = Number.isFinite(observedAt)
+      ? routingModelCatalogObservation(rows[0]!.models, rows[0]!.observed_at, observedAt)?.value : undefined;
+    return catalog?.some(option => option.model === input.preferredModel && routingModelOptionNamed(option, written)) === true;
+  }
+
+  private async validateConditions(tx: DatabaseTransaction, input: LaunchRequest, options: { tags: AutoLaunchTags; error?: string }) {
     const tags = options.tags;
     const machineOk = !tags.machine || await this.machineKnownAs(input.key.ownerUserId, input.key.machineId, tags.machine);
-    if (options.error || (input.useRuntimeDefaultModel && tags.model) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
+    // A written model rides on the runtime default only as the catalog model it named.
+    const writtenModelPreferred = tags.model !== undefined && input.preferredModel !== undefined &&
+      await this.preferredModelNamed(tx, input, tags.model);
+    if (options.error || (input.useRuntimeDefaultModel && tags.model && !writtenModelPreferred) || (tags.repo && input.workspaceReference !== `repo:${repoSummonReference(tags.repo)}`) ||
         (tags.pwd && input.workspaceReference === undefined) ||
         (tags.machine && !machineOk) ||
         (tags.harness && canonicalRegistrationHarness(tags.harness) !== input.key.harness) ||
-        (tags.model && tags.model !== input.requirements.model && tags.model !== input.modelResource) ||
+        (tags.model && tags.model !== input.requirements.model && tags.model !== input.modelResource && !writtenModelPreferred) ||
         (tags.effort && tags.effort !== input.requirements.effort) ||
         !sameHarnessParameterValues(launchHarnessParameters(tags), input.requirements.parameters ?? {})) {
       throw new RegistrationAccessError("invalid_registration_launch", 400);
     }
-    return source;
   }
 
   /** The environment revision admitted by the reservation is the one whose
    * launch settings start the Run; a later edit waits for the next launch. */
   private async launchSettings(input: LaunchRequest, environmentVersion: number) {
-    return this.directory.transaction({ requestId: input.commandId, operation: "registration.launch.settings" }, async tx => {
+    return this.directory.transaction({ requestId: input.commandId, operation: "registration.launch.settings",
+      statement: "single_read" }, async tx => {
       const rows = await tx.query({ name: "registration_launch_settings_v1", text: `SELECT declaration_json,version
         FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
       values: [input.key.ownerUserId,input.key.machineId,input.key.harness], maxRows: 1 });
@@ -502,7 +588,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   // still requires a local installation record, so it cannot be routed here.
   // A daemon in the reconnect grace routes too, and the route says until when
   // the launch waits for it (`reconnect_wait_until`).
-  private async workspace(input: LaunchRequest) {
+  private async workspace(input: LaunchRequest, ask: boolean) {
     const required = input.requiredHostCapabilities ?? [];
     // An effort on the runtime default model needs a daemon that carries it there.
     const defaultModelEffort = input.useRuntimeDefaultModel === true && Boolean(input.requirements.effort);
@@ -520,7 +606,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         }
         // A daemon runs a registered launch with no workspace reference only
         // once it declares the managed-directory capability.
-        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v7",
+        const repoRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_repo_route_v8",
           text: `SELECT hostname,${RECONNECT_WAIT_UNTIL_SQL("daemon.")} AS reconnect_wait_until FROM data.machine_daemons daemon
           WHERE owner_user_id=$1 AND machine_id=$2 AND (status='online' OR ${RECONNECTING_DAEMON_SQL("daemon.")})
             AND capabilities_json ? 'registration_launch_v3'
@@ -528,10 +614,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND (NOT $4::boolean OR capabilities_json ? 'registration_optional_model_v1')
             AND (NOT $6::boolean OR capabilities_json ? 'machine_routing_parameters_v1')
             AND (NOT $7::boolean OR capabilities_json ? 'registration_default_effort_v1')
+            AND (NOT $8::boolean OR capabilities_json ? 'registration_native_model_v1')
+            AND (NOT $9::boolean OR capabilities_json ? '${REGISTRATION_ACCESS_ASK_CAPABILITY}')
             AND ${HOST_CAPABILITY_ROUTE_SQL("$5")} LIMIT 2 FOR SHARE`,
           values: [input.key.ownerUserId,input.key.machineId,reference === undefined ? "registration_managed_v1" : null,
             input.useRuntimeDefaultModel === true, capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0,
-            defaultModelEffort], maxRows: 2 });
+            defaultModelEffort, input.preferredModel !== undefined, ask], maxRows: 2 });
         const routes = await repoRoutes(required);
         const unrouted = reference === undefined ? "registration_managed_route_unavailable" : "registration_repo_route_unavailable";
         if (!routes.length) throw await refuse(unrouted, () => repoRoutes([]), input.key);
@@ -543,7 +631,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(repo ? { remote_repo: repo } : {}), metadata_json: { displayName: repo ?? "xMatrix", managedWorkspaceKey: managedKey,
             syntheticManagedWorkspace: true, ...(repo ? { remoteRepo: repo } : {}) } };
       }
-      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v6",
+      const workspaceRoutes = (capabilities: readonly string[]) => tx.query({ name: "registration_launch_workspace_v7",
         text: `SELECT w.canonical_cwd,w.metadata_json,d.hostname,${RECONNECT_WAIT_UNTIL_SQL("d.")} AS reconnect_wait_until
         FROM data.workspaces w JOIN data.machine_daemons d ON d.owner_user_id=w.owner_user_id AND d.machine_id=w.machine_id
         WHERE w.workspace_id=$1 AND w.owner_user_id=$2 AND w.machine_id=$3 AND (d.status='online' OR ${RECONNECTING_DAEMON_SQL("d.")})
@@ -551,9 +639,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           AND (NOT $4::boolean OR d.capabilities_json ? 'registration_optional_model_v1')
           AND (NOT $6::boolean OR d.capabilities_json ? 'machine_routing_parameters_v1')
           AND (NOT $7::boolean OR d.capabilities_json ? 'registration_default_effort_v1')
+          AND (NOT $8::boolean OR d.capabilities_json ? 'registration_native_model_v1')
+          AND (NOT $9::boolean OR d.capabilities_json ? '${REGISTRATION_ACCESS_ASK_CAPABILITY}')
           AND ${HOST_CAPABILITY_ROUTE_SQL("$5", "d.")} LIMIT 1 FOR SHARE OF w,d`,
         values: [input.workspaceReference,input.key.ownerUserId,input.key.machineId,input.useRuntimeDefaultModel === true,
-          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0, defaultModelEffort], maxRows: 1 });
+          capabilities, Object.keys(input.requirements.parameters ?? {}).length > 0, defaultModelEffort,
+          input.preferredModel !== undefined, ask], maxRows: 1 });
       const rows = await workspaceRoutes(required);
       if (!rows[0]) throw await refuse("registration_workspace_or_daemon_unavailable", () => workspaceRoutes([]),
         { ...input.key, workspaceId: reference });
@@ -608,6 +699,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         ...(workspace.managed_key && !workspace.remote_repo ? { managementSpaceId: workspace.managed_key } : {}),
         ...(initialMessageId !== undefined ? { sourceMessageId: initialMessageId } : {}),
         context: { ...(!input.useRuntimeDefaultModel ? { requestedModel: allocation.runtimeModel } : {}),
+          ...(input.useRuntimeDefaultModel && input.preferredModel ? { preferredModel: input.preferredModel } : {}),
           ...(input.requirements.effort ? { requestedEffort: input.requirements.effort } : {}),
           ...(input.requirements.parameters ? { requestedParameters: input.requirements.parameters } : {}) },
         ...registrationInstructionsSpawnFields(configuration), ...spaceRules, ...connectedApps,
@@ -628,6 +720,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         summonedByUserId: input.actorUserId, identityKind: "instance",
         requestedRuntimeModel: allocation.runtimeModel ?? null, modelResource: resources.models[0] ?? null,
         agentName: row.display_name, useRuntimeDefaultModel: input.useRuntimeDefaultModel === true,
+        ...(input.useRuntimeDefaultModel && input.preferredModel ? { preferredRuntimeModel: input.preferredModel } : {}),
         ...(workspace.remote_repo ? { remoteRepo: workspace.remote_repo, runWorktree: true } : {}),
         ...(input.parameterEvidence ? { routingDecision: { source: jevDecided(input.parameterEvidence) ? "jev" : "deterministic",
           parameters: input.parameterEvidence, rows: [], machine: boundMachine(input.key.machineId, input.machineName) } } : {}) };
@@ -711,12 +804,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     quotaRetry?: AgentQuotaRetryAdmission;
     onlySelectionIndex?: number;
     commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
-    /** The author's "launch anyway" for one mention Jev read as a non-request:
-     * only that summon is prepared, as if it carried `launch:force`. */
+    /** "Start" on a mention its send did not launch: only that summon is
+     * prepared, as if it carried `launch:force`. */
     forceMention?: string;
-    /** Jev's reading of each summon while the author typed, by its text; the
-     * author sent the message knowing it, so it answers the intent question. */
-    draftIntents?: ReadonlyArray<DraftSummonIntent>;
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
       sourceMessageId = text(input.sourceMessageId), commandId = text(input.commandId, 200);
@@ -739,26 +829,31 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     const prepared: Array<{ runId: string; instanceId: string; launchId: string; reused: boolean }> = [];
     const rejected: Array<{ selectionIndex: number; code: string; sourceMention: string; tooOld?: HarnessTooOld;
-      signedOut?: HarnessSignedOut; offline?: OfflineMachine[]; machineAgents?: MachineAgents;
-      quotaTargets?: SpaceAgentRegistrationKey[] }> = [];
+      offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaExhausted?: QuotaExhausted;
+      quotaTargets?: QuotaRetryRegistration[]; quotaRefusedThrough?: string }> = [];
     // The summon as written, address through its last condition: the text the
     // web parses from the message and binds this launch or refusal to.
     const summonText = (selection: { start: number; end: number; text: string }) =>
       input.body.slice(selection.start, selectionLaunchConditions(input.body, selection).end);
-    // A refusal keeps what its error says is too old, signed out or offline, so the reply can name it,
+    // A refusal keeps what its error says is too old or offline, so the reply can name it,
     // and for a named machine that does not run the Agent, what that machine does run.
     const refused = async (selectionIndex: number, selection: { start: number; end: number; text: string }, code: string,
       error: unknown) => {
       const tooOld = error instanceof RegistrationAccessError ? error.tooOld : undefined;
-      const signedOut = error instanceof RegistrationAccessError ? error.signedOut : undefined;
       const offline = error instanceof RegistrationAccessError ? error.offline : undefined;
       const machine = code === "registration_machine_unavailable"
         ? selectionLaunchConditions(input.body, selection).tags.machine : undefined;
       // Only wording: a failed read leaves the refusal as it was.
       const machineAgents = machine ? await this.machineAgents(machine).catch(() => undefined) : undefined;
+      // A named model that is used up says until when.
+      const named = error instanceof RegistrationAccessError ? error.quotaTargets?.[0]?.model?.model : undefined;
+      const resetsAt = error instanceof RegistrationAccessError ? error.quotaResetsAt : undefined;
       rejected.push({ selectionIndex, code, sourceMention: summonText(selection), ...(tooOld ? { tooOld } : {}),
-        ...(signedOut ? { signedOut } : {}), ...(offline?.length ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
-        ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}) });
+        ...(offline?.length ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
+        ...(named && resetsAt ? { quotaExhausted: { model: named, resetsAt } } : {}),
+        ...(error instanceof RegistrationAccessError && error.quotaTargets ? { quotaTargets: error.quotaTargets } : {}),
+        ...(error instanceof RegistrationAccessError && error.quotaRefusedThrough
+          ? { quotaRefusedThrough: error.quotaRefusedThrough } : {}) });
     };
     for (const [selectionIndex, selection] of source.selections.entries()) {
       if (input.onlySelectionIndex !== undefined && input.onlySelectionIndex !== selectionIndex) continue;
@@ -768,11 +863,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (recovered) { prepared.push(recovered); continue; }
         const options = selectionLaunchConditions(input.body, selection);
         if (options.error) throw new RegistrationAccessError("invalid_registration_launch", 400);
-        const draftRead = input.forceMention === undefined && source.authorKind === "user"
-          ? input.draftIntents?.find(item => item.start === selection.start && item.end === options.end &&
-            item.mention === summonText(selection))?.choice : undefined;
-        if (draftRead !== undefined && draftRead !== "summon" && options.tags.launch !== "force") {
-          rejected.push({ selectionIndex, code: `summon_intent_${draftRead}`, sourceMention: summonText(selection) });
+        // A summon starts only when its send asked to launch, or its text says
+        // launch:force; otherwise it stays a mention with a Start on its card.
+        if (!source.launch && options.tags.launch !== "force" && input.forceMention === undefined) {
+          rejected.push({ selectionIndex, code: "launch_not_requested", sourceMention: summonText(selection) });
           continue;
         }
         // A conversation without a requested repository/directory can start in
@@ -806,8 +900,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
             ...(managedOnly ? { managedOnly } : {}), blocked: listed.blocked,
             tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
-            summon: { text: summonText(selection), start: selection.start, end: options.end, authorKind: source.authorKind,
-              ...(draftRead === "summon" ? { readInDraft: true as const } : {}) } });
+            summon: { text: summonText(selection), start: selection.start, end: options.end } });
         }
         catch (error) {
           // A model or its input read failed before any launch allocation. Do not
@@ -829,6 +922,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           sourceMessageId, selectionIndex, body: input.body, key: candidate.key, workspaceReference: selected.workspaceReference,
           // The web binds a launch's status, steps and Jev decision to the summon it answers.
           runMetadata: { sourceMention: summonText(selection) },
+          ...(Object.keys(options.tags).length ? { launchConditions: options.tags } : {}),
           ...(candidate.machineName ? { machineName: candidate.machineName } : {}),
           ...selectedParameters(selected, candidate.key.harness) }));
       } catch (error) {
@@ -848,8 +942,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
   async dispatchInput(input: {
     /** The predecessor's stable Agent registration cannot receive its own work. */
     excludeSourceInstanceId?: string;
-    /** An environment that cannot take this work (it just failed to start it). */
-    excludeRegistration?: SpaceAgentRegistrationKey;
+    /** Environments that cannot take this work (each just failed to start it). */
+    excludeRegistrations?: readonly SpaceAgentRegistrationKey[];
     commandId: string; actorUserId: string; channelId: string; body: string; runMetadata?: Record<string, unknown>;
     runId?: string; instanceId?: string;
     initialMessageId?: string; presentationMessageId?: string;
@@ -894,6 +988,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       if (excluded && sameAgentRegistration(parseSpaceAgentRegistrationKey(request.key), excluded)) {
         throw new RegistrationAccessError("handoff_same_agent", 409);
       }
+      if (await digestCanonicalCloneCborV1(request.launchConditions ?? {}) !==
+          await digestCanonicalCloneCborV1(input.tags ?? {})) {
+        throw new RegistrationAccessError("idempotency_mismatch", 409);
+      }
       return this.withHost(commandId, await this.prepare({ ...request, body: input.body }));
     }
     // Read alongside the candidates: the repository list comes from GitHub.
@@ -902,7 +1000,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const listed = await this.candidatesFor({ managedWorkspace: true, requiredHostCapabilities }, repositoryCatalog);
     const candidates = listed.offered
       .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded))
-      .filter(candidate => !input.excludeRegistration || !sameAgentRegistration(candidate.key, input.excludeRegistration));
+      .filter(candidate => !input.excludeRegistrations?.some(failed => sameAgentRegistration(candidate.key, failed)));
     if (!candidates.length) {
       // Say which requirement left nothing, rather than that nothing exists.
       if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
@@ -923,6 +1021,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     validateSelectedHarnessParameters(candidate, selected, tags);
     const request = { commandId, actorUserId, channelId, selectionIndex: 0, body: input.body, key: candidate.key,
+      ...(Object.keys(tags).length ? { launchConditions: tags } : {}),
       ...(selected.workspaceReference !== undefined ? { workspaceReference: selected.workspaceReference } : {}),
       ...(requiredHostCapabilities.length ? { requiredHostCapabilities } : {}),
       ...(input.runMetadata ? { runMetadata: input.runMetadata } : {}),
@@ -949,7 +1048,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       failed: SpaceAgentRegistrationKey } | undefined> {
     const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
     const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.fallback-origin",
-      placement: this.placement }, tx => tx.query({ name: "registration_launch_fallback_origin_v1", text: `SELECT
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_fallback_origin_v1", text: `SELECT
         intent.actor_user_id,intent.source_message_id,intent.selection_index,intent.owner_user_id,intent.machine_id,
         intent.harness,message.timeline_sequence
         FROM data.registration_launch_intents intent JOIN data.messages message ON message.space_id=intent.space_id
@@ -982,6 +1081,47 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         machineId: row.machine_id, harness: row.harness }) };
   }
 
+  /**
+   * A handoff's successor that failed to start: the same handoff, for the
+   * next Agent. The source has already stopped, so a successor that cannot
+   * take the work must not be the end of it. Read from the failed launch
+   * itself: its prompt and the predecessor's conversation from its spawn
+   * payload, its conditions from the request it was prepared with. `failed`
+   * is every environment this handoff has tried, so a retry of a retry never
+   * returns to one; undefined after HANDOFF_FALLBACK_ATTEMPTS of them, for a
+   * handoff to a harness its author named, and for a Run no handoff started.
+   */
+  async handoffFallbackOrigin(input: { commandId: string; channelId: string; runId: string }): Promise<{
+    actorUserId: string; body: string; tags: AutoLaunchTags; sourceInstanceId: string; presentationMessageId?: string;
+    sourceMention?: string; handoffContext?: Record<string, unknown>; failed: SpaceAgentRegistrationKey[] } | undefined> {
+    const commandId = text(input.commandId, 200), channelId = text(input.channelId), runId = text(input.runId);
+    const row = (await this.database.transaction({ requestId: commandId, operation: "registration.launch.handoff-fallback-origin",
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_handoff_fallback_origin_v1", text: `SELECT
+        intent.actor_user_id,intent.owner_user_id,intent.machine_id,intent.harness,intent.launch_request_json,
+        launch.spawn_payload_json->>'prompt' AS prompt,launch.spawn_payload_json->'handoffContext' AS handoff_context
+        FROM data.registration_launch_intents intent JOIN data.agent_launches launch ON launch.run_id=intent.run_id
+        WHERE intent.run_id=$1 AND intent.channel_id=$2 AND intent.space_id=$3 AND intent.state='committed'
+          AND intent.launch_request_json->'runMetadata'->>'handoffSourceInstanceId' IS NOT NULL`,
+      values: [runId, channelId, this.placement.spaceId], maxRows: 1 })))[0];
+    const request = row?.launch_request_json;
+    if (!row || !request || typeof request !== "object" || Array.isArray(request) || typeof row.prompt !== "string") return undefined;
+    const metadata = request.runMetadata && typeof request.runMetadata === "object" ? request.runMetadata as Record<string, unknown> : {};
+    const tried = (Array.isArray(metadata.handoffFallbackFailed) ? metadata.handoffFallbackFailed : []).flatMap(key => {
+      try { return [parseSpaceAgentRegistrationKey(key)]; } catch { return []; }
+    });
+    const failed = [...tried, parseSpaceAgentRegistrationKey({ spaceId: this.placement.spaceId, ownerUserId: row.owner_user_id,
+      machineId: row.machine_id, harness: row.harness })];
+    const { launch: _launch, ...tags } = (request.launchConditions ?? {}) as AutoLaunchTags;
+    // A successor its author named is not replaced, as a named summon is not.
+    if (tags.harness || failed.length > HANDOFF_FALLBACK_ATTEMPTS) return undefined;
+    const context = row.handoff_context;
+    return { actorUserId: String(row.actor_user_id), body: row.prompt, tags, failed,
+      sourceInstanceId: String(metadata.handoffSourceInstanceId),
+      ...(typeof request.presentationMessageId === "string" ? { presentationMessageId: request.presentationMessageId } : {}),
+      ...(typeof metadata.sourceMention === "string" ? { sourceMention: metadata.sourceMention } : {}),
+      ...(context && typeof context === "object" && !Array.isArray(context) ? { handoffContext: context as Record<string, unknown> } : {}) };
+  }
+
   /** A message that summons nobody: the harness Jev reads its author wants
    * started, or Jev's `start_intent_declined`. Nothing is prepared here; the
    * caller summons that harness with an ordinary `@<harness>` message. */
@@ -1001,7 +1141,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
 
   private async withHost<T extends { launchId: string }>(commandId: string, launch: T): Promise<T & { hostId: string }> {
     const rows = await this.database.transaction({ requestId: commandId, operation: "registration.launch.host",
-      placement: this.placement }, tx => tx.query({ name: "registration_launch_host_v1",
+      placement: this.placement, statement: "single_read" }, tx => tx.query({ name: "registration_launch_host_v1",
       text: `SELECT hostname FROM data.agent_launches WHERE launch_id=$1`, values: [launch.launchId], maxRows: 1 }));
     return { ...launch, hostId: String(rows[0]?.hostname ?? "") };
   }
@@ -1013,7 +1153,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       offlineOnly: boolean }> {
     catalog?.catch(() => undefined); // awaited below, after the registrations are read
     const rows = await this.database.transaction({ requestId: `registration-candidates:${target.harness ?? "auto"}`,
-      operation: "registration.launch.candidates", placement: this.placement }, tx => tx.query({
+      operation: "registration.launch.candidates", placement: this.placement, statement: "single_read" }, tx => tx.query({
       name: "registration_launch_candidates_v3", text: `SELECT r.owner_user_id,r.machine_id,r.harness,r.configuration_json,
         a.grant_limits,a.policy_limits,p.description AS profile_description FROM data.space_agent_registrations r
         JOIN data.space_members m ON m.space_id=r.space_id AND m.user_id=r.owner_user_id
@@ -1030,11 +1170,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const configuration = parseSpaceAgentConfiguration(row.configuration_json);
       if (configuration.routing?.enabled === false) return [];
       const grant = parseRegistrationResourceLimits(row.grant_limits), policy = parseRegistrationResourceLimits(row.policy_limits);
-      const declared = [...new Set([...(configuration.routing?.models ?? []), ...(configuration.model ? [configuration.model] : [])])];
-      const models = declared.filter(model => grant.models.includes(model) && policy.models.includes(model));
-      // No declared model means no model override. Declared models that are
-      // not allowed never widen into the runtime default.
-      if (declared.length && !models.length) return [];
+      const models = registrationAllowedModels(configuration, grant, policy);
+      if (!models) return [];
       const directories = configuration.workspaceReferences.filter(value =>
         (!this.repositoryReader || !value.startsWith("repo:")) && grant.workspaces.includes(value) && policy.workspaces.includes(value));
       const workspaceReferences = [...new Set([...directories,
@@ -1046,9 +1183,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         description: typeof row.profile_description === "string" ? row.profile_description : "",
         models, workspaceReferences }];
     });
-    const [observed, latencies] = await this.database.transaction({ requestId: `registration-models:${target.harness ?? "auto"}`,
-      operation: "registration.launch.model-catalog", placement: this.placement }, async tx => [await tx.query({
-      name: "registration_launch_model_catalog_v4", text: `SELECT requested.owner,requested.machine,requested.harness,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at
+    const modelReads = singleReadStatements(this.database, { requestId: `registration-models:${target.harness ?? "auto"}`,
+      operation: "registration.launch.model-catalog", placement: this.placement });
+    const observed = await modelReads.query({
+      name: "registration_launch_model_catalog_v6", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -1075,32 +1213,37 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
             AND (run.metadata_json->'spawnResult'->>'ok'='false'
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE
-        LEFT JOIN LATERAL (SELECT max(GREATEST(
-            CASE WHEN pg_input_is_valid(run.metadata_json->>'signedOutAt','timestamp with time zone')
-              THEN (run.metadata_json->>'signedOutAt')::timestamptz END,
-            CASE WHEN run.metadata_json->'invocationProgress'->'operationFailure'->>'code'='harness_signed_out'
-              THEN run.finished_at END)) AS signed_out_at
-          FROM data.run_agent_registrations r JOIN data.runs run ON run.run_id=r.run_id
-          WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
-            AND run.updated_at>=statement_timestamp()-interval '${SIGNED_OUT_FAILURE_WINDOW_HOURS} hours') signed_out ON TRUE`,
+        -- Its latest summons whose first turn has ended, newest first. Silent: the turn completed and the Run
+        -- never replied, in the conversation or to a program's request, however long it took.
+        LEFT JOIN LATERAL (SELECT CASE WHEN count(*)=${SILENT_SUMMONS} AND bool_and(recent.silent)
+            AND max(recent.connected_at)>=statement_timestamp()-interval '${SILENT_SUMMON_WINDOW_HOURS} hours' THEN max(recent.connected_at) END AS unanswered_at
+          FROM (SELECT launch.connected_at,launch.first_reply_at IS NULL AS silent
+            FROM data.run_agent_registrations r JOIN data.agent_launches launch ON launch.run_id=r.run_id
+              JOIN LATERAL (SELECT 1 AS ended
+                FROM data.agent_message_executions execution
+                WHERE execution.run_id=launch.run_id AND execution.source_message_id=launch.trigger_id
+                  AND execution.state='completed' AND execution.finished_at_millis IS NOT NULL
+                ORDER BY execution.started_at_millis LIMIT 1) turn ON TRUE
+            WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+              AND launch.connected_at>=statement_timestamp()-interval '${SILENT_SUMMON_HISTORY_DAYS} days'
+            ORDER BY launch.connected_at DESC LIMIT ${SILENT_SUMMONS}) recent) silent ON TRUE`,
       values: [JSON.stringify(candidates.map(candidate => ({ owner: candidate.key.ownerUserId,
         machine: candidate.key.machineId, harness: candidate.key.harness }))),this.placement.spaceId,
-        [...STARTUP_FAILURE_PHASES]], maxRows: 100 }),
-      // How long each harness takes to answer is the harness's own, measured
-      // over every launch: a new Space has none of its own to go on.
-      await tx.query({ name: "registration_launch_response_latency_v1", text: `SELECT
+        [...RUN_PHASES_BEFORE_READY]], maxRows: 100 });
+    // How long each harness takes to answer is the harness's own, measured
+    // over every launch: a new Space has none of its own to go on.
+    const latencies = await modelReads.query({ name: "registration_launch_response_latency_v1", text: `SELECT
           spawn_payload_json->'registration'->'key'->>'harness' AS harness,
           percentile_cont(0.5) WITHIN GROUP (ORDER BY extract(epoch FROM first_reply_at-connected_at)*1000) AS p50_ms
         FROM data.agent_launches
         WHERE created_at>=statement_timestamp()-interval '${RESPONSE_LATENCY_WINDOW_DAYS} days' AND first_reply_at>=connected_at
           AND spawn_payload_json->'registration'->'key'->>'harness'=ANY($1::text[])
         GROUP BY 1 HAVING count(*)>=${RESPONSE_LATENCY_MIN_SAMPLES}`,
-        values: [[...new Set(candidates.map(candidate => candidate.key.harness))]], maxRows: 100 })] as const);
+        values: [[...new Set(candidates.map(candidate => candidate.key.harness))]], maxRows: 100 });
     const responseLatency = new Map(latencies.map(row => [String(row.harness), Math.round(Number(row.p50_ms))]));
     // Resolve only references explicitly granted to this registration. Directory
     // metadata is factual context, never a source of new launch permissions.
-    return this.directory.transaction({ requestId: `registration-workspaces:${target.harness ?? "auto"}`,
-      operation: "registration.launch.workspace-catalog" }, async tx => {
+    const workspaceCatalog = async (tx: DatabaseTransaction) => {
       const offered: RegistrationLaunchCandidate[] = [];
       const blocked: LaunchMachineBlock[] = [];
       /** Offered through a daemon in the reconnect grace. */
@@ -1136,13 +1279,13 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (daemons.length > 0 && !online.length && !reconnecting.length) { offline(); continue; }
         // A reconnecting machine that cannot be offered stays refused as offline.
         const drop = () => { if (reconnecting.length) offline(); else droppedOther = true; };
-        const facts = await tx.query({ name: "registration_launch_observations_v3", text: `SELECT
+        const facts = await tx.query({ name: "registration_launch_observations_v4", text: `SELECT
           e.declaration_json,statement_timestamp() AS evaluated_at,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.state<>'released') AS machine_allocations,
           (SELECT count(*)::int FROM control.registration_execution_allocations a
             WHERE a.owner_user_id=$1 AND a.machine_id=$2 AND a.harness=$3 AND a.state<>'released') AS registration_allocations,
-          q.remaining,q.observed_at,q.expires_at,q.source,q.windows_json,q.account_json
+          ${registrationQuotaColumns("q")}
           FROM control.agent_registration_environments e
           ${currentRegistrationQuotaJoin("q")}
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
@@ -1169,15 +1312,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             reason: "harness_outdated", tooOld });
           continue;
         }
-        // A harness its machine reports signed out answers nothing sent to it:
-        // it is named, with its sign-in, and never routed to.
-        const signedOut = harnessSignedOutOn(daemon, candidate.key, observed.find(row => row.owner === candidate.key.ownerUserId &&
-          row.machine === candidate.key.machineId && row.harness === candidate.key.harness)?.signed_out_at);
-        if (signedOut) {
-          blocked.push({ machineId: candidate.key.machineId, ...(signedOut.machineName ? { machineName: signedOut.machineName } : {}),
-            reason: "harness_signed_out", signedOut });
-          continue;
-        }
+        // Whether its harness is signed in is not read here. Only the program
+        // knows whether its provider accepts it, and it says so when given
+        // work: a refused start or first turn shows its sign-in where it
+        // failed, and an `@auto` message goes on to the next Agent.
         // Jev never sees a machine whose daemon cannot show the host abilities
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
@@ -1185,8 +1323,11 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             !machineResources?.hostCapabilities?.includes(capability))) { drop(); continue; }
         const directories = workspaces.filter(row => workspaceReferences.includes(String(row.workspace_id)));
 
+        // The account's own headroom ranks the environment; the stored
+        // reading tells each model's (`routingQuotaObservation`).
         const quota = registrationQuotaReading(fact);
-        const quotaWindows = currentRoutingQuotaWindows(fact?.windows_json, Date.now());
+        const quotaUsage = registrationQuotaUsage(fact);
+        const quotaWindows = quota ? currentRoutingQuotaWindows(fact?.windows_json, Date.now()) : [];
         const observation = observed.find(row => row.owner === candidate.key.ownerUserId &&
           row.machine === candidate.key.machineId && row.harness === candidate.key.harness);
         const modelCatalog = routingModelCatalogObservation(observation?.models, observation?.observed_at, Date.now())?.value;
@@ -1194,10 +1335,12 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ? harnessParameterObservation(observation?.parameters, observation?.parameters_observed_at,
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
+        const unansweredAt = observation?.unanswered_at ? new Date(observation.unanswered_at).toISOString() : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
-          ...(startupFailedAt ? { startupFailedAt } : {}),
+          ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
+          ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),
           // A machine tag selects by the owner's name or id, never a hostname.
           machineName: String(daemon.machine_name || ""),
           // A launch addressed to this Machine (one of its registrations or its id) named it.
@@ -1205,9 +1348,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(fact ? { observations: { evaluatedAt,
             machineResources,
             outstandingMachineAllocations: Number(fact.machine_allocations), outstandingRegistrationAllocations: Number(fact.registration_allocations),
-            quota: quota ? { ...quota, assumed: false, source: fact.source,
+            quota: { ...quota ? { ...quota, assumed: false, source: fact.source,
               ...(quotaWindows.length ? { windows: quotaWindows } : {}) }
-              : { remainingPercent: 100, assumed: true } } } : {}),
+              : { remainingPercent: 100, assumed: true }, ...(quotaUsage ? { usage: quotaUsage } : {}) } } } : {}),
           supportsRequestedParameters: daemonCapable(daemon, "machine_routing_parameters_v1"),
           supportsRequestedEffort: daemonCapable(daemon, "machine_routing_effort_v1"),
           supportsDefaultModelEffort: daemonCapable(daemon, "machine_routing_effort_v1") &&
@@ -1232,7 +1375,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       }
       return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
         blocked.every(block => block.reason === "daemon_offline") };
-    });
+    };
+    return workspaceCatalog(singleReadStatements(this.directory, {
+      requestId: `registration-workspaces:${target.harness ?? "auto"}`, operation: "registration.launch.workspace-catalog" }));
   }
 
 }
@@ -1255,27 +1400,6 @@ export function harnessTooOldOn(daemon: QueryResultRow, harness: string): Harnes
     : ["macos", "darwin", "linux"].includes(String(metadata?.platform)) ? "unix" : undefined;
   const update = platform ? management?.update[platform] : undefined;
   return { ...tooOld, ...(machineName ? { machineName } : {}), ...(update ? { update: harnessCommandLine(update) } : {}) };
-}
-
-/** This harness signed out of its account on its machine: which program on
- * which machine. The machine's own report says so, or a start or turn it
- * refused as signed out (`signedOutAt`) that no later observation of the program
- * has answered, a sign-in through xMatrix included:
- * a program's status command can say signed in while its token cannot refresh.
- * An unchecked or unknown sign-in is not judged. */
-export function harnessSignedOutOn(daemon: QueryResultRow, key: { harness: string; machineId: string },
-  signedOutAt?: unknown): HarnessSignedOut | undefined {
-  const metadata = daemon.metadata_json && typeof daemon.metadata_json === "object" ? daemon.metadata_json as Record<string, unknown> : undefined;
-  const inventory = parseHarnessInventory(metadata?.harnesses);
-  const item = inventory?.items.find(entry => entry.id === key.harness && entry.installed);
-  const refusedAt = signedOutAt instanceof Date ? signedOutAt.getTime()
-    : typeof signedOutAt === "string" ? Date.parse(signedOutAt) : Number.NaN;
-  const unanswered = Number.isFinite(refusedAt) && !(inventory &&
-    (item ? harnessItemObservedAt(inventory, item) : Date.parse(inventory.capturedAt)) > refusedAt);
-  if (item?.login !== "signed_out" && !unanswered) return undefined;
-  const machineName = typeof daemon.machine_name === "string" ? daemon.machine_name.trim() : "";
-  return { harness: key.harness, program: agentPresetById(key.harness)?.displayName ?? key.harness,
-    machineId: key.machineId, ...(machineName ? { machineName } : {}) };
 }
 
 /** The part of one registration a launch can actually be routed to, by the

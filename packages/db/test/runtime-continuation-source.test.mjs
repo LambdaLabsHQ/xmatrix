@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readContinuationSource } from "../dist/runtime-continuation-source.js";
+import { readContinuationMachineConstraint, readContinuationSource } from "../dist/runtime-continuation-source.js";
+
+test("handoff inherits the admitted machine only from an explicit condition, across label changes and reborns", () => {
+  const key = { machineId: "machine:stable" };
+  assert.equal(readContinuationMachineConstraint({ key, sourceMessageId: "m", selectionIndex: 0 },
+    '@codex machine:"Old Laptop Name" task'), "machine:stable");
+  assert.equal(readContinuationMachineConstraint({ key, sourceMessageId: "m", selectionIndex: 0 },
+    "@codex task"), undefined, "an implicit placement is portable");
+  assert.equal(readContinuationMachineConstraint({ key, launchConditions: { machine: "Old Laptop Name" } }), "machine:stable");
+  assert.equal(readContinuationMachineConstraint({ key, runMetadata: { launchMachineId: "machine:stable" } }), undefined,
+    "caller metadata cannot create a machine requirement");
+  assert.equal(readContinuationMachineConstraint({}), undefined);
+});
 
 const source = { schemaVersion: 1, kind: "reborn", sourceMessageId: "message", sourceMessageVersion: 1,
   sourceMention: "＠Alpha:1:reborn", sourceInstanceId: "instance-a",

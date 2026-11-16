@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { connectorDatabase, integration } from "./postgres-database.fixture.mjs";
-import { PostgresSentryEventRepository, PostgresAppCredentialRepository, PostgresAppRepository } from "../dist/index.js";
+import { PostgresSentryEventRepository, PostgresAppCredentialRepository, PostgresAppRepository, DatabaseCommitUnknownError } from "../dist/index.js";
 
 const at = new Date().toISOString();
 const issue = { kind: "issue", action: "created", objectId: "42", projectId: "123", projectSlug: "test" };
@@ -152,16 +152,50 @@ integration("Sentry current Space deletion and grant-scoped subscriptions fail c
     await assert.rejects(accept("b".repeat(64)), /bindings are unavailable/);
   });
 });
-integration("Sentry installation fanout overflow rolls back the entire new receipt", async () => {
-  await fixture(async ({ sql, key, accept, spaceId, connectionId }) => {
+integration("Sentry events include every current binding across resource pages", async () => {
+  await fixture(async ({ sql, key, accept, claim, finish, current, spaceId, connectionId }) => {
     for (const table of ["app_connector_connections", "app_connector_credentials", "app_connector_oauth_installations"]) {
       await sql(`INSERT INTO data.${table} SELECT (jsonb_populate_record(NULL::data.${table},to_jsonb(c)||
-        jsonb_build_object('connection_id',$1||'-'||n||':sentry','space_id',$1||'-'||n,'search_rank_sequence',$2||'-rank-'||n))).*
-        FROM data.${table} c CROSS JOIN generate_series(1,50) n WHERE c.connection_id=$2`, [spaceId, connectionId]);
+        jsonb_build_object('connection_id',$1||'-'||lpad(n::text,3,'0')||':sentry','space_id',$1||'-'||lpad(n::text,3,'0'),
+          'search_rank_sequence',$2||'-rank-'||n,'grant_generation',gen_random_uuid()))).*
+        FROM data.${table} c CROSS JOIN generate_series(1,122) n WHERE c.connection_id=$2`, [spaceId, connectionId]);
     }
-    await assert.rejects(accept(), /bindings are unavailable/);
-    assert.equal((await sql("SELECT * FROM data.app_sentry_event_receipts WHERE app_client_id=$1", [key.appClientId])).rows.length, 0);
-    assert.equal((await sql("SELECT count(*)::int n FROM data.app_connector_oauth_installations WHERE app_client_id=$1", [key.appClientId])).rows[0].n, 51);
+    // The final page must apply current credential evidence as well as the first.
+    const staleConnection = `${spaceId}-122:sentry`;
+    await sql("UPDATE data.app_connector_credentials SET version=2 WHERE connection_id=$1", [staleConnection]);
+    assert.equal((await accept()).jobs, 122);
+    const stored = (await sql(`SELECT j.connection_id,j.grant_generation=i.grant_generation AS current
+      FROM data.app_sentry_event_jobs j JOIN data.app_connector_oauth_installations i USING (connection_id,space_id)
+      WHERE j.app_client_id=$1 ORDER BY j.connection_id`, [key.appClientId])).rows;
+    assert.equal(stored.length, 122);
+    assert.equal(new Set(stored.map(row => row.connection_id)).size, 122);
+    assert.ok(stored.every(row => row.current));
+    assert.ok(stored.some(row => row.connection_id === `${spaceId}-121:sentry`));
+    assert.ok(stored.every(row => row.connection_id !== staleConnection));
+    assert.equal((await accept()).reused, true);
+    let delivered = 0;
+    for (;;) {
+      const jobs = await claim();
+      if (!jobs.length) break;
+      for (const job of jobs) {
+        assert.deepEqual(await current(job), { credentialVersion: 1 });
+        await finish(job, "done");
+        delivered++;
+      }
+    }
+    assert.equal(delivered, 122, "bounded claims eventually serve the entire accepted set");
+    // A second receipt overflows only after its first page was inserted.
+    await sql(`UPDATE data.app_sentry_event_jobs SET state='pending' WHERE app_client_id=$1`, [key.appClientId]);
+    await sql(`INSERT INTO data.app_sentry_event_jobs
+      SELECT app_client_id,app_uuid,installation_uuid,delivery_digest,connection_id||'-extra-'||n,space_id,grant_generation,
+        state,attempts,available_at,lease_id,lease_until,updated_at FROM data.app_sentry_event_jobs CROSS JOIN generate_series(1,778) n
+      WHERE app_client_id=$1 AND connection_id=$2`, [key.appClientId, connectionId]);
+    await assert.rejects(accept("b".repeat(64)), error => error.code === "sentry_event_backlog_full");
+    assert.equal((await sql("SELECT count(*)::int n FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows[0].n, 900);
+    assert.equal((await sql("SELECT count(*)::int n FROM data.app_sentry_event_receipts WHERE app_client_id=$1", [key.appClientId])).rows[0].n, 1);
+    await sql("UPDATE data.app_sentry_event_receipts SET expires_at=now()-interval '1 second' WHERE app_client_id=$1", [key.appClientId]);
+    assert.deepEqual(await claim(), []);
+    assert.equal((await sql("SELECT count(*)::int n FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows[0].n, 0);
   });
 });
 integration("Sentry concurrent retirement and admission cannot leave a live accepted grant", async () => {
@@ -201,5 +235,77 @@ integration("Sentry overlapping recovery wakes never exceed eight active leases 
     assert.equal(jobs.length, 8, "later passes fill remaining capacity after contention");
     assert.equal(new Set(jobs.map(job => job.leaseId)).size, 8);
     assert.equal((await claim()).length, 0);
+  });
+});
+
+
+// Real committed/rolled-back rows prove the reconciliation result independently
+// of the transport fault. Existing wire tests own checkout and pre-COMMIT replay.
+function uncertainClaim(database, afterClaim, { rollback = false, readFailure } = {}) {
+  const unknown = new DatabaseCommitUnknownError("CONNECTION_TERMINATED");
+  const contexts = [];
+  const repo = new PostgresSentryEventRepository({ cacheMode: "disabled", async transaction(context, callback) {
+    contexts.push(context);
+    if (context.operation === "app.sentry-event.claim") {
+      if (rollback) {
+        await assert.rejects(database.transaction(context, async tx => { await callback(tx); throw unknown; }), error => error === unknown);
+      } else await database.transaction(context, callback);
+      await afterClaim?.();
+      throw unknown;
+    }
+    if (readFailure) throw readFailure;
+    return database.transaction(context, callback);
+  } });
+  return { contexts, run: key => repo.claim({ ...key, requestId: crypto.randomUUID() }) };
+}
+integration("Sentry unknown claim COMMIT recovers only its committed leases without claiming another batch (HUB-BY)", async () => {
+  await fixture(async ({ sql, database, key, accept, claim, current }) => {
+    for (let n = 1; n <= 9; n++) await accept(n.toString(16).padStart(64, "0"));
+    const other = await claim();
+    const recovery = uncertainClaim(database);
+    const jobs = await recovery.run(key);
+    assert.equal(jobs.length, 4);
+    assert.equal(new Set([...other, ...jobs].map(job => job.leaseId)).size, 8);
+    for (const job of jobs) assert.deepEqual(await current(job), { credentialVersion: 1 });
+    const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+    assert.equal(rows.filter(row => row.state === "pending" && row.attempts === 0).length, 1);
+    assert.equal(rows.filter(row => row.state === "leased" && row.attempts === 1).length, 8);
+    assert.equal(recovery.contexts.length, 2);
+    assert.equal(recovery.contexts[1].statement, "single_read");
+  });
+});
+integration("Sentry uncertain rollback or expired/replaced lease returns no jobs and leaves recovery in charge", async () => {
+  for (const outcome of ["rollback", "expired", "replaced", "receipt-expired"]) {
+    await fixture(async ({ sql, database, key, accept, claim, current }) => {
+      await accept();
+      let successor;
+      const recovery = uncertainClaim(database, async () => {
+        if (outcome === "expired" || outcome === "replaced") {
+          await sql("UPDATE data.app_sentry_event_jobs SET lease_until=now()-interval '1 second' WHERE app_client_id=$1", [key.appClientId]);
+          if (outcome === "replaced") [successor] = await claim();
+        } else if (outcome === "receipt-expired") {
+          await sql("UPDATE data.app_sentry_event_receipts SET expires_at=now()-interval '1 second' WHERE app_client_id=$1", [key.appClientId]);
+        }
+      }, { rollback: outcome === "rollback" });
+      assert.deepEqual(await recovery.run(key), [], outcome);
+      assert.equal(recovery.contexts.length, 2, "no claim replay after unknown COMMIT");
+      if (successor) assert.deepEqual(await current(successor), { credentialVersion: 1 });
+      if (outcome === "rollback") {
+        const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+        assert.deepEqual(rows, [{ state: "pending", attempts: 0 }]);
+        assert.equal((await claim()).length, 1, "a later wake claims rolled-back work");
+      }
+    });
+  }
+});
+integration("Sentry failed reconciliation surfaces its error and does not mutate the committed claim", async () => {
+  await fixture(async ({ sql, database, key, accept }) => {
+    await accept();
+    const readFailure = new Error("reconciliation unavailable");
+    const recovery = uncertainClaim(database, undefined, { readFailure });
+    await assert.rejects(recovery.run(key), error => error === readFailure);
+    assert.equal(recovery.contexts.length, 2);
+    const rows = (await sql("SELECT state,attempts FROM data.app_sentry_event_jobs WHERE app_client_id=$1", [key.appClientId])).rows;
+    assert.deepEqual(rows, [{ state: "leased", attempts: 1 }]);
   });
 });

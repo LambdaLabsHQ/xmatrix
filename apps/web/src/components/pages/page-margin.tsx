@@ -180,14 +180,16 @@ const threadAction = "flex size-7 shrink-0 items-center justify-center rounded-f
 /**
  * The open conversation, as a selected comment thread in Google Docs: raised
  * above the other cards and nudged toward the text, with what it is about,
- * then the conversation itself, sized to what it says.
+ * then the conversation itself, sized to what it says. It reads top to bottom
+ * on one sheet: its head, the comments, the Agents in it on the thread's last
+ * line, and the reply box; nothing floats over what was said.
  */
 function OpenConversationCard({ conversation, quietAgents = false, room = null, canResolve, children, onResolve, onExpand, onClose,
   onFocus }: {
   conversation: MarginConversation;
   /** The room left down to the page's end: the thread is no taller, and its messages scroll inside it. */
   room?: number | null;
-  /** Opened from an Agent's pill, which already says who works in it. */
+  /** Opened under an Agent's pill, which already says who works in it: the thread's own line of Agents is not drawn. */
   quietAgents?: boolean;
   canResolve: boolean;
   children: ReactNode;
@@ -201,22 +203,24 @@ function OpenConversationCard({ conversation, quietAgents = false, room = null, 
   const [height, setHeight] = useState<number | null>(null);
   // A thread is as tall as what it says, up to a cap. The message list scrolls
   // inside a box of known height, so the card adds up the list's rows (its
-  // header, messages and footer) and sets its own height from them. A thread
-  // with nothing in it yet is its header and its composer, and any note the
+  // header, messages and footer) and what stands under the list (the line of
+  // Agents and the reply box), and sets its own height from them. A thread
+  // with nothing in it yet is its header and that foot, and any note the
   // empty conversation still shows, such as why it could not load.
   useLayoutEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
     let list: Element | null = null;
     let empty: Element | null = null;
-    let composer: HTMLElement | null = null;
+    let foot: HTMLElement[] = [];
     const measure = () => {
       const header = headerRef.current?.offsetHeight ?? 0;
       const rows = list ? [...list.children].reduce((sum, row) => sum + row.getBoundingClientRect().height, 0) : 0;
       const bottom = empty ? Math.max(0, ...[...empty.children].map((child) => child.getBoundingClientRect().bottom)) : 0;
       const note = empty && bottom > 0 ? bottom - empty.getBoundingClientRect().top : 0;
-      const next = rows > 0 ? Math.ceil(header + rows)
-        : empty && composer ? Math.ceil(header + (note > 0 ? note + EMPTY_THREAD_GAP : 0) + composer.offsetHeight) : null;
+      const under = foot.reduce((sum, part) => sum + part.offsetHeight, 0);
+      const next = rows > 0 ? Math.ceil(header + rows + under)
+        : empty && foot.length > 0 ? Math.ceil(header + (note > 0 ? note + EMPTY_THREAD_GAP : 0) + under) : null;
       setHeight((current) => current === next ? current : next);
     };
     const sizes = new ResizeObserver(measure);
@@ -224,16 +228,17 @@ function OpenConversationCard({ conversation, quietAgents = false, room = null, 
       const viewport = body.querySelector(".app-message-timeline > div > div");
       const found = viewport?.querySelector(":scope > [data-timeline-rise-content]") ?? viewport;
       const foundEmpty = body.querySelector(".app-empty-conversation");
-      const foundComposer = body.querySelector<HTMLElement>(".app-composer");
-      if (found !== list || foundEmpty !== empty || foundComposer !== composer) {
+      const foundFoot = [...body.querySelectorAll<HTMLElement>(".app-agent-work-dock, .app-composer")];
+      if (found !== list || foundEmpty !== empty || foundFoot.length !== foot.length
+        || foundFoot.some((part, index) => part !== foot[index])) {
         list = found;
         empty = foundEmpty;
-        composer = foundComposer;
+        foot = foundFoot;
         sizes.disconnect();
       }
       if (list) for (const row of list.children) sizes.observe(row);
       if (empty) sizes.observe(empty);
-      if (composer) sizes.observe(composer);
+      for (const part of foot) sizes.observe(part);
       measure();
     };
     attach();
@@ -246,15 +251,16 @@ function OpenConversationCard({ conversation, quietAgents = false, room = null, 
       onMouseEnter={() => onFocus(true)} onMouseLeave={() => onFocus(false)}
       onKeyDown={(event) => { if (event.key === "Escape" && onClose) onClose(); }}
       style={{ height: `min(${[height && `${height}px`, room !== null && `${room}px`, OPEN_MAX_HEIGHT].filter(Boolean).join(", ")})` }}
+      data-quiet-agents={quietAgents || undefined}
       className="page-margin-open flex min-h-0 flex-col overflow-hidden rounded-xl">
-      <header ref={headerRef} className="flex shrink-0 items-start gap-1 pt-2.5 pr-2 pl-3">
+      <header ref={headerRef} className="flex shrink-0 items-start gap-1 pt-2.5 pr-2 pb-1.5 pl-3">
         <span className="min-w-0 flex-1 pt-1">
           <CardContext conversation={conversation} open />
           {/* A discussion is named by its passage until its content names it otherwise. */}
+          {/* On the passage's column, under it. */}
           {conversation.quote && conversation.name && conversation.name !== discussionTitle(conversation.quote) && (
-            <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{conversation.name}</span>
+            <span className="mt-0.5 block truncate pl-8 text-[12px] text-muted-foreground">{cardName(conversation.name)}</span>
           )}
-          {!quietAgents && <WorkingLine agents={conversation.agents} className="mt-1" />}
         </span>
         {canResolve && conversation.linkId && (
           <button type="button" onClick={onResolve} title="Resolve: its outcome is in the page"
@@ -365,14 +371,9 @@ export function PageOffscreenCard({ side, entries, onJump }: {
  * The open conversation expands in its card's place, level with its anchor,
  * and the other cards make room above and below it.
  */
-/** The margin's head, kept apart from conversation and Agent ids. */
-const HEAD = "head:";
-
 export function PageMargin({ conversations, writers = [], editors = [], view = null, end = null, tops, focusedId, openId = null,
-  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions, head }: {
+  renderOpen, canResolve, onOpen, onResolve, onExpand, onClose, onFocus, onJump, onWriter, writerActions }: {
   conversations: MarginConversation[];
-  /** What stands at the top of the margin, above the cards it would otherwise cover. */
-  head?: ReactNode;
   /** The Agents at work on the page. Each stands beside its line, and its channel's card is not drawn again. */
   writers?: readonly MarginWriter[];
   /** People editing the page, at their caret's line: out of view, they are told at the margin's edges with what it holds. */
@@ -420,7 +421,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
   const holder = openId ? holding.find((writer) => writer.conversation?.conversationId === openId) ?? null : null;
   const writerId = (writer: MarginWriter) => `writer:${writer.key}`;
   const items = [
-    ...(head ? [{ id: HEAD, top: 0, estimate: ESTIMATED_CARD_HEIGHT }] : []),
     ...cards.map((card) => ({ id: card.conversationId, top: anchorTop(tops, card), estimate: ESTIMATED_CARD_HEIGHT })),
     ...pens.map((writer) => ({ id: writerId(writer), estimate: ESTIMATED_WRITER_HEIGHT, top: writerTop(writer) - WRITER_RISE })),
   ];
@@ -501,7 +501,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       else if (entry.top > view.top + view.height - EDGE_ROOM) below.push(entry);
     };
     for (const item of shown) {
-      if (item.id === HEAD) continue;
       const top = positions.get(item.id)!;
       const height = heights.get(item.id) ?? item.estimate;
       const card = cards.find((conversation) => conversation.conversationId === item.id);
@@ -532,7 +531,6 @@ export function PageMargin({ conversations, writers = [], editors = [], view = n
       <div className="relative" style={{ minHeight: bottom,
         ...(view && onJump ? { clipPath: `inset(${Math.max(0, view.top + (offscreen.above.length ? EDGE_ROOM : 0))}px 0 ${Math.max(0, bottom - view.top - view.height + (offscreen.below.length ? EDGE_ROOM : 0))}px 0)` } : {}),
       }} data-testid="page-margin" aria-label="Conversations on this page">
-        {head && place(HEAD, head)}
         {cards.map((card) => place(card.conversationId, card.conversationId === openId && renderOpen ? openCard(card, false) : (
           <ConversationCard conversation={card} writer={inCard.get(card.conversationId)}
             focused={card.conversationId === focusedId} canResolve={canResolve}

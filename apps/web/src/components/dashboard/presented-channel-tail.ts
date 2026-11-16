@@ -16,10 +16,10 @@ export type PresentedChannelTail = { channelId: string; sequence: number; previe
  * a message the conversation does not (a Channel snapshot from a presence
  * report or a catalog read can name a newer one before its message arrives).
  */
-export function channelAsTimelineShows(
-  channel: ChannelSnapshot,
+export function channelAsTimelineShows<C extends ChannelSnapshot>(
+  channel: C,
   tail: PresentedChannelTail | null | undefined,
-): ChannelSnapshot {
+): C {
   if (!tail || tail.channelId !== channel.id) return channel;
   const messageCount = tail.sequence > 0 ? tail.sequence : channel.messageCount;
   if (sameValue(channel.lastMessage, tail.preview) && messageCount === channel.messageCount) return channel;
@@ -70,7 +70,7 @@ export function usePresentedChannelTail(channelId: string): PresentedChannelTail
 }
 
 /** `channel` as its row shows it (channelAsTimelineShows); the same object while the two agree. */
-export function useChannelAsTimelineShows(channel: ChannelSnapshot): ChannelSnapshot {
+export function useChannelAsTimelineShows<C extends ChannelSnapshot>(channel: C): C {
   const tail = usePresentedChannelTail(channel.id);
   return useMemo(() => channelAsTimelineShows(channel, tail), [channel, tail]);
 }

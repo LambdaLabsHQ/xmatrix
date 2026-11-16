@@ -11,6 +11,9 @@ import type { Page } from "@playwright/test";
 /** One painted frame: each visible message's top edge, by its row id. */
 type PaintedTimelineFrame = {
   at: number;
+  /** The frame's own time, on the clock animations run by. A page busy after
+      painting reads the frame late; its time is still when it was drawn. */
+  frameTime: number;
   /** The selector the recording was started with matches something. */
   open: boolean;
   /** The conversation is still drawn by its opening rows, not by the list. */
@@ -50,7 +53,7 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
     const frames: PaintedTimelineFrame[] = [];
     (window as RecordingWindow).__paintedTimelineFrames = frames;
     const painted = new MessageChannel();
-    painted.port1.onmessage = () => {
+    painted.port1.onmessage = (event: MessageEvent<number>) => {
       const timeline = document.querySelector(".app-message-timeline");
       const view = timeline?.getBoundingClientRect();
       const viewport = timeline?.querySelector("[data-viewport-type]");
@@ -65,6 +68,7 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
       }
       frames.push({
         at: performance.now(),
+        frameTime: event.data,
         open: Boolean(document.querySelector(selector)),
         opening: Boolean(timeline?.querySelector(".app-message-timeline-opening-tail")),
         scrollTop: timeline?.scrollTop ?? 0,
@@ -76,10 +80,10 @@ export async function recordPaintedTimelineFrames(page: Page, openSelector = ".a
         bottoms,
       });
     };
-    const eachFrame = () => {
+    const eachFrame = (frameTime: number) => {
       // A spec that starts a second recording replaces the first.
       if ((window as RecordingWindow).__paintedTimelineFrames !== frames) return;
-      painted.port2.postMessage(null);
+      painted.port2.postMessage(frameTime);
       requestAnimationFrame(eachFrame);
     };
     requestAnimationFrame(eachFrame);

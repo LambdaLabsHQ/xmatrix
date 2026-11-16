@@ -1,6 +1,7 @@
 import { diff3Merge, diffComm, diffIndices } from "node-diff3";
 import { trimEnd } from "./field-validation.js";
 import { stripHtmlTags } from "./html-text.js";
+import { extensionForMediaType, PAGE_MEDIA_TYPES } from "./media-types.js";
 
 /**
  * Markdown helpers shared by the page live session, the Web editor and the
@@ -18,7 +19,8 @@ export interface PageBlock {
   end: number;
 }
 
-const FENCE = /^\s{0,3}(`{3,}|~{3,})/u;
+// Keep the whole marker run out of the tail, even when a malformed line fails.
+const FENCE = /^ {0,3}(`{3,}(?!`)|~{3,}(?!~))(.*)$/u;
 const HEADING = /^\s{0,3}(#{1,6})\s(.*)$/u;
 
 /** A heading line's text: no surrounding blanks or closing `#` run. */
@@ -35,7 +37,7 @@ export function pageHeadingSlug(text: string): string {
 }
 
 /** Each line with its offsets, and whether it is prose: outside fenced code and not a fence itself. */
-function* markdownLines(markdown: string): Generator<{ line: string; offset: number; end: number; prose: boolean }> {
+export function* markdownLines(markdown: string): Generator<{ line: string; offset: number; end: number; prose: boolean }> {
   let offset = 0;
   let fence: string | null = null;
   const lines = markdown.split("\n");
@@ -45,12 +47,32 @@ function* markdownLines(markdown: string): Generator<{ line: string; offset: num
     const fenceMatch = FENCE.exec(line);
     if (fenceMatch) {
       const marker = fenceMatch[1]!;
-      if (fence === null) fence = marker[0]!;
-      else if (marker[0] === fence) fence = null;
+      if (fence === null) {
+        if (marker[0] !== "`" || !fenceMatch[2]!.includes("`")) fence = marker;
+      } else if (marker[0] === fence[0] && marker.length >= fence.length && !fenceMatch[2]!.trim()) fence = null;
     }
     yield { line, offset, end, prose: fence === null && !fenceMatch };
     offset = end;
   }
+}
+
+/** A top-level heading line, `# Title`, or `#` alone: a heading with no text. */
+const TITLE_LINE = /^ {0,3}#(?:[ \t]([^\n]*))?$/u;
+
+/**
+ * The line that names a page (pages-live-document.md §4.1): its document's first top-level heading
+ * outside fenced code, wherever it stands, so a note or a stray line above it does not unname the page.
+ * `title` is '' when that heading is empty: the page has no name until it is written. `start` and `end`
+ * bound the line without its newline. `data.page_title` reads the same line in SQL.
+ */
+export function pageTitleLine(markdown: string): { title: string; start: number; end: number } | null {
+  for (const { line, offset, prose } of markdownLines(markdown)) {
+    const heading = prose ? TITLE_LINE.exec(line) : null;
+    if (heading) {
+      return { title: trimEnd((heading[1] ?? "").replace(/^[ \t]+/u, ""), " \t\r"), start: offset, end: offset + line.length };
+    }
+  }
+  return null;
 }
 
 /** The page's sections, in order; duplicate slugs get -1, -2 suffixes as on GitHub. */
@@ -405,66 +427,6 @@ export function pageReferenceSpans(text: string): PageReferenceSpan[] {
   }));
 }
 
-/** The link scheme of an Automation's live reference (docs/design/pages-live-document.md §6.1). */
-export const AUTOMATION_REFERENCE_SCHEME = "xmatrix:automation/";
-
-const AUTOMATION_REFERENCE = /\]\(xmatrix:automation\/([A-Za-z0-9:._-]{1,200})\)/gu;
-
-/** The markdown line that places an Automation in a section: a link its editor renders as a chip. */
-export function automationReferenceMarkdown(automationId: string, name: string): string {
-  const label = name.replace(/\s+/gu, " ").trim().replace(/[[\]\\]/gu, "\\$&") || "Automation";
-  return `[${label}](${AUTOMATION_REFERENCE_SCHEME}${automationId})`;
-}
-
-/** Each Automation referenced in the page's text, outside code, with the section that holds its first reference. */
-export function automationReferences(markdown: string): Map<string, string> {
-  const references = new Map<string, string>();
-  const blocks = pageBlocks(markdown);
-  for (const { line, offset, prose } of markdownLines(markdown)) {
-    if (!prose) continue;
-    for (const match of line.replace(/`[^`]*`/gu, (code) => " ".repeat(code.length)).matchAll(AUTOMATION_REFERENCE)) {
-      const id = match[1]!;
-      if (references.has(id)) continue;
-      const at = offset + match.index!;
-      references.set(id, [...blocks].reverse().find((block) => block.start <= at)?.id ?? "");
-    }
-  }
-  return references;
-}
-
-/** The page with an Automation's reference at the end of a section ('' or an unknown id: the end of the page). */
-export function insertAutomationReference(markdown: string, blockId: string, automationId: string,
-  name: string): string {
-  const line = automationReferenceMarkdown(automationId, name);
-  const block = blockId ? pageBlocks(markdown).find((candidate) => candidate.id === blockId) : undefined;
-  const end = block ? block.end : markdown.length;
-  const before = markdown.slice(0, end).replace(/\s+$/u, "");
-  const after = markdown.slice(end);
-  return `${before}${before ? "\n\n" : ""}${line}\n${after ? `\n${after.replace(/^\s+/u, "")}` : ""}`;
-}
-
-/** The page with every reference to one Automation pointing at another, as a replacement does. */
-export function replaceAutomationReference(markdown: string, fromId: string, toId: string): string {
-  return markdown.split(`](${AUTOMATION_REFERENCE_SCHEME}${fromId})`).join(`](${AUTOMATION_REFERENCE_SCHEME}${toId})`);
-}
-
-/** The page without any reference to an Automation; a line left with no words goes with it. */
-export function removeAutomationReference(markdown: string, automationId: string): string {
-  const target = `](${AUTOMATION_REFERENCE_SCHEME}${automationId})`;
-  const lines: string[] = [];
-  for (const line of markdown.split("\n")) {
-    let rest = line;
-    for (let end = rest.indexOf(target); end >= 0; end = rest.indexOf(target)) {
-      let start = rest.lastIndexOf("[", end);
-      while (start > 0 && rest[start - 1] === "\\") start = rest.lastIndexOf("[", start - 2);
-      rest = `${rest.slice(0, Math.max(0, start))}${rest.slice(end + target.length)}`;
-    }
-    if (rest === line) lines.push(line);
-    else if (/[\p{L}\p{N}]/u.test(rest.replace(/^\s*\d+[.)]/u, ""))) lines.push(trimEnd(rest, " \t"));
-  }
-  return lines.join("\n").replace(/\n{3,}/gu, "\n\n");
-}
-
 /**
  * The link scheme of a GitHub file embedded in a page
  * (docs/design/pages-live-document.md §6.5): `xmatrix:github-file/<owner>/<repo>/<path>`,
@@ -588,19 +550,11 @@ export function gitHubFileReferences(markdown: string): string[] {
  */
 export const PAGE_MEDIA_SCHEME = "xmatrix:page-media/";
 
-/** What a page shows inline, by the extension its reference carries. Never markup (no SVG). */
-export const PAGE_MEDIA_TYPES = {
-  png: "image/png", jpg: "image/jpeg", gif: "image/gif", webp: "image/webp", avif: "image/avif",
-  mp4: "video/mp4", webm: "video/webm", mov: "video/quicktime",
-} as const;
-
-export type PageMediaExtension = keyof typeof PAGE_MEDIA_TYPES;
-
 export interface PageMedia {
   /** `<sha-256>.<extension>`, what the reference ends with. */
   file: string;
   contentHash: string;
-  mimeType: (typeof PAGE_MEDIA_TYPES)[PageMediaExtension];
+  mimeType: string;
   video: boolean;
 }
 
@@ -612,7 +566,7 @@ export function pageMediaFile(file: string): PageMedia | null {
   const match = PAGE_MEDIA_FILE.exec(file);
   const extension = match?.[2];
   if (!match || !extension || !Object.hasOwn(PAGE_MEDIA_TYPES, extension)) return null;
-  const mimeType = PAGE_MEDIA_TYPES[extension as PageMediaExtension];
+  const mimeType = PAGE_MEDIA_TYPES[extension]!;
   return { file, contentHash: match[1]!, mimeType, video: mimeType.startsWith("video/") };
 }
 
@@ -623,10 +577,9 @@ export function parsePageMedia(src: string): PageMedia | null {
 
 /** The reference for content of a type pages show; null for any other type. */
 export function pageMediaReference(contentHash: string, mimeType: string): string | null {
-  const type = mimeType.split(";", 1)[0]!.trim().toLowerCase();
-  const extension = (Object.keys(PAGE_MEDIA_TYPES) as PageMediaExtension[])
-    .find((key) => PAGE_MEDIA_TYPES[key] === type);
-  return extension && /^[0-9a-f]{64}$/u.test(contentHash) ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
+  const extension = extensionForMediaType(mimeType);
+  return extension && Object.hasOwn(PAGE_MEDIA_TYPES, extension) && /^[0-9a-f]{64}$/u.test(contentHash)
+    ? `${PAGE_MEDIA_SCHEME}${contentHash}.${extension}` : null;
 }
 
 /** Each media file (`<sha-256>.<extension>`) the page's text references. */

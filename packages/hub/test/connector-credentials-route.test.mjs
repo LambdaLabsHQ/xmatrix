@@ -7,25 +7,33 @@ import * as credentials from "../src/connectors/credentials.ts";
 import * as shared from "../src/index-shared.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
-// The credential store keeps an OAuth grant bound only when an edit writes
-// nothing but Hub-minted fields; the route is what tells it which those are,
-// so regenerating an ingress key neither unbinds the grant nor launders its bot.
-test("regenerating a Slack ingress key names it as Hub-generated to the credential store", async () => {
+/** The connector routes over a credential repository double, for a Space admin. */
+async function credentialRoutes(repository) {
   const route = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));
-  const puts = [];
-  const repository = {
-    readGenerated: async () => ({ ingressKey: "old-key" }),
-    put: async (input) => { puts.push(input); return { credentialFields: ["botToken", "ingressKey"] }; },
-  };
+  const policy = await compileCommonJsSourceModule(new URL("../src/connectors/credential-policy.ts", import.meta.url));
   const noop = () => {};
+  const store = { ...credentials, connectorCredentialRepository: () => repository };
   const imports = {
     "@xmatrix/protocol": protocol,
     "./app-connectors": connectors,
-    "./connectors/credentials": { ...credentials, connectorCredentialRepository: () => repository },
+    "./connectors/credentials": store,
+    "./connectors/credential-policy": policy((name) => ({ "../app-connectors": connectors, "./credentials": store })[name]),
     "./index-shared": { ...shared, requireAuth: async () => ({ id: "admin", email: "admin@example.test" }) },
   };
   const app = new Hono();
   route((name) => imports[name] ?? new Proxy({}, { get: () => noop })).registerConnectorRoutes(app);
+  return app;
+}
+
+// The credential store keeps an OAuth grant bound only when an edit writes
+// nothing but Hub-minted fields; the route is what tells it which those are,
+// so regenerating an ingress key neither unbinds the grant nor launders its bot.
+test("regenerating a Slack ingress key names it as Hub-generated to the credential store", async () => {
+  const puts = [];
+  const app = await credentialRoutes({
+    readGenerated: async () => ({ ingressKey: "old-key" }),
+    put: async (input) => { puts.push(input); return { credentialFields: ["botToken", "ingressKey"] }; },
+  });
   const response = await app.fetch(new Request("https://hub.example/api/spaces/space-1/app-connections/slack/credentials", {
     method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ regenerate: ["ingressKey"] }) }), {});
   assert.equal(response.status, 200, await response.clone().text());
@@ -34,6 +42,19 @@ test("regenerating a Slack ingress key names it as Hub-generated to the credenti
   assert.notEqual(puts[0].fields.ingressKey, "old-key");
   assert.deepEqual(puts[0].policy.generated, ["ingressKey"]);
   assert.ok(puts[0].policy.allowed.includes("botToken"));
+});
+
+// A plain field (a vendor number) reads back to the admin; secrets never do.
+test("an admin reads back a plain credential, apart from Hub-generated values and never a secret", async () => {
+  const reads = [];
+  const app = await credentialRoutes({ readGenerated: async (input) => { reads.push(input.generated);
+    return { webhookSecret: "minted", vendorNumber: "87654321", ingressKey: "ingress" }; } });
+  const response = await app.fetch(new Request("https://hub.example/api/spaces/space-1/app-connections/appstoreconnect/credentials"), {});
+  assert.equal(response.status, 200, await response.clone().text());
+  const view = await response.json();
+  assert.deepEqual(view.plain, { vendorNumber: "87654321" });
+  assert.deepEqual(view.generated, { webhookSecret: "minted" });
+  assert.ok(reads[0].includes("vendorNumber") && !reads[0].includes("privateKey") && !reads[0].includes("webSession"));
 });
 
 const permissionRoute = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));

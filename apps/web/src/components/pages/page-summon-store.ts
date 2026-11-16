@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useAuth } from "@/lib/auth-context";
+import { userSpaceLocalState } from "@/lib/user-space-local-state";
 
 /**
  * An `@` this reader wrote on a page to call an Agent (page-editor.tsx). The call is a message in a conversation
@@ -22,38 +24,35 @@ export interface PageSummon {
   instance?: boolean;
 }
 
-const STORAGE_KEY = "xmatrix.page-summons";
 /** The most recent calls this device remembers; an older `@` reads as a plain mention again. */
 const KEPT = 100;
-
-function remembered(): PageSummon[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const value: unknown = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "[]");
-    return Array.isArray(value) ? value.filter((item): item is PageSummon =>
+const NO_SUMMONS: PageSummon[] = [];
+const memory = userSpaceLocalState<PageSummon[]>("page-summons", (value) =>
+  Array.isArray(value) ? value.filter((item): item is PageSummon =>
       typeof item?.id === "string" && typeof item.pageId === "string" && typeof item.harness === "string"
-      && typeof item.conversationId === "string" && typeof item.messageId === "string") : [];
-  } catch {
-    return [];
-  }
-}
+      && typeof item.conversationId === "string" && typeof item.messageId === "string").slice(-KEPT) : undefined);
 
 /**
  * The calls this reader made from pages' `@`s. Those whose message was stored are this device's memory, so the
  * `@` still shows how its call went after the page is opened again; nobody else reads them.
  */
-export function usePageSummons() {
-  const [summons, setSummons] = useState<readonly PageSummon[]>(remembered);
+export function usePageSummons(spaceId: string | null) {
+  const { user } = useAuth();
+  const userId = user?.id;
+  const load = () => ({ userId, spaceId, summons: memory.read({ userId, spaceId }) ?? [] });
+  const [state, setState] = useState(load);
+  // A scope switch must not paint or persist the previous reader's calls.
+  if (state.userId !== userId || state.spaceId !== spaceId) setState(load());
+  const summons = state.userId === userId && state.spaceId === spaceId ? state.summons : NO_SUMMONS;
   useEffect(() => {
     const stored = summons.filter((summon) => summon.messageId).slice(-KEPT);
-    try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
-    } catch {
-      // A full or refused store only forgets: the `@` reads as a plain mention after a reload.
-    }
-  }, [summons]);
-  const add = useCallback((summon: PageSummon) => setSummons((current) => [...current, summon]), []);
-  const update = useCallback((id: string, change: Partial<PageSummon>) =>
-    setSummons((current) => current.map((summon) => summon.id === id ? { ...summon, ...change } : summon)), []);
+    memory.write({ userId, spaceId }, stored);
+  }, [summons, userId, spaceId]);
+  const change = useCallback((apply: (current: PageSummon[]) => PageSummon[]) => setState((current) =>
+    current.userId === userId && current.spaceId === spaceId
+      ? { ...current, summons: apply(current.summons) } : current), [userId, spaceId]);
+  const add = useCallback((summon: PageSummon) => change((current) => [...current, summon]), [change]);
+  const update = useCallback((id: string, patch: Partial<PageSummon>) =>
+    change((current) => current.map((summon) => summon.id === id ? { ...summon, ...patch } : summon)), [change]);
   return { summons, add, update };
 }

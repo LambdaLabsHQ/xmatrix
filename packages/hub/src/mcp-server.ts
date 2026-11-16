@@ -103,11 +103,12 @@ const WRITE_TOOLS: McpTool[] = [
   },
   {
     name: "send_message", title: "Send a message", annotations: { ...WRITES, destructiveHint: true },
-    description: "Post a message in a channel, as you. Mentioning an Agent (@name) asks it to act, as it would " +
-      "if you typed the message in xMatrix.",
+    description: "Post a message in a channel, as you. A summon (@agent, @auto) starts that Agent only with " +
+      "launch: true. Without it, address an existing Instance as @agent:instance; a bare summon is refused.",
     inputSchema: { type: "object", properties: { channelId: id("The channel, from list_channels."),
       body: { type: "string", minLength: 1, maxLength: 20_000 },
-      replyToMessageId: id("A message to reply to.") },
+      replyToMessageId: id("A message to reply to."),
+      launch: { type: "boolean", description: "Start the Agents this message summons." } },
     required: ["channelId", "body"], additionalProperties: false },
   },
 ];
@@ -242,6 +243,7 @@ export function mcpServer(env: Env, caller: McpCaller, dispatch: (request: Reque
       const sent = await route("POST", `/api/channels/${encodeURIComponent(channelId)}/messages`, {
         body: argument(args, "body"),
         ...(typeof args.replyToMessageId === "string" ? { replyToMessageId: args.replyToMessageId } : {}),
+        ...(args.launch === true ? { launch: true } : {}),
       });
       return text(pick(sent.message, ["messageId", "channelId", "sentAt"]));
     },

@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "about": "The file types xMatrix names by extension, read by the Web, the Hub and the CLI (media-types.ts, cli-rs core media_types.rs). The first extension is the one a saved copy gets. image: shown inline in a conversation and handed to a model as an image. page: shown inline in a page. Never a markup type such as SVG.",
+  "types": [
+    { "type": "image/png", "extensions": ["png"], "image": true, "page": true },
+    { "type": "image/jpeg", "extensions": ["jpg", "jpeg"], "image": true, "page": true },
+    { "type": "image/gif", "extensions": ["gif"], "image": true, "page": true },
+    { "type": "image/webp", "extensions": ["webp"], "image": true, "page": true },
+    { "type": "image/avif", "extensions": ["avif"], "page": true },
+    { "type": "video/mp4", "extensions": ["mp4"], "page": true },
+    { "type": "video/webm", "extensions": ["webm"], "page": true },
+    { "type": "video/quicktime", "extensions": ["mov"], "page": true },
+    { "type": "video/x-m4v", "extensions": ["m4v"] },
+    { "type": "video/ogg", "extensions": ["ogv"] },
+    { "type": "video/x-matroska", "extensions": ["mkv"] },
+    { "type": "video/x-msvideo", "extensions": ["avi"] },
+    { "type": "video/mpeg", "extensions": ["mpg", "mpeg"] },
+    { "type": "audio/mpeg", "extensions": ["mp3"] },
+    { "type": "audio/mp4", "extensions": ["m4a"] },
+    { "type": "audio/aac", "extensions": ["aac"] },
+    { "type": "audio/wav", "extensions": ["wav"] },
+    { "type": "audio/flac", "extensions": ["flac"] },
+    { "type": "audio/ogg", "extensions": ["ogg", "oga", "opus"] },
+    { "type": "audio/webm", "extensions": ["weba"] },
+    { "type": "text/markdown", "aliases": ["text/x-markdown"], "extensions": ["md", "markdown", "mdown", "mkd"] },
+    { "type": "text/plain", "extensions": ["txt", "log"] },
+    { "type": "application/json", "extensions": ["json"] },
+    { "type": "application/pdf", "extensions": ["pdf"] },
+    { "type": "application/zip", "extensions": ["zip"] }
+  ]
+}

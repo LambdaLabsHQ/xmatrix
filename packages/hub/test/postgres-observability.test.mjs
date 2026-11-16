@@ -38,6 +38,7 @@ test("query telemetry has fixed privacy-safe slots and retains slow-query eviden
     shardId: "shard-0",
     durationMs: 1_234,
     rowCount: 1,
+    resultBytes: 2_048,
     outcome: "ok",
     slow: true,
   });
@@ -48,7 +49,7 @@ test("query telemetry has fixed privacy-safe slots and retains slow-query eviden
       "ok", "none", "version-1", "cache_disabled", "postgres_health_v1", "slow",
       "postgres.readiness",
     ],
-    doubles: [1_234, 1, 1, 1],
+    doubles: [1_234, 1, 1, 1, 2_048],
   }]);
   assert.equal(JSON.stringify(written).includes("must-not-be-written"), false);
 });
@@ -62,6 +63,7 @@ test("hostile dimensions and errors collapse into bounded buckets", () => {
     shardId: "customer@example.com",
     durationMs: Number.POSITIVE_INFINITY,
     rowCount: -10,
+    resultBytes: Number.NaN,
     outcome: "unexpected",
     slow: false,
     errorCode: "password=secret",
@@ -70,7 +72,7 @@ test("hostile dimensions and errors collapse into bounded buckets", () => {
     "query", "other", "other", "other", "error", "DATABASE_ERROR", "version-1", "cache_disabled",
     "other", "error", "other",
   ]);
-  assert.deepEqual(written[0].doubles, [0, 0, 0, 1]);
+  assert.deepEqual(written[0].doubles, [0, 0, 0, 1, 0]);
 });
 
 test("client read deadlines remain distinguishable from server SQLSTATE timeouts", () => {
@@ -91,7 +93,8 @@ test("breaker refusals retain their operation and bounded opening-failure diagno
   const { env, written } = sink();
   const point = { requestId: "private", operation: "app.sentry-event.claim",
     queryName: "database_phase_pool_checkout_v1", shardId: "shard-0",
-    durationMs: 0, rowCount: 0, outcome: "error", slow: false, errorCode: "database_circuit_open",
+    durationMs: 0, rowCount: 0, resultBytes: 0, outcome: "error", slow: false,
+    errorCode: "database_circuit_open",
     connectivity: { state: "half_open", failureCode: "QUERY_READ_TIMEOUT",
       failureOperation: "app.googlechat.cleanup", failureQuery: "database_phase_begin_v1",
       failureCount: 5, failureAgeMs: 6_000, retryAfterMs: 1_000 } };
@@ -100,12 +103,12 @@ test("breaker refusals retain their operation and bounded opening-failure diagno
   assert.equal(written[0].blobs[10], "app.sentry-event.claim");
   assert.deepEqual(written[0].blobs.slice(11), ["half_open", "QUERY_READ_TIMEOUT",
     "app.googlechat.cleanup", "database_phase_begin_v1"]);
-  assert.deepEqual(written[0].doubles, [0, 0, 0, 1, 1_000, 6_000, 5]);
+  assert.deepEqual(written[0].doubles, [0, 0, 0, 1, 0, 1_000, 6_000, 5]);
   recordPostgresQueryObservation(env, { ...point, connectivity: {
     state: "private", failureCode: "password=secret", failureOperation: "private@example.com",
     failureQuery: "SELECT password", failureCount: -1, failureAgeMs: NaN, retryAfterMs: Infinity } });
   assert.deepEqual(written[1].blobs.slice(11), ["other", "DATABASE_ERROR", "other", "other"]);
-  assert.deepEqual(written[1].doubles.slice(4), [0, 0, 0]);
+  assert.deepEqual(written[1].doubles.slice(5), [0, 0, 0]);
   assert.equal(JSON.stringify(written).includes("private"), false);
 });
 
@@ -157,10 +160,10 @@ test("operations outside the hot paths are grouped by their code-defined family"
 
 test("ordinary successful queries are thinned with a compensating weight", () => {
   const point = { requestId: "r", operation: "message.append", queryName: "message_append_v1",
-    shardId: "shard-0", durationMs: 3, rowCount: 1, outcome: "ok", slow: false };
+    shardId: "shard-0", durationMs: 3, rowCount: 1, resultBytes: 40, outcome: "ok", slow: false };
   const all = sink({ POSTGRES_QUERY_OBSERVABILITY_SAMPLE_RATE: "1" });
   recordPostgresQueryObservation(all.env, point);
-  assert.deepEqual(all.written[0].doubles.slice(3), [1]);
+  assert.deepEqual(all.written[0].doubles.slice(3), [1, 40], "the weight scales a kept point's bytes too");
   assert.equal(all.written[0].blobs[9], "all");
 
   const thin = sink({ POSTGRES_QUERY_OBSERVABILITY_SAMPLE_RATE: "10000" });
@@ -182,7 +185,7 @@ test("session points carry every segment of one checkout in fixed slots", () => 
     operation: "channel-catalog.page", shardId: "shard-0", outcome: "ok", wallMs: 812,
     queueMs: 1, checkoutMs: 2, firstStatementMs: 600, beginMs: 600, sqlMs: 190,
     sqlMaxMs: 150, commitMs: 6, rollbackMs: 0, roundTrips: 6, transactions: 1, queries: 3,
-    rows: 40, requestId: "must-not-be-written",
+    rows: 40, resultBytes: 96_512, requestId: "must-not-be-written",
   };
   recordPostgresSessionObservation(env, summary);
   assert.deepEqual(written[0], {
@@ -193,7 +196,8 @@ test("session points carry every segment of one checkout in fixed slots", () => 
     ],
     doubles: [812, 40, 1, 1, ...SESSION_SEGMENTS.map((field) => summary[field])],
   });
-  assert.equal(written[0].doubles.length, 15);
+  assert.equal(written[0].doubles.length, 16);
+  assert.equal(written[0].doubles[15], 96_512, "double16 is the session's result bytes");
   assert.equal(JSON.stringify(written).includes("must-not-be-written"), false);
 
   recordPostgresSessionObservation(env, { ...summary, wallMs: 20, outcome: "error",

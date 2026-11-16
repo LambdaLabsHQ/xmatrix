@@ -44,7 +44,7 @@ test("the Space preloads repositories before typing and a GitHub change refreshe
   expect((await fixtureRequests(page, "github-catalog-change")).length).toBe(1);
 });
 
-test("a fresh @ offers runtimes only, and conditions after the summon", async ({ page }) => {
+test("a bare @ offers runtimes only, a typed one also the conditions that may open a summon", async ({ page }) => {
   const input = page.locator(".composer-textarea").first();
   const overlay = page.locator(".app-mention-suggestions");
   await input.fill("@");
@@ -54,8 +54,14 @@ test("a fresh @ offers runtimes only, and conditions after the summon", async ({
   for (const condition of ["repo:owner/xmatrix", "model:test-model", "machine:"]) {
     await expect(overlay.getByRole("option").filter({ hasText: condition })).toHaveCount(0);
   }
+  // `@Mac` names the machine: the summon fixes it and Jev chooses the rest.
+  await input.fill("@Mac");
+  await overlay.getByRole("option").filter({ hasText: "@machine:My Mac" }).click();
+  await expectDraft(input, '@machine:"My Mac" ');
+  await expect(input.locator(".app-mention-chip[data-mention]").first()).toHaveText('@machine:"My Mac"');
+  await expect(overlay.getByRole("option").filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
   await input.fill("@xmat");
-  await expect(overlay.getByRole("option").filter({ hasText: "owner/xmatrix" })).toHaveCount(0);
+  await expect(overlay.getByRole("option").filter({ hasText: "@repo:owner/xmatrix" })).toBeVisible();
   await input.fill("@codex ");
   await expect(overlay.getByRole("option").filter({ hasText: "repo:owner/xmatrix" })).toBeVisible();
   await expect(overlay.getByRole("option").filter({ hasText: "model:test-model" })).toBeVisible();
@@ -217,6 +223,30 @@ test("new syntax completes from registrations without legacy Profiles or live in
   await expect(page.getByLabel("Task launch conditions")).toHaveCount(0);
 });
 
+
+test("with no declared models, model: completes from the runtime's own catalog where its daemon applies one", async ({ page }) => {
+  const registration = {
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "native-machine", harness: "claude" },
+    displayName: "Claude", ownerName: "Owner", machineName: "Native Mac", version: 1,
+    state: "enabled", routingReady: true, models: [], nativeModels: true, parameterModel: "claude-opus-5-5",
+    modelCatalog: [
+      { model: "claude-opus-5-5", description: "", names: ["default"], isDefault: true, efforts: [{ value: "max", description: "" }] },
+      { model: "claude-sonnet-5-5", description: "", names: ["sonnet", "Sonnet"], efforts: [{ value: "low", description: "" }] }],
+    canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+  };
+  await fixtureJson(page, "registration-catalog", "**/api/xmatrix/spaces/*/agent-registrations", {
+    registrations: [registration], capabilities: [{ harness: "claude", models: [], locations: [registration] }],
+  });
+  await page.reload();
+  const input = page.locator(".composer-textarea").first();
+  await input.fill("@claude model:claude-son");
+  await page.getByRole("option").filter({ hasText: "model:claude-sonnet-5-5" }).click();
+  await expectDraft(input, "@claude model:claude-sonnet-5-5 ");
+  // A model written by the runtime's short name still offers that model's efforts.
+  await input.fill("@claude model:sonnet effort:");
+  await expect(page.getByRole("option").filter({ hasText: "effort:low" })).toBeVisible();
+  await expect(page.getByRole("option").filter({ hasText: "effort:max" })).toHaveCount(0);
+});
 
 test("typing a summon and a space opens tag choices without changing Enter submission", async ({ page }) => {
   await fixtureJson(page, "source", "**/api/xmatrix/channels/channel-general/messages",

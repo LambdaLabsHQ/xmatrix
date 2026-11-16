@@ -4,14 +4,14 @@ import type {
   SpaceMemberPermissions,
 } from "@xmatrix/protocol";
 
-export type SpaceMemberCreationCapability = keyof SpaceMemberPermissions;
+/** What a Space lets its members create from the Web. */
+export type SpaceMemberCreationCapability = "agentCreation";
 
 export function effectiveSpaceMemberPermissions(
   space: SerializedSpace | null | undefined,
-): SpaceMemberPermissions {
+): Pick<SpaceMemberPermissions, SpaceMemberCreationCapability> {
   return {
     agentCreation: space?.memberPermissions?.agentCreation ?? "members",
-    automationCreation: space?.memberPermissions?.automationCreation ?? "members",
   };
 }
 

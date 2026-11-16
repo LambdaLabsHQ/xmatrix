@@ -77,6 +77,8 @@ export interface ProductAgentInterventionResult {
   stopped: number;
   failures: string[];
   pending?: number;
+  /** What the sender must hear: each recorded result that stopped nothing. */
+  refusals?: string[];
 }
 
 /** The exact stop was queued, but host termination is not confirmed yet. */

@@ -39,7 +39,7 @@ test("production configuration cannot enable mock auth or reference test resourc
 test("production refuses over-limit requests and bounds Jev spend, each limiter in its own namespace", () => {
   assert.equal(hub.vars.RATE_LIMIT_ENFORCED, "true");
   // A missing binding admits everything, so a dropped one silently lifts a spend bound.
-  for (const name of ["RATE_LIMIT_SUMMON_INTENT", "RATE_LIMIT_JEV_EVALUATE", "RATE_LIMIT_SEARCH_RERANK"]) {
+  for (const name of ["RATE_LIMIT_JEV_EVALUATE", "RATE_LIMIT_SEARCH_RERANK"]) {
     assert.ok(binding(hub, "ratelimits", name), name);
   }
   const namespaces = hub.ratelimits.map((limiter) => limiter.namespace_id);

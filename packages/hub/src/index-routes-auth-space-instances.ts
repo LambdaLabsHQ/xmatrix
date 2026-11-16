@@ -10,6 +10,7 @@ import { RELAY_RUNTIME_AGENT_TRACE_TERMINATE_PATH } from "./runtime-transport/re
 import { INSTANCE_ABANDON_RESULT_TIMEOUT_MS, requireAuth, requireHumanAuth, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
+import { isXmatrixOwnedDirectory } from "./workspace-path-policy";
 import { machineCommandStatus, machineDaemonCommand, machineRepository } from "./machines";
 import { runtimeRepository } from "./runtime";
 import { ControlError } from "@xmatrix/db";
@@ -498,6 +499,9 @@ export function registerIndexRoutesAuthSpaceInstances(app: Hono<{ Bindings: Env 
       : "";
     if (!machineId || !canonicalCwd) {
       return c.json({ error: "machineId and canonicalCwd are required" }, 400);
+    }
+    if (isXmatrixOwnedDirectory(canonicalCwd)) {
+      return c.json({ error: "A directory xMatrix owns, such as a Run's worktree, cannot be a Workspace; register a project directory" }, 400);
     }
     // An Agent Run registers its owner's directories on its own Machine.
     const ownerUserId = authUser.agentRun?.ownerUserId || authUser.id;

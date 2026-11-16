@@ -157,8 +157,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       return c.json({ error: "One-click connect is not configured for this app" }, 404);
     }
     let accountId: string | undefined;
+    const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
     if (client.manifest.id === "x") {
-      const body = await c.req.json().catch(() => null) as Record<string, unknown> | null;
       if (body?.accountId !== undefined) {
         if (typeof body.accountId !== "string" || !/^[1-9][0-9]{0,19}$/u.test(body.accountId)) {
           return c.json({ error: "Invalid X account" }, 400);
@@ -181,6 +181,7 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
         providerId, actorUserId: user.id });
     }
     return c.json({ url: await oauthAuthorizeUrl(client, { spaceId, userId: user.id, connectionSnapshot, accountId,
+      desktop: body?.returnTo === "desktop",
       ...(stripeAuthorizeUrl ? { authorizeUrl: stripeAuthorizeUrl } : {}),
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
       meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },
@@ -200,6 +201,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
       const value = c.req.query(key);
       if (value !== undefined) url.searchParams.set(key, value);
     }
+    // Started in the desktop app: the browser page hands the grant back to the app, whose sign-in finishes it.
+    if (verified.desktop) url.searchParams.set("via", "desktop");
     return c.redirect(url.toString(), 302);
   });
 

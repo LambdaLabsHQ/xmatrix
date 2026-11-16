@@ -12,6 +12,8 @@ import { WEB_E2E_FIXTURE_ENV } from "./fixture-env.mjs";
        pnpm exec playwright test e2e/<spec> --project=web
 
    It keeps its output in .next-dev, so a built .next beside it stays usable.
+   It bundles with webpack, as the build does: Turbopack's CSS parser refuses
+   `::highlight()`, which the quoted-passage mark is drawn with, and answers 500.
    A development build mounts components twice and is slower; a spec that
    counts mounts or renders can differ here. `next dev` rewrites
    next-env.d.ts for its output directory: restore that file before committing. */
@@ -19,7 +21,7 @@ const WEB_E2E_DEV_PORT = 4612;
 
 if (isCliMain(import.meta.url)) {
   const port = process.argv[2] ?? String(WEB_E2E_DEV_PORT);
-  const server = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["exec", "next", "dev", "--turbopack", "-p", port], {
+  const server = spawn(process.platform === "win32" ? "pnpm.cmd" : "pnpm", ["exec", "next", "dev", "-p", port], {
     stdio: "inherit",
     shell: process.platform === "win32",
     env: { ...process.env, ...WEB_E2E_FIXTURE_ENV, XMATRIX_NEXT_DIST_DIR: ".next-dev" },

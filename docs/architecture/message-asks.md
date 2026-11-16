@@ -123,6 +123,15 @@ its current `canAsk` projection are separate: current recipients, permissions,
 source changes or a settled decision remove the action. No row means unknown.
 There is no historical backfill, age-based failure inference or browser retry.
 
+A pending first-message or explicit Ask summon also owns the Channel's startup
+before its Run exists. Other publications retain their append witness, but
+cannot offer or claim another Ask while that summon is pending, including the
+initial first-message reading gap. The query and the Channel-locked claim use
+the same predicate and the coordinator's bounded recovery lifetime. Failed,
+cancelled, stale, declined and expired decisions release that suppression; a
+finished dispatch is then covered by ordinary Run/Instance ownership. An exact
+retry of the winning choice still reconciles its existing decision.
+
 The Web draws **No Agent was asked** under the original publication. Available
 harnesses are explicit choices. If there are no registrations, this same place
 contains the established connection steps; an existing but unusable registration

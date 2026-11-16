@@ -39,11 +39,27 @@ not prove the five-minute expiry defect: cookie blocking, parallel flows or
 another cause can reach the same branch. Preserve that distinction when
 assessing a production event.
 
+For that browser-cookie branch, a request-local Better Auth hook observes the
+library's configured cookie name and signed-cookie verifier. The original
+exception is reported once with the provider, a fixed cookie result (`missing`,
+`invalid`, `different`, `matching` or `unavailable`), and booleans for the state,
+code and provider-error parameters. `read_issue` exposes these fields as
+`OAuth browser state`. `different` proves a valid signature over another state,
+not the cause of the overwrite; `missing` cannot distinguish browser blocking
+from expiry. `unavailable` means optional inspection failed. No state, code,
+cookie, URL, user or browser identity is retained. No custom fingerprint is
+assigned; normal SDK deduplication applies. The hook does not read the database, alter
+validation, consume state or retry a callback. Unrelated library errors keep
+their existing reporting path.
+
 `packages/hub/test/oauth-callback-postgres.test.mjs` exercises missing state,
 provider denial followed by replay, the per-flow return URL, session refusal
 and metric accounting against isolated PostgreSQL. A simulated browser clock
 also checks a six-minute return and refusals for missing, mismatched, replayed
 and expired state. It does not perform a live provider login.
+The same owner test captures real Sentry envelopes for missing, invalid and
+different signed cookies, checks concurrent request isolation and the connector
+projection, and verifies that refused cookies leave the genuine state usable.
 
 The login page offers GitHub alongside Google and email. Both social providers
 use the same validated return path, including the CLI/native device context;

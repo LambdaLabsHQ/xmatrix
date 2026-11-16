@@ -1,4 +1,5 @@
-import { connectorReceiptBody, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
+import { ControlError } from "@xmatrix/db";
+import { CONNECTOR_RECEIPT_FIXES_KEY, connectorReceiptBody, connectorReceiptMessageId, plainRecord, utf8ByteLength } from "@xmatrix/protocol";
 import type { AppConnectorProviderManifest, AppConnectorRemedy, ConnectorResultVisibility } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { appCommand, CONNECTED_APPS_NEED_MEMBER, usableAppConnections } from "../apps";
@@ -13,10 +14,16 @@ export function record(value: unknown): Record<string, unknown> {
   return plainRecord(value) ?? {};
 }
 
+/** A refused Hub write keeps the Hub's own error contract: a lock timeout or
+ * outage the message authority answered as a retryable 503 stays one for the
+ * caller, instead of becoming an unexplained 500 it reports a second time. */
 async function failure(operation: string, response: Response): Promise<Error> {
   const payload = record(await response.json().catch(() => ({})));
   const detail = typeof payload.error === "string" && payload.error.trim() ? `: ${payload.error.trim()}` : "";
-  return new Error(`${operation} failed (${response.status})${detail}`);
+  const message = `${operation} failed (${response.status})${detail}`;
+  return typeof payload.code === "string" && typeof payload.retryable === "boolean"
+    ? new ControlError(payload.code, response.status, message, payload.retryable)
+    : new Error(message);
 }
 
 export interface CommandScope {
@@ -34,8 +41,10 @@ async function channelSpace(manifest: AppConnectorProviderManifest, env: Connect
 }
 
 /** The Channel's Space and configured connection, or why the command is blocked. */
-export async function commandScope(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput):
-  Promise<CommandScope | string> {
+export async function commandScope(manifest: AppConnectorProviderManifest, input: ConnectorCommandInput,
+  /** Asks the provider again and records the answer, as Check again in Apps does; refused unless the actor is a Space admin. */
+  checkAppConnection?: (env: ConnectorCommandInput["env"], check: { spaceId: string; providerId: string; userId: string; commandId: string }) =>
+    Promise<Record<string, unknown>>): Promise<CommandScope | string> {
   const principal = { kind: "user" as const, id: input.actorUserId };
   const spaceId = await channelSpace(manifest, input.env, input.channelId, principal);
   const listed = await usableAppConnections(input.env, { spaceId, channelId: input.channelId, actorUserId: input.actorUserId });
@@ -43,7 +52,15 @@ export async function commandScope(manifest: AppConnectorProviderManifest, input
   const connection = listed.map(record).find((candidate) => candidate.providerId === manifest.id);
   if (!connection || connection.status !== "configured" || typeof connection.id !== "string") {
     if (connection?.status === "disconnected") return `${manifest.name} is disconnected in this Space; reconnect it in Apps → ${manifest.name}`;
-    if (connection?.status === "error") return `${manifest.name} needs attention in this Space; check it in Apps → ${manifest.name}`;
+    if (connection?.status === "error" && typeof connection.id === "string") {
+      // The recorded failure may be over (an API enabled, a key restored). The command is the moment to find
+      // out: a Space admin's command checks again, as Check again in Apps does, and goes on when it passes.
+      const checked = await checkAppConnection?.(input.env, { spaceId, providerId: manifest.id, userId: input.actorUserId,
+        commandId: `connector-command-check:${crypto.randomUUID()}` }).catch(() => undefined);
+      if (checked?.ok === true) return { principal, spaceId, connectionId: connection.id };
+      const reason = checked && typeof checked.message === "string" ? `: ${checked.message}` : "";
+      return `${manifest.name} needs attention in this Space${reason}; check it in Apps → ${manifest.name}`;
+    }
     return `connect ${manifest.name} to this Space first`;
   }
   return { principal, spaceId, connectionId: connection.id };
@@ -108,6 +125,9 @@ export async function withExecution(
       : { reason: executionExcerpt(outcome.summary, 500), ...(outcome.remedy ? { remedy: remedyCode(outcome.remedy) } : {}) }),
     principal: scope.principal,
   });
+  if (outcome.status !== "completed" && outcome.remedy) {
+    input.fixes?.push({ providerId: manifest.id, actionId: action.id, executionId, remedy: outcome.remedy });
+  }
   return commandResult(manifest.name, action.id, outcome);
 }
 
@@ -119,7 +139,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
   if (lines.length === 0) return;
   const response = await dispatchProductMessageAppend(input.env, input.channelId, {
     commandId: `product:${manifest.id}-status:${input.messageId}`.slice(0, 200),
-    messageId: `system:${input.messageId}:${manifest.id}`.slice(0, 200),
+    messageId: connectorReceiptMessageId(input.messageId, manifest.id),
     channelId: input.channelId,
     body: connectorReceiptBody(lines),
     // Paid X work is already charged before I/O. Its receipt must remain
@@ -128,6 +148,7 @@ export async function publishCommandStatus(manifest: AppConnectorProviderManifes
     principal: { kind: "user", id: input.actorUserId },
     appAuthorId: manifest.id,
     residual: { appMetadata: { xmatrixProvenance: "system_fact",
+      ...(input.fixes?.length ? { [CONNECTOR_RECEIPT_FIXES_KEY]: input.fixes } : {}),
       ...(options.privateResultOwnerUserId ? { xmatrixPrivateConnectorResultOwner: options.privateResultOwnerUserId } : {}),
       ...(options.resumeRequester !== false && input.senderKind === "agent" && input.senderId && input.commandMessageId !== null
         ? { xmatrixConnectorRequesterInstanceId: input.senderId } : {}) },

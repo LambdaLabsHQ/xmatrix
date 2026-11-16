@@ -47,6 +47,32 @@ integration("one opening message begins the transaction with every setting intac
     isolation: "serializable", lock_timeout: "2s" }]);
 });
 
+// Egress attribution reads node-postgres's protocol connection: a driver
+// upgrade that stops emitting DataRow lengths must fail here, not silently
+// report zero bytes for every query.
+integration("a real driver reports each statement's result bytes as they crossed the wire", async () => {
+  assert.ok(connectionString, "XMATRIX_TEST_POSTGRES_URL is required");
+  const observations = [];
+  const sessions = [];
+  const database = createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    observer: (point) => observations.push(point), sessionObserver: (summary) => sessions.push(summary) });
+  await database.transaction({ requestId: "result-bytes", operation: "client.result-bytes" }, async (transaction) => {
+    await transaction.query({ name: "test_wide_row_v1", text: "SELECT repeat('x', 1000) AS a", maxRows: 1 });
+    await transaction.query({ name: "test_three_rows_v1",
+      text: "SELECT repeat('y', 10) AS b FROM generate_series(1, 3)", maxRows: 3 });
+    await transaction.query({ name: "test_no_rows_v1", text: "SELECT 1 WHERE false", maxRows: 1 });
+  });
+  const bytes = Object.fromEntries(observations.map((point) => [point.queryName, point.resultBytes]));
+  // A DataRow is its type byte, a 4-byte length, a 2-byte field count, and
+  // each field's 4-byte length and text.
+  assert.equal(bytes.test_wide_row_v1, 1 + 4 + 2 + 4 + 1000);
+  assert.equal(bytes.test_three_rows_v1, 3 * (1 + 4 + 2 + 4 + 10));
+  assert.equal(bytes.test_no_rows_v1, 0);
+  assert.ok(bytes.database_phase_begin_v1 > 0, "the opening answers its settings row");
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].resultBytes, bytes.database_phase_begin_v1 + 1011 + 63);
+});
+
 // HUB-AY: a lock timeout erases pg_blocking_pids' wait edge. Existing driver
 // recovery tests cannot prove the diagnostic was taken while the SQL was waiting.
 integration("writer lock failures retain the live blocker without identities or SQL", async () => {
@@ -64,7 +90,7 @@ integration("writer lock failures retain the live blocker without identities or 
     await holder.query("BEGIN; SET LOCAL application_name='xmatrix-execution-report'");
     await holder.query(`SELECT * FROM ${table} FOR UPDATE`);
     const writers = [
-      ["runtime_execution_report_owner_v4", "xmatrix-execution-report", "execution-report"],
+      ["runtime_execution_report_owner_v5", "xmatrix-execution-report", "execution-report"],
       ["channel_mutation_root_lock_v2", "xmatrix-hub-channel-catalog", "catalog"],
       ["channel_mutation_head_advance_v1", "xmatrix-hub-channel-catalog", "catalog"],
     ];
@@ -94,7 +120,8 @@ integration("writer lock failures retain the live blocker without identities or 
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.lockWait?.status, mode === "available" ? "sampled" : "unavailable");
         if (mode === "available") {
-          assert.equal(evidence.lockWait.waiter.owner, owner);
+          assert.equal(evidence.lockWait.waiter.owner,
+            `op:${owner === "catalog" ? "channel.channel_configure" : "runtime.execution-report"}`);
           assert.equal(evidence.lockWait.waiter.wait, "Lock");
           assert.equal(evidence.lockWait.blockers.length, 1);
           assert.equal(evidence.lockWait.blockers[0].owner, "execution-report");
@@ -124,7 +151,7 @@ integration("writer lock failures retain the live blocker without identities or 
     }, async tx => {
       if (++readyCount === 2) releaseReady();
       await ready;
-      return tx.query({ name: "runtime_execution_report_owner_v4", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
+      return tx.query({ name: "runtime_execution_report_owner_v5", text: `SELECT id FROM ${table} FOR UPDATE`, maxRows: 1 });
     })));
     assert.ok(failures.every(result => result.status === "rejected" && result.reason.code === "55P03"));
     assert.deepEqual(failures.map(result => databaseFailureEvidence(result.reason)[0].lockWait.status).sort(), ["busy", "sampled"]);
@@ -136,7 +163,7 @@ integration("writer lock failures retain the live blocker without identities or 
         return new Client(config);
       } });
     assert.deepEqual(await database.transaction({ requestId: "fast", operation: "runtime.execution-report", placement },
-      tx => tx.query({ name: "runtime_execution_report_owner_v4", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
+      tx => tx.query({ name: "runtime_execution_report_owner_v5", text: "SELECT 1 AS ok", maxRows: 1 })), [{ ok: 1 }]);
   } finally {
     try { await holder.query("ROLLBACK"); }
     finally { await isolated.close(); }
@@ -158,8 +185,10 @@ integration("Agent message Channel lock failures retain either Channel's live bl
   try {
     await holder.query("CREATE SCHEMA data; CREATE TABLE data.channels (channel_id text PRIMARY KEY)");
     await holder.query("INSERT INTO data.channels VALUES ('private-a'),('private-b')");
-    for (const channel of ["private-a", "private-b"]) {
-      await holder.query("BEGIN; SET LOCAL application_name='xmatrix-agent-launch-coordinator'");
+    // HUB-AZ/B3 blockers read `other`: a holder that names its operation is reported by it.
+    for (const [channel, holderName, blocker] of [["private-a", "xmatrix-agent-launch-coordinator", "launch"],
+      ["private-b", "xmatrix-pages page.edit", "op:page.edit"]]) {
+      await holder.query(`BEGIN; SET LOCAL application_name='${holderName}'`);
       await holder.query("SELECT 1 FROM data.channels WHERE channel_id=$1 FOR UPDATE", [channel]);
       await assert.rejects(database.transaction({ requestId: "private-request", operation: "message.append" },
         tx => lockAgentRunChannels(tx, "private-b", "private-a")), error => {
@@ -167,9 +196,9 @@ integration("Agent message Channel lock failures retain either Channel's live bl
         const [evidence] = databaseFailureEvidence(error);
         assert.equal(evidence.queryName, "channel_lifecycle_lock_runtime_new_work_v1");
         assert.equal(evidence.lockWait?.status, "sampled");
-        assert.equal(evidence.lockWait.waiter.owner, "message");
+        assert.equal(evidence.lockWait.waiter.owner, "op:message.append");
         assert.equal(evidence.lockWait.waiter.wait, "Lock");
-        assert.equal(evidence.lockWait.blockers[0].owner, "launch");
+        assert.equal(evidence.lockWait.blockers[0].owner, blocker);
         assert.equal(evidence.lockWait.blockers[0].state, "idle in transaction");
         assert.ok(evidence.lockWait.blockers[0].ageMs >= 1);
         assert.doesNotMatch(JSON.stringify(evidence), /private-|SELECT|postgres:\/\//u);

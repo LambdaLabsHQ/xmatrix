@@ -305,6 +305,33 @@ test("@auto leaves the harness to routing, with no same-machine preference", asy
   assert.equal(port.handoffs[0].sourceMention, "@claude:2:handoff:@auto");
 });
 
+// Protect the handoff's authored conditions at the orchestration owner: the
+// previous parser delivered these words as prose and routed to another machine.
+test("handoff conditions use launch validation and cannot become task prose", async () => {
+  const port = basePort({ getRebornTarget: repoSource() });
+  await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "conditions",
+    body: '@claude:2:handoff:@codex machine:"My Laptop" model:chosen effort:high finish', actorUserId: "user-1", port });
+  assert.deepEqual(port.handoffs[0].tags, { machine: "My Laptop", model: "chosen", effort: "high" });
+  assert.equal(port.handoffs[0].request, "finish");
+  for (const tail of ['machine:Laptop machine:Server', 'machine:', 'harness:claude', 'repo:acme/app pwd:/srv/app']) {
+    const refused = basePort({ getRebornTarget: repoSource() });
+    const result = await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "invalid",
+      body: `@claude:2:handoff:@codex ${tail}`, actorUserId: "user-1", port: refused });
+    assert.equal(result.spawned, 0, tail);
+    assert.equal(refused.handoffs.length, 0, tail);
+    assert.match(refused.notices[0], /invalid_registration_launch/, tail);
+  }
+});
+
+test("automatic handoff retains the source's explicit machine; only an authored override replaces it", async () => {
+  for (const [tail, expected] of [["", "machine:laptop"], [" machine:Server", "Server"]]) {
+    const port = basePort({ getRebornTarget: repoSource({ launchMachineId: "machine:laptop" }) });
+    await orchestrateProductAgentMentions({ channelId: "ch-1", messageId: "inherit",
+      body: `@claude:2:handoff:@auto${tail}`, actorUserId: "user-1", port });
+    assert.equal(port.handoffs[0].tags.machine, expected);
+  }
+});
+
 test("a source without a repository hands off its registered directory, or none for a managed one", async () => {
   for (const [workspace, metadata, site] of [
     [{ machineId: "machine-1", canonicalCwd: "/srv/notes" }, { runtime: "codex" }, { directory: "/srv/notes" }],

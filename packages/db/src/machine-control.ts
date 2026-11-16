@@ -3,12 +3,12 @@ import { hostnameMetadata } from "./hostname-metadata.js";
 import type { QueryResultRow } from "pg";
 import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import {
-  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
+  ACTIVE_RUN_STATUS_SQL, agentPresetById, harnessActionAvailable, HARNESS_ACTION_CLAIM_TTL_MS, HARNESS_LOGIN_ACTIONS, MACHINE_HARNESS_CHECK_CAPABILITY, legacyMachineDaemonId, MACHINE_HARNESS_ACTION_CAPABILITY, MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY, MACHINE_HARNESS_LOGIN_CAPABILITY, MACHINE_HARNESS_RELEASE_CAPABILITY, MACHINE_HARNESS_UNINSTALL_CAPABILITY, machineResourceObservation,
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
   MACHINE_SLEEP_CAPABILITY, parseMachineCliUpdateStatus, stableMachineDaemonId,
-  sha256Hex } from "@xmatrix/protocol";
+  sha256Hex, type MachineResourceObservation } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -57,6 +57,16 @@ const QUOTA_PROBE_WINDOW_MS = 15_000;
  * is evidence the "online" route is not responding.
  */
 const UNANSWERED_AFTER_MS = 60_000;
+/**
+ * The modern admission lease is 10s, and the renew that extends it is judged
+ * on the database clock after that read round trip. A same-generation renew
+ * that missed by less than this is still the holder: production saw a harness
+ * admission 317ms late, with the command only as old as the 10s window.
+ * Claim waits out the same interval before taking the row. A longer quiet gap
+ * stays refused so another claim can have the command. Quota probes keep the
+ * hard result window and do not get this slack.
+ */
+const LEASE_RENEW_SKEW_MS = 1_000;
 /** Only recent work counts, so one command that can never be claimed does not
  * mark a working machine as not responding for its whole lifetime. */
 const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
@@ -87,6 +97,15 @@ export const MACHINE_RETIRED_MESSAGE =
 
 export class MachineControlError extends ControlError {
   override name = "MachineControlError";
+}
+
+/** Which lease fence refused a daemon frame, and on what command type: static
+ * labels only, logged with the rejection so a stale lease names its cause. */
+export class MachineStaleLeaseError extends MachineControlError {
+  constructor(message: string, readonly reason: string, readonly commandType?: string,
+    readonly leaseTiming?: { leaseWindowMs: number; leaseExpiredForMs: number; commandAgeMs: number }) {
+    super("machine_command_stale_lease", 409, message);
+  }
 }
 
 function channelCapabilityError(failure: ChannelCapabilityFailure): MachineControlError {
@@ -163,6 +182,9 @@ function activationReceipt(row: QueryResultRow, receiptId?: string): Record<stri
     ...(row.active_receipt_id ? { activeReceiptId: String(row.active_receipt_id) } : {}),
   };
 }
+
+/** The commands whose result gives the daemon its own record, metadata included. */
+const DAEMON_RECORD_ACTIONS: ReadonlySet<string> = new Set(["enroll", "connect", "recover_connect"]);
 
 function daemon(row: QueryResultRow) {
   return { id: String(row.daemon_id), userId: String(row.owner_user_id), email: String(row.owner_email),
@@ -403,9 +425,20 @@ export class PostgresMachineControlRepository {
         values: [ownerUserId, machineId], maxRows: 1 });
         if (retired[0]) throw new MachineControlError("machine_retired", 410, MACHINE_RETIRED_MESSAGE);
       }
-      const currentRows = await tx.query<QueryResultRow>({ name: "machine_control_daemon_lock_v1",
-        text: "SELECT * FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE",
-        values: [daemonId], maxRows: 1 });
+      // Only a connection answers the daemon with its own record, inventory
+      // included. Every other command (reports, claims, renewals, results,
+      // issues: about 125,000 a day) locks the row without its metadata, which
+      // is kilobytes of harness inventory and resources nobody reads from a
+      // command's result or its replay.
+      const currentRows = await tx.query<QueryResultRow>(DAEMON_RECORD_ACTIONS.has(action)
+        ? { name: "machine_control_daemon_lock_v1",
+          text: "SELECT * FROM data.machine_daemons WHERE daemon_id=$1 FOR UPDATE",
+          values: [daemonId], maxRows: 1 }
+        : { name: "machine_control_daemon_lock_lean_v2",
+          // Every column the row has, whatever its schema, with metadata left null.
+          text: `SELECT (jsonb_populate_record(NULL::data.machine_daemons, to_jsonb(d)-'metadata_json')).*
+            FROM data.machine_daemons d WHERE d.daemon_id=$1 FOR UPDATE`,
+          values: [daemonId], maxRows: 1 });
       let current: QueryResultRow | undefined = currentRows[0];
       if (!current && hostDerived && action === "enroll") {
         current = await this.recoverLegacyDaemonKey(tx, { ownerUserId, machineId, daemonId });
@@ -525,7 +558,8 @@ export class PostgresMachineControlRepository {
       }
       if (action === "claim") return this.claim(tx, input, current!, connectionEpoch!, at);
       if (action === "renew") return this.renew(tx, input, current!, connectionEpoch!, at);
-      if (action === "issue") await this.issue(tx, input, ownerUserId, machineId, hostId, payload, at);
+      const issued = action === "issue"
+        ? await this.issue(tx, input, ownerUserId, machineId, hostId, payload, at) : undefined;
       const batchIssue = action === "issue_batch"
         ? await this.issueBatch(tx, input, ownerUserId, machineId, hostId, at) : undefined;
       // An older daemon still asks its owner to approve host commands. Nothing
@@ -568,25 +602,12 @@ export class PostgresMachineControlRepository {
           values: [daemonId, connectionEpoch, JSON.stringify({ ...resources, connectionEpoch }),
             resources.observedAt], maxRows: 0 });
         // History keeps one sample per Machine per minute: the latest one the live
-        // connection reported in that minute.
-        if (resources) await tx.query({ name: "machine_resource_history_sample_v1", text: `INSERT INTO
-          data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
-            load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
-            disk_total_bytes,disk_available_bytes)
-          SELECT $1,$2,date_trunc('minute',$4::timestamptz),$5,$6,$7,$8,$9,$10,$11,$12
-          WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
-            AND connection_epoch=$13)
-          ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
-            cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
-            memory_total_bytes=EXCLUDED.memory_total_bytes,
-            memory_available_bytes=EXCLUDED.memory_available_bytes,
-            swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
-            disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
-          values: [ownerUserId, machineId, daemonId, resources.observedAt, resources.cpuUsagePercent ?? null,
-            resources.loadAverage?.[0] ?? null, resources.memoryTotalBytes ?? null,
-            resources.memoryAvailableBytes ?? null, resources.swapTotalBytes ?? null,
-            resources.swapFreeBytes ?? null, resources.diskTotalBytes ?? null,
-            resources.diskAvailableBytes ?? null, connectionEpoch], maxRows: 0 });
+        // connection reported in that minute. The daemon keeps its minute samples
+        // and sends them in batches with a report it makes anyway, so an idle
+        // Machine's history costs one write every few minutes, not one a minute.
+        const samples = machineResourceHistorySamples(resources, payload.machineResourceHistory, Date.parse(at));
+        if (samples.length) await tx.query(machineResourceHistoryInsert({ ownerUserId, machineId, daemonId,
+          connectionEpoch, samples }));
 
         // A harness inventory is an observation of the connection that sent it.
         // An invalid one is dropped rather than failing the Run snapshot it rides on.
@@ -641,6 +662,7 @@ export class PostgresMachineControlRepository {
         audit: { commandId, action, eventType: input.eventType ?? input.commandType, at,
           persisted: action === "enroll" }, ...(input.controlId ? { controlId: input.controlId } : {}),
         ...(batchIssue ? { commands: batchIssue } : {}),
+        ...(issued?.coalescedInto ? { coalescedInto: issued.coalescedInto } : {}),
         ...(runLifecycleChannelId ? { runLifecycleChannelId } : {}),
         ...(runLifecycleChannelIds.length ? { runLifecycleChannelIds } : {}),
         ...(terminalEvent ? { runTerminalReportRecorded: true } : {}),
@@ -1014,27 +1036,50 @@ export class PostgresMachineControlRepository {
     return rows[0]!;
   }
 
+  /** Stores one command for a daemon. A fresh quota read of one target that a
+   * read already under way on the same live connection will answer after its
+   * `readAfter` is not stored again: the caller joins that read. */
   private async issue(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
-    machineId: string, hostId: string, payload: Record<string, unknown>, at: string) {
+    machineId: string, hostId: string, payload: Record<string, unknown>, at: string): Promise<{ coalescedInto?: string }> {
     const controlId = text(input.controlId, "controlId", 200);
     const commandType = text(input.commandType, "commandType", 32);
     if (!COMMAND_TYPES.has(commandType) || payload.requestId !== controlId) throw new MachineControlError(
       "invalid_machine_command", 400, "Machine command payload does not match its control id");
     if (commandType === "quota_probe") {
+      let probe: ReturnType<typeof parseRoutingQuotaProbeRequest>;
+      // A read that checks a refusal names the reading it must be newer than;
+      // the Hub keeps it beside the probe and never sends it to the daemon.
+      const readAfter = typeof payload.readAfter === "string" ? Date.parse(payload.readAfter) : NaN;
       try {
-        const probe = parseRoutingQuotaProbeRequest(payload.probe);
+        probe = parseRoutingQuotaProbeRequest(payload.probe);
         if (payload.type !== "machine_quota_probe" || probe.requestId !== controlId ||
-            Object.keys(payload).some(key => !["type", "requestId", "probe"].includes(key))) {
+            Object.keys(payload).some(key => !["type", "requestId", "probe", "readAfter"].includes(key)) ||
+            payload.readAfter !== undefined && (probe.fresh !== true || !Number.isFinite(readAfter))) {
           throw new Error("Invalid quota probe envelope");
         }
-        const current = await tx.query({ name: "machine_quota_probe_epoch_v3", text: `SELECT 1
+        // A fresh read locks the daemon so concurrent askers of one target
+        // either join one read or store one; a plain read only shares.
+        const current = await tx.query({ name: probe.fresh ? "machine_quota_probe_epoch_lock_v1"
+          : "machine_quota_probe_epoch_v3", text: `SELECT 1
           FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
             AND status='online' AND connection_epoch=$3
-            AND capabilities_json ? 'machine_quota_probe_v2' FOR SHARE`,
+            AND capabilities_json ? 'machine_quota_probe_v2' ${probe.fresh ? "FOR UPDATE" : "FOR SHARE"}`,
         values: [ownerUserId, machineId, probe.connectionEpoch], maxRows: 1 });
         if (!current[0]) throw new Error("Quota probe daemon unavailable");
       } catch {
         throw new MachineControlError("invalid_quota_probe", 409, "Quota probe requires the exact capable online daemon");
+      }
+      if (probe.fresh && probe.targets.length === 1 && Number.isFinite(readAfter)) {
+        const [joined] = await tx.query<QueryResultRow>({ name: "machine_quota_probe_join_v1", text: `SELECT command_id
+          FROM data.machine_daemon_commands WHERE owner_user_id=$1 AND machine_id=$2 AND hostname=$3
+            AND command_type='quota_probe' AND status IN ('pending','leased') AND expires_at>$4::timestamptz
+            AND created_at>$5::timestamptz AND payload_json->'probe'->>'fresh'='true'
+            AND payload_json->'probe'->>'connectionEpoch'=$6
+            AND payload_json->'probe'->'targets' @> jsonb_build_array(jsonb_build_object('targetId',$7::text))
+          ORDER BY created_at DESC LIMIT 1`,
+        values: [ownerUserId, machineId, hostId, at, new Date(readAfter).toISOString(), String(probe.connectionEpoch),
+          probe.targets[0]!.targetId], maxRows: 1 });
+        if (joined) return { coalescedInto: String(joined.command_id) };
       }
     }
     if (commandType === "harness_action") {
@@ -1072,6 +1117,14 @@ export class PostgresMachineControlRepository {
         values: [ownerUserId, machineId, MACHINE_HARNESS_LOGIN_CAPABILITY], maxRows: 1 });
         if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
           "Update this machine's daemon before signing in to harnesses from here");
+      }
+      if (payload.action === "check") {
+        const capable = await tx.query({ name: "machine_harness_check_v1", text: `SELECT 1
+          FROM data.machine_daemons WHERE owner_user_id=$1 AND machine_id=$2
+            AND status='online' AND capabilities_json ? $3 FOR SHARE`,
+        values: [ownerUserId, machineId, MACHINE_HARNESS_CHECK_CAPABILITY], maxRows: 1 });
+        if (!capable[0]) throw new MachineControlError("harness_action_unavailable", 409,
+          "Update this machine's daemon before checking a harness's sign-in from here");
       }
       if (payload.action === "release") {
         const capable = await tx.query({ name: "machine_harness_release_v1", text: `SELECT 1
@@ -1187,6 +1240,7 @@ export class PostgresMachineControlRepository {
       if (!routes[0]) throw new MachineControlError("run_route_conflict", 409,
         "Run route is already bound to another Machine target");
     }
+    return {};
   }
 
   private async issueBatch(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
@@ -1300,7 +1354,7 @@ export class PostgresMachineControlRepository {
       WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
         AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
     values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v9", text: `SELECT
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v11", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
         THEN command.payload_json || jsonb_build_object(
@@ -1314,7 +1368,7 @@ export class PostgresMachineControlRepository {
       LEFT JOIN data.agent_launches launch ON launch.control_id=command.command_id
       WHERE command.owner_user_id=$1 AND command.machine_id=$2
         AND (command.status='pending' OR
-          (command.status='leased' AND command.lease_until<=clock_timestamp()))
+          (command.status='leased' AND command.lease_until+($14::integer*interval '1 millisecond')<=clock_timestamp()))
         AND COALESCE(command.available_at,command.created_at)<=clock_timestamp()
         AND (command.expires_at IS NULL OR command.expires_at>clock_timestamp())
         AND (cardinality($3::text[])=0 OR command.command_type=ANY($3::text[]))
@@ -1324,12 +1378,14 @@ export class PostgresMachineControlRepository {
           (command.payload_json->>'presetId'<>'cursor' OR command.payload_json->>'action'<>'update' OR $7::boolean) AND
           (command.payload_json->>'action'<>'uninstall' OR $8::boolean) AND
           (command.payload_json->>'action'<>'release' OR $9::boolean) AND
-          (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean)))
+          (command.payload_json->>'action' NOT LIKE 'login%' OR $10::boolean) AND
+          (command.payload_json->>'action'<>'check' OR $15::boolean)))
         AND (command.command_type<>'worktree_action' OR $11::boolean)
         AND (command.command_type<>'text_task' OR $12::boolean)
         AND (command.command_type<>'sleep' OR $13::boolean)
       ORDER BY command.created_at,command.command_id LIMIT 5
-      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY)],
+      FOR UPDATE OF command SKIP LOCKED`, values: [current.owner_user_id, current.machine_id, types, Array.isArray(current.capabilities_json) && current.capabilities_json.includes("machine_quota_probe_v2"), String(connectionEpoch), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CURSOR_LAUNCHER_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_UNINSTALL_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_RELEASE_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_LOGIN_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_WORKTREE_ACTION_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_TEXT_TASK_CAPABILITY), Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_SLEEP_CAPABILITY), LEASE_RENEW_SKEW_MS,
+        Array.isArray(current.capabilities_json) && current.capabilities_json.includes(MACHINE_HARNESS_CHECK_CAPABILITY)],
     maxRows: 5 });
     const commands = [];
     for (const row of rows) {
@@ -1347,8 +1403,8 @@ export class PostgresMachineControlRepository {
         RETURNING version,lease_generation,lease_until`,
       values: [leaseOwner, leaseMs, row.command_id, row.version, QUOTA_PROBE_WINDOW_MS], maxRows: 1 });
       const lease = updated[0];
-      if (!lease) throw new MachineControlError("machine_command_stale_lease", 409,
-        "Machine claim lost its compare-and-swap race");
+      if (!lease) throw new MachineStaleLeaseError("Machine claim lost its compare-and-swap race", "claim.race",
+        String(row.command_type));
       const relayLease = { leaseOwner, leaseGeneration: Number(lease.lease_generation),
         entityVersion: Number(lease.version), daemonEpoch: connectionEpoch };
       commands.push({ controlId: row.command_id, commandType: row.command_type,
@@ -1369,24 +1425,43 @@ export class PostgresMachineControlRepository {
    * run a second time, and whoever waited on it saw nothing for hours.
    */
   private async exactLeased(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
-    machineId: string, connectionEpoch: number, fence: "live" | "generation" = "live") {
+    machineId: string, connectionEpoch: number, action: "renew" | "complete" | "retry",
+    fence: "live" | "generation" = "live") {
     const controlId = text(input.controlId, "controlId", 200);
     const lease = record(input.relayLease, "relayLease");
     const leaseOwner = text(lease.leaseOwner, "relayLease.leaseOwner", 700);
-    if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineControlError(
-      "machine_command_stale_lease", 409, "Machine lease belongs to another Daemon epoch");
-    const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *,
+    if (fence === "live" && lease.daemonEpoch !== connectionEpoch) throw new MachineStaleLeaseError(
+      "Machine lease belongs to another Daemon epoch", `${action}.epoch`);
+    const rows = await tx.query<QueryResultRow>({ name: "machine_control_lease_lock_v3", text: `SELECT *, clock_timestamp() AS lease_observed_at,
       lease_until>clock_timestamp() AND (command_type<>'quota_probe' OR expires_at>clock_timestamp()) AS lease_live
       FROM data.machine_daemon_commands WHERE command_id=$1 AND owner_user_id=$2 AND machine_id=$3 FOR UPDATE`, values: [controlId, ownerUserId, machineId], maxRows: 1 });
     const command = rows[0];
     if (!command) throw new MachineControlError("machine_command_not_found", 404,
       "Machine command not found");
-    if (command.status !== "leased" || command.lease_owner !== leaseOwner ||
-        Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ||
-        Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ||
-        (fence === "live" && command.lease_live !== true)) {
-      throw new MachineControlError("machine_command_stale_lease", 409,
-        "Machine command lease is stale");
+    let stale = command.status !== "leased" ? "status"
+      : command.lease_owner !== leaseOwner ? "owner"
+        : Number(command.lease_generation) !== integer(lease.leaseGeneration, "leaseGeneration", 1) ? "generation"
+          : Number(command.version) !== integer(lease.entityVersion, "entityVersion", 2) ? "version"
+            : fence === "live" && command.lease_live !== true ? "expired" : undefined;
+    if (stale === "expired" && command.command_type !== "quota_probe") {
+      const millis = (value: unknown) => value instanceof Date ? value.getTime()
+        : typeof value === "string" ? Date.parse(value) : NaN;
+      const late = millis(command.lease_observed_at) - millis(command.lease_until);
+      // Same generation still holds the row. One read round trip past the
+      // admission deadline is not a new holder.
+      if (late >= 0 && late < LEASE_RENEW_SKEW_MS) stale = undefined;
+    }
+    if (stale) {
+      const timestamps = [command.lease_until, command.updated_at, command.created_at, command.lease_observed_at]
+        .map(value => value instanceof Date ? value.getTime() : typeof value === "string" ? Date.parse(value) : NaN);
+      const [until, updated, created, observed] = timestamps as [number, number, number, number];
+      const bounded = (ms: number, max = 86_400_000) => Math.min(max, Math.max(0, Math.round(ms)));
+      const leaseTiming = stale === "expired" && timestamps.every(Number.isFinite) ? {
+        leaseWindowMs: bounded(until-updated, 60_000), leaseExpiredForMs: bounded(observed-until),
+        commandAgeMs: bounded(observed-created),
+      } : undefined;
+      throw new MachineStaleLeaseError("Machine command lease is stale", `${action}.${stale}`,
+        String(command.command_type), leaseTiming);
     }
     return { command, controlId, leaseOwner };
   }
@@ -1394,7 +1469,7 @@ export class PostgresMachineControlRepository {
   private async renew(tx: DatabaseTransaction, input: Record<string, unknown>, current: QueryResultRow,
     connectionEpoch: number, at: string) {
     const exact = await this.exactLeased(tx, input, String(current.owner_user_id),
-      String(current.machine_id), connectionEpoch);
+      String(current.machine_id), connectionEpoch, "renew");
     if (input.expected !== undefined) {
       const expected = record(input.expected, "expected");
       const issued = record(exact.command.payload_json, "issuedPayload");
@@ -1434,8 +1509,8 @@ export class PostgresMachineControlRepository {
         updated_at=clock_timestamp()
       WHERE command_id=$2 AND version=$3 AND lease_owner=$4 RETURNING version,lease_until`, values: [leaseMs,
       exact.controlId, exact.command.version, exact.leaseOwner], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine command renewal lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine command renewal lost its compare-and-swap race",
+      "renew.race", String(exact.command.command_type));
     return { daemon: daemon(current), connectionEpoch, audit: {
       commandId: input.commandId, action: "renew", at, persisted: false },
     leaseUntil: new Date(rows[0]!.lease_until as string | Date).toISOString(),
@@ -1467,7 +1542,7 @@ export class PostgresMachineControlRepository {
       return { reused: true, ...completionFacts(String(prior.command_type),
         prior.payload_json as Record<string, unknown>, payload) };
     }
-    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch,
+    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "complete",
       // A quota probe answers for one connection; its result expires with it.
       prior.command_type === "quota_probe" ? "live" : "generation");
     exactResult(String(exact.command.command_type), exact.command.payload_json as Record<string, unknown>,
@@ -1478,8 +1553,8 @@ export class PostgresMachineControlRepository {
       lease_until=NULL,version=version+1,updated_at=$3,completed_at=$3 WHERE command_id=$4
       AND version=$5 RETURNING command_id`, values: [status, JSON.stringify(payload), at,
       exact.controlId, exact.command.version], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine completion lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine completion lost its compare-and-swap race",
+      "complete.race", String(exact.command.command_type));
     const issued = exact.command.payload_json as Record<string, unknown>;
     if (exact.command.command_type === "quota_probe" && status === "completed") {
       await recordRegistrationQuotaProbeResult(tx, { ownerUserId, machineId, hostId,
@@ -1499,15 +1574,15 @@ export class PostgresMachineControlRepository {
 
   private async retry(tx: DatabaseTransaction, input: Record<string, unknown>, ownerUserId: string,
     machineId: string, connectionEpoch: number) {
-    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch);
+    const exact = await this.exactLeased(tx, input, ownerUserId, machineId, connectionEpoch, "retry");
     const backoffMs = Math.min(integer(input.backoffMs ?? 0, "backoffMs"), 300_000);
     const rows = await tx.query({ name: "machine_control_retry_v2", text: `UPDATE
       data.machine_daemon_commands SET status='pending',lease_owner=NULL,lease_until=NULL,
       available_at=clock_timestamp()+($1::integer*interval '1 millisecond'),
       version=version+1,updated_at=clock_timestamp() WHERE command_id=$2 AND version=$3
       RETURNING command_id`, values: [backoffMs, exact.controlId, exact.command.version], maxRows: 1 });
-    if (!rows[0]) throw new MachineControlError("machine_command_stale_lease", 409,
-      "Machine retry lost its compare-and-swap race");
+    if (!rows[0]) throw new MachineStaleLeaseError("Machine retry lost its compare-and-swap race",
+      "retry.race", String(exact.command.command_type));
   }
 
   async list(input: { requestId: string; ownerUserId: string; cursor?: string; limit?: number }) {
@@ -1621,4 +1696,61 @@ export class PostgresMachineControlRepository {
         }) };
     });
   }
+}
+
+/** At most this many minute samples ride one report: two hours of an offline backlog. */
+export const MACHINE_RESOURCE_HISTORY_BATCH_MAX = 120;
+
+/**
+ * The minute rows one report adds: its batched history and its current sample,
+ * one per minute (the latest observed in it), oldest first. An invalid sample
+ * or one past the batch bound is dropped rather than failing the report.
+ */
+export function machineResourceHistorySamples(current: MachineResourceObservation | undefined,
+  batch: unknown, now: number): Array<MachineResourceObservation & { minute: string }> {
+  const observations = (Array.isArray(batch) ? batch.slice(-MACHINE_RESOURCE_HISTORY_BATCH_MAX) : [])
+    .map(value => machineResourceObservation(value, now))
+    .filter((value): value is MachineResourceObservation => value !== undefined);
+  if (current) observations.push(current);
+  const byMinute = new Map<number, MachineResourceObservation>();
+  for (const observation of observations) {
+    const observed = Date.parse(observation.observedAt);
+    const minute = observed - observed % 60_000;
+    const kept = byMinute.get(minute);
+    if (!kept || Date.parse(kept.observedAt) <= observed) byMinute.set(minute, observation);
+  }
+  return [...byMinute.entries()].sort(([left], [right]) => left - right)
+    .map(([minute, observation]) => ({ ...observation, minute: new Date(minute).toISOString() }));
+}
+
+/** The one statement that writes a report's minute rows, kept only while its connection is live. */
+export function machineResourceHistoryInsert(input: { ownerUserId: string; machineId: string; daemonId: string;
+  connectionEpoch: number | undefined; samples: ReturnType<typeof machineResourceHistorySamples> }) {
+  const { samples } = input;
+  return { name: "machine_resource_history_samples_v2", text: `INSERT INTO
+    data.machine_resource_samples (owner_user_id,machine_id,observed_at,cpu_usage_percent,
+      load_average_1m,memory_total_bytes,memory_available_bytes,swap_total_bytes,swap_free_bytes,
+      disk_total_bytes,disk_available_bytes)
+    SELECT $1,$2,s.observed_at,s.cpu,s.load,s.memory_total,s.memory_available,s.swap_total,s.swap_free,
+      s.disk_total,s.disk_available
+    FROM unnest($4::timestamptz[],$5::real[],$6::real[],$7::bigint[],$8::bigint[],$9::bigint[],
+      $10::bigint[],$11::bigint[],$12::bigint[]) AS s(observed_at,cpu,load,memory_total,memory_available,
+      swap_total,swap_free,disk_total,disk_available)
+    WHERE EXISTS (SELECT 1 FROM data.machine_daemons WHERE daemon_id=$3 AND status='online'
+      AND connection_epoch=$13)
+    ON CONFLICT (owner_user_id,machine_id,observed_at) DO UPDATE SET
+      cpu_usage_percent=EXCLUDED.cpu_usage_percent, load_average_1m=EXCLUDED.load_average_1m,
+      memory_total_bytes=EXCLUDED.memory_total_bytes,
+      memory_available_bytes=EXCLUDED.memory_available_bytes,
+      swap_total_bytes=EXCLUDED.swap_total_bytes, swap_free_bytes=EXCLUDED.swap_free_bytes,
+      disk_total_bytes=EXCLUDED.disk_total_bytes, disk_available_bytes=EXCLUDED.disk_available_bytes`,
+  values: [input.ownerUserId, input.machineId, input.daemonId, samples.map(sample => sample.minute),
+    samples.map(sample => sample.cpuUsagePercent ?? null),
+    samples.map(sample => sample.loadAverage?.[0] ?? null),
+    samples.map(sample => sample.memoryTotalBytes ?? null),
+    samples.map(sample => sample.memoryAvailableBytes ?? null),
+    samples.map(sample => sample.swapTotalBytes ?? null),
+    samples.map(sample => sample.swapFreeBytes ?? null),
+    samples.map(sample => sample.diskTotalBytes ?? null),
+    samples.map(sample => sample.diskAvailableBytes ?? null), input.connectionEpoch], maxRows: 0 };
 }

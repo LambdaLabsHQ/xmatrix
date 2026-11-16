@@ -1,4 +1,18 @@
-import { AGENT_NAME_PATTERN, parseHandoffInstanceTarget, type AgentContinuationSource , utf8ByteLength } from "@xmatrix/protocol";
+import { AGENT_NAME_PATTERN, parseAutoLaunchMentions, parseHandoffInstanceTarget, type AgentContinuationSource , utf8ByteLength } from "@xmatrix/protocol";
+import { storedObject } from "./stored-values.js";
+
+/** The admitted machine identity, never a mutable label or the machine chosen
+ * implicitly by routing. The initial launch row survives later reborns. */
+export function readContinuationMachineConstraint(value: unknown, prompt?: unknown): string | undefined {
+  const request = storedObject(value);
+  const key = storedObject(request.key);
+  const conditions = storedObject(request.launchConditions);
+  const selection = typeof prompt === "string" && Number.isSafeInteger(request.selectionIndex)
+    ? parseAutoLaunchMentions(prompt)[Number(request.selectionIndex)] : undefined;
+  const explicit = request.sourceMessageId !== undefined && selection?.tags.machine && !selection.error;
+  return typeof key.machineId === "string" && (explicit || typeof conditions.machine === "string")
+    ? key.machineId : undefined;
+}
 
 /** Closed presentation schema. Run/Channel authorization remains in Runtime. */
 export function readContinuationSource(value: unknown): AgentContinuationSource | undefined {

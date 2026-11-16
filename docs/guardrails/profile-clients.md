@@ -105,7 +105,7 @@ Each image and video preview has its own **Original** checkbox once preparation
 finishes. Checking it prepares the retained local source without compression;
 unchecking it restores automatic compression. Choices are independent and stay
 with the in-memory Channel draft. Originals retain their bytes, filename and
-MIME type, subject to the existing 64 MiB attachment limit. Images otherwise keep
+MIME type; attachments have no size limit below the 625 GiB storage ceiling. Images otherwise keep
 the 1 MB compression target. A quality change preserves attachment order and
 restores the previous file on failure or cancel.
 Uploads never block Send. A file still preparing or uploading goes with the
@@ -117,6 +117,16 @@ change still in flight when sent falls back to the previous file if it fails.
 Local source files remain browser-only and are excluded from send snapshots and
 message bindings. Failed image compression still permits choosing Original on
 that preview.
+
+### Personal browser records
+
+Personal browser records (composer input history, recent searches, Page summons
+and the preferred Page writer) share a user-and-Space storage boundary. Reads
+and writes require the signed-in user's stable id and Space id; switching
+either hides the previous scope immediately. Legacy records without an owner
+are not adopted. Storage refusal, including a blocked `localStorage` getter,
+does not interrupt the product action. These are device memories, not grants
+or evidence of current Channel access.
 
 ### Registration-backed Channel presence
 

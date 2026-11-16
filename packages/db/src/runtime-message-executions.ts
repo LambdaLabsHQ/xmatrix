@@ -16,7 +16,7 @@ export async function queryMessageExecutions(tx: DatabaseTransaction, input: {
   position?: [string, string] | null; runId?: string; viewerUserId?: string;
 }): Promise<{ records: SerializedAgentMessageExecution[]; next: [string, string] | null }> {
   if (input.position === null) return { records: [], next: null };
-  const rows = await tx.query<QueryResultRow>({ name: "runtime_message_execution_query_v5", text: `SELECT report.*,
+  const rows = await tx.query<QueryResultRow>({ name: "runtime_message_execution_query_v7", text: `SELECT report.*,
       reply.message_id AS final_reply_message_id,reply.sent_at AS final_reply_at,run.owner_user_id,
       run.status AS run_status,COALESCE(source.invocation_input_version,source.entity_version) AS source_input_version,
       to_char(report.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS cursor_at
@@ -163,9 +163,6 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
   spaceId: string; channelId: string; ownerUserId: string; machineId: string; hostId: string;
   payload: Record<string, unknown>; at: string;
 }): Promise<Record<string, unknown>> {
-  const fail = (code: string, status: 400 | 403 | 409, message: string): never => {
-    throw new RuntimeControlError(code, status, message);
-  };
   const scope = input.payload.scope as Record<string, unknown> | undefined;
   const report = cleanAgentRuntimeExecution(input.payload.report);
   const requestId = input.payload.requestId;
@@ -175,10 +172,12 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
         !scope[key] || utf8ByteLength(scope[key] as string) > 300) ||
       typeof scope.executionFingerprint !== "string" || !/^[0-9a-f]{64}$/u.test(scope.executionFingerprint) ||
       scope.channelId !== input.channelId || report.sources.some(source => source.channelId !== input.channelId)) {
-    return fail("invalid_execution_report", 400, "Execution report identity or evidence is invalid");
+    throw new RuntimeControlError("invalid_execution_report", 400, "Execution report identity or evidence is invalid");
   }
-  const run = (await tx.query<QueryResultRow>({ name: "runtime_execution_report_owner_v4", text: `SELECT
-      run.run_id,run.metadata_json,instance.instance_id,instance.channel_instance_id,
+  // Only the execution key of the Run's metadata: a Run's whole metadata is
+  // kilobytes, and every daemon execution report reads this row.
+  const run = (await tx.query<QueryResultRow>({ name: "runtime_execution_report_owner_v5", text: `SELECT
+      run.run_id,run.metadata_json->>'executionKey' AS execution_key,instance.instance_id,instance.channel_instance_id,
       COALESCE(registration.display_name,run.metadata_json->>'agentName') AS agent_name
     FROM data.runs run JOIN data.instances instance ON instance.run_id=run.run_id
       JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id AND binding.space_id=$1
@@ -190,11 +189,15 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
       AND instance.channel_id=run.channel_id AND instance.instance_id=$5 AND run.owner_user_id=$6
       AND run.metadata_json->>'machineId'=$7
     LIMIT 1 FOR UPDATE OF run`, values: [input.spaceId, scope.runId, input.channelId, scope.instanceId, scope.agentId, input.ownerUserId, input.machineId], maxRows: 1 }))[0];
-  const executionKey = run?.metadata_json?.executionKey;
-  if (!run || typeof executionKey !== "string" || await sha256Hex(executionKey) !== scope.executionFingerprint) {
-    return fail("execution_report_forbidden", 403, "Execution report requires its original Machine and Run binding");
-  }
+  const executionKey = run?.execution_key;
   const receipt = { requestId, runId: scope.runId, executionId: report.executionId, revision: report.revision };
+  // A report is answered with a final receipt whenever no retry could ever
+  // store it: its daemon deletes a report only on a receipt, and an error
+  // made every such report come back every five seconds for good. Nothing
+  // is stored for it, so the receipt grants nothing.
+  if (!run || typeof executionKey !== "string" || await sha256Hex(executionKey) !== scope.executionFingerprint) {
+    return { ...receipt, status: "source_unavailable", reason: "run_binding_unavailable" };
+  }
   if (report.updatedAtMillis < Date.parse(input.at) - RETENTION_MS) return { ...receipt, status: "expired" };
   const context = { spaceId: input.spaceId, channelId: input.channelId, runId: String(run.run_id),
     instanceId: String(run.instance_id),
@@ -210,7 +213,15 @@ export async function acknowledgeMachineExecution(tx: DatabaseTransaction, input
     report.sourceCount, report.sources, report.startedAtMillis]);
   if (stored.binding_digest !== binding || Number(stored.revision) < report.revision ||
       Number(stored.revision) === report.revision && stored.report_digest !== await hash(report)) {
-    return fail("execution_report_conflict", 409, "Execution report conflicts with existing evidence");
+    return { ...receipt, status: "superseded", reason: "conflicting_evidence" };
   }
-  return { ...receipt, status: Number(stored.revision) === report.revision ? "recorded" : "superseded" };
+  // A finished turn that leaves a Norn request it took unanswered has abandoned it: the Hub tells the request's program.
+  const abandoned = report.finishedAtMillis !== undefined && (await tx.query({ name: "runtime_execution_report_norn_request_v2",
+    // Also a request whose own turn was interrupted earlier and is still open: this later turn was its chance.
+    text: `SELECT 1 FROM data.norn_requests request WHERE request.channel_id=$1 AND request.settled_at IS NULL
+      AND (request.delivery_message_id=ANY($2::text[]) OR EXISTS (SELECT 1 FROM data.agent_message_executions cut
+        WHERE cut.instance_id=$3 AND cut.source_message_id=request.delivery_message_id AND cut.state='interrupted')) LIMIT 1`,
+    values: [input.channelId, report.sources.map(source => source.messageId), String(run.instance_id)], maxRows: 1 })).length > 0;
+  return { ...receipt, status: Number(stored.revision) === report.revision ? "recorded" : "superseded",
+    ...(abandoned ? { nornRequestAbandoned: true } : {}) };
 }

@@ -49,7 +49,12 @@ export function pageTriggers(): Plugin<PageTrigger | null> {
     key: triggersKey,
     state: {
       init: () => null,
-      apply: (tr, _value, _old, state) => tr.getMeta(triggersKey) === "close" ? null : pageTriggerAt(state),
+      apply: (tr, _value, _old, state) => {
+        const meta = tr.getMeta(triggersKey) as PageTrigger | "close" | undefined;
+        if (meta === "close") return null;
+        if (meta) return meta;
+        return pageTriggerAt(state);
+      },
     },
   });
 }

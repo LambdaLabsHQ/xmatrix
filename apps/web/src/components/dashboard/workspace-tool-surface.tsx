@@ -5,7 +5,6 @@ import { useMemo } from "react";
 import type {
   ChannelSnapshot,
   ObservabilityEvent,
-  SerializedAutomation,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -26,9 +25,7 @@ import { ProfileView } from "./human-profile-view";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import { MyAgentsView } from "./my-agents-view";
-import { SchedulesView, type ScheduleActions } from "./schedules-view";
 import {
-  automationsInSpace,
   channelsInSpace,
   eventsInSpace,
   localManagedAgentsInSpace,
@@ -65,8 +62,6 @@ export function ToolSurface({
   localManagedAgents,
   agentPresetDiscoveries,
   loadingAgentPresetDiscoveries,
-  automations,
-  automationExecutionEnabled,
   spaces,
   currentSpace,
   token,
@@ -81,13 +76,6 @@ export function ToolSurface({
   desktopUpdateStatus,
   localActionBusy,
   localActionError,
-  automationBusy,
-  automationError,
-  automationLoadError,
-  loadingAutomations,
-  scheduleFocusId,
-  onScheduleFocusConsumed,
-  onOpenPage,
   onOpenConversation,
   runtimeCheck,
   localSetupReady,
@@ -108,10 +96,6 @@ export function ToolSurface({
   onRevealLocalWorkspace,
   onCheckLocalRuntime,
   onCompleteDesktopSetup,
-  onUpdateAutomation,
-  onToggleAutomation,
-  onRunAutomation,
-  onDeleteAutomation,
   joinRequestsBySpace,
   onDecideJoinRequest,
   onCreateSpaceInviteCode,
@@ -145,8 +129,6 @@ export function ToolSurface({
   localManagedAgents: LocalManagedAgent[];
   agentPresetDiscoveries: DesktopAgentPresetDiscovery[];
   loadingAgentPresetDiscoveries: boolean;
-  automations: SerializedAutomation[];
-  automationExecutionEnabled: boolean | null;
   spaces: SerializedSpace[];
   currentSpace: SerializedSpace | null;
   token?: string;
@@ -161,14 +143,6 @@ export function ToolSurface({
   desktopUpdateStatus: DesktopUpdateStatus | null;
   localActionBusy: string | null;
   localActionError: string | null;
-  automationBusy: string | null;
-  automationError: string | null;
-  automationLoadError: string | null;
-  loadingAutomations: boolean;
-  /** An Automation Schedules opens for editing. */
-  scheduleFocusId: string | null;
-  onScheduleFocusConsumed: () => void;
-  onOpenPage: (pageId: string) => void;
   onOpenConversation: (channelId: string) => void;
   runtimeCheck: DesktopRuntimeCheckResult | null;
   localSetupReady: boolean;
@@ -201,7 +175,7 @@ export function ToolSurface({
   onChangeView: (view: AppView, selection?: string) => void;
   /** Opens the GitHub issue form for a report. */
   onReportIssue?: () => void;
-} & SpaceMemberActions & ScheduleActions) {
+} & SpaceMemberActions) {
   const currentSpaceChannelIds = useMemo(
     () => spaceChannelIdSet(channels, currentSpace?.id),
     [channels, currentSpace?.id],
@@ -222,48 +196,10 @@ export function ToolSurface({
     () => localManagedAgentsInSpace(localManagedAgents, currentSpace?.id),
     [currentSpace?.id, localManagedAgents],
   );
-  // Every Channel this account can see, so an Automation pinned to a Channel that no
-  // longer exists stays visible instead of being read as another Space's.
-  const knownChannelIds = useMemo(
-    () => new Set(channels.map((channel) => channel.id)),
-    [channels],
-  );
-  const currentSpaceAutomations = useMemo(
-    () => automationsInSpace(automations, currentSpaceChannelIds, knownChannelIds),
-    [currentSpaceChannelIds, knownChannelIds, automations],
-  );
   const currentSpaceEvents = useMemo(
     () => eventsInSpace(events, currentSpace?.id, currentSpaceChannelIds),
     [currentSpace?.id, currentSpaceChannelIds, events],
   );
-
-  // Schedules is read on the workspace panel's paper, like a page, not on the tools' board.
-  if (view === "automation") {
-    return (
-      <SchedulesView
-        spaceId={currentSpace?.id ?? null}
-        token={token ?? ""}
-        automations={currentSpaceAutomations}
-        executionEnabled={automationExecutionEnabled}
-        spaces={spaces}
-        currentUserId={user.id}
-        channels={currentSpaceChannels}
-        busy={automationBusy}
-        error={automationError}
-        loadError={automationLoadError}
-        loadingAutomations={loadingAutomations}
-        focusAutomationId={scheduleFocusId ?? undefined}
-        onFocusConsumed={onScheduleFocusConsumed}
-        onUpdateAutomation={onUpdateAutomation}
-        onToggleAutomation={onToggleAutomation}
-        onRunAutomation={onRunAutomation}
-        onDeleteAutomation={onDeleteAutomation}
-        onOpenPage={onOpenPage}
-        onOpenConversation={onOpenConversation}
-        onOpenPages={() => onChangeView("pages")}
-      />
-    );
-  }
 
   if (view === "admin") return <PlatformAdminTabs token={token} />;
   if (view === "team") {
@@ -290,7 +226,7 @@ export function ToolSurface({
       />
     );
   }
-  // Status: the Space at work, opening into Agents, Machines and Schedules.
+  // Status: the Space at work, opening into Agents and Machines.
   if (view === "status") {
     return (
       <StatusView
@@ -300,14 +236,10 @@ export function ToolSurface({
         machines={currentSpaceMachines}
         channels={currentSpaceChannels}
         events={currentSpaceEvents}
-        automations={currentSpaceAutomations}
-        executionEnabled={automationExecutionEnabled}
         onOpenAgent={(registrationId) => onChangeView("agents", registrationId)}
         onOpenAgents={() => onChangeView("agents")}
         onOpenMachine={(machineId) => onChangeView("machines", machineId)}
         onOpenMachines={() => onChangeView("machines")}
-        onOpenSchedule={(automationId) => onChangeView("automation", automationId)}
-        onOpenSchedules={() => onChangeView("automation")}
       />
     );
   }

@@ -6,6 +6,29 @@ import { actionRefusal } from "../src/connectors/connector-commands.ts";
 import { stubFetchResponses } from "./support/fetch-responses.mjs";
 
 const read = SENTRY_ACTIONS.read_issue;
+// WEB-Z: the producer already captures these conditions, but an unreadable
+// decision snapshot cannot distinguish a blocked list from a missing driver.
+// Exercise the public read projection, including its privacy boundary.
+test("conversation push conditions survive an issue read without exposing arbitrary extra data", async () => {
+  const conditions = { isMobileViewport: true, mobileDockPager: true, view: "messages",
+    composingConversation: false, mobileChannelDetailsOpen: false, agentConfigDialog: false,
+    workspaceSearchOpen: false, selectedChannel: true, client: "ios" };
+  const { result } = await run([{ body: issue }, { body: { ...event,
+    context: { ...conditions, channelId: "private-channel", text: "private-message" },
+  } }], undefined, "123");
+  for (const [key, value] of Object.entries(conditions)) {
+    assert.ok(result.summary.includes(`${key}=${value}`), `${key} must remain readable`);
+  }
+  assert.doesNotMatch(result.summary, /private-/);
+
+  const malformed = await run([{ body: issue }, { body: { ...event, context: {
+    isMobileViewport: "private-viewport", mobileDockPager: 1, view: "private-view",
+    composingConversation: null, mobileChannelDetailsOpen: { value: "private-detail" },
+    agentConfigDialog: [], workspaceSearchOpen: "false", selectedChannel: "private-channel", client: "private-client",
+  } } }], undefined, "123");
+  assert.doesNotMatch(malformed.result.summary, /Conversation push conditions:|private-/);
+});
+
 // WEB-M/WEB-N: mapped dependency frames alone cannot identify the deployed chunk.
 test("mapped Sentry stacks retain bounded generated locations and occurrence evidence", async () => {
   const { result, calls } = await run([{ body: { ...issue, count: "7",
@@ -354,11 +377,13 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
     sqlMaxMs: 0, commitMs: 0, roundTrips: 1, queries: 0 };
   const { result } = await run([{ body: issue }, { body: { ...event,
     tags: [{ key: "operation", value: "scheduled: Gmail notification recovery and renewal" }],
-    context: { database_failure_attempts: JSON.stringify([{ ...failure, session }, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
+    context: { database_failure_attempts: JSON.stringify([{ ...failure, session, code: "CONNECTION_TERMINATED",
+      driverReason: "hyperdrive_egress_severed" }, { ...failure, phase: "commit", queryName: "database_phase_commit_v1" }]),
       user: "private-user", sql: "private-sql", arguments: ["private-argument"] },
   } }], undefined, "123");
   assert.match(result.summary, /Scheduled task: Gmail notification recovery and renewal/);
-  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · QUERY_READ_TIMEOUT · 5000 ms/);
+  assert.match(result.summary, /Database failure 1: app.gmail-routing.finish · shard-0 · transaction · begin · database_phase_begin_v1 · CONNECTION_TERMINATED · 5000 ms/);
+  assert.match(result.summary, /Database driver reason 1: hyperdrive_egress_severed/);
   assert.match(result.summary, /Database failure 2: .* · commit · database_phase_commit_v1/);
   assert.match(result.summary, /Database session 1: wall=5012 ms .*checkout=12 ms .*round_trips=1 · queries=0/);
   assert.doesNotMatch(result.summary, /Database session 2:/, "historical events need no session snapshot");
@@ -366,6 +391,9 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
   for (const invalid of ["private-invalid-json", JSON.stringify(Array(5).fill(failure)),
     JSON.stringify([{ ...failure, sql: "private-sql" }]), JSON.stringify([{ ...failure, code: "private-code" }]),
     JSON.stringify([{ ...failure, durationMs: Infinity }]), JSON.stringify([{ ...failure, phase: "private-phase" }]),
+    ...["private-reason", "hyperdrive_egress_severed private-sql", "toString", "__proto__",
+      "hyperdrive_egress_severed", null, {}]
+      .map(driverReason => JSON.stringify([{ ...failure, driverReason }])),
     ...[null, { ...session, sql: "private-sql" }, { ...session, wallMs: -1 }, { ...session, checkoutMs: 120001 },
       { ...session, queries: 1.5 }, { ...session, beginMs: "private-duration" }, { wallMs: 12 }]
       .map(session => JSON.stringify([{ ...failure, session }]))]) {
@@ -377,17 +405,24 @@ test("scheduled failures expose bounded retry phases and keep unrelated event ex
 });
 
 test("origin wait snapshots reach read_issue with strict content-free validation (HUB-AY/B1)", async () => {
-  const backend = { state: "idle in transaction", wait: "Client", owner: "execution-report", ageMs: 5500 };
+  const backend = { state: "idle in transaction", wait: "Client", owner: "execution-report", ageMs: 5500,
+    queryName: "content_ref_intent_lock_v1", queryAgeMs: 4200, stateAgeMs: 4100 };
   const lockWait = { status: "sampled", waiter: { ...backend, state: "active", wait: "Lock", ageMs: 500 },
     blockers: [backend] };
   const failure = { operation: "runtime.execution-report", shardId: "shard-0", statement: "transaction",
-    phase: "sql", queryName: "runtime_execution_report_owner_v4", code: "55P03", durationMs: 2000 };
+    phase: "sql", queryName: "runtime_execution_report_owner_v5", code: "55P03", durationMs: 2000 };
   for (const field of ["lockWait", "queryWait"]) {
     const label = field === "lockWait" ? "lock wait" : "read wait";
     for (const [snapshot, valid] of [[lockWait, true], [{ ...lockWait, blockers: Array(5).fill(backend) }, false],
       [{ ...lockWait, pid: "private-id" }, false], [{ ...lockWait, waiter: { ...backend, query: "private-sql" } }, false],
       [{ ...lockWait, blockers: [{ ...backend, owner: "private-user" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, owner: "op:page.edit" }] }, true],
+      [{ ...lockWait, blockers: [{ ...backend, owner: "op:Private User" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, owner: `op:${"a".repeat(63)}` }] }, false],
       [{ ...lockWait, blockers: [{ ...backend, ageMs: 120001 }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, queryName: "private-query" }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, queryAgeMs: 120001 }] }, false],
+      [{ ...lockWait, blockers: [{ ...backend, stateAgeMs: -1 }] }, false],
       [{ status: "busy", blockers: [] }, true], [{ status: "missing", blockers: [backend] }, false]]) {
       const { result } = await run([{ body: issue }, { body: { ...event, context: {
         database_failure_attempts: JSON.stringify([{ ...failure, [field]: snapshot }]), sql: "private-sql",
@@ -395,7 +430,7 @@ test("origin wait snapshots reach read_issue with strict content-free validation
       if (valid) assert.match(result.summary, new RegExp(`Database ${label} 1: (sampled|busy)`));
       else assert.doesNotMatch(result.summary, /Database failure|Database (?:lock|read) wait/);
       if (snapshot === lockWait) assert.match(result.summary,
-        /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms/);
+        /blockers=execution-report\/idle in transaction\/Client\/age=5500 ms\/query=content_ref_intent_lock_v1\/query_age=4200 ms\/state_age=4100 ms/);
       assert.doesNotMatch(result.summary, /private-/);
     }
   }

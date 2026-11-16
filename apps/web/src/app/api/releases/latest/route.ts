@@ -16,7 +16,7 @@ const RELEASE_TARGETS = {
   },
   desktop: {
     resolveRelease: fetchLatestStableDesktopMacRelease,
-    downloadBasePath: "/api/desktop/releases",
+    downloadBasePath: "/api/desktop/releases/stable",
   },
   android: {
     resolveRelease: fetchLatestStableAndroidRelease,

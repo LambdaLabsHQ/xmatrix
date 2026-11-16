@@ -582,11 +582,24 @@ async fn cmd_request(
     let token = resolve_auth_token(cli_token, hub_url).await?;
     match command {
         RequestCommand::Secrets { json } => cmd_request_secrets(hub_url, &token, json).await,
+        RequestCommand::SignIn {
+            harness,
+            machine,
+            reason,
+            json,
+        } => cmd_request_sign_in(hub_url, &token, &harness, machine.as_deref(), reason, json).await,
         RequestCommand::SecretAccess {
             secret_refs,
             reason,
             json,
         } => cmd_request_secret_access(hub_url, &token, secret_refs, reason, json).await,
+        RequestCommand::Settings {
+            settings,
+            reason,
+            propose,
+            wait,
+            json,
+        } => cmd_request_settings(hub_url, &token, settings, reason, propose, wait, json).await,
         RequestCommand::SecretAdd {
             secret_ref,
             env,

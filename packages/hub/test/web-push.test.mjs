@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createDecipheriv, createECDH, createPublicKey, hkdfSync, randomBytes, verify } from "node:crypto";
 import test from "node:test";
 
-import { messagePushNotification, pushConfig, pushToPeople } from "../src/push/notify.ts";
+import { messagePushNotification, messagePushNotifications, pushConfig, pushToPeople } from "../src/push/notify.ts";
 import { encryptWebPush, sendWebPush, vapidAuthorization } from "../src/push/web-push.ts";
 
 const b64 = (bytes) => Buffer.from(bytes).toString("base64url");
@@ -145,4 +145,33 @@ test("a message is pushed to the devices of the people it is addressed to, and g
   assert.deepEqual(await pushToPeople({ config: {}, devices, userIds: ["user-1"], notification }), { sent: 0, gone: 0, failed: 0 });
   assert.equal(calls.list.length, 1);
   assert.equal(messagePushNotification("channel-1", { messageId: "m-2", body: "" }), null);
+});
+
+test("a pushed message names each page it refers to by the title its reader can see", async () => {
+  const pageId = "8348ecd3-8f9c-425f-813d-120f0a1b2c3d";
+  const calls = [];
+  const pages = {
+    async spaceOfConversation(input) { calls.push(["space", input.principal.id]); return { spaceId: "space-1" }; },
+    async tree(input) {
+      if (input.principal.id === "broken") throw new Error("postgres://secret");
+      return { pages: input.principal.id === "reader" ? [{ pageId, title: "发布计划" }, { pageId: "other", title: "x" }] : [] };
+    },
+  };
+  const payload = { messageId: "m-1", from: { label: "claude:1" }, body: `完整计划写好了：page:${pageId}#rollout (r4)` };
+  const groups = await messagePushNotifications({ channelId: "channel-1", payload,
+    userIds: ["reader", "outsider", "broken"], pages: () => pages });
+  assert.deepEqual(groups.map((group) => [group.userIds, group.notification.body]), [
+    [["reader"], "完整计划写好了：发布计划 › Section (r4)"],
+    [["outsider", "broken"], "完整计划写好了：Page › Section (r4)"],
+  ]);
+  // A cut never leaves half a locator: labels go in before the 240-character limit.
+  const long = messagePushNotification("channel-1", { messageId: "m-2", body: `${"字".repeat(230)} page:${pageId}` },
+    () => "发布计划");
+  assert.equal(long.body, `${"字".repeat(230)} 发布计划`);
+  // Without page references nobody's pages are read, and everyone shares one notification.
+  calls.length = 0;
+  const plain = await messagePushNotifications({ channelId: "channel-1", payload: { messageId: "m-3", body: "好了" },
+    userIds: ["reader", "outsider"], pages: () => { throw new Error("not read"); } });
+  assert.deepEqual(plain.map((group) => group.userIds), [["reader", "outsider"]]);
+  assert.deepEqual(calls, []);
 });

@@ -41,16 +41,16 @@ function HeadingMenuPopup({ anchor, title, menu, onClose }: {
   const place = anchor.getBoundingClientRect();
   const list = items(menu);
   // Below the "⋯", or above it when the window has no room below.
-  const height = list.length * ITEM_HEIGHT + 14;
+  const height = list.length * ITEM_HEIGHT;
   const below = place.bottom + 6 + height <= (window.visualViewport?.height ?? window.innerHeight) - 12;
   return createPortal(
     <PaperPopover ref={popup} role="menu" aria-label={`Actions for ${title}`}
-      className="xmatrix-app page-heading-menu fixed z-[var(--z-popover)] w-56 p-1.5"
+      className="xmatrix-app page-heading-menu fixed z-[var(--z-popover)] w-56"
       style={{ ...(below ? { top: place.bottom + 6 } : { bottom: window.innerHeight - place.top + 6 }),
         right: Math.max(12, window.innerWidth - place.right) }}>
       {list.map(({ key, label, icon: Icon, run }) => (
         <button key={key} type="button" role="menuitem" onClick={() => { onClose(); run(); }}
-          className="flex min-h-11 w-full items-center gap-3 rounded-md px-3 text-left text-[15px] font-medium">
+          className="flex min-h-11 w-full items-center gap-3 px-4 text-left text-[15px] font-medium">
           <Icon className="size-[18px] shrink-0 text-muted-foreground" />
           <span>{label}</span>
         </button>

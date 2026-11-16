@@ -217,6 +217,10 @@ page image, a message attachment) goes the same way (`PUT
 reads a whole request into memory before its route runs, so a file sent
 through it shows no progress while the Worker re-sends it, and the upload's
 stall watchdog gave it up; the Hub streams it into storage as it arrives.
+A file larger than one request (64 MiB) goes as a multipart upload in 64 MiB
+parts (`…/multipart/parts/<n>/scope/<scope>`), each its own request with its
+own stall watchdog and transient retries; a resumed upload starts after the
+parts the Hub already recorded.
 Other writes keep going through the Web. Direct requests use the browser's default cache mode: a mode that
 skips the HTTP cache makes Chrome skip its preflight cache too, and ask again
 before every request. The Hub marks every direct answer `no-store`, so no answer
@@ -296,6 +300,30 @@ so a ping neither wakes the object nor ends its hibernation:
 The frames are compared byte for byte, so both sides import the same constant.
 A page session pings only when its ticket names the heartbeat
 (`heartbeat: "ping"`), so an editor never times out a Hub that predates it.
+
+Agent Instances and Machine Daemons send the Human frame too (daemons every
+15 s, beside a protocol ping every 2 s). Any text answer
+proves a daemon's socket: the platform only auto-answers a socket the Runtime
+still holds, and the Hub never writes a held socket offline without closing
+it.
+
+### Machine Daemon liveness
+
+The platform records when it last auto-answered each socket
+(`getWebSocketAutoResponseTimestamp`). A daemon that advertises
+`machine_daemon_edge_heartbeat_v1` is judged by that timestamp: past 45 s
+(three missed heartbeats) the Hub closes it with `4005`, persists that
+connection offline and pushes `machine_offline` to the Instances on it.
+
+- A clean disconnect reaches `webSocketClose` at once.
+- A silent one is settled by the next event that wakes the owner's cell: a
+  dispatch, the owner's web connecting, any frame. An idle machine costs
+  nothing between events.
+- While a daemon carries a live Run nothing else may wake the cell, so the cell
+  sets one 30 s alarm and renews it only while such a Run remains.
+
+Route closes never use `4003`: that is the client-upgrade code, after which a
+daemon stops reconnecting.
 
 ### Tokens
 

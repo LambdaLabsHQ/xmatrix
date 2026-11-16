@@ -63,7 +63,7 @@ async function enrollMachine(worker, ownerUserId) {
 }
 
 /** A Human adds an Agent on their own machine: one registration `create` command. */
-function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, displayName = harness }) {
+function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, displayName = harness, access }) {
   return requestJson(worker, token, `/api/spaces/${encodeURIComponent(spaceId)}/agent-registrations/commands`, {
     method: "POST",
     body: JSON.stringify({
@@ -72,7 +72,7 @@ function createAgent(worker, token, { spaceId, ownerUserId, machineId, harness, 
       commandId: `create:${harness}:${Date.now()}:${Math.random()}`,
       displayName,
       environment: { schemaVersion: 1, enabled: true, models: [], description: "", availability: "interactive",
-        maxConcurrent: 1, capabilities: [], launch: { runtime: harness } },
+        maxConcurrent: 1, capabilities: [], launch: { runtime: harness, ...(access ? { access } : {}) } },
     }),
   });
 }
@@ -96,22 +96,6 @@ async function configureAgent(worker, token, key, configuration) {
   });
 }
 
-/** An Automation is made on a page section (docs/design/pages-live-document.md §6). */
-function createAutomation(worker, token, page, name) {
-  return requestJson(worker, token, `/api/spaces/${encodeURIComponent(page.spaceId)}/pages/${
-    encodeURIComponent(page.pageId)}/automations`, {
-    method: "POST",
-    body: JSON.stringify({ name, instruction: `${name} message`, intervalMinutes: 60 }),
-  });
-}
-
-async function createPage(worker, token, spaceId) {
-  const created = await requestJson(worker, token, `/api/spaces/${encodeURIComponent(spaceId)}/pages`, {
-    method: "POST", body: JSON.stringify({ title: "Schedules", body: "# Schedules\n" }) });
-  assert.equal(created.response.status, 200, JSON.stringify(created.payload));
-  return { spaceId, pageId: created.payload.page.pageId };
-}
-
 test("Space member creation policies default open and restrict every new Human creation path", () => withPolicyWorker(async (worker) => {
   const createdSpace = await requestJson(worker, OWNER_TOKEN, "/api/spaces", {
     method: "POST",
@@ -128,8 +112,6 @@ test("Space member creation policies default open and restrict every new Human c
   const memberMachine = await enrollMachine(worker, MEMBER_USER_ID);
   const adminMachine = await enrollMachine(worker, ADMIN_USER_ID);
 
-  const page = await createPage(worker, OWNER_TOKEN, spaceId);
-
   const memberAgent = { spaceId, ownerUserId: MEMBER_USER_ID, machineId: memberMachine, harness: "codex" };
   const existingAgent = await createAgent(worker, MEMBER_TOKEN, { ...memberAgent, displayName: "existing-member-agent" });
   assert.equal(existingAgent.response.status, 200, JSON.stringify(existingAgent.payload));
@@ -137,14 +119,6 @@ test("Space member creation policies default open and restrict every new Human c
   const foreignMachine = await createAgent(worker, OWNER_TOKEN, { ...memberAgent, harness: "claude" });
   assert.equal(foreignMachine.response.status, 403, JSON.stringify(foreignMachine.payload));
   assert.equal(foreignMachine.payload.code, "registration_owner_required");
-
-  const existingAutomation = await createAutomation(
-    worker,
-    MEMBER_TOKEN,
-    page,
-    "Existing member Automation",
-  );
-  assert.equal(existingAutomation.response.status, 201, JSON.stringify(existingAutomation.payload));
 
   const restricted = await requestJson(
     worker,
@@ -211,41 +185,6 @@ test("Space member creation policies default open and restrict every new Human c
   assert.equal(Object.hasOwn(afterConfigure.payload.configuration, "role"), false);
   const retiredRoutes = await worker.fetch("/api/roles", { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
   assert.equal(retiredRoutes.status, 404, "the Role package routes are retired");
-
-  const memberAutomationDenied = await createAutomation(
-    worker,
-    MEMBER_TOKEN,
-    page,
-    "Blocked member Automation",
-  );
-  assert.equal(memberAutomationDenied.response.status, 403, JSON.stringify(memberAutomationDenied.payload));
-  assert.equal(memberAutomationDenied.payload.code, "space_member_automation_creation_disabled");
-
-  const adminAutomation = await createAutomation(
-    worker,
-    ADMIN_TOKEN,
-    page,
-    "Admin Automation",
-  );
-  assert.equal(adminAutomation.response.status, 201, JSON.stringify(adminAutomation.payload));
-
-  const existingAutomationUpdate = await requestJson(
-    worker,
-    MEMBER_TOKEN,
-    `/api/automations/${encodeURIComponent(existingAutomation.payload.automation.id)}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({
-        expectedVersion: existingAutomation.payload.automation.version,
-        name: "Existing member Automation updated",
-      }),
-    },
-  );
-  assert.equal(
-    existingAutomationUpdate.response.status,
-    200,
-    JSON.stringify(existingAutomationUpdate.payload),
-  );
 
   const agents = await requestJson(worker, MEMBER_TOKEN, `/api/spaces/${encodeURIComponent(spaceId)}/agent-registrations`);
   assert.equal(agents.response.status, 200, JSON.stringify(agents.payload));
@@ -319,20 +258,27 @@ test("Agent principals never inherit the Human admin creation exception", async 
     // registered Run launched and admitted the way the daemon admits it.
     const { token: runToken } = await launchScenarioRun(worker, scenario);
 
-    const page = await createPage(worker, MOCK_TOKEN, spaceId);
-    const automationDenied = await createAutomation(worker, runToken, page, "Agent-made Automation");
-    assert.equal(automationDenied.response.status, 403, JSON.stringify(automationDenied.payload));
-    assert.equal(
-      automationDenied.payload.code,
-      "space_member_automation_creation_disabled",
-    );
-
     // A Run adds an Agent for its owner only as a member may: the owner's admin
     // exception to "admins only" never passes to it.
     const runAgent = { spaceId, ownerUserId: scenario.registration.ownerUserId,
       machineId: scenario.registration.machineId, harness: "claude" };
+    // Nor does it confirm for its owner what a harness may do on the machine:
+    // one its owner never added there is refused with the command they run.
+    const unconfirmed = await createAgent(worker, runToken, { ...runAgent, access: "full" });
+    assert.equal(unconfirmed.response.status, 403, JSON.stringify(unconfirmed.payload));
+    assert.match(unconfirmed.payload.error, /xmatrix agent add claude --space/u);
+    const environment = await requestJson(worker, MOCK_TOKEN, "/api/agent-environments/query", { method: "POST",
+      body: JSON.stringify({ ownerUserId: runAgent.ownerUserId, machineId: runAgent.machineId, harness: "claude" }) });
+    assert.equal(environment.response.status, 200, JSON.stringify(environment.payload));
+    assert.deepEqual([environment.payload.environment, environment.payload.fullAccess.args],
+      [null, ["--dangerously-skip-permissions"]], "its owner reads what full access adds before the first add");
+    // The owner adds it, confirming full access; removed from the Space, the
+    // harness stays confirmed on the machine.
+    const confirmed = await createAgent(worker, MOCK_TOKEN, { ...runAgent, access: "full" });
+    assert.equal(confirmed.response.status, 200, JSON.stringify(confirmed.payload));
     const agentDenied = await createAgent(worker, runToken, runAgent);
     assert.equal(agentDenied.response.status, 403, JSON.stringify(agentDenied.payload));
+    assert.doesNotMatch(String(agentDenied.payload.error), /xmatrix agent add/u, "refused by the Space's policy, not for access");
     const reopened = await requestJson(worker, MOCK_TOKEN,
       `/api/spaces/${encodeURIComponent(spaceId)}/member-permissions`,
       { method: "PATCH", body: JSON.stringify({ agentCreation: "members" }) });

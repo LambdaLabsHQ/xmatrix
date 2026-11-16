@@ -84,7 +84,7 @@ export async function feishuAppInteraction(payload: Record<string, unknown>, now
   if (message.message_type !== "text" || typeof content?.text !== "string") return null;
   const text = content.text;
   if (!text.trim() || utf8ByteLength(text) > 4000) throw new ProviderRequestError(400, "Feishu message exceeds its bound");
-  // Suppress capabilities even when copied into an invalid command; never project a nonce into Channels/Automation.
+  // Suppress capabilities even when copied into an invalid command; never project a nonce into Channels or programs.
   if (/\blink(?:\s|$)/iu.test(text) && /(?:@xMatrix|@_user_[0-9]+|[A-Za-z0-9_-]{32})/iu.test(text)) {
     const value = text.replace(/^@_user_[0-9]+\s*/u, "@xMatrix ").trim();
     const nonce = value.match(/^@xMatrix link ([A-Za-z0-9_-]{32})$/u)?.[1];

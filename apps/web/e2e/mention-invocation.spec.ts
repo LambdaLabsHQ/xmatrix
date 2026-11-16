@@ -878,7 +878,7 @@ test("a confirmed stop sits on the command instead of another message", async ({
   await expect(chip).toContainText("@claude:1:stop");
   await expect(chip).toContainText("Stopped");
   await expect(chip).toHaveAttribute("data-tone", "success");
-  await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
+  await expect(page.locator(".app-intent-reading-label")).toHaveCount(0);
   await expect(page.getByText("Stop requested for")).toHaveCount(0);
   await openChip(chip);
   const dialog = page.getByRole("dialog");
@@ -913,12 +913,12 @@ test("an accepted stop says Stopping until the Machine confirms it", async ({ pa
   const chip = await openStopChip(page, "@claude:1:stop", [stopReceipt("accepted")], "stop-receipts-accepted");
   await expect(chip).toContainText("Stopping");
   await expect(chip.locator(".app-invocation-spinner")).toBeVisible();
-  await expect(page.getByText("xMatrix is reading")).toHaveCount(0);
+  await expect(page.locator(".app-intent-reading-label")).toHaveCount(0);
   await openChip(chip);
   await expect(page.getByRole("dialog")).toContainText("Waiting for the Machine to confirm the process has terminated.");
 });
 
-/* After "Jev is reading", the parameters Jev chose enter the mention one per
+/* After "Starting", the parameters Jev chose enter the mention one per
    beat, in the order it chose them. One not yet revealed is not drawn at all,
    so the chip grows with each instead of holding empty space. */
 test("Jev's choices enter the mention one by one, taking no space before they arrive", async ({ page }) => {
@@ -935,7 +935,7 @@ test("Jev's choices enter the mention one by one, taking no space before they ar
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [], rejections: [], continuations: [] });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
-  await expect(page.locator(".app-mention-summon-written")).toContainText("xMatrix is reading");
+  await expect(page.locator(".app-mention-summon-written")).toContainText("Starting");
   await page.clock.pauseAt(new Date(Date.parse(E2E_NOW) + 20_000));
   await fixtureJson(page, "invocation-launches", "**/api/xmatrix/channels/channel-general/agent-launches/query",
     { launches: [auto], rejections: [], continuations: [] });

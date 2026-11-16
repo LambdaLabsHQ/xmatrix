@@ -7,15 +7,11 @@ import { registrationMachineBusy, registrationMachineName } from "./machine-name
 import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
-import { useDraftSummonIntents } from "./use-draft-summon-intents";
-import { draftSummonReadingsForDisplay, forceDraftSummon } from "./summon-intent";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
   isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
-  AUTOMATION_MAX_INTERVAL_MINUTES,
-  AUTOMATION_MIN_INTERVAL_MINUTES,
+  agentModelLabel,
   digestCanonicalCloneCborV1,
-  isAutomationIntervalMinutes,
   parseAgentInvocationSelections,
   type AgentInvocationSelection,
 } from "@xmatrix/protocol";
@@ -23,21 +19,13 @@ import {
 import { AgentIdentityLabels } from "./agent-identity-labels";
 
 import { MESSAGE_SURFACE_METRICS_EVENT, messageSurfaceOf } from "./message-surface-metrics";
-import {
-  AutomationExpressionGuidance,
-  DetailBlock,
-  automationExpressionFromText,
-} from "./workspace-admin-views";
-import { formatAutomationCadence } from "@/components/pages/page-automation-format";
+import { DetailBlock } from "./workspace-admin-views";
 
-import { noticeClass, statusChipClass } from "@/components/ui/status-tone";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 
 import type { ComposerChannelAttachment, TimelineItem } from "./workspace-shell-message-model";
 
 import {
-  IMAGE_ATTACHMENT_TYPES,
-  MAX_ATTACHMENTS,
   MAX_ATTACHMENT_BYTES,
   COUNT_CHIP_MATERIAL_CLASS,
 } from "./workspace-shell-constants";
@@ -48,6 +36,7 @@ import {
   formatPercent,
   Tag,
   tagsFromUsage,
+  BALANCE_TAG_KEY,
   UsageLimitSummary,
 } from "./workspace-shell-formatters";
 
@@ -58,7 +47,6 @@ import {
 import {
   ATTACHMENT_UPLOAD_CONCURRENCY,
   boundedConcurrency,
-  createAttachmentSlotLedger,
   createAttachmentUploadRegistry,
   planAttachmentIntake,
 } from "./composer-attachment-intake";
@@ -79,8 +67,6 @@ import {
   cleanStatusChips,
   clipboardHasTextPayload,
   defaultAttachmentName,
-  evaluationBindingLabel,
-  formatDateTime,
   formatFileSize,
   formatMember,
   latestEventTimestampMs,
@@ -117,29 +103,18 @@ export { DialogPanelFooter, DialogPanelHeader } from "./centered-dialog-shell";
 
 import { AgentInstanceTagChips } from "./agent-instance-tag-chips";
 import { LoadingImage } from "./content-skeleton";
-import { BranchBadge, tagClass, UsageMeterFill } from "./status-tag";
+import { BranchBadge, UsageMeterFill } from "./status-tag";
 
 import { ChannelSubscriptionsBlock } from "./channel-subscriptions-block";
 
 import {
   ChevronLeft,
   FileText,
-  Loader2,
   Paperclip,
-  Pause,
-  Pencil,
-  Play,
-  Quote,
   RefreshCw,
-  Reply,
-  Trash2,
   Video,
   X,
 } from "lucide-react";
-
-import { Textarea } from "@/components/ui/textarea";
-
-import { Input } from "@/components/ui/input";
 
 import { Face } from "@/components/dashboard/face";
 
@@ -155,7 +130,11 @@ import {
 import {
   ComposerInputAuthority,
 } from "@/components/dashboard/composer-input";
-import type { ComposerField } from "@/components/dashboard/composer-editor";
+import type { ComposerField, ComposerKeyEvent } from "@/components/dashboard/composer-editor";
+import { inputHistoryKey, readInputHistory, rememberInput, type ComposerInputHistoryEntry } from "./composer-input-history";
+import { ComposerInputHistoryPanel } from "./composer-input-history-panel";
+import { isImeKeyDown } from "@/lib/ime-keydown";
+import { useAuth } from "@/lib/auth-context";
 
 import {
   type AgentTraceReplica,
@@ -194,14 +173,12 @@ import {
   type DesktopClipboardImage,
 } from "@/lib/desktop/bridge";
 
-import { spaceMemberCanCreate } from "./space-member-permissions";
-
 import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 
 import { cn } from "@/lib/utils";
 
-import { spaceVisibilityScope, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { attachmentKind, spaceVisibilityScope, WEB_PROXY_ROUTES, type DiscussionSource } from "@xmatrix/protocol";
 
 import type {
   ChannelAttachment,
@@ -210,8 +187,6 @@ import type {
   SerializedAgentInstance,
   SerializedAppConnectorConnection,
   ChannelSnapshot,
-  SerializedAutomation,
-  AutomationUpdateRequest,
   SerializedSpace,
   SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -221,11 +196,17 @@ import type {
 export type { ComposerChannelAttachment } from "./workspace-shell-message-model";
 
 export type ComposerMentionInsertRequest =
-  { id: number; kind: "mention"; mention: string };
+  | { id: number; kind: "mention"; mention: string }
+  /** A passage quoted into the draft as a block on the line after the caret (composer-blocks.ts). */
+  | { id: number; kind: "quote"; quote: string; source: DiscussionSource };
 
 export type { AgentTraceTarget } from "./workspace-shell-message-model";
 import type { AgentTraceTarget, ComposerSendSnapshot } from "./workspace-shell-message-model";
+import { InlineRowPreview } from "./inline-row-preview";
 import { foldedDiscussionBody, quotedMessage, type DiscussionQuote } from "./selection-discussion";
+import { messageHere } from "./cited-passage";
+import { insertQuoteIntoDraft } from "./composer-blocks";
+import { draftPictures, insertPicturesIntoDraft, sentPictures } from "./inline-attachments";
 
 export type AgentTraceHistoryPanelState = {
   targetKey: string;
@@ -284,7 +265,6 @@ export const Composer = memo(function Composer({
   onDraftChange,
   onWorkspaceSelect,
   onCancelReply,
-  onRemoveQuote,
   onAttachmentsChange,
   onOpenAppsForSpace,
   onEditHarnessProfile,
@@ -336,7 +316,6 @@ export const Composer = memo(function Composer({
   onDraftChange: (value: string, invocationDraft?: ComposerInvocationDraft) => void;
   onWorkspaceSelect: (workspaceTarget: string | null) => void;
   onCancelReply: () => void;
-  onRemoveQuote?: () => void;
   onAttachmentsChange: (
     value: ChannelAttachment[] | ((current: ChannelAttachment[]) => ChannelAttachment[])
   ) => void;
@@ -353,6 +332,7 @@ export const Composer = memo(function Composer({
   afterSend?: ReactNode;
 }) {
   const channel = useRealtimeChannel(catalogChannel);
+  const quoteIsHere = useCallback((href: string) => Boolean(channel && messageHere(href, channel)), [channel]);
   const writable = isJoined && (Boolean(channel) || startsConversation);
   const composerRef = useRef<HTMLDivElement | null>(null);
   const fieldRef = useRef<ComposerField | null>(null);
@@ -379,6 +359,50 @@ export const Composer = memo(function Composer({
     },
     [onDraftChange]
   );
+  /** The input history while its list is open (composer-input-history.ts), with the highlighted entry. */
+  const { user } = useAuth();
+  const userId = user?.id;
+  const historySpaceId = channel?.spaceId ?? space?.id;
+  const [openedInputHistory, setInputHistory] = useState<{
+    userId: string | undefined; spaceId: string | undefined; entries: ComposerInputHistoryEntry[]; active: number;
+  } | null>(null);
+  const inputHistory = openedInputHistory?.userId === userId && openedInputHistory?.spaceId === historySpaceId
+    ? openedInputHistory : null;
+  useEffect(() => {
+    if (localDraft) setInputHistory(null);
+  }, [localDraft]);
+  useEffect(() => setInputHistory(null), [invocationScope, userId, historySpaceId]);
+  function putInputHistoryEntry(entry: ComposerInputHistoryEntry) {
+    setInputHistory(null);
+    invocationDraftRef.current = { body: entry.body, bindings: structuredClone(entry.references) };
+    clearEmptyPasteAnchor();
+    setLocalDraft(entry.body);
+    onDraftChange(entry.body, invocationDraftRef.current);
+    setCursor(entry.body.length);
+    scheduleTextareaSelection(() => fieldRef.current, entry.body, { start: entry.body.length, end: entry.body.length });
+  }
+  /** ↑ in an empty composer shows what was sent before; true when the key was the history list's. */
+  function inputHistoryKeyDown(event: ComposerKeyEvent): boolean {
+    if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey || isImeKeyDown(event.nativeEvent)) return false;
+    const field = fieldRef.current;
+    if (!field || !writable) return false;
+    const entries = inputHistory?.entries
+      ?? (event.key === "ArrowUp" ? readInputHistory({ userId, spaceId: historySpaceId }) : []);
+    const step = inputHistoryKey({ entries, active: inputHistory?.active ?? null, draft: localDraft,
+      collapsed: field.selectionStart === field.selectionEnd, key: event.key });
+    if (!step) return false;
+    event.preventDefault();
+    if (step.pick) putInputHistoryEntry(step.pick);
+    else setInputHistory(step.active === null ? null : { userId, spaceId: historySpaceId, entries, active: step.active });
+    return true;
+  }
+  /** The attachment a picture line of the draft names, after its upload landed or its quality changed. */
+  const pictureAliasesRef = useRef(new Map<string, string>());
+  const resolvePicture = useCallback((ref: string) => {
+    let id = ref;
+    for (let step = 0; step < 8 && pictureAliasesRef.current.has(id); step += 1) id = pictureAliasesRef.current.get(id)!;
+    return id;
+  }, []);
   const selectInvocation = (value: string, selected: AgentInvocationSelection, label?: string) => {
     invocationDraftRef.current = selectComposerInvocation(invocationDraftRef.current, value, selected, label);
     setLocalDraft(value);
@@ -400,7 +424,6 @@ export const Composer = memo(function Composer({
   const preparingSendRef = useRef(false);
   const [emptyPasteAnchorActive, setEmptyPasteAnchorActive] = useState(false);
   const uploadRegistryRef = useRef(createAttachmentUploadRegistry());
-  const slotLedgerRef = useRef(createAttachmentSlotLedger());
   const handledMentionInsertRequestIdRef = useRef<number | null>(null);
   const handledAutoFocusRequestRef = useRef(0);
   // Set while files are inbound but have no row yet (the desktop clipboard
@@ -435,6 +458,11 @@ export const Composer = memo(function Composer({
     completionApiRef.current?.dismissCompletion();
   }, []);
   const cursor = completionApiRef.current?.cursor ?? 0;
+  // What each picture of the draft shows, and which files the draft holds as pictures rather than in the strip.
+  const inlinedPictures = useMemo(() => new Set(draftPictures(localDraft).map((picture) => resolvePicture(picture.ref))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localDraft, resolvePicture, attachments]);
+
   // Gallery navigation follows the visible cards, including in-place quality changes.
   const composerImages = useMemo(() => [
     ...pendingAttachments.filter((attachment) => !attachment.replacesId),
@@ -556,7 +584,6 @@ export const Composer = memo(function Composer({
     uploadRegistryRef.current.cancelAll();
     for (const url of pendingPreviewUrlsRef.current.values()) URL.revokeObjectURL(url);
     pendingPreviewUrlsRef.current.clear();
-    slotLedgerRef.current.clear();
     setPendingAttachments([]);
     setAttachmentError(null);
   }, [composerIdentity]);
@@ -572,7 +599,10 @@ export const Composer = memo(function Composer({
     const nextCursor = target
       ? target.selectionStart || 0
       : cursor;
-    const next = insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
+    const next = mentionInsertRequest.kind === "quote"
+      // The field's own text: what was typed a moment ago may not have reached the draft state yet.
+      ? insertQuoteIntoDraft(target?.value ?? localDraft, nextCursor, mentionInsertRequest.quote, mentionInsertRequest.source)
+      : insertMentionIntoDraft(localDraft, nextCursor, mentionInsertRequest.mention);
     setDraftText(next.value);
     setCursor(next.cursor);
     dismissCompletion();
@@ -705,18 +735,33 @@ export const Composer = memo(function Composer({
     }
   }
 
-  async function intakeAttachmentCandidates(candidates: AttachmentDropCandidate[]): Promise<number> {
-    // Reservations the rendered rows already account for stop being
-    // reservations; what is left is the intakes whose rows have not landed yet.
-    const ledger = slotLedgerRef.current;
-    ledger.reconcile(new Set(pendingAttachments.map((attachment) => attachment.id)));
+  /** Puts pictures into the draft on the line after the caret, where writing goes on after them. */
+  function putPicturesInDraft(pictures: { name: string; ref: string }[]) {
+    if (!pictures.length || !writable) return;
+    const field = fieldRef.current;
+    const draft = field?.value ?? localDraft;
+    const next = insertPicturesIntoDraft(draft, field ? field.selectionStart : cursor, pictures);
+    setDraftText(next.value);
+    setCursor(next.cursor);
+    scheduleTextareaSelection(() => fieldRef.current, next.value, { start: next.cursor, end: next.cursor });
+  }
 
+  /** The draft as written in the field; a picture whose line was taken out of it takes its file along. */
+  function changeDraftFromField(value: string) {
+    const kept = new Set(draftPictures(value).map((picture) => resolvePicture(picture.ref)));
+    for (const picture of draftPictures(localDraft)) {
+      const id = resolvePicture(picture.ref);
+      if (kept.has(id)) continue;
+      if (pendingAttachments.some((pending) => pending.id === id)) removePendingAttachment(id);
+      else if (attachments.some((attachment) => attachment.id === id)) removeAttachment(id);
+    }
+    setDraftText(value);
+  }
+
+  async function intakeAttachmentCandidates(candidates: AttachmentDropCandidate[]): Promise<number> {
     const plan = planAttachmentIntake({
       candidates,
       attachmentsEnabled,
-      draftCount: attachments.length,
-      pendingCount: pendingAttachments.filter((attachment) => !attachment.replacesId).length + ledger.reservedCount(),
-      maxAttachments: MAX_ATTACHMENTS,
       maxBytes: MAX_ATTACHMENT_BYTES,
       maxBytesLabel: formatFileSize(MAX_ATTACHMENT_BYTES),
       kindOf: channelAttachmentKindForFile,
@@ -727,7 +772,6 @@ export const Composer = memo(function Composer({
     // Rows first, awaits after. Everything below this point can take a network
     // round-trip; nothing below it may be the first thing the user sees.
     if (plan.entries.length > 0) {
-      ledger.reserve(plan.entries.map((entry) => entry.id));
       setPendingAttachments((current) => [
         ...current,
         ...plan.entries.map<PendingAttachment>((entry) => ({
@@ -744,6 +788,9 @@ export const Composer = memo(function Composer({
       ]);
     }
     if (plan.error) setAttachmentError(plan.error);
+    // Pictures are blocks of what is written, put where the caret is (inline-attachments.ts).
+    putPicturesInDraft(plan.entries.filter((entry) => entry.kind === "image" && !entry.rejection)
+      .map((entry) => ({ name: entry.name, ref: entry.id })));
 
     const uploadable = plan.entries.filter((entry) => !entry.rejection);
     if (uploadable.length > 0) await uploadAttachmentEntries(uploadable);
@@ -849,6 +896,8 @@ export const Composer = memo(function Composer({
           ? { sourceMedia: { file: entry.file, original: useOriginalMedia } } : {}),
       };
       clearPendingAttachment(entry.id);
+      // A picture in the draft names the file it was put in as; it is this attachment now.
+      pictureAliasesRef.current.set(replaces?.id ?? entry.id, uploaded.id);
       if (replaces) {
         onAttachmentsChange((current) => current.map((attachment) => attachment.id === replaces.id ? uploaded : attachment));
         if (replaces.url) URL.revokeObjectURL(replaces.url);
@@ -856,16 +905,17 @@ export const Composer = memo(function Composer({
     }
   }
 
-  // Jev reads each summon as the author types; the hint shows it and the send carries it.
-  // Picked channels and pages are shown by name and sent as their id tokens; a discussion's passage goes first.
+  // Picked channels and pages are shown by name and sent as their id tokens; a page discussion's anchored passage
+  // goes first. Quotes of messages are blocks of the draft itself, so they send where they were put.
+  // Pictures are sent by their place among the message's attachments: the draft's files, then those still
+  // uploading, in the order the message carries them.
   const sendDraft = () => {
-    const typed = composerSendDraft(invocationDraftRef.current, localDraft);
+    const places = [...attachments.map((attachment) => attachment.id),
+      ...uploadingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => attachment.id)];
+    const typed = sentPictures(composerSendDraft(invocationDraftRef.current, localDraft),
+      (ref) => { const at = places.indexOf(resolvePicture(ref)); return at < 0 ? undefined : at + 1; });
     return quote ? quotedMessage(quote, typed) : typed;
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  const outgoingDraft = useMemo(sendDraft, [localDraft, invocationDraftRef.current, quote]);
-  const draftIntents = useDraftSummonIntents({ token, channelId: startsConversation ? undefined : channel?.id,
-    body: outgoingDraft.body, selections: outgoingDraft.selections });
 
   async function submitComposer() {
     // Enter reaches here without the Send button's gate: a file still being
@@ -875,6 +925,8 @@ export const Composer = memo(function Composer({
     setPreparingSend(true);
     setAttachmentError(null);
     const sendScope = invocationScope;
+    const sentDraft = invocationDraftRef.current;
+    const sentText = localDraft;
     // Taken in the same render that enabled Send: a file that lands while the
     // send is prepared reaches the message, not a draft that is about to clear.
     const sentAttachments = attachments.map((attachment) => {
@@ -891,7 +943,6 @@ export const Composer = memo(function Composer({
         sourceRevision: 1, sourceBodyHash, selections }, {
         spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
       }) : undefined;
-      const summonIntents = body === outgoingDraft.body ? draftIntents.readings : [];
       if (invocationScopeRef.current !== sendScope) {
         // The composer moved to another conversation, which ends its uploads.
         for (const upload of uploads) {
@@ -907,11 +958,11 @@ export const Composer = memo(function Composer({
       await onSend({
         body,
         ...(invocationSelections ? { invocationSelections } : {}),
-        ...(summonIntents.length ? { summonIntents } : {}),
         attachments: sentAttachments,
         ...(uploads.length ? { uploads } : {}),
       });
       handedOver = true;
+      rememberInput({ userId, spaceId: historySpaceId }, sentDraft, sentText);
     } catch (error) {
       setAttachmentError(userErrorMessage(error, "Couldn't prepare the message"));
     } finally {
@@ -1057,7 +1108,7 @@ export const Composer = memo(function Composer({
     const candidates: AttachmentDropCandidate[] = [];
     for (const image of images) {
       if (!image.mimeType.startsWith("image/")) continue;
-      if (!IMAGE_ATTACHMENT_TYPES.has(image.mimeType)) {
+      if (attachmentKind(image.mimeType) !== "image") {
         setAttachmentError("Only PNG, JPEG, WebP, and GIF images are supported.");
         continue;
       }
@@ -1133,6 +1184,91 @@ export const Composer = memo(function Composer({
     void uploadAttachmentEntries([entry], original, attachment);
   }
 
+  /** A picture of the draft, drawn where the draft put it as its card is in the strip. */
+  function renderPicture(ref: string) {
+    const id = resolvePicture(ref);
+    const pending = pendingAttachments.find((attachment) => attachment.id === id);
+    if (pending) return renderPendingAttachment(pending);
+    const attachment = attachments.find((item) => item.id === id);
+    return attachment ? renderDraftAttachment(attachment) : null;
+  }
+
+  /** Takes a picture's lines out of the draft along with its file. */
+  function dropPictureLines(id: string) {
+    const field = fieldRef.current;
+    const draft = field?.value ?? localDraft;
+    const lines = draft.split("\n");
+    const removed = new Set(draftPictures(draft).filter((picture) => resolvePicture(picture.ref) === id)
+      .map((picture) => picture.line));
+    const kept = lines.filter((_line, index) => !removed.has(index));
+    if (kept.length !== lines.length) setDraftText(kept.join("\n"));
+  }
+
+  /** A file of the draft as its card draws it, in the strip or, for a picture, where the draft put it. */
+  function renderDraftAttachment(attachment: ChannelAttachment) {
+    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
+    if (replacement) return renderPendingAttachment(replacement, attachment.id);
+    return attachment.kind === "video" ? (
+      <div
+        key={attachment.id}
+        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+      >
+        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
+          {attachment.thumbnailUrl ? (
+            <LoadingImage
+              src={attachment.thumbnailUrl}
+              alt={attachment.name}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <Video className="size-7" />
+          )}
+          {renderOriginalOption(attachment)}
+        </div>
+        <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeDraftFile(attachment.id)} />
+      </div>
+    ) : attachment.kind === "markdown" || attachment.kind === "file" ? (
+      <div
+        key={attachment.id}
+        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
+      >
+        <div className="flex size-20 shrink-0 items-center justify-center bg-background text-muted-foreground">
+          {attachment.kind === "markdown" ? <FileText className="size-7" /> : <Paperclip className="size-7" />}
+        </div>
+        <ReadyAttachmentDetails attachment={attachment} separator="-" onRemove={() => removeDraftFile(attachment.id)} />
+      </div>
+    ) : (
+      <div
+        key={attachment.id}
+        className="composer-image-attachment group relative h-20 w-20 shrink-0 overflow-visible rounded-md border border-border bg-muted"
+      >
+        <button
+          type="button"
+          aria-label={`Open ${attachment.name}`}
+          className="block h-full w-full cursor-zoom-in rounded-md"
+          data-lightbox-origin={attachment.id}
+          onClick={() => setOpenComposerImageId(attachment.id)}
+        >
+          <LoadingImage
+            src={attachment.url ?? attachment.dataUrl ?? ""}
+            alt={attachment.name}
+            className="block h-full w-full rounded-md object-cover"
+          />
+        </button>
+        {renderOriginalOption(attachment)}
+        <button
+          type="button"
+          title="Remove attachment"
+          aria-label={`Remove ${attachment.name}`}
+          onClick={() => removeDraftFile(attachment.id)}
+          className="composer-image-remove absolute -right-2 -top-2 z-20 flex size-7 items-center justify-center rounded-full bg-background text-foreground shadow-md ring-1 ring-border hover:bg-muted"
+        >
+          <X className="size-3.5" />
+        </button>
+      </div>
+    );
+  }
+
   function renderPendingAttachment(attachment: PendingAttachment, key = attachment.id) {
     return <PendingAttachmentCard key={key} attachment={attachment}
       onOpen={() => setOpenComposerImageId(attachment.id)}
@@ -1141,11 +1277,16 @@ export const Composer = memo(function Composer({
         removePendingAttachment(attachment.id);
         setAttachmentError(null);
         const entry = { id: crypto.randomUUID(), file, name: file.name, kind: attachment.kind, size: file.size, rejection: null };
+        // Its picture in the draft is the new upload's.
+        pictureAliasesRef.current.set(attachment.id, entry.id);
         const previewUrl = entry.kind === "image" ? pendingPreviewUrl(entry) : undefined;
         setPendingAttachments((current) => [...current, { ...entry, sourceFile: file, previewUrl, original, status: "reading", progress: 0 }]);
         void uploadAttachmentEntries([entry], original);
       } : undefined}
-      onRemove={() => removePendingAttachment(attachment.id)} />;
+      onRemove={() => {
+        removePendingAttachment(attachment.id);
+        dropPictureLines(attachment.id);
+      }} />;
   }
 
   function renderOriginalOption(attachment: ChannelAttachment) {
@@ -1153,6 +1294,12 @@ export const Composer = memo(function Composer({
     return source ? <AttachmentOriginalOption name={source.file.name} checked={source.original}
       onChange={attachmentsEnabled && writable && !sending && !preparingSend
         ? (original) => changeAttachmentOriginal(attachment, original) : undefined} /> : null;
+  }
+
+  /** The reader took a file out: its picture leaves the draft with it. */
+  function removeDraftFile(id: string) {
+    removeAttachment(id);
+    dropPictureLines(id);
   }
 
   function removeAttachment(id: string) {
@@ -1204,7 +1351,6 @@ export const Composer = memo(function Composer({
       URL.revokeObjectURL(previewUrl);
     }
     uploadRegistryRef.current.settle(id);
-    slotLedgerRef.current.settle(id);
     uploadSourcesRef.current.delete(id);
     setPendingAttachments((current) => current.filter((attachment) => attachment.id !== id));
   }
@@ -1275,19 +1421,8 @@ export const Composer = memo(function Composer({
           onInvocationSelect={selectInvocation}
           onReferenceSelect={selectReference}
           referenceRanges={invocationDraftRef.current?.bindings.filter((binding) => !isAgentBinding(binding))}
-          summonReadings={draftSummonReadingsForDisplay(draftIntents.readings, localDraft,
-            invocationDraftRef.current?.bindings.filter(isAgentBinding))}
-          summonReadingPending={draftIntents.reading}
-          onSummonStartAnyway={reading => {
-            const next = forceDraftSummon(fieldRef.current?.value ?? localDraft, reading);
-            if (!next) return;
-            setDraftText(next.body);
-            requestAnimationFrame(() => {
-              const input = fieldRef.current;
-              input?.focus();
-              input?.setSelectionRange(next.caret, next.caret);
-            });
-          }}
+          quoteIsHere={quoteIsHere}
+          renderPicture={renderPicture}
           channel={channel}
           space={space}
           token={token}
@@ -1319,7 +1454,7 @@ export const Composer = memo(function Composer({
             if (value.length > 0) {
               clearEmptyPasteAnchor();
             }
-            setDraftText(value);
+            changeDraftFromField(value);
             syncCursor(field);
           }}
           onFieldBeforeInput={(event, field) => {
@@ -1334,6 +1469,7 @@ export const Composer = memo(function Composer({
             primeEmptyPasteAnchor(field);
           }}
           onFieldBlur={() => {
+            setInputHistory(null);
             if (localDraft.length === 0) {
               clearEmptyPasteAnchor();
             }
@@ -1363,6 +1499,11 @@ export const Composer = memo(function Composer({
           onFieldPaste={(event, field) => {
             void addPastedImages(event, field);
           }}
+          panel={inputHistory && (
+            <ComposerInputHistoryPanel entries={inputHistory.entries} active={inputHistory.active}
+              onPick={putInputHistoryEntry} />
+          )}
+          onKeyDownFirst={inputHistoryKeyDown}
           onKeyDownExtra={(event) => {
             if (
               (event.key === "Backspace" || event.key === "Delete") &&
@@ -1385,122 +1526,41 @@ export const Composer = memo(function Composer({
           }
           boxHeader={
             <>
-              {quote && !quote.anchored && (
-                <div data-testid="composer-quote"
-                  className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
-                  <Quote className="mt-0.5 size-3.5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="line-clamp-2 text-foreground [overflow-wrap:anywhere]">{quote.text}</div>
-                    <div className="truncate">{quote.label}</div>
-                  </div>
-                  {onRemoveQuote && (
+              {replyTarget && (
+                /* The message replied to is quoted whole: the same slip as a quoted passage in the draft. */
+                <div className="px-3 pt-3">
+                  <div className="message-citation-composer composer-quote-block" data-testid="composer-reply">
+                    <div className="composer-quote-block-body">
+                      <div className="composer-quote-block-text">
+                        <InlineRowPreview text={foldedDiscussionBody(replyTarget.body) || "Attachment"} />
+                      </div>
+                      <div className="message-citation-source">{replyTarget.author}</div>
+                      {replyTarget.linkOrigin?.kind === "link" && (
+                        <div className="message-citation-source">
+                          {replyTarget.linkOrigin.channelName
+                            ? `Your reply will also be posted in #${replyTarget.linkOrigin.channelName}.`
+                            : "Your reply will also be posted in the Channel this Agent works in."}
+                        </div>
+                      )}
+                    </div>
                     <button
                       type="button"
-                      title="Remove quote"
-                      aria-label="Remove quote"
-                      onClick={onRemoveQuote}
-                      className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                      title="Cancel reply"
+                      aria-label="Cancel reply"
+                      onClick={onCancelReply}
+                      className="composer-quote-block-remove"
                     >
                       <X className="size-3.5" />
                     </button>
-                  )}
-                </div>
-              )}
-              {replyTarget && (
-                <div className="flex items-start gap-2 border-b border-border/70 px-3 py-2 text-xs text-muted-foreground">
-                  <Reply className="mt-0.5 size-3.5 shrink-0" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate font-bold text-foreground">
-                      Replying to {replyTarget.author}
-                    </div>
-                    <div className="line-clamp-2 [overflow-wrap:anywhere]">
-                      {foldedDiscussionBody(replyTarget.body) || "Attachment"}
-                    </div>
-                    {replyTarget.linkOrigin?.kind === "link" && (
-                      <div className="mt-1 font-medium">
-                        {replyTarget.linkOrigin.channelName
-                          ? `Your reply will also be posted in #${replyTarget.linkOrigin.channelName}.`
-                          : "Your reply will also be posted in the Channel this Agent works in."}
-                      </div>
-                    )}
                   </div>
-                  <button
-                    type="button"
-                    title="Cancel reply"
-                    aria-label="Cancel reply"
-                    onClick={onCancelReply}
-                    className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="size-3.5" />
-                  </button>
                 </div>
               )}
-              {(attachments.length > 0 || pendingAttachments.length > 0) && (
+              {(attachments.some((attachment) => !inlinedPictures.has(attachment.id))
+                || pendingAttachments.some((attachment) => !attachment.replacesId && !inlinedPictures.has(attachment.id))) && (
                 <div ref={attachmentStripRef} className="flex gap-2 overflow-x-auto px-3 py-3">
-                  {pendingAttachments.filter((attachment) => !attachment.replacesId).map((attachment) => renderPendingAttachment(attachment))}
-                  {attachments.map((attachment) => {
-                    const replacement = pendingAttachments.find((pending) => pending.replacesId === attachment.id);
-                    if (replacement) return renderPendingAttachment(replacement, attachment.id);
-                    return attachment.kind === "video" ? (
-                      <div
-                        key={attachment.id}
-                        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
-                      >
-                        <div className="relative flex size-20 shrink-0 items-center justify-center bg-black text-white">
-                          {attachment.thumbnailUrl ? (
-                            <LoadingImage
-                              src={attachment.thumbnailUrl}
-                              alt={attachment.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <Video className="size-7" />
-                          )}
-                          {renderOriginalOption(attachment)}
-                        </div>
-                        <ReadyAttachmentDetails attachment={attachment} separator="·" onRemove={() => removeAttachment(attachment.id)} />
-                      </div>
-                    ) : attachment.kind === "markdown" || attachment.kind === "file" ? (
-                      <div
-                        key={attachment.id}
-                        className="group relative flex h-20 w-44 shrink-0 overflow-hidden rounded-md border border-border bg-muted"
-                      >
-                        <div className="flex size-20 shrink-0 items-center justify-center bg-background text-muted-foreground">
-                          {attachment.kind === "markdown" ? <FileText className="size-7" /> : <Paperclip className="size-7" />}
-                        </div>
-                        <ReadyAttachmentDetails attachment={attachment} separator="-" onRemove={() => removeAttachment(attachment.id)} />
-                      </div>
-                    ) : (
-                      <div
-                        key={attachment.id}
-                        className="composer-image-attachment group relative h-20 w-20 shrink-0 overflow-visible rounded-md border border-border bg-muted"
-                      >
-                        <button
-                          type="button"
-                          aria-label={`Open ${attachment.name}`}
-                          className="block h-full w-full cursor-zoom-in rounded-md"
-                          data-lightbox-origin={attachment.id}
-                          onClick={() => setOpenComposerImageId(attachment.id)}
-                        >
-                          <LoadingImage
-                            src={attachment.url ?? attachment.dataUrl ?? ""}
-                            alt={attachment.name}
-                            className="block h-full w-full rounded-md object-cover"
-                          />
-                        </button>
-                        {renderOriginalOption(attachment)}
-                        <button
-                          type="button"
-                          title="Remove attachment"
-                          aria-label={`Remove ${attachment.name}`}
-                          onClick={() => removeAttachment(attachment.id)}
-                          className="composer-image-remove absolute -right-2 -top-2 z-20 flex size-7 items-center justify-center rounded-full bg-background text-foreground shadow-md ring-1 ring-border hover:bg-muted"
-                        >
-                          <X className="size-3.5" />
-                        </button>
-                      </div>
-                    )
-                  })}
+                  {pendingAttachments.filter((attachment) => !attachment.replacesId && !inlinedPictures.has(attachment.id))
+                    .map((attachment) => renderPendingAttachment(attachment))}
+                  {attachments.filter((attachment) => !inlinedPictures.has(attachment.id)).map(renderDraftAttachment)}
                 </div>
               )}
               {openComposerImage && (
@@ -1509,7 +1569,7 @@ export const Composer = memo(function Composer({
                   activeId={openComposerImage.id}
                   onActiveChange={setOpenComposerImageId}
                   onClose={() => setOpenComposerImageId(null)}
-                  originFor={(id) => attachmentStripRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
+                  originFor={(id) => composerRef.current?.querySelector<HTMLElement>(`[data-lightbox-origin="${CSS.escape(id)}"]`) ?? null}
                 />
               )}
             </>
@@ -1564,24 +1624,16 @@ function summarySourceLine(source: ChannelSummarySource, historyHeadSequence: nu
 }
 
 export const ChannelDetails = memo(function ChannelDetails({
-  channel,
+  channel: catalogChannel,
   space,
   workspaces,
   token,
   connectorRevision,
   currentUserMemberId,
-  currentUserId,
   onOpenAgentTrace,
   onRunChannelCommand,
   onManageApps,
   onDeleteChannel,
-  automations,
-  automationExecutionEnabled,
-  automationBusy,
-  onToggleAutomation,
-  onUpdateAutomation,
-  onDeleteAutomation,
-  onOpenSchedule,
   wideOnly = false,
   mobileOverlayOpen = false,
   onCloseMobileOverlay,
@@ -1593,8 +1645,6 @@ export const ChannelDetails = memo(function ChannelDetails({
   token?: string;
   connectorRevision?: string;
   currentUserMemberId: string;
-  /** The reader's user id, as Space members and Automation authors name them (no `user:` prefix). */
-  currentUserId: string;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
   /**
    * Post a command (`@github:subscribe:…`, `@agent:1 /model …`) as a message in
@@ -1604,29 +1654,19 @@ export const ChannelDetails = memo(function ChannelDetails({
   onRunChannelCommand?: (body: string) => void;
   onManageApps: () => void;
   onDeleteChannel?: () => void;
-  automations: SerializedAutomation[];
-  automationExecutionEnabled: boolean | null;
-  automationBusy: string | null;
-  onToggleAutomation: (automation: SerializedAutomation) => void;
-  onUpdateAutomation: (automationId: string, input: Omit<AutomationUpdateRequest, "expectedVersion">) => void;
-  onDeleteAutomation: (automation: SerializedAutomation) => void;
-  /** Opens Schedules at one Automation, with its editor. */
-  onOpenSchedule: (automationId: string) => void;
   wideOnly?: boolean;
   /** Mobile "More" entry: present this rail as a full-screen channel details sheet. */
   mobileOverlayOpen?: boolean;
   onCloseMobileOverlay?: () => void;
 }) {
+  // The catalog's copy carries no Instances; the Agents list reads the live store.
+  const channel = useRealtimeChannel(catalogChannel);
   const machineCatalog = useAgentRegistrationCatalog(space?.id ?? "", token ?? "", Boolean(space?.id && token));
   const [aboutSummaryBusy, setAboutSummaryBusy] = useState(false);
   const [aboutSummaryError, setAboutSummaryError] = useState<string | null>(null);
-  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(null);
-  const [automationMessageDraft, setAutomationMessageDraft] = useState("");
-  const [automationIntervalDraft, setAutomationIntervalDraft] = useState(AUTOMATION_MIN_INTERVAL_MINUTES);
   const channelId = channel?.id;
   const channelSpaceId = channel?.spaceId;
   useEffect(() => {
-    setEditingAutomationId(null);
     setAboutSummaryError(null);
   }, [channelId]);
 
@@ -1663,31 +1703,6 @@ export const ChannelDetails = memo(function ChannelDetails({
       setAboutSummaryBusy(false);
     }
   }, [aboutSummaryBusy, channel, token]);
-
-  const channelAutomations = useMemo(
-    () => automations.filter((automation) => automation.channelId === channelId),
-    [automations, channelId]
-  );
-  const currentSpaceRole = space?.members.find(
-    (member) => member.userId === currentUserId
-  )?.role;
-  const canCreateAutomation = Boolean(
-    currentSpaceRole &&
-    currentSpaceRole !== "viewer" &&
-    spaceMemberCanCreate(space, currentUserId, "automationCreation")
-  );
-  // Any Channel member may rewrite a schedule; saving someone else's replaces it
-  // with one that runs as you, which the Space's creation policy also governs.
-  const authoredByCurrentUser = (automation: SerializedAutomation) =>
-    automation.authorityRootUserId === currentUserId;
-  const canEditAutomation = (automation: SerializedAutomation) =>
-    automation.capabilities.update &&
-    (authoredByCurrentUser(automation) || canCreateAutomation);
-  const startEditingAutomation = (automation: SerializedAutomation) => {
-    setEditingAutomationId(automation.id);
-    setAutomationMessageDraft(automation.expression.text);
-    setAutomationIntervalDraft(automation.intervalMinutes);
-  };
 
   useEffect(() => {
     if (!mobileOverlayOpen || !onCloseMobileOverlay) return;
@@ -1840,185 +1855,6 @@ export const ChannelDetails = memo(function ChannelDetails({
             onManageApps={onManageApps}
           />
 
-          {/* Automations are made on a page, in the section they keep true; this lists the ones running here. */}
-          {channelAutomations.length > 0 && (
-          <DetailBlock title="Schedules">
-            <div className="space-y-2">
-              {channelAutomations.map((automation) => (
-                  <div key={automation.id} className="border-t border-border/60 py-2 text-sm first:border-t-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            {canEditAutomation(automation) ? (
-                              <button
-                                type="button"
-                                onClick={() => startEditingAutomation(automation)}
-                                className="truncate text-left font-medium hover:underline"
-                                title="Edit this schedule"
-                              >
-                                {automation.name}
-                              </button>
-                            ) : (
-                              <span className="truncate font-medium">{automation.name}</span>
-                            )}
-                            <span
-                              className={statusChipClass(
-                                automation.enabled && automationExecutionEnabled !== false
-                                  ? "settled"
-                                  : automation.enabled
-                                    ? "alert"
-                                    : "secondary",
-                                "app-automation-state shrink-0 px-1.5 py-0.5 text-[10px]"
-                              )}
-                            >
-                              {automation.enabled && automationExecutionEnabled === false
-                                ? "execution unavailable"
-                                : automation.enabled
-                                  ? "enabled"
-                                  : "paused"}
-                            </span>
-                            {!automation.capabilities.update && !automation.capabilities.pause && !automation.capabilities.resume &&
-                              !automation.capabilities.delete && (
-                              <span className={tagClass()}>
-                                read only
-                              </span>
-                            )}
-                          </div>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {formatAutomationCadence(automation)} · next {formatDateTime(automation.nextRunAt)}
-                          </p>
-                          <p className="truncate text-[11px] text-muted-foreground">
-                            {evaluationBindingLabel(automation.input)}
-                          </p>
-                          <p className="mt-1 whitespace-pre-wrap break-words text-[11px] leading-4 text-muted-foreground">
-                            {automation.expression.text}
-                          </p>
-                        </div>
-                        {canEditAutomation(automation) || (automation.enabled ? automation.capabilities.pause : automation.capabilities.resume) || automation.capabilities.delete ? (
-                        <div className="flex shrink-0 items-center gap-1">
-                          {canEditAutomation(automation) && <button
-                            type="button"
-                            title="Edit"
-                            aria-label={`Edit ${automation.name}`}
-                            aria-pressed={editingAutomationId === automation.id}
-                            disabled={Boolean(automationBusy)}
-                            onClick={() => editingAutomationId === automation.id
-                              ? setEditingAutomationId(null)
-                              : startEditingAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            <Pencil className="size-3.5" />
-                          </button>}
-                          {(automation.enabled ? automation.capabilities.pause : automation.capabilities.resume) && <button
-                            type="button"
-                            title={automation.enabled ? "Pause" : "Resume"}
-                            disabled={Boolean(automationBusy) || (!automation.enabled && automationExecutionEnabled !== true)}
-                            onClick={() => onToggleAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            {automationBusy === `toggle:${automation.id}` ? (
-                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
-                            ) : automation.enabled ? (
-                              <Pause className="size-3.5" />
-                            ) : (
-                              <Play className="size-3.5" />
-                            )}
-                          </button>}
-                          {automation.capabilities.delete && <button
-                            type="button"
-                            title="Delete lineage"
-                            disabled={Boolean(automationBusy)}
-                            onClick={() => onDeleteAutomation(automation)}
-                            className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-destructive disabled:pointer-events-none disabled:opacity-50"
-                          >
-                            {automationBusy === `delete:${automation.id}` ? (
-                              <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" />
-                            ) : (
-                              <Trash2 className="size-3.5" />
-                            )}
-                          </button>}
-                        </div>
-                        ) : null}
-                      </div>
-                      {canEditAutomation(automation) && editingAutomationId === automation.id && (
-                        <div className="mt-2 space-y-2 border-t border-border/60 pt-2">
-                          {!authoredByCurrentUser(automation) && (
-                            <p className={noticeClass("attention", "p-2 text-[11px]")}>
-                              Saving replaces this schedule with your own copy, which runs as you.
-                            </p>
-                          )}
-                          {!automation.once && (
-                            <label className="block text-[11px] font-bold text-muted-foreground">
-                              Resume every (minutes)
-                              <Input
-                                type="number"
-                                min={AUTOMATION_MIN_INTERVAL_MINUTES}
-                                max={AUTOMATION_MAX_INTERVAL_MINUTES}
-                                step={15}
-                                value={automationIntervalDraft}
-                                onChange={(event) => setAutomationIntervalDraft(Number(event.target.value))}
-                                className="mt-1 h-8"
-                              />
-                            </label>
-                          )}
-                          <label className="block text-[11px] font-bold text-muted-foreground">
-                            Expression data
-                            <Textarea
-                              value={automationMessageDraft}
-                              onChange={(event) => setAutomationMessageDraft(event.target.value)}
-                              className="mt-1 min-h-28 resize-y text-xs font-normal text-foreground"
-                            />
-                            <AutomationExpressionGuidance compact />
-                          </label>
-                          <div className="flex items-center justify-between gap-2">
-                            <button
-                              type="button"
-                              onClick={() => onOpenSchedule(automation.id)}
-                              className="text-[11px] font-medium text-muted-foreground hover:text-foreground"
-                            >
-                              Open in Schedules
-                            </button>
-                            <div className="flex items-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => setEditingAutomationId(null)}
-                                className="rounded px-2 py-1 text-[11px] font-bold text-muted-foreground hover:bg-muted"
-                              >
-                                Cancel
-                              </button>
-                              <button
-                                type="button"
-                                disabled={
-                                  Boolean(automationBusy) ||
-                                  automationMessageDraft.trim().length === 0 ||
-                                  (!automation.once && !isAutomationIntervalMinutes(automationIntervalDraft))
-                                }
-                                onClick={() => {
-                                  onUpdateAutomation(automation.id, {
-                                    expression: automationExpressionFromText(automationMessageDraft),
-                                    ...(automation.once ? {} : { intervalMinutes: automationIntervalDraft }),
-                                  });
-                                  setEditingAutomationId(null);
-                                }}
-                                className="rounded bg-primary px-2 py-1 text-[11px] font-bold text-primary-foreground disabled:opacity-50"
-                              >
-                                Save
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )
-                )}
-              {automationExecutionEnabled === false && (
-                <p className={noticeClass("alert", "text-[11px]")}>
-                  Evaluation resume is unavailable. Existing suspended evaluations will not run.
-                </p>
-              )}
-            </div>
-          </DetailBlock>
-          )}
           {/* The desktop title carries delete; the phone has no title icons. */}
           {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
             className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
@@ -2101,7 +1937,8 @@ const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   const noteTone = usageLimit?.credits ? "yellow" as const : usageLimit?.severity === "limit" ? "red" as const : undefined;
   const verdict = { ...(usageLimit?.note ? { note: usageLimit.note } : {}), ...(noteTone ? { noteTone } : {}) };
   const withVerdict = (tag: Omit<Tag, "title">): Tag => ({ ...tag, title: usageLimit?.title ?? "", ...verdict });
-  const statusChips = cleanStatusChips(instance.statusChips, instance.model, instance.effort)
+  const modelLabel = instance.model ? agentModelLabel(instance.model, instance.models) : undefined;
+  const statusChips = cleanStatusChips(instance.statusChips, modelLabel, instance.effort)
     ?.map((chip) => chip.id === limitChipId ? { ...chip, ...verdict } : chip);
   const branch = instance.gitBranch?.trim();
   const statusChipIds = new Set(statusChips?.map((chip) => chip.id) || []);
@@ -2110,6 +1947,7 @@ const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   // update cannot make the live instance card look as if it has no usage.
   const usageMeterTags = instance.usage
     ? tagsFromUsage(instance.usage).filter((tag) => {
+        if (tag.key === BALANCE_TAG_KEY) return true;
         if (tag.percent === undefined) return false;
         const statusChipId = tag.key === "ctx" ? "ctx" : `quota:${tag.label.toLowerCase()}`;
         return !statusChipIds.has(statusChipId);

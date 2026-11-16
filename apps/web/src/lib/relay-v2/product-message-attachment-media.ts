@@ -14,6 +14,12 @@ export interface ProductMessageAttachmentResult {
 const WEB_PRODUCT_MEDIA_PATH =
   "/api/xmatrix/relay-v2/message-attachments/product-media";
 const PRODUCT_MEDIA_CACHE_NAME = "xmatrix-product-media-v1";
+/**
+ * The largest body kept in Cache Storage. Attachments have no size ceiling;
+ * a copy of a larger one would take the origin's storage quota for one file,
+ * and writing it doubles the read, so it is read again from the Hub instead.
+ */
+export const PRODUCT_MEDIA_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 
 /** Bytes of one attachment received so far; `total` is null when the response does not say. */
 export type ProductMessageAttachmentProgress = (received: number, total: number | null) => void;
@@ -29,8 +35,9 @@ export interface ProductMessageAttachmentCache {
  * Loads one attachment after the hub rechecks channel ACL and streams the
  * content-addressed object — no Local Replica lease required.
  *
- * Successful bodies are retained in Cache Storage (or an injected cache) so
- * later views of the same attachment do not re-download through the Hub.
+ * Successful bodies up to `PRODUCT_MEDIA_CACHE_MAX_BYTES` are retained in
+ * Cache Storage (or an injected cache) so later views of the same attachment
+ * do not re-download through the Hub.
  */
 export class ProductMessageAttachmentMediaClient {
   private readonly fetchImpl: typeof fetch;
@@ -78,7 +85,8 @@ export class ProductMessageAttachmentMediaClient {
     const counted = onProgress ? countProductMediaResponse(response, onProgress) : response;
     const stored = await retainProductMediaResponse(this.cache, cacheKey, counted);
     const result = await resultFromProductMediaResponse(stored, messageAttachment);
-    return { ...result, source: "network", retained: this.cache !== null };
+    return { ...result, source: "network",
+      retained: this.cache !== null && result.attachment.size <= PRODUCT_MEDIA_CACHE_MAX_BYTES };
   }
 }
 
@@ -122,10 +130,7 @@ function countProductMediaResponse(
   onProgress: ProductMessageAttachmentProgress,
 ): Response {
   if (!response.body) return response;
-  const declared = Number(
-    response.headers.get("x-xmatrix-attachment-size") || response.headers.get("content-length"),
-  );
-  const total = Number.isSafeInteger(declared) && declared >= 1 ? declared : null;
+  const total = declaredProductMediaSize(response);
   let received = 0;
   onProgress(received, total);
   const body = response.body.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
@@ -138,12 +143,20 @@ function countProductMediaResponse(
   return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
 }
 
+function declaredProductMediaSize(response: Response): number | null {
+  const declared = Number(
+    response.headers.get("x-xmatrix-attachment-size") || response.headers.get("content-length"),
+  );
+  return Number.isSafeInteger(declared) && declared >= 1 ? declared : null;
+}
+
 async function retainProductMediaResponse(
   cache: ProductMessageAttachmentCache | null,
   cacheKey: string,
   response: Response,
 ): Promise<Response> {
-  if (!cache) return response;
+  const size = declaredProductMediaSize(response);
+  if (!cache || size === null || size > PRODUCT_MEDIA_CACHE_MAX_BYTES) return response;
   const clone = response.clone();
   try {
     await cache.put(cacheKey, clone);

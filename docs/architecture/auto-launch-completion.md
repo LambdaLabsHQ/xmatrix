@@ -17,7 +17,11 @@ Channel launch and Space routing authorities. Explicit Profile/Instance and life
 
 The same `@` search offers Auto, authorized repository references, registered
 directories, machine labels, declared/reported models, reasoning effort and
-harnesses. Selecting a condition establishes an Auto invocation automatically;
+harnesses. The unfiltered condition listing after a summon takes rows from each
+field in turn (one repository, one directory, one machine, one effort, …), so
+its first screen names every kind of condition rather than the first field's
+many values; a registration with no declared models offers the efforts its
+runtime reports for the default model. Selecting a condition establishes an Auto invocation automatically;
 users need not learn a parameter syntax. Directories bind their exact machine.
 The message text is the source of truth. There is no separate request field or
 selected-condition header. The native textarea contains the complete message;
@@ -26,8 +30,13 @@ text, selection, caret, or IME behavior. The parser interprets each recognized
 mention in the committed message without creating a separate request field.
 
 Harness-first selection inserts a direct runtime address. Runtime rows show
-the address; other completion rows show `key:value` spelling. Both
-`@repo:owner` searches and direct fields such as `@auto repo:owner` are supported.
+the address; other completion rows show `key:value` spelling. A bare `@` lists
+who to summon only. Once something is typed after it, the conditions whose
+value (or field) matches are listed too, below the Agents, as summons that open
+with that condition: `@Lap` offers `@machine:Laptop`, and picking it inserts
+`@machine:Laptop ` — the machine is fixed and Jev chooses the rest; further
+conditions continue it as after any summon. `@repo:owner` searches and direct
+fields such as `@auto repo:owner` are both supported.
 Direct fields complete only immediately after a summon, not in ordinary prose.
 An explicit completion replaces only the active fragment, preserving all other
 characters, including field order, quoting, whitespace, and other summons.
@@ -47,7 +56,10 @@ Suggestions and highlights do not grant authority or promise availability.
 
 The stored/CLI representation is `@auto repo:owner/repo model:m effort:high`.
 Conditions are `key:value` words after the mention, in the grammar the rest of
-`@` already uses: a colon separates, and a value carrying whitespace is quoted
+`@` already uses. A condition may also be the summon's first word:
+`@machine:Laptop effort:high` is `@auto machine:Laptop effort:high`, and its
+derived selection is that first word. A first word that is not a whole
+condition (`@repo:` alone, an unknown key) is prose. In conditions, a colon separates, and a value carrying whitespace is quoted
 with doubled quotes exactly as a workspace tail is (`pwd:"/Users/me/my work"`).
 Fields are `repo`, `pwd`, `machine` (stable ID), `model`, `effort`, `harness`,
 `launch:force`, and runtime-discovered `param.<id>:<value>` choices.
@@ -55,9 +67,11 @@ Fields are `repo`, `pwd`, `machine` (stable ID), `model`, `effort`, `harness`,
 and values come from runtime snapshots rather than a list of tag names in the
 composer. See [harness parameters](harness-parameters.md) for discovery and
 rollout boundaries. Order is arbitrary. Invalid or duplicate values prevent launch.
-A completed turn leaves the Agent available for follow-up messages. Prompts tell
-Agents that they can stop, reborn or hand off Instances, their own and other
-Agents' alike, but never steer them to stop themselves. Existing idle sleep,
+A completed turn leaves the Agent available for follow-up messages. Temporary
+helpers with a completed assignment and no remaining work send a final receipt
+and stop their own Instance. Waiting on a person or required CI result remains
+unfinished work. An exact Instance assignment is context for peers, including
+catch-up delivery; unaddressed messages and broadcasts remain shared. Existing idle sleep,
 wake, explicit stop and Automation execution deadlines remain separate
 lifecycle mechanisms.
 

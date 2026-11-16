@@ -13,7 +13,7 @@ import { ProviderRequestError } from "./http";
 export const GOOGLECHAT_INGRESS_DEPENDENCIES = {
   native: googleChatNativeApp, rooms: connectorGoogleChatRoomRepository, apps: connectorAppRepository,
   verify: verifyGoogleChatAddonRequest, deliver: deliverEvent, append: CONNECTOR_DELIVERY_EFFECTS.append,
-  automate: CONNECTOR_DELIVERY_EFFECTS.automations,
+  events: CONNECTOR_DELIVERY_EFFECTS.events,
 };
 /** One configured HTTP add-on endpoint; no caller-supplied xMatrix Space or alternate token audience. */
 export async function handleGoogleChatAppDelivery(env: Env, request: Request,
@@ -59,7 +59,7 @@ export async function handleGoogleChatAppDelivery(env: Env, request: Request,
   }
   if (interaction.kind !== "message") return Response.json({});
   await deliverConnectorRoom(env, rooms, base, interaction.event,
-    { provider: "googlechat", appIdentity: googleChatAppIdentity(native.app) }, { ...dependencies, automations: dependencies.automate });
+    { provider: "googlechat", appIdentity: googleChatAppIdentity(native.app) }, dependencies);
   // No acknowledgement before subscribed delivery succeeds; stable event ids make retries idempotent.
   return Response.json({});
 }

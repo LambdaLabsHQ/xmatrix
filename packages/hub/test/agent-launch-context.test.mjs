@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readLaunchContext, relativeAge, renderLaunchContext } from "../src/agent-launch-context.ts";
+import { readLaunchContext, relativeAge, renderLaunchContext, renderLinkedPages } from "../src/agent-launch-context.ts";
 
 const READ_AT = "2026-09-18T20:28:34Z";
 
@@ -105,4 +105,33 @@ test("the read pages newest first, stops once the budget is spent, and reads the
     about: async () => { aboutReads++; return null; } });
   assert.equal(aboutReads, 0);
   assert.ok(small.text.includes("all 3 message(s)"));
+});
+
+test("a schedule's new conversation starts with its linked page, whole, ahead of the line it runs", async () => {
+  const context = await readLaunchContext({ channelId: "c1", readAt: READ_AT, startedForId: "m1",
+    history: async () => ({ messages: [message("m1", 1, "Ann", "@auto remind me to check out")], hasMore: false }),
+    about: async () => null,
+    pages: async () => [{ pageId: "p1", title: "Bali stay", headRevision: 208,
+      body: "# Bali stay\n\n## Lodging\nEscotel, check out 11-06 12:00\n- [ ] @auto remind me to check out ⏳ 2026-11-06 10:00 +08:00\n" }] });
+  assert.ok(context.text.startsWith("## Pages linked to this conversation (read at launch)\n"));
+  assert.ok(context.text.includes("### Bali stay (page p1 · r208)\n\n# Bali stay\n\n## Lodging\nEscotel, check out 11-06 12:00\n"));
+  assert.ok(context.text.includes("End of page p1."));
+  assert.ok(!context.text.includes("Channel history"));
+  assert.equal(context.startedFor.messageId, "m1");
+
+  const failed = await readLaunchContext({ channelId: "c1", readAt: READ_AT, startedForId: "m1",
+    history: async () => ({ messages: [message("m1", 1, "Ann", "go")], hasMore: false }),
+    about: async () => null, pages: async () => { throw new Error("pages down"); } });
+  assert.equal(failed.text, undefined);
+});
+
+test("a page that does not fit whole is named with its read, never cut", () => {
+  const text = renderLinkedPages([
+    { pageId: "p1", title: "Small", headRevision: 1, body: "short" },
+    { pageId: "p2", title: "Huge", headRevision: 2, body: "z".repeat(500) },
+  ], 300);
+  assert.ok(text.includes("### Small (page p1 · r1)"));
+  assert.ok(!text.includes("zzz"));
+  assert.ok(text.includes("- Huge: `xmatrix page read p2`"));
+  assert.equal(renderLinkedPages([]), undefined);
 });

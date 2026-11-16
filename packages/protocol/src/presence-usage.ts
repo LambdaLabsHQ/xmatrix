@@ -1,4 +1,4 @@
-import type { LlmUsage } from "./authority-runtime.js";
+import { hasProviderQuotaReading, type LlmUsage } from "./authority-runtime.js";
 
 export function usageWithoutQuota(usage?: LlmUsage): LlmUsage | undefined {
   if (!usage) return undefined;
@@ -6,6 +6,7 @@ export function usageWithoutQuota(usage?: LlmUsage): LlmUsage | undefined {
     quotaSource: _quotaSource,
     quotaState: _quotaState,
     quotaUsages: _quotaUsages,
+    scopedQuotaUsages: _scopedQuotaUsages,
     quotaObservedAt: _quotaObservedAt,
     quotaAccount: _quotaAccount,
     ...localUsage
@@ -29,7 +30,7 @@ export function mergeUsageAttributes(...candidates: Array<LlmUsage | undefined>)
 export function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | undefined>): LlmUsage | undefined {
   let latest: LlmUsage | undefined;
   for (const usage of candidates) {
-    if (usage?.quotaState !== "unknown" && (usage?.quotaSource !== "provider_api" || !usage.quotaUsages?.length)) continue;
+    if (!usage || (usage.quotaState !== "unknown" && !hasProviderQuotaReading(usage))) continue;
     const time = Date.parse(usage.quotaObservedAt ?? "");
     if (usage.quotaState !== "unknown" && !Number.isFinite(time)) continue;
     const previous = Date.parse(latest?.quotaObservedAt ?? "");
@@ -39,6 +40,7 @@ export function accountQuotaUsageFromCandidates(...candidates: Array<LlmUsage | 
   if (!latest) return undefined;
   return { quotaState: latest.quotaState ?? "observed", quotaObservedAt: latest.quotaObservedAt,
     ...(latest.quotaState !== "unknown" ? { quotaSource: "provider_api", quotaUsages: latest.quotaUsages,
+      ...(latest.scopedQuotaUsages ? { scopedQuotaUsages: latest.scopedQuotaUsages } : {}),
       ...(latest.quotaAccount ? { quotaAccount: latest.quotaAccount } : {}) } : {}) };
 }
 
@@ -57,7 +59,7 @@ export function mergeLlmUsagePreferringQuotas(
   if (update.quotaState || current.quotaState) {
     return mergeAccountLevelLlmUsage(current, update);
   }
-  if (update.quotaSource === "provider_api" && Boolean(update.quotaUsages?.length)) {
+  if (hasProviderQuotaReading(update)) {
     const previousTime = Date.parse(current.quotaObservedAt ?? "");
     const incomingTime = Date.parse(update.quotaObservedAt ?? "");
     // Concurrent frames can arrive out of order. Token counters may advance
@@ -66,6 +68,7 @@ export function mergeLlmUsagePreferringQuotas(
       const {
         quotaSource: _quotaSource,
         quotaUsages: _quotaUsages,
+        scopedQuotaUsages: _scopedQuotaUsages,
         quotaObservedAt: _quotaObservedAt,
         quotaAccount: _quotaAccount,
         ...localUsage
@@ -74,12 +77,13 @@ export function mergeLlmUsagePreferringQuotas(
     }
     return update;
   }
-  if (current.quotaSource === "provider_api" && Boolean(current.quotaUsages?.length)) {
+  if (hasProviderQuotaReading(current)) {
     return {
       ...current,
       ...update,
       quotaSource: "provider_api",
       quotaUsages: current.quotaUsages,
+      scopedQuotaUsages: current.scopedQuotaUsages,
       quotaAccount: current.quotaAccount,
       ...(current.quotaObservedAt ? { quotaObservedAt: current.quotaObservedAt } : {}),
     };

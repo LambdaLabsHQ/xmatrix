@@ -740,6 +740,24 @@ mod tests {
     }
 
     #[test]
+    fn antigravity_sign_in_link_is_read_from_its_terminal_prompt() {
+        // Captured from `agy -p /help` 1.4.12 in a terminal with no browser.
+        // Through a pipe it prints no link at all, only "Run 'agy' to log in".
+        let text = plain_output(
+            "Authentication required. Please visit the URL to log in:\r\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071&code_challenge=AWsM&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&scope=openid&state=99Xa\r\n\r\nWaiting for authentication (timeout 60s)...\r\nOr, paste the authorization code here and press Enter:\r\n".as_bytes(),
+        );
+        let (url, code) = prompt(login("antigravity"), &text).unwrap();
+        assert_eq!(
+            url,
+            "https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071&code_challenge=AWsM&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&scope=openid&state=99Xa"
+        );
+        assert_eq!(code, None);
+        let recipe = login("antigravity");
+        assert_eq!(recipe.flow, LoginFlow::UrlPasteCode);
+        assert!(recipe.terminal);
+    }
+
+    #[test]
     fn acp_harness_device_sign_ins_are_read_from_their_real_output() {
         // Captured from each CLI's sign-in with no terminal and no browser.
         for (id, output, url, code) in [

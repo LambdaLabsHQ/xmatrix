@@ -14,7 +14,7 @@ import { readSpaceCommandReplay, storeSpaceCommandReplay } from "./command-repla
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
 import { DatabaseContractError } from "./errors.js";
-import { loadChannelAgentPresence, loadVisibleLiveAgentPresence } from "./channel-agent-presence.js";
+import { loadVisibleLiveAgentPresence, readChannelInstances, withChannelInstanceRecords } from "./channel-agent-presence.js";
 import { insertSpaceMember, spaceMemberRole } from "./space-members.js";
 import { writeOutbox } from "./outbox.js";
 import { advanceSpaceControlHead } from "./space-control-head.js";
@@ -589,7 +589,7 @@ function recordSummarySource(
 
 /**
  * A Channel tree leaving its Space takes no source-Space authority with it:
- * enabled Automations pause, Channel-bound trace authority ends,
+ * Channel-bound trace authority ends,
  * App subscriptions are removed, and unfinished routing and reborn work is
  * cancelled. Live Runs are stopped separately by terminalizeArchivedChannelTree.
  */
@@ -598,12 +598,6 @@ async function releaseChannelTreeForMove(
   channelIds: readonly string[],
   at: string,
 ): Promise<void> {
-  await transaction.query({
-    name: "channel_move_pause_automations_v1",
-    text: `UPDATE data.automations SET enabled=false, version=version+1, updated_at=$2
-      WHERE enabled AND channel_id=ANY($1::text[])`,
-    values: [channelIds, at], maxRows: 0,
-  });
   await transaction.query({
     name: "channel_move_expire_trace_access_v1",
     text: `UPDATE data.trace_access_grants SET status='expired', version=version+1,
@@ -717,6 +711,22 @@ async function moveChannelSpaceFacts(
     await transaction.query({
       name: "channel_move_agent_message_executions_v1",
       text: `UPDATE data.agent_message_executions ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
+    // A program and its requests move together: their foreign key is checked at commit.
+    await transaction.query({
+      name: "channel_move_norn_programs_v1",
+      text: `UPDATE data.norn_programs ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
+    await transaction.query({
+      name: "channel_move_norn_requests_v1",
+      text: `UPDATE data.norn_requests ${CHANNEL_MOVE_FACT_SQL}`,
+      values, maxRows: 0,
+    });
+    await transaction.query({
+      name: "channel_move_norn_notices_v1",
+      text: `UPDATE data.norn_notices ${CHANNEL_MOVE_FACT_SQL}`,
       values, maxRows: 0,
     });
     await transaction.query({
@@ -1748,6 +1758,8 @@ export class PostgresSpaceControlRepository {
     principal: SpaceControlPrincipal;
     /** Names the read path for observation; `channel.get` unless a caller narrows it. */
     operation?: `channel.get${string}`;
+    /** Instance ids the reader holds for this Channel: each is answered exactly, ended ones included. */
+    knownInstanceIds?: readonly string[];
   }): Promise<Record<string, unknown>> {
     const { requestId, spaceId, principalId } = principalScope(input);
     const channelId = bounded(input.channelId, "channelId");
@@ -1776,10 +1788,10 @@ export class PostgresSpaceControlRepository {
       });
       const row = rows[0];
       if (!row) throw new SpaceControlError("channel_not_found", 404, "Channel not found");
-      const presence = await loadChannelAgentPresence(transaction, spaceId, [channelId]);
-      const channel = serializeChannel(row,
+      const instances = await readChannelInstances(transaction, spaceId, [channelId], input.knownInstanceIds);
+      const channel = withChannelInstanceRecords(serializeChannel(row,
         row.mode === "closed" ? await this.visibleHumanIds(transaction, row) : [],
-        presence.get(channelId));
+        instances.memberPresence.get(channelId)), instances, channelId);
       const members = row.mode === "open" ? await transaction.query<QueryResultRow & { user_id: string }>({
         name: "open_channel_space_members_v1",
         text: `SELECT user_id FROM data.space_members
@@ -2643,15 +2655,15 @@ export class PostgresSpaceControlRepository {
         maxRows: limit + 1,
       });
       const page = rows.slice(0, limit);
-      const presence = await loadChannelAgentPresence(
+      const instances = await readChannelInstances(
         transaction, spaceId, page.map((row) => row.channel_id),
       );
       const serialized: Record<string, unknown>[] = [];
       for (const row of page) {
-        serialized.push(serializeChannel(
+        serialized.push(withChannelInstanceRecords(serializeChannel(
           row, row.visible_human_ids ?? [],
-          presence.get(row.channel_id),
-        ));
+          instances.memberPresence.get(row.channel_id),
+        ), instances, row.channel_id));
       }
       const openMemberRows = page.some((row) => row.mode === "open")
         ? await transaction.query<QueryResultRow & { user_id: string }>({
@@ -2841,21 +2853,26 @@ export class PostgresSpaceControlRepository {
     if (input.principal.kind !== "user") throw new SpaceControlError(
       "human_required", 403, "Only human admins may review transfer proposals");
     const placement = await this.placement(requestId, "transfer.list", spaceId);
-    return this.transaction({ requestId, operation: "transfer.list",
+    return this.database.transaction({ requestId, operation: "transfer.list", statement: "single_read",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
     }, async (tx) => {
-      const admins = await tx.query({ name: "transfer_list_admin_v1", text: `SELECT user_id
-        FROM data.space_members WHERE space_id = $1 AND user_id = $2 AND role IN ('owner','admin') LIMIT 1`,
-        values: [spaceId, input.principal.id], maxRows: 1 });
-      if (!admins[0]) throw new SpaceControlError("transfer_admin_required", 403, "Space admin required");
-      const rows = await tx.query<TransferRow>({ name: "transfer_list_v1", text: `SELECT *
-        FROM data.channel_transfer_proposals WHERE (space_id = $1 OR target_space_id = $1)
-          AND ($2::text IS NULL OR channel_id = $2)
-          AND ((status='pending' AND expires_at>clock_timestamp()) OR
-            (status='completed' AND completed_at>clock_timestamp()-interval '1 day'))
-        ORDER BY (status='pending') DESC, created_at DESC, proposal_id DESC LIMIT 100`,
-        values: [spaceId, input.channelId ?? null], maxRows: 100 });
-      return { proposals: rows.map((row) => transferView(row, input.principal.id)) };
+      // Keep current admin authority in the same snapshot as the proposals,
+      // including on the single read's fresh-connection recovery.
+      const rows = await tx.query<TransferRow>({ name: "transfer_list_v2", text: `SELECT p.*
+        FROM (SELECT user_id FROM data.space_members
+          WHERE space_id=$1 AND user_id=$3 AND role IN ('owner','admin') LIMIT 1) admin
+        LEFT JOIN LATERAL (SELECT * FROM data.channel_transfer_proposals
+          WHERE (space_id=$1 OR target_space_id=$1) AND ($2::text IS NULL OR channel_id=$2)
+            AND ((status='pending' AND expires_at>clock_timestamp()) OR
+              (status='completed' AND completed_at>clock_timestamp()-interval '1 day'))
+          ORDER BY (status='pending') DESC, created_at DESC, proposal_id DESC LIMIT 100
+        ) p ON true
+        ORDER BY (p.status='pending') DESC, p.created_at DESC, p.proposal_id DESC`,
+        values: [spaceId, input.channelId ?? null, input.principal.id], maxRows: 100 });
+      if (!rows[0]) throw new SpaceControlError("transfer_admin_required", 403, "Space admin required");
+      // The outer join keeps an authorized empty queue distinct from no access.
+      return { proposals: rows.filter((row) => row.proposal_id !== null)
+        .map((row) => transferView(row, input.principal.id)) };
     });
   }
 

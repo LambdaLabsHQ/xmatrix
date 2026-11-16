@@ -26,7 +26,7 @@ import {
   pageBlocks,
   type AgentInvocationSelection,
   type AppConnectorCompletionResponse,
-  type ChannelSnapshot,
+  type LiveChannel,
   type SerializedSpace,
   type SerializedWorkspace,
 } from "@xmatrix/protocol";
@@ -47,7 +47,7 @@ import { SlashCommandPanel } from "@/components/dashboard/slash-command-panel";
 import { useAuth } from "@/lib/auth-context";
 import { HARNESS_PROFILE_COPY } from "@/lib/harness-profile-copy";
 import { useOnboardingLocale } from "@/lib/onboarding-locale";
-import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonStartCandidates } from "./auto-launch-completion";
+import { autoLaunchCandidates, filterLaunchCandidates, findLaunchFieldCompletion, completeLaunchFragment, summonAtCompletion, summonConditionCandidates, summonStartCandidates } from "./auto-launch-completion";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import {
@@ -56,6 +56,7 @@ import {
   connectorCompletionRecovery,
   groupedMentionCandidates,
   DEFAULT_OPEN_MENTION_KINDS,
+  CONDITION_LISTING_ROWS,
   DEFAULT_OPEN_MENTION_ROWS,
   parseAppMentions,
   resolveMentionCompletion,
@@ -116,7 +117,7 @@ export type ComposerContextFields = {
   onInvocationSelect?: (value: string, selection: AgentInvocationSelection, label?: string) => void;
   /** Keeps a picked channel or page shown by name; without it the draft holds the id token itself. */
   onReferenceSelect?: (value: string, binding: ComposerReferenceBinding) => void;
-  channel: ChannelSnapshot | null;
+  channel: LiveChannel | null;
   space: SerializedSpace | null;
   token: string | null;
   workspaces: SerializedWorkspace[];
@@ -340,11 +341,13 @@ export function useComposerCompletion({
     // auto starts a summon; it is not a condition on one. After a summon it is
     // offered only to an `@` typed there, which begins the next summon.
     const typingSummon = !fieldCompletion && Boolean(registrationMentionCompletion.active);
-    const choices = filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
+    const choices = [...filterLaunchCandidates((bodySummon ? allChoices.filter(item =>
       item.id !== "launch:auto" || typingSummon) : summonStartCandidates(allChoices)).filter(item =>
       bodySummon || !item.launchTags?.harness ||
       !registrationMentionCompletion.candidates.some(candidate => candidate.invocationTarget &&
-        (candidate.mention || candidate.name).toLowerCase() === item.launchTags!.harness)), query);
+        (candidate.mention || candidate.name).toLowerCase() === item.launchTags!.harness)), query),
+    // A fresh `@` may open with a condition: `@Lap` offers `@machine:Laptop`.
+    ...(!bodySummon && typingSummon ? summonConditionCandidates(allChoices, query) : [])];
     // Old Profile rows appended a colon and led into the retired launch picker.
     // Harnesses now use condition tags; explicit registration targets remain typed.
     const references = registrationMentionCompletion.candidates.filter(candidate =>
@@ -379,7 +382,10 @@ export function useComposerCompletion({
         // A folded section shows no rows at all — its own one-line header is
         // the whole section until it is opened.
         openKinds: mentionListingFolds ? [...DEFAULT_OPEN_MENTION_KINDS, "launch"] : undefined,
-        limitPerKind: mentionListingFolds ? DEFAULT_OPEN_MENTION_ROWS : 100,
+        // Conditions on a summon are the whole list there, so they get the room
+        // the other sections would have taken.
+        limitPerKind: !mentionListingFolds ? 100 : mentionSuggestions.every(candidate => candidate.kind === "launch")
+          ? CONDITION_LISTING_ROWS : DEFAULT_OPEN_MENTION_ROWS,
       }),
     [expandedMentionKinds, mentionListingFolds, mentionSuggestions]
   );

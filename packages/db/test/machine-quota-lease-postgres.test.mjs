@@ -53,6 +53,38 @@ integration("quota probes get a bounded execution window at claim without admitt
     await assert.rejects(complete(late), error => error.code === "machine_command_stale_lease", "the execution window stays bounded");
     assert.equal((await client.query("SELECT result_json FROM data.machine_daemon_commands WHERE command_id=$1", [lateId])).rows[0].result_json, null);
 
+    // A refusal's fresh read of one target: concurrent askers join the read already under way,
+    // never one that has finished or one issued before the reading they must be newer than.
+    const freshIssue = async readAfter => {
+      const requestId = `quota:${randomUUID()}`;
+      const result = await controls.command({ ...machine, commandId: randomUUID(), action: "issue",
+        principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "quota_probe",
+        payload: { type: "machine_quota_probe", requestId, readAfter,
+          probe: { requestId, connectionEpoch: connected.connectionEpoch, targets: [target], fresh: true } } });
+      return { requestId, coalescedInto: result.coalescedInto };
+    };
+    const stored = async id => (await client.query("SELECT count(*) FROM data.machine_daemon_commands WHERE command_id=$1",
+      [id])).rows[0].count;
+    const earlier = new Date(Date.now() - 60_000).toISOString();
+    const freshFirst = await freshIssue(earlier);
+    assert.equal(freshFirst.coalescedInto, undefined);
+    const joined = await Promise.all([freshIssue(earlier), freshIssue(earlier)]);
+    assert.deepEqual(joined.map(item => item.coalescedInto), [freshFirst.requestId, freshFirst.requestId],
+      "askers of one target share the read under way and learn which one");
+    assert.deepEqual(await Promise.all(joined.map(item => stored(item.requestId))), ["0", "0"]);
+    const later = await freshIssue(new Date(Date.now() + 1_000).toISOString());
+    assert.equal(later.coalescedInto, undefined, "a read issued before the fence cannot answer it");
+    await client.query("UPDATE data.machine_daemon_commands SET expires_at=clock_timestamp()-interval '1 second' WHERE command_id IN ($1,$2)",
+      [freshFirst.requestId, later.requestId]);
+    assert.equal((await freshIssue(earlier)).coalescedInto, undefined, "a read that is over is not joined");
+    await assert.rejects(controls.command({ ...machine, commandId: randomUUID(), action: "issue",
+      principal: { kind: "user", id: "owner" }, controlId: "quota:plain-fenced", commandType: "quota_probe",
+      payload: { type: "machine_quota_probe", requestId: "quota:plain-fenced", readAfter: earlier,
+        probe: { requestId: "quota:plain-fenced", connectionEpoch: connected.connectionEpoch, targets: [target] } } }),
+    error => error.code === "invalid_quota_probe", "only a fresh read carries a fence");
+    await client.query(`UPDATE data.machine_daemon_commands SET expires_at=clock_timestamp()-interval '1 second'
+      WHERE command_type='quota_probe' AND status='pending'`);
+
     const fencedId = await issue();
     const fenced = (await claim()).commands[0];
     const reconnected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",

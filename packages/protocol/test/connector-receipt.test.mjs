@@ -4,8 +4,31 @@ import { test } from "node:test";
 
 import { loadTypescriptModule } from "./load-typescript-module.mjs";
 
-const { connectorReceiptBody, connectorReceiptPreview, parseConnectorReceipt } =
-  await loadTypescriptModule(new URL("../src/connector-receipt.ts", import.meta.url));
+const {
+  connectorReceiptAnswersCommandSql, connectorReceiptBody,
+  connectorReceiptMessageId, connectorReceiptPreview, parseConnectorReceipt,
+} = await loadTypescriptModule(new URL("../src/connector-receipt.ts", import.meta.url));
+
+test("a receipt id is the execution id, including an approval and a finished upload", () => {
+  const command = "command-4";
+  const app = "gmail";
+  assert.equal(connectorReceiptMessageId(command, app), "system:command-4:gmail");
+  assert.equal(connectorReceiptMessageId(`${command}:approved`, app), "system:command-4:approved:gmail");
+  assert.equal(connectorReceiptMessageId(`${command}:upload-result`, "x"), "system:command-4:upload-result:x");
+  assert.equal(connectorReceiptMessageId(`${command}:denied`, app), `system:${command}:denied:${app}`);
+  const longCommand = "c".repeat(180);
+  const truncated = connectorReceiptMessageId(`${longCommand}:approved`, app);
+  assert.equal(truncated.length, 200);
+  assert.equal(truncated.startsWith(`system:${longCommand}:approved:`), true);
+});
+
+test("the unread check uses the same receipt ids, and a denial stays unread", () => {
+  assert.equal(connectorReceiptAnswersCommandSql("m.message_id", "command.message_id", "m.author_id"), [
+    "m.message_id=left('system:'||command.message_id||':'||m.author_id,200)",
+    "m.message_id=left('system:'||command.message_id||':approved:'||m.author_id,200)",
+    "m.message_id=left('system:'||command.message_id||':upload-result:'||m.author_id,200)",
+  ].join(" OR "));
+});
 
 test("a private call reads as the action's label, its outcome and a private result", () => {
   const body = connectorReceiptBody(["Google Search Console inspect_url: completed; Result: [hidden — private call]."]);
