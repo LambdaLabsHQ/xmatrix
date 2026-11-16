@@ -11,6 +11,12 @@ use crate::protocol;
 #[derive(Debug, Clone, Default)]
 pub(crate) struct AgentPresentationFacts {
     pub(crate) model: Option<String>,
+    /// The model the session reported first, before any switch: the one the
+    /// runtime runs when it is given none (Cursor's catalog marks no default).
+    pub(crate) starting_model: Option<String>,
+    /// The session was loaded, not created: the model it reports first is the
+    /// one it last ran, not the runtime's default, so it is no starting model.
+    pub(crate) session_resumed: bool,
     pub models: Vec<protocol::AgentModelInfo>,
     pub(crate) models_reported: bool,
     pub(crate) effort: Option<String>,
@@ -40,6 +46,15 @@ pub(crate) struct AgentPresentationSnapshot {
 /// Contract implemented by every Agent runtime family before presentation
 /// reaches Hub/Web. Vendor events are observed here and normalized into the
 /// same model/effort/command/chip/usage snapshot.
+impl AgentPresentationFacts {
+    /// Keep the first model a created session reports as the one it started on.
+    fn note_starting_model(&mut self, model: &str) {
+        if !self.session_resumed && self.starting_model.is_none() {
+            self.starting_model = Some(model.to_string());
+        }
+    }
+}
+
 pub(crate) trait AgentPresentationAdapter {
     fn runtime(&self) -> &str;
     fn source(&self) -> &str;
@@ -67,13 +82,30 @@ pub(crate) trait AgentPresentationAdapter {
             !self.runtime().trim().is_empty(),
             "presentation adapters require a stable runtime id"
         );
-        normalized_presentation(
+        let mut snapshot = normalized_presentation(
             self.source(),
             self.command_catalog_json(),
             facts,
             command_overlay,
             self.overlay_is_complete(),
-        )
+        );
+        // Each Cursor model spends its pool, Auto or API. Its catalog marks
+        // no default, so the model the session started on is marked: the one
+        // a launch that names no model runs, and whose pool gates it.
+        if self.runtime() == "cursor" {
+            for row in snapshot.models.iter_mut().flatten() {
+                row.quota_scopes = Some(vec![
+                    xmatrix_harness::quota::cursor::cursor_quota_scope_for_model(&row.model)
+                        .to_string(),
+                ]);
+                if facts.starting_model.as_deref().is_some_and(|model| {
+                    row.id.eq_ignore_ascii_case(model) || row.model.eq_ignore_ascii_case(model)
+                }) {
+                    row.is_default = Some(true);
+                }
+            }
+        }
+        snapshot
     }
 }
 
@@ -658,12 +690,23 @@ fn is_placeholder_model_id(value: &str) -> bool {
             .is_some_and(|rest| rest == "]")
 }
 
-fn option_current_display(option: &Value, current: &str) -> String {
+/// The choices of an ACP select option. ACP lets a select list its choices
+/// flat or in groups (`{ group, name, options: [...] }`); DeepSeek Harness
+/// groups its models by provider, so each group's choices are read in place.
+pub(crate) fn select_option_entries(option: &Value) -> impl Iterator<Item = &Value> {
     option
         .get("options")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
+        .flat_map(|entry| match entry.get("options").and_then(Value::as_array) {
+            Some(grouped) => grouped.as_slice(),
+            None => std::slice::from_ref(entry),
+        })
+}
+
+fn option_current_display(option: &Value, current: &str) -> String {
+    select_option_entries(option)
         .find_map(|entry| {
             let value = option_value(entry)?;
             value
@@ -781,6 +824,7 @@ pub fn acp_model_catalog_from_value(value: &Value) -> Vec<protocol::AgentModelIn
                 input_modalities: None,
                 supports_personality: None,
                 upgrade: None,
+                quota_scopes: None,
             })
         })
         .collect()
@@ -903,11 +947,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             128,
         );
         if key == "model" || key == "models" {
-            let models: Vec<_> = option
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+            let models: Vec<_> = select_option_entries(option)
                 .filter_map(|entry| {
                     let model = option_value(entry)?;
                     Some(protocol::AgentModelInfo {
@@ -922,6 +962,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
                         input_modalities: None,
                         supports_personality: None,
                         upgrade: None,
+                        quota_scopes: None,
                     })
                 })
                 .collect();
@@ -930,6 +971,9 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             // Keep the raw currentValue (including Cursor's variants-mode
             // `default[]`) so display-name resolution can still map it to
             // "Auto"; presentation chips never show the placeholder text.
+            if let Some(current) = &current {
+                facts.note_starting_model(current);
+            }
             facts.model = current;
             attach_config_efforts_to_selected_model(facts);
             continue;
@@ -940,11 +984,7 @@ fn observe_config_options(options: &[Value], facts: &mut AgentPresentationFacts,
             // `effort`, or `reasoning_effort`, category `thought_level`) and,
             // on Claude, a separate boolean `thinking` toggle. The boolean is
             // not a reasoning level. Keep the leveled control when both exist.
-            let supported: Vec<_> = option
-                .get("options")
-                .and_then(Value::as_array)
-                .into_iter()
-                .flatten()
+            let supported: Vec<_> = select_option_entries(option)
                 .filter_map(|entry| {
                     let reasoning_effort = option_value(entry)?;
                     Some(protocol::AgentModelReasoningEffort {
@@ -1086,6 +1126,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
         )
         .filter(|value| !is_placeholder_model_id(value))
         {
+            facts.note_starting_model(&model);
             facts.model = Some(model.clone());
             if let Some(selected) = facts
                 .models
@@ -1105,6 +1146,7 @@ fn observe_acp_node(value: &Value, facts: &mut AgentPresentationFacts, source: &
     )
     .filter(|value| !is_placeholder_model_id(value))
     {
+        facts.note_starting_model(&model);
         facts.model = Some(model);
     }
     if let Some(effort) = clean_string(

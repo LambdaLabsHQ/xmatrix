@@ -56,7 +56,7 @@ function runtimeCell(human, agent) {
     { getWebSockets: () => [], acceptWebSocket() {} },
     human ?? new HumanRuntimeTransport({ capabilities: new Set(HUMAN_AUTHORITY_REQUIRED_CAPABILITIES) }),
     agent ?? new AgentInstanceRuntimeTransport({ capabilities: new Set(AGENT_INSTANCE_AUTHORITY_REQUIRED_CAPABILITIES) }),
-    {},
+    new MachineDaemonRuntimeTransport({ capabilities: new Set(MACHINE_DAEMON_AUTHORITY_REQUIRED_CAPABILITIES) }),
   );
   return cell;
 }
@@ -248,12 +248,12 @@ function ownerCell({ machineOnline = true } = {}) {
 }
 
 /** A Channel whose Agents are owned by `owners` (owner-1 owns agent-1/instance-1, and so on). */
-function channelOwnedBy(owners) {
+function channelOwnedBy(owners, usage) {
   return { id: "channel-1", spaceId: "space-1", name: "c", mode: "open", createdAt: now, updatedAt: now,
     memberPresence: Object.fromEntries(owners.map((owner, index) => [`agent-${index + 1}`, { kind: "agent", label: "Agent",
       registration: { ownerUserId: owner, machineId: "machine-1", harness: "codex" },
       instances: [{ id: `instance-${index + 1}`, channelId: "channel-1", channelInstanceId: String(index + 1), status: "idle",
-        connectedAt: now, lastSeenAt: now }] }])) };
+        connectedAt: now, lastSeenAt: now, ...(usage ? { usage } : {}) }] }])) };
 }
 
 /**
@@ -261,14 +261,16 @@ function channelOwnedBy(owners) {
  * answer as `cells` does; viewer-1 may read channel-1 only, and not even that unless `readable`.
  * `shown()` waits for what the last focus started.
  */
-function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
+function viewerSocket(cells, { owners = ["owner-1"], readable = true, usage } = {}) {
   const reads = [];
+  const quotaRefreshes = [];
   const { env, calls } = runtimeEnv(cells);
   const factory = createProductionRelayRuntimeProductPortFactory(env, {
     readChannel: async (channelId, userId) => {
       reads.push([channelId, userId]);
-      return readable && channelId === "channel-1" ? { openChannelHumanMemberIdsBySpace: {}, channel: channelOwnedBy(owners) } : undefined;
+      return readable && channelId === "channel-1" ? { openChannelHumanMemberIdsBySpace: {}, channel: channelOwnedBy(owners, usage) } : undefined;
     },
+    refreshChannelQuota: async (input) => { quotaRefreshes.push(input); },
     readHistory: async () => { throw new Error("unexpected history"); },
     analytics: { writeDataPoint() {} },
     runtimeSelf: { cellName: () => "user-viewer-1", fetch: () => { throw new Error("Unexpected self RPC"); } },
@@ -282,7 +284,7 @@ function viewerSocket(cells, { owners = ["owner-1"], readable = true } = {}) {
     session: { user: { id: "viewer-1", email: "viewer-1@example.test" }, connectedAt: now, lastSeenAt: now,
       focusedChannelId: null, deviceClient: "web", clientVersion: "1.8.0", clientProtocolVersion: 2 } }), true);
   return {
-    socket, reads, cells: () => calls.map((call) => call.cell),
+    socket, reads, quotaRefreshes, cells: () => calls.map((call) => call.cell),
     focus: (channelId = "channel-1") => human.handleFrame(socket, JSON.stringify({ type: "user_focus_channel", requestId: `focus-${channelId}`, channelId })),
     ping: () => human.handleFrame(socket, JSON.stringify({ type: "ping", requestId: "ping" })),
     close: () => human.handleClose(socket, 1000, "closed", true),
@@ -295,8 +297,29 @@ async function openChannel(owner, options) {
   const viewer = viewerSocket(new Map([["user-owner-1", owner]]), options);
   await viewer.focus();
   await viewer.shown();
-  return { cards: viewer.cards(), reads: viewer.reads, cells: viewer.cells() };
+  return { cards: viewer.cards(), reads: viewer.reads, cells: viewer.cells(), quotaRefreshes: viewer.quotaRefreshes };
 }
+
+test("opening a Channel whose Agent has no current quota reading asks its machine for one", async () => {
+  const unread = await openChannel(ownerCell(), { usage: { quotaState: "unknown", quotaObservedAt: now } });
+  await Promise.resolve();
+  assert.deepEqual(unread.quotaRefreshes, [{ channelId: "channel-1", actorUserId: "viewer-1" }],
+    "an expired reading is read again, as the person who opened the Channel");
+
+  const current = await openChannel(ownerCell(), { usage: { quotaState: "observed", quotaSource: "provider_api",
+    quotaObservedAt: now, quotaUsages: [{ label: "5h", percent: 12 }] } });
+  await Promise.resolve();
+  assert.deepEqual(current.quotaRefreshes, [], "a reading in force asks nothing");
+
+  const held = await openChannel(ownerCell(), { usage: { quotaState: "exhausted", quotaSource: "provider_api",
+    quotaObservedAt: now, quotaUsages: [{ percent: 100 }] } });
+  await Promise.resolve();
+  assert.deepEqual(held.quotaRefreshes, [{ channelId: "channel-1", actorUserId: "viewer-1" }],
+    "a usage-limit hold waits for a read to tell what was used up");
+
+  const refused = await openChannel(ownerCell(), { readable: false });
+  assert.deepEqual(refused.quotaRefreshes, [], "nothing is asked for a Channel the person cannot read");
+});
 
 test("a person who opens a Channel is shown its Agents as they are now, from the cells that hold them", async () => {
   const opened = await openChannel(ownerCell());
@@ -700,4 +723,52 @@ test("a daemon connect refused for another owner's cell advances no epoch and wa
   assert.equal(transport.session(socket)?.connectionEpoch, 1);
   assert.equal(commands[0], "connect", "the admitted connect is the first command committed");
   assert.deepEqual(woken, ["machine-1"]);
+});
+
+test("Instance records negotiate per Human socket and preserve their capability across hibernation", async () => {
+  const records = { type: "instance_records", records: [] };
+  const work = { instanceId: "channel-1:1", channelId: "channel-1", revision: { version: 1, sequence: 1 }, intent: "First work" };
+  const activities = { type: "instance_activity", activities: [work] };
+  const human = new HumanRuntimeTransport(humanAuthority("reader"), { onChannelFocus: async ({ send }) => {
+    send(records); send(activities);
+  } });
+  const modern = new FakeSocket();
+  human.accept(modern);
+  await human.handleFrame(modern, JSON.stringify({ type: "human_connect", token: "token", device: {
+    client: "web", version: "1.8.0", protocolVersion: 2, capabilities: ["instance_records_v1", "presence_digest"],
+  } }));
+  const legacy = new FakeSocket();
+  const attachment = human.hibernationAttachment(modern);
+  assert.equal(attachment.session.instanceRecords, true);
+  const legacyAttachment = structuredClone(attachment);
+  delete legacyAttachment.session.instanceRecords;
+  assert.equal(human.rehydrate(legacy, legacyAttachment), true);
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  modern.sent.length = 0;
+  human.deliverToUser("reader", records);
+  human.deliverToUser("reader", activities);
+  assert.deepEqual(modern.sent, [records, activities]);
+  assert.deepEqual(legacy.sent, [], "old consumers receive only their negotiated wire shapes");
+  assert.equal(human.deliverToUser("another-reader", records), false);
+  const restored = new HumanRuntimeTransport(humanAuthority("reader"));
+  const restoredSocket = new FakeSocket();
+  assert.equal(restored.rehydrate(restoredSocket, attachment), true);
+  restored.deliverToUser("reader", records);
+  assert.deepEqual(restoredSocket.sent, [records]);
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: null }));
+  modern.sent.length = 0;
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  await human.handleFrame(legacy, JSON.stringify({ type: "user_focus_channel", channelId: "channel-1" }));
+  assert.deepEqual(modern.sent.filter(frame => frame.type.startsWith("instance_")), [records, activities]);
+  assert.deepEqual(legacy.sent, [], "the focused-socket callback observes the same capability boundary");
+  await human.handleFrame(modern, JSON.stringify({ type: "user_focus_channel", channelId: null }));
+  modern.sent.length = 0;
+  human.deliverToUser("reader", records);
+  human.deliverToUser("reader", activities);
+  const latest = { ...work, revision: { version: 1, sequence: 2 }, intent: "Latest work" };
+  human.deliverToUser("reader", { type: "instance_activity", activities: [latest] });
+  assert.deepEqual(modern.sent, [records], "durable facts are immediate while background work waits");
+  await new Promise(resolve => setTimeout(resolve, 1_050));
+  assert.deepEqual(modern.sent, [records, { type: "instance_activity", activities: [latest] }]);
+  assert.deepEqual(legacy.sent, []);
 });

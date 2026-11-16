@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import test from "node:test";
 import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import { setTimeout } from "node:timers/promises";
 import { Client } from "pg";
 import { createAuthorityDatabase } from "../dist/index.js";
@@ -11,6 +12,18 @@ import { createAuthorityDatabase } from "../dist/index.js";
 export const connectionString = process.env.XMATRIX_TEST_POSTGRES_URL;
 export const integration = connectionString || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true"
   ? test : test.skip;
+
+/** Real command clients, with a countable diagnostic checkout that can fail independently. */
+export function postgresDiagnosticClients() {
+  const diagnostics = { attempts: 0, unavailable: false, clientFactory: config => {
+    if (config.application_name === "xmatrix-lock-diagnostic") {
+      diagnostics.attempts++;
+      if (diagnostics.unavailable) throw new Error("private-diagnostic-failure");
+    }
+    return new Client(config);
+  } };
+  return diagnostics;
+}
 
 /** Independent bounded commands plus a direct connection for connector fixture setup. */
 export async function connectorDatabase(applicationName) {
@@ -97,7 +110,7 @@ export function savepointDatabase(client, rewrite, checkContext = () => {}) {
       await client.query("ROLLBACK TO SAVEPOINT command");
       throw error;
     }
-  } };
+  }, async close() {}, openSession() { return this; } };
 }
 
 export async function applyTestMigrations(client, files, rewrite) {
@@ -143,7 +156,7 @@ export async function isolatedPostgres(prefix, { migrate = true, shard = false, 
     url.pathname = `/${name}`;
     let applied;
     if (migrate) applied = JSON.parse((await promisify(execFile)(process.execPath,
-      [new URL("../scripts/migrate.mjs", import.meta.url).pathname, "apply", "--revision=local", "--allow-contract"], {
+      [fileURLToPath(new URL("../scripts/migrate.mjs", import.meta.url)), "apply", "--revision=local", "--allow-contract"], {
         timeout: 120_000, env: { ...process.env, DATABASE_URL: url.toString(), POSTGRES_RUNTIME_ROLE: role },
       })).stdout);
     client = new Client({ connectionString: url.toString() });

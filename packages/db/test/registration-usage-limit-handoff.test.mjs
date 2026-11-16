@@ -51,11 +51,14 @@ test("handoff rejects the source Agent even when addressed through a harness ali
 
 test("a usage limit only holds the pool until the reset; it hands nothing off itself", async () => {
   const { repo, calls } = repository();
-  assert.deepEqual(await repo.holdUsageLimit(input), { limitedUntil: "2026-10-01T13:00:00.000Z" });
-  assert.deepEqual(calls.limits, [["owner", "m1", "claude", "2026-10-01T13:00:00.000Z"]]);
+  assert.deepEqual(await repo.holdUsageLimit(input), {
+    limitedUntil: "2026-10-01T13:00:00.000Z", quotaPoolId: "registration:m1:claude", usedUp: "account",
+  });
+  assert.deepEqual(calls.limits, [["owner", "m1", "claude"],
+    ["owner", "registration:m1:claude", "2026-10-01T13:00:00.000Z"]]);
   assert.deepEqual(calls.handoffs, []);
   const unheld = repository({ held: null });
-  assert.deepEqual(await unheld.repo.holdUsageLimit(input), {});
+  assert.equal(await unheld.repo.holdUsageLimit(input), undefined);
 });
 
 test("only the Instance's owner may report its account used up", async () => {

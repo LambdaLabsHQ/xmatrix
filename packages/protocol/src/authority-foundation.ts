@@ -1,4 +1,3 @@
-import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "./app-connector-manifests.js";
 import { agentFailureEvidence, agentFailureStatusLines, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 
@@ -7,8 +6,6 @@ import type { AgentStatusChip } from "./agent-status-tags.js";
 import type {
   AgentSkill,
   AppConnectorCompletionDynamicSource,
-  ChannelAppMention,
-  EvalExpression,
   LlmUsage,
 } from "./authority-runtime.js";
 
@@ -17,12 +14,17 @@ import { agentFaceUrl } from "./faces.js";
 
 export {
   AGENT_PRESETS,
+  agentAccessGrant,
+  agentAccessModes,
+  REGISTRATION_ACCESS_ASK_CAPABILITY,
   agentHarnessSpec,
   agentLaunchExecutable,
   withMachineSpawnHarness,
   agentPresetById,
   agentPresetForLauncher,
   normalizeAgentPresetRuntime,
+  type AgentAccessGrant,
+  type AgentAccessMode,
   type AgentHarnessSpec,
   type AgentPreset,
   type AgentPresetBackend,
@@ -220,6 +222,31 @@ export const HUB_ROUTES = {
   connector_usage: "/api/connectors/usage",
   /** Synchronous private read; the authenticated calling Run alone gets its result. */
   connector_call: "/api/connectors/call",
+  /** The open Norn requests an Agent Run holds or waits on. */
+  norn_requests: "/api/norn/requests",
+  /** The Run that holds a Norn request answers it. */
+  norn_request_answer: "/api/norn/requests/answer",
+  /** The Run that holds a Norn request delegates it to someone who answers it for them. */
+  norn_request_delegate: "/api/norn/requests/delegate",
+  /** The Run whose Instance asked a question with a command calls it off. */
+  norn_request_call_off: "/api/norn/requests/call-off",
+  /** The Norn program a message carries, for whoever can read its conversation: how it stands and what it does next. */
+  space_norn_program: (spaceId: string, programId: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
+  /** A Norn request by its reference, for whoever can read its conversation: what a `request:<ref>` shows. */
+  space_norn_request: (spaceId: string, requestRef: string) =>
+    `/api/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
+  /** An Agent Run asks a person or an Agent something, as a Norn program it becomes the author of. */
+  norn_request_ask: "/api/norn/requests/ask",
+  /** The person a Norn request was delivered to answers it, from its card. */
+  channel_norn_request_answer: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
+  /** The person a Norn request was delivered to delegates it from its card, to someone who answers it for them. */
+  channel_norn_request_delegate: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/delegate`,
+  /** The person who delegated a Norn request takes it back while it is open. */
+  channel_norn_request_reclaim: (channelId: string, requestRef: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/reclaim`,
   space_secrets: (spaceId: string) => `/api/spaces/${encodeURIComponent(spaceId)}/secrets`,
   space_secret: (spaceId: string, secretRef: string) =>
     `/api/spaces/${encodeURIComponent(spaceId)}/secrets/${encodeURIComponent(secretRef)}`,
@@ -228,6 +255,12 @@ export const HUB_ROUTES = {
   secret_request_status: "/api/secret-requests/status",
   /** An Agent Run asks a Machine's owner, on a card in its Channel, to sign a harness in there. */
   harness_sign_in_requests: "/api/harness-sign-in-requests",
+  /** An Agent Run asks, on a card in its Channel, for settings only a person can make (docs/design/settings-cards.md). */
+  settings_requests: "/api/settings-requests",
+  settings_request_status: "/api/settings-requests/status",
+  /** A settings card's settings as its viewer sees them (GET), and one of them made on it (PUT). */
+  channel_settings_card: (channelId: string, messageId: string) =>
+    `/api/channels/${encodeURIComponent(channelId)}/settings-cards/${encodeURIComponent(messageId)}`,
   push_config: "/api/push/config",
   push_devices: "/api/push/devices",
   push_device: (deviceId: string) => `/api/push/devices/${encodeURIComponent(deviceId)}`,
@@ -354,8 +387,6 @@ export const HUB_ROUTES = {
     `/api/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
-  channel_summon_intent: (channelId: string) =>
-    `/api/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   channel_message: (channelId: string, messageId: string) =>
@@ -454,6 +485,8 @@ export const WEB_PROXY_ROUTES = {
     secretRef ? `/${encodeURIComponent(secretRef)}` : ""}`,
   secret_request_fulfill: "/api/secret-requests/fulfill",
   secret_request_status: "/api/secret-requests/status",
+  channel_settings_card: (channelId: string, messageId: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/settings-cards/${encodeURIComponent(messageId)}`,
   push_config: "/api/xmatrix/push/config",
   push_devices: "/api/xmatrix/push/devices",
   push_device: (deviceId: string) => `/api/xmatrix/push/devices/${encodeURIComponent(deviceId)}`,
@@ -480,8 +513,6 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/agent-launches/${encodeURIComponent(launchId)}/retry`,
   channel_message_launch_anyway: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-anyway`,
-  channel_summon_intent: (channelId: string) =>
-    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/summon-intent`,
   channel_message_launch_choice: (channelId: string, messageId: string) =>
     `/api/xmatrix/channels/${encodeURIComponent(channelId)}/messages/${encodeURIComponent(messageId)}/launch-choice`,
   space_launch_targets: (spaceId: string) =>
@@ -605,6 +636,16 @@ export const WEB_PROXY_ROUTES = {
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}`,
   cross_space_read_grant_decision: (spaceId: string, grantId: string) =>
     `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/cross-space-read-grants/${encodeURIComponent(grantId)}/decision`,
+  space_norn_program: (spaceId: string, programId: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-programs/${encodeURIComponent(programId)}`,
+  space_norn_request: (spaceId: string, requestRef: string) =>
+    `/api/xmatrix/spaces/${encodeURIComponent(spaceId)}/norn-requests/${encodeURIComponent(requestRef)}`,
+  channel_norn_request_answer: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/answer`,
+  channel_norn_request_delegate: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/delegate`,
+  channel_norn_request_reclaim: (channelId: string, requestRef: string) =>
+    `/api/xmatrix/channels/${encodeURIComponent(channelId)}/norn-requests/${encodeURIComponent(requestRef)}/reclaim`,
   context_feed: "/api/xmatrix/context/feed",
   assistant_memory: "/api/xmatrix/assistant-memory",
   shared_memory: "/api/xmatrix/shared-memory",
@@ -865,7 +906,7 @@ export function isAgentUsageLimitLifecycle(message: {
 
 /**
  * A turn failure whose provider error says the account's usage limit or quota
- * is used up. Hub reads this from the original error, so every host that
+ * or prepaid balance is used up. Hub reads this from the original error, so every host that
  * reports a failed turn gets the same handoff. Plain rate limiting (`429`,
  * "rate limit", "overloaded") is retried by the provider CLIs and is not a
  * usage limit.
@@ -873,7 +914,12 @@ export function isAgentUsageLimitLifecycle(message: {
 export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {
   const lower = (error ?? "").toLowerCase();
   const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
-    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded"]
+    "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded",
+    // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
+    // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
+    "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足",
+    // Cursor CLI's whole reply when its account has no payment method or credit left.
+    "add a payment method to continue"]
     .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
   if (!limited) return undefined;
   // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.
@@ -982,238 +1028,6 @@ export interface SerializedMachineDaemon {
   appVersion?: string;
 }
 
-export interface SerializedAutomation {
-  id: string;
-  /** CAS authority for every Automation mutation. */
-  version: number;
-  ownerUserId: string;
-  authorityRootUserId: string;
-  name: string;
-  /** The conversation it runs in; for a page's Automation, a conversation of its own. */
-  channelId: string;
-  /** The page it belongs to (docs/design/pages-live-document.md §6); its section is where the page references it. */
-  pageId?: string;
-  /** The section of the page its line is in, when read through its page ('' before the first heading). */
-  blockId?: string;
-  /** The page's Space, with pageId. */
-  spaceId?: string;
-  /** The page line it is (docs/design/pages-live-document.md §6.1), as last synced. */
-  source?: string;
-  /** Why its line does not run as written, when it does not. */
-  problem?: string;
-  /** What else makes it run now, besides its cadence (a page's Automation only). */
-  triggers?: AutomationTrigger[];
-  /** Events that made it due and that its next occurrence will name. */
-  triggerEvents?: AutomationTriggerEvent[];
-  payloadVersion?: 2 | 3;
-  /** Principal-specific capability; readable Automations may still be immutable to this Human. */
-  canManage: boolean;
-  /** Principal-specific action capabilities computed by Relay authority. */
-  capabilities: AutomationCapabilities;
-  /** Expression repeatedly evaluated by the Channel evaluator. */
-  expression: AutomationExpression;
-  /** Canonical v3 input; absent when a payload has no evaluator binding (legacy v2). */
-  input?: PersistedEvalInput;
-  /** @deprecated Compatibility projection for payloadVersion 2 clients. */
-  message: AutomationMessage;
-  intervalMinutes: number;
-  /** A reminder: it runs once at nextRunAt, waits on its author, then stops. */
-  once?: true;
-  enabled: boolean;
-  createdAt: string;
-  updatedAt: string;
-  nextRunAt: string;
-  lastRunAt?: string;
-  lastRunId?: string;
-  /** Authoritative status of lastRunId from the durable Run record. */
-  lastRunStatus?: string;
-  /** Terminal timestamp of lastRunId, absent while the Run is active. */
-  lastRunFinishedAt?: string;
-  lastError?: string;
-  /** Latest durable dispatch attempt, including a retryable failure that has not produced a Run. */
-  latestExecution?: AutomationExecutionStatus;
-  /** Successful scheduled deliveries; migrated legacy Agent runs remain counted. */
-  deliveryCount: number;
-  lastDeliveryAt?: string;
-  lastMessageId?: string;
-  /** The conversation the last occurrence ran in; each occurrence opens its own. */
-  lastChannelId?: string;
-  /** Legacy Agent-bound fields remain readable only until migration completes. */
-  workspace?: WorkspaceRef;
-  agentId?: string;
-  agentName?: string;
-  prompt?: string;
-  executionTimeoutMinutes?: number;
-  runCount: number;
-}
-
-/**
- * What makes a page's Automation run now, besides its cadence
- * (docs/design/pages-live-document.md §6.2). A trigger never queues work: it
- * makes the next occurrence due, and events coalesce.
- */
-export type AutomationTrigger =
-  | { kind: "merged"; repository: string; branch?: string; paths?: string[]; installationId?: string }
-  | { kind: "ci-failed"; repository: string; branch?: string; workflow?: string; installationId?: string }
-  /** A connector event (docs/design/connector-platform.md §3.4): a provider's source, `*` for any, and feature. */
-  | { kind: "event"; provider: string; source: string; feature?: string };
-
-/** An event that fired an Automation, named in the occurrence it made due. */
-export interface AutomationTriggerEvent {
-  kind: AutomationTrigger["kind"];
-  at: string;
-  summary: string;
-  url?: string;
-}
-
-const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
-const TRIGGER_TEXT = /^[^\s][^\n]{0,199}$/u;
-
-/* A connector event trigger names a provider that delivers events, one of its
-   sources (or `*`) and optionally one of its features. */
-function connectorEventTrigger(trigger: Record<string, unknown>): AutomationTrigger {
-  const providerId = typeof trigger.provider === "string" ? trigger.provider.trim().toLowerCase() : "";
-  const manifest = APP_CONNECTOR_PROVIDER_MANIFESTS.find((candidate) => candidate.id === providerId);
-  const events = manifest?.events;
-  if (!manifest || !events) throw new Error("an event trigger names a connector that delivers events");
-  const source = typeof trigger.source === "string" && trigger.source.trim() ? trigger.source.trim().toLowerCase() : "*";
-  if (source !== "*" && !new RegExp(events.source.pattern, "u").test(source)) {
-    throw new Error(`an event trigger's source is a ${manifest.name} ${events.source.label.toLowerCase()} or *`);
-  }
-  const feature = typeof trigger.feature === "string" && trigger.feature.trim() && trigger.feature.trim() !== "*"
-    ? trigger.feature.trim().toLowerCase() : undefined;
-  if (feature && !events.features.some((candidate) => candidate.id === feature)) {
-    throw new Error(`${manifest.name} events are ${events.features.map((candidate) => candidate.id).join(", ")}`);
-  }
-  return { kind: "event", provider: manifest.id, source, ...(feature ? { feature } : {}) };
-}
-
-/**
- * An Automation's triggers as a writer gave them, validated and bounded; the
- * Hub sets each GitHub trigger's installationId from the Space's connection.
- * Throws on anything else.
- */
-export function automationTriggersFrom(value: unknown): AutomationTrigger[] {
-  if (value === undefined || value === null) return [];
-  if (!Array.isArray(value) || value.length > 8) throw new Error("triggers is a list of at most 8 triggers");
-  const text = (field: unknown, name: string): string | undefined => {
-    if (field === undefined || field === null || field === "") return undefined;
-    if (typeof field !== "string" || !TRIGGER_TEXT.test(field.trim())) throw new Error(`${name} is invalid`);
-    return field.trim();
-  };
-  const seen = new Set<string>();
-  return value.map((entry) => {
-    const trigger = entry && typeof entry === "object" && !Array.isArray(entry) ? entry as Record<string, unknown> : {};
-    let result: AutomationTrigger;
-    if (trigger.kind === "merged" || trigger.kind === "ci-failed") {
-      const repository = typeof trigger.repository === "string" ? trigger.repository.trim() : "";
-      if (!REPOSITORY_NAME.test(repository)) throw new Error("a GitHub trigger names its repository as owner/repo");
-      const branch = text(trigger.branch, "branch");
-      if (trigger.kind === "merged") {
-        const paths = trigger.paths === undefined ? [] : Array.isArray(trigger.paths) && trigger.paths.length <= 20
-          ? trigger.paths.map((path) => text(path, "path")).filter((path): path is string => Boolean(path))
-          : (() => { throw new Error("paths is a list of at most 20 path prefixes"); })();
-        result = { kind: "merged", repository, ...(branch ? { branch } : {}), ...(paths.length ? { paths } : {}) };
-      } else {
-        const workflow = text(trigger.workflow, "workflow");
-        result = { kind: "ci-failed", repository, ...(branch ? { branch } : {}), ...(workflow ? { workflow } : {}) };
-      }
-    } else if (trigger.kind === "event") {
-      result = connectorEventTrigger(trigger);
-    } else throw new Error("a trigger is merged, ci-failed or a connector event");
-    const key = JSON.stringify(result);
-    if (seen.has(key)) throw new Error("a trigger is listed twice");
-    seen.add(key);
-    return result;
-  });
-}
-
-export interface AutomationExecutionStatus {
-  /** Exact persisted Runs of this occurrence. Older Hubs omit this projection.
-   * Empty means no provable Run, independently of message delivery status. */
-  runs?: Array<{ runId: string; instanceId: string | null; channelId: string; status: RunStatus }>;
-  status: "pending" | "leased" | "prepared" | "dispatched" | "failed" | "cancelled";
-  attempts: number;
-  scheduledFor: string;
-  nextAttemptAt: string;
-  updatedAt: string;
-  finishedAt?: string;
-  errorCode?: string;
-  errorMessage?: string;
-}
-
-export interface AutomationCapabilities {
-  update: boolean;
-  pause: boolean;
-  /** Always false; pause-request approval is retired. Sent for CLIs that still require it. */
-  requestPause: false;
-  resume: boolean;
-  /** Make its next occurrence due now; a running Automation whose page the caller can edit. */
-  run: boolean;
-  delete: boolean;
-  reasonRequired: boolean;
-}
-
-export interface AutomationMessage {
-  body: string;
-  appMentions?: ChannelAppMention[];
-}
-
-export interface AutomationExpression extends EvalExpression {
-  kind: "text";
-  language: "natural-language";
-  text: string;
-  appMentions?: ChannelAppMention[];
-}
-
-/** Authoring shape; Hub assigns a stable evaluator ref when a writer omits it. */
-export type AutomationExpressionInput = Omit<AutomationExpression, "ref"> & {
-  ref?: string;
-};
-
-export interface PersistedEvalEnvironmentRef {
-  /** Outermost REPL/environment to which this closure is bound. */
-  root: { kind: "channel"; id: string };
-  actor: { kind: "user" | "agent"; id: string };
-  /** Human authority root used for revocation and resource accounting. */
-  authorityRootUserId: string;
-}
-
-export type EvalResumeCondition = {
-  kind: "interval";
-  intervalMinutes: number;
-};
-
-/** Durable evaluator input. Automation is a projection of this value. */
-export interface PersistedEvalInput {
-  datum: AutomationExpression;
-  envRef: PersistedEvalEnvironmentRef;
-  resume: EvalResumeCondition;
-  lineage: {
-    rootMessageId: string;
-    parentInputId?: string;
-    depth: number;
-    budget: number;
-  };
-}
-
-export interface SerializedAutomationCatalog {
-  automations: SerializedAutomation[];
-  /** Exact Hub rollout capability; false means saved schedules cannot execute. */
-  executionEnabled: boolean;
-  /** Exact Hub rollout capability; absent/false makes Agent management fail closed. */
-  agentManagementEnabled: boolean;
-}
-
-export interface AutomationUpdateRequest {
-  expectedVersion: number;
-  name?: string;
-  expression?: AutomationExpressionInput;
-  /** @deprecated Accepted only as a migration input. */
-  message?: AutomationMessage;
-  intervalMinutes?: number;
-}
-
 /**
  * Provider-neutral live presentation produced by an Agent runtime adapter.
  *
@@ -1237,67 +1051,52 @@ export interface AgentPresentationSnapshot {
   usage?: LlmUsage;
 }
 
-export interface SerializedAgentInstance extends AgentPresentationSnapshot {
-  /**
-   * Globally unique live instance id. Use this for traces, controls, storage,
-   * and any non-mention identity comparison.
-   */
+/** Runtime-owned display and capability observations, independent of Instance identity.
+ * Add presentation fields here so durable normalization must account for them. */
+export interface AgentInstancePresentation extends AgentPresentationSnapshot {
+  clientVersion?: string;
+  hostName?: string;
+  workspace?: WorkspaceRef;
+  workspaceName?: string;
+  /** Ref from which the daemon materialized this Run worktree. */
+  runWorktreeBaseRef?: string;
+  /** Temporary work fields travel only on the live activity stream. */
+  activity?: string;
+  files?: string[];
+  intent?: string;
+  gitBranch?: string;
+  runtimeState?: AgentRuntimeState;
+  capabilities?: string[];
+  goal?: AgentGoalStatus;
+  modelsObservedAt?: string;
+  parametersObservedAt?: string;
+}
+
+export interface SerializedAgentInstance extends AgentInstancePresentation {
+  /** Globally unique Instance id, used for traces, controls and storage. */
   id: string;
-  /**
-   * Per-channel ordinal used only for channel-visible addressing such as
-   * `@agent:1`.
-   */
+  /** Channel-local ordinal for addresses such as `@agent:1`. */
   channelInstanceId?: string;
-  /**
-   * Channel this live instance is registered in. `channelInstanceId` ordinals
-   * are only meaningful inside this channel; consumers must not match slots
-   * across channels without comparing this scope first.
-   */
+  /** An ordinal is addressable only inside this Channel. */
   channelId?: string;
   label: string;
-  /**
-   * Version of the xMatrix client that registered this live instance.
-   */
-  clientVersion?: string;
   connectedAt: string;
   lastSeenAt: string;
   status: AgentStatus;
-  /**
-   * Set only with `status: "offline"`: this Instance is resting, not gone, and
-   * the next message in its Channel wakes it (docs/instance-sleep.md).
-   */
+  /** An offline, resting Instance remains its Channel's and wakes on a message. */
   rest?: AgentInstanceRest;
-  /** Set only with `rest: "wake_failed"`: the failure code, then what the failing step said. */
+  /** The failure reported with `rest: "wake_failed"`. */
   restReason?: string;
-  /** Set only with `status: "offline"` on a live Instance whose machine is unreachable. */
+  /** A live Instance's Machine is unreachable. */
   offlineReason?: AgentInstanceOfflineReason;
   machineId?: string;
   /** Mutable OS observation; never selects or authorizes a Machine. */
   hostname?: string;
   hostId?: string;
-  hostName?: string;
   cwd?: string;
-  /** Repository admitted for this Run, for display only; independent of its checkout path. */
+  /** Repository admitted for this Run, for display only. */
   repository?: string;
-  workspace?: WorkspaceRef;
-  workspaceName?: string;
-  /**
-   * Current git branch reported by the live instance, when its cwd is inside a
-   * repository. Detached heads and non-git directories leave this unset.
-   */
-  gitBranch?: string;
-  /**
-   * Ref the instance's managed run worktree was cut from, when the daemon
-   * materialized one for this run (execution-context display).
-   */
-  runWorktreeBaseRef?: string;
-  activity?: string;
-  files?: string[];
-  intent?: string;
-  runtimeState?: AgentRuntimeState;
-  /** Provider-backed operations advertised by this exact live runtime. */
-  capabilities?: string[];
-  goal?: AgentGoalStatus;
+  /** Legacy wire field; current runtime discovery uses commands and capabilities. */
   skills?: AgentSkill[];
 }
 
@@ -1355,6 +1154,9 @@ export interface AgentModelReasoningEffort {
 export interface AgentModelInfo {
   id: string;
   model: string;
+  /** Other selectors and display names the runtime lists for this same model
+   * (Claude's `opus` beside `default`), kept when the catalog collapses them. */
+  aliases?: string[];
   displayName?: string;
   description?: string;
   hidden?: boolean;
@@ -1364,6 +1166,10 @@ export interface AgentModelInfo {
   inputModalities?: string[];
   supportsPersonality?: boolean;
   upgrade?: string;
+  /** The `scope`s of the provider's scoped quota windows that constrain this
+   * model (Claude's family, `Fable`; Cursor's pool, `Auto` or `API`). Kept
+   * apart from the names a person selects a model by. */
+  quotaScopes?: string[];
 }
 
 export type WorkspaceVisibility = "private" | "channel" | "space";

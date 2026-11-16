@@ -48,6 +48,7 @@ import { isRecoverableLaunchFailure } from "../live-run-admission";
 import { wakeAgentLaunchCoordinator } from "../agent-launch-coordinator-wake";
 import { wakeMachineChannels } from "../registration-authority-wake";
 import { wakeInstancesAwaitingMachine } from "../registration-launch-dispatch";
+import { verifyWaitedQuotaOnMachine } from "../quota-waits";
 import { pageSummaryAnswered } from "../page-summary-answer";
 import type { ScheduledStep } from "../postgres-agent-launch-schedule";
 import { machineDaemonCommand } from "../machines";
@@ -131,9 +132,10 @@ export class PostgresMachineDaemonPort implements MachineDaemonSocketBackend {
       daemonCommand: (command) => machineDaemonCommand(input.env, command),
       runLifecycleReport: (report) => machineRunLifecycleReport(input.env, report),
       launchUpdate: (update) => updateAgentLaunch(input.env, update),
-      // Work queued for the machine moves, and Instances a message could not wake while it was away wake.
+      // Work queued for the machine moves, Instances a message could not wake while it was away wake,
+      // and quota a refused summon waits on there is read again.
       machineConnected: (route) => Promise.all([wakeMachineChannels(input.env, route),
-        wakeInstancesAwaitingMachine(input.env, route)]),
+        wakeInstancesAwaitingMachine(input.env, route), verifyWaitedQuotaOnMachine(input.env, route)]),
       textTaskAnswered: (task) => channelAboutRequest(task.requestId)
         ? channelAboutAnswered(input.env, task, input.runtimeSelf ? { runtimeSelf: {
           cellName: input.runtimeSelf.cellName(), fetch: request => input.runtimeSelf!.fetch(request),
@@ -919,7 +921,7 @@ function claimedCommand(value: unknown, capabilities: readonly string[]): Machin
   if (type === "machine_quota_probe") {
     const probe = parseRoutingQuotaProbeRequest(payload.probe);
     if (probe.requestId !== requestId || Object.keys(payload).some(key =>
-        !["type", "requestId", "probe", "relayLease"].includes(key))) {
+        !["type", "requestId", "probe", "relayLease", "readAfter"].includes(key))) {
       throw new Error("PostgreSQL returned an invalid quota probe command");
     }
     return { type, requestId, probe };

@@ -260,6 +260,8 @@ jobs:
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup node-checks
       - uses: ./.github/actions/setup-pnpm-node
+        with:
+          electron-binary: "false"
         if: steps.ledger.outputs.hit != 'true'
       - name: Run shared Node checks
         if: steps.ledger.outputs.hit != 'true'
@@ -295,6 +297,8 @@ jobs:
       - *select_ci_ref
       - uses: ./.github/actions/clear-linux-proxy
       - uses: ./.github/actions/setup-pnpm-node
+        with:
+          electron-binary: "false"
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup web
@@ -383,6 +387,8 @@ jobs:
       - *setup_node
       - *select_ci_ref
       - uses: ./.github/actions/setup-pnpm-node
+        with:
+          electron-binary: "false"
       - id: ledger
         name: Reuse a passing result for identical content
         run: node scripts/ci-ledger.mjs lookup hub-suite

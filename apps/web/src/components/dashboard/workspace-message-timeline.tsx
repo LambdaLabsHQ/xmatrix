@@ -29,9 +29,12 @@ import {
   type AgentTraceTarget,
 } from "./workspace-shell-message-model";
 
-import { RealtimeMessageAvatar } from "./realtime-message-avatar";
+import { RealtimeMessageAvatar, useMessageSenderStatus } from "./realtime-message-avatar";
+import { EventCard } from "./event-card";
 import { ConnectorReceiptCard } from "./connector-receipt-card";
-import { RealtimeChannelsContext, RealtimeEventsContext, useRealtimeChannelSelection } from "./realtime-channels";
+import { SettingsCard } from "./settings-card";
+import { RealtimeChannelsContext, RealtimeEventsContext, useChannelWithInstanceIdentities,
+  useRealtimeChannelSelection } from "./realtime-channels";
 import { createAgentWorkSelection, agentWorkCanReborn, type AgentWorkView } from "./agent-work-view";
 
 import { LiquidGlassPill, PaperPopover } from "@/components/ui/material-surfaces";
@@ -39,6 +42,7 @@ import { statusInkClass } from "@/components/ui/status-tone";
 
 import {
   RichMessageContent,
+  prepareRichMessageContent,
   messageMarkdownComponents,
 } from "./workspace-shell-rich-message";
 
@@ -154,6 +158,9 @@ import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 
 
 import { MessageUnsentNotice } from "./message-unsent-notice";
+import { MessagePicturesContext } from "./inline-pictures";
+import { InlineRowPreview } from "./inline-row-preview";
+import { CitingConversationContext, PASSAGE_HIGHLIGHT, passageRange, takeOpenedPassage } from "./cited-passage";
 import { foldedDiscussionBody, MESSAGE_BODY_ATTRIBUTE, selectedMessagePassage, type MessagePassageSelection } from "./selection-discussion";
 
 import {
@@ -170,6 +177,7 @@ import {
   MessageSquare,
   Paperclip,
   Pencil,
+  Quote,
   RefreshCw,
   Reply,
   ArrowRightLeft,
@@ -218,7 +226,7 @@ import { PageEditCards, useMessagePageEdits } from "@/components/dashboard/page-
 
 import type { SerializedAgentInvocationRejection, SerializedAgentStop, AgentInvocationQueryPage, InteractionDecisionWindow, PageMessageEdit,
   InteractionLaunchOption } from "@xmatrix/protocol";
-import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt } from "@xmatrix/protocol";
+import { firstMessageDecisionWindow, harnessLaunchOption, hasOperationalAgentInvocation, isAutoHandoffSuccessor, isHandoffSuccessorName, parseAgentControlInvocations, parseAgentStopInvocation, parseAutoLaunchMentions, parseConnectorInvocation, parseConnectorReceipt, connectorReceiptFixesOf, settingsCardOf } from "@xmatrix/protocol";
 import { FirstMessageLaunchChoice } from "./first-message-launch-choice";
 import { launchChoiceOffered } from "./first-message-launch-choice-state";
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
@@ -285,13 +293,15 @@ import { useSystemBackHandler } from "./use-system-back";
 import { cn } from "@/lib/utils";
 import { SentUploadProgress } from "./sent-upload-progress";
 import { CrossSpaceReadCard, crossSpaceReadMetadata } from "@/components/dashboard/cross-space-read-card";
+import { NornRequestCard, nornRequestMetadata } from "@/components/dashboard/norn-request-card";
+import { carriesNornBlock, MessageProgramFlow, MessageProgramProvider } from "@/components/dashboard/message-program-flow";
 import { MessageAskLine } from "./message-ask-line";
 import { OnboardingMessage } from "@/components/dashboard/onboarding-message";
 import { HarnessSignedOutNotice } from "@/components/dashboard/harness-signed-out-notice";
 import { MachineOfflineNotice } from "@/components/dashboard/machine-offline-notice";
 import { TurnFailureNotice } from "@/components/dashboard/turn-failure-notice";
 import { QuotaRetryNotice } from "./quota-retry-notice";
-import { quotaRetryOfferId } from "@xmatrix/protocol";
+import { eventCardOf, legacyStripeEventFacts, quotaRetryOfferId, stripeEventWords } from "@xmatrix/protocol";
 import { turnFailureEvidenceOf, turnFailuresContinuedByLaterSpeech } from "@/components/dashboard/turn-failure";
 import {
   SecretAccessRequestCardView, SecretRequestCardView, secretAccessRequestMetadata, secretRequestMetadata,
@@ -444,7 +454,7 @@ const TIMELINE_VIRTUOSO_COMPONENTS: VirtuosoComponents<TimelineItem, TimelineVir
 };
 
 export const MessageTimeline = memo(function MessageTimeline({
-  channel,
+  channel: catalogChannel,
   space,
   token,
   localContext,
@@ -473,6 +483,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onReply,
   onOpenThread,
   onDiscussPassage,
+  onQuotePassage,
   onMentionSender,
   onRebornSender,
   reborningSenderKey,
@@ -484,7 +495,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId,
   threadRootMessage,
   threadRootChannel,
-  foldsDiscussionHead = false,
+  inPageMargin = false,
 }: {
   channel: ChannelSnapshot | null;
   space: SerializedSpace | null;
@@ -512,6 +523,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   currentUserIdentityId: string;
   /** Starts a conversation from a passage selected in a message's text. */
   onDiscussPassage?: (message: TimelineItem, quote: string) => void;
+  /** Quotes a passage selected in a message's text in this conversation's composer. */
+  onQuotePassage?: (message: TimelineItem, quote: string) => void;
   reborningSenderKey: string | null;
   /** Opens a `page:<id>` chip from a message, at its section when it names one (pages-and-conversations.md §4.3). */
   onOpenPage: PageReferenceScope["onOpenPage"];
@@ -519,12 +532,17 @@ export const MessageTimeline = memo(function MessageTimeline({
   highlightMessageId?: string;
   threadRootMessage?: TimelineItem;
   threadRootChannel?: ChannelSnapshot;
-  /** The thread's head shows a page discussion's passage, so its first message need not (selection-discussion.ts). */
-  foldsDiscussionHead?: boolean;
+  /** A comment thread in a page's margin: its head shows a page discussion's passage, so its first message need
+   * not (selection-discussion.ts), and a thread that short needs no way back to a person's last message, which
+   * would only cover what it says (user 2026-11-06). */
+  inPageMargin?: boolean;
 } & Pick<MessageRowProps,
   "onReact" | "onEdit" | "onRecall" | "onUnsentAction" | "onReply" | "onOpenThread" | "onMentionSender" |
   "onRebornSender" | "onQuestionnaireAnswer" | "onOpenInternalAppLink" | "onJumpToMessage"
 >) {
+  // The list copy holds no Instances. Mentions and their read state need who
+  // the Channel's Instances are, not what each is doing.
+  const channel = useChannelWithInstanceIdentities(catalogChannel);
   const [visibleInvocationScope, setVisibleInvocationScope] = useState<{ channelId: string; ids: string[] } | null>(null);
   const visibleInvocationIds = visibleInvocationScope?.channelId === channel?.id ? visibleInvocationScope?.ids : undefined;
   const agentLaunchQuery = useChannelAgentLaunches(channel, token, timeline, visibleInvocationIds, currentUserIdentityId);
@@ -696,6 +714,20 @@ export const MessageTimeline = memo(function MessageTimeline({
   const stableOnOpenInternalAppLink = useStableCallback(onOpenInternalAppLink);
   const stableOnMessageExposed = useStableCallback(onMessageExposed);
   const stableOnJumpToMessage = useStableCallback(onJumpToMessage);
+  const citingConversation = useMemo(() => channel
+    ? { channel, openMessage: (messageId: string) => stableOnJumpToMessage(messageId) } : null,
+  [channel, stableOnJumpToMessage]);
+  // The words a quote opened, marked in the message its jump landed on for as long as that row is marked.
+  useEffect(() => {
+    if (!highlightMessageId || typeof Highlight === "undefined") return;
+    const quote = takeOpenedPassage(highlightMessageId);
+    const body = quote
+      ? timelineScrollRef.current?.querySelector(`[${MESSAGE_BODY_ATTRIBUTE}="${CSS.escape(highlightMessageId)}"]`) : null;
+    const range = body && quote ? passageRange(body, quote) : null;
+    if (!range) return;
+    CSS.highlights.set(PASSAGE_HIGHLIGHT, new Highlight(range));
+    return () => { CSS.highlights.delete(PASSAGE_HIGHLIGHT); };
+  }, [highlightMessageId, timelineScrollRef]);
   const stableOnScrollPositionChange = useStableCallback(onScrollPositionChange);
   const stableOnScrollGesture = useStableCallback(onScrollGesture);
   const stableOnNearTop = useStableCallback(onNearTop);
@@ -853,9 +885,20 @@ export const MessageTimeline = memo(function MessageTimeline({
 
   /** The message a jump has scrolled toward and not yet seen centred. */
   const jumpScrollTargetRef = useRef<string | null>(null);
+  /* Whether the jump's row was already in full view when the jump began. Only
+     such a row is left where it is; one that a fetched page has just brought
+     into view is centred, or the list's prepend anchoring can push it under
+     an edge after it was counted as landed. */
+  const jumpStartRef = useRef<{ messageId: string; wasInView: boolean } | null>(null);
   const scrollToMessage = useStableCallback((messageId: string): TimelineJumpOutcome => {
     const container = timelineScrollRef.current;
     const anchorHash = `#message:${messageId}`;
+    if (jumpStartRef.current?.messageId !== messageId) {
+      jumpStartRef.current = {
+        messageId,
+        wasInView: timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container),
+      };
+    }
     const index = rows.findIndex((item) => item.messageId === messageId ||
       item.folded?.some((entry) => entry.messageId === messageId));
     if (index < 0) return "unavailable";
@@ -865,10 +908,14 @@ export const MessageTimeline = memo(function MessageTimeline({
     readingAnchor.release();
     // The list is still landing on its last row and undoes a scroll made now.
     // What the tail shows keeps its place through the handover, so a row in
-    // full view there has landed; any other jump goes on once the list has
-    // taken over.
+    // full view there since the jump began has landed; any other jump goes on
+    // once the list has taken over.
     if (opening) {
-      if (timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) return "landed";
+      if (jumpStartRef.current.wasInView &&
+        timelineRowIsInFullView(resolveTimelineAnchor(anchorHash, container), container)) {
+        jumpStartRef.current = null;
+        return "landed";
+      }
       jumpAwaitsOpeningRef.current = true;
       return "opening";
     }
@@ -887,8 +934,10 @@ export const MessageTimeline = memo(function MessageTimeline({
     // the timeline's edge is not one the reader can see, so it is centred too.
     if (jumpScrollTargetRef.current === messageId
       ? timelineRowIsOnScreen(row, container) && timelineRowIsSettled(row, container)
-      : timelineRowIsInFullView(row, container)) {
+      : jumpStartRef.current.wasInView && timelineRowIsInFullView(row, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
+      if (row) readingAnchor.hold(row.id);
       return "landed";
     }
     // Virtuoso's imperative index space is the data index; `firstItemIndex`
@@ -903,6 +952,8 @@ export const MessageTimeline = memo(function MessageTimeline({
     const placed = resolveTimelineAnchor(anchorHash, container);
     if (timelineRowIsOnScreen(placed, container) && timelineRowIsSettled(placed, container)) {
       jumpScrollTargetRef.current = null;
+      jumpStartRef.current = null;
+      if (placed) readingAnchor.hold(placed.id);
       return "landed";
     }
     return "settling";
@@ -1162,7 +1213,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchOptions={launchOptions}
                   onLaunchChoice={chooseFirstLaunch}
                   initiallyExpanded={isThread && _index < (threadRootMessage ? 1 : 2)}
-                  foldsDiscussionHead={foldsDiscussionHead}
+                  foldsDiscussionHead={inPageMargin}
                   turnContinued={continuedTurnFailures.has(message.id)}
                   currentUserIdentityId={currentUserIdentityId}
                   channel={rowChannel}
@@ -1204,6 +1255,7 @@ export const MessageTimeline = memo(function MessageTimeline({
     <PageReferenceScopeProvider scope={pageReferenceScope}>
     <AnsweredQuestionnairesProvider timeline={timeline}>
     <MentionReadChannelScopeProvider scope={mentionReadScope}>
+    <CitingConversationContext.Provider value={citingConversation}>
     <div
       ref={setTimelineScrollRoot}
       /* A real gesture always beats an automatic scroll: reading back through
@@ -1230,8 +1282,9 @@ export const MessageTimeline = memo(function MessageTimeline({
         settling && "[&_[data-testid=virtuoso-item-list]]:invisible",
       )}
     >
-      <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id} token={token}
-        hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling} onJump={stableOnJumpToMessage} />
+      {!inPageMargin && <HumanAboveViewJump scrollRoot={timelineScrollRoot} rows={rows} channelId={channel?.id}
+        token={token} hasOlderMessages={hasOlderMessages} hidden={!channel || opening || settling}
+        onJump={stableOnJumpToMessage} />}
       {/* A refresh must not hide already-rendered rows.
           Skeleton only when there is nothing to show yet. */}
       {loading && !hasTimelineContent && (
@@ -1349,13 +1402,14 @@ export const MessageTimeline = memo(function MessageTimeline({
           }}
         />
       )}
-      {onDiscussPassage && (
-        <MessagePassageDiscuss rootRef={timelineScrollRef} onDiscuss={(messageId, quote) => {
+      {(onQuotePassage || onDiscussPassage) && (
+        <MessagePassageActions rootRef={timelineScrollRef} onAction={(action, messageId, quote) => {
           const message = timeline.find((item) => item.messageId === messageId);
-          if (message) onDiscussPassage(message, quote);
-        }} />
+          if (message) (action === "quote" ? onQuotePassage : onDiscussPassage)?.(message, quote);
+        }} quote={Boolean(onQuotePassage)} discuss={Boolean(onDiscussPassage)} />
       )}
     </div>
+    </CitingConversationContext.Provider>
     </MentionReadChannelScopeProvider>
     </AnsweredQuestionnairesProvider>
     </PageReferenceScopeProvider>
@@ -1363,12 +1417,15 @@ export const MessageTimeline = memo(function MessageTimeline({
 });
 
 /**
- * "Discuss" beside a passage selected in one message's text, as a page offers
- * it on a selected passage: a new conversation that opens holding the quote.
+ * What can be done with a passage selected in one message's text: quote it in
+ * this conversation's composer, or discuss it in a new conversation that opens
+ * holding the quote, as a page offers on a selected passage.
  */
-function MessagePassageDiscuss({ rootRef, onDiscuss }: {
+function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
   rootRef: React.RefObject<HTMLDivElement | null>;
-  onDiscuss: (messageId: string, quote: string) => void;
+  onAction: (action: "quote" | "discuss", messageId: string, quote: string) => void;
+  quote: boolean;
+  discuss: boolean;
 }) {
   const [passage, setPassage] = useState<MessagePassageSelection | null>(null);
   useEffect(() => {
@@ -1394,20 +1451,30 @@ function MessagePassageDiscuss({ rootRef, onDiscuss }: {
   if (!passage || typeof document === "undefined") return null;
   // Above the passage, unless that is off the top or a phone's own selection menu sits there.
   const below = passage.rect.top < 56 || window.matchMedia("(pointer: coarse)").matches;
+  const act = (action: "quote" | "discuss") => {
+    onAction(action, passage.messageId, passage.quote);
+    document.getSelection()?.removeAllRanges();
+  };
+  const actionClass = "flex items-center gap-1.5 whitespace-nowrap px-3 text-sm [&_svg]:size-4";
   return createPortal(
     <div className={cn("fixed z-50", !below && "-translate-y-full")}
-      style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 128)),
+      style={{ left: Math.max(8, Math.min(passage.rect.left, window.innerWidth - 300)),
         top: below ? passage.rect.bottom + 6 : passage.rect.top - 6 }}>
       <PaperPopover role="toolbar" aria-label="Selection" data-testid="message-selection-menu"
-        className="flex items-center p-1">
-        <button type="button" onMouseDown={(event) => event.preventDefault()}
-          onClick={() => {
-            onDiscuss(passage.messageId, passage.quote);
-            document.getSelection()?.removeAllRanges();
-          }}
-          className="flex h-8 items-center gap-1.5 rounded-md px-2 text-sm [&_svg]:size-4">
-          <MessageSquare /> Discuss
-        </button>
+        className="flex items-center">
+        {quote && (
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("quote")}
+            className={actionClass}>
+            <Quote /> Quote
+          </button>
+        )}
+        {quote && discuss && <span aria-hidden="true" className="app-paper-popover-divider" />}
+        {discuss && (
+          <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => act("discuss")}
+            className={actionClass}>
+            <MessageSquare /> Discuss in new channel
+          </button>
+        )}
       </PaperPopover>
     </div>,
     document.body,
@@ -1516,11 +1583,10 @@ const NO_STOPS: readonly SerializedAgentStop[] = [];
 /** Where the reader had read to, and what happened since (conversation-activity.md §3.5). */
 function SinceDivider({ digest }: { digest: SinceDigest }) {
   return (
-    <div className="app-since-divider flex items-center gap-3 px-5 py-2" role="separator"
+    /* Words only, no rules either side: the brass tone marks the place. */
+    <div className="app-since-divider flex px-5 pb-1 pt-3" role="separator"
       aria-label={sinceDigestLine(digest)}>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
-      <span className="max-w-[80%] truncate text-[11px] font-bold text-primary">{sinceDigestLine(digest)}</span>
-      <span className="h-px min-w-4 flex-1 bg-primary/40" aria-hidden="true" />
+      <span className="min-w-0 truncate text-[11px] font-semibold text-primary">{sinceDigestLine(digest)}</span>
     </div>
   );
 }
@@ -1665,12 +1731,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   const goal = (item: TimelineItem) =>
     goalStatusBadgeLabel(item.senderGoal, "historical") ? <GoalStatusBadge goal={item.senderGoal} /> : null;
   const branch = (item: TimelineItem) => item.senderGitBranch ? <BranchBadge branch={item.senderGitBranch} /> : null;
-  const stale = (item: TimelineItem) => item.senderInstanceStale ? (
-    <span className={tagClass("app-sender-instance-stale-badge")}
-      title="This message came from an agent instance that is no longer live in this channel.">
-      instance offline
-    </span>
-  ) : null;
   const before = previous.senderStatusChips ?? [];
   const after = message.senderStatusChips ?? [];
   const chipIds = [...new Set([...after, ...before].map((chip) => chip.id.toLowerCase()))]
@@ -1681,7 +1741,6 @@ function RetaggedHeaderTags({ message, previous, keys }: {
   };
   return (
     <>
-      {keys.includes("stale") && <RetagPair from={stale(previous)} to={stale(message)} />}
       {keys.includes("goal") && <RetagPair from={goal(previous)} to={goal(message)} />}
       {keys.includes("branch") && <RetagPair from={branch(previous)} to={branch(message)} />}
       {chipIds.map((id) => <RetagPair key={id} from={chipOf(before, id)} to={chipOf(after, id)} />)}
@@ -1825,14 +1884,20 @@ export const MessageRow = memo(function MessageRow({
   const avatarLongPressTriggeredRef = useRef(false);
   const rebornHoverTimerRef = useRef<number | null>(null);
   const rebornHoveringRef = useRef(false);
-  const canRebornSender = canRebornMessageSender(message);
+  const senderStatus = useMessageSenderStatus({ channelId: message.channelId,
+    instanceId: message.senderKind === "agent" ? message.senderInstanceId : undefined,
+    senderId: message.linkOrigin?.kind === "reply" ? undefined : message.senderId, name: message.author });
+  const canRebornSender = canRebornMessageSender(message, senderStatus);
   const humanSenderUserId = message.senderKind === "user" && message.senderId
     ? message.senderId.replace(/^user:/, "")
     : null;
   // A page discussion's first message shows only what was written where its thread's head shows the
   // passage; anywhere else the passage and its link back open the conversation.
+  // A program's request of an Agent carries how to answer after what it asks: that part is for the Agent alone.
+  const answerFrom = message.senderKind === "system" ? message.metadata?.nornAnswerFrom : undefined;
   const displayBody = normalizeMessageBodyForDisplay(
-    foldsDiscussionHead ? foldedDiscussionBody(message.body) : message.body, message.senderKind);
+    foldsDiscussionHead ? foldedDiscussionBody(message.body)
+      : typeof answerFrom === "number" && answerFrom > 0 ? message.body.slice(0, answerFrom) : message.body, message.senderKind);
   const nonOperationalRanges = useMemo(() => /[@＠]/u.test(displayBody) ? nonOperationalMentionRanges(displayBody) : [], [displayBody]);
   const markdownComponents = useMemo(
     () => createMessageMarkdownComponents(onOpenInternalAppLink),
@@ -1866,17 +1931,33 @@ export const MessageRow = memo(function MessageRow({
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
   }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
-  const connectorReceipt = useMemo(() => message.senderKind === "app" && message.provenance === "system_fact"
-    ? parseConnectorReceipt(message.body) : undefined, [message.senderKind, message.provenance, message.body]);
+  // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
+  const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"
+    && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string";
+  // A Stripe message from before events carried a card draws as the same card, read out of its text.
+  const eventCard = useMemo(() => {
+    if (message.senderKind !== "app") return undefined;
+    const legacy = message.senderId === "app:stripe" ? legacyStripeEventFacts(message.body) : undefined;
+    return eventCardOf(message.metadata) ?? (legacy ? stripeEventWords(legacy).card : undefined);
+  }, [message.senderKind, message.senderId, message.metadata, message.body]);
+  const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
+    : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
+    : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
+  [message.senderKind, message.provenance, message.body, privateEventOwner]);
   const questionnaire = questionnaireMetadata(message.metadata);
-  const onboardingStage = onboardingStageOf(message.metadata);
-  const signedOutNotice = harnessSignedOutNoticeOf(message.metadata);
-  const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(message.metadata);
+  /* Cards the Hub posts are drawn only from a message the Hub wrote: its provenance is a key
+     callers cannot set, while the card fields themselves are not. Anyone else's lookalike reads as text. */
+  const hubMetadata = message.provenance === "system_fact" ? message.metadata : undefined;
+  const onboardingStage = onboardingStageOf(hubMetadata);
+  const signedOutNotice = harnessSignedOutNoticeOf(hubMetadata);
+  const offlineNotice = signedOutNotice ? null : machineOfflineNoticeOf(hubMetadata);
   const turnFailure = signedOutNotice ? null : turnFailureEvidenceOf(message.metadata);
   const quotaRetryId = quotaRetryOfferId(message.metadata);
-  const crossSpaceRead = crossSpaceReadMetadata(message.metadata);
-  const secretRequest = crossSpaceRead ? null : secretRequestMetadata(message.metadata);
-  const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(message.metadata);
+  const crossSpaceRead = crossSpaceReadMetadata(hubMetadata);
+  const nornRequest = nornRequestMetadata(hubMetadata);
+  const secretRequest = crossSpaceRead ? null : secretRequestMetadata(hubMetadata);
+  const secretAccessRequest = crossSpaceRead ? null : secretAccessRequestMetadata(hubMetadata);
+  const settingsRequest = settingsCardOf(hubMetadata);
   const routingDecision = parsePresentedRoutingDecision(message.metadata?.routingDecision);
   const collapsible = !routingDecision && isLongMessageBody(displayBody);
   /* A thread is its own Channel, so it can be archived while its parent stays
@@ -2371,6 +2452,274 @@ export const MessageRow = memo(function MessageRow({
     return observeToolbarLayout(avatar, toolbar, layoutRoot, positionRebornToolbar, false);
   }, [canRebornSender, rebornControlVisible, reborningSender, positionRebornToolbar]);
 
+  // An attachment of the message as it is drawn, under its words or where its words put it (inline-pictures.tsx).
+  const renderAttachment = (attachment: ChannelAttachment) => {
+    const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
+    const baseAttachment = mediaIdentity
+      ? mediaStore.resolved.get(mediaIdentity) ?? attachment
+      : attachment;
+    // Authority product history omits presentation kind. Normalize so
+    // render and load never disagree.
+    const displayAttachment: ChannelAttachment = {
+      ...baseAttachment,
+      kind: presentationAttachmentKind(baseAttachment),
+    };
+    const source = attachmentSource(displayAttachment);
+    // Without a verified media identity there is no loader path for
+    // Relay V2 binary bodies — fail closed instead of spinning forever.
+    const mediaLoadFailed = mediaIdentity
+      ? mediaStore.failures.has(mediaIdentity)
+      : !source;
+    const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
+    const attachmentCopied = copiedAttachmentId === attachment.id;
+    const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
+    const upload = message.uploads?.find((item) => item.id === attachment.id);
+    return (
+      <div
+        key={attachment.id}
+        className={cn(
+          "group/attachment relative min-w-0",
+          (displayAttachment.kind === "video" || displayAttachment.kind === "markdown" || displayAttachment.kind === "file") &&
+            "col-span-2 sm:col-span-3"
+        )}
+      >
+        {playableMediaKind(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
+          <div className="app-paper-tile p-3">
+            <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
+            {source ? (
+              <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaDownloadProgress label="Downloading audio" progress={mediaProgress} className="min-h-16 text-muted-foreground" />
+            )}
+            <button type="button" className="mt-2 text-xs text-primary underline" onClick={() => void downloadMessageAttachment(displayAttachment)}>
+              Download {displayAttachment.name}
+            </button>
+          </div>
+        ) : displayAttachment.kind === "video" ? (
+          <div className="message-video-attachment relative aspect-video max-h-[28rem] w-full overflow-hidden border border-border bg-black">
+            {source ? (
+              <MediaPlayer
+                kind="video"
+                name={displayAttachment.name}
+                src={source}
+                poster={displayAttachment.thumbnailUrl}
+                className="absolute inset-0 h-full w-full bg-black object-contain"
+              />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
+            )}
+            {upload && <SentUploadProgress upload={upload} media />}
+            <button
+              type="button"
+              title={`Open ${displayAttachment.name}`}
+              aria-label={`Open ${displayAttachment.name}`}
+              onClick={() => void openMessageAttachment(displayAttachment)}
+              className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
+            >
+              <Maximize2 className="size-4.5" />
+            </button>
+            {source && (
+              <button
+                type="button"
+                title={`Download ${displayAttachment.name}`}
+                aria-label={`Download ${displayAttachment.name}`}
+                onClick={() => void downloadMessageAttachment(displayAttachment)}
+                className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
+              >
+                <Download className="size-4.5" />
+              </button>
+            )}
+          </div>
+        ) : displayAttachment.kind === "markdown" || displayAttachment.kind === "file" ? (
+          <button
+            type="button"
+            title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
+            aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
+            onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
+            className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
+          >
+            <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
+              {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-bold text-foreground">{displayAttachment.name}</span>
+              <span className="block text-xs text-muted-foreground">{displayAttachment.kind === "markdown" ? "Markdown" : displayAttachment.mimeType || "File"} - {formatFileSize(displayAttachment.size)}</span>
+            </span>
+            {upload ? <SentUploadProgress upload={upload} media={false} />
+              : displayAttachment.kind === "markdown"
+                ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
+                : <Download className="size-4 shrink-0 text-muted-foreground" />}
+          </button>
+        ) : (
+          <button
+            type="button"
+            title={`Open ${displayAttachment.name}`}
+            aria-label={`Open ${displayAttachment.name}`}
+            onClick={() => void openMessageAttachment(displayAttachment)}
+            data-lightbox-origin={displayAttachment.id}
+            className="message-image-attachment relative block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
+          >
+            {upload && <SentUploadProgress upload={upload} media />}
+            {source ? (
+              <LoadingImage
+                src={source}
+                alt={displayAttachment.name}
+                className="block aspect-square w-full object-cover"
+              />
+            ) : mediaLoadFailed ? (
+              <AttachmentMediaUnavailable />
+            ) : (
+              <MediaSkeleton label="Loading image" className="app-media-skeleton-image" />
+            )}
+          </button>
+        )}
+        {source && !upload && displayAttachment.kind === "image" && (
+          <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover/attachment:opacity-100">
+            {displayAttachment.kind === "image" && (
+              <button
+                type="button"
+                title={
+                  attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
+                }
+                aria-label={
+                  attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void copyAttachment(displayAttachment);
+                }}
+                className={cn(
+                  "flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100",
+                  attachmentCopyFailed && "bg-destructive/85 hover:bg-destructive"
+                )}
+              >
+                {attachmentCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
+              </button>
+            )}
+            <button
+              type="button"
+              title={`Download ${displayAttachment.name}`}
+              aria-label={`Download ${displayAttachment.name}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                void downloadMessageAttachment(displayAttachment);
+              }}
+              className="flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100"
+            >
+              <Download className="size-4" />
+            </button>
+          </div>
+        )}
+      </div>
+    );
+  };
+  const cardBody = onboardingStage ? (
+    <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : crossSpaceRead ? (
+    <CrossSpaceReadCard
+      request={crossSpaceRead}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : nornRequest && channel ? (
+    <NornRequestCard request={nornRequest} channelId={channel.id} token={token}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      {...(message.commandNotices?.[0]?.body ? { outcome: message.commandNotices[0].body } : {})} />
+  ) : settingsRequest && channel && token && message.messageId && message.sequence ? (
+    <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")} agentName={settingsRequest.agentName}
+      {...(settingsRequest.reason ? { reason: settingsRequest.reason } : {})} />
+  ) : secretRequest ? (
+    <SecretRequestCardView
+      request={secretRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : secretAccessRequest ? (
+    <SecretAccessRequestCardView
+      request={secretAccessRequest}
+      messageId={message.messageId}
+      token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+    />
+  ) : questionnaire ? (
+    <QuestionnaireMessage
+      questionnaire={questionnaire}
+      message={message}
+      onAnswer={onQuestionnaireAnswer}
+    />
+  ) : routingDecision ? (
+    <RoutingDecisionBoard decision={routingDecision} />
+  ) : quotaRetryId && channel ? (
+    <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
+      token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : signedOutNotice ? (
+    <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
+      spaceId={channel?.spaceId ?? null} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
+        signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
+      notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
+  ) : offlineNotice ? (
+    <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
+      onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
+        ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
+  ) : turnFailure ? (
+    <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
+      spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : eventCard ? (
+    <EventCard card={eventCard} spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : connectorReceipt ? (
+    <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+      <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
+        {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
+          ? { privateResult: { channelId: channel.id, messageId: message.messageId,
+            ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
+      {channel && token && !contextOnly && message.messageId && message.sequence &&
+        connectorReceiptFixesOf(message.metadata).length ? (
+        <SettingsCard channelId={channel.id} messageId={message.messageId} sequence={message.sequence} token={token}
+          userId={currentUserIdentityId.replace(/^user:/, "")} />
+      ) : null}
+    </div>
+  ) : isMachineRunFailureNotice(message) ? (
+    <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
+  ) : null;
+  const hasCardBody = cardBody !== null || Boolean(message.isEvent);
+  // A message that carries a program draws the program's flow over its text. An edit or a quote of it is no program.
+  const programSpaceId = !contextOnly && !recalled && carriesNornBlock(displayBody) ? channel?.spaceId : undefined;
+  const programFlow = useMemo(() => programSpaceId && token && message.messageId ? (
+    <MessageProgramFlow spaceId={programSpaceId} programId={message.messageId} token={token}
+      userId={currentUserIdentityId.replace(/^user:/, "")}
+      render={(text) => <RichMessageContent body={text} components={markdownComponents} />} />
+  ) : null, [programSpaceId, token, message.messageId, currentUserIdentityId, markdownComponents]);
+  const richMessage = useMemo(() => prepareRichMessageContent({ body: hasCardBody ? "" : displayBody,
+    collapsed: collapsible && !expanded, components: markdownComponents, connector: connectorInvocation }),
+  [hasCardBody, displayBody, collapsible, expanded, markdownComponents, connectorInvocation]);
+  const presentedBody = cardBody ?? (
+    <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
+      {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
+      <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
+        <MessagePicturesContext.Provider value={drawPicture}>
+          <MessageProgramProvider value={programFlow}>{richMessage.content}</MessageProgramProvider>
+        </MessagePicturesContext.Provider>
+      </div>
+    </MentionReadMessageScopeProvider>
+  );
+  const underWords = (message.attachments ?? []).filter((_attachment, index) =>
+    !richMessage.picturedPlaces.has(index + 1));
+  function drawPicture(place: number) {
+    const attachment = message.attachments?.[place - 1];
+    return attachment ? renderAttachment(attachment) : null;
+  }
+
   if (message.isEvent) {
     const Icon = message.eventType ? EVENT_ICONS[message.eventType] || Hash : Hash;
 
@@ -2472,7 +2821,7 @@ export const MessageRow = memo(function MessageRow({
           channelId={message.channelId}
           instanceId={message.senderKind === "agent" ? message.senderInstanceId : undefined}
           senderId={message.linkOrigin?.kind === "reply" ? undefined : message.senderId}
-          status={message.senderStatus}
+          status={senderStatus}
           size="md"
           showKindBadge={false}
           glass={false}
@@ -2487,7 +2836,7 @@ export const MessageRow = memo(function MessageRow({
                   instanceScoped: Boolean(message.senderInstanceId),
                   channelId: channel?.id,
                   name: message.author,
-                  status: message.senderStatus,
+                  status: senderStatus,
                   goal: message.senderGoal,
                   face: message.face,
                 })
@@ -2569,8 +2918,9 @@ export const MessageRow = memo(function MessageRow({
               App
             </span>
           )}
-          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice. */}
-          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && (
+          {/* xMatrix's own onboarding speaks in its own voice; the tag would only say who wrote it twice.
+              A program's request is an ask of a person, which its card says; "system fact" would call it a notice. */}
+          {shouldShowProvenanceBadge(message.provenance) && !onboardingStage && !connectorReceipt && !nornRequest && (
             <span
               className={provenanceBadgeClass(message.provenance, message.body)}
               title={provenanceTitle(message.provenance, message.body)}
@@ -2578,10 +2928,7 @@ export const MessageRow = memo(function MessageRow({
               {provenanceLabel(message.provenance, message.body)}
             </span>
           )}
-          {message.retagged ? (
-            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
-          ) : (<>
-          {message.senderInstanceStale && (
+          {message.senderKind === "agent" && !message.reservedSystemAgent && senderStatus === "offline" && (
             <span
               className={tagClass("app-sender-instance-stale-badge")}
               title="This message came from an agent instance that is no longer live in this channel."
@@ -2589,6 +2936,9 @@ export const MessageRow = memo(function MessageRow({
               instance offline
             </span>
           )}
+          {message.retagged ? (
+            <RetaggedHeaderTags message={message} previous={message.retagged.previous} keys={message.retagged.keys} />
+          ) : (<>
           {message.senderKind === "agent" && (
             <GoalStatusBadge goal={message.senderGoal} />
           )}
@@ -2655,73 +3005,7 @@ export const MessageRow = memo(function MessageRow({
             {message.replyTo && (
               <ReplyPreview reply={message.replyTo} onJump={onJumpToMessage} />
             )}
-            {onboardingStage ? (
-              <OnboardingMessage stage={onboardingStage} spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : crossSpaceRead ? (
-              <CrossSpaceReadCard
-                request={crossSpaceRead}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : secretRequest ? (
-              <SecretRequestCardView
-                request={secretRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : secretAccessRequest ? (
-              <SecretAccessRequestCardView
-                request={secretAccessRequest}
-                messageId={message.messageId}
-                token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-              />
-            ) : questionnaire ? (
-              <QuestionnaireMessage
-                questionnaire={questionnaire}
-                message={message}
-                onAnswer={onQuestionnaireAnswer}
-              />
-            ) : routingDecision ? (
-              <RoutingDecisionBoard decision={routingDecision} />
-            ) : quotaRetryId && channel ? (
-              <QuotaRetryNotice id={quotaRetryId} channelId={channel.id} body={displayBody} spaceId={channel.spaceId??null}
-                token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : signedOutNotice ? (
-              <HarnessSignedOutNotice signedOut={signedOutNotice.signedOut} requestedBy={signedOutNotice.requestedBy}
-                spaceId={channel?.spaceId ?? null} token={token}
-                userId={currentUserIdentityId.replace(/^user:/, "")}
-                onSignedIn={signedOutNotice.summon && onResendRefusedSummon && (() => onResendRefusedSummon(
-                  signedOutNotice.summon!.sourceMessageId, signedOutNotice.summon!.sourceMention))}
-                notice={<RichMessageContent body={displayBody} components={markdownComponents} />} />
-            ) : offlineNotice ? (
-              <MachineOfflineNotice offline={offlineNotice.offline} sourceMention={offlineNotice.summon?.sourceMention}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")}
-                onResend={offlineNotice.summon && onResendRefusedSummon && ownsRefusedSummon?.(offlineNotice.summon.sourceMessageId)
-                  ? () => onResendRefusedSummon(offlineNotice.summon!.sourceMessageId, offlineNotice.summon!.sourceMention) : undefined} />
-            ) : turnFailure ? (
-              <TurnFailureNotice evidence={turnFailure} agent={message.author} body={displayBody} continued={turnContinued}
-                spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
-            ) : connectorReceipt ? (
-              <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}
-                  {...(channel && message.messageId && typeof message.metadata?.xmatrixPrivateConnectorResultOwner === "string"
-                    ? { privateResult: { channelId: channel.id, messageId: message.messageId,
-                      ownerUserId: message.metadata.xmatrixPrivateConnectorResultOwner, token } } : {})} />
-              </div>
-            ) : isMachineRunFailureNotice(message) ? (
-              <NamedMachineRunFailureNotice body={displayBody} metadata={message.metadata} spaceId={channel?.spaceId} token={token} />
-            ) : (
-              <MentionReadMessageScopeProvider scope={mentionReadMessageScope}>
-                {/* Its text is where a passage can be selected to discuss (selection-discussion.ts). */}
-                <div {...(message.messageId && !recalled ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
-                  <RichMessageContent body={displayBody} collapsed={collapsible && !expanded} components={markdownComponents}
-                    connector={connectorInvocation} />
-                </div>
-              </MentionReadMessageScopeProvider>
-            )}
+            {presentedBody}
             {!recalled && collapsible && !expanded && (
               // Disclosure is a different layer from the message actions: the
               // body fades out under `.rich-message-collapsed::after` and its
@@ -2758,172 +3042,9 @@ export const MessageRow = memo(function MessageRow({
             <span className="pointer-events-none">Show less</span>
           </button>
         )}
-        {!recalled && message.attachments && message.attachments.length > 0 && (
+        {!recalled && underWords.length > 0 && (
           <div ref={attachmentGridRef} className="mt-2 grid w-full max-w-[min(42rem,100%)] min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
-            {message.attachments.map((attachment) => {
-              const mediaIdentity = relayV2AttachmentMediaIdentity(attachment);
-              const baseAttachment = mediaIdentity
-                ? mediaStore.resolved.get(mediaIdentity) ?? attachment
-                : attachment;
-              // Authority product history omits presentation kind. Normalize so
-              // render and load never disagree.
-              const displayAttachment: ChannelAttachment = {
-                ...baseAttachment,
-                kind: presentationAttachmentKind(baseAttachment),
-              };
-              const source = attachmentSource(displayAttachment);
-              // Without a verified media identity there is no loader path for
-              // Relay V2 binary bodies — fail closed instead of spinning forever.
-              const mediaLoadFailed = mediaIdentity
-                ? mediaStore.failures.has(mediaIdentity)
-                : !source;
-              const mediaProgress = mediaIdentity ? mediaStore.progress.get(mediaIdentity) : undefined;
-              const attachmentCopied = copiedAttachmentId === attachment.id;
-              const attachmentCopyFailed = failedAttachmentCopyId === attachment.id;
-              const upload = message.uploads?.find((item) => item.id === attachment.id);
-              return (
-                <div
-                  key={attachment.id}
-                  className={cn(
-                    "group/attachment relative min-w-0",
-                    (displayAttachment.kind === "video" || displayAttachment.kind === "markdown" || displayAttachment.kind === "file") &&
-                      "col-span-2 sm:col-span-3"
-                  )}
-                >
-                  {playableMediaKind(displayAttachment.mimeType, displayAttachment.name) === "audio" ? (
-                    <div className="app-paper-tile p-3">
-                      <div className="mb-2 truncate text-sm font-medium">{displayAttachment.name}</div>
-                      {source ? (
-                        <MediaPlayer kind="audio" src={source} name={displayAttachment.name} />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaDownloadProgress label="Downloading audio" progress={mediaProgress} className="min-h-16 text-muted-foreground" />
-                      )}
-                      <button type="button" className="mt-2 text-xs text-primary underline" onClick={() => void downloadMessageAttachment(displayAttachment)}>
-                        Download {displayAttachment.name}
-                      </button>
-                    </div>
-                  ) : displayAttachment.kind === "video" ? (
-                    <div className="message-video-attachment relative aspect-video max-h-[28rem] w-full overflow-hidden border border-border bg-black">
-                      {source ? (
-                        <MediaPlayer
-                          kind="video"
-                          name={displayAttachment.name}
-                          src={source}
-                          poster={displayAttachment.thumbnailUrl}
-                          className="absolute inset-0 h-full w-full bg-black object-contain"
-                        />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaDownloadProgress label="Downloading video" progress={mediaProgress} />
-                      )}
-                      {upload && <SentUploadProgress upload={upload} media />}
-                      <button
-                        type="button"
-                        title={`Open ${displayAttachment.name}`}
-                        aria-label={`Open ${displayAttachment.name}`}
-                        onClick={() => void openMessageAttachment(displayAttachment)}
-                        className="absolute left-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-                      >
-                        <Maximize2 className="size-4.5" />
-                      </button>
-                      {source && (
-                        <button
-                          type="button"
-                          title={`Download ${displayAttachment.name}`}
-                          aria-label={`Download ${displayAttachment.name}`}
-                          onClick={() => void downloadMessageAttachment(displayAttachment)}
-                          className="absolute right-2 top-2 z-10 flex size-9 items-center justify-center rounded-full bg-black/65 text-white shadow-lg transition hover:bg-black/80"
-                        >
-                          <Download className="size-4.5" />
-                        </button>
-                      )}
-                    </div>
-                  ) : displayAttachment.kind === "markdown" || displayAttachment.kind === "file" ? (
-                    <button
-                      type="button"
-                      title={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
-                      aria-label={`${displayAttachment.kind === "markdown" ? "Open" : "Download"} ${displayAttachment.name}`}
-                      onClick={() => void (displayAttachment.kind === "markdown" ? openMessageAttachment : downloadMessageAttachment)(displayAttachment)}
-                      className="app-paper-tile flex w-full min-w-0 items-center gap-3 px-3 py-3 text-left transition-colors"
-                    >
-                      <span className="flex size-10 shrink-0 items-center justify-center text-muted-foreground">
-                        {displayAttachment.kind === "markdown" ? <FileText className="size-5" /> : <Paperclip className="size-5" />}
-                      </span>
-                      <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm font-bold text-foreground">{displayAttachment.name}</span>
-                        <span className="block text-xs text-muted-foreground">{displayAttachment.kind === "markdown" ? "Markdown" : displayAttachment.mimeType || "File"} - {formatFileSize(displayAttachment.size)}</span>
-                      </span>
-                      {upload ? <SentUploadProgress upload={upload} media={false} />
-                        : displayAttachment.kind === "markdown"
-                          ? <Maximize2 className="size-4 shrink-0 text-muted-foreground" />
-                          : <Download className="size-4 shrink-0 text-muted-foreground" />}
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      title={`Open ${displayAttachment.name}`}
-                      aria-label={`Open ${displayAttachment.name}`}
-                      onClick={() => void openMessageAttachment(displayAttachment)}
-                      data-lightbox-origin={displayAttachment.id}
-                      className="message-image-attachment relative block max-w-[18rem] overflow-hidden rounded-[0.75rem] border border-border bg-transparent text-left"
-                    >
-                      {upload && <SentUploadProgress upload={upload} media />}
-                      {source ? (
-                        <LoadingImage
-                          src={source}
-                          alt={displayAttachment.name}
-                          className="block aspect-square w-full object-cover"
-                        />
-                      ) : mediaLoadFailed ? (
-                        <AttachmentMediaUnavailable />
-                      ) : (
-                        <MediaSkeleton label="Loading image" className="app-media-skeleton-image" />
-                      )}
-                    </button>
-                  )}
-                  {source && !upload && displayAttachment.kind === "image" && (
-                    <div className="absolute right-1.5 top-1.5 z-10 flex gap-1 opacity-100 transition md:opacity-0 md:group-hover/attachment:opacity-100">
-                      {displayAttachment.kind === "image" && (
-                        <button
-                          type="button"
-                          title={
-                            attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
-                          }
-                          aria-label={
-                            attachmentCopyLabel(attachment.name, attachmentCopyFailed, attachmentCopied)
-                          }
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            void copyAttachment(displayAttachment);
-                          }}
-                          className={cn(
-                            "flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100",
-                            attachmentCopyFailed && "bg-destructive/85 hover:bg-destructive"
-                          )}
-                        >
-                          {attachmentCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        title={`Download ${displayAttachment.name}`}
-                        aria-label={`Download ${displayAttachment.name}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void downloadMessageAttachment(displayAttachment);
-                        }}
-                        className="flex size-8 items-center justify-center rounded-full bg-black/60 text-white shadow-lg transition hover:bg-black/75 focus-visible:opacity-100"
-                      >
-                        <Download className="size-4" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+            {underWords.map(renderAttachment)}
           </div>
         )}
         {/* After the words and the pictures. A choice between them reads as a second message. */}
@@ -3173,15 +3294,14 @@ export function ReplyPreview({
         event.preventDefault();
         onJump(reply.messageId, reply.sequence);
       }}
-      className="mb-1.5 mt-1 flex max-w-[min(36rem,100%)] items-start gap-2 border-l-2 border-primary/60 bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted"
+      /* A reply quotes the whole message, so it is the same yellow slip as a quoted passage: the words, then
+         who wrote them in quiet ink (Daniel 2026-11-06: 引用整条消息和引用某段内容可以用同一种方式表达). */
+      className="message-citation message-reply-citation"
     >
-      <Reply className="mt-0.5 size-3.5 shrink-0" />
-      <span className="min-w-0">
-        <span className="block truncate font-bold text-foreground">{reply.author}</span>
-        <span className="line-clamp-2 [overflow-wrap:anywhere]">
-          {foldedDiscussionBody(reply.body) || "Attachment"}
-        </span>
+      <span className="message-citation-text">
+        <InlineRowPreview text={foldedDiscussionBody(reply.body) || "Attachment"} />
       </span>
+      <span className="message-citation-source">{reply.author}</span>
     </a>
   );
 }
@@ -3363,8 +3483,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onRebornAgentInstance,
   onHandoffAgentInstance,
   onOpenAgentTrace,
+  inPageMargin = false,
 }: {
   approvals?: ReactNode;
+  /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
+   * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
+  inPageMargin?: boolean;
   channel: ChannelSnapshot | null;
   token: string | null;
   timeline: TimelineItem[];
@@ -3403,11 +3527,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   // supplies an operation; readLatest always rebuilds from the current store.
   useLayoutEffect(() => { presentedViews.current = workItems; }, [workItems]);
   const readLatest = useCallback((key: string) => {
-    const channel = realtimeChannels ? realtimeChannels.get(channelId) : catalogChannel;
+    // Only the live Channel holds Instances to act on.
+    const channel = realtimeChannels?.get(channelId);
     if (!channel) return undefined;
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
-  }, [realtimeChannels, realtimeEvents, channelId, catalogChannel, events, launches]);
+  }, [realtimeChannels, realtimeEvents, channelId, events, launches]);
   const openTrace = useStableCallback((key: string) => {
     const item = readLatest(key);
     if (item) onOpenAgentTrace(item.target);
@@ -3471,7 +3596,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
      the newest message, whose hover controls sit at its
      bottom edge. Publish the measured distance and let the padding read it. */
   useLayoutEffect(() => {
-    if (workItems.length === 0 && !approvals) {
+    // In flow, the dock covers nothing, so the timeline keeps no room for it.
+    if (inPageMargin || (workItems.length === 0 && !approvals)) {
       surfaceRef.current?.style.removeProperty("--app-agent-work-dock-clearance");
       return;
     }
@@ -3515,7 +3641,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
       window.removeEventListener("resize", publishClearance);
       surfaceElement.style.removeProperty("--app-agent-work-dock-clearance");
     };
-  }, [workItems.length, approvals]);
+  }, [workItems.length, approvals, inPageMargin]);
 
   if (workItems.length === 0 && !approvals) return null;
 

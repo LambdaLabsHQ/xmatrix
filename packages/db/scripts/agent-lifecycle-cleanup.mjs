@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Client } from 'pg';
-import { digestCanonicalCloneCborV1, parseAgentRoutingRequirements, parseSpaceAgentRegistrationKey, parseAutoLaunchMentions } from '@xmatrix/protocol';
+import { digestCanonicalCloneCborV1, parseAgentRoutingRequirements, parseSpaceAgentRegistrationKey } from '@xmatrix/protocol';
 import { runIfInvoked, withClient } from './cli.mjs';
 
 // Fixed product records only. Authored messages, page revisions, audit evidence,
@@ -11,7 +11,6 @@ export const lifecycleCleanupTargets = [
   { table: 'data.agent_launches', keys: ['launch_id'], column: 'spawn_payload_json' },
   { table: 'data.registration_launch_intents', keys: ['actor_user_id', 'command_id'], column: 'launch_request_json', intent: true },
   { table: 'data.machine_daemon_commands', keys: ['command_id'], column: 'payload_json', command: true },
-  { table: 'data.automations', keys: ['automation_id'], column: 'payload_json', expressions: true },
 ];
 const retiredKeys = new Set(['oneshot', 'oneShot', 'exitAfterInitialMessage', 'exitAfterInitialTask']);
 const record = value => value && typeof value === 'object' && !Array.isArray(value);
@@ -46,51 +45,12 @@ async function preparationReferences(client) {
   });
 }
 
-/** Use the product scanner's Markdown and mention boundaries. Only a retired
- * condition in an executable launch's parameter block is removed, never prose,
- * quoted paths, code examples, or a later message paragraph. */
-export function cleanLifecycleExpression(body) {
-  if (typeof body !== 'string') return body;
-  let result = body;
-  for (let pass = 0; pass < 128; pass++) {
-    const spans = parseAutoLaunchMentions(result).flatMap(mention => {
-      const tail = result.slice(mention.end);
-      const match = /^[\t\p{Zs}]+oneshot:(?:on|off|"on"|"off")(?=\s|$)/u.exec(tail);
-      if (mention.error && match) {
-        let suffix = tail;
-        let lifetimes = 0;
-        const token = /^[\t\p{Zs}]+(repo|pwd|machine|model|effort|harness|launch|oneshot):("(?:[^"]|"")*"|[^\s"]+)(?=\s|$)/u;
-        for (let part = token.exec(suffix); part; part = token.exec(suffix)) {
-          if (part[1] === 'oneshot' && ++lifetimes > 1) throw new Error('Duplicate retired lifecycle conditions require an owner edit');
-          suffix = suffix.slice(part[0].length);
-        }
-        return [{ start: mention.end, end: mention.end + match[0].length }];
-      }
-      return [];
-    });
-    if (!spans.length) {
-      // Invalid values and ambiguous retired expressions require an explicit
-      // edit by their owner; never erase an invalid constraint and launch.
-      if (parseAutoLaunchMentions(result).some(mention => mention.error &&
-          /^[\t\p{Zs}]+oneshot:/u.test(result.slice(mention.end)))) {
-        throw new Error('Invalid retired lifecycle condition; repair the Automation before cleanup');
-      }
-      if (result !== body && parseAutoLaunchMentions(result).some(mention => mention.error)) {
-        throw new Error('Invalid launch conditions require an owner edit before cleanup');
-      }
-      return result;
-    }
-    for (const span of spans.sort((a, b) => b.start - a.start)) result = result.slice(0, span.start) + result.slice(span.end);
-  }
-  throw new Error('Lifecycle expression exceeds the bounded rewrite limit');
-}
-
 function legacyEvidence(value) {
   return record(value) && (record(value.selections) && Object.hasOwn(value.selections, 'oneshot') ||
     Array.isArray(value.choices) && value.choices.some(choice => choice?.key === 'oneshot'));
 }
 
-export function cleanLifecycleData(value, expressions = false, depth = 0) {
+export function cleanLifecycleData(value, depth = 0) {
   if (depth > 32) throw new Error('Lifecycle metadata exceeds the bounded nesting limit');
   if (!record(value)) return structuredClone(value);
   // These are product-owned records, not an arbitrary JSON tree. In particular,
@@ -103,17 +63,9 @@ export function cleanLifecycleData(value, expressions = false, depth = 0) {
     if (legacyEvidence(next[key])) delete next[key];
   }
   for (const key of ['runMetadata', 'routingDecision', 'repoPool', 'repoPoolBinding', 'tags']) {
-    if (record(next[key])) next[key] = cleanLifecycleData(next[key], false, depth + 1);
+    if (record(next[key])) next[key] = cleanLifecycleData(next[key], depth + 1);
   }
   if (next.routedAs === 'agent_mention_one_shot') next.routedAs = 'agent_mention';
-  if (expressions) {
-    for (const path of [['message', 'body'], ['expression', 'text'], ['input', 'datum', 'text']]) {
-      let parent = next;
-      for (const key of path.slice(0, -1)) parent = record(parent) ? parent[key] : undefined;
-      const key = path.at(-1);
-      if (record(parent) && typeof parent[key] === 'string') parent[key] = cleanLifecycleExpression(parent[key]);
-    }
-  }
   return next;
 }
 
@@ -165,7 +117,7 @@ export async function cleanStoredLifecycles(client, { apply = false, batchSize =
       if (scanned > maximumRows) throw new Error('Lifecycle cleanup row budget exhausted; increase the reviewed bound and rerun');
       const updates = [];
       for (const row of rows.rows) {
-        const value = cleanLifecycleData(row.value, target.expressions);
+        const value = cleanLifecycleData(row.value);
         if (JSON.stringify(value) === JSON.stringify(row.value)) continue;
         let requestDigest;
         if (target.intent) {
@@ -190,7 +142,6 @@ export async function cleanStoredLifecycles(client, { apply = false, batchSize =
             const old = keys.length + 2;
             const extra = target.intent ? [requestDigest, row.request_digest] : [];
             const updated = await client.query(`UPDATE ${table} SET ${column}=$1::jsonb
-              ${target.expressions ? ', version=version+1, updated_at=clock_timestamp()' : ''}
               ${target.intent ? `, request_digest=$${old + 1}` : ''}
               WHERE ${keys.map((key, i) => `${key}=$${i + 2}`).join(' AND ')} AND ${column}=$${old}::jsonb${target.intent ? ` AND request_digest=$${old + 2} AND state<>'preparing'` : ''}
                 ${target.command ? "AND status NOT IN ('pending','leased')" : ''}`,

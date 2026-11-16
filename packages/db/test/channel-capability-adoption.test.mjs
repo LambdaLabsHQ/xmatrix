@@ -17,7 +17,8 @@ const migratedAuthorities = [
   "runtime-control.ts",
   "space-secret-control.ts",
   "app-control.ts",
-  "automation-control.ts",
+  // Commerce claims/delivery and scoped status all use current app_new_work.
+  "apple-commerce-control.ts",
   "trace-access-control.ts",
   "cross-space-read-control.ts",
   "content-control.ts",
@@ -34,6 +35,9 @@ const migratedAuthorities = [
   // The visible live-agent list names Channels through
   // channelCapabilityPredicate("catalog_read"), then loads those Instances.
   "channel-agent-presence.ts",
+  // A Norn request of a person is theirs while message_content_read lets
+  // them read its conversation, and a name finds only people it lets read.
+  "norn-programs.ts",
 ];
 
 const exactOrLifecycleOwnerAuthorities = [
@@ -49,9 +53,6 @@ const exactOrLifecycleOwnerAuthorities = [
   // it neither returns Channel data nor authorizes an action on the observed Run.
   "agent-registration-run.ts",
   "agent-registration-revocation.ts",
-  // A page commit, after the page authority authorized the edit, reconciles
-  // that page's Automations; it joins Channels only for their Space.
-  "automation-page-anchor.ts",
   "channel-transfer.ts",
   // A Space owner's or admin's one-time move to pages reads every Channel of
   // that Space by design, after the owner/admin check; it returns only the plan.

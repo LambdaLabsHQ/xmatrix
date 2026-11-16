@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["agent-quota-usage"]);
-const { agentUsageReadings, agentUsageGlance, formatResetIn } = compiled.exports;
+const { agentBalanceReadings, agentUsageReadings, agentUsageGlance, formatResetIn } = compiled.exports;
 
 test.after(compiled.dispose);
 
@@ -52,9 +52,9 @@ test("reset countdowns never go negative or show an unknown time", () => {
 
 test("the provider's verdict on the account follows its windows", () => {
   const served = { ...quota([{ label: "1w", usedPercent: 100, resetAt: at(90) }]),
-    account: { allowed: true, credits: { balance: 137.5 } } };
+    account: { allowed: true, credits: { balance: 53079.6061305 } } };
   assert.deepEqual(agentUsageReadings(served, now).slice(1),
-    [{ key: "credits", label: "Credits", value: "137.5 left", high: false }]);
+    [{ key: "credits", label: "Credits", value: "53,080 left", high: false }]);
   const refused = { ...quota([{ label: "5h", usedPercent: 20 }]), account: { allowed: false } };
   assert.deepEqual(agentUsageReadings(refused, now).slice(1),
     [{ key: "account", label: "Provider", value: "Refusing requests", high: true }]);
@@ -71,4 +71,28 @@ test("list glance keeps all measured windows with compact labels and reset conte
   assert.deepEqual(agentUsageGlance(undefined, now), []);
   assert.deepEqual(agentUsageGlance({ ...quota(undefined), account: { credits: { unlimited: true } } }, now),
     [{ key: "quota", label: "Quota", percent: 86, detail: "Quota: 86% used" }]);
+});
+
+test("a model's own window is named by its scope", () => {
+  const windows = quota([
+    { label: "1w", usedPercent: 55, resetAt: at(90) },
+    { label: "1w", usedPercent: 100, resetAt: at(90), scope: "Fable" },
+  ]);
+  assert.deepEqual(agentUsageReadings(windows, now).map(({ key, label }) => [key, label]),
+    [["1w:0", "Weekly"], ["Fable:1w:1", "Fable · Weekly"]]);
+  assert.deepEqual(agentUsageGlance(windows, now).map(({ label, percent, detail }) => [label, percent, detail]), [
+    ["1w", 55, "Weekly: 55% used · resets in 1h 30m"],
+    ["Fable · 1w", 100, "Fable · Weekly: 100% used · resets in 1h 30m"],
+  ]);
+});
+
+test("a prepaid account reads as the money left, not as a window", () => {
+  const prepaid = (amount, allowed) => ({ amount, currency: "CNY", allowed, observedAt: at(-1), expiresAt: at(10) });
+  assert.deepEqual(agentBalanceReadings(undefined), []);
+  assert.deepEqual(agentBalanceReadings(prepaid(12.3, true)),
+    [{ key: "balance", label: "Balance", value: "¥12.30 left", high: false }]);
+  assert.deepEqual(agentBalanceReadings(prepaid(0, false)).map(({ label, value, high }) => ({ label, value, high })), [
+    { label: "Provider", value: "Refusing requests", high: true },
+    { label: "Balance", value: "¥0.00 left", high: true },
+  ]);
 });

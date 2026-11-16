@@ -105,3 +105,20 @@ test("a completed call is a log line: when, what ran, which Agent for whom, how 
   await expect(row).not.toContainText("untrusted");
   await expect(row).not.toContainText("6450000000");
 });
+
+test("a connected app shows both sign-ins and Disconnect before what it did and can do", async ({ page }) => {
+  await open(page, signedIn, { status: "configured" });
+  const order = await page.locator("section[aria-label]").evaluateAll((sections) =>
+    sections.map((section) => section.getAttribute("aria-label")));
+  const credentials = order.indexOf("Credentials");
+  const disconnect = order.indexOf("Disconnect");
+  expect(credentials).toBeGreaterThanOrEqual(0);
+  expect(disconnect).toBeGreaterThan(credentials);
+  for (const later of ["Recent activity", "Permissions", "Commands"]) {
+    if (order.includes(later)) expect(order.indexOf(later)).toBeGreaterThan(disconnect);
+  }
+  const signIns = page.getByRole("region", { name: "Credentials" });
+  await expect(signIns).toContainText("Private key");
+  await expect(signIns).toContainText("Web session");
+  await expect(page.getByRole("button", { name: "Disconnect App Store Connect" })).toBeVisible();
+});

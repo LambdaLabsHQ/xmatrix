@@ -4,17 +4,19 @@ import { Hono } from "hono";
 import {
   registerAgentRegistrationRoutes,
 } from "../src/index-routes-agent-registration.ts";
-import { ControlError } from "@xmatrix/db";
+import { ControlError, RegistrationAccessError } from "@xmatrix/db";
 import { getAgentRegistration, refreshAgentRegistrationQuota } from "../src/agent-registrations.ts";
 const key = { spaceId: "space", ownerUserId: "owner", machineId: "machine", harness: "codex" };
 const body = { action: "offer", key, commandId: "offer", displayName: "codex" };
 
-function fixture(user = { id: "owner" }) {
+function fixture(user = { id: "owner" }, environment = undefined, environmentFailure = undefined) {
   const calls = [], app = new Hono();
   const record = name => async (_env, input) => { calls.push({ name, input }); return { key }; };
   registerAgentRegistrationRoutes(app, { authenticate: async () => user,
     control: record("control"), get: record("get"), describe: record("describe"),
-    changeEnvironment: record("changeEnvironment"), getEnvironment: record("getEnvironment") });
+    changeEnvironment: record("changeEnvironment"),
+    getEnvironment: environmentFailure ? async () => { throw environmentFailure; }
+      : environment === undefined ? record("getEnvironment") : async () => ({ key, version: 1, environment }) });
   return { calls, request: (payload = body, action = "commands", physical = false) => app.request(
     `${physical ? "/api/agent-environments" : "/api/spaces/space/agent-registrations"}/${action}`,
     { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) }, {}) };
@@ -72,11 +74,31 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   const create = { action: "create", key, commandId: "create", displayName: "codex", environment: {
     schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
     launch: { runtime: "codex", runtimeArgs: [], sandboxMode: "off", requestReviewer: "low-risk-auto" } } };
-  const agent = fixture({ id: "agent-run:run", agentRun: run });
-  const added = await agent.request(create);
+  // What an Agent may do on a machine is its owner's to confirm. A Run adds
+  // only a harness whose access its owner confirmed there, and the refusal
+  // names what the owner runs.
+  const unconfirmedAdd = { ...create, environment: { ...create.environment,
+    launch: { runtime: "codex", runtimeArgs: [], access: "full" } } };
+  for (const held of [null, { launch: { runtime: "codex", runtimeArgs: [] } }]) {
+    const unconfirmed = fixture({ id: "agent-run:run", agentRun: run }, held);
+    const refused = await unconfirmed.request(unconfirmedAdd);
+    assert.equal(refused.status, 403);
+    assert.match((await refused.json()).error, /xmatrix agent add codex --space space/u);
+    assert.equal(unconfirmed.calls.length, 0, "nothing is written, whatever mode the Run sent");
+  }
+  const neverAdded = fixture({ id: "agent-run:run", agentRun: run }, undefined,
+    new RegistrationAccessError("registration_not_found", 404));
+  const refusedNeverAdded = await neverAdded.request(unconfirmedAdd);
+  assert.equal(refusedNeverAdded.status, 403, "a missing environment is an unconfirmed add, not a missing registration");
+  assert.match((await refusedNeverAdded.json()).error, /xmatrix agent add codex --space space/u);
+  assert.equal(neverAdded.calls.length, 0);
+  const agent = fixture({ id: "agent-run:run", agentRun: run }, { launch: { runtime: "codex", runtimeArgs: [], access: "full" } });
+  const added = await agent.request({ ...create, environment: { ...create.environment,
+    launch: { runtime: "codex", runtimeArgs: [], access: "full" } } });
   assert.equal(added.status, 200, await added.clone().text());
   assert.deepEqual([agent.calls[0].input.actorUserId, agent.calls[0].input.byAgent], ["owner", true],
     "it acts as its owner, without an admin's creation exception");
+  assert.equal(agent.calls[0].input.command.environment.launch.access, undefined, "a Run never writes a mode of its own");
   for (const [payload, why] of [[body, "only adding"], [{ ...create, key: { ...key, machineId: "other" } }, "only its Machine"],
     [{ ...create, key: { ...key, ownerUserId: "someone" } }, "only for its owner"]]) {
     assert.equal((await agent.request(payload)).status, 403, why);
@@ -85,6 +107,28 @@ test("an Agent Run adds an Agent for its owner on its own Machine in its own Spa
   assert.equal(agent.calls.length, 1);
   const elsewhere = fixture({ id: "agent-run:run", agentRun: { ...run, spaceId: "other" } });
   assert.equal((await elsewhere.request(create)).status, 403, "only in its own Space");
+});
+
+test("a mode is confirmed only for a harness whose permission requests xMatrix can show", async () => {
+  const create = harness => ({ action: "create", key: { ...key, harness }, commandId: "create", displayName: harness, environment: {
+    schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [],
+    launch: { runtime: harness, runtimeArgs: [], access: "ask" } } });
+  const owner = fixture();
+  // Codex's approvals do not reach the bridge, so it is given full access or not added.
+  const refused = await owner.request(create("codex"));
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /codex can only be given full access/u);
+  assert.equal(owner.calls.length, 0);
+  // DeepSeek Harness relays requests, but its full access is an environment
+  // setting: left on its own sandbox it cannot run the xmatrix CLI at all.
+  const sandboxed = await owner.request(create("deepseek"));
+  assert.equal(sandboxed.status, 400);
+  assert.match((await sandboxed.json()).error, /deepseek can only be given full access/u);
+  assert.equal(owner.calls.length, 0);
+  for (const harness of ["claude", "cursor", "grok"]) assert.equal((await owner.request(create(harness))).status, 200, harness);
+  const { spaceId: _spaceId, ...physicalKey } = key;
+  const change = { key: physicalKey, commandId: "environment", expectedVersion: 1, environment: create("codex").environment };
+  assert.equal((await owner.request(change, "commands", true)).status, 400);
 });
 
 test("Agent Runs, spoofed principals, oversized input and cross-Space selections never reach authority", async () => {
@@ -149,7 +193,7 @@ function refreshDatabase({ role = "member", daemons }) {
       if (name === "registration_control_member_v1") return role ? [{ role }] : [];
       if (name === "registration_quota_probe_registrations_v1") return [{ owner_user_id: "owner",
         machine_id: "machine", harness: "claude" }];
-      if (name === "registration_quota_probe_daemons_v5") return daemons;
+      if (name === "registration_quota_probe_daemons_v8") return daemons;
       assert.fail(name);
     } }) };
   return { database, seen };
@@ -169,8 +213,9 @@ test("a Space member's quota refresh probes each daemon at most once a minute, a
   const { database, seen } = refreshDatabase({ daemons: [daemonRow()] });
   assert.deepEqual(await refresh("member", database, quotaProbes(issued)), { issued: 1 });
   assert.equal(issued[0].payload.probe.windowLabels, true);
+  assert.equal(issued[0].payload.probe.scopedQuotaUsages, true);
   assert.deepEqual(issued[0].payload.probe.targets.map(target => target.targetId), ["registration:claude"]);
-  assert.equal(seen.find(query => query.name === "registration_quota_probe_daemons_v5").values[1], 60_000);
+  assert.equal(seen.find(query => query.name === "registration_quota_probe_daemons_v8").values[1], 60_000);
 
   const again = [];
   const recent = refreshDatabase({ daemons: [daemonRow({ recently_probed: true })] });

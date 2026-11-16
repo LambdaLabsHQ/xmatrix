@@ -84,11 +84,17 @@ test("an action is available only where an official recipe or control exists", (
   assert.equal(harnessActionAvailable(preset("custom"), "install"), false);
   assert.equal(harnessActionAvailable(preset("custom"), "refresh"), true);
   assert.equal(harnessActionAvailable(undefined, "refresh"), false);
+  // Any harness xMatrix manages can be asked whether it is signed in.
+  assert.equal(harnessActionAvailable(preset("claude"), "check"), true);
+  assert.equal(harnessActionAvailable(preset("goose"), "check"), true);
   assert.equal(harnessActionAvailable(preset("claude"), "update"), true);
   assert.equal(harnessActionAvailable(preset("claude"), "auto_update_off"), true);
   // goose has no updater of its own; xMatrix schedules its official update.
   assert.equal(harnessActionAvailable(preset("goose"), "auto_update_on"), true);
+  // The daily release watcher uses the official update recipe without a registry.
+  assert.equal(harnessActionAvailable(preset("goose"), "release"), true);
   assert.equal(harnessActionAvailable(preset("zcode"), "update"), false);
+  assert.equal(harnessActionAvailable(preset("zcode"), "release"), false);
   assert.equal(harnessActionAvailable(preset("codex"), "uninstall"), true);
   // No verified uninstaller upstream: the action is never offered.
   assert.equal(harnessActionAvailable(preset("grok"), "uninstall"), false);
@@ -157,7 +163,7 @@ test("a Cursor CLI from before its ACP mode is too old, and is named as the prog
   assert.equal(harnessTooOldSentence(tooOld), "Cursor CLI is 2025.09.12, too old for xMatrix, which needs 2026.01.01 or later.");
   assert.equal(harnessTooOld(cursor, "2026.09.26-dd393fe"), undefined);
   assert.equal(harnessTooOld(cursor, undefined), undefined, "an unknown version is not judged");
-  assert.equal(harnessTooOld(AGENT_PRESETS.find((preset) => preset.id === "codex").management, "0.1.0"), undefined,
+  assert.equal(harnessTooOld(AGENT_PRESETS.find((preset) => preset.id === "claude").management, "0.1.0"), undefined,
     "no minimum, no judgement");
   // Dated builds compare by date, not by their hash.
   assert.equal(compareHarnessVersions("2026.01.01-abc", "2026.01.01"), 0);
@@ -171,6 +177,16 @@ test("an Antigravity CLI from before `agy acp` is too old", () => {
     { program: "Antigravity CLI", version: "1.4.10", minimumVersion: "1.4.11" });
   assert.equal(harnessTooOld(antigravity, "1.4.11"), undefined);
   assert.equal(harnessTooOld(antigravity, "1.10.0"), undefined);
+});
+
+test("a Codex CLI from before namespaced dynamic tools is too old", () => {
+  const codex = AGENT_PRESETS.find((preset) => preset.id === "codex").management;
+  // thread/start carries the goal tools as one `namespace`; 0.140 and older
+  // refuse it ("missing field `inputSchema`"), which a new user's 0.104.0 did.
+  assert.deepEqual(harnessTooOld(codex, "0.104.0"), { program: "Codex CLI", version: "0.104.0", minimumVersion: "0.141.0" });
+  assert.ok(harnessTooOld(codex, "0.140.0"));
+  assert.equal(harnessTooOld(codex, "0.141.0"), undefined);
+  assert.equal(harnessTooOld(codex, "0.159.2"), undefined);
 });
 
 test("every minimum version names the program it is a version of", () => {

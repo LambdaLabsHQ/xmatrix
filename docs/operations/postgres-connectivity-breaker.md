@@ -39,7 +39,7 @@ keeps the requested operation in `blob11` and adds:
 | `blob12` | `open` cooldown or `half_open` probe in flight |
 | `blob13` | Last counted connectivity failure's normalized code |
 | `blob14`, `blob15` | That failure's code-defined operation and query/phase name |
-| `double5`, `double6`, `double7` | Retry delay, age of that failure (ms), counted failure streak |
+| `double6`, `double7`, `double8` | Retry delay, age of that failure (ms), counted failure streak (`double5`–`double7` before 2026-11-03, when every query point gained result bytes in `double5`) |
 
 These additional slots apply only to refused **query** points; session timing
 slots retain their existing meanings. Unknown or malformed dimensions collapse

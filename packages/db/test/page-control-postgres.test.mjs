@@ -3,9 +3,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { Client } from "pg";
+import { pageChangedBlocks, pageTitleLine } from "@xmatrix/protocol";
 import { createAuthorityDatabase } from "../dist/index.js";
 
-import { PostgresPageRepository, pageNameFrom, pagePositionBetween } from "../dist/page-control.js";
+import { PostgresPageRepository, pagePositionBetween, renamedPageBody } from "../dist/page-control.js";
 import { describePageConversations } from "../dist/page-conversations.js";
 import { keepSectionChanges, walkSectionChanges } from "../dist/page-section-changes.js";
 import { keepBlames, walkBlame } from "../dist/page-blame.js";
@@ -132,6 +133,43 @@ const code = (expected) => (error) => {
   return true;
 };
 
+integration("pages: commits and discussion links accept generated slugs starting with separators", async () => {
+  const { client, ids, pages, owner } = await pageTest("page-heading-slugs");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, principal: owner,
+      ...input, requestId: crypto.randomUUID() });
+    const before = "# Plan\n";
+    const { page } = await call("create", { body: before });
+    const body = `${before}\n## 🚀 Launch\n\nReady\n\n## _Private\n\nNotes\n\n## ---\n\nRule\n\n## 🚀 Launch\n\nAgain\n`;
+    const blockIds = pageChangedBlocks(before, body);
+    assert.deepEqual(blockIds, ["plan", "-launch", "_private", "---", "-launch-1"]);
+    const result = await call("edit", { pageId: page.pageId, baseRevision: 1, body,
+      blockIds, conversationIds: [ids.open] });
+    assert.equal(result.page.headRevision, 2);
+    const saved = await call("read", { pageId: page.pageId });
+    assert.equal(saved.page.body, body);
+    const links = (await call("links", { pageId: page.pageId })).links;
+    assert.deepEqual(links.map((link) => link.blockId).sort(), [...blockIds].sort());
+    const read = await call("read", { pageId: page.pageId, conversationId: ids.open, blockId: "-launch" });
+    assert.equal(read.page.headRevision, 2);
+    const linked = await call("link", { pageId: page.pageId, conversationId: ids.open,
+      blockId: "_private", source: "manual" });
+    assert.equal(linked.link.blockId, "_private");
+
+    for (const blockId of ["with space", "a/b", "a?b", "a#b", "🚀", "-".repeat(201)]) {
+      await assert.rejects(call("edit", { pageId: page.pageId, baseRevision: 2, body: `${body}\nRejected\n`,
+        blockIds: [blockId] }), code("invalid_block_id"));
+      await assert.rejects(call("link", { pageId: page.pageId, conversationId: ids.open,
+        blockId, source: "manual" }), code("invalid_block_id"));
+    }
+    assert.equal((await call("read", { pageId: page.pageId })).page.headRevision, 2,
+      "invalid block ids cannot write a revision");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 test("sibling positions always sort strictly between their neighbours", () => {
   let before = null;
   const keys = [];
@@ -190,24 +228,17 @@ integration("pages: how far a person has read a page is theirs, only moves forwa
       await call("edit", { principal: owner, pageId: page.pageId, baseRevision: head.headRevision, body });
     }
 
-    assert.deepEqual(await call("readState", { principal: viewer, pageId: page.pageId }), { revision: null, seen: null },
+    assert.deepEqual(await call("readState", { principal: viewer, pageId: page.pageId }), { revision: null },
       "nobody has read it before they open it");
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 2 }), { revision: 2 });
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 1 }), { revision: 2 },
       "it never moves back");
     assert.deepEqual(await call("markRead", { principal: viewer, pageId: page.pageId, revision: 99 }), { revision: 3 },
       "nor past the page's head");
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: null, seen: null },
+    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: null },
       "each person has their own");
-    // Part of the page seen past a revision is kept as the page they saw, until they have seen it whole.
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 2, seen: "# Plan\n\nTwo\n\nOld\n" });
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }),
-      { revision: 2, seen: "# Plan\n\nTwo\n\nOld\n" });
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 1, seen: "# Plan\n" });
-    assert.deepEqual((await call("readState", { principal: owner, pageId: page.pageId })).seen, "# Plan\n\nTwo\n\nOld\n",
-      "an older report does not take back what was seen");
-    await call("markRead", { principal: owner, pageId: page.pageId, revision: 3, seen: null });
-    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: 3, seen: null });
+    await call("markRead", { principal: owner, pageId: page.pageId, revision: 3 });
+    assert.deepEqual(await call("readState", { principal: owner, pageId: page.pageId }), { revision: 3 });
     await call("markRead", { principal: owner, pageId: page.pageId, revision: 2 });
     const readIn = async (principal) => (await call("tree", { principal })).pages[0].readRevision;
     assert.deepEqual([await readIn(viewer), await readIn(owner), await readIn(agent)], [3, 3, null],
@@ -540,37 +571,50 @@ integration("public pages: an owner publishes a page every member reads, and any
   }
 });
 
-integration("pages: a page's name is the top-level heading its document opens with, read alike in SQL", async () => {
+integration("pages: a page's name is its document's first top-level heading, read alike in SQL", async () => {
   const { client, ids, pages, owner } = await pageTest("page-name");
   try {
     const r = () => crypto.randomUUID();
-    const title = async (pageId) => (await pages.read({ requestId: r(), spaceId: ids.space, pageId,
-      principal: owner })).page.title;
+    const read = async (pageId) => (await pages.read({ requestId: r(), spaceId: ids.space, pageId,
+      principal: owner })).page;
+    const title = async (pageId) => (await read(pageId)).title;
     const edit = (pageId, baseRevision, body) => pages.edit({ requestId: r(), spaceId: ids.space, pageId,
       principal: owner, baseRevision, body });
 
     // A new page's name is written into its document; a document that names itself keeps its own.
     const { page } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Untitled" });
-    assert.equal((await pages.read({ requestId: r(), spaceId: ids.space, pageId: page.pageId, principal: owner }))
-      .page.body, "# Untitled\n");
+    assert.equal((await read(page.pageId)).body, "# Untitled\n");
     const { page: notes } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner, title: "Notes",
       body: "## Search\n\nNext.\n" });
     assert.equal(notes.title, "Notes");
     const { page: roadmap } = await pages.create({ requestId: r(), spaceId: ids.space, principal: owner,
-      title: "Plans", body: "# Roadmap\n\nNext.\n" });
+      title: "Plans", body: "> Moved from the wiki.\n\n# Roadmap\n\nNext.\n" });
     assert.equal(roadmap.title, "Roadmap");
 
-    // Editing the heading is renaming the page; a document that stops opening with one has no name.
+    // Editing the heading is renaming the page, wherever it stands: what an Agent pasted above it on
+    // 2026-11-04 left NomadCafe "Untitled". Code is not a heading; a document without one has no name.
     await edit(page.pageId, 1, "# 测试一下共同写作\n");
     assert.equal(await title(page.pageId), "测试一下共同写作");
-    await edit(page.pageId, 2, "Intro first.\n\n# Roadmap\n");
+    const pasted = "```\nworking: claude:1 (Agent) in conversation c-1\n```\n\nautomations:\n\n- a-1 · #市场与用户\n\n---\n\n";
+    await edit(page.pageId, 2, `${pasted}# NomadCafe\n\n## 现状\n`);
+    assert.equal(await title(page.pageId), "NomadCafe");
+    await edit(page.pageId, 3, "```sh\n# install\n```\n\n## 现状\n");
     assert.equal(await title(page.pageId), "Untitled");
+
+    // A rename rewrites that heading where it stands and keeps what is above it.
+    await edit(page.pageId, 4, renamedPageBody(`${pasted}# NomadCafe\n\n## 现状\n`, "Nomad Cafe"));
+    assert.deepEqual([(await read(page.pageId)).title, (await read(page.pageId)).body],
+      ["Nomad Cafe", `${pasted}# Nomad Cafe\n\n## 现状\n`]);
 
     // SQL reads the name exactly as the Hub does.
     for (const body of ["# Plain\n", "\n\n#   Spaced   \nmore", "#NoSpace\n", "## Section\n", "Text\n# Later\n",
-      "# \n", "# Windows\r\nline", "", "#\tTabbed\n"]) {
-      const [row] = (await client.query("SELECT data.page_name($1) AS name", [body])).rows;
-      assert.equal(row.name, pageNameFrom(body), JSON.stringify(body));
+      "# \n", "# Windows\r\nline", "", "#\tTabbed\n", "> Note\n\n# Under a note\n", `${pasted}# Pasted over\n`,
+      "```\n# not a title\n```\n# After code\n", "~~~~\n# in\n~~~\n# still in\n~~~~\n# out\n", "``` a`b\n# real\n",
+      "```js\n# never closed\n", "    # indented code\n", "   # three spaces\n", "#\n\n# Second\n",
+      "Intro\r\n# Windows below\r\n", "```\r\n# not a fence\r\n", "# Closing ##\n", `${"x".repeat(5000)}\n# Far\n`,
+      `# ${"y".repeat(5000)}\n`]) {
+      const [row] = (await client.query("SELECT data.page_title($1) AS name", [body])).rows;
+      assert.equal(row.name, pageTitleLine(body)?.title || null, JSON.stringify(body.slice(0, 80)));
     }
   } finally {
     await cleanup(client, ids);
@@ -942,6 +986,41 @@ integration("the page tree shows each page's Agents: live in a conversation whos
     assert.deepEqual(await onPages(member), {}, "an ended Run is on no page");
 
     await assert.rejects(onPages({ kind: "user", id: `${ids.space}-stranger` }), code("space_not_found"));
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+// Every page request checks access through the whole tree; it carried every
+// page's title, timestamps and summary (and parsed every head body for the
+// title) to answer for one page. Those bytes are PlanetScale egress on each
+// page read, link list, section update and conversation edit.
+integration("pages: one page's read carries the other pages' access, not their titles or summaries", async () => {
+  const { client, ids, owner } = await pageTest("page-tree-bytes");
+  const observations = [];
+  const pages = new PostgresPageRepository(createAuthorityDatabase({ connectionString, shardId: "shard-0",
+    observer: (point) => observations.push(point) }));
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const created = [];
+    for (let index = 0; index < 40; index += 1) {
+      const { page } = await call("create", { principal: owner, title: `Page ${index}`,
+        body: `# Page ${index}\n\n${"x".repeat(4_000)}\n` });
+      await call("setSummary", { principal: owner, pageId: page.pageId, baseRevision: 1, summary: "s".repeat(240) });
+      created.push(page);
+    }
+    observations.length = 0;
+    const { page } = await call("read", { principal: owner, pageId: created[17].pageId });
+    assert.equal(page.title, "Page 17", "the page read still has its own title");
+    assert.equal(page.summary.text, "s".repeat(240), "and its own summary");
+    const tree = observations.find((point) => point.queryName.startsWith("page_tree_access_"));
+    assert.ok(tree.resultBytes < 40 * 250,
+      `one page's access read returned ${tree.resultBytes} bytes for a 40-page Space`);
+    const listed = (await call("tree", { principal: owner })).pages;
+    assert.equal(listed.length, 40);
+    assert.ok(listed.every((item) => /^Page \d+$/u.test(item.title) && item.summary?.text === "s".repeat(240)),
+      "the tree view still names and summarizes every page");
   } finally {
     await cleanup(client, ids);
     await client.end();

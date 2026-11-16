@@ -1,0 +1,95 @@
+import type { Metadata, Viewport } from "next";
+import "@/app/globals.css";
+import "@/app/themes/materials.css";
+import "@/app/themes/wood.css";
+import "@/app/themes/site.css";
+import { AuthProvider } from "@/lib/auth-context";
+import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
+import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
+import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
+import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
+import { shareImage, siteUrl } from "@/lib/site-url";
+import { browserBackEntryScript } from "@/components/dashboard/browser-back-entry-script";
+
+export const metadata: Metadata = {
+  metadataBase: siteUrl,
+  title: "xMatrix — Where people and AI agents work together",
+  description:
+    "Bring every agent, person, and workstream into one shared space—visible, coordinated, and under your control.",
+  icons: {
+    icon: [
+      { url: "/icon-32.png", type: "image/png", sizes: "32x32" },
+      { url: "/icon-48.png", type: "image/png", sizes: "48x48" },
+      { url: "/icon-192.png", type: "image/png", sizes: "192x192" },
+      { url: "/icon-512.png", type: "image/png", sizes: "512x512" },
+      {
+        url: "/favicon.ico",
+        sizes: "16x16 32x32 48x48 64x64 128x128 256x256",
+      },
+    ],
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  manifest: "/site.webmanifest",
+  openGraph: {
+    title: "xMatrix",
+    description:
+      "Bring every agent, person, and workstream into one shared space—visible, coordinated, and under your control.",
+    siteName: "xMatrix",
+    type: "website",
+    images: [shareImage],
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  minimumScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: "cover",
+};
+
+export default function Document(props: { children: React.ReactNode; lang: string }) {
+  const themeScript = `
+    (() => {
+      try {
+        /* Wood is the single fixed application material. */
+        const theme = "wood";
+        document.documentElement.setAttribute("data-app-theme", theme);
+        document.documentElement.classList.remove("light", "dark");
+        document.documentElement.classList.add("light");
+        document.documentElement.style.colorScheme = "light";
+        const desktopPlatform = window.xmatrixDesktop && window.xmatrixDesktop.platform;
+        if (desktopPlatform) document.documentElement.setAttribute("data-desktop-platform", desktopPlatform);
+      } catch {
+        document.documentElement.setAttribute("data-app-theme", "wood");
+        document.documentElement.classList.add("light");
+        document.documentElement.style.colorScheme = "light";
+      }
+    })();
+    ${OVERLAY_SCROLLBARS_MODE_SCRIPT}
+  `;
+
+  return (
+    <html
+      lang={props.lang}
+      className="font-sans light"
+      data-app-theme="wood"
+      style={{ colorScheme: "light" }}
+      suppressHydrationWarning
+    >
+      {/* Shared by the App Router root layouts; this is their document head. */}
+      {/* eslint-disable-next-line @next/next/no-head-element */}
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script dangerouslySetInnerHTML={{ __html: browserBackEntryScript }} />
+      </head>
+      <body className="site-canvas antialiased">
+        <LiquidGlassFilter />
+        <LiquidGlassLensDefs />
+        <OverlayScrollbars />
+        <AuthProvider>{props.children}</AuthProvider>
+      </body>
+    </html>
+  );
+}

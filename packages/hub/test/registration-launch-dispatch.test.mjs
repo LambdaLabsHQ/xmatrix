@@ -7,7 +7,6 @@ import {
   executeFirstMessageDecision,
 } from "../src/registration-launch-dispatch.ts";
 
-const signedOut = { harness: 'codex', program: 'Codex', machineId: 'machine:mac', machineName: 'mac-mini' };
 const tooOld = { program: 'Cursor CLI', version: '2025.09.12-4852336', minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update' };
 
 test('composite dispatch persists sanitized rejection through current source and channel authority', async t => {
@@ -21,14 +20,13 @@ test('composite dispatch persists sanitized rejection through current source and
     mode: 'composite', selectionCount: 1, prepared: [], rejected: [
       { selectionIndex: 0, sourceMention: '@codex', code: 'registration_directory_unavailable' },
       { selectionIndex: 1, sourceMention: '@cursor', code: 'registration_harness_outdated', tooOld },
-      { selectionIndex: 2, sourceMention: '@auto', code: 'registration_harness_signed_out', signedOut },
     ],
   }));
   const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
     if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
     if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
     if (query.name === 'channel_capability_runtime_new_work_v3') return allowed ? [{ channel_id: 'channel', space_id: 'space', mode: 'open', archived_at: null, space_role: 'member' }] : [];
-    if (query.name === 'runtime_initial_message_source_v5') return [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 12 }];
+    if (query.name === 'runtime_initial_message_source_v6') return [{ entity_version: 1, body_hash: bodyHash, timeline_sequence: 12 }];
     if (query.name === 'routing_command_lock_v1' || query.name === 'runtime_replay_read_v1') return [];
     if (query.name === 'runtime_replay_write_v1') { writes.push(JSON.parse(query.values[4])); return []; }
     throw new Error(`unexpected ${query.name}`);
@@ -40,8 +38,6 @@ test('composite dispatch persists sanitized rejection through current source and
   assert.equal(writes[0].rejected[0].code, 'registration_directory_unavailable');
   // A refusal for a too-old harness keeps what is too old, so its reply names it.
   assert.deepEqual(writes[0].rejected[1].tooOld, tooOld);
-  // And one for a signed-out harness keeps what to sign in, so its reply offers it.
-  assert.deepEqual(writes[0].rejected[2].signedOut, signedOut);
   assert.equal(Object.hasOwn(writes[0], 'bodyHash'), false);
   allowed = false;
   await assert.rejects(executeRegistrationLaunchDispatch(input));

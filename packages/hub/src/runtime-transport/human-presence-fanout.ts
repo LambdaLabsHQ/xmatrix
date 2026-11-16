@@ -78,16 +78,17 @@ export type HumanFanoutPurpose = "agent-presence";
  * knows the Channel's Space names it, and the read skips the directory.
  */
 export type HumanFanoutChannelReader = (channelId: string, userId: string, purpose: HumanFanoutPurpose,
-  spaceId?: string) => Promise<{
+  spaceId?: string, knownInstanceIds?: readonly string[]) => Promise<{
   channel: SerializedChannel;
   openChannelHumanMemberIdsBySpace: OpenChannelHumanMemberIdsBySpace;
 } | undefined>;
 
 /** Fanout is best effort: a Channel that cannot be read is skipped, never fatal. */
 export function humanFanoutChannelReader(env: SpacesEnv): HumanFanoutChannelReader {
-  const read = async (channelId: string, userId: string, purpose: HumanFanoutPurpose, spaceId?: string) => {
+  const read = async (channelId: string, userId: string, purpose: HumanFanoutPurpose, spaceId?: string,
+    knownInstanceIds?: readonly string[]) => {
     const result = await getChannel(env, { channelId, principal: { kind: "user", id: userId },
-      purpose: `fanout.${purpose}`, ...(spaceId ? { spaceId } : {}) }) as {
+      purpose: `fanout.${purpose}`, ...(spaceId ? { spaceId } : {}), ...(knownInstanceIds ? { knownInstanceIds } : {}) }) as {
       channel?: SerializedChannel;
       openChannelHumanMemberIdsBySpace?: OpenChannelHumanMemberIdsBySpace;
     };
@@ -97,13 +98,13 @@ export function humanFanoutChannelReader(env: SpacesEnv): HumanFanoutChannelRead
       openChannelHumanMemberIdsBySpace: result.openChannelHumanMemberIdsBySpace || {},
     };
   };
-  return async (channelId, userId, purpose, spaceId) => {
+  return async (channelId, userId, purpose, spaceId, knownInstanceIds) => {
     try {
-      return await read(channelId, userId, purpose, spaceId);
+      return await read(channelId, userId, purpose, spaceId, knownInstanceIds);
     } catch (error) {
       // A Channel that left the Space it was named in is read where it is now.
       if (!spaceId || !(error instanceof SpaceControlError) || error.code !== "channel_not_found") return undefined;
-      return read(channelId, userId, purpose).catch(() => undefined);
+      return read(channelId, userId, purpose, undefined, knownInstanceIds).catch(() => undefined);
     }
   };
 }

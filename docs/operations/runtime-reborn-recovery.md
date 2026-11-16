@@ -63,6 +63,13 @@ bound concurrent discovery; exact identities, current grants and terminal
 proof own execution authority. A stale coordinator lease cannot settle a newer
 claim. New deletion, handoff, cancellation or replacement fences prevent
 continuation. Intents expire after 24 hours and retain a terminal error code.
+
+A failed stop retains the daemon's bounded reason in the refusal, as a failed
+spawn does. A stale progress observation is diagnostic evidence, not proof that
+the process has exited or is still executing. Do not replace an exact stop
+receipt with a busy flag, elapsed time or a local process kill. Handoff refuses
+an unconfirmed stop instead of starting a competing successor. Recovery uses
+the same fenced control IDs and the existing retry path.
 Failed intents remain evidence and do not automatically restart.
 
 Continuation snapshots distinguish the historical display name from the stable

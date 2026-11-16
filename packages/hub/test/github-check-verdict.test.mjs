@@ -44,3 +44,15 @@ test('a workflow cancelled before its first job cannot be hidden by a passing sc
 test('a completed check with no known conclusion cannot prove success',async()=>{
  assert.deepEqual(await verdict({runs:[{name:'CI',status:'completed',conclusion:null}]}),{state:'pending'});
 });
+
+// #1397's conflicting head had only the external-PR closer, skipped. The
+// real GitHub response must not manufacture a CI success from that absence.
+test('checks that all skip or decline a verdict cannot announce CI passed',async()=>{
+ for(const conclusion of ['skipped','neutral']) {
+  assert.deepEqual(await verdict({runs:[{name:'close',status:'completed',conclusion}]}),{state:'pending'});
+ }
+ assert.deepEqual(await verdict({runs:[
+  {name:'close',status:'completed',conclusion:'skipped'},
+  {name:'ci',status:'completed',conclusion:'success'},
+ ]}),{state:'passed',failed:[],settledAt:completed.updated_at});
+});

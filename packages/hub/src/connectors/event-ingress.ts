@@ -1,15 +1,16 @@
 import type { PostgresTeamsRoomRepository } from "@xmatrix/db";
 import { getAppConnectorProvider } from "../app-connectors";
 import { readBoundedRequestBody } from "../index-shared";
-import { fireConnectorAutomationTriggers } from "../automation-triggers";
+import { connectorEventArrived } from "../outside-events";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import type { Env } from "../types";
 import { connectorAppRepository, connectorCredentialRepository, INGRESS_KEY_FIELD } from "./credentials";
-import { timingSafeEqual } from "@xmatrix/protocol";
+import { EVENT_CARD_METADATA_KEY, timingSafeEqual } from "@xmatrix/protocol";
 import type { ConnectorDeliveryResult, ConnectorEvent, ConnectorProvider } from "./provider";
 import { trimmedConnectorEnv } from "./connector-env";
 import { oauthClient } from "./oauth";
 import { parseJsonObject } from "./event-format";
+import { spaceLanguage } from "../space-language";
 import { linearEventVisible } from "./linear-visibility";
 import { slackRetirement } from "./slack-events";
 
@@ -32,13 +33,13 @@ export interface ConnectorIngressDependencies {
   credentials: typeof connectorCredentialRepository;
   apps: typeof connectorAppRepository;
   append: typeof dispatchProductMessageAppend;
-  automations?: typeof fireConnectorAutomationTriggers;
+  events?: typeof connectorEventArrived;
   /** Whether a Space's own Linear grant reads what an event is about. */
   linearVisible?: typeof linearEventVisible;
 }
 
-/** Shared Channel append and Automation effects; provider authentication stays separate. */
-export const CONNECTOR_DELIVERY_EFFECTS = { append: dispatchProductMessageAppend, automations: fireConnectorAutomationTriggers };
+/** Shared Channel append and outside-event effects; provider authentication stays separate. */
+export const CONNECTOR_DELIVERY_EFFECTS = { append: dispatchProductMessageAppend, events: connectorEventArrived };
 
 const DEFAULT_DEPENDENCIES: ConnectorIngressDependencies = {
   credentials: connectorCredentialRepository,
@@ -115,7 +116,7 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
       // One Linear delivery serves every Space that connected the organization;
       // each takes only what its own grant reads (private teams stay private),
       // and only while that grant is current: a Connect since the read is a
-      // different grant, so routes, the final append and Automations are
+      // different grant, so routes, the final append and the programs it reaches are
       // fenced to the credential version that read it.
       const proof = provider.id === "linear" ? await visible(env, connection.spaceId, event) : undefined;
       if (provider.id === "linear" && !proof) continue;
@@ -128,9 +129,9 @@ export async function handleAppConnectorDelivery(input: { env: Env; request: Req
         ? { ...binding, credentialVersion: proof.credentialVersion, ...(proof.grantGeneration ? { grantGeneration: proof.grantGeneration } : {}) }
         : binding);
       // Reauthorization can change the workspace between the first lookup and dispatch.
-      if (dependencies.automations && await current()) {
-        await dependencies.automations(env, { spaceId: connection.spaceId, provider: provider.id, event })
-          .catch(() => console.error("Connector Automation triggers failed", provider.id));
+      if (dependencies.events && await current()) {
+        await dependencies.events(env, { spaceId: connection.spaceId, provider: provider.id, event })
+          .catch(() => console.error("Connector event did not reach its programs", provider.id));
       }
     }
   }
@@ -167,9 +168,9 @@ export async function handleConnectorDelivery(input: {
   let delivered = 0;
   for (const event of result.events.slice(0, MAX_EVENTS_PER_DELIVERY)) {
     delivered += await deliverEvent(env, apps, dependencies.append, provider.id, resolved.connectionId, event);
-    /* Page Automations this event fires (§3.4); a failure must not lose the Channel delivery. */
-    await dependencies.automations?.(env, { spaceId: resolved.spaceId, provider: provider.id, event })
-      .catch((error: unknown) => console.error("Connector Automation triggers failed",
+    /* The Norn programs that wait for this event; a failure must not lose the Channel delivery. */
+    await dependencies.events?.(env, { spaceId: resolved.spaceId, provider: provider.id, event })
+      .catch((error: unknown) => console.error("Connector event did not reach its programs",
         error instanceof Error ? error.message : "unknown"));
   }
   return Response.json({ ok: true, events: result.events.length, delivered });
@@ -215,7 +216,10 @@ export async function appendToRoutes(
   append: typeof dispatchProductMessageAppend,
   providerId: string,
   event: ConnectorEvent,
-  routes: { channelId: string; authorityRootUserId: string }[],
+  /** `spaceMetadata` carries the Space's language setting: a localized event is posted in it. */
+  routes: { channelId: string; authorityRootUserId: string; spaceMetadata?: unknown }[],
+  /** Hub-written facts about the event the Web draws from, e.g. its private result's owner. */
+  appMetadata?: Record<string, unknown>,
 ): Promise<number> {
   let delivered = 0;
   for (let offset = 0; offset < routes.length; offset += APPEND_BATCH) {
@@ -225,9 +229,11 @@ export async function appendToRoutes(
         commandId: `product:connector-event:${key}`.slice(0, 200),
         messageId: connectorEventMessageId(providerId, event.eventId, route.channelId),
         channelId: route.channelId,
-        body: event.body,
+        body: (spaceLanguage(route.spaceMetadata) === "zh" ? event.localizedBody?.zh : undefined) ?? event.body,
         principal: { kind: "user", id: route.authorityRootUserId },
         appAuthorId: providerId,
+        ...(appMetadata || event.card ? { residual: { appMetadata: { ...appMetadata,
+          ...(event.card ? { [EVENT_CARD_METADATA_KEY]: event.card } : {}) } } } : {}),
       }).catch(() => undefined);
       return response?.ok ? 1 : 0;
     }));
@@ -244,7 +250,7 @@ export function currentConnectorAppend(append: typeof dispatchProductMessageAppe
   return async (...args) => await current() ? append(...args) : new Response(null, { status: 503 });
 }
 
-/** Both app endpoints share primary-grant fences, durable append and Automation ordering. */
+/** Both app endpoints share primary-grant fences, durable append and event ordering. */
 export async function deliverConnectorRoom(env: Env, rooms: Pick<PostgresTeamsRoomRepository, "route" | "current">,
   input: Parameters<PostgresTeamsRoomRepository["route"]>[0], event: ConnectorEvent,
   scope: { provider: "teams" | "googlechat"; appIdentity: string },
@@ -257,5 +263,5 @@ export async function deliverConnectorRoom(env: Env, rooms: Pick<PostgresTeamsRo
   await effects.deliver(env, effects.apps(env), currentConnectorAppend(effects.append, current), scope.provider,
     binding.connectionId, event, undefined, scope.provider === "googlechat" ? grant : undefined,
     undefined, undefined, undefined, scope.provider === "teams" ? grant : undefined);
-  if (await current()) await effects.automations(env, { spaceId: binding.spaceId, provider: scope.provider, event });
+  if (await current()) await effects.events(env, { spaceId: binding.spaceId, provider: scope.provider, event });
 }

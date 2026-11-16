@@ -1,16 +1,15 @@
-import { parseAppleSubscriptionConfig, readBoundedStream, type AppleSubscriptionConfig } from "@xmatrix/protocol";
+import { parseAppleSubscriptionConfig, type AppleSubscriptionConfig } from "@xmatrix/protocol";
 import { Buffer } from "node:buffer";
 import type { JWSTransactionDecodedPayload } from "@apple/app-store-server-library";
 import { importPKCS8, SignJWT } from "jose";
 import type { AppleSeatGroupState, BillingSubscriptionFact } from "@xmatrix/db";
 import { APPLE_ROOT_G3 } from "./root-certificate";
+import { readStoreJson, StoreBillingError } from "../store-billing-errors";
 
 export const APPLE_BUNDLE_ID = "sh.xmatrix.app";
 export type AppleEnvironment = "Production" | "Sandbox";
 export type { AppleSubscriptionConfig } from "@xmatrix/protocol";
-export class AppleBillingError extends Error {
-  constructor(readonly code: string, message: string, readonly retryable = false) { super(message); }
-}
+export class AppleBillingError extends StoreBillingError {}
 
 export function appleSubscriptionConfig(raw: string | undefined): AppleSubscriptionConfig {
   try { return parseAppleSubscriptionConfig(raw); }
@@ -50,12 +49,8 @@ export async function verifyAppleNotification(config: AppleSubscriptionConfig, s
   throw new AppleBillingError("invalid_apple_notification", "Apple notification verification failed");
 }
 
-async function boundedJson(response: Response, signal: AbortSignal): Promise<unknown> {
-  try {
-    const bytes = await readBoundedStream(response.body, 1_048_576, () => new Error("Apple response is too large"), signal);
-    return JSON.parse(new TextDecoder().decode(bytes));
-  } catch { throw new AppleBillingError("apple_response_invalid", "Apple response is invalid", true); }
-}
+const boundedJson = (response: Response, signal: AbortSignal) =>
+  readStoreJson(response, signal, () => new AppleBillingError("apple_response_invalid", "Apple response is invalid", true));
 
 export interface VerifiedAppleSubscription {
   environment: AppleEnvironment;

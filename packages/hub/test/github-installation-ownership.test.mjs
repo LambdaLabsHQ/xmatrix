@@ -12,8 +12,9 @@ const env = { GITHUB_APP_CLIENT_SECRET: "app-secret" };
 const account = (installationId, login, type = "Organization") => ({ installationId, login, type });
 
 function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed = [], status = "configured",
-  statePayload = { spaceId: "space-1", userId: "admin" } } = {}) {
+  statePayload = { spaceId: "space-1", userId: "admin" }, checkFails = false } = {}) {
   const upserts = [];
+  const checks = [];
   const authorizations = [];
   const credentialPuts = [];
   const records = [];
@@ -26,6 +27,12 @@ function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed =
       findAppConnection: async () => ({ providerId: "github", status,
         metadata: { installationIds: stored, repository: "org/repo" },
         githubLinks: confirmed.map((installationId) => ({ installationId, githubUserId: 77 })) }),
+    },
+    "./app-connection-check": {
+      checkAppConnection: async (_env, input) => {
+        checks.push({ spaceId: input.spaceId, providerId: input.providerId, userId: input.userId });
+        if (checkFails) throw new Error("GitHub is unavailable");
+      },
     },
     "./app-connectors": {
       githubConnectionInstallationIds,
@@ -64,7 +71,7 @@ function fixture({ granted = ["111"], stored = ["111"], confirmed = [], listed =
   const link = (installationId, grant = "grant") => app.request("/api/spaces/space-1/app-connections/github/installations", {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installationId, grant }) }, env);
   const list = (grant) => app.request(`/api/spaces/space-1/app-connections/github/installations${grant ? `?grant=${grant}` : ""}`, {}, env);
-  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts, records };
+  return { app, setup, patch, link, list, upserts, authorizations, credentialPuts, records, checks };
 }
 
 const outcome = (response) => new URL(response.headers.get("location")).searchParams.get("github");
@@ -105,6 +112,16 @@ test("Link links only an installation the admin's own grant for this Space names
   assert.deepEqual(f.upserts.map((upsert) => upsert.body.metadataAppend), [{ installationIds: "222" }]);
   // The GitHub user the grant names is recorded as handing it over; without that record it is not usable.
   assert.deepEqual(f.records, [{ spaceId: "space-1", actorUserId: "admin", githubUserId: 77, installationIds: ["222"] }]);
+});
+
+test("a link asks GitHub about the connection, so a card that asked for it sees a check after it", async () => {
+  const f = fixture({ granted: ["222"] });
+  assert.equal((await f.link("999")).status, 403);
+  assert.deepEqual(f.checks, [], "nothing is checked for a link that was refused");
+  assert.equal((await f.link("222")).status, 200);
+  assert.deepEqual(f.checks, [{ spaceId: "space-1", providerId: "github", userId: "admin" }]);
+  const unavailable = fixture({ granted: ["222"], checkFails: true });
+  assert.equal((await unavailable.link("222")).status, 200, "the link stands when the check cannot run");
 });
 
 test("Link appends and never replaces the stored metadata of a connected Space", async () => {

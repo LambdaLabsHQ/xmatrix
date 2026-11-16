@@ -27,7 +27,7 @@ function time(value: string | undefined): number {
  * changes nothing, in which case the Channel comes back itself. A message
  * without a sequence counts once, when the history did not hold it yet.
  */
-export function channelAfterMessage(channel: ChannelSnapshot, arrival: ChannelMessageArrival): ChannelSnapshot {
+export function channelAfterMessage<C extends ChannelSnapshot>(channel: C, arrival: ChannelMessageArrival): C {
   const { entry } = arrival;
   const held = channel.messageCount || 0;
   const counted = entry.sequence ? entry.sequence : held + (arrival.known ? 0 : 1);

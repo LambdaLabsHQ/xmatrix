@@ -39,7 +39,6 @@ const nextConfig: NextConfig = {
   // Search engines read those from <head>, so every client gets them there.
   htmlLimitedBots: /.*/u,
   // The user guide's Markdown is imported as text (src/lib/docs/guide.ts).
-  turbopack: { rules: { "*.md": { loaders: ["./markdown-source-loader.cjs"], as: "*.js" } } },
   webpack(config, { dev, isServer }) {
     config.module.rules.push({ test: /\.md$/u, use: [join(__dirname, "markdown-source-loader.cjs")] });
     if (!dev && !isServer) config.plugins.push(new CssSubjectBucketsPlugin());

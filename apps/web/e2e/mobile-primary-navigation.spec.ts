@@ -14,6 +14,7 @@ import {
   fixtureRule,
   releaseFixture,
   screenChangeLanded,
+  routeHumanSocket,
 } from "./workspace-fixtures";
 
 const SLOW_HISTORY_RULE = "slow-channel-general-history";
@@ -57,11 +58,47 @@ async function openAppLinkForTest(page: Page, href: string) {
   ).__openAppLinkForTest?.(link), href);
 }
 
+/** The iOS app on the channel list of a Space with #general and #ops, its page listening for notifications. */
+async function openIOSChannelListWithOps(page: Page) {
+  await installNativeBridge(page, "ios");
+  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
+  await page.goto("/app/personal-sspaceperso/channels");
+  await expect(generalChannelRow(page)).toBeVisible();
+  // The init-script bridge exists before the live shell subscribes to it.
+  await expect.poll(() => page.evaluate(() => (
+    window as typeof window & { __appLinkListenerCountForTest?: () => number }
+  ).__appLinkListenerCountForTest?.() ?? 0)).toBeGreaterThan(0);
+}
+
+/** Every screen change that moved from now on: the lists trading places, or a whole-page view transition. */
+async function watchScreenMoves(page: Page) {
+  await page.evaluate(() => {
+    const moves: string[] = [];
+    (window as typeof window & { __screenMoves?: string[] }).__screenMoves = moves;
+    new MutationObserver(() => {
+      for (const element of document.querySelectorAll<HTMLElement>("[data-list-transition]")) {
+        moves.push(`list:${element.dataset.listTransition}`);
+      }
+    }).observe(document.documentElement, { subtree: true, attributes: true, attributeFilter: ["data-list-transition"] });
+    const start = document.startViewTransition?.bind(document);
+    if (start) {
+      document.startViewTransition = ((...args: Parameters<typeof start>) => {
+        moves.push("view-transition");
+        return start(...args);
+      }) as typeof document.startViewTransition;
+    }
+  });
+  return () => page.evaluate(() => (window as typeof window & { __screenMoves?: string[] }).__screenMoves ?? []);
+}
+
 async function installNativeBridge(page: Page, client: "android" | "ios") {
   await page.addInitScript((client) => {
     const appLinkListeners = new Set<(href: string) => boolean>();
     (window as typeof window & { __openAppLinkForTest?: (href: string) => boolean })
       .__openAppLinkForTest = (href) => Array.from(appLinkListeners).reverse().some((listener) => listener(href));
+    (window as typeof window & { __appLinkListenerCountForTest?: () => number })
+      .__appLinkListenerCountForTest = () => appLinkListeners.size;
     const listeners = new Set<() => boolean>();
     const disabledUpdateStatus = () => ({
       state: "disabled" as const,
@@ -147,7 +184,7 @@ test("tapping Channels once opens the mobile channel list", async ({ page }) => 
   await openMoreChildWorkspace(page);
 
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
-  // Pages, Channels, Status and More; Agents lives behind More with Machines and Schedules.
+  // Pages, Channels, Status and More; Agents lives behind More with Machines.
   await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Status", "More"]);
   await expect(primaryNav.getByRole("button", { name: "Follow-ups", exact: true })).toHaveCount(0);
   // Direct messages live on the Channels page.
@@ -229,17 +266,18 @@ test("a conversation loaded directly goes Back to its channel list", async ({ pa
 });
 
 test("the iOS app's edge swipe goes Back in the page, and a notification opens without a reload", async ({ page }) => {
-  await installNativeBridge(page, "ios");
-  const ops = { ...E2E_CHANNEL, id: "channel-ops", name: "ops" };
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL, ops] });
-  await page.goto("/app/personal-sspaceperso/channels");
+  await openIOSChannelListWithOps(page);
   await page.evaluate(() => { (window as typeof window & { __samePage?: boolean }).__samePage = true; });
   const entries = await historyLength(page);
 
+  const moves = await watchScreenMoves(page);
   expect(await openAppLinkForTest(page, `${new URL(page.url()).origin}/app?channel=channel-ops`)).toBe(true);
   await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
   await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
   expect(await page.evaluate(() => (window as typeof window & { __samePage?: boolean }).__samePage)).toBe(true);
+  // Over the channel list it slides in as a tapped row does, and only the lists move.
+  expect(await moves()).toContain("list:forward");
+  expect(await moves()).not.toContain("view-transition");
 
   // UIKit is already sliding a snapshot of the conversation away. Its Back
   // must commit the parent before answering, without a second Web animation
@@ -394,6 +432,77 @@ test("a swipe that catches the conversation springing back carries on from where
   expect(await screenLayout(page)).toEqual(before);
 });
 
+test("a part of the push cancelled by its own component does not leave the change set up", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  await page.evaluate(() => {
+    // The composer box restarts its own animations when its completion panel opens.
+    document.addEventListener("click", () => requestAnimationFrame(() => {
+      for (const part of document.querySelectorAll(".app-composer-shell > *")) {
+        for (const animation of part.getAnimations()) animation.cancel();
+      }
+    }), { capture: true, once: true });
+  });
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await screenChangeLanded(page);
+  // The next change still runs: Back slides the lists.
+  const moves = await watchScreenMoves(page);
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+  expect(await moves()).toContain("list:back");
+  await screenChangeLanded(page);
+});
+
+test("a connected conversation push builds its landing on the quiet frame and never pauses it", async ({ page }) => {
+  let initialFocusSent = false;
+  await routeHumanSocket(page, (frame, reply) => {
+    if (frame.type !== "user_focus_channel") return;
+    initialFocusSent = true;
+    if (frame.channelId) reply({ type: "channel_history", channelId: frame.channelId,
+      requestId: frame.requestId, messages: [], hasMore: false });
+  });
+  await installNativeBridge(page, "ios");
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  // The connected path stamps the history accept refs before navigation.
+  // Witness the focus sent by human_connected before tapping the row.
+  await expect.poll(() => initialFocusSent).toBe(true);
+  await page.evaluate(() => {
+    const probe = { paused: 0, landings: 0, positions: [] as number[] };
+    let frames = 0;
+    const sample = () => {
+      const timeline = document.querySelector(".app-message-timeline");
+      if (timeline) probe.positions.push(timeline.getBoundingClientRect().left);
+      if (frames++ < 90) requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+    (window as typeof window & { __pushProbe?: typeof probe }).__pushProbe = probe;
+    const pause = Animation.prototype.pause;
+    Animation.prototype.pause = function (this: Animation) {
+      // The drag's track is paused by design; a landing is a timed one.
+      if (document.querySelector("[data-list-transition=forward]") && this.effect?.getTiming().fill === "forwards") probe.paused += 1;
+      return pause.call(this);
+    };
+    const animate = Element.prototype.animate;
+    Element.prototype.animate = function (this: Element, ...args: Parameters<Element["animate"]>) {
+      const options = args[1];
+      if (document.querySelector("[data-list-transition=forward]") && typeof options === "object" && options?.easing === "linear"
+        && options.fill === "forwards") probe.landings += 1;
+      return animate.apply(this, args);
+    };
+  });
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await screenChangeLanded(page);
+  const probe = await page.evaluate(() => (window as typeof window & { __pushProbe?: { paused: number; landings: number; positions: number[] } }).__pushProbe!);
+  // Only the drag track is paused; timed landings play when they are built.
+  expect(probe).toMatchObject({ paused: 0 });
+  expect(probe.landings).toBeGreaterThan(0);
+  expect(probe.positions.some((left) => left > 0 && left < 390), "the connected push crosses the viewport").toBe(true);
+  expect(await screenLayout(page)).toMatchObject({ timeline: 0 });
+});
+
 test("the page leaves an edge swipe to the app while a layer is open over the conversation", async ({ page }) => {
   await installNativeBridge(page, "ios");
   await openGeneralChannel(page);
@@ -402,7 +511,7 @@ test("the page leaves an edge swipe to the app while a layer is open over the co
   await expect(details).toBeVisible();
 });
 
-test("switching dock tabs moves the bar with the page", async ({ page }) => {
+test("a tab not shown yet renders first, then the page and its bar slide to it", async ({ page }) => {
   await openGeneralChannelList(page);
   await expect(generalChannelRow(page)).toBeVisible();
   const moving = await page.evaluate(async () => {
@@ -414,11 +523,87 @@ test("switching dock tabs moves the bar with the page", async ({ page }) => {
     for (let frame = 0; frame < 60 && slot() === channels; frame++) await new Promise(requestAnimationFrame);
     const bar = document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-outgoing)");
     const leaving = document.querySelector(".app-dock-tab-slide-outgoing");
-    return { bar: bar?.getAnimations().length ?? 0, leaving: leaving?.getAnimations().length ?? 0 };
+    return {
+      track: track?.getAnimations().length ?? 0,
+      bar: bar?.getAnimations().length ?? 0,
+      leaving: leaving?.getAnimations().length ?? 0,
+    };
   });
+  // The track slides by an animation started once the new screen is painted, not a CSS transition.
+  expect(moving.track).toBeGreaterThan(0);
   expect(moving.bar).toBeGreaterThan(0);
   expect(moving.leaving).toBeGreaterThan(0);
   await expect(page.locator(".app-dock-tab-slide-outgoing")).toHaveCount(0);
+});
+
+test("a tab already shown slides there at once and renders once it lands", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  const dock = page.getByRole("navigation", { name: "Primary" });
+  // Status's screen goes on the track the first time it is shown.
+  await dock.getByRole("button", { name: "Status" }).click();
+  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+  await screenChangeLanded(page);
+  await dock.getByRole("button", { name: "Channels" }).click();
+  await expect(generalChannelRow(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() =>
+    document.querySelector(".app-mobile-dock-track")?.getAnimations().length ?? -1)).toBe(0);
+
+  const atTap = await page.evaluate(() => {
+    const track = document.querySelector<HTMLElement>(".app-mobile-dock-track")!;
+    const slot = track.style.getPropertyValue("--app-mobile-dock-slot");
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Status"]')?.click();
+    return {
+      // Moving in the same task as the tap, before anything renders.
+      track: track.getAnimations().length,
+      slotBefore: slot,
+      slotNow: track.style.getPropertyValue("--app-mobile-dock-slot"),
+      copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+      bars: document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-incoming)")?.getAnimations().length ?? 0,
+    };
+  });
+  expect(atTap.track).toBeGreaterThan(0);
+  expect(atTap.slotNow).toBe(atTap.slotBefore);
+  expect(atTap.copies).toBe(1);
+  expect(atTap.bars).toBeGreaterThan(0);
+  // The dock marks where the page is going from the start.
+  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+
+  // Once it lands the shell is on Status, and nothing is left moving or copied.
+  await expect(page).toHaveURL(/\/status$/);
+  await expect.poll(() => page.evaluate(() => {
+    const track = document.querySelector<HTMLElement>(".app-mobile-dock-track")!;
+    return {
+      slot: track.style.getPropertyValue("--app-mobile-dock-slot"),
+      track: track.getAnimations().length,
+      copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+    };
+  })).toEqual({ slot: "2", track: 0, copies: 0 });
+});
+
+test("a second tap while the page slides takes it on from where it is to the newer tab", async ({ page }) => {
+  await openGeneralChannelList(page);
+  await expect(generalChannelRow(page)).toBeVisible();
+  const dock = page.getByRole("navigation", { name: "Primary" });
+  for (const name of ["Status", "More", "Channels"]) {
+    await dock.getByRole("button", { name }).click();
+    await expect(dock.getByRole("button", { name })).toHaveAttribute("aria-current", "page");
+    await screenChangeLanded(page);
+    await expect.poll(() => page.evaluate(() =>
+      document.querySelector(".app-mobile-dock-track")?.getAnimations().length ?? -1)).toBe(0);
+  }
+  await page.evaluate(async () => {
+    const tap = (name: string) => document.querySelector<HTMLButtonElement>(`nav[aria-label="Primary"] button[aria-label="${name}"]`)?.click();
+    tap("Status");
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    tap("More");
+  });
+  await expect(page).toHaveURL(/\/more$/);
+  await expect.poll(() => page.evaluate(() => ({
+    slot: document.querySelector<HTMLElement>(".app-mobile-dock-track")?.style.getPropertyValue("--app-mobile-dock-slot"),
+    copies: document.querySelectorAll(".app-dock-tab-slide-incoming").length,
+  }))).toEqual({ slot: "3", copies: 0 });
+  await expect(dock.getByRole("button", { name: "More" })).toHaveAttribute("aria-current", "page");
 });
 
 test("a conversation opened from a notification goes back to the channel list, not the conversation before it", async ({ page }) => {
@@ -441,6 +626,27 @@ test("a conversation opened from a notification goes back to the channel list, n
   await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
   await page.getByRole("button", { name: "Back to channels" }).tap();
   await expectChannelListVisible(page);
+});
+
+test("a notification tapped in a conversation replaces it in place, and Back goes to the channel list", async ({ page }) => {
+  await openIOSChannelListWithOps(page);
+  await generalChannelRow(page).tap();
+  await expect(page).toHaveURL(/\/channels\/general--channel-general$/);
+  await expect(page.locator("[data-list-transition]")).toHaveCount(0);
+  const entries = await historyLength(page);
+
+  // One conversation to another had the whole page slide in over the last, a stack.
+  const moves = await watchScreenMoves(page);
+  expect(await openAppLinkForTest(page, `${new URL(page.url()).origin}/app?channel=channel-ops`)).toBe(true);
+  await expect(page).toHaveURL(/\/channels\/ops--channel-ops$/);
+  await expect(page.getByRole("button", { name: "Back to channels" })).toBeVisible();
+  expect(await moves()).toEqual([]);
+
+  // Back goes to the list, not to the conversation that was open before.
+  await page.getByRole("button", { name: "Back to channels" }).tap();
+  await expectChannelListVisible(page);
+  expect(await moves()).not.toContain("view-transition");
+  expect(await historyLength(page)).toBe(entries);
 });
 
 test("back from a conversation shows the channel list that was already painted", async ({ page }) => {

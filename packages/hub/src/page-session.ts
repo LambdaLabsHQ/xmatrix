@@ -14,6 +14,7 @@ import { absolutePositionToRelativePosition, updateYFragment, yXmlFragmentToPros
 import * as awarenessProtocol from "y-protocols/awareness";
 import * as syncProtocol from "y-protocols/sync";
 import * as Y from "yjs";
+import { nornProgramProblems } from "./norn-host";
 import { PageCoWriter, type PageCoWriterHost, type PageCoWriterPerson } from "./page-co-writer";
 import type { PageCoWriteObservation } from "./page-co-write-timing";
 import { finishStoredTyping, type PageStoredTypingState } from "./page-stored-typing";
@@ -32,6 +33,12 @@ import { PageOutputReceipts, type PageOutputWrite, type PageOutputReceipt,
  */
 
 export { PAGE_DOCUMENT_FRAGMENT };
+/**
+ * What an edit answers for each task line still written as a schedule (`🔁`, `⏳`): released CLIs hint that
+ * syntax and print these problems after `xmatrix page edit`, so whoever wrote the line learns it runs nothing.
+ */
+const SCHEDULE_LINE_PROBLEM = "Schedule lines no longer run. Write this as a program: a code block tagged "
+  + "`norn run <name>` (https://xmatrix.sh/docs/programs)";
 /** Where sessions before the document kept plain markdown; read once to convert them. */
 const LEGACY_MARKDOWN_TEXT = "markdown";
 
@@ -106,7 +113,7 @@ export interface PageSessionPorts {
   observeCoWriting?(principal: PageSessionPrincipal, event: PageCoWriteObservation): void;
   loadHead(principal: PageSessionPrincipal): Promise<PageHead>;
   loadRevision(principal: PageSessionPrincipal, revision: number): Promise<string>;
-  /** Commits a revision; returns the committed revision, the page head, and the Automations it moved. */
+  /** Commits a revision; returns the committed revision and the page head. */
   commit(principal: PageSessionPrincipal, input: PageCommitInput): Promise<PageSessionCommit>;
   persist(state: PageSessionState): Promise<void>;
   send(connectionId: string, data: Uint8Array): void;
@@ -882,8 +889,8 @@ export class PageSession {
       this.ports.broadcast(encodeNotice({ type: "committed", revision: result.revision,
         headRevision: result.headRevision, author: principal.label }));
       return { ...result, removedSections: pageRemovedSections(current, target),
-        scheduleProblems: pageSchedules(target).flatMap((line) => line.error
-          ? [{ source: line.source, problem: line.error }] : []) } as PageEditResult;
+        scheduleProblems: [...pageSchedules(target).flatMap((line) => line.status === "done"
+          ? [] : [{ source: line.source, problem: SCHEDULE_LINE_PROBLEM }]), ...nornProgramProblems(target)] } as PageEditResult;
     });
   }
 

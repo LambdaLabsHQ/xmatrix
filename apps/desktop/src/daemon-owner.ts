@@ -1,5 +1,6 @@
 export type ExistingDaemonProcess = {
-  pid: number;
+  /** Unknown when only the daemon's held lock says it runs (Windows). */
+  pid?: number;
   command: string;
   source: "lock" | "process-scan";
 };
@@ -40,10 +41,10 @@ export function commandLooksLikeXmatrixDaemon(command: string) {
 export function parsePsDaemonProcesses(
   stdout: string,
   currentPid: number
-): ExistingDaemonProcess[] {
+): (ExistingDaemonProcess & { pid: number })[] {
   return stdout
     .split(/\r?\n/)
-    .map((line): ExistingDaemonProcess | null => {
+    .map((line): (ExistingDaemonProcess & { pid: number }) | null => {
       const match = line.trimStart().match(/^(\d+)\s+(.+)$/);
       if (!match) return null;
 
@@ -54,6 +55,22 @@ export function parsePsDaemonProcesses(
 
       return { pid, command, source: "process-scan" as const };
     })
-    .filter((item): item is ExistingDaemonProcess => Boolean(item))
+    .filter((item): item is ExistingDaemonProcess & { pid: number } => Boolean(item))
     .sort((left, right) => left.pid - right.pid);
+}
+
+/**
+ * Whether a running daemon holds `daemon.lock`. The daemon takes it
+ * exclusively for its whole life; on Windows that lock also refuses other
+ * processes' reads (ERROR_LOCK_VIOLATION, which Node reports as EBUSY), so a
+ * refused read is the daemon itself saying it runs. Elsewhere the lock is
+ * advisory and the file reads normally, so this says nothing there.
+ */
+export function daemonLockReadRefused(read: () => unknown): boolean {
+  try {
+    read();
+    return false;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "EBUSY";
+  }
 }

@@ -3,7 +3,8 @@ import test from "node:test";
 import { isLaunchHintRejection, launchRefusal, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
   harnessSignedOutNoticeOf, HARNESS_SIGNED_OUT_NOTICE_KIND, daemonOfflineRefusal, machineOfflineNoticeOf,
-  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, parseMachineAgents, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
+  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, parseMachineAgents, parseQuotaExhausted,
+  REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
 
 test("every registered summon rejection has a public, bounded explanation", () => {
   for (const code of REGISTRATION_PREPARATION_REJECTION_CODES) {
@@ -17,8 +18,8 @@ test("every registered summon rejection has a public, bounded explanation", () =
   assert.doesNotMatch(preparationRejectionMessage("registration_daemon_offline"), /workspace|registered environment/i);
 });
 
-test("only readings and machine-naming prompts are launch hints; failures are not", () => {
-  for (const code of ["summon_intent_reference", "summon_intent_explanation", "summon_intent_example",
+test("only mention-only outcomes and machine-naming prompts are launch hints; failures are not", () => {
+  for (const code of ["launch_not_requested", "summon_intent_reference", "summon_intent_explanation", "summon_intent_example",
     "registration_machine_not_auto_assigned", "registration_machine_ambiguous"]) {
     assert.equal(isLaunchHintRejection(code), true, code);
   }
@@ -44,7 +45,8 @@ test("a named offline machine is not reported as a missing registration", () => 
 test("an offline refusal names its machines and how to bring one back", () => {
   const blocked = [{ machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
     { machineId: "laptop-id", machineName: "Laptop", reason: "daemon_offline" },
-    { machineId: "mac-id", reason: "harness_signed_out", signedOut: { harness: "codex", program: "Codex", machineId: "mac-id" } }];
+    { machineId: "mac-id", reason: "harness_outdated",
+      tooOld: { program: "Codex", version: "0.1.0", minimumVersion: "0.2.0" } }];
   // Each offline machine once; a machine blocked for another reason is not offline.
   assert.deepEqual(daemonOfflineRefusal(blocked), { code: "registration_daemon_offline",
     offline: [{ machineId: "laptop-id", machineName: "Laptop" }] });
@@ -80,6 +82,17 @@ test("a named machine that does not run the Agent says what it does run", () => 
   assert.equal(parseMachineAgents({ machineName: "Laptop", harnesses: Array.from({ length: 65 }, () => "codex") }), undefined);
 });
 
+test("a named model whose own quota is used up says until when", () => {
+  const detail = { model: "Fable 5.2", resetsAt: "2026-11-19T08:00:00.000Z" };
+  assert.equal(preparationRejectionMessage("registration_quota_exhausted", detail),
+    "The provider quota for Fable 5.2 is used up until 2026-11-19 08:00 UTC. Choose another model or Agent, " +
+    "or wait for the reset and send your message again. No launch was allocated.");
+  // Without a stored detail the code alone stands; a detail is read back only whole.
+  assert.match(preparationRejectionMessage("registration_quota_exhausted"), /provider account quota/);
+  assert.equal(parseQuotaExhausted({ model: "Fable 5.2", resetsAt: "soon" }), undefined);
+  assert.equal(parseQuotaExhausted({ resetsAt: detail.resetsAt }), undefined);
+});
+
 test("a launch only a too-old harness could take names the program, its version and the update", () => {
   const tooOld = { program: "Cursor CLI", version: "2025.09.12-4852336", minimumVersion: "2026.01.01",
     machineName: "Laptop", update: "cursor-agent update" };
@@ -104,28 +117,17 @@ test("a launch only a too-old harness could take names the program, its version 
   assert.equal(preparationRejectionMessage("registration_daemon_offline", tooOld), preparationRejectionMessage("registration_daemon_offline"));
 });
 
-test("a launch only a signed-out harness could take names the program and machine to sign in", () => {
+test("a signed-out notice names the program and machine to sign in, and the summon to send again", () => {
   const signedOut = { harness: "codex", program: "Codex", machineId: "mac-id", machineName: "mac-mini" };
-  const blocked = [{ machineId: "mac-id", machineName: "mac-mini", reason: "harness_signed_out", signedOut }];
-  assert.deepEqual(launchRefusal("registration_not_found", undefined, blocked),
-    { code: "registration_harness_signed_out", signedOut });
-  assert.equal(launchRefusal("registration_machine_unavailable", "mac-mini", blocked).code, "registration_harness_signed_out");
-  // Another machine being signed out says nothing about the one named.
-  assert.deepEqual(launchRefusal("registration_machine_unavailable", "Other", blocked), { code: "registration_machine_unavailable" });
-  // Too old is the cause first: signing in would not make it answer.
-  const tooOld = { program: "Codex", version: "0.1.0", minimumVersion: "0.2.0" };
-  assert.equal(launchRefusal("registration_not_found", undefined,
-    [...blocked, { machineId: "pc", reason: "harness_outdated", tooOld }]).code, "registration_harness_outdated");
-
-  assert.equal(preparationRejectionMessage("registration_harness_signed_out", signedOut),
-    "Codex on mac-mini is not signed in, so it can't take work. Sign it in from here, then the message goes to it. No launch was allocated.");
+  // No launch is refused for it beforehand: only the program says so, when given work.
+  assert.equal(preparationRejectionMessage("registration_harness_signed_out", signedOut), undefined);
   assert.equal(parseHarnessSignedOut({ ...signedOut, harness: "Codex X" }), undefined);
   assert.equal(parseHarnessSignedOut({ ...signedOut, machineName: "a\nb" }), undefined);
   assert.deepEqual(parseHarnessSignedOut(signedOut), signedOut);
 
   const notice = { kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut, sourceMention: "@auto", sourceMessageId: "m-1" };
   assert.deepEqual(harnessSignedOutNoticeOf(notice), { signedOut, summon: { sourceMention: "@auto", sourceMessageId: "m-1" } });
-  // A turn failure answers no summon: only the sign-in.
+  // A later turn answers no summon: only the sign-in.
   assert.deepEqual(harnessSignedOutNoticeOf({ kind: HARNESS_SIGNED_OUT_NOTICE_KIND, signedOut }), { signedOut });
   assert.deepEqual(harnessSignedOutNoticeOf({ ...notice, sourceMention: "auto" }), { signedOut });
   assert.equal(harnessSignedOutNoticeOf({ ...notice, signedOut: { ...signedOut, program: "" } }), null);
@@ -157,16 +159,3 @@ test("answer failures name the actual request key without a fixed parameter list
   assert.equal(parseDecisionAnswerFailure({ questionKey: "browserMode", issue: "private error" }), undefined);
 });
 
-
-test("draft readings bind the exact UTF-16 range and reject stale or ambiguous input", async () => {
-  const { parseDraftSummonIntents } = await import("../dist/index.js");
-  const body = "🌍 @codex asks @codex";
-  const first = { start: 3, end: 9, mention: "@codex", choice: "summon" };
-  const second = { start: 15, end: 21, mention: "@codex", choice: "reference" };
-  assert.deepEqual(parseDraftSummonIntents([first, second], body), [first, second]);
-  assert.equal(parseDraftSummonIntents(undefined, body), undefined);
-  for (const value of [null, {}, [first, first], [{ ...first, start: 2 }], [{ ...first, end: 10 }],
-    [{ ...first, choice: "invalid" }], [{ ...first, extra: true }], [{ ...first, start: -1 }],
-    [{ ...first, start: 3.5 }], Array(17).fill(first)]) assert.throws(() => parseDraftSummonIntents(value, body));
-  assert.throws(() => parseDraftSummonIntents([first], "changed body"));
-});

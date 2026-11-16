@@ -5,6 +5,8 @@ import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { InstallationOutcome, SignInElsewhere } from "./installation-consent";
+import { buttonVariants } from "@/components/ui/button";
+import { getDesktopBridge } from "@/lib/desktop/bridge";
 
 const CALLBACK_KEYS = ["state", "code", "configurationId", "teamId", "next"] as const;
 type CallbackParams = Partial<Record<(typeof CALLBACK_KEYS)[number], string>>;
@@ -19,6 +21,8 @@ export function OAuthConnectCompletion() {
   const params = useRef<CallbackParams | null>(null);
   const started = useRef(false);
   const [error, setError] = useState("");
+  /* Set when the desktop app started this connect and this page is the browser: the grant goes back to the app. */
+  const [appLink, setAppLink] = useState("");
 
   useEffect(() => {
     if (params.current) return;
@@ -32,6 +36,12 @@ export function OAuthConnectCompletion() {
       if (values.length === 1) read[key] = values[0];
     }
     if (!read.state) { setError("This connect request is missing or invalid. Start again from Apps."); return; }
+    if (query.get("via") === "desktop" && !getDesktopBridge()) {
+      const link = `xmatrix://connect/oauth?${new URLSearchParams(read as Record<string, string>).toString()}`;
+      setAppLink(link);
+      window.location.assign(link);
+      return;
+    }
     params.current = read;
   }, []);
 
@@ -51,9 +61,12 @@ export function OAuthConnectCompletion() {
 
   return <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-5 px-6 py-12">
     <h1 className="text-2xl font-semibold">Connect an app</h1>
-    {error ? null : loading || session ? <p className="text-sm text-muted-foreground">Finishing the connection…</p> : <SignInElsewhere>
+    {appLink ? <>
+      <p className="text-sm text-muted-foreground">Signed in. The xMatrix app finishes the connection; you can close this tab.</p>
+      <a className={buttonVariants({ variant: "default" })} href={appLink}>Open xMatrix</a>
+    </> : error ? null : loading || session ? <p className="text-sm text-muted-foreground">Finishing the connection…</p> : <SignInElsewhere>
       Sign in in a separate tab as the Space admin who started this connect, then return here.
     </SignInElsewhere>}
-    <InstallationOutcome error={error} href="/app" />
+    {appLink ? null : <InstallationOutcome error={error} href="/app" />}
   </main>;
 }

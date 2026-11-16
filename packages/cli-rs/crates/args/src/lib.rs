@@ -753,6 +753,51 @@ mod tests {
     }
 
     #[test]
+    fn request_settings_names_addresses_and_may_wait() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "request",
+            "settings",
+            "connector:appstoreconnect/webSession",
+            "connector:appstoreconnect/vendorNumber",
+            "--reason",
+            "sales report",
+            "--propose",
+            "connector:appstoreconnect/vendorNumber=87654321",
+            "--wait",
+        ])
+        .expect("request settings should parse");
+        let Some(Commands::Request {
+            command:
+                RequestCommand::Settings {
+                    settings,
+                    reason,
+                    propose,
+                    wait,
+                    json,
+                },
+        }) = cli.command
+        else {
+            panic!("expected request settings command");
+        };
+        assert_eq!(
+            settings,
+            vec![
+                "connector:appstoreconnect/webSession".to_string(),
+                "connector:appstoreconnect/vendorNumber".to_string()
+            ]
+        );
+        assert_eq!(reason.as_deref(), Some("sales report"));
+        assert_eq!(
+            propose,
+            vec!["connector:appstoreconnect/vendorNumber=87654321".to_string()]
+        );
+        assert!(wait);
+        assert!(!json);
+        assert!(Cli::try_parse_from(["xmatrix", "request", "settings"]).is_err());
+    }
+
+    #[test]
     fn request_secrets_parses_json_flag() {
         let cli = Cli::try_parse_from(["xmatrix", "request", "secrets", "--json"])
             .expect("request secrets should parse");
@@ -1419,6 +1464,33 @@ pub enum RequestCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Ask, on a card in this Channel, for settings only a person can make
+    ///
+    /// Name each setting by address: `connector:<app>/<field>` for a sign-in or
+    /// credential (`connector:appstoreconnect/webSession`),
+    /// `connector:<app>/connect` to connect the App again, `secret:<alias>`,
+    /// `secret-access:<alias>`, or `harness:<machine>/<harness>/sign-in`. The
+    /// person who may make it does so on the card; a value goes where the
+    /// setting lives, never into chat. xMatrix answers the card, which wakes
+    /// this Agent, once every setting is in; `--wait` also returns then. The
+    /// Hub's `xmatrix settings ask` does the same without waiting.
+    Settings {
+        /// Setting addresses, for example `connector:appstoreconnect/webSession`.
+        #[arg(required = true, num_args = 1..)]
+        settings: Vec<String>,
+        /// Why this Agent needs them, shown on the card.
+        #[arg(long)]
+        reason: Option<String>,
+        /// Suggest a value for a plain setting (not a secret), which a person confirms: `<address>=<value>`.
+        #[arg(long = "propose", value_name = "ADDRESS=VALUE")]
+        propose: Vec<String>,
+        /// Wait until every setting is in (up to 30 minutes).
+        #[arg(long)]
+        wait: bool,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
     /// Ask a Space admin, on a card in this Channel, to let Agents read secrets without asking
     ///
     /// The card lists the named secrets that still ask first; a Space admin
@@ -1450,7 +1522,8 @@ pub enum SecretCommand {
         json: bool,
     },
     /// Save a secret in a Space (Space admins). Inside an Agent Run, without
-    /// --space: save a credential it holds into its Space.
+    /// --space: save a credential it holds into its Space, or with only
+    /// `--access ask` make a saved secret ask first (its owner is a Space admin).
     Set {
         /// Secret alias.
         secret_ref: String,
@@ -1556,6 +1629,22 @@ pub enum AgentCommand {
         /// on this machine first when it is not one yet.
         #[arg(long)]
         workspace: Option<PathBuf>,
+        /// Confirm, as this machine's owner, what the Agent may do on it:
+        /// `full` starts the harness with what xMatrix adds so it works without
+        /// asking, which the command prints first; `ask` adds none of it and
+        /// asks in the Channel each time the harness wants permission. Asked
+        /// at a terminal when omitted
+        #[arg(long, value_parser = ["full", "ask"])]
+        access: Option<String>,
+    },
+    /// Show what a harness's Agents may do on this machine, or change it:
+    /// `full` or `ask`. Its owner only; it applies to its next Runs in every Space
+    Access {
+        /// Harness id, for example codex or claude
+        harness: String,
+        /// The mode to change to. Omit to show the current one
+        #[arg(value_parser = ["full", "ask"])]
+        mode: Option<String>,
     },
     /// Show one Agent's Space configuration and access
     Show {
@@ -2029,7 +2118,7 @@ pub enum PageCommand {
         /// New markdown
         #[arg(long = "message", short = 'm')]
         body: Option<String>,
-        /// Read markdown from a file
+        /// Read markdown from a file: the page's text, or all of what `xmatrix page read` printed (its header is left out)
         #[arg(long, short = 'f')]
         file: Option<PathBuf>,
         /// Read markdown from stdin
@@ -2168,72 +2257,6 @@ pub enum PageCommand {
     Migration {
         #[command(subcommand)]
         command: PageMigrationCommand,
-    },
-    /// A page's schedules: lines of its text, written as Obsidian Tasks writes a recurring or scheduled task
-    ///
-    /// `- [ ] <what to do> 🔁 every 12 hours[, on merged:owner/repo@main]` runs on a cadence;
-    /// `- [ ] <what to do> ⏳ 2026-11-03 09:00 +08:00` runs once, as a reminder that waits on its author.
-    /// `[-]` pauses one and `[x]` marks one done. Write and change them with `page edit` in the section
-    /// they keep true; each runs as whoever last changed its line (an Agent as its owner), in a fresh
-    /// conversation. Use `@auto repo:<owner/repo>` in what to do to address an Agent each time.
-    /// Any other live Agents receive context only. Without an Agent mention an occurrence only posts its text.
-    #[command(alias = "automations")]
-    Automation {
-        #[command(subcommand)]
-        command: PageAutomationCommand,
-    },
-}
-
-#[derive(Subcommand)]
-pub enum PageAutomationCommand {
-    /// List a page's schedules with their section, state and line
-    #[command(alias = "ls")]
-    List {
-        /// Page ID
-        page: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Pause a schedule: its line becomes `- [-]`
-    Pause {
-        /// Page ID
-        page: String,
-        /// Automation ID (from `xmatrix page automation list`)
-        automation: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Resume a paused schedule: its line becomes `- [ ]`
-    Resume {
-        /// Page ID
-        page: String,
-        /// Automation ID
-        automation: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Run a running schedule once now; its cadence stays
-    Run {
-        /// Page ID
-        page: String,
-        /// Automation ID
-        automation: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
-    },
-    /// Delete a schedule by taking its line out of the page
-    Delete {
-        /// Page ID
-        page: String,
-        /// Automation ID
-        automation: String,
-        /// Space ID (defaults to this Run's conversation's Space)
-        #[arg(long)]
-        space: Option<String>,
     },
 }
 
@@ -2382,6 +2405,33 @@ mod invocation_diagnostic_args_tests {
         );
     }
     #[test]
+    fn send_reads_its_body_from_a_file_and_attaches_with_attachment() {
+        let cli = Cli::try_parse_from([
+            "xmatrix",
+            "send",
+            "channel",
+            "--file",
+            "reply.md",
+            "--attachment",
+            "a.png",
+            "--attachment",
+            "b.pdf",
+        ])
+        .expect("send should parse a body file and attachments");
+        let Some(Commands::Send(SendArgs {
+            file, attachments, ..
+        })) = cli.command
+        else {
+            panic!("expected send command");
+        };
+        assert_eq!(file, Some(PathBuf::from("reply.md")));
+        assert_eq!(
+            attachments,
+            [PathBuf::from("a.png"), PathBuf::from("b.pdf")]
+        );
+    }
+
+    #[test]
     fn send_recovery_cannot_change_the_saved_operation() {
         for prefix in [
             vec!["xmatrix", "send", "channel"],
@@ -2401,6 +2451,7 @@ mod invocation_diagnostic_args_tests {
             for extra in [
                 vec!["new body"],
                 vec!["--file", "new.txt"],
+                vec!["--attachment", "new.png"],
                 vec!["--stdin"],
                 vec!["--escape-newlines"],
                 vec!["--message-id", "different"],
@@ -2466,6 +2517,7 @@ mod registration_argument_tests {
                     runtime: None,
                     args,
                     workspace,
+                    access: None,
                 },
         }) = cli.command
         else {
@@ -2535,15 +2587,21 @@ pub struct SendArgs {
     /// Declare that you are waiting on the people and Agents this message mentions. It stays with them until they answer.
     #[arg(long)]
     pub wait: bool,
+    /// Start the Agents this message summons (`@<agent>`, `@auto`, `@repo:…`). Without it an Agent address requires an Instance number.
+    #[arg(long)]
+    pub launch: bool,
     /// Recover a saved send by checking its receipt before retrying the same message
-    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "files", "stdin", "escape_newlines", "message"])]
+    #[arg(long, conflicts_with_all = ["message_id", "final_for", "reply_to", "wait", "launch", "attachments", "stdin", "file", "escape_newlines", "message"])]
     pub recover: Option<String>,
-    /// File attachment path. Repeat for multiple files.
-    #[arg(long = "file")]
-    pub files: Vec<PathBuf>,
+    /// Attach this file to the message, beside its body. Repeat for multiple files.
+    #[arg(long = "attachment", value_name = "PATH")]
+    pub attachments: Vec<PathBuf>,
     /// Read the full message body from stdin. Use this for multi-line Markdown.
     #[arg(long)]
     pub stdin: bool,
+    /// Read the full message body from this UTF-8 file, as `xmatrix page edit --file` reads a page. It does not attach the file.
+    #[arg(long, short = 'f', value_name = "PATH")]
+    pub file: Option<PathBuf>,
     /// Decode literal \n and \r\n sequences in the message arguments into real newlines.
     #[arg(long)]
     pub escape_newlines: bool,

@@ -1,4 +1,4 @@
-import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, parsePresentedRoutingDecision, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type PresentedRoutingDecision, type SerializedAgentLaunch, type SerializedAgentStop,
+import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
   type AutoLaunchMention, type AgentControlInvocation, type AgentControlOutcomeRecord,
   parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
@@ -98,7 +98,7 @@ type StartupStep = { label: string; status: string; at?: string; began?: string;
  *  confirmed by its own evidence or by any later one, since a later checkpoint
  *  cannot happen without the earlier ones. */
 function startupView(input: {
-  lead: InvocationStep; before?: InvocationStep; startup: StartupStep[]; activity?: AgentLaunchActivity; reasoningAt?: string; reasoning: boolean;
+  lead: InvocationStep; startup: StartupStep[]; activity?: AgentLaunchActivity; reasoningAt?: string; reasoning: boolean;
   failed: boolean; stopped: boolean; failureMessage?: string; queued?: boolean; unavailable: boolean;
 }): InvocationView {
   const { activity, reasoning, unavailable } = input;
@@ -116,7 +116,7 @@ function startupView(input: {
     activity?.runStatus === "failed" || activity?.runStatus === "exited");
   const stopped = !reasoning && !failed && (input.stopped || activity?.runStatus === "stopped");
   if (pending) pending.state = failed ? "failed" : stopped ? "unknown" : "current";
-  const steps: InvocationStep[] = [...(input.before ? [input.before] : []), input.lead,
+  const steps: InvocationStep[] = [input.lead,
     ...startup,
     { label: "Reasoning started", at: input.reasoningAt, state: reasoning ? "done" : "unknown" },
   ];
@@ -149,26 +149,13 @@ function channelStartup(activity: AgentLaunchActivity | undefined, connectedAt?:
   ];
 }
 
-/** The first step of a started summon: why it was read as a request. */
-export function summonIntentNote(decision: PresentedRoutingDecision | undefined): string | undefined {
-  const intent = decision?.parameters?.intent;
-  if (!intent) return undefined;
-  if (intent.source === "author") return "launch:force";
-  if (intent.source === "draft") return "Previewed before send";
-  const probability = intent.probabilities.summon;
-  return Number.isFinite(probability) ? `xMatrix · ${Math.round(probability * 100)}%` : "xMatrix";
-}
-
 /** Selecting an environment, starting it, then the first turn. */
 export function summonView(launch: SerializedAgentLaunch, records: readonly SerializedAgentMessageExecution[] = [], unavailable = false): InvocationView {
   const activity = launch.activity;
   const execution = launchExecution(launch, records);
   const reasoningAt = startupCheckpoint(activity, "turn_running") || execution?.startedAt || launch.firstReplyAt;
   const decision = launch.routingDecision;
-  const intent = summonIntentNote(parsePresentedRoutingDecision(decision));
   return { ...startupView({
-    ...(intent ? { before: { label: intent === "launch:force" ? "Started on the author's request" : "Read as a request",
-      note: intent, at: decision?.evaluatedAt, state: "done" as const } } : {}),
     lead: { label: "Environment selected", at: decision?.evaluatedAt, state: "done" },
     startup: [
       { label: "Machine accepted", status: launch.machineReconnecting ? "Reconnecting" : launch.daemonOffline ? "Queuing" : "Dispatching",

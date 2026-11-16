@@ -15,6 +15,7 @@ function footerLinks(copy: LandingCopy) {
       { label: links.download, href: "/download" },
       { label: links.pricing, href: `${copy.home}#pricing` },
       { label: links.docs, href: "/docs" },
+      { label: links.support, href: "/support" },
       { label: "GitHub", href: REPOSITORY_URL },
       { label: "X", href: X_ACCOUNT_URL },
       { label: links.console, href: "/console" },

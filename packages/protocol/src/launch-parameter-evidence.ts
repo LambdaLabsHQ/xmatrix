@@ -26,6 +26,9 @@ export interface LaunchPlacementCandidate {
   /** When it last failed to start within the breaker window: it was ranked
    * after every environment that had not. */
   startupFailedAt?: string;
+  /** When it last ended a summon without a reply, its latest summons
+   * all having gone that way: it was ranked after every environment that had not. */
+  unansweredAt?: string;
 }
 
 /** Public decision evidence contains opaque workspace handles, never private directory catalogs. */
@@ -119,8 +122,8 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
       item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2) ||
       item.described !== undefined && typeof item.described !== "boolean" ||
-      item.startupFailedAt !== undefined && (typeof item.startupFailedAt !== "string" ||
-        item.startupFailedAt.length > 40 || !Number.isFinite(Date.parse(item.startupFailedAt))) ||
+      [item.startupFailedAt, item.unansweredAt].some(at => at !== undefined && (typeof at !== "string" ||
+        at.length > 40 || !Number.isFinite(Date.parse(at)))) ||
       item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1)) ||
       (item.responseLatencyMs !== undefined || item.responseQuality !== undefined) &&
         (!unit(item.responseLatencyMs, 0, 86_400_000) || !unit(item.responseQuality, 0, 1))) return null;
@@ -130,6 +133,7 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       ...(item.quotaPace !== undefined ? { quotaPace: item.quotaPace as number } : {}), frontier: item.frontier, utility: item.utility,
       ...(item.described !== undefined ? { described: item.described as boolean } : {}),
       ...(item.startupFailedAt !== undefined ? { startupFailedAt: item.startupFailedAt as string } : {}),
+      ...(item.unansweredAt !== undefined ? { unansweredAt: item.unansweredAt as string } : {}),
       ...(network ? { network, networkQuality: item.networkQuality as number } : {}),
       ...(item.responseLatencyMs !== undefined ? { responseLatencyMs: item.responseLatencyMs as number,
         responseQuality: item.responseQuality as number } : {}) });
@@ -148,8 +152,10 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       !row.selections || typeof row.selections !== "object" || Array.isArray(row.selections) ||
       !Array.isArray(row.choices) || row.choices.length < 1 || row.choices.length > 3) return undefined;
   const selected = row.selections as Record<string, unknown>;
-  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11"]
-    .includes(row.rubricVersion) && selected.model === undefined;
+  // From v12 a model choice may keep the runtime's default, so it selects no model.
+  const keepsDefault = row.rubricVersion === "registration-parameters-v12";
+  const skipsModel = ["registration-parameters-v9", "registration-parameters-v10", "registration-parameters-v11",
+    "registration-parameters-v12"].includes(row.rubricVersion) && selected.model === undefined;
   if ((!skipsModel && !text(selected.model, 160)) ||
       selected.effort !== undefined && !text(selected.effort, 80) ||
       !["repo", "local-path", "managed"].includes(String(selected.workspaceKind)) ||
@@ -163,12 +169,13 @@ export function parseLaunchParameterEvidence(value: unknown): LaunchParameterEvi
       : key === "workspace" ? /^workspace_\d{1,3}$/u : /^placement_(?:any|stationary)$/u, choice);
     if (!parsed) return undefined;
     // The only option is certain by itself, not by anyone's reading.
-    if (only !== undefined && (only !== true || row.rubricVersion !== "registration-parameters-v11" ||
+    if (only !== undefined && (only !== true || !["registration-parameters-v11", "registration-parameters-v12"].includes(String(row.rubricVersion)) ||
         Object.keys(parsed).length !== 1 || parsed[choice as string] !== 1)) return undefined;
     choices.push({ key: key as LaunchParameterEvidence["choices"][number]["key"], selected: choice as string, probabilities: parsed,
       ...(only ? { only: true as const } : {}) });
   }
-  if (choices.some(item => item.key === "modelEffort") === skipsModel || !choices.some(item => item.key === "workspace")) return undefined;
+  const modelChosen = choices.some(item => item.key === "modelEffort");
+  if ((keepsDefault ? !skipsModel && !modelChosen : modelChosen === skipsModel) || !choices.some(item => item.key === "workspace")) return undefined;
   const harness = stage(row.harness, HARNESS);
   const environment = stage(row.environment, /^candidate_\d{1,3}$/u);
   if (harness === null || environment === null) return undefined;

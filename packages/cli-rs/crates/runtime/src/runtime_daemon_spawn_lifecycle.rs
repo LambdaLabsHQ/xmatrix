@@ -85,6 +85,11 @@ fn resolve_registration_spawn(
             CliError::Launch("Registered launch is missing the Hub's preset for its harness".into())
         })?;
     let mut resolved = intent.clone();
+    let declared_args = if harness.backend == "acp" && intent.runtime_args.is_empty() {
+        intent.agent_acp_args.clone()
+    } else {
+        intent.runtime_args.clone()
+    };
     if resolved.runtime_args.is_empty() {
         resolved.runtime_args = harness.default_args.clone();
     }
@@ -99,9 +104,49 @@ fn resolve_registration_spawn(
         .requested_model
         .as_ref()
         .and_then(|_| binding.runtime_model.clone());
+    // On the runtime default, a preferred model from the runtime's own catalog
+    // is requested the same way: each runtime applies it through its native
+    // model switch and refuses to start when the runtime does not accept it.
+    if intent.requested_model.is_none() && binding.runtime_model.is_none() {
+        resolved.requested_model = intent
+            .preferred_model
+            .as_deref()
+            .map(str::trim)
+            .filter(|model| {
+                !model.is_empty() && model.len() <= 160 && !model.chars().any(char::is_control)
+            })
+            .map(str::to_owned);
+    }
     if resolved.agent_acp_args.is_empty() {
         resolved.agent_acp_args = harness.acp_args.clone().unwrap_or_default();
     }
+    // The Hub's grant is the launch's access. A Hub that predates it sends
+    // none, and the launch is what it always was: the preset's full access,
+    // except that an argv the registration declared started as declared
+    // (Grok's aside, whose flag the bridge added).
+    let access = resolved.access.take().unwrap_or_else(|| {
+        let mut access = xmatrix_cli_agent::agent_preset_by_id(&harness.id)
+            .map(xmatrix_cli_agent::AgentPreset::full_access_grant)
+            .unwrap_or_else(|| xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+                mode: "full".into(),
+                ..Default::default()
+            });
+        if !declared_args.is_empty() && harness.backend != "grok-acp" {
+            access.args.retain(|arg| declared_args.contains(arg));
+        }
+        access
+    });
+    // Its args join the argv the harness starts with: the ACP argv for the
+    // generic ACP backend unless the launch declares its own.
+    if resolved.agent_backend.as_deref() == Some("acp") && resolved.runtime_args.is_empty() {
+        if !access.args.is_empty() && resolved.agent_acp_args.is_empty() && harness.acp_args.is_none() {
+            resolved.agent_acp_args = vec!["acp".to_string()];
+        }
+        resolved.agent_acp_args = access.with_args(&resolved.agent_acp_args);
+    } else {
+        resolved.runtime_args = access.with_args(&resolved.runtime_args);
+    }
+    resolved.access = Some(access);
     Ok(resolved)
 }
 
@@ -349,7 +394,12 @@ async fn handle_daemon_spawn_request(
         if reclaim_first {
             reclaim_worktree_storage_for_registry(run_registry).await;
         }
-        let layout = repo_pool::RepoPoolLayout::create(&pools_root, repo_key.clone())
+        // A session (and a handoff's predecessor) stays in the pool that holds
+        // it; a new one starts in the compact pool, never in a legacy one.
+        let pool_sessions: Vec<&str> = std::iter::once(session_key)
+            .chain(intent.handoff_source_resume_session_key.as_deref())
+            .collect();
+        let layout = repo_pool::RepoPoolLayout::for_session(&pools_root, repo_key.clone(), &pool_sessions)
             .map_err(|error| CliError::Launch(format!("repo pool layout unavailable ({error})")))?;
         // The child later receives a Space-scoped GitHub token. Issue that
         // grant now so the required origin fetch can use it; otherwise the
@@ -754,6 +804,7 @@ async fn handle_daemon_spawn_request(
             agent_backend: intent.agent_backend.as_deref(),
             agent_preset_id: intent.agent_preset_id.as_deref(),
             agent_acp_args: &intent.agent_acp_args,
+            access: intent.access.as_ref(),
             agent_name: &intent.agent_name,
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
@@ -995,7 +1046,7 @@ async fn record_daemon_spawn_result(
             let metadata = (!metadata.is_empty()).then_some(Value::Object(metadata));
             let warning_receipt = child.repo_pool_binding.as_ref()
                 .filter(|binding| binding.baseline.as_ref().is_some_and(|baseline| baseline.warn_agent))
-                .and_then(|binding| Some((binding.repo_key_id.clone(), repo_pool::LeaseRequest {
+                .and_then(|binding| Some((binding.repo_key_id.clone(), binding.slot_id.clone(), repo_pool::LeaseRequest {
                     session_key: child.resume_session_key.clone()?,
                     instance_id: child.instance_id.clone()?,
                     run_id: child.run_id.clone()?,
@@ -1017,10 +1068,15 @@ async fn record_daemon_spawn_result(
                     metadata,
                 };
             }
-            if let Some((repo_key, request)) = warning_receipt {
+            if let Some((repo_key, slot_id, request)) = warning_receipt {
                 let receipt = async {
                     let pools_root = repo_pool::default_repo_pools_root()?;
-                    let layout = repo_pool::RepoPoolLayout::from_persisted(&pools_root, &repo_key)?;
+                    let layout = repo_pool::RepoPoolLayout::from_persisted_lease(
+                        &pools_root,
+                        &repo_key,
+                        Some(&request.session_key),
+                        &slot_id,
+                    )?;
                     repo_pool::acknowledge_baseline_warning_at(&layout, &request).await
                 }.await;
                 if let Err(error) = receipt {
@@ -1997,6 +2053,37 @@ fn apply_authoritative_agent_execution_env(
     Ok(env)
 }
 
+/// Passes the launch's access grant to its wrapper and sets the grant's
+/// environment on it, which the harness it starts inherits. A grant names
+/// harness variables only: nothing of xMatrix's own, and nothing the process
+/// loader reads.
+fn apply_spawn_access(
+    mut env: BTreeMap<String, String>,
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> error::Result<BTreeMap<String, String>> {
+    let name_ok = |name: &str| {
+        !name.is_empty()
+            && name.len() <= 128
+            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            && !name.starts_with("XMATRIX_")
+            && !name.starts_with("LD_")
+            && !name.starts_with("DYLD_")
+            && name != "PATH"
+    };
+    if access.env.len() > 16
+        || access.env.iter().any(|(name, value)| {
+            !name_ok(name) || value.len() > 1024 || value.chars().any(char::is_control)
+        })
+    {
+        return Err(CliError::Launch(
+            "spawn request contains an invalid access environment".into(),
+        ));
+    }
+    env.extend(access.env.clone());
+    env.insert("XMATRIX_AGENT_ACCESS".into(), serde_json::to_string(access)?);
+    Ok(env)
+}
+
 struct HeadlessAgentSpawn<'a> {
     hub_url: &'a str,
     registration: &'a xmatrix_cli_core::agent_registration::RegistrationLaunchBinding,
@@ -2010,6 +2097,7 @@ struct HeadlessAgentSpawn<'a> {
     agent_backend: Option<&'a str>,
     agent_preset_id: Option<&'a str>,
     agent_acp_args: &'a [String],
+    access: Option<&'a xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant>,
     agent_name: &'a str,
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
@@ -2043,6 +2131,53 @@ struct HeadlessAgentSpawn<'a> {
     daemon_epoch: u64,
 }
 
+/// What a missing launcher's refusal starts with; Hub reads it as the code.
+pub(crate) const HARNESS_MISSING: &str = "harness_missing";
+
+/// A preset's own launcher must be on the PATH the Run will get before the
+/// wrapper starts: otherwise the wrapper dies on `No such file or directory`
+/// naming nothing. A custom command is the registration's own and is not
+/// judged here.
+fn harness_launcher_preflight(
+    agent_preset_id: Option<&str>,
+    runtime: &str,
+    profile_path: Option<&str>,
+) -> error::Result<()> {
+    let Some(preset) = agent_preset_id.and_then(xmatrix_cli_agent::agent_preset_by_id) else {
+        return Ok(());
+    };
+    let stem = xmatrix_cli_agent::launcher_stem(runtime);
+    let own_launcher = xmatrix_cli_agent::launcher_stem(&preset.runtime) == stem
+        || preset
+            .launcher_names
+            .iter()
+            .any(|name| xmatrix_cli_agent::launcher_stem(name) == stem);
+    if !own_launcher
+        || crate::runtime_daemon_harness_inventory::resolve_launcher_on(preset, profile_path)
+            .is_some()
+    {
+        return Ok(());
+    }
+    if let Some(path) = xmatrix_cli_agent::agent_spawn_path(profile_path) {
+        eprintln!(
+            "{HARNESS_MISSING}: {} ({runtime}) not found on {}",
+            preset.display_name,
+            path.to_string_lossy()
+        );
+    }
+    let install = preset
+        .install_hint
+        .as_deref()
+        .filter(|hint| !hint.trim().is_empty())
+        .map(|hint| format!("Install it with `{hint}`"))
+        .unwrap_or_else(|| "Install it".to_string());
+    Err(CliError::Launch(format!(
+        "{HARNESS_MISSING}: {} (`{runtime}`) is not installed where xMatrix starts Agents on this machine. \
+         {install}, or link it into ~/.local/bin, then send the message again.",
+        preset.display_name
+    )))
+}
+
 async fn spawn_headless_agent(
     spawn: HeadlessAgentSpawn<'_>,
 ) -> error::Result<SpawnedHeadlessAgent> {
@@ -2059,6 +2194,7 @@ async fn spawn_headless_agent(
         agent_backend,
         agent_preset_id,
         agent_acp_args,
+        access,
         agent_name,
         identity_id,
         role_initial_prompt,
@@ -2116,6 +2252,9 @@ async fn spawn_headless_agent(
     )?;
     local_env = apply_spawn_bootstrap_prompts(local_env, bootstrap_prompts)?;
     local_env.extend(auto_update.env);
+    if let Some(access) = access {
+        local_env = apply_spawn_access(local_env, access)?;
+    }
     local_env.insert(
         "XMATRIX_AGENT_REGISTRATION".into(),
         serde_json::to_string(&registration.key)?,
@@ -2133,6 +2272,19 @@ async fn spawn_headless_agent(
             admitted_secrets: Some(registration.resources.secrets.clone()),
         })
     });
+    if let Err(error) = harness_launcher_preflight(
+        agent_preset_id,
+        runtime,
+        local_env.get("PATH").map(String::as_str),
+    ) {
+        // Hub still believes this harness is installed here: tell it now, so
+        // the next summon is refused by name instead of failing again.
+        let relay = daemon_relay.clone();
+        tokio::spawn(async move {
+            crate::runtime_daemon_harness_inventory::report_inventory(&relay).await;
+        });
+        return Err(error);
+    }
     // An external Unix update may atomically replace the installed CLI while
     // an older daemon still owns work. Linux keeps that running image
     // executable through /proc/self/exe even when current_exe points at the
@@ -2207,6 +2359,7 @@ async fn spawn_headless_agent(
         "XMATRIX_AUTO_JOIN_CHANNEL_ID",
         "XMATRIX_ACP",
         "XMATRIX_ACP_ARGS",
+        "XMATRIX_AGENT_ACCESS",
         "XMATRIX_ACTIVE_CHANNEL_DIR",
         "XMATRIX_CHANNEL_MIRROR_DIR",
         "XMATRIX_CLAUDE_PRINT",
@@ -2531,6 +2684,10 @@ async fn spawn_headless_agent(
             if let Some(sidecar) = provisional_sidecar.as_ref() {
                 let _ = remove_daemon_run_sidecar(sidecar);
             }
+            if let Some(reason) = windows_working_directory_too_long(&err, &workspace.canonical_cwd)
+            {
+                return Err(CliError::Launch(reason));
+            }
             return Err(CliError::Launch(format!(
                 "Failed to spawn headless agent: {err}"
             )));
@@ -2647,4 +2804,111 @@ async fn reclaim_worktree_storage_for_registry(run_registry: &DaemonRunRegistry)
     run_worktree::log_gc_outcome(
         &run_worktree::reclaim_worktree_storage_if_needed(&live_cwds, &pool_liveness).await,
     );
+}
+
+/// Windows starts no program in a working directory past MAX_PATH (260),
+/// whatever LongPathsEnabled, the program's manifest or `core.longpaths` say;
+/// CreateProcess then answers only "The directory name is invalid" (267).
+/// Name the directory and its length instead.
+fn windows_working_directory_too_long(error: &std::io::Error, cwd: &str) -> Option<String> {
+    const ERROR_DIRECTORY: i32 = 267;
+    // CreateProcess needs room for a trailing separator and the terminator.
+    const MAX_WORKING_DIRECTORY_CHARS: usize = 258;
+    let chars = cwd.encode_utf16().count();
+    (cfg!(windows)
+        && error.raw_os_error() == Some(ERROR_DIRECTORY)
+        && chars > MAX_WORKING_DIRECTORY_CHARS)
+        .then(|| {
+            format!(
+                "Windows cannot start the Agent in {cwd}: the folder path is {chars} characters, and Windows starts no program in a folder longer than {MAX_WORKING_DIRECTORY_CHARS} (MAX_PATH). Register a Workspace at a shorter path."
+            )
+        })
+}
+
+#[cfg(test)]
+mod windows_working_directory_tests {
+    use super::windows_working_directory_too_long;
+
+    #[test]
+    fn a_too_long_folder_is_named_with_its_length_on_windows_only() {
+        let cwd = format!(r"C:\{}", "a".repeat(300));
+        let invalid = std::io::Error::from_raw_os_error(267);
+        let named = windows_working_directory_too_long(&invalid, &cwd);
+        if cfg!(windows) {
+            let reason = named.expect("named");
+            assert!(reason.contains("303 characters"), "{reason}");
+            assert!(reason.contains("longer than 258"), "{reason}");
+        } else {
+            assert!(named.is_none());
+        }
+        // A short folder or another error keeps the original cause.
+        assert!(windows_working_directory_too_long(&invalid, r"C:\repo").is_none());
+        let missing = std::io::Error::from_raw_os_error(2);
+        assert!(windows_working_directory_too_long(&missing, &cwd).is_none());
+    }
+}
+
+#[cfg(test)]
+mod harness_launcher_preflight_tests {
+    use super::{HARNESS_MISSING, harness_launcher_preflight};
+
+    /// A launcher name no machine running these tests has installed.
+    fn absent_preset() -> &'static xmatrix_cli_agent::AgentPreset {
+        xmatrix_cli_agent::agent_presets()
+            .iter()
+            .find(|preset| {
+                preset.install_hint.is_some()
+                    && which::which_in(
+                        &preset.runtime,
+                        xmatrix_cli_agent::agent_spawn_path(Some("")),
+                        std::env::temp_dir(),
+                    )
+                    .is_err()
+                    && xmatrix_cli_agent::native_launcher_dirs(&preset.id).is_empty()
+            })
+            .expect("a preset whose launcher is not installed here")
+    }
+
+    #[test]
+    fn a_missing_launcher_is_refused_by_name_before_the_wrapper_starts() {
+        let preset = absent_preset();
+        let root = std::env::temp_dir().join(format!("xmatrix-preflight-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let profile = root.to_string_lossy().into_owned();
+
+        let refusal = harness_launcher_preflight(Some(&preset.id), &preset.runtime, Some(&profile))
+            .expect_err("missing launcher")
+            .to_string();
+        assert!(refusal.starts_with(HARNESS_MISSING), "{refusal}");
+        assert!(refusal.contains(&preset.display_name), "{refusal}");
+        assert!(refusal.contains(preset.install_hint.as_deref().unwrap()), "{refusal}");
+
+        // The same launcher on the Run's PATH starts.
+        let suffix = if cfg!(windows) { ".cmd" } else { "" };
+        let launcher = root.join(format!("{}{suffix}", preset.runtime));
+        std::fs::write(&launcher, b"fixture").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&launcher, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        harness_launcher_preflight(Some(&preset.id), &preset.runtime, Some(&profile))
+            .expect("launcher on the Run's PATH");
+
+        // A registration's own command, or no preset, is not judged.
+        harness_launcher_preflight(Some(&preset.id), "my-wrapper-xyz", Some(&profile)).unwrap();
+        harness_launcher_preflight(None, &preset.runtime, Some("")).unwrap();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn installer_directories_are_on_every_run_path() {
+        let path = xmatrix_cli_agent::agent_spawn_path(Some("")).expect("spawn path");
+        let dirs: Vec<_> = std::env::split_paths(&path).collect();
+        for id in ["opencode", "kimi"] {
+            for dir in xmatrix_cli_agent::native_launcher_dirs(id) {
+                assert!(dirs.contains(&dir), "{id}: {}", dir.display());
+            }
+        }
+    }
 }

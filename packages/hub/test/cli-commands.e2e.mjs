@@ -1,15 +1,9 @@
 import { Client } from "pg";
 import { createAuthorityDatabase, PostgresContentRepository } from "../../db/dist/index.js";
 import { restrictedChannelContentScope } from "@xmatrix/protocol";
-import { acceptSpaceInvite, channelSpaceId, createPgSpawnableScenario, inviteToSpace, isSpawnOf, startPgHubWorker, testPostgresUrl } from "./agent-launch-postgres.fixture.mjs";
+import { acceptSpaceInvite, channelSpaceId, createPgSpawnableScenario, inviteToSpace, isSpawnOf, runHubCommand as run, startPgHubWorker, testPostgresUrl } from "./agent-launch-postgres.fixture.mjs";
 import { assert, channelHistory, mintAgentRunToken, MOCK_TOKEN, postChannelMessage, randomUUID, test } from "./agent-mention-spawn.fixture.mjs";
 
-const run = async (worker, token, argv) => {
-  const response = await worker.fetch("/api/cli/commands/run", { method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify({ argv }) });
-  assert.equal(response.status, 200, await response.clone().text());
-  return response.json();
-};
 
 test("Hub commands answer a person and a Run through the Hub's own routes", async () => {
   const ownerId = `cli-commands-${randomUUID()}`, otherId = `cli-other-${randomUUID()}`;
@@ -29,24 +23,22 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
     assert.deepEqual(await run(worker, MOCK_TOKEN, ["logn"]), { unknownCommand: true });
     const listing = await run(worker, MOCK_TOKEN, ["commands"]);
     assert.equal(listing.exitCode, 0);
-    assert.match(listing.stdout, /automation pause\s+Pause an Automation/);
+    assert.match(listing.stdout, /settings status\s+/);
     assert.match(listing.stdout, /call\s+Call a connected app read action with public or private results/);
     const privateHelp = await run(worker, MOCK_TOKEN, ["call", "--help"]);
     assert.match(privateHelp.stdout, /calling Agent and its Human owner/);
     const humanCall = await run(worker, MOCK_TOKEN, ["call", "@gmail:read:18f2a9c0d1e2b3a4", "--private"]);
     assert.equal(humanCall.exitCode, 1);
     assert.match(humanCall.stderr, /require an Agent Run/);
-    const list = await run(worker, MOCK_TOKEN, ["automation", "list", "--channel", channelId]);
-    assert.deepEqual(list, { stdout: "", exitCode: 0 });
+    assert.deepEqual(await run(worker, MOCK_TOKEN, ["automation", "list", "--channel", channelId]), { unknownCommand: true });
 
     await postChannelMessage(worker, MOCK_TOKEN, channelId,
-      `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" list automations`);
+      `@auto harness:codex machine:${machineId} pwd:"${canonicalCwd}" list requests`);
     const spawn = await daemon.inbox.waitFor((message) => message.type === "machine_spawn_agent" &&
       message.channelId === channelId && isSpawnOf(message, registration), "machine spawn");
     const runToken = await mintAgentRunToken(worker, daemon, spawn, channelId);
-    const asRun = await run(worker, runToken, ["automation", "list", "--channel", channelId, "--json"]);
+    const asRun = await run(worker, runToken, ["requests"]);
     assert.equal(asRun.exitCode, 0, asRun.stderr);
-    assert.deepEqual(JSON.parse(asRun.stdout), []);
     const privateRead = await run(worker, runToken, ["call", "@gmail:read:18f2a9c0d1e2b3a4", "--private"]);
     assert.equal(privateRead.exitCode, 1);
     assert.match(privateRead.stderr, /connect Gmail/);
@@ -110,7 +102,7 @@ test("Hub commands answer a person and a Run through the Hub's own routes", asyn
       await database.query("UPDATE data.blob_upload_intents SET created_at=now()-interval '34 days', expires_at=now()-interval '33 days' WHERE intent_id=$1", [orphanId]);
       assert.equal(await content.retireDecisionUploads({ requestId: randomUUID(), spaceId }), 1);
     } finally { await session.close(); await database.end(); }
-    const refused = await run(worker, runToken, ["automation", "pause", "missing", "--version", "1"]);
+    const refused = await run(worker, runToken, ["reply", "missing", "Sound"]);
     assert.equal(refused.exitCode, 1);
     assert.match(refused.stderr, /^error: .*\(HTTP 4\d\d\)\n$/);
   } finally {

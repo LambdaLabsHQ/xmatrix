@@ -1,8 +1,29 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { test } from "node:test";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { pageBlocks } from "../dist/index.js";
 import { canonicalPageMarkdown, markdownToPageDoc, pageDocToMarkdown } from "../dist/page-document.js";
+
+const docsRoot = new URL("../../../docs/", import.meta.url);
+
+function documentationMarkdown() {
+  const walk = (dir) => readdirSync(dir).flatMap((name) => {
+    const entry = new URL(name, dir);
+    if (statSync(entry).isDirectory()) return walk(new URL(`${name}/`, dir));
+    return name.endsWith(".md") ? [entry] : [];
+  });
+  return walk(docsRoot).sort((left, right) => left.pathname.localeCompare(right.pathname));
+}
+
+function assertRoundTrip(input, label) {
+  const original = markdownToPageDoc(input);
+  const once = pageDocToMarkdown(original);
+  const canonical = markdownToPageDoc(once);
+  assert.equal(pageDocToMarkdown(canonical), once, label);
+  assert.ok(canonical.eq(original), `${label}: canonical form reads as the same document`);
+}
 
 const CANONICAL = `# Relay
 
@@ -57,28 +78,29 @@ test("the document models GFM structure, not markup", () => {
 
 test("any page markdown converts once to canonical form and then stays put", () => {
   const inputs = [
-    "* star bullets\n* two\n\n__strong__ and _em_\n\nSetext\n======\n",
-    "Text with [a ref][r] and ![img][r].\n\n[r]: https://example.com \"T\"\n",
-    "Footnote[^1].\n\n[^1]: The note.\n",
-    "**bold `code` inside** and a\nsoft break\n",
-    "| a | b |\n|---|---|\n| 1 | 2 | 3 |\n| 4 |\n",
-    "",
-    "\n\n",
+    ["syntax:star", "* star bullets\n* two\n\n__strong__ and _em_\n\nSetext\n======\n"],
+    ["syntax:reference", "Text with [a ref][r] and ![img][r].\n\n[r]: https://example.com \"T\"\n"],
+    ["syntax:footnote", "Footnote[^1].\n\n[^1]: The note.\n"],
+    ["syntax:soft-break", "**bold `code` inside** and a\nsoft break\n"],
+    ["syntax:table", "| a | b |\n|---|---|\n| 1 | 2 | 3 |\n| 4 |\n"],
+    ["syntax:empty", ""],
+    ["syntax:blank", "\n\n"],
   ];
-  const docs = new URL("../../../docs/", import.meta.url);
-  for (const dir of ["", "design/", "architecture/", "operations/"]) {
-    for (const name of readdirSync(new URL(dir, docs))) {
-      if (name.endsWith(".md")) inputs.push(readFileSync(new URL(dir + name, docs), "utf8"));
-    }
+  const docsPrefix = fileURLToPath(docsRoot);
+  for (const file of documentationMarkdown()) {
+    const label = path.relative(docsPrefix, fileURLToPath(file)).replaceAll("\\", "/");
+    inputs.push([label, readFileSync(file, "utf8")]);
   }
-  for (const input of inputs) {
-    const once = canonicalPageMarkdown(input);
-    assert.equal(canonicalPageMarkdown(once), once);
-    assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)), "canonical form reads as the same document");
+  for (const [label, input] of inputs) {
+    // Both assertions share the original and canonical documents. Reparsing
+    // either adds no evidence, especially across the full documentation corpus.
+    assertRoundTrip(input, label);
   }
 });
 
 test("canonical form keeps readable markdown", () => {
+  assert.equal(canonicalPageMarkdown("See `C:\\\\Users\\\\<user>\\\\.local\\\\bin\\\\xmatrix.exe` and a note \\(about\\) ~1.\n"),
+    "See `C:\\\\Users\\\\<user>\\\\.local\\\\bin\\\\xmatrix.exe` and a note (about) ~1.\n");
   assert.equal(canonicalPageMarkdown("RELAY_POSTGRES_CACHED and RelayPostgres*Coordinator ~1,100\n"),
     "RELAY_POSTGRES_CACHED and RelayPostgres*Coordinator ~1,100\n");
   assert.equal(canonicalPageMarkdown("#2737 split the suite\n"), "#2737 split the suite\n");
@@ -87,19 +109,33 @@ test("canonical form keeps readable markdown", () => {
   assert.equal(canonicalPageMarkdown("| a | b |\n|---|---|\n| 1 | 2 |\n"), "| a | b |\n| --- | --- |\n| 1 | 2 |\n");
 });
 
-test("a long page whose lines carry escapes canonicalizes in bounded time", () => {
-  // Each escape is checked within its own lines, not by reparsing the page: a
-  // 40 KB page used to take seconds, past what a page session can spend.
-  const sections = Array.from({ length: 120 }, (_, index) =>
-    `## Section ${index}\n\nA *note* about [link](https://example.com/${index}) and RelayPostgres*Coordinator.\n\n` +
-    `- item with snake_case_name and a_b\n- \\# not a heading ${index}\n`);
-  const input = sections.join("\n");
+function assertBoundedCanonical(input) {
   const started = performance.now();
   const once = canonicalPageMarkdown(input);
   const elapsed = performance.now() - started;
   assert.equal(canonicalPageMarkdown(once), once);
   assert.ok(markdownToPageDoc(once).eq(markdownToPageDoc(input)));
   assert.ok(elapsed < 3_000, `canonicalized in ${elapsed.toFixed(0)} ms`);
+  return once;
+}
+
+test("a long page whose lines carry escapes canonicalizes in bounded time", () => {
+  // Each escape is checked within its own lines, not by reparsing the page: a
+  // 40 KB page used to take seconds, past what a page session can spend.
+  const sections = Array.from({ length: 120 }, (_, index) =>
+    `## Section ${index}\n\nA *note* about [link](https://example.com/${index}) and RelayPostgres*Coordinator.\n\n` +
+    `- item with snake_case_name and a_b\n- \\# not a heading ${index}\n`);
+  assertBoundedCanonical(sections.join("\n"));
+});
+
+test("a tight list whose lines carry escapes canonicalizes in bounded time", () => {
+  // Blank lines split a page into runs. A tight list has none, so the list is
+  // one run; judging each escaped line against that whole run reparsed a
+  // 400-item list hundreds of times (about 10s). Each item is its own block.
+  const input = `${Array.from({ length: 400 }, (_, index) =>
+    `- item ${index} snake_case_name and RelayPostgres*Coordinator`).join("\n")}\n`;
+  const once = assertBoundedCanonical(input);
+  assert.doesNotMatch(once, /\\_/);
 });
 
 test("markdown the schema does not model is kept verbatim", () => {

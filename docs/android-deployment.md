@@ -20,6 +20,10 @@ The workflow is `.github/workflows/android-deploy.yml`. Stable publication is a 
 If `ANDROID_HOME` is not set, the workflow runs `scripts/android-env.mjs` to find SDK Platform 36 in common Windows and Linux install locations.
 The installer retries and resumes interrupted command-line-tools downloads so a transient runner connection does not discard the partial transfer.
 
+## Subscriptions
+
+The app sells Pro only through Google Play Billing; it never shows Stripe checkout. The Hub verifies and acknowledges every purchase. Setup and configuration are in [Google Play subscriptions](operations/google-play-subscriptions.md).
+
 ## Repository Secrets
 
 Configure these secrets before uploading to Google Play:

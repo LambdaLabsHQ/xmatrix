@@ -147,12 +147,21 @@ agents.
 - `xmatrix-bootstrap.exe` and `xmatrix machine supervisor start-daemon` belong only to the unreleased signed-continuity design and have no current installation authority.
 - `xmatrix daemon sync-session` applies a newly saved same-Hub, same-user CLI session to a compatible running daemon without restarting it. The saved CLI refresh token is never installed as the daemon refresh token; the daemon exchanges an independent session before switching generations.
 - After an established connection loses enrollment with `Invalid or expired auth token`, the daemon wakes its existing session refresh task immediately instead of retrying the same access token until the periodic timer fires. Concurrent refusals coalesce into one wake; the seven-day session limit, generation checks, refresh failure backoff, and owner/Hub checks still apply. Network failures, retired Machines, and upgrade requirements do not trigger this auth recovery path.
+- A Machine credential refresh captures the live connection epoch before minting its token. The actor sends it and updates its HTTP credential cache only on that same connection. Reconnect enrolls a fresh credential; refreshes queued offline or still minting for the replaced socket are discarded. Current-connection refreshes keep their existing wire format and verification.
+- An established Agent Instance whose reconnect is refused with
+  `agent_run_credential_invalid` wakes its own Run-token refresh task rather
+  than waiting for the eight-minute refresh timer. The task asks only its
+  existing scoped daemon broker, and reconnect retains the Instance and Run
+  bindings. Repeated refusals of the same token request one refresh; other
+  failures keep their existing retry or terminal behavior. Already-running
+  wrappers need the updated CLI code on their next normal Reborn.
 - A CLI login that starts an absent daemon passes only the Hub location. The daemon reads the canonical saved session itself rather than inheriting the login command's short-lived `XMATRIX_TOKEN`, so later reconnects remain refreshable and eligible for live session synchronization.
 - Windows host updates use the same `xmatrix update` and daemon self-update loop as macOS and Linux.
 - Request records are journaled to a private bounded file before each execution transition. On daemon replacement, pending approvals remain routable, interrupted running requests fail explicitly, and terminal channel notices are resent with the same idempotency identity. Surviving Agents rediscover the new auth and request broker ports while retaining only their exact recovered Run capabilities.
 
 ### Causal Run snapshots
 
+- Before writing a queued snapshot, the daemon checks its captured connection epoch against the authenticated socket. Snapshots from a replaced connection are discarded without rebinding their causal fields: reconnect captures a fresh full Run snapshot and sends cached harness metadata. A successful spawn result still retains its original causal tuple for effect reconciliation.
 - A daemon advertising `machine_run_snapshot_causal_v1` attaches its active connection epoch and one process-local monotonic registry sequence to every successful spawn result and complete Run snapshot. Snapshot capture advances that sequence while the registry lock is held; daemon wall-clock `capturedAt` is diagnostic and never defines ordering.
 - PostgreSQL stores the last accepted `(connection epoch, registry sequence)` per Machine/host/Channel. A duplicate or older snapshot is a no-op. An absent Run can become terminal only after its successful spawn result established registry ownership at an earlier causal point, or after a newer daemon connection proves that an older-epoch Run is absent.
 - Agent connection and daemon reporting are independent transports. A Run that connected after an earlier snapshot was captured therefore remains live even if that snapshot reaches Runtime authority later. Legacy daemons remain accepted; recently updated legacy Runs receive a bounded settling window instead of being treated as immediate absence evidence.

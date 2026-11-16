@@ -14,6 +14,7 @@ import {
 import {
   WEB_PROXY_ROUTES,
   AGENT_PRESETS,
+  agentAccessModes,
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
@@ -35,10 +36,11 @@ import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
 import { useAgentRegistrationCatalog } from "./agent-capability-select";
+import { ASK_ACCESS_EFFECT, AgentAccessLines, FULL_ACCESS_EFFECT, chooseHeldAccess } from "./agent-access";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
 import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
-import { AGENT_USAGE_REFRESH_MS, agentUsageReadings } from "./agent-quota-usage";
+import { AGENT_USAGE_REFRESH_MS, agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
 import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
@@ -144,7 +146,7 @@ export function MyAgentsView({
     : groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) ?? (selectedAgentId ? undefined : groups[0]);
 
   const list = (
-    <ToolList title="Agents" createLead="avatar" create={{ label: "Manage machines", onCreate: onOpenMachines }}>
+    <ToolList title="Agents" create={{ label: "Manage machines", onCreate: onOpenMachines, shortcut: true }}>
       {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
       {!ready ? (
         <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
@@ -173,6 +175,7 @@ export function MyAgentsView({
   } else if (chosen) {
     const { registration, id, activity, harness, title, machineInLine } = chosen;
     const status = registrationStatus(registration);
+    const harnessName = AGENT_PRESETS.find((preset) => preset.id === harness)?.displayName ?? harness;
     const ownerPreset = registration.key.ownerUserId === currentUserId
       ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
     const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
@@ -182,8 +185,8 @@ export function MyAgentsView({
     const seen = formatRelativeAge(live?.machine.lastSeenAt, now);
     const machineState = !live ? null : live.machine.online ? "online" : seen ? `offline, seen ${seen}` : "offline";
     const running = live?.running ?? [];
-    const usage = agentUsageReadings(live?.quota, now);
-    const checked = formatRelativeAge(live?.quota?.observedAt, now);
+    const usage = [...agentUsageReadings(live?.quota, now), ...agentBalanceReadings(live?.balance)];
+    const checked = formatRelativeAge(live?.quota?.observedAt ?? live?.balance?.observedAt, now);
     detail = (
       <ToolDetail
         key={id}
@@ -302,6 +305,28 @@ export function MyAgentsView({
             </p>
           )}
         </ToolDetailSection>
+        {registration.access && (
+          <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
+            <div className="space-y-2 text-sm" data-testid="agent-access">
+              {registration.access.mode === "full" ? <>
+                <p>xMatrix starts {harnessName} like this:</p>
+                <AgentAccessLines grant={registration.access} name={harnessName} />
+                <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>
+              </> : <p>{ASK_ACCESS_EFFECT}</p>}
+              {/* Added before its owner was asked, it runs as it always did until they read this
+                  and confirm; once confirmed, its owner changes the mode here. */}
+              {registration.canManageOwnerGrant && token
+                ? (!registration.access.confirmed || agentAccessModes(AGENT_PRESETS.find((preset) => preset.id === harness)).length > 1) && (
+                  <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
+                    const mode = await chooseHeldAccess(token, registration.key, harnessName);
+                    if (mode && (mode !== registration.access?.mode || !registration.access.confirmed)) {
+                      void command.run(registration.key, { kind: "access", mode });
+                    }
+                  }}>{registration.access.confirmed ? "Change" : "Review and confirm"}</Button>
+                ) : !registration.access.confirmed && <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>}
+            </div>
+          </ToolDetailSection>
+        )}
       </ToolDetail>
     );
   } else if (catalog.data && rows.length === 0 && newCandidates.length === 0 && !addsOnThisMachine) {

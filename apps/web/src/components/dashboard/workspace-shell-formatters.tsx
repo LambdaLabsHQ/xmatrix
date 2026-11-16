@@ -1,9 +1,10 @@
 "use client";
-import { usageWithoutQuota, accountQuotaUsageFromCandidates, mergeUsageAttributes } from "@xmatrix/protocol";
+import { usageWithoutQuota, accountQuotaUsageFromCandidates, formatQuotaBalance, mergeUsageAttributes, quotaAccountBalance } from "@xmatrix/protocol";
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { directMediaLink } from "./attachment-media-type";
 import { codeLanguageLabel, useHighlightedCode } from "./code-highlight";
+import { useMessageProgramFlow } from "./message-program-flow";
 import { MediaLink } from "./media-player";
 import { MessageMarkdownImage } from "./message-markdown-image";
 import { formatInstant, formatZonedDateTime } from "./time-display";
@@ -48,8 +49,8 @@ import {
 } from "lucide-react";
 
 import { NonOperationalMentions, renderMentionChildren } from "@/components/dashboard/mention-read-chip";
-import { MessageReferenceChip } from "@/components/dashboard/page-reference-chip";
-import { loneMessageReference, splitDiscussionHead } from "@xmatrix/protocol";
+import { MessageReferenceChip, RequestReferenceBlock } from "@/components/dashboard/page-reference-chip";
+import { loneMessageReference, withoutDiscussionHeads } from "@xmatrix/protocol";
 
 import {
   type AgentTraceTimelineBlock,
@@ -102,9 +103,13 @@ export function createMessageMarkdownComponents(
   h6: ({ children, node }) => <h6 className="mt-4 text-sm font-bold first:mt-0">{renderMentionChildren(children, node)}</h6>,
   // Mentions carry read state, so body text runs pass through the mention
   // renderer. Code spans keep their children untouched.
-  p: ({ children, node }) => (
-    <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>
-  ),
+  p: ({ children, node }) => {
+    // A delivery's "**Request** `request:<ref>`" line is the request itself: it is shown in full, as paragraphs.
+    const delivered = /^Request\s+(request:\S+)$/u.exec(markdownTextContent(children).trim());
+    const span = delivered && node?.children.length === 3 ? loneMessageReference(delivered[1]!) : undefined;
+    if (span?.kind === "request") return <RequestReferenceBlock requestRef={span.requestRef} />;
+    return <p className={RICH_MESSAGE_PARAGRAPH_CLASS_NAME}>{renderMentionChildren(children, node)}</p>;
+  },
   blockquote: ({ children }) => (
     <blockquote className="message-quote mt-4 first:mt-0">
       <NonOperationalMentions>{children}</NonOperationalMentions>
@@ -255,9 +260,12 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
 
   const language = markdownCodeLanguage(children);
   const highlighted = useHighlightedCode(text, language);
+  // A program's flow stands over its text: what it does, before how it is written.
+  const programFlow = useMessageProgramFlow(language);
   // The block draws its own code element from the text, so a fence without a language never falls through to the
   // inline span's chip and gets a rim on every line.
-  return (
+  return (<>
+    {programFlow}
     <div className="message-code-block group/code relative mt-4 w-full min-w-0 max-w-full overflow-hidden first:mt-0" data-language={language || undefined}>
       {language ? <MarkdownCodeLanguage language={language} /> : null}
       <button
@@ -277,7 +285,7 @@ export function MarkdownPre({ children }: { children?: React.ReactNode }) {
         )}
       </pre>
     </div>
-  );
+  </>);
 }
 
 export function isSafeMessageImageSrc(src: string): boolean {
@@ -425,6 +433,11 @@ export function tagsFromUsage(usage: LlmUsage): Tag[] {
     percent: quotaPercent(quota),
     resetLabel: quotaResetLabel(quota),
   }));
+  const balance = providerAccountBalance(usage);
+  if (balance) {
+    const left = formatQuotaBalance(balance);
+    tags.push({ key: BALANCE_TAG_KEY, label: left, title: `Provider balance: ${left} left` });
+  }
   if (usage.quotaState === "exhausted") {
     tags.push({ key: "quota:exhausted", label: "Quota exhausted", title: "Provider quota exhausted", percent: 100 });
   }
@@ -465,6 +478,14 @@ export function tagsFromUsage(usage: LlmUsage): Tag[] {
   }
 
   return tags;
+}
+
+/** The tag of a prepaid account's balance: an amount, so it has no meter. */
+export const BALANCE_TAG_KEY = "quota:balance";
+
+/** Money left on a prepaid account, shown only from a provider API read. */
+function providerAccountBalance(usage?: LlmUsage) {
+  return usage?.quotaSource === "provider_api" ? quotaAccountBalance(usage.quotaAccount) : undefined;
 }
 
 /** React identity follows the quota window, not its rolling reset clock. */
@@ -509,7 +530,7 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
     : codexQuotas.length > 0
       ? codexQuotas
       : quotaUsages).filter((quota) => {
-      const label = quotaLabel(quota).toLowerCase();
+      const label = quotaWindowLabel(quota).toLowerCase();
       // Codex/Claude/ZCode: 5h + weekly. Grok Build billing: monthly credits (1mo).
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
@@ -531,13 +552,15 @@ export function dedupeQuotaUsagesByLabel(value: LlmQuotaUsage[]): LlmQuotaUsage[
 
 const QUOTA_DISPLAY_ORDER = ["5h", "1w", "2h", "1mo"] as const;
 
-/** Provider array order is transport detail; the visible three are deterministic. */
+/** Provider array order is transport detail; the visible three are
+ * deterministic. A window's account form comes before its scoped ones. */
 export function compareQuotaUsageForDisplay(left: LlmQuotaUsage, right: LlmQuotaUsage): number {
+  const leftRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(left).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);
+  const rightRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(right).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);
+  if (leftRank !== rightRank) return leftRank - rightRank;
+  if (Boolean(left.scope) !== Boolean(right.scope)) return left.scope ? 1 : -1;
   const leftLabel = quotaLabel(left).toLowerCase();
   const rightLabel = quotaLabel(right).toLowerCase();
-  const leftRank = QUOTA_DISPLAY_ORDER.indexOf(leftLabel as typeof QUOTA_DISPLAY_ORDER[number]);
-  const rightRank = QUOTA_DISPLAY_ORDER.indexOf(rightLabel as typeof QUOTA_DISPLAY_ORDER[number]);
-  if (leftRank !== rightRank) return leftRank - rightRank;
   if (leftLabel !== rightLabel) return leftLabel.localeCompare(rightLabel);
   // Duplicate provider records for one window must resolve independently of
   // array order. Prefer the window that remains current longer; if both reset
@@ -580,6 +603,9 @@ export function usageLimitSummary(usage?: LlmUsage): UsageLimitSummary | undefin
   const allowed = usage?.quotaAccount?.allowed;
   if (allowed === false) return { label: "limit", severity: "limit", title: "Usage limit reached: provider refuses requests" };
   const quota = providerQuotaUsages(usage)
+    // A scoped window limits only the models of its scope, not the account
+    // this verdict is about.
+    .filter((candidate) => !candidate.scope)
     .map((candidate) => ({ quota: candidate, percent: quotaPercent(candidate) }))
     // A limit warning is time-sensitive: keep this guard at the verdict boundary
     // even though providerQuotaUsages normalizes its display list as well.
@@ -667,7 +693,7 @@ export function hasQuotaMeterUsage(usage?: LlmUsage): boolean {
 export function accountQuotaUsage(usage?: LlmUsage): LlmUsage | undefined {
   if (usage?.quotaState === "exhausted") return { quotaState: "exhausted", quotaObservedAt: usage.quotaObservedAt };
   const quotaUsages = providerQuotaUsages(usage);
-  if (quotaUsages.length === 0) return undefined;
+  if (quotaUsages.length === 0 && !providerAccountBalance(usage)) return undefined;
   const quotaObservedAt = usage?.quotaObservedAt;
   return {
     quotaSource: "provider_api",
@@ -677,10 +703,11 @@ export function accountQuotaUsage(usage?: LlmUsage): LlmUsage | undefined {
   };
 }
 
-/** Provider API provenance is required before an account meter can render. */
+/** Provider API provenance is required before an account meter can render.
+ * A model's own windows (`scopedQuotaUsages`) follow the account's. */
 export function providerQuotaUsages(usage?: LlmUsage): LlmQuotaUsage[] {
   return usage?.quotaSource === "provider_api"
-    ? normalizeQuotaUsageList(usage.quotaUsages)
+    ? normalizeQuotaUsageList([...usage.quotaUsages ?? [], ...usage.scopedQuotaUsages ?? []])
     : [];
 }
 
@@ -705,7 +732,14 @@ export function agentMemberUsage(presence: ChannelMemberPresence): LlmUsage | un
   );
 }
 
+/** A window's name, its scope first when it is one model's own: "Fable · 1w". */
 export function quotaLabel(quota: LlmQuotaUsage): string {
+  const window = quotaWindowLabel(quota);
+  return quota.scope ? `${quota.scope} · ${window}` : window;
+}
+
+/** The window alone (`5h`, `1w`), whatever it constrains. */
+function quotaWindowLabel(quota: LlmQuotaUsage): string {
   // Unnamed windows have no label to normalise; they are filtered out upstream
   // rather than given a generic one here.
   const raw = quota.label || quota.window || "";
@@ -773,7 +807,7 @@ export function quotaPercent(quota: LlmQuotaUsage): number | undefined {
 export function quotaTitle(quota: LlmQuotaUsage): string {
   // No `"Quota"` stand-in: naming an unnamed window is how a foreign limit got
   // presented as this agent's. Unnamed quotas are dropped before they get here.
-  const parts = [quota.label || quota.window].filter((part): part is string => Boolean(part));
+  const parts = [quota.scope, quota.label || quota.window].filter((part): part is string => Boolean(part));
   const percent = quotaPercent(quota);
   if (percent !== undefined) parts.push(formatPercent(percent));
   if (quota.used !== undefined && quota.limit !== undefined) {
@@ -858,14 +892,13 @@ export function optimisticDesktopUpdateInstallStatus(status: DesktopUpdateStatus
 }
 
 /* mirror of the hub's channelReplyPreview, for live local updates; a
-   discussion's first message previews as what was written after its head */
+   message quoting passages previews as what was written around them */
 export function channelLastMessagePreviewFromEntry(
   entry: ChannelMessage
 ): ChannelSnapshot["lastMessage"] {
-  const head = splitDiscussionHead(entry.body || "");
   const body = entry.recalledAt
     ? "Message recalled"
-    : (head?.rest.trim() ? head.rest : entry.body || "").trim().replace(/\s+/g, " ");
+    : (withoutDiscussionHeads(entry.body || "") || entry.body || "").trim().replace(/\s+/g, " ");
   const bodyPreview = body
     ? body.length > 240
       ? `${body.slice(0, 237)}...`

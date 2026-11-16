@@ -10,7 +10,6 @@ const {
   eventsInSpace,
   localManagedAgentsInSpace,
   machinesInSpace,
-  automationsInSpace,
   spaceChannelIdSet,
   workspacesInSpace,
 } = require(path.join(__dirname, "space-scoped-tool-content.ts"));
@@ -28,22 +27,6 @@ test("channel ids for the current Space exclude every other Space", () => {
   assert.deepEqual([...ids].sort(), ["ch-a", "ch-b"]);
   assert.deepEqual(channelsInSpace(channels, SPACE).map((channel) => channel.id), ["ch-a", "ch-b"]);
   assert.deepEqual(channelsInSpace(channels, null), []);
-});
-
-test("Schedules hide another Space's tasks and keep a task whose Channel is gone", () => {
-  const tasks = [
-    { id: "t-a", channelId: "ch-a" },
-    { id: "t-c", channelId: "ch-c" },
-    { id: "t-missing", channelId: "ch-gone" },
-  ];
-  const known = new Set(channels.map((channel) => channel.id));
-  // `t-missing` belongs to no Space at all. Dropping it would leave a running
-  // schedule with no surface that can edit or delete it, which is the state the
-  // editor's `(unavailable)` Channel option exists to repair.
-  assert.deepEqual(
-    automationsInSpace(tasks, spaceChannelIdSet(channels, SPACE), known).map((task) => task.id),
-    ["t-a", "t-missing"],
-  );
 });
 
 test("Activity keeps this Space's events and the ones that name no Space", () => {

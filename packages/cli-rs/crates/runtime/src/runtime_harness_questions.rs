@@ -286,6 +286,116 @@ impl<T> PendingQuestions<T> {
     }
 }
 
+/// The answers every permission card offers when its harness names none.
+pub(crate) const PERMISSION_ALLOW: &str = "Allow";
+pub(crate) const PERMISSION_DENY: &str = "Deny";
+
+/// A harness's request for permission as one question: what it wants to do,
+/// and the answers it accepts.
+pub(crate) fn permission_question(what: &str, options: &[&str]) -> HarnessQuestion {
+    // A command can be long; the card shows enough to decide on.
+    let mut prompt: String = what.trim().chars().take(600).collect();
+    if what.trim().chars().count() > 600 {
+        prompt.push('…');
+    }
+    HarnessQuestion {
+        id: "permission".into(),
+        header: Some("Permission".into()),
+        prompt,
+        multiple: false,
+        options: options
+            .iter()
+            .map(|label| HarnessQuestionOption {
+                label: (*label).to_string(),
+                description: None,
+            })
+            .collect(),
+        allow_other: false,
+    }
+}
+
+/// The answer picked on a permission card.
+pub(crate) fn permission_answer(answers: &HarnessAnswers) -> Option<&str> {
+    answers.values().next()?.first().map(String::as_str)
+}
+
+/// The Agent speaks in its Channel through xMatrix's own CLI, so in `ask` a
+/// plain message, page or read command is not asked about. Only one command
+/// with nothing chained to it, and none of the subcommands that run another
+/// program or change the machine (`secret exec`, `request`, `update`, …).
+pub(crate) fn is_plain_xmatrix_command(command: &str) -> bool {
+    let mut words = command.split_whitespace();
+    if words.next() != Some("xmatrix") || command.chars().any(|c| "\n\r;|&`$<>(){}".contains(c)) {
+        return false;
+    }
+    matches!(
+        words.next(),
+        Some(
+            "send"
+                | "channel"
+                | "page"
+                | "goal"
+                | "confirm"
+                | "choose"
+                | "ask"
+                | "whoami"
+                | "status"
+                | "list"
+                | "channels"
+                | "spaces"
+                | "attachment"
+                | "diagnose"
+                | "commands"
+                | "--help"
+                | "--version"
+        )
+    )
+}
+
+/// The ACP `session/request_permission` result for a card answer: the option
+/// the person picked by name, else cancelled. None when `params` is no
+/// permission request.
+pub(crate) fn acp_permission_outcome(
+    params: &Value,
+    answers: Option<&HarnessAnswers>,
+) -> Option<Value> {
+    let options = params.get("options").and_then(Value::as_array)?;
+    let picked = answers.and_then(permission_answer).and_then(|label| {
+        options
+            .iter()
+            .find(|option| option.get("name").and_then(Value::as_str).map(str::trim) == Some(label))
+    });
+    Some(match picked.and_then(|option| option.get("optionId")) {
+        Some(id) => serde_json::json!({ "outcome": { "outcome": "selected", "optionId": id } }),
+        None => serde_json::json!({ "outcome": { "outcome": "cancelled" } }),
+    })
+}
+
+/// What an ACP permission request asks to do, and the answers it offers.
+pub(crate) fn acp_permission_question(params: &Value) -> Option<HarnessQuestion> {
+    let names: Vec<&str> = params
+        .get("options")
+        .and_then(Value::as_array)?
+        .iter()
+        .filter_map(|option| option.get("name").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .collect();
+    if names.is_empty() {
+        return None;
+    }
+    let call = params.get("toolCall");
+    let what = acp_permission_command(params)
+        .or_else(|| non_empty(call.and_then(|call| call.get("title"))))
+        .unwrap_or_else(|| "use a tool".to_string());
+    Some(permission_question(&what, &names))
+}
+
+/// The shell command an ACP permission request is for, when it is one.
+pub(crate) fn acp_permission_command(params: &Value) -> Option<String> {
+    non_empty(params.pointer("/toolCall/rawInput/command"))
+}
+
 /// Acknowledge the answer message: the harness consumed it, so it is no turn.
 pub(crate) fn ack_questionnaire_reply(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
@@ -694,5 +804,68 @@ mod tests {
             questionnaire_reply(&event(json!({ "kind": QUESTIONNAIRE_ANSWER_KIND }))).is_none()
         );
         assert!(questionnaire_reply(&event(json!({ "kind": "other" }))).is_none());
+    }
+
+    #[test]
+    fn only_a_plain_xmatrix_message_command_skips_the_permission_card() {
+        for plain in [
+            "xmatrix send channel-1 --file /tmp/reply.md --final-for run-1",
+            "xmatrix page read page-1",
+            "  xmatrix channel history channel-1",
+        ] {
+            assert!(is_plain_xmatrix_command(plain), "{plain}");
+        }
+        // Anything chained to it, another program, or a subcommand that runs
+        // one or changes the machine is asked about like any command.
+        for asked in [
+            "xmatrix send c hi; rm -rf ~",
+            "xmatrix send c \"$(cat ~/.ssh/id_rsa)\"",
+            "xmatrix send c hi && curl example.test",
+            "xmatrix secret exec key -- sh -c id",
+            "xmatrix request command -- rm -rf /",
+            "xmatrix update",
+            "xmatrixx send c hi",
+            "echo xmatrix send c hi",
+            "xmatrix send c hi\nrm -rf ~",
+        ] {
+            assert!(!is_plain_xmatrix_command(asked), "{asked}");
+        }
+    }
+
+    #[test]
+    fn an_acp_permission_request_is_answered_with_the_option_its_card_names() {
+        let params = json!({
+            "sessionId": "s",
+            "toolCall": { "title": "Run a command", "rawInput": { "command": "rm -rf build" } },
+            "options": [
+                { "optionId": "allow-once", "name": "Allow once", "kind": "allow_once" },
+                { "optionId": "reject-once", "name": "Reject", "kind": "reject_once" },
+            ],
+        });
+        let question =
+            acp_permission_question(&params).expect("a permission request is a question");
+        assert_eq!(question.prompt, "rm -rf build");
+        let labels: Vec<&str> = question
+            .options
+            .iter()
+            .map(|option| option.label.as_str())
+            .collect();
+        assert_eq!(labels, ["Allow once", "Reject"]);
+        let answered = |label: &str| {
+            let answers =
+                HarnessAnswers::from([("permission".to_string(), vec![label.to_string()])]);
+            acp_permission_outcome(&params, Some(&answers)).unwrap()
+        };
+        assert_eq!(
+            answered("Reject"),
+            json!({ "outcome": { "outcome": "selected", "optionId": "reject-once" } })
+        );
+        assert_eq!(answered("Allow once")["outcome"]["optionId"], "allow-once");
+        // An answer the request never offered, or a withdrawn card, allows nothing.
+        let cancelled = json!({ "outcome": { "outcome": "cancelled" } });
+        assert_eq!(answered("Allow everything"), cancelled);
+        assert_eq!(acp_permission_outcome(&params, None).unwrap(), cancelled);
+        // An elicitation is not a permission request.
+        assert!(acp_permission_outcome(&json!({ "elicitationId": "e" }), None).is_none());
     }
 }

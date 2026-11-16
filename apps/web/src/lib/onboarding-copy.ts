@@ -25,6 +25,13 @@ const en = {
   worksWith: (names: string, all: boolean) => all ? `Works with ${names}` : `Works with ${names} and `,
   more: (count: number) => `${count} more`,
   runCommand: "Run this on your computer",
+  /** On a Mac or PC the App is the way in; the terminal is the alternative. */
+  getApp: "Get the xMatrix app on this computer",
+  appDoes: "Open it. A browser already signed in on the web sets up this computer and finds your agents, without signing in again or using a terminal.",
+  useTerminal: "Use a terminal instead",
+  /** Inside the App, which connects its own computer. */
+  settingUpHere: "Setting up this computer",
+  settingUpHereDoes: "xMatrix is connecting this computer and looking for your agents…",
   signInOnComputer: "On your computer, open xmatrix.sh and sign in with this same email",
   otherPlatform: (windows: boolean): string => windows ? "macOS or Linux?" : "Windows?",
   waitingForComputer: "Waiting for your computer…",
@@ -67,31 +74,15 @@ const en = {
   preparingCommand: "Preparing a command…",
   copy: (copied: boolean): string => copied ? "Copied" : "Copy",
   agentsIn: (names: string, one: boolean) =>
-    `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work, or start with one of these:`,
-  /* The first task should end in a page about the person's own work, which is
-     where xMatrix makes sense; each starter asks for one. A page explaining
-     xMatrix itself kept people learning the tool instead of using it. */
-  /* What xMatrix is for, one card each: talking, several agents at once, the
-     live page, every computer. One click shows it. */
-  talk: { title: "Start a new conversation", detail: "Say what you want done. No need to @ anyone: xMatrix picks an AI to take it." },
-  together: { title: "Get several AIs working together", detail: (a: string, b: string) =>
-    `@${a} and @${b} split the work and pass it between them. You watch it come together.`,
-    needsTwo: "Bring in one more AI, and they can work together.",
-    draft: (a: string, b: string) => `@${a} @${b} Work on this together and split it between you: ` },
-  machines: { title: "Connect another computer", detail: "Your work machine, your home machine, a server. Their AIs meet in one conversation." },
-  /* The live document people came for: a page they write in, with an agent writing beside them. */
-  coWrite: { title: "Write something with AI", detail: (agent: string) => `You write a line. @${agent} writes the next.`,
-    pageTitle: "What I'm working on",
-    firstLine: (agent: string) => `Write the first line here. @${agent} writes the next.`,
+    `${names} ${one ? "is" : "are"} in. Mention ${one ? "it" : "one"} here to give ${one ? "it" : "them"} work.`,
+  /* Live co-writing on a page: its first-line placeholder and the co-writer's state beside its face. */
+  coWrite: { firstLine: (agent: string) => `Write the first line here. @${agent} writes the next.`,
     /** Beside a co-writing Agent's face: how long it has been thinking, and that it went quiet. */
     thinkingFor: (seconds: number) => seconds < 60 ? `thinking ${seconds}s` : `thinking ${Math.floor(seconds / 60)} min`,
     quiet: "went quiet",
     switchTo: (agent: string) => `Write with @${agent} instead` },
-  bringWorkConnect: "Bring your work in. Connect GitHub, and your repositories become pages.",
-  bringWorkRepos: "Pick a repository. It becomes pages, yours to review first.",
+  bringWorkConnect: "Connect GitHub so agents can work in several repositories in parallel.",
   connectGitHub: "Connect GitHub",
-  draftFrom: (repo: string) => repo,
-  draftingFrom: (repo: string) => `Turning ${repo} into pages. They wait in Pages for your review.`,
   installedTitle: "Your installed agents",
   installedBody: "Turn them on to summon them. Choose a working folder when you send the first task.",
   enabling: "Enabling…",
@@ -177,6 +168,11 @@ const zh: OnboardingCopy = {
   worksWith: (names, all) => all ? `支持 ${names}` : `支持 ${names}，还有`,
   more: (count) => `另外 ${count} 个`,
   runCommand: "在你的电脑上运行这条命令",
+  getApp: "在这台电脑上装 xMatrix App",
+  appDoes: "打开即可。这个浏览器里已经登录的话，它会接上这台电脑、找到你的 Agent。不用再登录，也不用开终端。",
+  useTerminal: "改用终端",
+  settingUpHere: "正在接上这台电脑",
+  settingUpHereDoes: "xMatrix 正在接上这台电脑，并查找你的 Agent…",
   signInOnComputer: "在电脑上打开 xmatrix.sh，用同一个邮箱登录",
   otherPlatform: (windows) => windows ? "用 macOS 或 Linux？" : "用 Windows？",
   waitingForComputer: "正在等你的电脑连上…",
@@ -215,22 +211,13 @@ const zh: OnboardingCopy = {
   preparingCommand: "正在生成命令…",
   copy: (copied) => copied ? "已复制" : "复制",
   agentsIn: (names, one) =>
-    `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活，也可以从下面选一个开始：`,
-  talk: { title: "开一个新对话", detail: "说一件你想做的事。不用 @ 谁，xMatrix 会挑一个 AI 来接。" },
-  together: { title: "让多个 AI 一起协作", detail: (a, b) => `@${a} 和 @${b} 分工干活、互相接力，你看着事情做成。`,
-    needsTwo: "再接一个 AI，就能让它们一起协作。", draft: (a, b) => `@${a} @${b} 你们分工合作，一起把这件事做完：` },
-  machines: { title: "再接一台电脑", detail: "公司的、家里的电脑或服务器，上面的 AI 能在同一个对话里碰头。" },
-  coWrite: { title: "和 AI 一起写点什么", detail: (agent) => `你写一句，@${agent} 接一句。`,
-    pageTitle: "我手上的事",
-    firstLine: (agent) => `在这里写下第一句，@${agent} 会接着写。`,
+    `${names} 已接入。在这里 @ ${one ? "它" : "其中一个"}就能派活。`,
+  coWrite: { firstLine: (agent) => `在这里写下第一句，@${agent} 会接着写。`,
     thinkingFor: (seconds) => seconds < 60 ? `想了 ${seconds} 秒` : `想了 ${Math.floor(seconds / 60)} 分钟`,
     quiet: "没有动静了",
     switchTo: (agent) => `改让 @${agent} 来写` },
-  bringWorkConnect: "把工作带进来。连上 GitHub，仓库就成了页面。",
-  bringWorkRepos: "选一个仓库，它会变成几页。你看过，才算数。",
+  bringWorkConnect: "连接 GitHub，让 Agent 并行在多个仓库工作。",
   connectGitHub: "连接 GitHub",
-  draftFrom: (repo) => repo,
-  draftingFrom: (repo) => `正在把 ${repo} 写成页面，写好会在 Pages 里等你过目。`,
   installedTitle: "你已安装的 Agent",
   installedBody: "开启后就能召唤它们。发第一个任务时再选工作目录。",
   enabling: "正在开启…",

@@ -86,3 +86,20 @@ test("report dates, months and fractional rates are written the way people read 
   () => ACTIONS.report.execute({ credentials: token }, statement("@googleanalytics:report:123 by=month,page")));
   assert.match(byMonth.result.summary, /\n2026-09\t20261002\t1\n/u);
 });
+
+test("metrics=app reads an app's users, first opens and events by platform, version or event", async () => {
+  const options = analyticsReportOptions("by=platform,version metrics=app", noon);
+  assert.deepEqual(options.dimensions, ["platform", "appVersion"]);
+  assert.deepEqual(options.metrics, ["activeUsers", "newUsers", "sessions", "eventCount", "userEngagementDuration"]);
+  assert.deepEqual(analyticsReportOptions("by=event", noon).dimensions, ["eventName"]);
+  for (const bad of ["metrics=money", "metrics=constructor", "metrics=app metrics=traffic"]) {
+    assert.equal(typeof analyticsReportOptions(bad, noon), "string", bad);
+  }
+  assert.equal(analyticsReportOptions("", noon).metrics, undefined, "the traffic set stays the default");
+  const report = await fetched([{ body: { metricHeaders: [{ name: "activeUsers" }, { name: "newUsers" }],
+    rows: [{ dimensionValues: [{ value: "Android" }], metricValues: [{ value: "12" }, { value: "4" }] }] } }],
+  () => ACTIONS.report.execute({ credentials: token }, statement("@googleanalytics:report:123 by=platform metrics=app")));
+  assert.deepEqual(report.calls[0].body.orderBys, [{ metric: { metricName: "activeUsers" }, desc: true }]);
+  assert.match(report.result.summary, /app activity \(newUsers counts first opens\)/u);
+  assert.match(report.result.summary, /platform\tactiveUsers\tnewUsers\nAndroid\t12\t4/u);
+});

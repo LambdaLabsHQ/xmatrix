@@ -1,48 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Client} from 'pg';
-import {PostgresMessageRepository,PostgresAutomationRepository} from '../dist/index.js';
+import {PostgresMessageRepository} from '../dist/index.js';
 import {DatabasePreparedUnknownError} from '../dist/errors.js';
 import {dingtalkPreparation} from '../dist/dingtalk-prepared-port.js';
 import {crossFixture,serversFile,waitLock,latch} from './dingtalk-crossdb.fixture.mjs';
 const integration=serversFile?test:test.skip;
-const write=async(f,db,cap,kind)=>kind==='channel'?new PostgresMessageRepository(db).append(await f.appendInput(cap),cap):new PostgresAutomationRepository(db).fireTrigger(await f.fireInput(cap),cap);
+const write=async(f,db,cap)=>new PostgresMessageRepository(db).append(await f.appendInput(cap),cap);
 const sourceChange=(f,kind)=>kind==='retire'?f.companies.retire(f.request({corpId:f.selection.corpId,eventTime:new Date().toISOString()})):
   kind==='revoke'?f.consent.revoke(f.request({scopeDigest:f.job.scopeDigest})):f.inbound();
 integration('cross-db rejects unknown production admission before journal/source writes',async()=>crossFixture(async f=>{
   await assert.rejects(f.execute(),/unavailable|admission/);assert.equal((await f.journals()).length,0);assert.equal(await f.count(),0);
 },{unknown:true}));
-for(const kind of ['channel','automation']) {
-  integration(`cross-db ${kind} uses actual independent target owner and rejects primary membership as authority`,async()=>crossFixture(async f=>{
-    await f.sourceSql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='owner'",[f.spaceId]);
-    const c=await f.execute(kind);assert.equal(c.state,'committed');assert.equal(c.sourceProved,true);assert.equal(c.targetProved,true);
-    assert.equal(kind==='channel'?await f.count():(await f.trigger()).length,1);
-    assert.equal((await f.sql('SELECT count(*) n FROM pg_prepared_xacts')).rows[0].n,'0');
-    assert.equal((await f.sourceSql('SELECT count(*) n FROM control.dingtalk_effect_journal')).rows[0].n,'1');
-    // Recovery proves old outcome without reauthorizing or revealing content.
-    await sourceChange(f,'retire');assert.equal((await f.coordinator.recover(c.bindingDigest)).state,'committed');
+integration(`cross-db append uses actual independent target owner and rejects primary membership as authority`,async()=>crossFixture(async f=>{
+  await f.sourceSql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='owner'",[f.spaceId]);
+  const c=await f.execute();assert.equal(c.state,'committed');assert.equal(c.sourceProved,true);assert.equal(c.targetProved,true);
+  assert.equal(await f.count(),1);
+  assert.equal((await f.sql('SELECT count(*) n FROM pg_prepared_xacts')).rows[0].n,'0');
+  assert.equal((await f.sourceSql('SELECT count(*) n FROM control.dingtalk_effect_journal')).rows[0].n,'1');
+  // Recovery proves old outcome without reauthorizing or revealing content.
+  await sourceChange(f,'retire');assert.equal((await f.coordinator.recover(c.bindingDigest)).state,'committed');
+}));
+for(const change of ['retire','revoke','rotate']) {
+  integration(`cross-db append source ${change} wins first: zero target effects`,async()=>crossFixture(async f=>{
+    await sourceChange(f,change);const result=await f.execute().catch(()=>null);
+    assert.ok(!result || result.state==='aborted');assert.equal(await f.count(),0);
   }));
-  for(const change of ['retire','revoke','rotate']) {
-    integration(`cross-db ${kind} source ${change} wins first: zero target effects`,async()=>crossFixture(async f=>{
-      await sourceChange(f,change);const result=await f.execute(kind).catch(()=>null);
-      assert.ok(!result || result.state==='aborted');assert.equal(await f.count(),0);assert.equal(await f.trigger(),null);
-    }));
-    integration(`cross-db ${kind} source ${change} waits for source PREPARE until target commits`,async()=>crossFixture(async f=>{
-      const gate=latch();let c;
-      const pending=f.execute(kind,{runTarget:async(db,cap)=>{await write(f,db,cap,kind);gate.enter();await gate.hold;}});
-      await Promise.race([gate.arrived,pending.then(()=>{throw new Error("effect never reached preparation latch");})]);assert.equal(await f.count(),0);assert.equal(await f.trigger(),null);
-      const retired=sourceChange(f,change);await waitLock(f.sourceSql,'pg_advisory_xact_lock');
-      let done=false;retired.then(()=>{done=true;});assert.equal(done,false);gate.release();c=await pending;await retired;
-      assert.equal(c.state,'committed');assert.equal(kind==='channel'?await f.count():(await f.trigger()).length,1);
-    }));
-  }
-  for(const change of ['acl','member','original-member']) {
-    integration(`cross-db ${kind} target ${change} commits first and actual owner aborts`,async()=>crossFixture(async f=>{
-      if(change==='acl')await f.sql("DELETE FROM data.channel_access WHERE channel_id=$1 AND subject_id='target'",[f.channelId]);
-      else await f.sql("UPDATE data.space_members SET role='viewer',version=version+1 WHERE space_id=$1 AND user_id=$2",[f.spaceId,change==='member'?'target':'owner']);
-      await assert.rejects(f.execute(kind));assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);assert.equal(await f.trigger(),null);
-    }));
-  }
+  integration(`cross-db append source ${change} waits for source PREPARE until target commits`,async()=>crossFixture(async f=>{
+    const gate=latch();let c;
+    const pending=f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);gate.enter();await gate.hold;}});
+    await Promise.race([gate.arrived,pending.then(()=>{throw new Error("effect never reached preparation latch");})]);assert.equal(await f.count(),0);
+    const retired=sourceChange(f,change);await waitLock(f.sourceSql,'pg_advisory_xact_lock');
+    let done=false;retired.then(()=>{done=true;});assert.equal(done,false);gate.release();c=await pending;await retired;
+    assert.equal(c.state,'committed');assert.equal(await f.count(),1);
+  }));
+}
+for(const change of ['acl','member','original-member']) {
+  integration(`cross-db append target ${change} commits first and actual owner aborts`,async()=>crossFixture(async f=>{
+    if(change==='acl')await f.sql("DELETE FROM data.channel_access WHERE channel_id=$1 AND subject_id='target'",[f.channelId]);
+    else await f.sql("UPDATE data.space_members SET role='viewer',version=version+1 WHERE space_id=$1 AND user_id=$2",[f.spaceId,change==='member'?'target':'owner']);
+    await assert.rejects(f.execute());assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);
+  }));
 }
 integration('cross-db source PREPARE acknowledgement loss aborts exact participants without orphan',async()=>crossFixture(async f=>{
   await assert.rejects(f.execute());assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);
@@ -70,7 +68,7 @@ integration('decided source/target PREPARE locks survive both restarts and expir
     if(decision.state==='commit_decided'){gate.enter();await gate.hold;}
     return decision;
   };
-  const pending=f.execute('channel');
+  const pending=f.execute();
   let retiring,revoke,targetPeer;
   try {
     await Promise.race([gate.arrived,pending.then(()=>{throw new Error('effect never reached durable commit decision');})]);
@@ -99,7 +97,7 @@ integration('decided source/target PREPARE locks survive both restarts and expir
 }));
 integration('undecided prepared restart after leadership expiry aborts through recovery without target effects',async()=>crossFixture(async f=>{
   const gate=latch();
-  const pending=f.execute('channel',{runTarget:async(db,cap)=>{await write(f,db,cap,'channel');gate.enter();await gate.hold;}});
+  const pending=f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);gate.enter();await gate.hold;}});
   const rejected=assert.rejects(pending,/binding or leader changed/);
   try {
     await Promise.race([gate.arrived,pending]);
@@ -114,7 +112,7 @@ integration('undecided prepared restart after leadership expiry aborts through r
   }finally{gate.release();await Promise.allSettled([pending,rejected]);}
 }));
 integration('journal decision/takeover never waits on full prepared source pin, job or product locks; stale leader cannot decide',async()=>crossFixture(async f=>{
-  const gate=latch();const pending=f.execute('automation',{runTarget:async(db,cap)=>{await write(f,db,cap,'automation');gate.enter();await gate.hold;}});
+  const gate=latch();const pending=f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);gate.enter();await gate.hold;}});
   const rejected=assert.rejects(pending,/leader changed/);await gate.arrived;
   const row=(await f.journals())[0];
   await f.sourceSql("SET lock_timeout='100ms'");
@@ -123,7 +121,7 @@ integration('journal decision/takeover never waits on full prepared source pin, 
   gate.release();await rejected;
   const undecided=await f.coordinator.journal.read(row.binding_digest);assert.equal(undecided.state,'preparing');
   await f.coordinator.journal.decide(leader,'abort');const c=await f.coordinator.recover(row.binding_digest);
-  assert.equal(c.state,'aborted');assert.equal(await f.count(),0);assert.equal(await f.trigger(),null);
+  assert.equal(c.state,'aborted');assert.equal(await f.count(),0);
   const fk=(await f.sourceSql(`SELECT count(*) n FROM pg_constraint WHERE conrelid IN ('control.dingtalk_effect_journal'::regclass,'control.dingtalk_effect_gates'::regclass,'control.dingtalk_effect_outcomes'::regclass) AND contype='f'`)).rows[0].n;
   assert.equal(fk,'0');
 }));
@@ -143,12 +141,12 @@ integration('late source PREPARE after abort inventory scan is rolled back befor
   })})});
 });
 integration('expired decision deadline aborts both actual prepared effects; committed decision survives later abort/deadline',async()=>crossFixture(async f=>{
-  const c=await f.execute('channel',{runTarget:async(db,cap)=>{await write(f,db,cap,'channel');const row=(await f.journals())[0];
+  const c=await f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);const row=(await f.journals())[0];
     await f.sourceSql("UPDATE control.dingtalk_effect_journal SET decision_deadline=clock_timestamp()-interval '1 second' WHERE binding_digest=$1",[row.binding_digest]);}});
   assert.equal(c.state,'aborted');assert.equal(await f.count(),0);
 }));
-for(const kind of ['channel','automation'])for(const change of ['acl','member'])integration(`cross-db ${kind} prepared target holds ${change} rights until actual target commit`,async()=>crossFixture(async f=>{
-  const gate=latch();const pending=f.execute(kind,{runTarget:async(db,cap)=>{await write(f,db,cap,kind);gate.enter();await gate.hold;}});
+for(const change of ['acl','member'])integration(`cross-db append prepared target holds ${change} rights until actual target commit`,async()=>crossFixture(async f=>{
+  const gate=latch();const pending=f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);gate.enter();await gate.hold;}});
   await Promise.race([gate.arrived,pending]);const peer=new Client({connectionString:f.servers.target.url});await peer.connect();
   try {
     await peer.query('BEGIN');const revoked=peer.query(change==='acl'?'SELECT 1 FROM data.channels WHERE channel_id=$1 FOR UPDATE':"SELECT 1 FROM data.space_members WHERE space_id=$1 AND user_id='target' FOR UPDATE",[change==='acl'?f.channelId:f.spaceId]);
@@ -156,15 +154,14 @@ for(const kind of ['channel','automation'])for(const change of ['acl','member'])
     gate.release();const c=await pending;await revoked;
     if(change==='acl')await peer.query("DELETE FROM data.channel_access WHERE channel_id=$1 AND subject_id='target'",[f.channelId]);
     else await peer.query("UPDATE data.space_members SET role='viewer',version=version+1 WHERE space_id=$1 AND user_id='target'",[f.spaceId]);
-    await peer.query('COMMIT');assert.equal(c.state,'committed');assert.equal(kind==='channel'?await f.count():(await f.trigger()).length,1);
+    await peer.query('COMMIT');assert.equal(c.state,'committed');assert.equal(await f.count(),1);
   }finally{gate.release();await peer.query('ROLLBACK');await peer.end();}
 }));
-for(const kind of ['channel','automation'])for(const change of ['member-delete','owner','features','placement'])integration(`cross-db actual ${kind} refuses independent current ${change}`,async()=>crossFixture(async f=>{
+for(const change of ['member-delete','owner','features','placement'])integration(`cross-db actual append refuses independent current ${change}`,async()=>crossFixture(async f=>{
   if(change==='member-delete')await f.sql("DELETE FROM data.space_members WHERE space_id=$1 AND user_id='target'",[f.spaceId]);
   else if(change==='placement')await f.sql("UPDATE control.space_placement SET placement_epoch=placement_epoch+1,state='blocked' WHERE space_id=$1",[f.spaceId]);
-  else if(kind==='channel')await f.sql(change==='owner'?"UPDATE data.app_source_relations SET created_by='other' WHERE relation_id=$1":"UPDATE data.app_source_relations SET features_json='[]' WHERE relation_id=$1",[f.relationId]);
-  else await f.sql(change==='owner'?"UPDATE data.automations SET owner_user_id='other' WHERE automation_id=$1":"UPDATE data.automations SET enabled=false WHERE automation_id=$1",[f.automationId]);
-  await assert.rejects(f.execute(kind));assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);assert.equal(await f.trigger(),null);
+  else await f.sql(change==='owner'?"UPDATE data.app_source_relations SET created_by='other' WHERE relation_id=$1":"UPDATE data.app_source_relations SET features_json='[]' WHERE relation_id=$1",[f.relationId]);
+  await assert.rejects(f.execute());assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);
 }));
 integration('full actual prepared source rejects NOTIFY eligibility rather than falling back to ordinary COMMIT',async()=>crossFixture(async f=>{
   await assert.rejects(f.execute(),e=>e.code==='0A000');assert.equal((await f.journals())[0].state,'aborted');assert.equal(await f.count(),0);
@@ -191,7 +188,7 @@ integration('journal decision actual COMMIT lost ACK recovers immutable commit; 
 for(const side of ['source','target'])integration(`actual ${side} ROLLBACK PREPARED lost ACK closes gate and proves abort`,async()=>{
   let lost=false;
   await crossFixture(async f=>{
-    const signal=new AbortController();const c=await f.execute('channel',{signal:signal.signal,runTarget:async(db,cap)=>{await write(f,db,cap,'channel');signal.abort();}});
+    const signal=new AbortController();const c=await f.execute({signal:signal.signal,runTarget:async(db,cap)=>{await write(f,db,cap);signal.abort();}});
     assert.equal(lost,true);assert.equal(c.state,'aborted');assert.equal(await f.count(),0);
   },{clientFactory:(which,config)=>{const client=new Client(config),query=client.query.bind(client);client.query=async(...args)=>{
     const result=await query(...args),text=typeof args[0]==='string'?args[0]:args[0].text;
@@ -224,7 +221,7 @@ integration('journal rejects copied decision and wrong binding; bounded company 
 }));
 integration('concurrent abort and commit requests select one irreversible journal decision',async()=>crossFixture(async f=>{
   const gate=latch();let captured;
-  const pending=f.execute('channel',{runTarget:async(db,cap)=>{await write(f,db,cap,'channel');captured=await f.coordinator.journal.read((await f.journals())[0].binding_digest);gate.enter();await gate.hold;}});
+  const pending=f.execute({runTarget:async(db,cap)=>{await write(f,db,cap);captured=await f.coordinator.journal.read((await f.journals())[0].binding_digest);gate.enter();await gate.hold;}});
   await gate.arrived;const aborted=await f.coordinator.journal.decide(captured,'abort');assert.equal(aborted.state,'abort_decided');
   gate.release();await assert.rejects(pending,/leader changed/);const c=await f.coordinator.recover(captured.bindingDigest);
   assert.equal(c.state,'aborted');assert.equal(await f.count(),0);assert.equal((await f.coordinator.journal.decide(captured,'commit')).state,'aborted');

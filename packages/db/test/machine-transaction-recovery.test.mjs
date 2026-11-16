@@ -35,7 +35,7 @@ function fixture(stage, failures, breaker = new ConnectivityBreaker("shard-0")) 
       ? [{ shard_id: "shard-0", placement_epoch: 1, state: "active", target_shard_id: null }]
       : /SELECT \* FROM data.machine_daemons|UPDATE\s+data.machine_daemons/u.test(text) ? [daemon]
       : /AS agent_name\s+FROM data.runs/u.test(text) ? [{ run_id: "run", instance_id: "instance",
-        channel_instance_id: "1", metadata_json: { executionKey: "key" } }] : [],
+        channel_instance_id: "1", execution_key: "key" }] : [],
   });
   return { pools, database: { ...wire, cacheMode: "disabled", openSession: () => wire.openSession(),
     transaction: (context, callback) => context.operation.startsWith("machine-lifecycle.")

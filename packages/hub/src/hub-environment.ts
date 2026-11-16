@@ -98,8 +98,6 @@ export const HUB_ENVIRONMENT = {
   MACHINE_NAME_REQUIRED: product("var", "Require a recorded owner-chosen Machine name before enrollment, connect or recovery; production pins true."),
 
   // Product behavior pinned by the committed config.
-  RELAY_AUTOMATION_EXECUTION_ENABLED: product("var", "Runs Automation occurrences; off when unset."),
-  RELAY_AUTOMATION_RUN_TIMEOUT_MS: product("var", "Default deadline for Automation runs without their own timeout."),
   CLIENT_COMPATIBILITY_LEGACY_ADMISSION_ENABLED: product("var", "Admits the last client generation that sends no compatibility identity."),
   GITHUB_REPOSITORY_TOKEN_LEGACY_UNBOUND_ENABLED: product("var", "Mints repository tokens for daemons that name no Run (pre-binding CLI); refused unless \"true\"."),
 
@@ -114,7 +112,6 @@ export const HUB_ENVIRONMENT = {
   RATE_LIMIT_CREDENTIAL: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted." },
   RATE_LIMIT_ANONYMOUS: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted." },
   RATE_LIMIT_HUMAN_CONNECT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted." },
-  RATE_LIMIT_SUMMON_INTENT: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of composer draft previews (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: previews are not counted." },
   RATE_LIMIT_JEV_EVALUATE: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted." },
   RATE_LIMIT_SEARCH_RERANK: { kind: "binding", scope: "feature", summary: "Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted." },
   RATE_LIMIT_ENFORCED: product("var", "Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when \"true\"; otherwise they are only logged. Production pins true."),
@@ -157,6 +154,7 @@ export const HUB_ENVIRONMENT = {
 
   // Optional integrations.
   APPLE_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private App Store Server key, app identity, allowed products and sandbox Space allowlist. Unset disables Apple subscription purchases." },
+  GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG: { kind: "secret", scope: "feature", summary: "Private Google Play service account key, subscription and base plan ids, Pub/Sub push identity and test-purchase Space allowlist. Unset disables Google Play subscription purchases." },
   PUSH_CONFIG: { kind: "secret", scope: "feature", summary: "JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open." },
   STRIPE_SECRET_KEY: { kind: "secret", scope: "feature", summary: "Stripe API key for paid plans. Unset with the webhook secret: checkout and the billing portal answer 503." },
   STRIPE_WEBHOOK_SECRET: { kind: "secret", scope: "feature", summary: "Stripe webhook signing secret." },
@@ -179,7 +177,6 @@ export const HUB_ENVIRONMENT = {
 
   // Local and test deployments.
   XMATRIX_MOCK_AUTH_TOKEN: test("secret", "Bearer token that signs in the mock user; never set in production."),
-  XMATRIX_MOCK_SCHEDULE_DELAY_MS: test("var", "Automation cadence seed honored only with mock auth."),
   XMATRIX_MOCK_AUTH_USERS: test("var", "JSON map of mock tokens to users."),
   XMATRIX_MOCK_AUTH_USER_ID: test("var", "Mock user id."),
   XMATRIX_MOCK_AUTH_EMAIL: test("var", "Mock user email."),

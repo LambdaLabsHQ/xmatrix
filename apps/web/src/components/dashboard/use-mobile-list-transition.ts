@@ -4,6 +4,8 @@ import { useEffect, useRef, type MutableRefObject } from "react";
 import { flushSync } from "react-dom";
 
 import { useScreenChangeStore, type ScreenChangeStore } from "./screen-change-store";
+import { SPRING_SAMPLES, springDuration, springOffset } from "./screen-spring";
+import { whenQuiet } from "./start-after-paint";
 import { systemBackLayerOpen } from "./use-system-back";
 
 /*
@@ -26,6 +28,8 @@ import { systemBackLayerOpen } from "./use-system-back";
  * - Once let go, the rest of the way is handed to the compositor as keyframes
  *   sampled from the spring, so the layers land smoothly whatever the main
  *   thread does. The sign's length, which is laid out, follows on the main thread.
+ * - Opening a conversation renders it first; its push waits for the frame that
+ *   paints it before it starts (start-after-paint.ts).
  * - The iOS app announces a touch at the left edge (`prepare`) before its swipe
  *   is recognized; the change is set up then, invisibly, and the swipe starts
  *   on a page that is ready. A swipe that catches the screen springing back
@@ -55,10 +59,6 @@ declare global {
   }
 }
 
-/** Critically damped: no overshoot, settled in about 0.4 s. */
-const SETTLE_RATE = 22;
-/** Points sampled from the spring for the compositor's keyframes. */
-const SETTLE_SAMPLES = 60;
 /** A prepared change no swipe took up is put away. */
 const PREPARED_FOR_MS = 700;
 /** How fast the bar's glyphs and the controls at the bottom trade places: the
@@ -71,20 +71,6 @@ const POSE_STOPS = [0, 1 - 1 / BAR_FADE, 1 - 1 / BOTTOM_FADE, 1 / BOTTOM_FADE, 1
 
 function reducedMotion(): boolean {
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
-
-/** How far from its target the spring is `t` s after leaving `offset` px from it at `speed` px/s. */
-function springOffset(offset: number, speed: number, t: number): number {
-  return (offset + (speed + SETTLE_RATE * offset) * t) * Math.exp(-SETTLE_RATE * t);
-}
-
-/** When the spring is within half a pixel of its target for good. */
-function springDuration(offset: number, speed: number): number {
-  let settledAt = 0;
-  for (let t = 0; t <= 1; t += 1 / 240) {
-    if (Math.abs(springOffset(offset, speed, t)) >= 0.5) settledAt = t + 1 / 240;
-  }
-  return Math.max(settledAt, 0.12);
 }
 
 /** The elements that move during the change, found once when it is set up. */
@@ -207,19 +193,21 @@ function tearDown(parts: Parts) {
 function settleOnCompositor(parts: Parts, x: number, target: number, speed: number) {
   const offset = x - target;
   const duration = springDuration(offset, speed);
-  const frames = Array.from({ length: SETTLE_SAMPLES + 1 }, (_, index) => {
-    const t = (duration * index) / SETTLE_SAMPLES;
-    return poses(parts, index === SETTLE_SAMPLES ? target : target + springOffset(offset, speed, t));
+  const frames = Array.from({ length: SPRING_SAMPLES + 1 }, (_, index) => {
+    const t = (duration * index) / SPRING_SAMPLES;
+    return poses(parts, index === SPRING_SAMPLES ? target : target + springOffset(offset, speed, t));
   });
   const animations = frames[0].map(([element], part) => element.animate(
     frames.map((pose) => ({ ...pose[part][1] })),
     { duration: duration * 1000, easing: "linear", fill: "forwards" },
   ));
-  const startedAt = performance.now();
   return {
     animations,
-    /** Where the screen is now, for a swipe that catches it. */
-    position: () => target + springOffset(offset, speed, Math.min(duration, (performance.now() - startedAt) / 1000)),
+    /** Where the screen is now, for a swipe that catches it: by the animations' own time, which a held start does not count. */
+    position: () => {
+      const time = Number(animations[0]?.currentTime ?? 0) / 1000;
+      return target + springOffset(offset, speed, Math.min(duration, time));
+    },
   };
 }
 
@@ -248,6 +236,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       /** What a drag seeks, from the change's setup until it is let go. */
       track: [] as Animation[],
       landing: null as null | { toList: boolean; position: () => number; animations: Animation[] },
+      /** Cancels a landing waiting for a quiet frame. */
+      putOff: null as null | (() => void),
       putAway: 0,
     };
 
@@ -276,6 +266,8 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
 
     const close = (update?: () => void) => {
       window.clearTimeout(m.putAway);
+      m.putOff?.();
+      m.putOff = null;
       // The screen holds its last pose until the new one is in.
       const holding = [...m.track, ...(m.landing?.animations ?? [])];
       m.stage = null;
@@ -298,18 +290,29 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
       if (rootRef.current) delete rootRef.current.dataset.listTransition;
     };
 
-    const land = (target: number, speed: number, then: () => void) => {
+    const land = (target: number, speed: number, then: () => void, afterPaint = false) => {
       const parts = m.parts;
       if (!parts) return;
-      for (const animation of m.track) animation.cancel();
-      m.track = [];
-      const landing = settleOnCompositor(parts, m.x, target, speed);
-      m.landing = { toList: target > 0, ...landing };
-      void Promise.all(landing.animations.map((animation) => animation.finished)).then(() => {
-        if (m.landing?.animations !== landing.animations) return;
-        m.x = target;
-        then();
-      }, () => undefined);
+      const start = () => {
+        m.putOff = null;
+        if (m.parts !== parts) return;
+        for (const animation of m.track) animation.cancel();
+        m.track = [];
+        const landing = settleOnCompositor(parts, m.x, target, speed);
+        m.landing = { toList: target > 0, ...landing };
+        // Settled, not all finished: a part cancelled by its own component (the
+        // composer box morphing) must not leave the change set up for good.
+        void Promise.allSettled(landing.animations.map((animation) => animation.finished)).then(() => {
+          if (m.landing?.animations !== landing.animations) return;
+          m.x = target;
+          then();
+        });
+      };
+      // A conversation just rendered keeps its first pose on the paused track,
+      // as a drag holds it, until the main thread is free (start-after-paint.ts);
+      // the landing is made and played only then.
+      if (afterPaint) m.putOff = whenQuiet(start);
+      else start();
     };
 
     const canDrawBack = () => state.current.conversationOverList && !systemBackLayerOpen() && !reducedMotion();
@@ -335,7 +338,9 @@ export function useMobileListTransition({ conversationOverList, listShowing, roo
         if (m.stage === "prepared") close();
         if (m.stage || !state.current.listShowing) return false;
         flushSync(update);
-        if (state.current.conversationOverList && setUpAs("forward")) land(0, 0, () => close());
+        if (state.current.conversationOverList && setUpAs("forward")) {
+          land(0, 0, () => close(), true);
+        }
         return true;
       },
     };

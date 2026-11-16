@@ -82,7 +82,7 @@ async function desktopConversationRow(page: Page) {
   await page.setViewportSize(E2E_DESKTOP_CONTEXT.viewport);
   await page.goto(`/app/${encodeURIComponent(E2E_SPACE.id)}/channels/${encodeURIComponent(`${E2E_CHANNEL.name}--${E2E_CHANNEL.id}`)}`,
     { waitUntil: "domcontentloaded" });
-  const conversation = page.locator(".app-sidebar .app-channel-chat-row").first();
+  const conversation = page.locator(".xmatrix-app-shell:not([aria-busy]) .app-sidebar .app-channel-chat-row").first();
   await expect(conversation).toBeVisible();
   return measure(conversation);
 }

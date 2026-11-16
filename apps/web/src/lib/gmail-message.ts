@@ -59,6 +59,15 @@ function link(line: string): GmailLink | undefined {
   }
 }
 
+/**
+ * The message in Gmail's own web app. `authuser` picks the signed-in Google account that holds the mailbox, so a
+ * reader signed in to several accounts lands in the right one; without a mailbox Gmail opens its default account.
+ */
+export function gmailWebUrl(message: Pick<GmailMessage, "id" | "mailbox">): string {
+  const account = message.mailbox ? `?authuser=${encodeURIComponent(message.mailbox)}` : "";
+  return `https://mail.google.com/mail/${account}#all/${message.id}`;
+}
+
 /** The message a Gmail read describes, or undefined when `detail` is anything else. */
 export function parseGmailMessage(detail: string): GmailMessage | undefined {
   const preamble = detail.match(PREAMBLE);

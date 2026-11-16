@@ -1,13 +1,13 @@
 "use client";
 
-import { useLayoutEffect, useSyncExternalStore, type MutableRefObject } from "react";
+import { useLayoutEffect, useSyncExternalStore, type ComponentProps, type MutableRefObject } from "react";
 import type { SerializedSpace } from "@xmatrix/protocol";
 
 import type { CreateAction } from "./list-create";
 import { slideDockTabBars, type DockTabSlideStore } from "./use-dock-tab-slide";
 import type { MobileListTransitionStore } from "./use-mobile-list-transition";
 import { CreateFab, MobileTabDock, TopWorkspaceBar } from "./workspace-shell-chrome";
-import type { AppView } from "./workspace-shell-navigation";
+import { DOCK_TAB_VIEWS, type AppView } from "./workspace-shell-navigation";
 
 const noServerSnapshot = () => null;
 
@@ -53,6 +53,14 @@ export function MobileListTransitionLayer({ store, bar, listCreate, webDock, sta
       {stage !== "prepared" && <div className="app-list-transition-shield" aria-hidden="true" />}
     </>
   );
+}
+
+/** The web dock, marking the tab a slide is going to from the moment it starts (use-dock-tab-slide). */
+export function SlidingMobileTabDock({ slide, activeView, ...dock }: ComponentProps<typeof MobileTabDock> & {
+  slide: DockTabSlideStore;
+}) {
+  const pendingSlot = useSyncExternalStore(slide.pending.subscribe, slide.pending.get, noServerSnapshot);
+  return <MobileTabDock activeView={DOCK_TAB_VIEWS[pendingSlot ?? -1] ?? activeView} {...dock} />;
 }
 
 /** The bar of the dock tab being left, sliding out with its page (use-dock-tab-slide). */

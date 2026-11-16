@@ -1,4 +1,4 @@
-import { exceptionEvents } from "./support/error-reports.mjs";
+import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuthorityDatabase, PostgresFeishuRoomRepository } from "@xmatrix/db";
@@ -6,6 +6,7 @@ import { startErrorReporting, sendErrorReports } from "@xmatrix/protocol/error-r
 import { scheduledTaskFailed } from "../src/scheduled-task-failure.ts";
 import { watchHarnessReleasesBesidePostgres } from "../src/harness-release-watch.ts";
 import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
+import { noticeCliReleases, fetchCliChannelVersion } from "../src/cli-release-notice.ts";
 
 // The existing DB tests check retry behavior; only a sent envelope proves a
 // stackless scheduled failure retains its task and its attempt evidence once.
@@ -70,6 +71,46 @@ test("scheduled failures send exactly one event with task and database evidence"
     ]);
     assert.ok(harness.every(value => Number.isSafeInteger(value.durationMs) && value.durationMs >= 0));
   } finally { globalThis.fetch = originalFetch; console.warn = originalWarn; }
+});
+
+// HUB-BM lost every original cause and stage by stringifying channel errors.
+// The actual sent event and its connector projection own this privacy contract.
+test("CLI notice failures retain independent stages and causes in one readable event", async t => {
+  const envelopes = captureErrorReports(t);
+  t.mock.method(console, "warn", () => {});
+  let feedCalls = 0, cellCalls = 0;
+  await assert.rejects(noticeCliReleases({}, {
+    latest: async channel => channel === "stable" ? "2.3.0" : fetchCliChannelVersion(channel, async () => {
+      feedCalls++; throw new DOMException("feed timeout", "TimeoutError");
+    }),
+    owners: async () => ["private-owner"],
+    cells: () => [
+      { fetch: async () => { cellCalls++; throw new Error("socket transport failed"); } },
+      { fetch: async () => { cellCalls++; return new Response("{severed"); } },
+    ],
+  }), error => { scheduledTaskFailed("CLI release notice", error); return true; });
+  await sendErrorReports();
+  assert.equal(feedCalls, 2);
+  assert.equal(cellCalls, 2, "neither delivery is replayed after losing its response");
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, 1);
+  const event = events[0];
+  const evidence = JSON.parse(event.extra.cli_release_notice_failure);
+  assert.deepEqual(evidence.map(({ channel, phase, attempt, responseStatus }) =>
+    [channel, phase, attempt, responseStatus]), [
+    ["stable", "cell_fetch", 1, 0], ["stable", "cell_body", 1, 200],
+    ["dev", "feed_headers", 1, 0], ["dev", "feed_headers", 2, 0],
+  ]);
+  assert.match(JSON.stringify(event.exception), /socket transport failed/);
+  const metadata = sentryEventMetadata({ tags: [{ key: "operation", value: event.tags.operation }], context: event.extra }).join("\n");
+  assert.match(metadata, /Scheduled task: CLI release notice/);
+  assert.match(metadata, /CLI release notice failure: stable · cell_body · attempt 1 · \d+ ms · HTTP 200/);
+  assert.match(metadata, /CLI release notice failure: dev · feed_headers · attempt 2/);
+  assert.doesNotMatch(JSON.stringify(event.extra) + metadata, /private-owner|severed/);
+  for (const invalid of [{ ...evidence[0], owner: "private-owner" }, { ...evidence[0], phase: "private-owner" },
+    { ...evidence[0], attempt: 3 }, { ...evidence[0], durationMs: 120001 }]) {
+    assert.deepEqual(sentryEventMetadata({ context: { cli_release_notice_failure: JSON.stringify([invalid]) } }), []);
+  }
 });
 
 // HUB-AV exhausted recovery in SQL, then BEGIN. Generic retry tests cannot

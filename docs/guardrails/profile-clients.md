@@ -118,6 +118,16 @@ Local source files remain browser-only and are excluded from send snapshots and
 message bindings. Failed image compression still permits choosing Original on
 that preview.
 
+### Personal browser records
+
+Personal browser records (composer input history, recent searches, Page summons
+and the preferred Page writer) share a user-and-Space storage boundary. Reads
+and writes require the signed-in user's stable id and Space id; switching
+either hides the previous scope immediately. Legacy records without an owner
+are not adopted. Storage refusal, including a blocked `localStorage` getter,
+does not interrupt the product action. These are device memories, not grants
+or evidence of current Channel access.
+
 ### Registration-backed Channel presence
 
 Channel catalog presence uses the Instance actor for registration-backed Runs,

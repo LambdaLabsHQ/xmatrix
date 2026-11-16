@@ -50,7 +50,7 @@ function totals(overrides = {}) {
     messages: 0, messages_last_24h: 0, messages_last_7d: 0,
     human_messages: 0, agent_messages: 0, agent_registrations: 0,
     runs: 0, active_runs: 0, agent_instances: 0,
-    automations: 0, enabled_automations: 0, storage_logical_bytes: 0,
+    storage_logical_bytes: 0,
     ...overrides,
   }];
 }
@@ -92,8 +92,7 @@ test("PostgreSQL admin overview merges placed facts and reads global Machines on
     postgres_admin_totals_v4: totals({
       spaces: 1, channels: 1, active_channels: 1,
       messages: 2, messages_last_24h: 1, messages_last_7d: 2,
-      human_messages: 2, agent_registrations: 1, automations: 1,
-      enabled_automations: 1, storage_logical_bytes: 250,
+      human_messages: 2, agent_registrations: 1, storage_logical_bytes: 250,
     }),
     postgres_admin_spaces_v3: [{
       id: "space-1", name: "One", owner_user_id: "user-1",

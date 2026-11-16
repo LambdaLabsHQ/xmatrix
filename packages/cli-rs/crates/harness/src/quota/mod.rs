@@ -18,9 +18,9 @@ mod cache;
 pub mod claude;
 pub mod codex;
 pub mod cursor;
+pub mod deepseek;
 pub mod grok;
 pub mod opencode;
-pub mod refresh;
 pub mod windows;
 pub mod zai;
 
@@ -48,6 +48,8 @@ pub enum Provider {
     Codex,
     /// Cursor Agent billing-cycle and Auto/API buckets.
     Cursor,
+    /// DeepSeek prepaid API balance (an amount, not a window).
+    DeepSeek,
     /// Grok Build credits (weekly or monthly).
     Grok,
     /// OpenCode Go 5h/1w/1mo windows.
@@ -102,6 +104,7 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::Cursor, Account::Process | Account::DefaultLogin) => {
             cursor::read_cursor_period_usage(force).await
         }
+        (Provider::DeepSeek, Account::Process) => deepseek::read_deepseek_balance(force).await,
         (Provider::Grok, Account::Process) => grok::read_grok_build_billing_usage(force).await,
         (Provider::Grok, Account::Home(home)) => {
             grok::read_grok_build_billing_usage_for_home(&home, force).await
@@ -109,11 +112,19 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::OpenCode, Account::Process) => opencode::read_opencode_zen_usage(force).await,
         (Provider::Zai, Account::Process) => zai::read_zai_coding_plan_quota_usage(force).await,
         (
-            Provider::Claude | Provider::Cursor | Provider::OpenCode | Provider::Zai,
+            Provider::Claude
+            | Provider::Cursor
+            | Provider::DeepSeek
+            | Provider::OpenCode
+            | Provider::Zai,
             Account::Home(_),
         )
         | (
-            Provider::Codex | Provider::Grok | Provider::OpenCode | Provider::Zai,
+            Provider::Codex
+            | Provider::DeepSeek
+            | Provider::Grok
+            | Provider::OpenCode
+            | Provider::Zai,
             Account::DefaultLogin,
         ) => None,
     }

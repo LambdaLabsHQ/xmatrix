@@ -61,3 +61,13 @@ test("retired create-instance suffixes fail closed without becoming workspace ta
   assert.deepEqual(mixed.tags, { repo: "owner/b" });
   assert.match(mixed.error, /retired/);
 });
+
+test("a summon that opens with a condition is an auto selection carrying every condition", async () => {
+  const { selectionLaunchConditions } = await import("../dist/index.js");
+  const body = "@machine:Laptop repo:owner/repo fix the build";
+  const derived = deriveHarnessInvocationSelections(await source(body));
+  assert.deepEqual(derived.selections.map(item => [item.text, item.target]), [["@machine:Laptop", { kind: "auto" }]]);
+  const options = selectionLaunchConditions(body, derived.selections[0]);
+  assert.deepEqual(options.tags, { machine: "Laptop", repo: "owner/repo" });
+  assert.equal(body.slice(0, options.end), "@machine:Laptop repo:owner/repo");
+});

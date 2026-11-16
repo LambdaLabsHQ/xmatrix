@@ -36,31 +36,34 @@ async fn run_codex_app_external(run: ExternalRun<'_>) -> error::Result<()> {
     write_current_run_effort(latest_effort.as_deref());
 
     write_current_run_status("codex_app_starting", false, None);
-    // Seed account-level Codex 5h/1w quotas from ChatGPT wham/usage. The
-    // app-server's session-local rate limits are not an account usage source.
-    let latest_usage = read_codex_chatgpt_usage(false).await;
-    let quota_relay = relay.clone();
-    let _quota_refresh = xmatrix_harness::quota::refresh::spawn_quota_refresh(
-        || read_codex_chatgpt_usage(false),
-        move |usage| send_presence(&quota_relay, None, PresencePatch::usage(Some(usage))),
-    );
     let mut initial_runtime_turn = runtime_state.begin_initial_message_turn(
         &relay,
         initial_message.is_some(),
         auto_join_channel_id.as_deref(),
         latest_model.clone(),
-        latest_usage.clone(),
+        None,
         latest_goal.clone(),
     );
 
-    let mut app = spawn_initialized_codex_app(
-        cmd,
-        cwd,
-        &agent,
-        resume_session_key.as_deref(),
-        resume_requested,
-    )
-    .await?;
+    // Seed account-level Codex 5h/1w quotas from ChatGPT wham/usage beside the
+    // app-server's start, never ahead of it: the start does not wait on the
+    // provider. The app-server's session-local rate limits are not an account
+    // usage source. After this the quota is read when a turn ends, not on a
+    // timer.
+    let (latest_usage, app) = tokio::join!(
+        read_codex_chatgpt_usage(false),
+        spawn_initialized_codex_app(
+            cmd,
+            cwd,
+            &agent,
+            resume_session_key.as_deref(),
+            resume_requested,
+        )
+    );
+    let mut app = app?;
+    if let Some(usage) = latest_usage.clone() {
+        send_presence(&relay, None, PresencePatch::usage(Some(usage)));
+    }
     if let Some(goal) = initial_goal.as_ref()
         && let Some(objective) = goal
             .objective

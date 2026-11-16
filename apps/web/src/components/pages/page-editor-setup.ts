@@ -1,6 +1,6 @@
 import { PAGE_AGENT_INK_MS } from "@xmatrix/protocol";
 import {
-  markdownToPageDoc, pageDocBlockAt, pageDocBlocks, pageDocChanges, pageSchema,
+  pageDocBlockAt, pageDocBlocks, pageSchema,
 } from "@xmatrix/protocol/page-document";
 import { baseKeymap, chainCommands, exitCode, lift, setBlockType, toggleMark, wrapIn } from "prosemirror-commands";
 import { dropCursor } from "prosemirror-dropcursor";
@@ -21,7 +21,7 @@ import {
 } from "y-prosemirror";
 import type { Awareness } from "y-protocols/awareness";
 import * as Y from "yjs";
-import { automationChips } from "./page-automation-chips";
+import { programChips } from "./page-program-chips";
 import { PageSessionChanges, type PageChangeItems, type PageChangeWriter } from "./page-session-changes";
 import { referenceChips, type PageReferenceTargets } from "./page-reference-chips";
 import { githubFileEmbeds, type ReadGitHubFile } from "./page-github-file-embeds";
@@ -407,14 +407,14 @@ function placeholder(hint: () => string | undefined): Plugin {
             class: doc.firstChild!.content.size ? "" : "page-placeholder",
           })]);
         }
-        const first = doc.firstChild!;
-        if (first.type !== nodes.heading || first.attrs.level !== 1) {
-          // A document that opens with anything else has no name: "Untitled" in its place, named by clicking it.
+        const title = titleHeading(doc);
+        if (!title) {
+          // A document without one has no name: "Untitled" above its text, named by clicking it.
           return DecorationSet.create(doc, [Decoration.widget(0, untitled, { side: -1, key: "untitled", stopEvent: () => true })]);
         }
         // A name typed and taken back again reads "Untitled" too.
-        if (!first.content.size) {
-          return DecorationSet.create(doc, [Decoration.node(0, first.nodeSize,
+        if (!title.node.content.size) {
+          return DecorationSet.create(doc, [Decoration.node(title.pos, title.pos + title.node.nodeSize,
             { class: "page-placeholder", "data-placeholder": NEW_PAGE_TITLE })]);
         }
         // A named page with nothing under its name yet shows what to write in the line below.
@@ -443,6 +443,15 @@ function untitled(view: EditorView): HTMLElement {
     view.focus();
   });
   return title;
+}
+
+/** The heading that names the page: its document's first top-level h1, wherever it stands (pages-live-document.md §4.1). */
+function titleHeading(doc: DocNode): { node: DocNode; pos: number } | null {
+  for (let index = 0, pos = 0; index < doc.childCount; pos += doc.child(index).nodeSize, index++) {
+    const node = doc.child(index);
+    if (node.type === nodes.heading && node.attrs.level === 1) return { node, pos };
+  }
+  return null;
 }
 
 function emptyPage(doc: DocNode): boolean {
@@ -1120,27 +1129,10 @@ function remoteChanges(fragment: Y.XmlFragment, awareness: Awareness): Plugin {
 }
 
 /**
- * What changed since this reader last read the page (§3.1), shown in place as
- * a diff until they tick it viewed: new text is tinted, text taken out stands
- * struck where it was. Positions are Yjs relative positions, because a remote
- * update redraws the whole document.
- */
-interface ReaderChange {
-  id: number;
-  kind: "added" | "removed";
-  block: boolean;
-  from: Y.RelativePosition;
-  to: Y.RelativePosition | null;
-  text: string;
-}
-
-const readerChangesKey = new PluginKey<DecorationSet>("page-reader-changes");
-
-/**
  * Room at the right edge beside a change, where what to do with it stands over the text's edge on a phone
  * or a narrow window: the lines beside it end short of it, so no word runs under it.
  */
-export function edgeRoom(beside: "suggestion" | "reader-change"): HTMLElement {
+export function edgeRoom(beside: "suggestion"): HTMLElement {
   const element = document.createElement("span");
   element.className = `page-edge-room is-${beside}`;
   element.contentEditable = "false";
@@ -1149,7 +1141,7 @@ export function edgeRoom(beside: "suggestion" | "reader-change"): HTMLElement {
 }
 
 /** That room, where the first line of text from `from` to `to` starts. */
-export function edgeRoomAt(doc: DocNode, from: number, to: number, beside: "suggestion" | "reader-change"): Decoration[] {
+export function edgeRoomAt(doc: DocNode, from: number, to: number, beside: "suggestion"): Decoration[] {
   let first: number | null = null;
   doc.nodesBetween(from, to, (node, pos) => {
     if (node.isTextblock) first ??= pos + 1;
@@ -1158,109 +1150,6 @@ export function edgeRoomAt(doc: DocNode, from: number, to: number, beside: "sugg
   return first === null ? [] : [Decoration.widget(first, () => edgeRoom(beside), {
     side: -1, ignoreSelection: true, marks: [], key: `${beside}-room`,
   })];
-}
-
-function removedWidget(change: ReaderChange): HTMLElement {
-  const element = document.createElement(change.block ? "div" : "span");
-  element.className = `page-reader-removed${change.block ? " is-block" : ""}`;
-  element.contentEditable = "false";
-  element.setAttribute("aria-hidden", "true");
-  element.textContent = change.text;
-  if (change.block) element.prepend(edgeRoom("reader-change"));
-  return element;
-}
-
-function readerDecorations(state: EditorState, fragment: Y.XmlFragment, changes: readonly ReaderChange[]): DecorationSet {
-  const mapping = yMapping(state);
-  if (!mapping || !fragment.doc || changes.length === 0) return DecorationSet.empty;
-  const size = state.doc.content.size;
-  const resolve = (position: Y.RelativePosition) => {
-    try {
-      return relativePositionToAbsolutePosition(fragment.doc!, fragment, position, mapping as never);
-    } catch {
-      return null;
-    }
-  };
-  const decorations: Decoration[] = [];
-  // Each block with a change keeps room at its edge for the mark that walks the changes on a phone.
-  const rooms = new Set<number>();
-  const keepRoom = (pos: number) => {
-    const at = state.doc.resolve(pos);
-    const start = at.depth > 0 ? at.before(1) : pos;
-    const block = state.doc.nodeAt(start);
-    if (!block || rooms.has(start)) return;
-    rooms.add(start);
-    decorations.push(...edgeRoomAt(state.doc, start, start + block.nodeSize, "reader-change"));
-  };
-  for (const change of changes) {
-    const from = resolve(change.from);
-    if (from === null || from > size) continue;
-    if (!(change.kind === "removed" && change.block)) keepRoom(from);
-    if (change.kind === "removed") {
-      decorations.push(Decoration.widget(from, () => removedWidget(change), {
-        side: -1, ignoreSelection: true, marks: [], key: `reader-removed-${change.id}`,
-      }));
-      continue;
-    }
-    const attrs = { class: change.block ? "page-reader-change is-block" : "page-reader-change" };
-    if (change.block) {
-      appendBlockChangeDecoration(decorations, state, from, attrs);
-      continue;
-    }
-    const to = change.to ? resolve(change.to) : null;
-    if (to !== null && to > from && to <= size) decorations.push(Decoration.inline(from, to, attrs));
-  }
-  return DecorationSet.create(state.doc, decorations);
-}
-
-function readerChanges(fragment: Y.XmlFragment): Plugin {
-  let changes: ReaderChange[] = [];
-  return new Plugin({
-    key: readerChangesKey,
-    state: {
-      init: () => DecorationSet.empty,
-      apply: (tr, value, _old, state) => {
-        const set = tr.getMeta(readerChangesKey) as ReaderChange[] | undefined;
-        if (set) changes = set;
-        return tr.docChanged || set ? readerDecorations(state, fragment, changes) : value;
-      },
-    },
-    props: { decorations: (state) => readerChangesKey.getState(state) },
-  });
-}
-
-/**
- * Where a change that is all of one paragraph starts as a block: the paragraph, or the list item or
- * list that holds nothing else. A new paragraph is marked in the margin, not word by word.
- */
-function wholeBlockAt(doc: DocNode, from: number, to: number): number | null {
-  const start = doc.resolve(from);
-  if (!start.parent.isTextblock || from !== start.start() || to !== start.end()) return null;
-  let depth = start.depth;
-  while (depth > 1 && start.node(depth - 1).childCount === 1) depth -= 1;
-  return start.before(depth);
-}
-
-/**
- * Shows what changed since the revision the reader last read, given as its
- * markdown, against the document the editor holds now, and says how many
- * changes that is. Without a baseline the page is shown as it is.
- */
-/** Counts what changed since `baseline`, and marks it over the text only while the reader has asked to see it. */
-export function showReaderChanges(view: EditorView, fragment: Y.XmlFragment, baseline: string | null, shown: boolean): number {
-  const mapping = yMapping(view.state);
-  if (!mapping) return 0;
-  const relative = (pos: number) => absolutePositionToRelativePosition(pos, fragment, mapping as never);
-  const doc = view.state.doc;
-  const changes = baseline === null ? [] : pageDocChanges(markdownToPageDoc(baseline), doc).map((change, id): ReaderChange => {
-    if (change.kind === "removed") return { id, kind: "removed", block: change.block, from: relative(change.at), to: null, text: change.text };
-    const block = change.block ? null : wholeBlockAt(doc, change.from, change.to);
-    if (block !== null) return { id, kind: "added", block: true, from: relative(block), to: null, text: "" };
-    return { id, kind: "added", block: change.block, from: relative(change.from), to: change.block ? null : relative(change.to),
-      text: "" };
-  });
-  view.dispatch(view.state.tr.setMeta(readerChangesKey, shown ? changes : []));
-  return changes.length;
 }
 
 export function editorPlugins(input: {
@@ -1273,6 +1162,8 @@ export function editorPlugins(input: {
   onBlockChange?: (blockId: string) => void;
   handleKeyDown: (view: EditorView, event: KeyboardEvent) => boolean;
   openConversation: (conversationId: string) => void;
+  /** Told whether the page holds a `norn run` block, and again when that changes. */
+  onProgramsPresent: (present: boolean) => void;
   /** Brings a discussion's card forward in the margin. */
   focusConversation: (conversationId: string) => void;
   headingActions: () => HeadingActions;
@@ -1322,8 +1213,7 @@ export function editorPlugins(input: {
     currentHeading(),
     discussionOverlay(input.fragment, input.openConversation, input.focusConversation),
     remoteChanges(input.fragment, input.awareness),
-    readerChanges(input.fragment),
-    automationChips(input.openConversation),
+    programChips(input.openConversation, input.onProgramsPresent),
     referenceChips(input.references),
     githubFileEmbeds(input.readGitHubFile),
   ];

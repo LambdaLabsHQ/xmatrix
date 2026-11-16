@@ -212,7 +212,7 @@ test("presence patches preserve all Agent labels and quota windows across token-
   assert.equal(heartbeat.models[0].displayName, "GPT-5");
   assert.equal(heartbeat.commands[0].token, "/model");
   assert.deepEqual(heartbeat.files, ["packages/hub/src/scoped-control-authority-base.ts"]);
-  assert.equal(heartbeat.statusChips[0].value, "gpt-5");
+  assert.equal(heartbeat.statusChips[0].value, "GPT-5", "the catalog names the model tag");
   assert.equal(heartbeat.statusChips[1].value, "high");
   assert.equal(heartbeat.usage.totalTokens, 180);
   assert.equal(heartbeat.usage.quotaUsages[0].remaining, 70);
@@ -251,6 +251,27 @@ test("usage heartbeats retire stale mirrored quota and context chips", () => {
   assert.equal(heartbeat.statusChips.some((chip) => chip.id === "ctx"), false);
   assert.equal(heartbeat.statusChips.find((chip) => chip.id === "model").value, "gpt-5");
   assert.equal(heartbeat.statusChips.find((chip) => chip.id === "mode").value, "full access");
+});
+
+test("runtime catalogs keep every entry and stay out of the hibernation attachment", () => {
+  // A Claude build with many skills reports far more than 64 commands; none may be dropped.
+  const commands = Array.from({ length: 200 }, (_, index) => ({
+    token: `/skill-${index}`, label: `skill-${index}`, description: "Discovered from local runtime overlay.",
+    mode: "passthrough", freeform: true }));
+  const parameters = Array.from({ length: 80 }, (_, index) => ({ id: `option${index}`, label: `Option ${index}`,
+    options: Array.from({ length: 120 }, (_, value) => `v${value}`), currentValue: "v0" }));
+  const presentation = mergeAgentInstancePresentation(fullPresentation(), { type: "presence_update", commands,
+    capabilities: Array.from({ length: 100 }, (_, index) => `capability-${index}`), parameters });
+  assert.equal(presentation.commands.length, 200);
+  assert.equal(presentation.capabilities.length, 100);
+  assert.equal(presentation.parameters.length, 80);
+  assert.equal(presentation.parameters[79].options.length, 120);
+  const serialized = serializeAgentInstanceHibernationAttachment(runtimeSession(presentation));
+  const restored = parseAgentInstanceHibernationAttachment(serialized).session.presentation;
+  // The Instance row keeps the catalogs; the attachment keeps the rest of the presentation.
+  assert.equal(restored.commands, undefined);
+  assert.equal(restored.capabilities, undefined);
+  assert.equal(restored.gitBranch, "fix/restore-agent-migration-labels");
 });
 
 test("Agent presentation survives bounded hibernation with its required authority route", () => {
@@ -361,7 +382,7 @@ test("Agent messages capture immutable goal, branch, model, effort, and chip sna
     model: "gpt-5",
     effort: "high",
     statusChips: [
-      { id: "model", label: "Model", value: "gpt-5", source: "codex" },
+      { id: "model", label: "Model", value: "GPT-5", source: "codex" },
       { id: "effort", label: "Effort", value: "high" },
     ],
   });
@@ -682,6 +703,28 @@ test("Cursor placeholder model ids and default Agent mode are dropped from prese
   assert.equal(presentation?.statusChips, undefined);
 });
 
+test("the model tag names the selected model from the runtime catalog, in presence and message snapshots", () => {
+  const selector = '["deepseek-official","deepseek-flash"]';
+  const models = [
+    { id: '["deepseek-official","deepseek-v4-pro"]', model: '["deepseek-official","deepseek-v4-pro"]', displayName: "DeepSeek-V4-Pro" },
+    { id: selector, model: selector, displayName: "DeepSeek-V4.1-Flash" },
+  ];
+  const presentation = mergeAgentInstancePresentation(undefined, {
+    type: "presence_update", model: selector, models,
+    statusChips: [{ id: "model", label: "Model", value: selector }],
+  });
+  assert.equal(presentation?.model, selector, "the selector id stays exact for switching");
+  assert.equal(presentation?.statusChips?.find((chip) => chip.id === "model")?.value, "DeepSeek-V4.1-Flash");
+  assert.equal(agentMessagePresentation(presentation)?.statusChips?.find((chip) => chip.id === "model")?.value,
+    "DeepSeek-V4.1-Flash");
+  const switched = mergeAgentInstancePresentation(presentation, {
+    type: "presence_update", model: '["deepseek-official","deepseek-v4-pro"]',
+  });
+  assert.equal(switched?.statusChips?.find((chip) => chip.id === "model")?.value, "DeepSeek-V4-Pro");
+  const uncatalogued = mergeAgentInstancePresentation(undefined, { type: "presence_update", model: "gpt-5.5" });
+  assert.equal(uncatalogued?.statusChips?.find((chip) => chip.id === "model")?.value, "gpt-5.5");
+});
+
 test("non-default Cursor mode chips survive presence presentation", () => {
   const presentation = mergeAgentInstancePresentation(undefined, {
     type: "presence_update",
@@ -710,13 +753,13 @@ test('model catalog observation time changes only when a catalog is reported', (
 test("registration catalog and live presence retain one card per Instance through disconnect", async () => {
   const rows = [3, 4].map(ordinal => ({
     instance_id: `instance-${ordinal}`, channel_id: "channel-1", channel_instance_id: ordinal,
-    status: "online", created_at: "2026-09-24T09:00:00Z", updated_at: "2026-09-24T09:01:00Z", registration_owner: "owner-1", registration_machine: "machine-1",
+    status: "online", run_status: "running", instance_version: 1, created_at: "2026-09-24T09:00:00Z", updated_at: "2026-09-24T09:01:00Z", registration_owner: "owner-1", registration_machine: "machine-1",
     registration_harness: "claude", workspace_machine_id: "machine-1",
     workspace_canonical_cwd: "/workspace", run_metadata_json: { identityKind: "instance", remoteRepo: "LambdaLabsHQ/xmatrix" },
     profile_name: "Claude", profile_runtime: "claude", profile_metadata_json: {}, owner_email: null,
   }));
   const catalog = await loadChannelAgentPresence({ async query(statement) {
-    return statement.name === "channel_agent_resting_presence_v6" ? [] : rows;
+    return statement.name === "channel_agent_resting_presence_v8" ? [] : rows;
   } }, "space-1", ["channel-1"]);
   let channel = { id: "channel-1", memberPresence: catalog.get("channel-1") };
   const sessions = rows.map(row => ({

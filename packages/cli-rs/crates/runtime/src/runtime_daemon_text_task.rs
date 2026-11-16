@@ -223,7 +223,14 @@ pub(crate) async fn execute(
     }
     let stateless = supported_stateless_flags(&program, preset_id).await;
     let argv = one_shot_argv(&args, &stateless);
-    let result = run(&program, &argv, &directory, &prompt(instruction, input)).await;
+    let result = run(
+        preset_id,
+        &program,
+        &argv,
+        &directory,
+        &prompt(instruction, input),
+    )
+    .await;
     let _ = tokio::fs::remove_dir_all(&directory).await;
     match result {
         Ok(text) => outcome(preset_id, "completed", Some(text), None),
@@ -232,6 +239,7 @@ pub(crate) async fn execute(
 }
 
 async fn run(
+    preset_id: &str,
     program: &std::path::Path,
     args: &[&str],
     directory: &std::path::Path,
@@ -245,6 +253,9 @@ async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    if preset_id == "claude" {
+        crate::runtime_trusted_role_prompt::label_claude_entrypoint(&mut command);
+    }
     #[cfg(windows)]
     command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     crate::process_tree::configure_tokio_process_tree(&mut command);
@@ -371,5 +382,29 @@ mod tests {
             execute("r", "cursor", "Summarise.", "text").await.status,
             "unavailable"
         );
+    }
+
+    /// Claude bills the 5-hour window by the entrypoint label it reports, and a
+    /// headless `--print` process calls itself `sdk-cli` unless told otherwise
+    /// (anthropics/claude-code#97074). The one-shot Claude names xMatrix; a
+    /// different harness's environment is left as it is.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_one_shot_claude_reports_xmatrix_as_its_entrypoint() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = private_directory(&format!("entrypoint-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("fake-harness");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\ncat >/dev/null\nprintf '%s' \"${CLAUDE_CODE_ENTRYPOINT-unset}\"\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let claude = run("claude", &program, &[], &dir, "hi").await.unwrap();
+        assert_eq!(claude.trim(), "xmatrix");
+        let codex = run("codex", &program, &[], &dir, "hi").await.unwrap();
+        assert_ne!(codex.trim(), "xmatrix");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

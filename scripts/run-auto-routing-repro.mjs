@@ -19,10 +19,8 @@ const data = join(directory, "pg");
 const lifecycle = process.argv.includes("--lifecycle-connect-retry");
 const lifecycleTerminal = process.argv.includes("--lifecycle-terminal");
 const lifecycleFailure = process.argv.includes("--lifecycle-start-failure");
-const lifecycleScheduled = process.argv.includes("--lifecycle-scheduled");
 const lifecycleWorkspace = process.argv.includes("--lifecycle-workspace");
 const hubSuite = process.argv.includes("--hub-suite");
-const hubIntegrations = process.argv.includes("--hub-postgres-integrations");
 // Hosted CI spreads the Hub suite over parallel jobs: one runs the workspace
 // packages' PostgreSQL tests ("packages"), the others each run one
 // XMATRIX_HUB_TEST_SHARD of the Hub test files ("files"). Together they are
@@ -33,8 +31,8 @@ if (!["all", "packages", "files"].includes(hubSuitePart)) {
 }
 const hubSuitePackages = hubSuite && hubSuitePart !== "files";
 const hubSuiteFiles = hubSuite && hubSuitePart !== "packages";
-if ([lifecycle, lifecycleTerminal, lifecycleFailure, lifecycleScheduled, lifecycleWorkspace, hubSuite, hubIntegrations].filter(Boolean).length > 1) throw new Error("Choose a single reproduction mode.");
-const needsTcp = lifecycle || lifecycleTerminal || lifecycleFailure || lifecycleScheduled || lifecycleWorkspace || hubSuite || hubIntegrations;
+if ([lifecycle, lifecycleTerminal, lifecycleFailure, lifecycleWorkspace, hubSuite].filter(Boolean).length > 1) throw new Error("Choose a single reproduction mode.");
+const needsTcp = lifecycle || lifecycleTerminal || lifecycleFailure || lifecycleWorkspace || hubSuite;
 const port = needsTcp ? await new Promise((resolve, reject) => {
   const server = createServer();
   server.once("error", reject);
@@ -93,9 +91,6 @@ try {
   if (lifecycleFailure) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/agent-start-failure-notice.e2e.mjs"], {
     ...hubPostgresEnv,
   });
-  if (lifecycleScheduled) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/automation-api.e2e.mjs", "test/automation-delivery.e2e.mjs"], {
-    ...hubPostgresEnv,
-  });
   if (lifecycleWorkspace) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test", "test/agent-mention-workspace-spawn.e2e.mjs"], {
     ...hubPostgresEnv,
   });
@@ -105,11 +100,20 @@ try {
   if (hubSuitePackages) run("node", ["--test", "packages/db/test/page-migration-postgres.test.mjs",
     // Exercise deletion against the current schema, including registered Run dependencies.
     "packages/db/test/space-deletion-postgres.test.mjs",
-    "packages/db/test/automation-run-links-postgres.test.mjs",
+    // 0253 refuses while an Automation would still run, and otherwise drops their storage.
+    "packages/db/test/drop-automations-migration-postgres.test.mjs",
     "packages/db/test/postgres-fixture-lifecycle.test.mjs",
     "packages/db/test/client-postgres.test.mjs",
+    // Machine advisory scopes and runtime heads need real live lock-wait evidence.
+    "packages/db/test/machine-control-lock-postgres.test.mjs",
+    // Expired harness leases retain database-clock evidence without extending authority.
+    "packages/db/test/machine-harness-action-postgres.test.mjs",
+    "packages/db/test/runtime-head-deadlock-postgres.test.mjs",
     // Lost-response regressions must execute their actual authorization SQL.
     "packages/db/test/catalog-read-recovery-postgres.test.mjs",
+    // page.read lost its BEGIN before any statement (XMATRIX-HUB-CX).
+    "packages/db/test/page-read-recovery-postgres.test.mjs",
+    "packages/db/test/message-system-annotation.test.mjs",
     "packages/db/test/content-ref-commit-postgres.test.mjs",
     // Storage metering and multipart progress against the widened content schema.
     "packages/db/test/content-storage-postgres.test.mjs",
@@ -119,6 +123,8 @@ try {
     "packages/db/test/agent-registration-revocation-postgres.test.mjs",
     // Connection, retry and revocation must not lock Runs ahead of Channel writers.
     "packages/db/test/message-run-locks-postgres.test.mjs",
+    // A daemon execution report's owner read stays a few hundred bytes (egress).
+    "packages/db/test/runtime-execution-report-postgres.test.mjs",
     "packages/db/test/first-message-launch-choice-postgres.test.mjs",
     "packages/db/test/message-asks-postgres.test.mjs",
     "packages/db/test/agent-quota-retry-postgres.test.mjs",
@@ -171,11 +177,6 @@ try {
     "--test-concurrency=auto", "--test-timeout=300000"], {
     ...hubPostgresEnv,
   }, 30 * 60 * 1000);
-  if (hubIntegrations) run("pnpm", ["--dir", "packages/hub", "exec", "node", ...hubTestImports, "--test",
-    "test/scheduled-timeout-postgres.integration.test.mjs"], {
-    ...hubPostgresEnv,
-    XMATRIX_REQUIRE_POSTGRES_TEST: "true",
-  });
 } finally {
   if (started) run("pg_ctl", ["-D", data, "-m", "fast", "-w", "stop"]);
   console.log(`Reproduction database and PostgreSQL log retained at ${directory}; no production data was used.`);

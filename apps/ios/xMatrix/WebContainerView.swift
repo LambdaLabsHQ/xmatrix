@@ -722,12 +722,58 @@ struct WebContainerView: UIViewRepresentable {
             return alert
         }
 
-        private static func present(_ controller: UIViewController, from webView: WKWebView?) {
-            guard var presenter = webView?.window?.rootViewController else { return }
+        // The page's window.alert, confirm and prompt. Without these a web view
+        // shows nothing and answers at once (confirm false, prompt null), so
+        // every action the page confirms first silently never ran on iOS
+        // (user 2026-11-09: 手机好像点不动). Each answers its page exactly once.
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptAlertPanelWithMessage message: String,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping () -> Void
+        ) {
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
+            if !Self.present(alert, from: webView) { completionHandler() }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptConfirmPanelWithMessage message: String,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping (Bool) -> Void
+        ) {
+            let alert = UIAlertController(title: nil, message: message, preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(false) })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler(true) })
+            if !Self.present(alert, from: webView) { completionHandler(false) }
+        }
+
+        func webView(
+            _ webView: WKWebView,
+            runJavaScriptTextInputPanelWithPrompt prompt: String,
+            defaultText: String?,
+            initiatedByFrame frame: WKFrameInfo,
+            completionHandler: @escaping (String?) -> Void
+        ) {
+            let alert = UIAlertController(title: nil, message: prompt, preferredStyle: .alert)
+            alert.addTextField { field in field.text = defaultText }
+            alert.addAction(UIAlertAction(title: "Cancel", style: .cancel) { _ in completionHandler(nil) })
+            alert.addAction(UIAlertAction(title: "OK", style: .default) { [weak alert] _ in
+                completionHandler(alert?.textFields?.first?.text ?? "")
+            })
+            if !Self.present(alert, from: webView) { completionHandler(nil) }
+        }
+
+        /// Presents over whatever the window shows now; false when the page has no window to present from.
+        @discardableResult
+        private static func present(_ controller: UIViewController, from webView: WKWebView?) -> Bool {
+            guard var presenter = webView?.window?.rootViewController else { return false }
             while let presented = presenter.presentedViewController {
                 presenter = presented
             }
             presenter.present(controller, animated: true)
+            return true
         }
 
         func viewForZooming(in scrollView: UIScrollView) -> UIView? {

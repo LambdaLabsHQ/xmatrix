@@ -47,3 +47,44 @@ export function splitDiscussionHead(body: string): DiscussionHead | null {
     rest: body.slice(head.length),
   };
 }
+
+/** A quoted passage with where it came from, wherever it sits in a message: `body.slice(start, end)` is its head. */
+export interface PlacedDiscussionHead extends DiscussionSource {
+  quote: string;
+  start: number;
+  end: number;
+}
+
+/**
+ * Every quoted passage in a message, in order. A message quotes as many passages as its author put in it, each at
+ * the line where it was put, between whatever was written around them; each is a head, as a discussion's first
+ * message opens with.
+ */
+export function discussionHeadsIn(body: string): PlacedDiscussionHead[] {
+  const heads: PlacedDiscussionHead[] = [];
+  let at = 0;
+  while (at < body.length) {
+    const head = splitDiscussionHead(body.slice(at));
+    if (head) {
+      const length = body.length - at - head.rest.length;
+      heads.push({ quote: head.quote, label: head.label, href: head.href, start: at, end: at + length });
+      at += length;
+      continue;
+    }
+    const line = body.indexOf("\n", at);
+    if (line < 0) break;
+    at = line + 1;
+  }
+  return heads;
+}
+
+/** What a message says besides the passages it quotes, as a preview or a name reads it. */
+export function withoutDiscussionHeads(body: string): string {
+  let said = "";
+  let at = 0;
+  for (const head of discussionHeadsIn(body)) {
+    said += body.slice(at, head.start);
+    at = head.end;
+  }
+  return `${said}${body.slice(at)}`.replace(/\n{3,}/gu, "\n\n").trim();
+}

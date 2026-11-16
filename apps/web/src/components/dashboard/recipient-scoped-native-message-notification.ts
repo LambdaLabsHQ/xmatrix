@@ -7,6 +7,7 @@ import type {
 import type { DesktopBridge } from "@/lib/desktop/bridge";
 import { channelAppPath, channelTitle, spaceAppPath } from "./channel-links";
 import { isOwnChannelMessage } from "./workspace-shell-helpers-extra";
+import { messageProvenance } from "./workspace-shell-message-model";
 import {
   nativeMessageNotificationBody,
   nativeMessageNotificationTitle,
@@ -52,6 +53,7 @@ export function maybePushRecipientScopedNativeMessageNotification({
     body: nativeMessageNotificationBody(entry),
     url,
     channelId: entry.channelId,
-    metadata: entry.metadata,
+    // The desktop app reads card fields from it, so only the Hub's own messages carry it there.
+    ...(messageProvenance(entry.metadata) === "system_fact" ? { metadata: entry.metadata } : {}),
   }).catch(() => undefined);
 }

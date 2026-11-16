@@ -90,6 +90,22 @@ test("expand policy rejects destructive and rewriting PostgreSQL migrations", ()
   ));
 });
 
+test("a CRLF checkout keeps the LF migration checksum and online-index mode", async () => {
+  const sql = "-- xmatrix:online-indexes\nCREATE INDEX CONCURRENTLY sample_idx ON data.messages (sent_at);\n";
+  const directories = [];
+  for (const ending of ["\n", "\r\n"]) {
+    const directory = await mkdtemp(join(tmpdir(), "xmatrix-db-migrations-"));
+    directories.push(directory);
+    await writeFile(join(directory, "0000_expand_sample.sql"), sql.replaceAll("\n", ending));
+  }
+  const [lf, crlf] = await Promise.all(directories.map((directory) => loadMigrationManifest(directory)));
+  assert.equal(crlf[0].checksumSha256, lf[0].checksumSha256);
+  assert.equal(crlf[0].source, lf[0].source);
+  assert.equal(crlf[0].onlineIndexes.length, 1);
+  assert.equal(crlf[0].onlineIndexes[0].name, "sample_idx");
+  assert.equal(crlf[0].onlineIndexes[0].text.includes("\r"), false);
+});
+
 test("manifest rejects gaps and invalid filenames", async () => {
   const directory = await mkdtemp(join(tmpdir(), "xmatrix-db-migrations-"));
   await writeFile(join(directory, "0001_expand_gap.sql"), "CREATE TABLE gap (id text);\n");

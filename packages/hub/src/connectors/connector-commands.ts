@@ -1,4 +1,6 @@
 import { AppControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
+import { appReviewSetupCapability } from "./app-store-connect-review-setup";
+import { appleCommerceStatusCapability } from "./app-store-connect-commerce";
 import { agentRegistrationOf } from "./agent-caller";
 import { teamsActionCapability } from "./teams-native";
 import { dingtalkActionCapability } from "./dingtalk-native";
@@ -10,7 +12,7 @@ import { getAppConnectorProvider } from "../app-connectors";
 import { parseActionCommand } from "./action-parse";
 import { connectorActionCatalog } from "./action-catalog";
 import { commandResult, commandScope, publishCommandStatus, withExecution } from "./command-support";
-import { connectionCredentials } from "./connection-credentials";
+import { connectionCredentialGrant, credentialRenewal } from "./connection-credentials";
 import { discordActionCapability } from "./discord-native";
 import { feishuActionCapability } from "./feishu-native";
 import { googleChatActionCapability } from "./googlechat-native";
@@ -27,6 +29,9 @@ import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-a
 import { connectorSubscriptionStatements, isConnectorSubscriptionCommand } from "./subscription-parse";
 import { enqueueXUpload } from "./x-upload-executor-do";
 import { X_ACTIONS } from "./actions/x";
+import { gmailPreview } from "./actions/gmail";
+import { mailSnapshotLinks } from "./mail-snapshot-link";
+import { commandFiles, commandMailAttachments } from "./gmail-attachments";
 import type { XExecutingUpload, XUploadOutcome } from "@xmatrix/db";
 
 /*
@@ -72,6 +77,7 @@ export function connectorCommands(providerId: string,
     run: async (input) => {
       const manifest = getAppConnectorProvider(providerId);
       if (!manifest) return;
+      input = { ...input, fixes: [] };
       const lines: string[] = [];
       if (manifest.events && isConnectorSubscriptionCommand(providerId, input.body)) {
         for (const [index, statement] of connectorSubscriptionStatements(manifest, input.body).entries()) {
@@ -100,6 +106,20 @@ export function privateFailure(error: unknown): string {
   return error instanceof ConnectorRemedy ? error.message : PRIVATE_CONNECTOR_RESULT;
 }
 
+type AppConnectionCheck = NonNullable<Parameters<typeof commandScope>[2]>;
+let installedAppConnectionCheck: AppConnectionCheck | undefined;
+
+/* The check reaches this file again through the provider registry, and the Worker bundle loads
+ * internal modules statically only. So the registry, which every command runs through, installs it. */
+export function installAppConnectionCheck(check: AppConnectionCheck): void {
+  installedAppConnectionCheck = check;
+}
+
+const checkAppConnection: AppConnectionCheck = (env, check) => {
+  if (!installedAppConnectionCheck) throw new Error("connectors/registry.ts has not installed the app connection check");
+  return installedAppConnectionCheck(env, check);
+};
+
 /** A synchronous read returns the original result to its caller. Recorded
  * private calls give execution history a fixed mask rather than an excerpt. */
 export async function callConnectorRead(providerId: string, input: ConnectorCommandInput, actionId: string,
@@ -107,12 +127,12 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
   authorizeCaller: () => Promise<void>, resultVisibility: ConnectorResultVisibility): Promise<ConnectorActionResult> {
   const manifest = getAppConnectorProvider(providerId);
   const entry = connectorActionCatalog(providerId, { [actionId]: action }).get(actionId);
-  if (!manifest || !entry || action.effect !== "read") {
+  if (!manifest || !entry || (action.effect !== "read" && !action.callerOnly)) {
     throw new ConnectorRemedy(403, "Private calls support declared read actions only; use a Channel command for writes");
   }
   const parsed = action.parse(statement);
   if (typeof parsed === "string") throw new ConnectorRemedy(400, parsed);
-  const scope = await commandScope(manifest, input);
+  const scope = await commandScope(manifest, input, checkAppConnection);
   if (typeof scope === "string") throw new ConnectorRemedy(403, scope);
   const authorize = async () => {
     await authorizeCaller();
@@ -140,7 +160,8 @@ export async function callConnectorRead(providerId: string, input: ConnectorComm
     return result;
   };
   let result: ConnectorActionResult | undefined, failure: unknown;
-  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "", retry: resultVisibility }, async () => {
+  await withExecution(manifest, input, scope, { id: actionId, label: entry.definition.label, key: "",
+    ...(action.effect === "read" ? { retry: resultVisibility } : {}) }, async () => {
     try {
       result = await execute();
       return { status: "completed", summary: resultVisibility === "private" ? PRIVATE_CONNECTOR_RESULT
@@ -199,7 +220,9 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
   const label = entry?.label ?? actionId;
   const parsed = approved?.prepared ?? action.parse(statement);
   if (typeof parsed === "string") return result("failed", parsed);
-  const scope = await commandScope(manifest, input);
+  // Its result would be published to everyone who reads the Channel.
+  if (action.callerOnly) return result("blocked", `its result is for the caller alone; run it with xmatrix call "@${providerId}:${actionId}:…"`);
+  const scope = await commandScope(manifest, input, checkAppConnection);
   if (typeof scope === "string") return result("blocked", scope);
   const policyInput = { providerId, connectionId: scope.connectionId, actionId };
   const mode = await connectionActionPolicy(input.env, policyInput);
@@ -233,7 +256,7 @@ async function runAction(providerId: string, input: ConnectorCommandInput, actio
       const prepared = action.prepare ? await action.prepare(context, parsed) : parsed;
       const preview = providerId === "googlecalendar" ? JSON.parse(prepared.preview!) as Record<string, string>
         : providerId === "gmail"
-        ? Object.fromEntries(["from", "to", "subject", "body"].map(key => [key, prepared[key] ?? ""]))
+        ? gmailPreview(prepared)
         : providerId === "x" && actionId === "accounts" ? { account: "Connected X accounts owned by the requesting member", text: "List handles and account IDs" }
         : providerId === "x" ? { account: `@${prepared.accountUsername} (X account ${prepared.accountId})`,
           text: prepared.text ?? "", ...(prepared.postId ? { quotedPost: prepared.postId } : {}),
@@ -342,8 +365,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
     attachmentAuthority: request => postgresMessageAttachmentAuthorityRequest(input.env, request) }) : undefined;
-  const native = teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
-  const credentials = native ? {} : await connectionCredentials(input.env, spaceId, providerId);
+  const appleCommerce = providerId === "appstoreconnect" && actionId === "commerce_status"
+    ? appleCommerceStatusCapability(input.env,{spaceId,channelId:input.channelId,userId:input.actorUserId}) : undefined;
+  const appReviewSetup = providerId === "appstoreconnect" && actionId === "set_review_setup"
+    ? appReviewSetupCapability(()=>connectorCredentialRepository(input.env).resolve({requestId:crypto.randomUUID(),spaceId,providerId}),authorizeWrite):undefined;
+  const native = appReviewSetup || appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
+  const grant = native ? undefined : await connectionCredentialGrant(input.env, spaceId, providerId);
+  const credentials = grant?.values ?? {};
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
   const missing = native ? [] : action.requires.filter((field) => !field.split("|").some((name) => credentials[name]));
   if (missing.length > 0) {
@@ -356,13 +384,13 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const instanceId = input.senderKind === "agent" ? input.senderId : undefined;
   const caller = { userId: input.actorUserId,
     ...(instanceId ? { agent: () => agentRegistrationOf(input.env, { ownerUserId: input.actorUserId, instanceId }) } : {}) };
-  const declared = (getAppConnectorProvider(providerId)!.credentials ?? []).map(field => field.id);
-  const saveCredentials = async (fields: Readonly<Record<string, string>>) => {
-    await connectorCredentialRepository(input.env).put({ requestId: crypto.randomUUID(), spaceId, providerId, actorUserId: "hub:provider-renewal",
-      fields: { ...fields }, policy: { allowed: declared }, at: new Date().toISOString(), asHub: true });
-  };
+  const saveCredentials = grant ? credentialRenewal(input.env, spaceId, providerId, grant.version) : undefined;
   const usage = upstreamMeter(input.env, { spaceId, connector: providerId, action: actionId });
-  return { credentials, caller, authorizeWrite, usage, ...(native ? {} : { saveCredentials }), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
+  const mailSnapshot = providerId === "gmail" && ["send_draft", "send", "reply"].includes(actionId)
+    && input.env.ATTACHMENT_BUCKET && input.env.HUB_URL ? mailSnapshotLinks(input.env.ATTACHMENT_BUCKET, input.env.HUB_URL) : undefined;
+  const mailAttachments = providerId === "gmail" ? commandMailAttachments(actionId, input) : undefined;
+  const files = providerId === "googleplay" && ["api_plan", "api_write"].includes(actionId) ? commandFiles(input) : undefined;
+  return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(files ? { commandFiles: files } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
     ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
 }

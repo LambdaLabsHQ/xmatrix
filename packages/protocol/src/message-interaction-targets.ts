@@ -43,7 +43,8 @@ export function agentInteractionTarget(id: string, alias: string): InteractionTa
 /** An installed connector and the actions its manifest declares. */
 export function connectorInteractionTarget(id: string, actionIds: readonly string[]): InteractionTargetDescriptor {
   const ids = [...new Set(actionIds.map(action => action.trim().toLowerCase()))]
-    .filter(action => /^[a-z][a-z0-9_.-]{0,99}$/u.test(action)).slice(0, MESSAGE_INTERACTION_LIMITS.operations);
+    .filter(action => /^[a-z][a-z0-9_.-]{0,99}$/u.test(action));
+  if (ids.length > MESSAGE_INTERACTION_LIMITS.operations) throw new Error("Connector operation catalog exceeds its limit");
   return { schemaVersion: 1, descriptorRevision: "1", targetId: `connector:${id}`, kind: "connector",
     aliases: [id], operations: ids.map(action => operation(action, ["connector.action.v1"], "connector-statement.v1",
       "connector-command.v1", "connector.v1")) };

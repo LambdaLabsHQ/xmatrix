@@ -9,7 +9,7 @@ import { ProviderRequestError } from "./http";
 
 export const FEISHU_INGRESS_DEPENDENCIES = { native: feishuNativeApp, authority: connectorFeishuAppRepository,
   rooms: connectorFeishuRoomRepository, apps: connectorAppRepository, client: feishuStoreClient,
-  verify: verifyFeishuAppRequest, deliver: deliverEvent, append: CONNECTOR_DELIVERY_EFFECTS.append, automate: CONNECTOR_DELIVERY_EFFECTS.automations };
+  verify: verifyFeishuAppRequest, deliver: deliverEvent, append: CONNECTOR_DELIVERY_EFFECTS.append, events: CONNECTOR_DELIVERY_EFFECTS.events };
 /** The shared company endpoint never accepts a caller-selected xMatrix Space or a self-built token fallback. */
 export async function handleFeishuAppDelivery(env: Env, request: Request, dependencies = FEISHU_INGRESS_DEPENDENCIES): Promise<Response> {
   try {
@@ -45,7 +45,7 @@ export async function handleFeishuAppDelivery(env: Env, request: Request, depend
     const append: typeof dependencies.append = async (...args) => await current() ? dependencies.append(...args) : new Response(null, { status: 503 });
     await dependencies.deliver(env, dependencies.apps(env), append, "feishu", captured.connectionId, event.event, undefined, undefined,
       { appIdentity: feishuAppIdentity(native.app), chatSpace: captured.chatSpace, grantGeneration: captured.grantGeneration });
-    if (await current()) await dependencies.automate(env, { spaceId: captured.spaceId, provider: "feishu", event: event.event });
+    if (await current()) await dependencies.events(env, { spaceId: captured.spaceId, provider: "feishu", event: event.event });
     return Response.json({ code: 0 });
   } catch (error) {
     if (error instanceof ProviderRequestError && [400, 401, 413].includes(error.status)) return Response.json({ error: error.message }, { status: error.status });

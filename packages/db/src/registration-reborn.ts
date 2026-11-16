@@ -4,7 +4,7 @@ import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
-  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
+  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -16,14 +16,15 @@ import { spaceRulesSpawnFields } from "./space-rules-spawn.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
-import { registrationLaunchSpawnFields } from "./agent-registration-launch.js";
+import { registrationAllowedModels, registrationLaunchSpawnFields, type RegistrationModelFacts } from "./agent-registration-launch.js";
 import { commitRuntime, expireInstanceTraceAccess, runtimeChannelCapability } from "./runtime-control.js";
 import { prepareReborn, prepareHandoff, advanceReborn } from "./runtime-reborn.js";
 import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { handoffResumeSource } from "./handoff-resume-source.js";
 import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
-  registrationQuotaReading } from "./agent-registration-quota-probe.js";
+  registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage,
+  type RegistrationUsageLimit } from "./agent-registration-quota-probe.js";
 
 interface RebornRegistration {
   key: SpaceAgentRegistrationKey; actorUserId: string; requested: RegistrationResourceLimits;
@@ -63,12 +64,21 @@ function text(value: unknown, code = "invalid_registration_reborn"): string {
 type ContinuationInput = ReturnType<typeof continuationInput>;
 
 function continuationInput(raw: { commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-  sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission }) {
+  sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission;
+  preferredRuntimeModel?: string }) {
+  const preferred = raw.preferredRuntimeModel;
+  if (preferred !== undefined && (typeof preferred !== "string" || preferred !== preferred.trim() ||
+      preferred.length > 160 || hasControlCharacter(preferred))) throw new RegistrationAccessError("invalid_registration_reborn", 400);
   return { commandId: text(raw.commandId), actorUserId: text(raw.actorUserId), channelId: text(raw.channelId),
     sourceMessageId: text(raw.sourceMessageId), sourceInstanceId: text(raw.sourceInstanceId),
     sourceMention: typeof raw.sourceMention === "string" ? raw.sourceMention : undefined,
     prompt: typeof raw.prompt === "string" ? raw.prompt.slice(0, 64 * 1024) : "",
-    ...(raw.quotaRetry ? { quotaRetry: raw.quotaRetry } : {}) };
+    ...(raw.quotaRetry ? { quotaRetry: raw.quotaRetry } : {}),
+    ...(preferred !== undefined ? { preferredRuntimeModel: preferred } : {}) };
+}
+
+function registrationTriple(row: QueryResultRow): string {
+  return JSON.stringify([String(row.owner_user_id), String(row.machine_id), String(row.harness)]);
 }
 
 /** A wake refusal that no later message can change: the Instance stops resting.
@@ -185,10 +195,80 @@ function continuationSpawnWorkspace(source: ContinuationSource, key: SpaceAgentR
  */
 export class PostgresRegistrationRebornRepository extends RegistrationPreparationAuthority {
 
-  /** An explicit `@name:N:reborn`: stop the Instance, then resume it, answering the message that asked. */
+  /** An explicit `@name:N:reborn`, or a quota retry: stop the Instance, then
+   * resume it, answering the message that asked. `preferredRuntimeModel` is a
+   * model the successor runs instead of its predecessor's (a quota retry whose
+   * model is used up): one of the registration's declared models, or on the
+   * runtime default a model of the runtime's own catalog, empty for its default. */
   async prepare(raw: { commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
-    sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission }) {
+    sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: AgentQuotaRetryAdmission;
+    preferredRuntimeModel?: string }) {
     return this.recordResume(continuationInput(raw), "reborn");
+  }
+
+  /** What decides the model a stopped Instance can continue on: the models
+   * its registration allows, its runtime's catalog as the Instance last
+   * reported it, and its pool's provider reading. Undefined when its declared
+   * models are no longer allowed or no longer what it ran (declared or the
+   * runtime default), or its registration or environment is gone. */
+  async continuationModelFacts(raw: { commandId: string; channelId: string; sourceInstanceId: string }):
+    Promise<RegistrationModelFacts | undefined> {
+    const commandId = text(raw.commandId), channelId = text(raw.channelId), instanceId = text(raw.sourceInstanceId);
+    const space = await this.database.transaction({ requestId: commandId, operation: "registration.continuation.models",
+      placement: this.placement }, async tx => {
+      const { key, useRuntimeDefaultModel } = await this.predecessor(tx, instanceId, channelId);
+      const [row] = await tx.query({ name: "registration_continuation_models_v1", text: `SELECT
+          r.configuration_json,a.grant_limits,a.policy_limits,
+          i.presentation_json->'models' AS catalog_models,i.presentation_json->>'modelsObservedAt' AS catalog_observed_at
+        FROM data.space_agent_registrations r
+        JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
+          AND a.machine_id=r.machine_id AND a.harness=r.harness
+        JOIN data.instances i ON i.instance_id=$5 AND i.channel_id=$6
+        WHERE r.space_id=$1 AND r.owner_user_id=$2 AND r.machine_id=$3 AND r.harness=$4`,
+      values: [...registrationKeyValues(key), instanceId, channelId], maxRows: 1 });
+      return row ? { key, row, useRuntimeDefaultModel } : undefined;
+    });
+    const allowed = space && registrationAllowedModels(parseSpaceAgentConfiguration(space.row.configuration_json),
+      parseRegistrationResourceLimits(space.row.grant_limits), parseRegistrationResourceLimits(space.row.policy_limits));
+    // A switch keeps the predecessor's kind of model: a declared model for one
+    // that ran a declared model, the runtime's catalog for one on the runtime
+    // default. A registration whose declarations changed since offers neither.
+    if (!space || !allowed || space.useRuntimeDefaultModel !== !allowed.length) return undefined;
+    const { key } = space;
+    const [fact] = await this.directory.transaction({ requestId: commandId, operation: "registration.continuation.model-facts",
+      statement: "single_read" }, tx => tx.query({ name: "registration_continuation_model_facts_v1", text: `SELECT
+        e.declaration_json,EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=e.owner_user_id
+          AND d.machine_id=e.machine_id AND d.status='online' AND d.capabilities_json ? 'registration_native_model_v1') AS native_models,
+        ${registrationQuotaColumns("q")}
+      FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
+      WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
+    values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 }));
+    if (!fact) return undefined;
+    const environment = parseAgentRegistrationEnvironment(fact.declaration_json);
+    // The physical environment bounds the Space's models exactly as a launch does.
+    const models = allowed.filter(model => environment.models.includes(model));
+    if (allowed.length && !models.length) return undefined;
+    const modelCatalog = routingModelCatalogObservation(space.row.catalog_models, space.row.catalog_observed_at, Date.now())?.value;
+    const usage = registrationQuotaUsage(fact);
+    return { models, ...(environment.modelAliases ? { modelAliases: environment.modelAliases } : {}),
+      ...(modelCatalog ? { modelCatalog } : {}), ...(fact.native_models === true ? { supportsNativeModel: true } : {}),
+      ...(usage ? { observations: { quota: { usage } } } : {}) };
+  }
+
+  /** Whether a Run moved off `original` for quota can go back to it: a
+   * current reading shows that model has quota, it is still the registration's
+   * kind of model, and a catalog model has a daemon that switches to it. */
+  private async originalModelBack(input: ContinuationInput, original: string, runtimeDefault: boolean): Promise<boolean> {
+    const facts = await this.continuationModelFacts({ commandId: `${input.commandId}:original-model`.slice(0, 300),
+      channelId: input.channelId, sourceInstanceId: input.sourceInstanceId });
+    if (!facts || (runtimeDefault ? original && !facts.supportsNativeModel : !facts.models.includes(original))) return false;
+    const catalog = facts.modelCatalog ?? [];
+    const runtimeModel = runtimeDefault ? original : facts.modelAliases?.[original] ?? original;
+    const row = runtimeModel ? catalog.find(option => routingModelOptionNamed(option, runtimeModel))
+      : catalog.find(option => option.isDefault);
+    const now = Date.now();
+    const quota = row && routingQuotaObservation(facts.observations?.quota?.usage, now, { model: row });
+    return quota !== undefined && quota.value > 0;
   }
 
   /**
@@ -196,14 +276,20 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * as `kind`. A reborn names its asking message as its continuation source, so
    * its status and failure answer that message; a wake answers no message.
    */
-  private async recordResume(input: ContinuationInput, kind: "reborn" | "wake") {
+  private async recordResume(raw: ContinuationInput, kind: "reborn" | "wake") {
     const spaceId = this.placement.spaceId;
-    const located = await this.locate(input, "reborn");
-    const physical = await this.physical(input, located.key, located, "reborn", located.useRuntimeDefaultModel === true);
+    const located = await this.locate(raw, "reborn");
+    // A Run moved off its model for quota goes back to it on its next resume
+    // once a reading shows that model has quota again.
+    const returning = raw.preferredRuntimeModel === undefined && located.originalRuntimeModel !== undefined &&
+      await this.originalModelBack(raw, located.originalRuntimeModel, located.useRuntimeDefaultModel);
+    const input = returning ? { ...raw, preferredRuntimeModel: located.originalRuntimeModel } : raw;
+    const physical = await this.physical(input, located.key, located, "reborn", located.useRuntimeDefaultModel === true,
+      located.useRuntimeDefaultModel === true && Boolean(input.preferredRuntimeModel));
     const at = new Date().toISOString();
     return this.database.transaction({ requestId: input.commandId, operation: `registration.${kind}.prepare`,
       placement: this.placement }, async tx => {
-      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at);
+      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at, returning);
       // The written mention binds this reborn's status to its source message.
       const invocationSource = kind === "reborn" ? readContinuationSource({ schemaVersion: 1, kind: "reborn",
         sourceMessageId: input.sourceMessageId, sourceMessageVersion: 1, sourceMention: input.sourceMention,
@@ -226,12 +312,23 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * under its own registration, re-admitted against current grants. */
   private async resumeSuccessor(tx: DatabaseTransaction, input: ContinuationInput,
     located: Awaited<ReturnType<PostgresRegistrationRebornRepository["locate"]>>,
-    physical: Awaited<ReturnType<PostgresRegistrationRebornRepository["physical"]>>, at: string) {
+    physical: Awaited<ReturnType<PostgresRegistrationRebornRepository["physical"]>>, at: string, returning: boolean) {
     const spaceId = this.placement.spaceId;
     const key = located.key;
     const { source, displayName } = await this.lockedSource(tx, input, key, located.key, "reborn");
-    const model = source.useRuntimeDefaultModel ? "" : source.requestedRuntimeModel ?? "";
-    const modelResource = model ? source.modelResource ?? model : undefined;
+    // A model switch keeps the predecessor's kind of model: another declared
+    // model (its runtime id through the owner's alias), or on the runtime
+    // default another catalog model, or the default itself.
+    const switched = input.preferredRuntimeModel;
+    const declared = source.useRuntimeDefaultModel ? "" : source.requestedRuntimeModel ?? "";
+    if (declared && switched === "") throw new RegistrationAccessError("registration_model_unavailable", 409);
+    const model = declared && switched ? physical.environment.modelAliases?.[switched] ?? switched : declared;
+    const modelResource = model ? (declared && switched ? switched : source.modelResource ?? model) : undefined;
+    const preferredRuntimeModel = model ? undefined : switched === undefined ? source.preferredRuntimeModel : switched || undefined;
+    // The model a switched Run was moved off, kept until it goes back to it.
+    const moved = switched === undefined ? source.originalRuntimeModel : returning ? undefined
+      : source.originalRuntimeModel ?? (declared ? source.modelResource ?? declared : source.preferredRuntimeModel ?? "");
+    const originalRuntimeModel = moved === switched ? undefined : moved;
     if (physical.managed && (source.managedWorkspaceKey !== physical.managed.key
       || source.canonicalCwd !== `.xmatrix-management/${physical.managed.key}` || source.remoteRepo)) {
       throw new RegistrationAccessError("reborn_source_changed", 409);
@@ -254,6 +351,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       spawnControlId: `reborn:1-spawn:${suffix}`, resumeInstanceId: input.sourceInstanceId, identityKind: "instance",
       agentName: displayName, summonedByUserId: input.actorUserId,
       sourceMessageId: input.sourceMessageId, useRuntimeDefaultModel: !model, requestedRuntimeModel: model || null, modelResource: modelResource ?? null,
+      // The runtime catalog model the predecessor started on comes back with it, unless it switches.
+      ...(preferredRuntimeModel ? { preferredRuntimeModel } : {}),
+      ...(originalRuntimeModel !== undefined ? { originalRuntimeModel } : {}),
       ...(source.handedOff ? { resumeAfterHandoff: true } : {}),
       ...(source.managedWorkspaceKey ? { managedWorkspaceKey: source.managedWorkspaceKey } : {}),
       ...(source.remoteRepo ? { remoteRepo: source.remoteRepo, runWorktree: true } : {}) };
@@ -277,7 +377,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       // the initial message id drops the copy as a summon echo.
       agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId,
       resumeWorktreeBootstrap: true,
-      context: model ? { requestedModel: model } : {},
+      context: model ? { requestedModel: model } : preferredRuntimeModel ? { preferredModel: preferredRuntimeModel } : {},
       ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
     return { source, successor: { run, instance, spawn } };
   }
@@ -296,9 +396,12 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const commandId = text(raw.commandId);
     const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v2", text: `SELECT
-        i.instance_id,r.owner_user_id FROM data.instances i
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v4", text: `SELECT
+        i.instance_id,r.owner_user_id,b.machine_id,b.harness,i.presentation_json->>'model' AS model,
+        i.presentation_json->'models' AS catalog_models,i.presentation_json->>'modelsObservedAt' AS catalog_observed_at
+        FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
+        LEFT JOIN data.run_agent_registrations b ON b.run_id=i.run_id
         WHERE i.channel_id=$1 AND ($2::text IS NULL OR i.instance_id=$2)
           AND i.status='offline' AND i.rest_state IN ('sleeping','interrupted')
           AND r.status IN (${TERMINAL_RUN_STATUS_SQL})
@@ -308,8 +411,16 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
+    const usedUp = await this.usedUpInstances(commandId, candidates);
     for (const candidate of candidates) {
       const instanceId = String(candidate.instance_id);
+      // Its provider account, or the model it runs, is used up (a sibling may
+      // have just reported the limit): waking it would only fail the same way.
+      // It keeps resting, and the first message after the reset wakes it.
+      if (usedUp.has(instanceId)) {
+        refused.push({ instanceId, code: "registration_quota_exhausted", permanent: false });
+        continue;
+      }
       try {
         const value = await this.recordResume(continuationInput({
           commandId: `instance-wake:${sourceMessageId}:${instanceId}`.slice(0, 200),
@@ -338,6 +449,36 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       }
     }
     return { woken, refused };
+  }
+
+  /** Of these resting Instances, those whose model has no quota now on its
+   * pool's reading: the account windows and the scoped windows that constrain
+   * the model each Instance last ran (its catalog row, the default's for the
+   * runtime default; account windows alone without a current catalog). A
+   * reported usage limit holds a pool so until the reset. */
+  private async usedUpInstances(commandId: string, candidates: readonly QueryResultRow[]): Promise<Set<string>> {
+    const keyed = candidates.filter(row => row.machine_id != null && row.harness != null);
+    if (!keyed.length) return new Set();
+    const rows = await this.directory.transaction({ requestId: `${commandId}:wake-quota`.slice(0, 200),
+      operation: "registration.wake.quota" }, tx => tx.query({ name: "registration_wake_resting_quota_v2",
+      text: `SELECT e.owner_user_id,e.machine_id,e.harness,${registrationQuotaColumns("q")}
+        FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
+        JOIN unnest($1::text[],$2::text[],$3::text[]) AS k(owner_user_id,machine_id,harness)
+          ON k.owner_user_id=e.owner_user_id AND k.machine_id=e.machine_id AND k.harness=e.harness
+        WHERE q.owner_user_id IS NOT NULL`,
+      values: [keyed.map(row => String(row.owner_user_id)), keyed.map(row => String(row.machine_id)),
+        keyed.map(row => String(row.harness))], maxRows: MAX_WAKES_PER_MESSAGE }));
+    const readings = new Map(rows.map(row => [registrationTriple(row), row]));
+    const now = Date.now();
+    return new Set(keyed.flatMap(candidate => {
+      const pool = readings.get(registrationTriple(candidate));
+      if (!pool) return [];
+      const catalog = routingModelCatalogObservation(candidate.catalog_models, candidate.catalog_observed_at, now)?.value ?? [];
+      const model = typeof candidate.model === "string" ? candidate.model : "";
+      const row = model ? catalog.find(option => routingModelOptionNamed(option, model)) : catalog.find(option => option.isDefault);
+      const reading = registrationQuotaReading(pool, row);
+      return reading && reading.remainingPercent <= 0 ? [String(candidate.instance_id)] : [];
+    }));
   }
 
   /** Hand a predecessor's retained directory to a new Instance of another
@@ -421,20 +562,22 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     });
   }
 
-  /** A live Instance reported its provider account's usage limit used up:
-   * hold its quota pool empty until the reset, so no routing picks it again.
-   * Moving its work is an ordinary `handoff:@auto` the Hub posts next. Only
-   * the Instance's owner, acting through that Instance's own Run, gets here. */
+  /** A live Instance reported a turn refused for its provider usage limit:
+   * record what it used up and the reading it was told from, in one
+   * transaction (`recordRegistrationUsageLimit`), so no routing picks a used-up
+   * model or pool again. The Hub moves the work next: a used-up account hands
+   * off, anything narrower waits for a quota retry. Only the Instance's owner,
+   * acting through that Instance's own Run, gets here. */
   async holdUsageLimit(raw: { commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string;
-    resetsAt?: string }): Promise<{ limitedUntil?: string }> {
+    resetsAt?: string; quotaScope?: string; usage?: unknown }): Promise<RegistrationUsageLimit | undefined> {
     const input = continuationInput({ ...raw, sourceMessageId: raw.commandId, prompt: "" });
     const located = await this.locate(input, "handoff");
     if (located.key.ownerUserId !== input.actorUserId) throw new RegistrationAccessError("forbidden", 403);
-    const held = await this.directory.transaction({ requestId: `${input.commandId}:limit`,
+    return this.directory.transaction({ requestId: `${input.commandId}:limit`,
       operation: "registration.usage-limit.record" }, tx => recordRegistrationUsageLimit(tx, {
       ownerUserId: located.key.ownerUserId, machineId: located.key.machineId, harness: located.key.harness,
-      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}) }));
-    return held?.limitedUntil ? { limitedUntil: held.limitedUntil } : {};
+      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(raw.quotaScope ? { quotaScope: raw.quotaScope } : {}),
+      ...(raw.usage !== undefined ? { usage: raw.usage } : {}) }));
   }
 
   /** `handoff:@auto`: hand the retained directory to the first other harness
@@ -500,11 +643,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     if (!harnesses.length) return [];
     const facts = await this.directory.transaction({ requestId: `${input.commandId}:successor-quota`,
       operation: "registration.usage-limit.successor-quota" }, tx => tx.query({
-      name: "registration_usage_limit_successor_quota_v2", text: `SELECT e.harness,e.declaration_json,
+      name: "registration_usage_limit_successor_quota_v3", text: `SELECT e.harness,e.declaration_json,
         statement_timestamp() AS evaluated_at,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         (SELECT ${REGISTRATION_QUOTA_POOL_SQL} FROM control.agent_registration_environments e
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$4) AS source_pool_id,
-        q.source,q.remaining,q.observed_at,q.expires_at,q.windows_json,q.account_json
+        ${registrationQuotaColumns("q")}
         FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
         WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=ANY($3::text[])`,
       values: [key.ownerUserId, key.machineId, harnesses, key.harness], maxRows: USAGE_LIMIT_SUCCESSOR_CANDIDATES }));
@@ -547,14 +690,16 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * row; both live in the directory, not in this Space's shard. */
   private physical(input: ContinuationInput, key: SpaceAgentRegistrationKey,
     located: { hostId?: string; remoteRepo?: string; canonicalCwd?: string; managedWorkspaceKey?: string }, operation: "reborn" | "handoff",
-    runtimeDefaultModel: boolean) {
+    runtimeDefaultModel: boolean, nativeModel = false) {
     return this.directory.transaction({ requestId: input.commandId, operation: `registration.${operation}.physical` },
       async tx => {
+        // A model of the runtime's own catalog needs a daemon that switches to it.
         if (runtimeDefaultModel) {
-          const routes = await tx.query({ name: "registration_continuation_default_model_route_v2", text: `SELECT 1 FROM data.machine_daemons
+          const routes = await tx.query({ name: "registration_continuation_default_model_route_v3", text: `SELECT 1 FROM data.machine_daemons
             WHERE owner_user_id=$1 AND machine_id=$2 AND status='online'
-              AND capabilities_json ? 'registration_optional_model_v1' LIMIT 1`,
-            values: [key.ownerUserId, key.machineId], maxRows: 1 });
+              AND capabilities_json ? 'registration_optional_model_v1'
+              AND (NOT $3::boolean OR capabilities_json ? 'registration_native_model_v1') LIMIT 1`,
+            values: [key.ownerUserId, key.machineId, nativeModel], maxRows: 1 });
           if (!routes.length) throw await registrationRouteRefusal(tx, "registration_workspace_or_daemon_unavailable",
             { ...key, hostId: located.hostId });
         }
@@ -735,6 +880,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       canonicalCwd: row.workspace_canonical_cwd ? String(row.workspace_canonical_cwd) : undefined,
       useRuntimeDefaultModel: metadata.useRuntimeDefaultModel === true,
       requestedRuntimeModel: typeof metadata.requestedRuntimeModel === "string" ? metadata.requestedRuntimeModel : undefined,
+      preferredRuntimeModel: metadata.useRuntimeDefaultModel === true && typeof metadata.preferredRuntimeModel === "string"
+        ? metadata.preferredRuntimeModel : undefined,
+      originalRuntimeModel: typeof metadata.originalRuntimeModel === "string" ? metadata.originalRuntimeModel : undefined,
       modelResource: typeof metadata.modelResource === "string" ? metadata.modelResource : undefined,
       hostname: typeof metadata.hostname === "string" ? metadata.hostname : undefined,
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : undefined,

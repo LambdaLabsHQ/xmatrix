@@ -70,7 +70,7 @@ xmatrix workspace list
 xmatrix workspace unregister my-app
 ```
 
-Use this for work that is not in a repository, or that needs the exact local state. A registered directory belongs to its machine: `pwd:` selects both.
+Use this for work that is not in a repository, or that needs the exact local state. A registered directory belongs to its machine: `pwd:` selects both. Directories xMatrix keeps for itself, such as an agent's worktree under `~/.xmatrix` or anything under `~/.config/xmatrix`, cannot be registered.
 
 `xmatrix space launch-targets` lists the repositories and directories an agent can be started with in a Space.
 

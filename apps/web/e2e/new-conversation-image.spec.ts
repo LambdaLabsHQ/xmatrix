@@ -38,7 +38,9 @@ for (const mode of ["open", "closed"] as const) {
     await composer.getByLabel("What should happen").press("Enter");
     await expect(composer).toBeHidden();
     await expect.poll(() => fixtureRequestBodies(page, "conversation-first-message"))
-      .toEqual([expect.objectContaining({ body: "look at this", attachments: [expect.objectContaining({ mimeType: "image/png" })] })]);
+      // The picture is a block of what was written, after the words it was put under (inline-attachments.ts).
+      .toEqual([expect.objectContaining({ body: "look at this\n\n![shot.png](attachment:1)",
+        attachments: [expect.objectContaining({ mimeType: "image/png" })] })]);
     // Visibility is the reference's: the Channel's scope, open or closed.
     expect(await fixtureRequestBodies(page, "blob-refs")).toEqual([expect.objectContaining({
       ownerKind: "message_attachment",

@@ -68,3 +68,33 @@ test.describe("for a Chinese reader", () => {
     await page.screenshot({ path: test.info().outputPath("desktop-setup-in-use-after-zh.png") });
   });
 });
+
+test("an App signed in without a CLI session hands it one and starts its service, instead of showing a command", async ({ page }) => {
+  // Production 11-08: the App was signed in, had no CLI and no CLI session,
+  // reported the daemon "missing" and never asked for the session it needed.
+  await page.addInitScript(({ now }) => {
+    const nothing = async () => undefined;
+    const context = { client: "darwin", platform: "darwin", version: "4.0.1", isPackaged: true, startUrl: "" };
+    let daemon: Record<string, unknown> = { state: "missing", message: "xMatrix CLI was not found.", updatedAt: now };
+    const calls: string[] = [];
+    (window as unknown as Record<string, unknown>).desktopCalls = calls;
+    (window as unknown as Record<string, unknown>).xmatrixDesktop = {
+      client: context.client, platform: context.platform, getContext: async () => context,
+      getDaemonStatus: async () => daemon,
+      saveCliSession: async () => { calls.push("saveCliSession"); return { ok: true, updatedAt: now }; },
+      startDaemon: async () => { calls.push("startDaemon"); daemon = { state: "running", pid: 42, updatedAt: now }; return daemon; },
+      installCli: async () => ({ ok: true }),
+      getUpdateStatus: async () => ({ state: "disabled", enabled: false }),
+      getSetupStatus: async () => ({ setupVersion: 1, completedAt: now }),
+      checkCliInstalled: async () => ({ installed: false }), notify: async () => true,
+      setBadge: nothing, setTitle: nothing, openExternal: nothing, openCliInstall: nothing, checkForUpdates: nothing,
+      discoverAgentPresets: async () => [],
+    };
+  }, { now: E2E_NOW });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [] });
+  await fixtureJson(page, "cli-exchange", "**/api/xmatrix/**/exchange-session", { token: "cli-token", refreshToken: "cli-refresh",
+    user: { id: "user-1", email: "person@example.test" }, hubUrl: "https://hub.example.test", relayUrl: "wss://relay.example.test" });
+  await page.goto("/app/personal-sspaceperso");
+  await expect.poll(() => page.evaluate(() => (window as unknown as { desktopCalls: string[] }).desktopCalls),
+    { timeout: 20_000 }).toEqual(["saveCliSession", "startDaemon"]);
+});

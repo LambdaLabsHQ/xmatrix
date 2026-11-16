@@ -167,6 +167,10 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   `Merged <link>: <title>` or `Closed <link>: <title>`, the same voice as the
   connector receipt, with the title the receipt does not carry. A person is
   still named (`<login> merged pull request <link>: <title>`).
+  A passing verdict requires at least one check that concluded `success`;
+  checks that all concluded `skipped` or `neutral` say nothing. In particular,
+  a conflicting pull request's skipped external-PR closer cannot announce
+  that CI passed. Failures still report even without a successful check.
   Queued GitHub Actions suites hold the verdict before their first job exists;
   empty suites for other installed apps remain placeholders. Reads are shared
   across routes for each pull request. Incomplete inventories or unknown check

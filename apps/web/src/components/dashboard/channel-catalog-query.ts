@@ -134,6 +134,7 @@ export async function fetchChannelCatalogResolve(input: {
   spaceId: string;
   channelIds: string[];
   routeToken?: string;
+  knownInstanceIds?: string[];
   includeParticipants?: boolean;
   signal?: AbortSignal;
 }): Promise<ChannelSnapshotCatalogResolveResult> {
@@ -144,6 +145,7 @@ export async function fetchChannelCatalogResolve(input: {
       spaceId: input.spaceId, channelIds: input.channelIds,
       ...(input.routeToken ? { routeToken: input.routeToken } : {}),
       includeParticipants: input.includeParticipants !== false,
+      ...(input.knownInstanceIds ? { knownInstanceIds: input.knownInstanceIds } : {}),
     }),
     signal: input.signal,
     cache: "no-store",

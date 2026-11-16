@@ -79,6 +79,12 @@ export function desktopDaemonLabel(status: DesktopDaemonStatus | null, desktopAv
   return status.state.charAt(0).toUpperCase() + status.state.slice(1);
 }
 
+/** The App could install the CLI from its seed, but there is none: the CLI has
+ * no session to install with until the App hands it the one it signed in with. */
+export function desktopDaemonNeedsFirstSession(status: DesktopDaemonStatus | null, canInstallCli: boolean) {
+  return canInstallCli && status?.state === "missing";
+}
+
 export function daemonStatusNeedsSessionSync(status: DesktopDaemonStatus | null) {
   if (!status || status.state !== "error") return false;
   const message = (status.message || "").toLowerCase();

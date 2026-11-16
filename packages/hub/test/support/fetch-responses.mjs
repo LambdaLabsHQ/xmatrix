@@ -19,7 +19,8 @@ export async function withProviderResponses(responses, operation) {
     decodeBody: body => body instanceof URLSearchParams ? Object.fromEntries(body) : body ? JSON.parse(body) : undefined,
     reply: response => {
       if (response.error) throw response.error;
-      return new Response("raw" in response ? response.raw : JSON.stringify(response.body ?? {}), { status: response.status ?? 200 });
+      return new Response("raw" in response ? response.raw : JSON.stringify(response.body ?? {}),
+        { status: response.status ?? 200, ...(response.headers ? { headers: response.headers } : {}) });
     },
   });
   try { return { result: await operation(fetch.calls), calls: fetch.calls }; }

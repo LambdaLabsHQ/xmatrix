@@ -41,7 +41,6 @@ export async function dispatchPreparedAgentLaunchWake(input: {
 
 export interface ProductAgentMentionAuthorityEnv extends HubAuthorityEnv {
   XMATRIX_MOCK_AUTH_TOKEN?: string;
-  XMATRIX_MOCK_SCHEDULE_DELAY_MS?: string;
   RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
 }
 
@@ -230,6 +229,7 @@ export function createProductAgentMentionAuthorityPort(input: {
         agentName: value.agentName,
         harness: value.harness,
         ownerUserId: value.ownerUserId,
+        ...(typeof value.launchMachineId === "string" ? { launchMachineId: value.launchMachineId } : {}),
         ...(typeof workspace?.machineId === "string" && typeof workspace.canonicalCwd === "string"
           ? { workspace: { machineId: workspace.machineId, canonicalCwd: workspace.canonicalCwd } }
           : {}),

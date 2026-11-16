@@ -70,6 +70,6 @@ Use the actual name and number from your conversation. Reopen the same page and 
 
 Bring in the next decision, issue summary or release note through the conversation and ask the agent to update the existing page. Give it access to your real project folder when it needs to inspect code. If you want it to read GitHub issues or pull requests, connect [GitHub](connectors.md#github) to the Space first and specify the repository in the task.
 
-Keep each fact in one place. Add child pages when the project needs them, and link to them from Release status. [Pages and Automations](pages.md) explains the tree, concurrent edits and scheduled updates.
+Keep each fact in one place. Add child pages when the project needs them, and link to them from Release status. [Pages](pages.md) explains the tree, concurrent edits and scheduled updates.
 
 Pages stay private until a Space owner or admin chooses to publish one. Review its content and access before sharing it outside the team; creating this wiki does not publish it.

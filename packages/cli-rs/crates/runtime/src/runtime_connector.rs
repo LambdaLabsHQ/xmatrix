@@ -24,9 +24,17 @@ fn render(listing: &Value) -> String {
             connector["provider"].as_str().unwrap_or_default()
         ));
         for action in connector["actions"].as_array().into_iter().flatten() {
+            let effect = action["effect"].as_str().unwrap_or_default();
+            // A read the Hub cannot answer its caller (a subscription) acts on
+            // the Channel it is sent in; `read` would promise `xmatrix call`.
+            let label = if effect == "read" && action["via"].as_str() == Some("send") {
+                "send"
+            } else {
+                effect
+            };
             out.push_str(&format!(
                 "  {:<5}  {}\n         {}\n",
-                action["effect"].as_str().unwrap_or_default(),
+                label,
                 action["command"].as_str().unwrap_or_default(),
                 action["description"].as_str().unwrap_or_default()
             ));
@@ -66,6 +74,22 @@ mod tests {
             "Gmail (gmail)\n  read   @gmail:search:* <Gmail query>\n         Search mail.\n"
         ));
         assert!(text.contains("xmatrix send <channel-id>"));
+    }
+
+    #[test]
+    fn a_read_that_only_runs_as_a_channel_message_is_not_labelled_read() {
+        let text = render(&json!({ "connectors": [{
+            "provider": "github", "name": "GitHub",
+            "actions": [
+                { "command": "@github:subscribe:<target> <text>", "effect": "read", "via": "send",
+                    "description": "Subscribe." },
+                { "command": "@github:comment:<target> <text>", "effect": "write", "via": "send",
+                    "description": "Comment." }
+            ]
+        }] }));
+        assert!(text.contains("  send   @github:subscribe:<target> <text>\n"));
+        assert!(text.contains("  write  @github:comment:<target> <text>\n"));
+        assert!(!text.contains("read"));
     }
 
     #[test]

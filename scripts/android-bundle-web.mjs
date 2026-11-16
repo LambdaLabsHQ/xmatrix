@@ -72,7 +72,9 @@ copyDirectory(path.join(webDir, "public"), androidAssetsDir);
 
 const htmlRoutes = [
   ["index.html", ["index.html"]],
-  ["app.html", ["app.html", path.join("app", "index.html")]],
+  // Every /app address is the prerendered /workspace shell, as middleware.ts
+  // rewrites it on the Web; there is no /app page of its own (#1403).
+  ["workspace.html", ["app.html", path.join("app", "index.html")]],
   ["login.html", ["login.html", path.join("login", "index.html")]],
   ["docs.html", ["docs.html", path.join("docs", "index.html")]],
   ["download.html", ["download.html", path.join("download", "index.html")]],
@@ -87,7 +89,7 @@ for (const [sourceName, targetNames] of htmlRoutes) {
 }
 
 if (!fs.existsSync(path.join(androidAssetsDir, "app.html"))) {
-  throw new Error("Packaged /app HTML was not generated. Ensure apps/web/src/app/app can be statically prerendered.");
+  throw new Error("Packaged /app HTML was not generated: the Web build wrote no .next/server/app/workspace.html. Ensure apps/web/src/app/(en)/workspace can be statically prerendered.");
 }
 
 const buildIdPath = path.join(webDir, ".next", "BUILD_ID");

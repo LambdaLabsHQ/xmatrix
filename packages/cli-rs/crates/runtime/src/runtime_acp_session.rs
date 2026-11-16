@@ -49,6 +49,7 @@ impl AcpSession {
             session_id: None,
             loaded_goal: None,
             auth_method_ids: Vec::new(),
+            prompt_images: false,
             presentation: AgentPresentationFacts::default(),
             config,
             activity: ChannelActivityReporter::default(),
@@ -197,17 +198,28 @@ impl AcpSession {
                 let method_id = acp_retry_auth_method(&self.auth_method_ids);
                 // The agent itself said it needs credentials and refused the
                 // ones it has: whatever its wording, that is a sign-in problem.
-                self.request(
-                    "authenticate",
-                    Some(serde_json::json!({ "methodId": method_id })),
+                // A method that answers only after someone signs in somewhere
+                // (CodeBuddy's opens a browser login and waits) is one too.
+                let display_name = self.config.display_name.clone();
+                match tokio::time::timeout(
+                    ACP_AUTH_RETRY_TIMEOUT,
+                    self.request(
+                        "authenticate",
+                        Some(serde_json::json!({ "methodId": method_id })),
+                    ),
                 )
                 .await
-                .map_err(|err| {
-                    CliError::Launch(format!(
-                        "{} authentication required: {err}",
-                        self.config.display_name
-                    ))
-                })?;
+                {
+                    Ok(answer) => answer.map(|_| ()).map_err(|err| {
+                        CliError::Launch(format!("{display_name} authentication required: {err}"))
+                    })?,
+                    Err(_) => {
+                        return Err(CliError::Launch(format!(
+                            "{display_name} authentication required: it waits for a sign-in \
+                             (authenticate {method_id} did not answer)"
+                        )));
+                    }
+                }
                 self.request(method, Some(params)).await
             }
             Err(err) => Err(CliError::Launch(err.detail)),
@@ -240,6 +252,7 @@ impl AcpSession {
             .request_with_login_retry("initialize", acp_initialize_params())
             .await?;
         self.auth_method_ids = acp_auth_method_ids(&initialized);
+        self.prompt_images = acp_prompt_images(&initialized);
         self.notify("notifications/initialized", None).await?;
 
         if let Some(authenticate) = self.config.authenticate.clone() {
@@ -266,6 +279,7 @@ impl AcpSession {
         let new_session_params =
             || acp_session_new_params(&workspace_path, trusted_rules, rules_channel);
         let result = if let Some(session_id) = resume_session_id.as_deref() {
+            self.presentation.session_resumed = true;
             match self
                 .request_with_login_retry(
                     "session/load",
@@ -288,6 +302,7 @@ impl AcpSession {
                 }
                 Err(err) => {
                     self.loaded_goal = None;
+                    self.presentation.session_resumed = false;
                     eprintln!(
                         "{} {} session/load failed for {}: {err}; starting a new session",
                         "⚠".yellow().bold(),
@@ -481,6 +496,50 @@ impl AcpSession {
         }
     }
 
+    /// In `ask` access a permission request waits on a person: show it as a
+    /// card with the answers the agent offers and park it. A plain `xmatrix`
+    /// command is allowed at once, and with no channel to ask in, or no
+    /// answer to offer, the request is cancelled.
+    async fn park_acp_permission(
+        &mut self,
+        message: &Value,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+        channel_id: Option<&str>,
+    ) -> error::Result<()> {
+        use crate::runtime_harness_questions as questions;
+        let id = message.get("id").cloned().unwrap_or(Value::Null);
+        let params = message.get("params").cloned().unwrap_or(Value::Null);
+        let options = params.get("options").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]);
+        if questions::acp_permission_command(&params).is_some_and(|command| questions::is_plain_xmatrix_command(&command))
+            && let Some(option_id) = acp_select_permission_option_id(options)
+        {
+            let allowed = serde_json::json!({ "outcome": { "outcome": "selected", "optionId": option_id } });
+            return self.write_message(&acp_result(id, allowed)).await;
+        }
+        match (relay, channel_id, questions::acp_permission_question(&params)) {
+            (Some(relay), Some(channel_id), Some(question)) => {
+                let key = format!("acp-permission-{}", uuid::Uuid::new_v4());
+                let card = questions::publish_questionnaire(
+                    relay,
+                    channel_id,
+                    questions::questionnaire_message(
+                        &self.config.trace_source,
+                        &self.config.display_name,
+                        &key,
+                        &[question],
+                    ),
+                );
+                self.questions.park(key, (id, params), card);
+                Ok(())
+            }
+            _ => {
+                let cancelled = questions::acp_permission_outcome(&params, None)
+                    .unwrap_or_else(|| serde_json::json!({ "outcome": { "outcome": "cancelled" } }));
+                self.write_message(&acp_result(id, cancelled)).await
+            }
+        }
+    }
+
     async fn submit_turn(
         &mut self,
         text: &str,
@@ -539,7 +598,7 @@ impl AcpSession {
             "method": "session/prompt",
             "params": {
                 "sessionId": session_id.clone(),
-                "prompt": content_blocks,
+                "prompt": acp_prompt_blocks(content_blocks, self.prompt_images),
             },
         });
         self.write_message(&request).await?;
@@ -602,6 +661,16 @@ impl AcpSession {
                     .await?;
                 continue;
             }
+            if message.get("method").and_then(Value::as_str).is_some_and(|method| method.contains("permission"))
+                && message.get("id").is_some()
+                && message.get("result").is_none()
+                && message.get("error").is_none()
+                && !launch_access().approves_requests
+            {
+                self.park_acp_permission(&message, trace_relay, trace_channel_id)
+                    .await?;
+                continue;
+            }
             if acp_handle_server_request(self, &message).await?.is_some() {
                 continue;
             }
@@ -646,10 +715,14 @@ impl AcpSession {
                     self.presentation.model = Some(model);
                 }
                 let cancellation_detail = acp_turn_cancellation_detail(&display_name, &result);
-                // A turn the agent ended before finishing its work is a failed turn.
+                // A turn the agent ended before finishing its work is a failed turn,
+                // and so is one the program answered with its account's refusal.
                 let incomplete_detail = cancellation_detail
                     .is_none()
-                    .then(|| acp_turn_incomplete_detail(&display_name, &result))
+                    .then(|| {
+                        acp_turn_incomplete_detail(&display_name, &result)
+                            .or_else(|| acp_account_refusal_detail(&display_name, &output))
+                    })
                     .flatten();
                 if latest_goal.is_none() {
                     latest_goal = self
@@ -890,6 +963,24 @@ mod session_notice_tests {
     use super::*;
 
     #[test]
+    fn image_blocks_reach_only_an_agent_that_advertised_them() {
+        let blocks = vec![
+            serde_json::json!({ "type": "text", "text": "see local copy" }),
+            serde_json::json!({ "type": "image", "mimeType": "image/png", "data": "AA==" }),
+        ];
+        let advertised = serde_json::json!({
+            "agentCapabilities": { "promptCapabilities": { "image": true } }
+        });
+        assert!(acp_prompt_images(&advertised));
+        assert_eq!(acp_prompt_blocks(blocks.clone(), true).len(), 2);
+        assert!(!acp_prompt_images(&serde_json::json!({ "agentCapabilities": {} })));
+        assert_eq!(
+            acp_prompt_blocks(blocks, false),
+            vec![serde_json::json!({ "type": "text", "text": "see local copy" })]
+        );
+    }
+
+    #[test]
     fn capability_is_advertised_only_with_the_notice_decoder() {
         assert_eq!(acp_initialize_params()["clientCapabilities"]["session"]["notices"], serde_json::json!({}));
     }
@@ -941,20 +1032,20 @@ fn acp_is_session_load_replay(request: &Value, message: &Value) -> bool {
             })
 }
 
-fn grok_acp_spawn_args(cmd_args: &[String]) -> Vec<String> {
+fn grok_acp_spawn_args(
+    cmd_args: &[String],
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> Vec<String> {
     // Prefer an explicit agent-mode argv when callers already pass one.
     if cmd_args.iter().any(|arg| arg == "stdio") {
-        let mut args = cmd_args.to_vec();
+        // The grant's args are agent options too, wherever the argv carries them.
+        let mut args: Vec<String> =
+            cmd_args.iter().filter(|arg| !access.args.contains(arg)).cloned().collect();
         if !args.iter().any(|arg| arg == "agent") {
             args.insert(0, "agent".to_string());
         }
-        if !args
-            .iter()
-            .any(|arg| arg == "--always-approve" || arg == "--yolo")
-        {
-            let idx = args.iter().position(|arg| arg == "stdio").unwrap_or(args.len());
-            args.insert(idx, "--always-approve".to_string());
-        }
+        let idx = args.iter().position(|arg| arg == "stdio").unwrap_or(args.len());
+        args.splice(idx..idx, access.args.iter().cloned());
         return args;
     }
 
@@ -966,10 +1057,9 @@ fn grok_acp_spawn_args(cmd_args: &[String]) -> Vec<String> {
             args.push(model.to_string());
         }
     }
-    // User-supplied flags go before the transport subcommand:
-    // `grok agent [agent-opts] stdio`.
-    args.extend(cmd_args.iter().cloned());
-    args.push("--always-approve".to_string());
+    // The launch's flags, its access args among them, go before the transport
+    // subcommand: `grok agent [agent-opts] stdio`.
+    args.extend(access.with_args(cmd_args));
     args.push("stdio".to_string());
     args
 }
@@ -1053,6 +1143,24 @@ fn acp_turn_incomplete_detail(display_name: &str, result: &Value) -> Option<Stri
     ))
 }
 
+/// The program's own account refusal, sent as the turn's whole reply text
+/// with an ordinary `end_turn`. Observed: Cursor CLI answers every prompt with
+/// "Add a payment method to continue" when its account has no payment method
+/// or credit left. That text stayed local, so the Channel saw nothing at all.
+/// Only a short reply that is the refusal counts, never a model discussing it.
+fn acp_account_refusal_detail(display_name: &str, output: &str) -> Option<String> {
+    const REFUSALS: &[&str] = &["add a payment method to continue"];
+    let reply = output.trim();
+    if reply.is_empty() || reply.chars().count() > 300 {
+        return None;
+    }
+    let lower = reply.to_ascii_lowercase();
+    REFUSALS
+        .iter()
+        .any(|refusal| lower.contains(refusal))
+        .then(|| format!("{display_name} refused the turn for its account: {reply}"))
+}
+
 fn acp_turn_result_is_cancelled(turn: &CodexTurnResult) -> bool {
     turn.failure_detail
         .as_deref()
@@ -1133,12 +1241,15 @@ async fn acp_handle_server_request(
     let result = if method == "elicitation/create" {
         // Outside a turn there is no channel to ask in.
         serde_json::json!({ "action": "cancel" })
+    } else if method.contains("permission") && !launch_access().approves_requests {
+        // `ask` access outside a turn: there is no channel to ask a person in.
+        serde_json::json!({ "outcome": { "outcome": "cancelled" } })
     } else if method.contains("permission") {
-        // Auto-approve tool execution when the agent still asks (belt and suspenders
-        // with --always-approve on the spawn line). Option selection is driven by
-        // the ACP `kind` semantics so each vendor's wording works; when the request
-        // carries no selectable option, fall back to the vendor's historical
-        // optionId (Grok: allow-always) or reject with -32601.
+        // Full access answers the agent's permission requests with allow.
+        // Option selection is driven by the ACP `kind` semantics so each
+        // vendor's wording works; when the request carries no selectable
+        // option, fall back to the vendor's historical optionId (Grok:
+        // allow-always) or reject with -32601.
         let options = message
             .get("params")
             .and_then(|params| params.get("options"))
@@ -1222,6 +1333,27 @@ fn redact_data_urls_value(value: &Value) -> Value {
 )]
 mod tests;
 
+/// Whether the agent accepts inline image blocks in `session/prompt`.
+fn acp_prompt_images(initialize_result: &Value) -> bool {
+    initialize_result
+        .pointer("/agentCapabilities/promptCapabilities/image")
+        .and_then(Value::as_bool)
+        == Some(true)
+}
+
+/// The prompt an agent can take. Without the image capability, image blocks
+/// are left out: the text already names each image's local copy, which the
+/// agent can open with its own tools.
+fn acp_prompt_blocks(blocks: Vec<Value>, images: bool) -> Vec<Value> {
+    if images {
+        return blocks;
+    }
+    blocks
+        .into_iter()
+        .filter(|block| block.get("type").and_then(Value::as_str) != Some("image"))
+        .collect()
+}
+
 fn acp_auth_method_ids(initialize_result: &Value) -> Vec<String> {
     initialize_result
         .get("authMethods")
@@ -1244,13 +1376,22 @@ fn acp_retry_auth_method(advertised: &[String]) -> String {
 /// How long a readiness check may take, from spawn to an open session.
 const ACP_READINESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
+/// How long the credential retry waits for `authenticate`. Credentials the
+/// agent already holds answer in seconds; a method still waiting after this is
+/// waiting for a person to sign in.
+const ACP_AUTH_RETRY_TIMEOUT: std::time::Duration = if cfg!(test) {
+    std::time::Duration::from_secs(2)
+} else {
+    std::time::Duration::from_secs(20)
+};
+
 /// Whether an ACP harness can take work on this machine, asked the way a
 /// launch asks it: the same spawn, `initialize`, credential retry and
 /// `session/new`, then closed before any prompt, so no model is called. A
 /// vendor's status command can be missing or wrong (an expired sign-in still
 /// reads signed in); this cannot. `Some(Err(reason))` is the harness's own
-/// account of why it refused; `None` is no answer (no start, a timeout, or a
-/// failure that is not about credentials).
+/// account of why it cannot (refused credentials, or it quit before a session
+/// opened); `None` is no answer (no start, or a timeout).
 pub(crate) async fn acp_harness_readiness(
     preset: &xmatrix_cli_agent::AgentPreset,
     launcher: &std::path::Path,
@@ -1275,11 +1416,15 @@ pub(crate) async fn acp_harness_readiness(
     )
     .await;
     app.shutdown().await;
-    match opened.ok()? {
+    readiness_verdict(opened.ok()?)
+}
+
+/// A harness that quits or errors before a session opens fails every launch
+/// the same way (a WorkBuddy-bundled CodeBuddy exits right after loading its
+/// mods), so routing must skip it as surely as one that refused credentials.
+fn readiness_verdict<T>(opened: error::Result<T>) -> Option<Result<(), String>> {
+    match opened {
         Ok(_) => Some(Ok(())),
-        Err(err) => {
-            let detail = err.to_string();
-            harness_signed_out_error(&detail).then_some(Err(detail))
-        }
+        Err(err) => Some(Err(err.to_string())),
     }
 }

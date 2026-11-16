@@ -593,6 +593,13 @@ async fn cmd_request(
             reason,
             json,
         } => cmd_request_secret_access(hub_url, &token, secret_refs, reason, json).await,
+        RequestCommand::Settings {
+            settings,
+            reason,
+            propose,
+            wait,
+            json,
+        } => cmd_request_settings(hub_url, &token, settings, reason, propose, wait, json).await,
         RequestCommand::SecretAdd {
             secret_ref,
             env,

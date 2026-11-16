@@ -1134,8 +1134,7 @@ export class PostgresContentRepository {
     const channelId = text(input.channelId, "channelId");
     const messageId = text(input.messageId, "messageId");
     const actorUserId = text(input.actorUserId, "actorUserId");
-    if (!Array.isArray(input.attachments) || input.attachments.length < 1 ||
-        input.attachments.length > 10) {
+    if (!Array.isArray(input.attachments) || input.attachments.length < 1) {
       throw new ContentControlError("invalid_command", 400, "Attachment count is invalid");
     }
     const scope = await this.resolveScope(requestId, `channel:${channelId}`);

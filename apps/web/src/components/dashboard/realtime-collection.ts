@@ -192,7 +192,8 @@ export type RealtimeCollection<T extends { id: string }> = ReturnType<typeof cre
 
 /** Incremental existence query: unchanged keys are never re-evaluated on a
  * live report, including the worst case where nothing currently matches. */
-export function realtimeCollectionAny<T extends { id: string }>(store: RealtimeCollection<T>, matches: (item: T) => boolean) {
+export function realtimeCollectionAny<T extends { id: string }>(
+  store: Pick<RealtimeCollection<T>, "get" | "getSnapshot" | "subscribeChanges">, matches: (item: T) => boolean) {
   let source = store.getSnapshot();
   let matching = new Set(source.filter(matches).map(item => item.id));
   let watching = false;

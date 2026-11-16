@@ -1,12 +1,12 @@
 import { digestCanonicalCloneCborV1 } from '@xmatrix/protocol';
-import { createAuthorityDatabase, PostgresDingTalkInboundInboxRepository, PostgresMessageRepository, PostgresAutomationRepository } from '../dist/index.js';
+import { createAuthorityDatabase, PostgresDingTalkInboundInboxRepository, PostgresMessageRepository } from '../dist/index.js';
 import { inboundFixture } from './dingtalk-inbound.fixture.mjs';
 import { connectionString } from './postgres-database.fixture.mjs';
 
 /** Full migrated schema, implementation fixtures only; no native conversation proof. */
 export async function effectFixture(run, constructors={}) {
   return inboundFixture(async f => {
-    const spaceId=f.spaces[0],channelId=spaceId+':channel',relationId=spaceId+':relation',automationId=spaceId+':automation';
+    const spaceId=f.spaces[0],channelId=spaceId+':channel',relationId=spaceId+':relation';
     f.applicationName='dt-effects:'+spaceId;
     f.database=createAuthorityDatabase({connectionString,shardId:'shard-0',applicationName:f.applicationName,statementTimeoutMs:5000,transactionTimeoutMs:10000,lockTimeoutMs:2000});
     f.inbox=new (constructors.PostgresDingTalkInboundInboxRepository??PostgresDingTalkInboundInboxRepository)(f.database,f.key);
@@ -26,17 +26,12 @@ export async function effectFixture(run, constructors={}) {
     await f.sql(`INSERT INTO data.app_source_relations(relation_id,connection_id,space_id,channel_id,source_kind,source_ref,
       features_json,version,created_by,created_at,updated_at) VALUES($1,$2,$3,$4,'repository',$5,'["message.received"]',1,'target',now(),now())`,
     [relationId,job.connectionId,spaceId,channelId,source.sourceRef]);
-    await f.sql(`INSERT INTO data.automations(automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,page_id,created_at,updated_at)
-      VALUES($1,'target',$2,now()+interval '1 day',true,1,$3::jsonb,'fixture-page',now(),now())`,[automationId,channelId,
-      JSON.stringify({ input: { envRef: { authorityRootUserId: 'target' } },triggers: [{ kind: 'event',provider: 'dingtalk',source: '*',feature: 'message.received' }] })]);
-    const destination=async kind => {
-      const table=kind==='channel'?'app_source_relations':'automations',key=kind==='channel'?'relation_id':'automation_id',id=kind==='channel'?relationId:automationId;
-      const row=(await f.sql(`SELECT version,(extract(epoch from created_at)*1000000)::bigint::text birth FROM data.${table} WHERE ${key}=$1`,[id])).rows[0];
-      return { kind,id: kind==='channel'?channelId:automationId,channelId,authorityRootUserId: 'target',version: Number(row.version),birth: row.birth,
-        ...(kind==='channel'?{ relationId }:{ ownerUserId: 'target' }) };
+    const destination=async () => {
+      const row=(await f.sql(`SELECT version,(extract(epoch from created_at)*1000000)::bigint::text birth FROM data.app_source_relations WHERE relation_id=$1`,[relationId])).rows[0];
+      return { kind: 'channel',id: channelId,channelId,authorityRootUserId: 'target',version: Number(row.version),birth: row.birth,relationId };
     };
-    const cap=async (kind='channel',signal=new AbortController().signal,extra={}) => f.inbox.effectAuthority(f.request({ job,destination: await destination(kind),signal,...extra }));
-    const messages=new PostgresMessageRepository(f.database),automations=new PostgresAutomationRepository(f.database);
+    const cap=async (kind='channel',signal=new AbortController().signal,extra={}) => f.inbox.effectAuthority(f.request({ job,destination: await destination(),signal,...extra }));
+    const messages=new PostgresMessageRepository(f.database);
     const appendInput=async authority => {
       const reservation=await messages.reserveAppendSequence({ requestId: crypto.randomUUID(),commandId: authority.effectId,
         spaceId,channelId,observedPostgresHead: 0 });
@@ -48,12 +43,10 @@ export async function effectFixture(run, constructors={}) {
           bodyHash: await digestCanonicalCloneCborV1(source.candidate.text),senderSnapshotDigest: '3'.repeat(64),recordDigest: '4'.repeat(64),recordEncodedBytes: 10,
           preview: { bodyPreview: source.candidate.text,senderSnapshot: { kind: 'app',id: 'dingtalk' } } } };
     };
-    const fireInput=async authority => ({ requestId: crypto.randomUUID(),automationId,eventId: authority.effectId,event: { summary: 'caller cannot substitute this' },at: await f.time() });
-    try { await run({ ...f,spaceId,channelId,relationId,automationId,job,source,cap,destination,messages,automations,appendInput,fireInput }); }
+    try { await run({ ...f,spaceId,channelId,relationId,job,source,cap,destination,messages,appendInput }); }
     finally {
-      for (const table of ['automations','app_source_relations','message_sequence_reservations','message_mutations','message_attention','message_attention_revisions','messages','idempotency_keys','outbox','channel_content_counters','channel_message_sequences','channel_access','space_control_heads','channels']) {
-        // Automations do not store space_id.
-        await f.sql(table==='automations'?'DELETE FROM data.automations WHERE automation_id=$1':`DELETE FROM data.${table} WHERE space_id=$1`,[table==='automations'?automationId:spaceId]);
+      for (const table of ['app_source_relations','message_sequence_reservations','message_mutations','message_attention','message_attention_revisions','messages','idempotency_keys','outbox','channel_content_counters','channel_message_sequences','channel_access','space_control_heads','channels']) {
+        await f.sql(`DELETE FROM data.${table} WHERE space_id=$1`,[spaceId]);
       }
       await f.sql("DELETE FROM control.scoped_control_command_replays WHERE scope_kind='space' AND scope_id=$1",[spaceId]);
       await f.sql('DELETE FROM control.space_placement WHERE space_id=$1',[spaceId]);

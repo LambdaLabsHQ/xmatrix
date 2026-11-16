@@ -25,7 +25,7 @@ function fixture(ingressEffects = {}) {
     native, rooms: () => rooms, apps: () => ({}), verify: async () => { if (state.denyAuth) throw new Error("unverified"); },
     append: async () => { calls.push(["append"]); return new Response(null, { status: state.failDelivery ? 503 : 200 }); },
     deliver: async (_env, _apps, append, ...args) => { calls.push(["deliver", args]); const result = await append(); if (!result.ok) throw new Error("uncommitted"); },
-    automations: async () => { calls.push(["automations"]); }, ...ingressEffects,
+    events: async () => { calls.push(["automations"]); }, ...ingressEffects,
   });
   return { state, calls, capability, check, delivery, binding };
 }

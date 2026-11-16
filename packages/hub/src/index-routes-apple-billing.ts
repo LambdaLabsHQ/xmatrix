@@ -1,10 +1,9 @@
 import { spaceBilling } from "@xmatrix/billing";
-import { PostgresAppleBillingRepository, PostgresBillingRepository } from "@xmatrix/db";
+import { PostgresAppleBillingRepository } from "@xmatrix/db";
 import { sha256Hex } from "@xmatrix/protocol";
 import type { Hono, Context } from "hono";
-import { requireAuth, requireHumanAuth, readBoundedRequestBody, productCommandId, requestErrorResponse } from "./index-shared";
-import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { POSTGRES_AUTHORITY_TIMEOUTS, postgresAuthorityShardId } from "./postgres-authority-http";
+import { requireAuth, requireHumanAuth, productCommandId } from "./index-shared";
+import { storeBillingDatabase, storeErrorResponse as errorResponse, storeRequestBody } from "./store-billing";
 import type { Env } from "./types";
 import { appleBillingFact, appleOrganizationGroup, appleSeatGroupFact, appleSubscriptionConfig, AppleBillingError, retrieveAppleSubscription,
   verifyAppleNotification, type AppleSubscriptionConfig, type VerifiedAppleSubscription } from "./apple/subscriptions";
@@ -13,24 +12,11 @@ import type { AppleSeatGroupState } from "@xmatrix/db";
 
 type BillingContext = Context<{ Bindings: Env }>;
 function repositories(env: Env) {
-  const db = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-hub-apple-billing", ...POSTGRES_AUTHORITY_TIMEOUTS });
-  const billing = new PostgresBillingRepository(db, postgresAuthorityShardId(env, "apple-billing"));
+  const { db, billing } = storeBillingDatabase(env, "apple");
   return { billing, apple: new PostgresAppleBillingRepository(db, billing) };
 }
-async function body(request: Request, limit = 8192): Promise<Record<string, unknown>> {
-  const bytes = await readBoundedRequestBody(request, limit);
-  if (!bytes) throw new AppleBillingError("invalid_apple_request", "Apple billing request is too large");
-  try {
-    const text = new TextDecoder().decode(bytes).trim();
-    const parsed = text ? JSON.parse(text) : {};
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error();
-    return parsed;
-  } catch { throw new AppleBillingError("invalid_apple_request", "Apple billing request is invalid"); }
-}
-function errorResponse(c: BillingContext, error: unknown) {
-  if (error instanceof AppleBillingError) return c.json({ code: error.code, error: error.message }, error.retryable || error.code === "apple_billing_unavailable" ? 503 : 400);
-  return requestErrorResponse(c, error);
-}
+const body = (request: Request, limit = 8192) =>
+  storeRequestBody(request, limit, () => new AppleBillingError("invalid_apple_request", "Apple billing request is invalid"));
 async function reconcile(c: BillingContext, config: AppleSubscriptionConfig, originalId: unknown, environment: unknown,
   actor?: { userId: string; spaceId: string }) {
   const requestId = crypto.randomUUID();

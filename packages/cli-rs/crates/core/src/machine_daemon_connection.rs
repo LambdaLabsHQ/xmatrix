@@ -28,11 +28,15 @@ const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(2);
 /// Silence that makes the cheap protocol ping inconclusive, so liveness has to
 /// be settled by a reply this repository actually guarantees.
 const HEARTBEAT_PROBE_AFTER: Duration = Duration::from_secs(4);
-/// How long the Hub itself may stay silent while the edge keeps answering
-/// protocol pings. Those pongs never reach the Durable Object, so they must
-/// not postpone this probe: a dropped session would otherwise look healthy
-/// and the catalog would stay offline until the process was restarted.
-const HUB_SESSION_PROBE_AFTER: Duration = Duration::from_secs(60);
+/// How often the edge heartbeat is written however busy the socket is. The
+/// Relay Runtime auto-answers it without waking, and the platform records when
+/// it did: that timestamp is how the Hub tells a socket that vanished without a
+/// close from a live idle one, so it must keep moving even while other frames
+/// flow. Must equal the Hub's `MACHINE_DAEMON_EDGE_HEARTBEAT_MS`, which allows
+/// three misses before it closes the connection.
+const EDGE_HEARTBEAT_EVERY: Duration = Duration::from_secs(15);
+/// Tells the Hub this daemon writes the edge heartbeat, so its silence counts.
+pub const MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY: &str = "machine_daemon_edge_heartbeat_v1";
 /// A written probe gets the same response budget as connection admission.
 /// Four seconds mistook brief network/edge delays for a dead control socket.
 const HEARTBEAT_PROBE_TIMEOUT: Duration = CONNECT_TIMEOUT;
@@ -117,8 +121,11 @@ fn machine_report_at_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_string())
 }
 
-/// A text frame is the Hub. Protocol ping and pong are the edge, which
-/// answers them without waking the Durable Object that owns this session.
+/// A text frame comes from the Durable Object that holds this socket, or from
+/// its auto-response to the edge heartbeat, which the platform only gives a
+/// socket that object still holds. Protocol ping and pong are the edge alone.
+/// The Hub never leaves a held socket offline in its catalog: every offline it
+/// writes for a live route closes that socket, so a held socket is a session.
 fn frame_proves_hub_session(message: &Message) -> bool {
     !message.is_ping() && !message.is_pong()
 }
@@ -129,25 +136,18 @@ fn machine_daemon_heartbeat_frame() -> Message {
     Message::Ping(Default::default())
 }
 
-/// Application-level liveness probe, sent only once the cheap protocol ping has
-/// left this connection silent past [`HEARTBEAT_PROBE_AFTER`].
+/// Application-level liveness probe: the edge heartbeat. It is written every
+/// [`EDGE_HEARTBEAT_EVERY`], and sooner once the cheap protocol ping has left
+/// this connection silent past [`HEARTBEAT_PROBE_AFTER`].
 ///
 /// Whether Cloudflare surfaces a protocol pong back to this client is not
 /// established anywhere in this repository, so protocol-ping silence alone
-/// cannot separate a dead socket from a healthy idle one. The Hub answers every
-/// `ping` with `pong` (see `machine-daemon-port.ts`), which makes silence after
-/// this frame real evidence. It does wake a hibernated Relay Runtime, so it
-/// stays off the steady-state path and only runs when liveness is already in
-/// doubt.
+/// cannot separate a dead socket from a healthy idle one. This frame always gets
+/// a text answer: the Relay Runtime's auto-response, or on a Hub without one its
+/// daemon port's `pong`. Silence after it is real evidence, and on a current Hub
+/// it never wakes the Durable Object.
 fn machine_daemon_liveness_probe_frame() -> Message {
-    Message::Text(
-        serde_json::json!({
-            "type": "ping",
-            "requestId": uuid::Uuid::new_v4().to_string(),
-        })
-        .to_string()
-        .into(),
-    )
+    Message::Text(crate::agent_instance_connection::EDGE_HEARTBEAT_FRAME.into())
 }
 
 /// Write-queue slots kept free for the heartbeat, so a burst of instructions
@@ -291,6 +291,11 @@ pub struct SerializedMachineDaemon {
 pub struct MachineSpawnContext {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub requested_model: Option<String>,
+    /// On the runtime's default model: a model from the runtime's own catalog
+    /// to start on instead, as a live `/model` would switch to it. It is not an
+    /// admitted model resource, so it never comes from the registration binding.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preferred_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub requested_effort: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -484,6 +489,37 @@ pub struct AgentHarnessSpec {
     pub install_hint: Option<String>,
 }
 
+/// Exactly what one launch adds for its access mode (`AgentAccessGrant` in
+/// `@xmatrix/protocol`): the Hub resolves it from the harness preset and the
+/// mode the machine's owner confirmed, and the owner is shown the same data.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentAccessGrant {
+    /// `full` or `ask`.
+    pub mode: String,
+    /// Joined to the launcher's argv.
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Set on the harness process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+    /// xMatrix answers the harness's permission requests with allow.
+    #[serde(default)]
+    pub approves_requests: bool,
+}
+
+impl AgentAccessGrant {
+    /// `args` followed by this grant's, none repeated.
+    pub fn with_args(&self, args: &[String]) -> Vec<String> {
+        let mut all = args.to_vec();
+        all.extend(self.args.iter().filter(|arg| !args.contains(arg)).cloned());
+        all
+    }
+}
+
 /// Hub control intents understood by a Machine Daemon.
 ///
 /// This protocol contains no Human presence or Agent Instance channel
@@ -529,6 +565,10 @@ pub enum MachineDaemonCommand {
         harness: Option<AgentHarnessSpec>,
         #[serde(default)]
         agent_acp_args: Option<Vec<String>>,
+        /// What this launch adds for its access mode. A Hub that predates the
+        /// grant sends none, and the launch is the preset's full access.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        access: Option<AgentAccessGrant>,
         agent_name: String,
         #[serde(default)]
         identity_id: Option<String>,
@@ -766,6 +806,9 @@ pub enum HarnessAction {
     /// Hand the running sign-in the owner's code, if any, and wait for it.
     LoginFinish,
     LoginCancel,
+    /// Ask this one preset's program, now, whether it is installed and signed
+    /// in, and answer with what it says. Nothing is changed or remembered.
+    Check,
 }
 
 impl HarnessAction {
@@ -773,6 +816,7 @@ impl HarnessAction {
         LoginStart => "login_start",
         LoginFinish => "login_finish",
         LoginCancel => "login_cancel",
+        Check => "check",
     );
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -846,6 +890,19 @@ pub struct MachineQuotaProbeRequest {
     /// The Hub accepts a result's `quotaAccount` only when it sets this.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quota_account: bool,
+    /// The probe checks a refusal: read the provider now rather than answer
+    /// from a recent cached reading, which could only repeat what refused.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fresh: bool,
+    /// The Hub accepts an observed result with no windows (a prepaid account:
+    /// only its balance and currency) only when it sets this.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub account_balance: bool,
+    /// The Hub accepts a result's `scopedQuotaUsages` (windows that constrain
+    /// only the models of their `scope`) only when it sets this; it then also
+    /// accepts an observed result whose only windows are scoped.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scoped_quota_usages: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -879,6 +936,11 @@ pub struct MachineQuotaProbeTargetResult {
     pub quota_observed_at: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
     pub quota_usages: Vec<MachineQuotaProbeWindow>,
+    /// Windows that constrain only the models of their `scope`, sent only
+    /// when the probe asked for them. Present, even empty, on a reading that
+    /// states them completely.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scoped_quota_usages: Option<Vec<MachineQuotaProbeWindow>>,
     /// Whether the provider still serves the account, sent only when the
     /// probe asked for it.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -897,6 +959,10 @@ pub struct MachineQuotaProbeWindow {
     /// probe asked for window labels.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub label: Option<String>,
+    /// The provider's name for what a scoped window constrains (`"Fable"`);
+    /// only in `scoped_quota_usages`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub scope: Option<String>,
 }
 
 /// Machine-local results and snapshots reported to the Hub.
@@ -1091,6 +1157,9 @@ pub enum MachineDaemonReport {
         captured_at: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         machine_resources: Option<serde_json::Value>,
+        /// Minute samples kept since the last report, batched onto this one.
+        #[serde(skip_serializing_if = "Vec::is_empty", default)]
+        machine_resource_history: Vec<serde_json::Value>,
         #[serde(skip_serializing_if = "Option::is_none", default)]
         harness_inventory: Option<serde_json::Value>,
         /// What this daemon's own CLI update is doing (`MachineCliUpdateStatus`).
@@ -1300,7 +1369,10 @@ enum ConnectionInstruction {
         report: MachineDaemonReport,
         reply: oneshot::Sender<std::result::Result<String, String>>,
     },
-    RefreshAuthCredential(String),
+    RefreshAuthCredential {
+        credential: String,
+        connection_epoch: Option<u64>,
+    },
     /// The owner removed this Machine; Hub refused its credential refresh.
     Retired(String),
     RenewLease {
@@ -1586,6 +1658,7 @@ impl MachineDaemonConnectionClient {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: Some(inventory),
             cli_update: None,
             runs: Vec::new(),
@@ -1606,6 +1679,7 @@ impl MachineDaemonConnectionClient {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: Some(status),
             runs: Vec::new(),
@@ -1751,6 +1825,9 @@ impl MachineDaemonConnectionClient {
     /// inside the actor would also stall heartbeats and let Hub presence expire
     /// even though the daemon process and control socket were still alive.
     pub async fn refresh_auth(&self, token: String) -> Result<()> {
+        // Bind before enrollment awaits the network: this socket can be
+        // replaced while the replacement credential is being minted.
+        let connection_epoch = self.connection_epoch();
         *self
             .enrollment_token
             .write()
@@ -1774,9 +1851,10 @@ impl MachineDaemonConnectionClient {
             }
         };
         self.instruction_tx
-            .send(ConnectionInstruction::RefreshAuthCredential(
-                enrollment.credential,
-            ))
+            .send(ConnectionInstruction::RefreshAuthCredential {
+                credential: enrollment.credential,
+                connection_epoch,
+            })
             .map_err(|_| CliError::Relay("Machine Daemon control connection is closed".into()))
     }
 
@@ -2353,7 +2431,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
         // inbound traffic proves the Hub is still there. Writes run on a dedicated
         // task so a hung send cannot stall that read/heartbeat select.
         let mut last_server_activity = Instant::now();
-        let mut last_hub_activity = Instant::now();
+        let mut last_edge_heartbeat = Instant::now();
         let mut pending_probe: Option<MachineDaemonProbe> = None;
         let mut pending_renews: HashMap<
             String,
@@ -2396,6 +2474,15 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                             });
                         }
                         Some(ConnectionInstruction::Report(report)) => {
+                            // Instructions survive reconnect; observations do not. Never
+                            // restamp an old snapshot as current absence evidence. The
+                            // host takes a fresh full snapshot after Reconnected. Spawn
+                            // results retain their causal tuple for reconciliation.
+                            if matches!(&report, MachineDaemonReport::MachineRunSnapshot {
+                                registry_connection_epoch: Some(captured_epoch), ..
+                            } if *captured_epoch != epoch) {
+                                continue;
+                            }
                             let text = match serde_json::to_string(&report) {
                                 Ok(value) => value,
                                 Err(error) => {
@@ -2518,7 +2605,13 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                                 break error;
                             }
                         }
-                        Some(ConnectionInstruction::RefreshAuthCredential(credential)) => {
+                        Some(ConnectionInstruction::RefreshAuthCredential { credential, connection_epoch }) => {
+                            // Reconnect enrolled its own fresh credential. A refresh
+                            // queued before or during that reconnect belongs to no
+                            // current socket and must not roll its HTTP cache back.
+                            if connection_epoch != Some(epoch) {
+                                continue;
+                            }
                             let message = serde_json::json!({
                                 "type": "refresh_auth",
                                 "requestId": uuid::Uuid::new_v4().to_string(),
@@ -2584,7 +2677,6 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                             // waiting on that session.
                             last_server_activity = Instant::now();
                             if frame_proves_hub_session(&message) {
-                                last_hub_activity = Instant::now();
                                 pending_probe = None;
                             }
                             if let Message::Close(frame) = &message
@@ -2661,7 +2753,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                     }
                     let silence = last_server_activity.elapsed();
                     let probe = silence >= HEARTBEAT_PROBE_AFTER
-                        || last_hub_activity.elapsed() >= HUB_SESSION_PROBE_AFTER;
+                        || last_edge_heartbeat.elapsed() >= EDGE_HEARTBEAT_EVERY;
                     let (frame, queued_probe) = if probe {
                         let (frame, queued) = MachineDaemonProbe::queued();
                         (frame, Some(queued))
@@ -2669,7 +2761,12 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                         (machine_daemon_heartbeat_frame().into(), None)
                     };
                     match enqueue_machine_daemon_heartbeat(&out_tx, frame) {
-                        Ok(true) => pending_probe = queued_probe,
+                        Ok(true) => {
+                            if queued_probe.is_some() {
+                                last_edge_heartbeat = Instant::now();
+                            }
+                            pending_probe = queued_probe;
+                        }
                         Ok(_) => {}
                         Err(error) => break format!("Machine Daemon heartbeat failed: {error}"),
                     }
@@ -3495,17 +3592,39 @@ mod tests {
     #[test]
     fn probe_escalation_stays_off_the_steady_state_path() {
         // A protocol ping that Cloudflare answers below the Durable Object keeps
-        // edge silence under the fast threshold. The Hub session has its own,
-        // slower probe: edge pongs are not that session.
+        // edge silence under the fast threshold. The edge heartbeat runs on its
+        // own slower clock, and the Hub closes a daemon after three misses.
         assert!(HEARTBEAT_PROBE_AFTER > HEARTBEAT_INTERVAL);
-        assert!(HUB_SESSION_PROBE_AFTER > HEARTBEAT_PROBE_AFTER);
-        assert_eq!(HUB_SESSION_PROBE_AFTER, Duration::from_secs(60));
+        assert!(EDGE_HEARTBEAT_EVERY > HEARTBEAT_PROBE_AFTER);
+        assert_eq!(EDGE_HEARTBEAT_EVERY, Duration::from_secs(15));
+        let hub = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../../hub/src/runtime-transport/machine-daemon-port.ts"),
+        )
+        .unwrap();
+        assert!(hub.contains("MACHINE_DAEMON_EDGE_HEARTBEAT_MS = 15_000"));
+        assert!(hub.contains(&format!(
+            "MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY = \"{MACHINE_DAEMON_EDGE_HEARTBEAT_CAPABILITY}\""
+        )));
+    }
+
+    #[test]
+    fn the_liveness_probe_is_the_frame_the_relay_runtime_auto_answers() {
+        // Any other text frame would wake the Durable Object on every probe.
+        assert_eq!(
+            machine_daemon_liveness_probe_frame(),
+            Message::Text(crate::agent_instance_connection::EDGE_HEARTBEAT_FRAME.into())
+        );
     }
 
     #[test]
     fn an_edge_pong_does_not_prove_the_hub_session() {
-        assert!(!frame_proves_hub_session(&Message::Ping(Default::default())));
-        assert!(!frame_proves_hub_session(&Message::Pong(Default::default())));
+        assert!(!frame_proves_hub_session(
+            &Message::Ping(Default::default())
+        ));
+        assert!(!frame_proves_hub_session(
+            &Message::Pong(Default::default())
+        ));
         assert!(frame_proves_hub_session(&Message::Text(
             r#"{"type":"pong","requestId":"probe-1"}"#.into(),
         )));
@@ -3791,8 +3910,11 @@ mod tests {
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
-            cli_update: Some(serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" })),
+            cli_update: Some(
+                serde_json::json!({ "state": "checking", "at": "2026-10-31T14:00:00Z" }),
+            ),
             runs: Vec::new(),
         };
         let value = serde_json::to_value(&report).expect("snapshot serializes");
@@ -4020,6 +4142,7 @@ mod tests {
             HarnessAction::LoginStart,
             HarnessAction::LoginFinish,
             HarnessAction::LoginCancel,
+            HarnessAction::Check,
         ] {
             assert_eq!(HarnessAction::parse(action.as_str()), Some(action));
         }
@@ -4523,6 +4646,7 @@ mod tests {
             registry_sequence: Some(11),
             captured_at: Some("2026-09-05T00:00:00Z".to_string()),
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: None,
             runs: Vec::new(),
@@ -4594,18 +4718,19 @@ mod tests {
         let client = test_machine_daemon_client();
         client.connected.store(true, Ordering::Release);
         client.connection_epoch.store(7, Ordering::Release);
-        let report = MachineDaemonReport::MachineRunSnapshot {
+        let snapshot = || MachineDaemonReport::MachineRunSnapshot {
             request_id: None,
             snapshot_complete: Some(true),
             registry_connection_epoch: None,
             registry_sequence: None,
             captured_at: None,
             machine_resources: None,
+            machine_resource_history: Vec::new(),
             harness_inventory: None,
             cli_update: None,
             runs: Vec::new(),
         };
-        let first = client.bind_registry_causality(report).unwrap();
+        let first = client.bind_registry_causality(snapshot()).unwrap();
         let first_value = serde_json::to_value(&first).unwrap();
         let replay = client.bind_registry_causality(first).unwrap();
         let replay_value = serde_json::to_value(replay).unwrap();
@@ -4613,19 +4738,7 @@ mod tests {
         assert_eq!(first_value["registryConnectionEpoch"], 7);
         assert_eq!(first_value["registrySequence"], 1);
 
-        let later = client
-            .bind_registry_causality(MachineDaemonReport::MachineRunSnapshot {
-                request_id: None,
-                snapshot_complete: Some(true),
-                registry_connection_epoch: None,
-                registry_sequence: None,
-                captured_at: None,
-                machine_resources: None,
-                harness_inventory: None,
-                cli_update: None,
-                runs: Vec::new(),
-            })
-            .unwrap();
+        let later = client.bind_registry_causality(snapshot()).unwrap();
         assert_eq!(serde_json::to_value(later).unwrap()["registrySequence"], 2);
     }
 

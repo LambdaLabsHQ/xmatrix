@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { exchangeOAuthGrant, grantFieldsForgottenOnDisconnect, oauthAuthorizeUrl, oauthClient, verifyOAuthState } from "../src/connectors/oauth.ts";
+import { signOAuthState } from "../src/connectors/oauth-state.ts";
 import { parseXAccounts, xAccountFields } from "../src/connectors/x-accounts.ts";
 import { xOAuthFields, xTokenGrant } from "../src/connectors/x-oauth.ts";
 import { withProviderResponses } from "./support/fetch-responses.mjs";
@@ -32,6 +33,8 @@ test("X OAuth requests a narrow offline PKCE grant and signs the Space, Human, c
   assert.equal(url.searchParams.has("code_verifier"), false);
   assert.ok(!url.toString().includes(env.CONNECTOR_X_CLIENT_SECRET));
   const state = url.searchParams.get("state");
+  // X refuses a state longer than 500 characters before consent, so a connect must stay inside it.
+  assert.ok(state.length <= 500, `state is ${state.length} characters`);
   const verified = await verifyOAuthState(env, state);
   assert.equal(verified.client.manifest.id, "x");
   assert.equal(verified.spaceId, "selected-space");
@@ -45,12 +48,13 @@ test("X OAuth requests a narrow offline PKCE grant and signs the Space, Human, c
 test("X OAuth state rejects tampering and missing or malformed connection snapshots", async () => {
   const state = await startState();
   const [body, signature] = state.split(".");
-  const claims = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
-  for (const [field, value] of [["providerId", "google"], ["spaceId", "other-space"], ["userId", "other-human"],
-    ["clientId", "other-client"], ["redirectUri", "https://evil.test/callback"], ["connectionSnapshot", { ...snapshot, credentialVersion: 1 }]]) {
-    const tampered = `${Buffer.from(JSON.stringify({ ...claims, [field]: value })).toString("base64url")}.${signature}`;
-    assert.equal(await verifyOAuthState(env, tampered), undefined, field);
-  }
+  assert.equal(await verifyOAuthState(env, `${body.slice(0, 20)}${body[20] === "A" ? "B" : "A"}${body.slice(21)}.${signature}`), undefined, "altered payload");
+  const signed = { providerId: "x", spaceId: "selected-space", userId: "human-owner",
+    nonce: "c7c91028-32ab-402d-abbe-3e7a9f7e5f31", expiresAt: Date.now() + 600_000,
+    clientId: env.CONNECTOR_X_CLIENT_ID, redirectUri, connectionSnapshot: snapshot };
+  assert.equal(await verifyOAuthState(env, await signOAuthState(signed, "rotated-secret")), undefined, "another secret");
+  assert.equal(await verifyOAuthState(env, await signOAuthState({ ...signed, clientId: "other-client" },
+    env.CONNECTOR_X_CLIENT_SECRET)), undefined, "another client");
   for (const connectionSnapshot of [undefined, { ...snapshot, connectionVersion: 0 }, { ...snapshot, credentialVersion: -1 },
     { ...snapshot, credentialVersion: 0.5 }, { ...snapshot, connectionGeneration: "" }]) {
     assert.equal(await verifyOAuthState(env, await startState({ connectionSnapshot })), undefined);

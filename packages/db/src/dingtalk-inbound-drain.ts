@@ -17,7 +17,6 @@ export interface DingTalkInboundEffectFence { current(): Promise<boolean>; signa
 export interface DingTalkInboundEffects {
   verifyNative(current: Current,signal: AbortSignal): Promise<void>;
   append(input: { job: DingTalkInboundJob; event: DingTalkInboundEvent },fence: DingTalkInboundEffectFence): Promise<void>;
-  automations(input: { job: DingTalkInboundJob; event: DingTalkInboundEvent },fence: DingTalkInboundEffectFence): Promise<void>;
 }
 
 /**
@@ -65,8 +64,6 @@ export async function drainDingTalkInbound(input: { app: DingTalkAppIdentity; re
           feature: "message.received",summary: "DingTalk text message",body: captured.candidate.text };
         // Stable IDs survive a crash between effects. Only an owning-boundary capability may dispatch them.
         await input.effects.append({ job,event },fence);
-        if (!await current()) return "obsolete";
-        await input.effects.automations({ job,event },fence);
         return await current() ? "done" : "obsolete";
       })()]);
     } catch { /* Private payload/provider errors never enter logs or a completed receipt. */ }

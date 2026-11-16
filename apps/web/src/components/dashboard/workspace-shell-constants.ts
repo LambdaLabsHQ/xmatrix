@@ -15,8 +15,6 @@ import type { ChannelMessage } from "@xmatrix/protocol";
 import { RELAY_V2_BLOB_MAX_BYTES } from "@xmatrix/protocol/relay-v2/message-attachment";
 
 export const HISTORY_REFRESH_INTERVAL_MS = 30000;
-/** When to re-read a channel's presence after one of its Instances went offline. */
-export const RESTING_PRESENCE_REFRESH_DELAYS_MS = [4_000, 20_000] as const;
 
 export const EMPTY_CHANNEL_HISTORY: ChannelMessage[] = [];
 
@@ -101,8 +99,6 @@ export function channelRowIndentPx(depth: number): number {
   return CHANNEL_ROW_INDENT_BASE_PX + depth * CHANNEL_ROW_INDENT_STEP_PX;
 }
 
-export const MAX_ATTACHMENTS = 10;
-
 export const MAX_IMAGE_ATTACHMENT_BYTES = 1_000_000;
 
 export const MAX_ATTACHMENT_BYTES = RELAY_V2_BLOB_MAX_BYTES;
@@ -160,8 +156,6 @@ export const AGENT_SPAWN_PENDING_MAX_AGE_MS = 2 * 60 * 1000;
 export const RELAY_CLIENT_PROFILE_STORAGE_KEY = "xmatrix:relay-v2:client-profile-id";
 
 export const DESKTOP_SETUP_VERSION = 1;
-
-export const AUTOMATION_REFRESH_INTERVAL_MS = 15_000;
 
 export const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "👀", "✅"];
 

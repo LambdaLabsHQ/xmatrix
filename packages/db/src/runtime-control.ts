@@ -7,12 +7,13 @@ import { publicLaunchFailureCode, publicLaunchFailureMessage, publicRuntimeError
 import { requireRunRegistrationAccess } from "./agent-registration-run.js";
 import type { QueryResultRow } from "pg";
 import { resumableChannelRun } from "./instance-rest-state.js";
+import { loadAgentInstanceRecordsById, type AgentInstanceRecord } from "./channel-agent-presence.js";
 import { decodeInvocationPageCursor, encodeInvocationPageCursor, type InvocationPagePosition } from "./runtime-invocation-cursor.js";
 import { readInvocationProgress } from "./runtime-invocation-progress.js";
-import { readContinuationSource } from "./runtime-continuation-source.js";
+import { readContinuationMachineConstraint, readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
-import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines, parseMachineAgents,
+import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines, parseMachineAgents, parseQuotaExhausted,
   parsePresentedRoutingDecision, rebornFailureReason, isAgentStatus,
   isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
@@ -36,9 +37,19 @@ import {
    NaturalKeyError, reserveNaturalKey } from "./natural-keys.js";
 import { commandFields } from "./command-fields.js";
 import { ControlError } from "./control-error.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
+/** Runtime catalogs an Instance report keeps from the row when it omits them, each with its observation stamp. */
+const RETAINED_INSTANCE_CATALOGS: readonly (readonly [string, string?])[] = [
+  ["models", "modelsObservedAt"], ["parameters", "parametersObservedAt"], ["commands"], ["capabilities"],
+];
 type InstanceStatus = AgentStatus;
+
+/** The launch a message's own summon started (`registration-launch:<message>:<selection>`),
+ * as a LIKE pattern: not "Start" on it again, a handoff's successor or a fallback. Only
+ * that launch's refused start is answered by sending its summon again. */
+export const SUMMON_LAUNCH_COMMAND = "registration-launch:%";
 
 export class RuntimeControlError extends ControlError {
   override name = "RuntimeControlError";
@@ -58,40 +69,6 @@ export function runtimeChannelCapability(tx: DatabaseTransaction, channelId: str
 
 const { text, integer, object: record } = commandFields((field) =>
   new RuntimeControlError("invalid_runtime_request", 400, `${field} is invalid`));
-
-/** Runtime-owned cancellation fence. Call inside the scheduling transaction so
- * revocation and occupancy release commit together. This is not process-death evidence. */
-export async function cancelRunExecution(tx: DatabaseTransaction, input: {
-  runId: string; ownerUserId: string; channelId: string; at: string;
-  reason: "timeout" | "owner";
-}): Promise<void> {
-  const rows = await tx.query<QueryResultRow>({ name: "runtime_execution_cancel_lock_v1",
-    text: `SELECT r.*,i.instance_id FROM data.runs r LEFT JOIN data.instances i
-      ON i.run_id=r.run_id WHERE r.run_id=$1 FOR UPDATE OF r`,
-    values: [input.runId], maxRows: 1 });
-  const run = rows[0];
-  if (!run || run.owner_user_id !== input.ownerUserId || run.channel_id !== input.channelId) {
-    throw new RuntimeControlError("conflict", 409, "Scheduled execution ownership does not match");
-  }
-  const body = metadata(run);
-  if (body.executionCancellation && isTerminalRunStatus(run.status)) return;
-  if (!isActiveRunStatus(run.status)) {
-    throw new RuntimeControlError("conflict", 409, "Run is already terminal");
-  }
-  const cancellation = { reason: input.reason, requestedAt: input.at,
-    processCleanup: { status: "pending", attempts: 0, nextAttemptAt: input.at } };
-  await tx.query({ name: "runtime_execution_cancel_v1", text: `UPDATE data.runs
-    SET status='failed',version=version+1,updated_at=$2,finished_at=$2,
-      metadata_json=metadata_json || $3::jsonb WHERE run_id=$1`,
-    values: [input.runId, input.at, JSON.stringify({ executionCancellation: cancellation,
-      terminalError: input.reason === "timeout" ? "Execution deadline exceeded; execution cancelled"
-        : "Execution cancelled by its owner" })], maxRows: 0 });
-  await tx.query({ name: "runtime_execution_cancel_launch_v1", text: `UPDATE data.agent_launches
-    SET state='cancelled',retryable=false,lease_owner=NULL,lease_until=NULL,
-      version=version+1,updated_at=$2,finished_at=$2 WHERE run_id=$1
-      AND state NOT IN ('cancelled','failed')`, values: [input.runId, input.at], maxRows: 0 });
-  await expireInstanceTraceAccess(tx, run.instance_id, input.at);
-}
 
 function runStatus(value: unknown): RunStatus {
   const result = text(value, "status", 32) as RunStatus;
@@ -378,14 +355,12 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
       sourceMessageId: String(result.sourceMessageId), sourceMention: value.sourceMention,
       targetRef: value.targetRef.slice(0, 300), code,
       ...(routingDecisionView(value.routingDecision) ? { routingDecision: routingDecisionView(value.routingDecision) } : {}),
-      ...(code === "registration_harness_signed_out" && parseHarnessSignedOut(value.signedOut)
-        ? { signedOut: parseHarnessSignedOut(value.signedOut)! } : {}),
       ...(code === "registration_daemon_offline" && parseOfflineMachines(value.offline)
         ? { offline: parseOfflineMachines(value.offline)! } : {}),
       message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld
-        : code === "registration_harness_signed_out" ? value.signedOut
         : code === "registration_daemon_offline" ? value.offline
-        : code === "registration_machine_unavailable" ? value.machineAgents : value.answerFailure)!
+        : code === "registration_machine_unavailable" ? value.machineAgents
+        : code === "registration_quota_exhausted" ? value.quotaExhausted : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
       rejectedAt: iso(row.created_at)!, evidenceExpiresAt: iso(row.expires_at)! }];
   });
@@ -537,7 +512,7 @@ export class PostgresRuntimeRepository {
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown; tooOld?: unknown; signedOut?: unknown; offline?: unknown; machineAgents?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown; offline?: unknown; machineAgents?: unknown; quotaExhausted?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -553,12 +528,12 @@ export class PostgresRuntimeRepository {
       const answerFailure = item.code === "routing_parameter_invalid_answer"
         ? parseDecisionAnswerFailure(item.answerFailure) : undefined;
       const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
-      const signedOut = item.code === "registration_harness_signed_out" ? parseHarnessSignedOut(item.signedOut) : undefined;
       const offline = item.code === "registration_daemon_offline" ? parseOfflineMachines(item.offline) : undefined;
       const machineAgents = item.code === "registration_machine_unavailable" ? parseMachineAgents(item.machineAgents) : undefined;
+      const quotaExhausted = item.code === "registration_quota_exhausted" ? parseQuotaExhausted(item.quotaExhausted) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
-        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}), ...(signedOut ? { signedOut } : {}),
-        ...(offline ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
+        ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}),
+        ...(offline ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}), ...(quotaExhausted ? { quotaExhausted } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
     const placement = await this.channelPlacement(commandId, channelId,
@@ -723,16 +698,23 @@ export class PostgresRuntimeRepository {
    * transaction that authorizes the message, so the Worker serving the REST
    * send path never has to call the Runtime cell to learn them.
    *
-   * Presentation is display state, not a lifecycle transition: it is
-   * last-writer-wins, takes no expected version, bumps no instance version,
-   * writes no command replay and publishes no route. Racing it against a
-   * connect fence would be a bug, not a safeguard.
+   * Presentation is display state, not a lifecycle transition: it bumps no
+   * instance version, writes no command replay and publishes no route.
+   *
+   * A connection orders its own reports. With `expectedVersion` (the version
+   * its connect claimed), `runId` and `presenceSequence` (its report count),
+   * a report is written only while the row still holds that version and Run
+   * and no later report of the same version has been: a predecessor socket,
+   * or a report overtaken by a newer one, is refused (`recorded: false`). The
+   * row then carries `presenceVersion`/`presenceSequence`, so every read
+   * orders it against live reports by the same revision (version, sequence).
+   * Without the three fields a write is unordered: it stores no sequence, and
+   * is refused once an ordered report holds the row's current version, so a
+   * connection that cannot order its reports never overwrites one that does.
    *
    * `status` is the live phase (online, busy or idle) the Instance reported
-   * with this presentation. A catalog snapshot is ordered against live frames
-   * by `updated_at`, so the row must not advance that clock while still saying
-   * `online` for an Instance mid-turn. It only moves between live statuses:
-   * whether an Instance is live at all stays the lifecycle's to decide.
+   * with this presentation. It only moves between live statuses: whether an
+   * Instance is live at all stays the lifecycle's to decide.
    */
   async recordInstancePresentation(input: {
     requestId: string;
@@ -741,8 +723,12 @@ export class PostgresRuntimeRepository {
     instanceId: string;
     presentation: Record<string, unknown> | null;
     status?: string;
+    expectedVersion?: number;
+    runId?: string;
+    presenceSequence?: number;
     at: string;
-  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string } }> {
+  }): Promise<{ instanceId: string; recorded: boolean; registration?: { ownerUserId: string; machineId: string; harness: string };
+    record?: AgentInstanceRecord }> {
     const requestId = text(input.requestId, "requestId", 200);
     const spaceId = text(input.spaceId, "spaceId", 300);
     const instanceId = text(input.instanceId, "instanceId", 300);
@@ -751,31 +737,58 @@ export class PostgresRuntimeRepository {
       "invalid_runtime_request", 400, "at is invalid");
     if (input.status !== undefined && !isLiveAgentStatus(input.status)) throw new RuntimeControlError(
       "invalid_runtime_request", 400, "status is invalid");
-    const presentation = input.presentation === null ||
+    const ordering = [input.expectedVersion, input.runId, input.presenceSequence];
+    if (ordering.some((value) => value !== undefined) && ordering.some((value) => value === undefined)) {
+      throw new RuntimeControlError("invalid_runtime_request", 400,
+        "An ordered presentation needs expectedVersion, runId and presenceSequence together");
+    }
+    const ordered = input.expectedVersion !== undefined ? {
+      version: integer(input.expectedVersion, "expectedVersion", 1),
+      runId: text(input.runId, "runId", 300),
+      sequence: integer(input.presenceSequence, "presenceSequence", 1),
+    } : undefined;
+    const reported = input.presentation === null ||
         input.presentation === undefined ||
         Object.keys(input.presentation).length === 0
       ? null
       : input.presentation;
+    // The ordering keys are the row's to stamp, never the reporter's.
+    const { presenceVersion: _version, presenceSequence: _sequence, ...rest } = reported ?? {};
+    const presentation = reported === null ? null : rest;
     const placement = await this.spaces.resolve(requestId, "runtime.instance.presentation", spaceId);
-    const rows = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, (tx) => tx.query<QueryResultRow>({
-      name: "runtime_instance_presentation_v4",
-      // Hibernation can omit the large model catalog from live presentation.
-      // Omission is not a withdrawal; only an explicit models field replaces
-      // the durable observation, including an empty list that clears it.
-      text: `UPDATE data.instances SET presentation_json=
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'models')
-            THEN jsonb_strip_nulls(jsonb_build_object('models',presentation_json->'models',
-              'modelsObservedAt',presentation_json->'modelsObservedAt')) ELSE '{}'::jsonb END ||
-          CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? 'parameters')
-            THEN jsonb_strip_nulls(jsonb_build_object('parameters',presentation_json->'parameters',
-              'parametersObservedAt',presentation_json->'parametersObservedAt')) ELSE '{}'::jsonb END || COALESCE($2::jsonb,'{}'::jsonb),updated_at=$3,
-          status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
-        WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
-          WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
-        RETURNING instance_id,run_id`,
-      values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300)],
-      maxRows: 1,
-    }));
+    const written = await this.spaces.transaction(requestId, "runtime.instance.presentation", placement, async (tx) => {
+      const rows = await tx.query<QueryResultRow>({
+        name: "runtime_instance_presentation_v6",
+        // Hibernation omits the runtime catalogs from live presentation.
+        // Omission is not a withdrawal; only an explicit catalog field replaces
+        // the durable observation, including an empty list that clears it.
+        text: `UPDATE data.instances SET presentation_json=${RETAINED_INSTANCE_CATALOGS.map(([key, observedAt]) =>
+            `CASE WHEN NOT (COALESCE($2::jsonb,'{}'::jsonb) ? '${key}')
+              THEN jsonb_strip_nulls(jsonb_build_object('${key}',presentation_json->'${key}'${observedAt
+                ? `,'${observedAt}',presentation_json->'${observedAt}'` : ""})) ELSE '{}'::jsonb END || `).join("")}COALESCE($2::jsonb,'{}'::jsonb) ||
+            CASE WHEN $6::bigint IS NULL THEN '{}'::jsonb
+              ELSE jsonb_build_object('presenceVersion',$6::bigint,'presenceSequence',$8::bigint) END,updated_at=$3,
+            status=CASE WHEN $4::text IS NOT NULL AND status IN (${LIVE_AGENT_STATUS_SQL}) THEN $4::text ELSE status END
+          WHERE instance_id=$1 AND EXISTS (SELECT 1 FROM data.runs r
+            WHERE r.run_id=data.instances.run_id AND r.owner_user_id=$5)
+            AND CASE WHEN $6::bigint IS NULL
+              THEN presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb(version)
+              ELSE version=$6::bigint AND run_id=$7::text
+                AND (presentation_json->'presenceVersion' IS DISTINCT FROM to_jsonb($6::bigint)
+                  OR COALESCE((presentation_json->>'presenceSequence')::bigint,0)<$8::bigint) END
+          RETURNING instance_id,run_id,channel_id`,
+        values: [instanceId, presentation === null ? null : JSON.stringify({ ...presentation, usage: localLlmUsage(presentation.usage as import("@xmatrix/protocol").LlmUsage | undefined) }), at, input.status ?? null, text(input.actorUserId, "actorUserId", 300),
+          ordered?.version ?? null, ordered?.runId ?? null, ordered?.sequence ?? null],
+        maxRows: 1,
+      });
+      // What this report made the Instance, read back by the one projection
+      // every read uses: whoever relays it shows exactly what a read would.
+      const record = rows[0] && ordered
+        ? (await loadAgentInstanceRecordsById(tx, spaceId, [String(rows[0].channel_id)], [instanceId])).records[0]
+        : undefined;
+      return { rows, record };
+    });
+    const { rows, record } = written;
     const binding = rows[0] && input.presentation?.usage ? await this.database.transaction({
       requestId, operation: "runtime.instance.quota-binding",
       placement: { spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch },
@@ -785,7 +798,7 @@ export class PostgresRuntimeRepository {
     const key = binding[0];
     return { instanceId, recorded: rows.length > 0, ...(key ? { registration: {
       ownerUserId: String(key.owner_user_id), machineId: String(key.machine_id), harness: String(key.harness),
-    } } : {}) };
+    } } : {}), ...(record ? { record } : {}) };
   }
 
   private async transitionRun(tx: DatabaseTransaction, input: Record<string, unknown>, actorUserId: string,
@@ -1167,7 +1180,14 @@ export class PostgresRuntimeRepository {
     if (sourceMessageIds.length === 0) return { launches: [], ...(paginated ? { nextCursor: null } : {}) };
     const placement = await this.channelPlacement(requestId, channelId,
       "runtime.agent-launches.channel.locate", "runtime.agent-launches.placement");
-    return this.spaces.transaction(requestId, "runtime.agent-launches.query", placement, async (tx) => {
+    // Only database reads and the current Channel capability check happen here,
+    // so a connection lost before COMMIT cannot have changed anything: one
+    // fresh session replays it (XMATRIX-HUB-C6).
+    return retryTransactionBeforeCommit(this.database, {
+      requestId, operation: "runtime.agent-launches.query",
+      placement: { spaceId: placement.spaceId, shardId: placement.shardId,
+        placementEpoch: placement.placementEpoch },
+    }, async (tx) => {
       await runtimeChannelCapability(tx, channelId,
         text(input.actorUserId, "actorUserId", 300), "runtime_history_read");
       const rows = position.launch === null ? [] : await tx.query<QueryResultRow>({ name: "runtime_agent_launches_query_v5", text: `SELECT
@@ -1406,8 +1426,11 @@ export class PostgresRuntimeRepository {
       }
       if (!transitions[currentState]?.includes(target)) {
         if (current.state === target) return { launch: serializeAgentLaunch(current) };
-        throw new RuntimeControlError("launch_transition_conflict", 409,
-          `Invalid Agent Launch transition ${String(current.state)} -> ${target}`);
+        // The sentence stays off the log. Both ends are launch states, so the
+        // token is a fixed label the next rejection can be grouped by.
+        throw Object.assign(new RuntimeControlError("launch_transition_conflict", 409,
+          `Invalid Agent Launch transition ${currentState} -> ${target}`),
+          { reason: `${currentState}_to_${target}` });
       }
       // The daemon's report time may trail the Hub clock that created the
       // Launch and its Run; evidence keeps it, row clocks never move backward.
@@ -1517,12 +1540,14 @@ export class PostgresRuntimeRepository {
           i.instance_id,i.status AS instance_status,i.channel_instance_id,
           r.run_id,r.owner_user_id,r.workspace_machine_id,
           r.workspace_canonical_cwd,r.metadata_json,r.status AS run_status,sr.display_name AS agent_name,
-          sr.harness
+          sr.harness,launch.launch_request_json,origin.spawn_payload_json->>'prompt' AS launch_prompt
         FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
         JOIN data.run_agent_registrations b ON b.run_id=r.run_id AND b.space_id=$2
         JOIN data.space_agent_registrations sr ON sr.space_id=b.space_id AND sr.owner_user_id=b.owner_user_id
           AND sr.machine_id=b.machine_id AND sr.harness=b.harness
+        LEFT JOIN data.registration_launch_intents launch ON launch.instance_id=i.instance_id
+        LEFT JOIN data.agent_launches origin ON origin.launch_id=launch.launch_id
         WHERE i.channel_id=$1 AND i.channel_instance_id=$3
           AND (lower(sr.display_name)=$4 OR sr.harness=$4)
         LIMIT 2`, values: [channelId, placement.spaceId,
@@ -1535,11 +1560,13 @@ export class PostgresRuntimeRepository {
       const runMetadata = metadata(row);
       if (runMetadata.instanceDeletion !== undefined) throw new RuntimeControlError(
         "instance_not_found", 404, "Agent Instance was deleted or is being deleted");
+      const launchMachineId = readContinuationMachineConstraint(row.launch_request_json, row.launch_prompt);
       return { target: {
         instanceId: String(row.instance_id), instanceStatus: String(row.instance_status), channelId,
         channelInstanceId: Number(row.channel_instance_id), runId: String(row.run_id),
         runStatus: String(row.run_status), agentName: String(row.agent_name), harness: String(row.harness),
         ownerUserId: String(row.owner_user_id),
+        ...(launchMachineId ? { launchMachineId } : {}),
         ...(row.workspace_machine_id && row.workspace_canonical_cwd ? { workspace: {
           machineId: String(row.workspace_machine_id),
           canonicalCwd: String(row.workspace_canonical_cwd),
@@ -1671,11 +1698,15 @@ export class PostgresRuntimeRepository {
     });
   }
 
-  /** A Run whose program refused a turn as signed out: recorded on the Run, so
-   * routing passes its registration over until its machine reports a newer
-   * sign-in, and returned as the program and machine its sign-in names.
+  /** The program and machine of a Run whose program refused a turn as signed
+   * out, for the sign-in its notice offers; whether the Run has yet to reply
+   * (`unanswered`: the work it was started for is still nobody's); and, when a
+   * message's own summon started it, that summon, to send again once signed in.
+   * Nothing is recorded: only the program knows whether its provider accepts
+   * it, and it says so each time it is given work.
    * Undefined for a Run without a registration. */
-  async recordRunSignedOut(input: { requestId: string; runId: string; actorUserId: string }): Promise<HarnessSignedOut | undefined> {
+  async signedOutRunHarness(input: { requestId: string; runId: string; actorUserId: string }): Promise<{
+    signedOut: HarnessSignedOut; unanswered: boolean; summon?: { sourceMessageId: string; sourceMention: string } } | undefined> {
     const requestId = text(input.requestId, "requestId", 200);
     const runId = text(input.runId, "runId", 300);
     const route = await this.entityDirectory.resolve(
@@ -1685,19 +1716,27 @@ export class PostgresRuntimeRepository {
     const placement = await this.spaces.resolve(requestId, "runtime.run-signed-out.placement", route.spaceId);
     const rows = await this.database.transaction({ requestId, operation: "runtime.run-signed-out",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId, placementEpoch: placement.placementEpoch } },
-    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v1", text: `WITH marked AS (
-        UPDATE data.runs SET metadata_json=metadata_json||jsonb_build_object('signedOutAt',statement_timestamp())
-        WHERE run_id=$1 AND owner_user_id=$2 RETURNING run_id)
-      SELECT b.machine_id,b.harness,
-        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name
-      FROM data.run_agent_registrations b JOIN marked ON marked.run_id=b.run_id WHERE b.owner_user_id=$2 LIMIT 1`,
+    tx => tx.query<QueryResultRow>({ name: "runtime_run_signed_out_v2", text: `SELECT b.machine_id,b.harness,
+        (SELECT name FROM data.machines m WHERE m.owner_user_id=b.owner_user_id AND m.machine_id=b.machine_id) AS machine_name,
+        intent.source_message_id,run.metadata_json->>'sourceMention' AS source_mention,
+        EXISTS (SELECT 1 FROM data.agent_launches launch
+          WHERE launch.run_id=b.run_id AND launch.first_reply_at IS NOT NULL) AS replied
+      FROM data.run_agent_registrations b JOIN data.runs run ON run.run_id=b.run_id
+      LEFT JOIN data.registration_launch_intents intent ON intent.run_id=b.run_id AND intent.state='committed'
+        AND intent.command_id LIKE '${SUMMON_LAUNCH_COMMAND}'
+      WHERE b.run_id=$1 AND b.owner_user_id=$2 LIMIT 1`,
     values: [runId, text(input.actorUserId, "actorUserId", 300)], maxRows: 1 }));
     const row = rows[0];
     if (!row) return undefined;
     const harness = String(row.harness);
     const machineName = typeof row.machine_name === "string" ? row.machine_name.trim() : "";
-    return parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
+    const signedOut = parseHarnessSignedOut({ harness, program: agentPresetById(harness)?.displayName ?? harness,
       machineId: String(row.machine_id), ...(machineName ? { machineName } : {}) });
+    if (!signedOut) return undefined;
+    const sourceMention = typeof row.source_mention === "string" ? row.source_mention : "";
+    return { signedOut, unanswered: row.replied !== true,
+      ...(row.replied !== true && typeof row.source_message_id === "string" && /^[@＠]/u.test(sourceMention)
+      ? { summon: { sourceMessageId: row.source_message_id, sourceMention } } : {}) };
   }
 
   async getRun(input: { requestId: string; runId: string; actorUserId: string; requireExecutionAccess?: boolean }) {

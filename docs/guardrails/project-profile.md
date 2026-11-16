@@ -1,5 +1,10 @@
 # Project Profile
 
+App Store Connect generic relationship writes and App Review draft attachments
+share one complete JSON:API linkage boundary. Relationship POSTs bind current
+membership as updates do; partial or ambiguous snapshots cannot authorize a
+mutation. See [official API operations](../connectors/app-store-connect-api.md).
+
 This file is a descriptive snapshot, not policy. The only canonical project rules are the ten P0/P1/P2 guardrails in `project-guardrails.md`; statements here and in the linked snapshots document the current implementation and cannot add or override a guardrail.
 
 ## Overview
@@ -30,6 +35,91 @@ App Store What's New. See [release notes](../release-updates.md#release-notes).
 
 ## Current behavior
 
+Versioned Instance records retain runtime commands, capabilities, model and
+parameter catalogs, workspace and worktree-base presentation across persistence
+and every read path. The complete typed checkpoint and shared normalizer require
+every durable field; SQL derives its selection from that exhaustive registry.
+Explicit empty catalogs remain withdrawals; legacy Agent
+cards do not supply missing modern fields. See [command completion](../command-completion.md).
+
+Agent binding refusals report one fixed comparison source and field, readable
+through Sentry without compared credentials or identity values. Strict binding
+and connection fencing remain enforced. See [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
+Agent launch candidate selection recovers one lost response per lock-free
+registration, observation and directory read on a fresh connection. Placed
+reads recheck their fence; preparation and commit retain current admission
+and unknown-commit reconciliation. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
+App Store Connect pins Apple's official OpenAPI and derives its public operation
+catalog, request validation and zero-runtime types from that source. Generic
+reads and snapshot-checked writes cover additional resources while existing
+business workflows keep their domain checks. See [API operations](../connectors/app-store-connect-api.md).
+
+App Store Connect reads review attachments and prepares/verifies App Review
+draft replies through its saved web session. App/thread ownership, exact draft
+digests and one-shot sends protect the review workflow; resubmission remains
+a separate decision. See [App Review actions](../connectors/app-store-connect-review.md).
+Rating resets require an editable version and current digest; new Sandbox testers
+read their private profile from Credentials and preserve existing accounts.
+App Review contacts and demo login details likewise come from a bundle-bound
+private reviewSetup profile, with credential-version checks and Apple readback.
+See [website management](../connectors/app-store-connect-web-management.md).
+Commerce notifications use an opt-in five-minute poll, with primary App authority
+leases, current subscription/grant checks and a durable deduplicated outbox.
+See [commerce events](../connectors/app-store-connect-commerce.md).
+
+The iOS app declares camera and microphone use for user-initiated video
+attachments. Public support lives at `/support`, linked from the guide and
+site footer; App Store metadata uses that contact page. See
+[iOS delivery](../operations/ios-app-store-cd.md#version-and-retry-behavior).
+
+Sentry event admission and installation retirement share complete binding
+iteration. Events atomically admit every current target that fits the existing
+pending-job backpressure, including targets beyond the former 50-binding read.
+See [resource counts](../operations/resource-counts.md).
+
+Sentry recovery claims reconcile an unknown COMMIT through their preassigned
+per-job lease nonces, without repeating the claim. Current grant checks use
+lock-free read recovery. See [PostgreSQL recovery](../operations/postgres-hyperdrive-origin.md).
+
+Expired Machine command leases report bounded grant-window, lateness and command-age
+durations from PostgreSQL's clock, distinguishing delayed admission from a later
+renewal gap without changing lease authority or socket replies. See
+[Runtime delivery errors](../operations/runtime-delivery-errors.md).
+
+Scheduled work is a `norn run` program on its page. A task line written as a
+schedule (`🔁`, `⏳`) runs nothing, an Agent edit that leaves one says so, and
+the Hub answers released clients' schedule lists empty and their changes as
+retired. See [live documents](../design/pages-live-document.md#61-scheduled-work-is-a-program).
+
+Runtime WebSocket upgrade failures retain bounded fetch duration, owner versus
+unassigned routing, remote flag and a fixed platform message category, readable
+through Sentry without identities or request data. Overload is not replayed by
+the router. See [Runtime delivery errors](../operations/runtime-delivery-errors.md).
+Daily harness release notices without a version registry are admitted when an
+official update recipe exists, matching the daemon's action support. See
+[harness management](../harness-management.md).
+
+Handoff accepts ordinary launch conditions after the successor address and
+inherits an explicit source machine condition by admitted machine identity.
+It refuses an unconfirmed source stop before starting a successor. Exact
+Instance assignments are context for peers; runtime bootstrap identifies the
+current Instance and Run and asks completed temporary helpers to stop. An
+Instance waiting for a person or CI remains available. See
+[handoff](../same-machine-instance-handoff.md#22-moving-to-another-machine) and
+[syntax](../guide/syntax.md#stopping-restarting-and-handing-off).
+
+While a Channel's launch choice is still starting, follow-up messages cannot
+offer or claim a second Agent choice. Their append evidence stays available
+for explicit recovery after a failed or cancelled startup. See
+[message ownership](../architecture/message-asks.md).
+
+Daemon reconnect discards queued snapshots captured for the replaced connection
+before writing to the new socket. Fresh full snapshots restore observations;
+successful spawn results retain their original causal evidence for reconciliation.
+See [daemon service model](../daemon-service-model.md#causal-run-snapshots).
+
 Agents upload local Page images and videos with `xmatrix page upload`, then
 insert the returned Markdown through ordinary Page writes. The Hub rechecks
 current Page edit access before binding media, including replays. Page text
@@ -49,7 +139,7 @@ Failures and external stop causes retain their explanations. See
 
 Saved resources do not inherit fixed cardinality quotas from query bounds.
 Space secrets, Channel pins, push registrations, memory entries, GitHub links,
-Page Automation reconciliation and Sentry/Discord installation bindings retain
+Page Automation deletion and Sentry/Discord installation bindings retain
 complete sets through bounded batches. Request sizes, byte budgets,
 authorization and transaction deadlines remain explicit. See
 [resource counts](../operations/resource-counts.md).
@@ -172,6 +262,12 @@ first-message automatic summon and author choice window. Passage
 discussions are named after the first message's text rather than its quote;
 section discussions keep the section name. See [automatic invocation](../architecture/auto-launch-completion.md#a-new-conversations-first-message).
 
+Message attachment placement follows the final displayed Markdown tree; files
+not drawn inline remain beneath the message, including code, quote slips,
+collapsed previews and plain-text fallback. Composer quote controls resolve their
+current editor position after earlier edits. See
+[conversation content](../design/pages-and-conversations.md#32-conversation).
+
 Unaddressed Human speech has positive, publication-bound evidence and an
 explicit author choice under its original message. It shares the first-message
 launch decision and durable summon coordinator. Missing tracking stays unknown;
@@ -218,10 +314,9 @@ The login page supports GitHub, Google and email. GitHub sign-in reuses the
 existing linked Human identity and GitHub App OAuth credentials, independently
 of Space connector installations. See [OAuth recovery](../operations/oauth-callback-recovery.md).
 
-Automation message occurrences link to actual persisted Runs through their exact
-canonical message and registration launches, including multiple Runs per message.
-Unused reservations and unstarted launches do not count; missing historical
-evidence stays unknown. See [Automation Run links](../operations/automation-run-links.md).
+Automations are retired: contract migration 0253 dropped `data.automations`,
+`data.automation_occurrences` and the `data.automation_occurrence_runs` view.
+Scheduled work is a Norn program on a page.
 
 Pages type committed Agent edits in as people type: the structure goes in
 first, then the words as small CRDT insertions, a few at a time. Several Agents
@@ -250,18 +345,17 @@ retain the legacy local combination. See
 [live documents](../design/pages-live-document.md).
 
 
-Channel presence uses the protocol's read-only Instance-ID map, separate from
-Human devices. One reducer owns identity checks, lifecycle merges and removal;
-messages and live reports cannot create residents. Required registrations
-supply harness avatars. Legacy wire shapes are normalized at the boundary.
-Message headers wait for an available Channel presence snapshot before
-declaring a sender's Instance offline. See
+Instance presence uses self-contained versioned records in one Web store,
+separate from Channel metadata and Human devices. Catalog reads are windows:
+absence stays unknown, explicit terminal records mean offline, and reconnect
+reconciles held IDs with authorized exact reads. Message avatars, badges and
+controls use one live selector rather than status copied into history.
+Legacy wire shapes remain negotiated compatibility projections. See
 [Agent status](../design/agent-status.md#instance-identity-in-presence).
 
 Human message sender snapshots read the current account name and avatar, as the
-Space catalog does, while Space membership still authorizes the append. This
-includes Automation occurrences, which have no client-supplied sender snapshot;
-renaming an account affects new messages and preserves historical authors.
+Space catalog does, while Space membership still authorizes the append.
+Renaming an account affects new messages and preserves historical authors.
 Session exchange creates credentials for the existing account without replacing
 its saved name or avatar with a retained token's older profile fields.
 
@@ -432,11 +526,11 @@ parameterized cost/credit analysis, public SKU attribution, bounded daily or cre
 Monitoring incident edges route by metrics-scope project through authenticated
 per-connection ingress. See [GCP connector](../connectors/gcp.md).
 
-The Web composer previews Jev's summon intent while typing, with mention bands
-and a declined-mention explanation and Start anyway option at the address. Human-confirmed readings travel with the exact message;
-publication takes completed readings without waiting for previews. Launch
-authorization remains server-owned, and unread or unavailable previews
-retain post-send checks. See [invocation status](../design/mention-invocation/README.md).
+A summon starts an Agent only when its send asks to (`launch: true`): the Web
+composer always does, an Agent with `xmatrix send --launch`. Otherwise the
+mention stays a mention whose card offers its author Start; Jev no longer reads
+intent. Launch authorization remains server-owned. See
+[invocation status](../design/mention-invocation/README.md).
 
 Windows Agent children enforce UTF-8 transport settings and use managed PowerShell
 entrypoints that initialize console and pipeline encoding for each command.
@@ -537,5 +631,7 @@ and PostgreSQL conflict reports retain the original exception, correlated
 bounded query evidence and, for deadlocks, a content-free wait graph readable
 through Sentry. Slow execution-owner, Agent Channel-lock and combined message
 append preflight queries share one bounded live blocker sampler per isolate.
+Content intent/reference holders expose only fixed statement labels and bounded
+query/state ages to distinguish their last database step from transaction age.
 See [Agent turn failures](../operations/agent-turn-failures.md)
 and [Runtime delivery errors](../operations/runtime-delivery-errors.md).

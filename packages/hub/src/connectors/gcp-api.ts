@@ -7,6 +7,7 @@ import { GCP_SERVICE_ACTIONS } from "./gcp-services";
 import { GCP_COST_REPORT_ACTIONS } from "./gcp-cost-report";
 import { GCP_ANALYSIS_ACTIONS } from "./gcp-analysis";
 import { GCP_CALLER_ACTIONS } from "./gcp-caller";
+import { GCP_API_KEY_ACTIONS } from "./gcp-api-keys";
 
 /* Google IAM remains authoritative. Fixed endpoints and typed resource names
  * prevent targets from becoming arbitrary URLs; no container environment,
@@ -72,6 +73,7 @@ export const GCP_ACTIONS: Record<string, ConnectorAction> = {
   ...GCP_COST_REPORT_ACTIONS,
   ...GCP_ANALYSIS_ACTIONS,
   ...GCP_CALLER_ACTIONS,
+  ...GCP_API_KEY_ACTIONS,
   list_projects: {
     effect: "read", requires: ["oauthToken"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @gcp:list_projects:*",

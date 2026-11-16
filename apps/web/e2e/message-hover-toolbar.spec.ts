@@ -62,6 +62,8 @@ test("the bar rides the row's top edge on paper and leaves its first line readab
     row.getByText("Progress: the menu is gone").boundingBox(),
   ]);
   expect(cardBox!.y).toBeLessThan(rowBox!.y);
+  // It stands on the row's top edge: its bottom meets the hover tone's top.
+  expect(Math.abs(cardBox!.y + cardBox!.height - rowBox!.y)).toBeLessThanOrEqual(0.5);
   // At most the leading above the first line's glyphs, never the glyphs.
   expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(textBox!.y + 5);
 
@@ -107,7 +109,7 @@ test("a common reaction is one click, and R replies to the message under the poi
 
   await row.hover();
   await page.keyboard.press("r");
-  await expect(page.getByText("Replying to Daniel")).toBeVisible();
+  await expect(page.getByTestId("composer-reply")).toContainText("Daniel");
 });
 
 test("one's own message keeps Edit and Recall behind More actions", async ({ page }) => {

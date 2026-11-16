@@ -68,6 +68,12 @@ export interface AppConnectorProviderManifest {
     clientAuth?: "body" | "basic";
     /** Confidential providers that require a server-held S256 proof. */
     pkce?: "S256";
+    /**
+     * The provider's limit on the length of the `state` parameter. X answers an
+     * authorize request with a longer state by `invalid_request` before consent,
+     * so the Hub refuses to start a connect that the provider would not show.
+     */
+    stateLimit?: number;
     tokenField: string;
     extraAuthorizeParams?: Record<string, string>;
     /**
@@ -94,6 +100,19 @@ export interface AppConnectorProviderManifest {
      * value stays possible everywhere else.
      */
     signIn?: "appstoreconnect";
+    /**
+     * Not a secret (an account or vendor number): a Space admin reads it back,
+     * it is typed in the open, and an Agent may suggest a value on a settings
+     * card for a person to confirm. Still stored with the other credentials.
+     */
+    plain?: boolean;
+    /**
+     * A read action (taking `*`) that proves this field works, for a field the
+     * connection check does not exercise, such as a web session beside an API
+     * key. Its state then follows what calls needing it last did, and a
+     * settings card that saves it runs this read.
+     */
+    verify?: string;
   }>;
   /**
    * Inbound events (§3.3). A Channel subscribes with

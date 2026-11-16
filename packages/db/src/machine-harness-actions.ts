@@ -9,7 +9,8 @@ const ERROR_MAX = 256;
  * Fold a completed action's re-probe into the Machine's inventory. A refresh
  * replaces the whole observation unless a fresher one is stored; a single
  * re-probed preset replaces only its own item in an existing observation and
- * records when it was observed, so a sign-in answers refusals made before it.
+ * records when it was observed, so a setting asked for after an earlier
+ * sign-in is met only by a later one (settings-domain-harness).
  */
 export async function recordHarnessActionInventory(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; hostId: string; result: HarnessActionResult; at: string;
@@ -158,6 +159,37 @@ const UNVERSIONED_REPEAT_INTERVAL = "24 hours";
 const RELEASE_TARGET_ROWS = 5_000;
 
 /**
+ * The release-target statement. Its repeat window compares `created_at` with
+ * `now()`, which is stable within the statement, so the window is an index
+ * condition on machine_daemon_commands_harness_release_idx; the volatile
+ * `clock_timestamp()` could only filter, and each probe then read every
+ * release notice the Machine ever stored for the preset (XMATRIX-HUB-BD).
+ * A single_read runs in its own implicit transaction, so `now()` is the read's
+ * own start time.
+ */
+export const HARNESS_RELEASE_TARGETS_SQL = `SELECT
+        release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id
+        FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS release(preset_id,version,position)
+        CROSS JOIN LATERAL (SELECT
+          daemon.owner_user_id,daemon.owner_email,daemon.machine_id,daemon.hostname,daemon.daemon_id
+          FROM data.machine_daemons daemon
+          WHERE daemon.status='online' AND daemon.capabilities_json ? $1
+            AND EXISTS (SELECT 1 FROM jsonb_array_elements(
+                CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
+                  THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
+              WHERE item->>'id'=release.preset_id AND item->'installed'='true'::jsonb
+                AND item->>'autoUpdate'='enabled'
+                AND (release.version='' OR item->>'version' IS DISTINCT FROM release.version))
+            AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
+              WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
+                AND command.command_type='harness_action' AND command.payload_json->>'presetId'=release.preset_id
+                AND command.payload_json->>'action'='release'
+                AND command.created_at>now()-
+                  (CASE WHEN release.version='' THEN $6 ELSE $4 END)::interval)
+          ORDER BY daemon.daemon_id LIMIT $5) target
+        ORDER BY release.position,target.daemon_id`;
+
+/**
  * For each preset's latest version: online, capable daemons whose reported
  * inventory has the preset installed with its automatic-update switch on and
  * another version installed, and that were not told about this preset
@@ -180,27 +212,7 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
     Math.floor(RELEASE_TARGET_ROWS / input.releases.length)));
   return database.transaction({ requestId: input.requestId, operation: "machine-control.harness-release-targets", statement: "single_read" },
     async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v4", text: `SELECT
-        release.preset_id,target.owner_user_id,target.owner_email,target.machine_id,target.hostname,target.daemon_id
-        FROM unnest($2::text[],$3::text[]) WITH ORDINALITY AS release(preset_id,version,position)
-        CROSS JOIN LATERAL (SELECT
-          daemon.owner_user_id,daemon.owner_email,daemon.machine_id,daemon.hostname,daemon.daemon_id
-          FROM data.machine_daemons daemon
-          WHERE daemon.status='online' AND daemon.capabilities_json ? $1
-            AND EXISTS (SELECT 1 FROM jsonb_array_elements(
-                CASE WHEN jsonb_typeof(daemon.metadata_json->'harnesses'->'items')='array'
-                  THEN daemon.metadata_json->'harnesses'->'items' ELSE '[]'::jsonb END) item
-              WHERE item->>'id'=release.preset_id AND item->'installed'='true'::jsonb
-                AND item->>'autoUpdate'='enabled'
-                AND (release.version='' OR item->>'version' IS DISTINCT FROM release.version))
-            AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands command
-              WHERE command.owner_user_id=daemon.owner_user_id AND command.machine_id=daemon.machine_id
-                AND command.command_type='harness_action' AND command.payload_json->>'presetId'=release.preset_id
-                AND command.payload_json->>'action'='release'
-                AND command.created_at>clock_timestamp()-
-                  (CASE WHEN release.version='' THEN $6 ELSE $4 END)::interval)
-          ORDER BY daemon.daemon_id LIMIT $5) target
-        ORDER BY release.position,target.daemon_id`,
+      const rows = await tx.query<QueryResultRow>({ name: "machine_harness_release_targets_v5", text: HARNESS_RELEASE_TARGETS_SQL,
       values: [MACHINE_HARNESS_RELEASE_CAPABILITY, input.releases.map(release => release.presetId),
         input.releases.map(release => release.version ?? ""), RELEASE_REPEAT_INTERVAL, limit,
         UNVERSIONED_REPEAT_INTERVAL],

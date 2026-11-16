@@ -68,3 +68,22 @@ test("daemon credential failures retain a finite reason through socket reporting
   assert.equal(exceptionEvents(envelopes).length, reasons.size, "valid credentials add no failure reports");
   assert.deepEqual(sentryEventMetadata({ context: { machine_credential_reason: "PRIVATE_SENTINEL" } }), []);
 });
+
+test("an expired daemon credential reports how long ago it expired (XMATRIX-HUB-A9)", async (t) => {
+  const envelopes = captureErrorReports(t);
+  const sockets = new RuntimeSocketState("test", (_id, message, failure) => ({ message, failure }), () => {});
+  const expiredAt = Math.floor(Date.now() / 1000) - 5400;
+  await sockets.answerOperation({ send() {} }, "refresh", "Credential refresh failed",
+    async () => verifyMachineDaemonCredential(await credential({ expiration: expiredAt }), env));
+  await sendErrorReports();
+  const [event] = exceptionEvents(envelopes);
+  const seconds = Number(event.extra.machine_credential_expired_for_s);
+  assert.ok(seconds >= 5400 && seconds < 5460, `expired ${seconds} s ago`);
+  const metadata = sentryEventMetadata({ context: event.extra });
+  assert.ok(metadata.includes(`Machine credential expired for: ${seconds} s`));
+  for (const forged of ["PRIVATE_SENTINEL", "-1", "99999999"]) {
+    assert.ok(!sentryEventMetadata({ context: { machine_credential_reason: "expired",
+      machine_credential_expired_for_s: forged } }).some(line => line.includes("expired for")));
+  }
+  assert.doesNotMatch(JSON.stringify(event), /PRIVATE_SENTINEL|eyJ/u);
+});

@@ -9,7 +9,10 @@
 // by side unless one ships a component the other ships or depends on
 // (release-dependencies.mjs); a beta train leaves open the intents that would
 // wait long for an active release, so they do not hold the train in front of
-// changes that could ship now.
+// changes that could ship now. A beta train that ships the Hub ships it alone
+// (shipHubAlone): the rest of what it selected stays open for the train it
+// wakes, so the Hub's place in line is held for a Hub deploy, not for the
+// slowest client build that rode with it.
 //
 // Releases come in two channels, and the version alone says which one
 // (release-version-order.mjs):
@@ -101,12 +104,23 @@ export function normalizeScope(requested, channel = "beta") {
   return COMPONENTS.filter((item) => items.includes(item));
 }
 
+// Rust, Kotlin and Swift reach only a dev channel or TestFlight on a beta.
+// Their analyses sit with the client suites and run on the stable train.
+const STABLE_ONLY_CODEQL_LANGUAGES = new Set(["rust", "java-kotlin", "swift"]);
+
 /**
- * The CodeQL languages a train scans before it ships `scope`: those its
- * components are written in, and the workflows that release them.
+ * The CodeQL languages a train scans before it ships `scope`. Hub, Web and
+ * Desktop JavaScript and TypeScript, plus the workflows that release the
+ * train, are scanned on every channel. Rust, Kotlin and Swift are scanned
+ * only when `channel` is stable.
  */
-export function codeqlLanguages(scope) {
-  return [...new Set(["actions", ...scope.map((component) => CODEQL_LANGUAGE[component])])];
+export function codeqlLanguages(scope, channel) {
+  if (channel !== "beta" && channel !== "stable") {
+    throw new Error("CodeQL channel must be beta or stable");
+  }
+  const languages = scope.map((component) => CODEQL_LANGUAGE[component])
+    .filter((language) => channel === "stable" || !STABLE_ONLY_CODEQL_LANGUAGES.has(language));
+  return [...new Set(["actions", ...languages])];
 }
 
 // Test code never ships, so no analysis reads it.
@@ -128,14 +142,14 @@ function codeqlConfig({ paths = [], ignore = [] }) {
 }
 
 /**
- * The CodeQL analyses a train runs before it ships `scope`: its languages
- * (codeqlLanguages), each whole or in its parts, with the alert category each
- * uploads to and its configuration. The configuration comes from the train's
- * own revision, not the source it scans, so a stable of an older beta reads
- * the same paths.
+ * The CodeQL analyses a train runs before it ships `scope` on `channel`:
+ * its languages (codeqlLanguages), each whole or in its parts, with the alert
+ * category each uploads to and its configuration. The configuration comes from
+ * the train's own revision, not the source it scans, so a stable of an older
+ * beta reads the same paths and still selects client languages.
  */
-export function codeqlAnalyses(scope) {
-  return codeqlLanguages(scope).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
+export function codeqlAnalyses(scope, channel) {
+  return codeqlLanguages(scope, channel).flatMap((language) => (CODEQL_PARTS[language] ?? [{ part: "all" }]).map((part) => ({
     language,
     part: part.part,
     category: part.part === "all" ? `/language:${language}` : `/language:${language}/${part.part}`,
@@ -212,7 +226,9 @@ function superseded(stables, intent) {
 export function planTrain({ refs, trainSha, isAncestor, tagExists, productionState, stables = [] }) {
   const intents = refs.map(({ ref, sha }) => parseIntentRef(ref, sha)).filter(Boolean);
   const inflight = intents.filter((intent) => intent.state === "inflight");
-  const inflightIds = new Set(inflight.map((intent) => intent.id));
+  // One request can be in flight for its Hub while the rest of it is still open.
+  const part = (intent) => `${intent.id}/${intent.scope.join("+")}`;
+  const inflightParts = new Set(inflight.map(part));
   const updates = [];
   const open = [];
   const pending = [];
@@ -242,7 +258,7 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
   }
   for (const intent of intents.filter((candidate) => candidate.state === "open")) {
     // A move to in flight that stopped half way: the in-flight copy is the one.
-    if (inflightIds.has(intent.id)) updates.push({ delete: intent.ref });
+    if (inflightParts.has(part(intent))) updates.push({ delete: intent.ref });
     else open.push(intent);
   }
 
@@ -253,6 +269,25 @@ export function planTrain({ refs, trainSha, isAncestor, tagExists, productionSta
 }
 
 /** Pure: `version` raised by a patch, minor or major bump. */
+/**
+ * Pure: a beta train that ships the Hub ships it alone. A release holds the
+ * Hub's place in line until its slowest component is published, and the Hub
+ * deploys in minutes while a client builds for half an hour, so a Hub fix
+ * merged meanwhile waited for builds it has nothing to do with. Everything
+ * else depends on the Hub and ships from the train this one wakes: an intent
+ * that names more than the Hub is shipped for its Hub, and its `rest` stays
+ * open under the same id.
+ */
+export function shipHubAlone(eligible) {
+  const selected = new Set(eligible.flatMap((intent) => intent.scope));
+  if (!selected.has("hub") || selected.size === 1) return { eligible, waiting: false };
+  return {
+    eligible: eligible.filter((intent) => intent.scope.includes("hub")).map((intent) => intent.scope.length === 1 ? intent
+      : { ...intent, scope: ["hub"], rest: intent.scope.filter((component) => component !== "hub") }),
+    waiting: true,
+  };
+}
+
 export function bumpVersion(version, bump) {
   const [major, minor, patch] = parseSemver(version).core;
   if (bump === "major") return `${major + 1n}.0.0`;
@@ -496,6 +531,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   pushUpdates(root, intents.flatMap((intent) => [
     { create: inflightRef(tag, intent.id, intent.scope, intent.stable), sha: intent.sha },
     { delete: intent.ref },
+    ...(intent.rest ? [{ create: intentRef(intent.id, intent.rest), sha: intent.sha }] : []),
   ]));
   console.log(`Train ${tag} ships ${scope.join(",")} (${channel}) for intents ${intents.map((intent) => intent.id).join(", ")}.`);
   output("scope", scope.join(","));
@@ -503,7 +539,7 @@ async function claimAndShip(root, { tag, version, channel, sourceSha, runId, int
   output("tag", tag);
   output("channel", channel);
   output("source_sha", sourceSha);
-  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope)));
+  output("codeql_analyses", JSON.stringify(codeqlAnalyses(scope, channel)));
   output("intents", intents.map((intent) => intent.id).join(","));
 }
 
@@ -577,6 +613,12 @@ async function plan(root) {
     }
     ({ eligible, scope } = ready);
   }
+  const hubFirst = shipHubAlone(eligible);
+  if (hubFirst.waiting) {
+    console.log(`The Hub ships alone; ${scope.filter((component) => component !== "hub").join(",")} ships from the next train.`);
+    eligible = hubFirst.eligible;
+    scope = ["hub"];
+  }
   if (!eligible.length) {
     console.log("No open release intent this revision contains can ship now; nothing to release.");
     output("scope", "");
@@ -588,6 +630,8 @@ async function plan(root) {
     tag: `xmatrix-v${version}`, version, channel: "beta", sourceSha: trainSha, runId,
     intents: eligible, scope, token,
   });
+  // The rest waits only for this Hub release, which the next train sees running.
+  if (hubFirst.waiting) output("betas_waiting", "true");
 }
 
 /**

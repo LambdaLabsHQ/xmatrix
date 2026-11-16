@@ -1,10 +1,13 @@
-import { SYSTEM_ANNOTATION_AUTHOR, type ObservabilityEvent } from "@xmatrix/protocol";
-import { postgresMessageLiveRecipientUserIds, withPostgresMessageRequestScope } from "./postgres-message-authority";
+import { SYSTEM_ANNOTATION_AUTHOR, utf8ByteLength, type ObservabilityEvent } from "@xmatrix/protocol";
+import { postgresMessageLiveAgentPresence, postgresMessageLiveRecipientUserIds,
+  withPostgresMessageRequestScope } from "./postgres-message-authority";
 import {
   deliverToAudience,
+  RUNTIME_CHANNEL_AGENT_PRESENCE_URL,
   RUNTIME_CHANNEL_OBSERVABLE_EVENT_URL,
   runtimeJsonRequest,
 } from "./runtime-transport/runtime-principal-delivery";
+import { channelAgentPresenceDeliveryBody, channelInstanceRecordBatches } from "./runtime-transport/channel-agent-presence-delivery";
 import type { Env } from "./types";
 
 /* The Hub's judgments about a Channel's messages, pushed to its live people.
@@ -39,15 +42,59 @@ export async function publishChannelInvocationsChanged(env: Env, channelId: stri
 }
 
 /**
- * Tell a Channel's people that one of its resting Agent Instances changed
- * outside a live socket: a message woke it, or its machine is offline so the
- * wake waits for it to reconnect. Clients read the Channel's presence again.
- * Best effort, like the push above.
+ * Tell a Channel's people how its Agents stand after some of its Instances
+ * (`instanceIds`) changed outside a live socket: they went to rest, a message
+ * woke them, their wake waits for an offline machine, or they were stopped.
+ * Each changed Instance is read exactly, so one that ended arrives as its
+ * terminal record, never as an absence; the Channel's window comes with it.
+ * Records go first; old clients get the Channel's Agents as their lists show
+ * them (`presenceCoverage: "agents"`). A push that fails is read and sent
+ * once more, so the last word on an Instance is the current one; past that,
+ * the read a reconnect makes repairs it.
  */
-export async function publishChannelPresenceChanged(env: Env, channelId: string): Promise<void> {
-  await publishChannelMessageJudgment(env, channelId, "presence_updated", {})
-    .catch((error: unknown) => console.warn("Channel presence push failed", {
+export async function publishChannelPresenceChanged(env: Env, channelId: string,
+  instanceIds: readonly string[] = []): Promise<void> {
+  const publish = async () => {
+    const { recipientUserIds, memberPresence, instanceRecords } = await withPostgresMessageRequestScope(
+      env, (scope) => postgresMessageLiveAgentPresence(env, channelId, scope, instanceIds));
+    // The longest actual recipient envelope determines the shared batches.
+    const recipient = (userId: string) => ({ userId, digest: false, card: false, channel: false, immediate: [] });
+    const longest = recipientUserIds.reduce((held, userId) =>
+      utf8ByteLength(JSON.stringify(userId)) > utf8ByteLength(JSON.stringify(held)) ? userId : held, "");
+    const batches = channelInstanceRecordBatches(instanceRecords,
+      { channelId, reason: "update", recipients: [recipient(longest)] });
+    for (const records of batches) {
+      await deliverToAudience({
+        env, label: "Instance records", audience: { humans: recipientUserIds },
+        request: share => {
+          const body = channelAgentPresenceDeliveryBody({ channelId, reason: "update", records,
+            recipients: [recipient(share.owner)] });
+          if (!body) throw new RangeError("Instance records exceed delivery budget");
+          return runtimeJsonRequest(RUNTIME_CHANNEL_AGENT_PRESENCE_URL, body);
+        },
+      });
+    }
+    await publishToChannelPeople(env, channelId, recipientUserIds, "presence_updated",
+      { memberPresence, presenceCoverage: "agents" });
+  };
+  try {
+    await publish();
+  } catch (first) {
+    console.warn("Channel presence push failed; reading again", {
+      channelId, error: first instanceof Error ? first.message : String(first) });
+    await new Promise((resolve) => setTimeout(resolve, CHANNEL_PRESENCE_RETRY_MS));
+    await publish().catch((error: unknown) => console.warn("Channel presence push failed", {
       channelId, error: error instanceof Error ? error.message : String(error) }));
+  }
+}
+
+/** How long a failed presence push waits before it reads and sends again. */
+const CHANNEL_PRESENCE_RETRY_MS = 1_000;
+
+/** The Instance a Run belongs to: stored Run ids are `<instanceId>#<n>` (0084). */
+export function runInstanceId(runId: string): string | undefined {
+  const at = runId.lastIndexOf("#");
+  return at > 0 ? runId.slice(0, at) : undefined;
 }
 
 /** A Hub judgment about one message, to every live member of its Channel. */
@@ -61,6 +108,16 @@ async function publishChannelMessageJudgment(
     env,
     (scope) => postgresMessageLiveRecipientUserIds(env, channelId, scope),
   );
+  await publishToChannelPeople(env, channelId, recipientUserIds, type, metadata);
+}
+
+async function publishToChannelPeople(
+  env: Env,
+  channelId: string,
+  recipientUserIds: readonly string[],
+  type: ObservabilityEvent["type"],
+  metadata: Record<string, unknown>,
+): Promise<void> {
   const event: ObservabilityEvent = {
     id: crypto.randomUUID(),
     type,

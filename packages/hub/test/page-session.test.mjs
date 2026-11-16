@@ -671,13 +671,21 @@ test("random Agents' edits, people's typing and commits always end on one page e
   }
 });
 
-test("an Agent edit answers which sections it removed and which schedule lines cannot run", async () => {
+test("an Agent edit answers which sections it removed, that its schedule lines run nothing, and which programs cannot run", async () => {
   const h = harness();
   const ann = await annConnected(h);
   const result = await h.session.submitEdit(agent, { baseRevision: 1,
-    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 3 months\n", conversationIds: [] });
+    body: "# Project\n\n## Status\n\nIn progress\n\n- [ ] Sweep 🔁 every 12 hours\n- [-] Remind me ⏳ 2030-01-01 10:00 +08:00\n" +
+      "- [x] Swept 🔁 every day\n- [ ] Write `🔁 every day` in the guide\n\n" +
+      "```norn run sweep\nopen Std\nroutine(~every=1d, \"Sweep\")\n```\n\n" +
+      "```norn run fine\nafter(1h)->wait\n```\n", conversationIds: [] });
   assert.deepEqual(result.removedSections, ["Notes"]);
-  assert.deepEqual(result.scheduleProblems.map((line) => line.source), ["- [ ] Sweep 🔁 every 3 months"]);
+  const retired = "Schedule lines no longer run. Write this as a program: a code block tagged `norn run <name>` (https://xmatrix.sh/docs/programs)";
+  assert.deepEqual(result.scheduleProblems.slice(0, 2), [
+    { source: "- [ ] Sweep 🔁 every 12 hours", problem: retired },
+    { source: "- [-] Remind me ⏳ 2030-01-01 10:00 +08:00", problem: retired }]);
+  assert.deepEqual(result.scheduleProblems.map((line) => line.source).slice(2), ["```norn run sweep"]);
+  assert.match(result.scheduleProblems[2].problem, /from/u);
   assert.doesNotMatch(ann.text.toString(), /## Notes/u);
 });
 
@@ -1094,9 +1102,6 @@ test("pages written by hand and Agent edits in any markdown style merge as the s
 
 const summarySessionModule = await compileCommonJsSourceModule(new URL("../src/page-session-do.ts", import.meta.url));
 const summarySessionRequire = createRequire(new URL("../src/page-session-do.ts", import.meta.url));
-// Syncing schedule lines reaches the Worker-only App connections; these sessions write none.
-const noScheduleSync = { async syncPageSchedules() { return { problems: [] }; } };
-
 function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
   const data = new Map(stored ? [["summary", stored]] : []);
   const issued = [];
@@ -1107,8 +1112,7 @@ function summaryGateFixture({ sockets, stored, beforeStart } = {}) {
       await beforeStart?.();
       return { started: true, requestId, revision: 3 };
     },
-  } : name === "./page-schedule-sync" ? noScheduleSync
-    : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
+  } : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
   const socket = (kind) => ({ deserializeAttachment: () => ({ principal: { kind, id: kind, label: kind } }) });
   const connected = (sockets ?? []).map(socket);
   const object = Object.create(SummarySession.prototype);
@@ -1924,7 +1928,6 @@ function coWritingFixture({ sockets = [], rows = [] } = {}) {
       async coWritersToWake() { return rows; }
       async reopenCoWriting(input) { reopened.push(input); return { reopened: true }; } } }
     : name === "./postgres-authority-fleet" ? { createPostgresAuthorityDatabase: () => ({}) }
-    : name === "./page-schedule-sync" ? noScheduleSync
     : name === "cloudflare:workers" ? { DurableObject } : summarySessionRequire(name));
   const connected = sockets.map((attachment) => ({ deserializeAttachment: () => ({ spaceId: "space", pageId: "page",
     connectionId: attachment.principal.id, ...attachment }) }));

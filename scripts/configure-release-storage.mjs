@@ -39,7 +39,8 @@ export const RELEASE_STORAGE = {
       ],
     },
     lock: {
-      rules: [retentionLockRule("retain-release-assets-90d", "releases/", 90)],
+      // A week: the betas R2 keeps (scripts/prune-r2-release-assets.mjs).
+      rules: [retentionLockRule("retain-release-assets-7d", "releases/", 7)],
     },
   },
   "xmatrix-release-receipts": {

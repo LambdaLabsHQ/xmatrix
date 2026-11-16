@@ -1,6 +1,6 @@
 import { hmacBytes } from "@xmatrix/protocol";
 import { base64UrlEncodeBytes } from "../relay-v2-primitives";
-import { verifyGitHubAppState } from "../index-shared";
+import { verifyOAuthStateClaims } from "./oauth-state";
 import { ProviderRequestError } from "./http";
 import type { OAuthClient } from "./oauth";
 
@@ -26,7 +26,7 @@ export async function pkceChallenge(client: OAuthClient, claims: Record<string, 
 /** Reverify the signed state at the token boundary before revealing the proof to the provider. */
 export async function oauthGrantState(client: OAuthClient, state: string | undefined, redirectUri: string) {
   const claims = state && state.length <= 4_096
-    ? await verifyGitHubAppState(state, client.clientSecret).catch(() => undefined) : undefined;
+    ? await verifyOAuthStateClaims(state, client.clientSecret) : undefined;
   if (!claims || !validPkceClaims(client, claims) || claims.redirectUri !== redirectUri) {
     throw new ProviderRequestError(400, "Invalid or expired OAuth proof; restart Connect");
   }

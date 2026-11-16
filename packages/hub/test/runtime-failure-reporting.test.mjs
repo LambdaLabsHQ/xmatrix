@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { sendErrorReports, startErrorReporting } from "@xmatrix/protocol/error-reporting";
 import { RuntimeSocketState } from "../src/runtime-transport/ordered-socket-dispatch.ts";
-import { createAuthorityDatabase } from "@xmatrix/db";
+import { createAuthorityDatabase, retryBeforeCommit } from "@xmatrix/db";
 import { captureErrorReports, exceptionEvents } from "./support/error-reports.mjs";
 import { sentryEventMetadata } from "../src/connectors/actions/sentry-event-metadata.ts";
 
@@ -116,4 +116,87 @@ test("unclassified runtime database failures retain phase and mapped origin once
   assert.equal(exceptionEvents(envelopes).length, 5, "different provider reasons are not deduplicated");
   assert.deepEqual(sentryEventMetadata({ context: { runtime_database_reason: "PRIVATE_SENTINEL" } }), []);
   assert.doesNotMatch(JSON.stringify(exceptionEvents(envelopes)), /PRIVATE_SENTINEL/u);
+});
+
+// XMATRIX-HUB-7J/8Y: a retryable outage on a socket logged two console-only
+// errors (authority rejection, failure stage) and dropped the database evidence.
+test("a retryable database outage on a socket is reported once, with its evidence (XMATRIX-HUB-7J/8Y)", async (t) => {
+  const envelopes = captureErrorReports(t);
+  const errors = [];
+  t.mock.method(console, "warn", () => {});
+  t.mock.method(console, "error", (...args) => { errors.push(args[0]); });
+  // A Hyperdrive stall: the query is sent and its answer never arrives.
+  const stalled = { connect: async () => {}, end: async () => {}, async query(input) {
+    if (typeof input === "object" && /PRIVATE_SENTINEL_TABLE/u.test(input.text)) throw new Error("Query read timeout");
+    return { rows: [{ backend_pid: 1, configured: "" }] };
+  } };
+  const database = createAuthorityDatabase({ shardId: "shard-0", clientFactory: () => stalled,
+    connectionString: "postgres://PRIVATE_SENTINEL" });
+  const connect = () => database.transaction({ requestId: "PRIVATE_SENTINEL", operation: "agent.connect" }, tx =>
+    tx.query({ name: "agent_connect_v1", text: "SELECT 1 FROM PRIVATE_SENTINEL_TABLE", maxRows: 1 }));
+  const replies = [];
+  const agentSocket = { send(raw) { replies.push(JSON.parse(raw)); } };
+  await new RuntimeSocketState("agent", (_id, message, failure) => ({ message, failure }), () => {})
+    .answerOperation(agentSocket, "connect", "Connect failed", connect, () => "relay.authenticate");
+  await sendErrorReports();
+  assert.equal(replies[0].failure.code, "postgres_runtime_unavailable");
+  assert.equal(replies[0].failure.retryable, true, "the client redials");
+  const events = exceptionEvents(envelopes);
+  assert.equal(events.length, 1, "one report, not a console line per layer");
+  assert.equal(events[0].tags.operation, "runtime.database");
+  assert.equal(events[0].extra.diagnosticId, replies[0].failure.diagnosticId);
+  assert.equal(JSON.parse(events[0].extra.database_failure_attempts)[0].queryName, "agent_connect_v1");
+  assert.deepEqual(errors, [], "the authority rejection and failure stage only warn");
+  assert.doesNotMatch(JSON.stringify([events, replies]), /PRIVATE_SENTINEL/u);
+});
+
+// HUB-BQ: the common code erased whether each fresh attempt was terminated
+// by pg or answered with Hyperdrive's explicit egress-severed message.
+test("connection termination reports retain each attempt's fixed driver reason (HUB-BQ)", async (t) => {
+  t.mock.method(console, "warn", () => {});
+  const messages = ["Connection terminated", "Connection terminated unexpectedly",
+    "Egress connection severed outside of Hyperdrive", "Connection terminated PRIVATE_SENTINEL"];
+  const reasons = ["pg_connection_terminated", "pg_connection_terminated_unexpectedly", "hyperdrive_egress_severed", undefined];
+  for (let index = 0; index < messages.length; index++) {
+    const envelopes = captureErrorReports(t);
+    let opened = 0;
+    let closed = 0;
+    const database = createAuthorityDatabase({ connectionString: "postgres://PRIVATE_SENTINEL", shardId: `termination-${index}`,
+      clientFactory: () => {
+        const attempt = opened++;
+        return { connect: async () => {}, end: async () => { closed++; }, async query() {
+          const failure = Object.assign(new Error(messages[(index + attempt) % messages.length], {
+            cause: new Error("PRIVATE_SENTINEL cause"),
+          }), { code: reasons[(index + attempt) % reasons.length] ? (index % 2 ? undefined : "58000") : "CONNECTION_TERMINATED",
+            detail: "PRIVATE_SENTINEL detail" });
+          // Distinct uploaded call sites avoid Sentry's adjacent-event dedupe.
+          failure.stack = `Error: PRIVATE_SENTINEL\n    at openTransaction (index.js:${100 + index}:7)`;
+          throw failure;
+        } };
+      } });
+    const replies = [];
+    await new RuntimeSocketState("test", (_id, message, failure) => ({ message, failure }), () => {})
+      .answerOperation({ send: raw => replies.push(JSON.parse(raw)) }, "report", "Report failed",
+        () => retryBeforeCommit(() => database.transaction({ requestId: "PRIVATE_SENTINEL", operation: "machine-control.report" },
+          async () => { assert.fail("no command may run after a failed opening"); })));
+    await sendErrorReports();
+    assert.equal(opened, 2, "one fresh-session replay only");
+    assert.equal(closed, 2, "both failed sessions close");
+    assert.equal(replies[0].failure.code, "postgres_runtime_unavailable");
+    assert.equal(replies[0].failure.retryable, true, "a recorded connection loss is an outage, not a permanent refusal");
+    const events = exceptionEvents(envelopes);
+    assert.equal(events.length, 1, "each exhausted command produces one event");
+    const event = events.at(-1);
+    const attempts = JSON.parse(event.extra.database_failure_attempts);
+    assert.deepEqual(attempts.map(({ code, phase, driverReason }) => ({ code, phase, driverReason })),
+      [0, 1].map(offset => ({ code: "CONNECTION_TERMINATED", phase: "begin",
+        driverReason: reasons[(index + offset) % reasons.length] })));
+    const metadata = sentryEventMetadata({ context: event.extra });
+    for (const offset of [0, 1]) {
+      const reason = reasons[(index + offset) % reasons.length];
+      if (reason) assert.ok(metadata.includes(`Database driver reason ${offset + 1}: ${reason}`));
+      else assert.ok(!metadata.some(line => line.startsWith(`Database driver reason ${offset + 1}:`)));
+    }
+    assert.doesNotMatch(JSON.stringify([events, replies, metadata]), /PRIVATE_SENTINEL|postgres:\/\//u);
+  }
 });
