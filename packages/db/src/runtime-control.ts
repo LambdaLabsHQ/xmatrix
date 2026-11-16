@@ -680,7 +680,7 @@ export class PostgresRuntimeRepository {
       await commitRuntime(tx, spaceId, value, at);
       await storeReplay(tx, spaceId, commandId, kind, requestDigest, value, at);
       return value;
-    }));
+    }), { lockTimeout: true });
     const runId = typeof value.runId === "string" ? value.runId
       : kind === "run_transition" ? text(input.runId, "runId", 300) : null;
     const instanceId = typeof value.instanceId === "string" ? value.instanceId
