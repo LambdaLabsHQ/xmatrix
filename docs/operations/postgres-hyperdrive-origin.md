@@ -8,21 +8,24 @@ AWS region as the Worker placement hint. It is a deliberate single-node cluster
 
 ## Connection budget
 
-The origin allows 25 connections, 3 of them reserved for superusers. The
-provider sets that number, not us: it was 50 until PlanetScale's forced
-PostgreSQL 17.12 maintenance restart on 2026-11-14 and 25 after it, which left
-the pools pinned for 50 holding every slot. Raising it again is a cluster
-parameter in the PlanetScale console and restarts Postgres. Both shards share
-the origin, and the provider's own sessions (`pscale_admin`,
+The origin allows 50 connections, 3 of them reserved for superusers. That is
+the cluster parameter `max_connections` in the PlanetScale console (Min 25,
+Max 200 on the PS-20 size); changing it interrupts connections for under a
+minute. A provider maintenance restart can reset it: the forced PostgreSQL
+17.12 restart on 2026-11-14 took it from 50 to 25, which left the pools
+pinned for 50 holding every slot, and it was set back on 2026-11-16. Both
+shards share the origin, and the provider's own sessions (`pscale_admin`,
 `pscale_exporter`) hold about 4. Hyperdrive limits are soft: on 2026-10-08 the
 primary pool held 36 connections against a limit of 30, and the origin refused
 every other login (`remaining connection slots are reserved for roles with the
 SUPERUSER attribute`), which failed release verification and Hyperdrive's own
-reconnects. So `scripts/production-hyperdrive-prepare.mjs` pins them at 8
+reconnects. So `scripts/production-hyperdrive-prepare.mjs` pins them at 20
 (primary) and 5 (shard 1, the provider's minimum): an overshoot of that size
-still leaves room for migrations, release verification and operators. The Hub
-keeps under one connection busy, so the primary pool can grow back toward 24
-once the origin allows 50 again. Any other Hyperdrive configuration pointing at
+still leaves room for migrations, release verification and operators. The
+primary's limit is not headroom for load (the Hub keeps under one connection
+busy): Hyperdrive splits it over five pools and a request waits on the pool it
+lands in, so at 8 each pool held a single connection and one slow transaction
+held up every request behind it. Any other Hyperdrive configuration pointing at
 the same origin counts against the same budget; delete retired ones rather
 than leaving them idle.
 
