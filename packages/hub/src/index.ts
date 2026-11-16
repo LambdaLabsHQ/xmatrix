@@ -42,7 +42,7 @@ import { registerStripeAccountRoutes } from "./index-routes-stripe-accounts";
 import { registerCloudflareLoginRoutes } from "./index-routes-cloudflare-logins";
 import { redirectInsecureRequest } from "./https-redirect";
 import { scheduledTaskFailed } from "./scheduled-task-failure";
-import { runScheduledLanes, type ScheduledPass } from "./scheduled-passes";
+import { runScheduledLanes, scheduledPassesDue, type ScheduledPass } from "./scheduled-passes";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { requestErrorResponse } from "./index-shared";
@@ -196,8 +196,10 @@ export default {
       { name: "Admin activity rollup", work: () => rollUpAdminActivityOnSchedule(env, event.scheduledTime) },
       // Delivers again quota waits a reading already made ready; never asks a provider.
       { name: "Quota wait redelivery", work: () => redeliverOwedQuotaWakes(env) },
-      ...([["Teams", connectorTeamsRoomRepository], ["Google Chat", connectorGoogleChatRoomRepository], ["Feishu", connectorFeishuRoomRepository], ["Telegram", connectorTelegramRoomRepository]] as const)
-        .map(([provider, repository]) => ({ name: `${provider} lifecycle maintenance`,
+      // Rows these delete have already expired for every reader, so nothing
+      // waits on them: each runs once an hour, in its own minute.
+      ...([["Teams", connectorTeamsRoomRepository, 7], ["Google Chat", connectorGoogleChatRoomRepository, 22], ["Feishu", connectorFeishuRoomRepository, 37], ["Telegram", connectorTelegramRoomRepository, 52]] as const)
+        .map(([provider, repository, hourlyAtMinute]) => ({ name: `${provider} lifecycle maintenance`, hourlyAtMinute,
           work: () => repository(env).cleanup({ requestId: crypto.randomUUID(), limit: 100 }) })),
     ];
     const network: ScheduledPass[] = [
@@ -207,7 +209,7 @@ export default {
       { name: "CLI release notice", work: () => noticeCliReleases(env, { latest }) },
     ];
     // A pass that fails after its lane stopped waiting still sends its report.
-    executionCtx.waitUntil(runScheduledLanes([database, network], (name, error) => {
+    executionCtx.waitUntil(runScheduledLanes([scheduledPassesDue(database, event.scheduledTime), network], (name, error) => {
       scheduledTaskFailed(name, error);
       executionCtx.waitUntil(sendErrorReports());
     }));

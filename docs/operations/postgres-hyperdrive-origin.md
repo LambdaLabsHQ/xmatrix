@@ -175,6 +175,8 @@ invocation holds at the same moment, not the day's total:
 - The minute cron runs its passes in two lanes, one pass at a time each
   (`scheduled-passes.ts`). Started together, its thirteen passes queued behind
   each other for 0.5-1.9 s and requests in that window queued behind them.
+  A pass that only deletes rows every reader already ignores (the four
+  connector room cleanups) sets `hourlyAtMinute` and runs once an hour.
 - A session opened inside another session's open transaction holds a second
   connection while the first waits. Each such session point is always kept
   (`blob10 = 'nested'`) and names the outer transaction's operation in

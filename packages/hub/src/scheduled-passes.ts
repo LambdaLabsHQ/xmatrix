@@ -1,5 +1,20 @@
 /** One named pass of the minute cron. */
-export interface ScheduledPass { name: string; work: () => Promise<unknown> }
+export interface ScheduledPass {
+  name: string;
+  work: () => Promise<unknown>;
+  /**
+   * For a pass whose result nothing waits on (deleting rows that already
+   * expired): run it once an hour, at this minute, instead of every minute.
+   * Different minutes keep such passes from sharing one.
+   */
+  hourlyAtMinute?: number;
+}
+
+/** The passes due in the minute the cron fired for. */
+export function scheduledPassesDue<T extends ScheduledPass>(passes: readonly T[], scheduledTime: number): T[] {
+  const minute = new Date(scheduledTime).getUTCMinutes();
+  return passes.filter(pass => pass.hourlyAtMinute === undefined || pass.hourlyAtMinute === minute);
+}
 
 /** How long a lane waits for one pass before starting its next. */
 export const SCHEDULED_PASS_PATIENCE_MS = 20_000;

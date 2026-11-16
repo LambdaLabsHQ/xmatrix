@@ -1227,6 +1227,34 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.deepEqual(nativeRun.spawn_payload_json.registration.resources.models, [], 'no model resource is admitted');
     assert.equal(nativeRun.metadata_json.useRuntimeDefaultModel, true);
     assert.equal(nativeRun.metadata_json.preferredRuntimeModel, 'codex-sonnet');
+    // 2026-11-16: a Space's model on a machine whose owner declared none runs
+    // from the runtime's catalog, on the runtime-default authority, instead of
+    // leaving the Agent with nothing to run.
+    const [heldConfiguration] = (await sql(`SELECT configuration_json FROM data.space_agent_registrations
+      WHERE harness='codex'`)).rows;
+    const [heldAccess] = (await sql(`SELECT grant_limits,policy_limits FROM data.space_agent_registration_access
+      WHERE harness='codex'`)).rows;
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=configuration_json||'{"model":"codex-sonnet"}'
+      WHERE harness='codex'`);
+    await sql(`UPDATE data.space_agent_registration_access SET grant_limits=jsonb_set(grant_limits,'{models}','["codex-sonnet"]'),
+      policy_limits=jsonb_set(policy_limits,'{models}','["codex-sonnet"]') WHERE harness='codex'`);
+    const heldDeclarations = (await sql(`SELECT machine_id,declaration_json FROM control.agent_registration_environments
+      WHERE harness='codex'`)).rows;
+    await sql(`UPDATE control.agent_registration_environments SET declaration_json=jsonb_set(declaration_json-'modelAliases','{models}','[]')
+      WHERE harness='codex'`);
+    const spaceModel = await launches.dispatchFromMessage(await managedMessage('space-catalog-model', '@codex', target, ''),
+      prefer('codex-sonnet', candidate => assert.deepEqual([candidate.models, candidate.catalogModels], [[], ['codex-sonnet']])));
+    assert.deepEqual(spaceModel.rejected, []);
+    const spaceModelRun = (await sql(`SELECT l.spawn_payload_json FROM data.agent_launches l WHERE l.launch_id=$1`,
+      [spaceModel.prepared[0].launchId])).rows[0].spawn_payload_json;
+    assert.equal(spaceModelRun.context.preferredModel, 'codex-sonnet');
+    assert.equal(spaceModelRun.context.requestedModel, undefined);
+    await sql(`UPDATE data.space_agent_registrations SET configuration_json=$1::jsonb WHERE harness='codex'`,
+      [JSON.stringify(heldConfiguration.configuration_json)]);
+    await sql(`UPDATE data.space_agent_registration_access SET grant_limits=$1::jsonb,policy_limits=$2::jsonb WHERE harness='codex'`,
+      [JSON.stringify(heldAccess.grant_limits), JSON.stringify(heldAccess.policy_limits)]);
+    for (const row of heldDeclarations) await sql(`UPDATE control.agent_registration_environments SET declaration_json=$2::jsonb
+      WHERE harness='codex' AND machine_id=$1`, [row.machine_id, JSON.stringify(row.declaration_json)]);
     for (const [id, condition, model] of [['native-unlisted', '', 'codex-unlisted'], ['native-other-name', ' model:opus', 'codex-sonnet']]) {
       const refused = await launches.dispatchFromMessage(await managedMessage(id, '@codex', target, condition), prefer(model));
       assert.equal(refused.prepared.length, 0, id);

@@ -125,6 +125,10 @@ export interface RegistrationLaunchCandidate {
   /** Its daemon has the runtime switch to a preferred model from the runtime's
    * own catalog as it starts (`registration_native_model_v1`). */
   supportsNativeModel?: boolean;
+  /** Models the Space sets for it that its machine's owner declared none for:
+   * it runs them from the runtime's own catalog, as a summon naming one
+   * would (`supportsNativeModel`), on the runtime-default authority. */
+  catalogModels?: string[];
   /** Its daemon lets a Run check out repositories itself (`run_repo_checkout_v1`),
    * so a summon naming no repository may start in the managed directory. */
   supportsRepoCheckout?: boolean;
@@ -172,7 +176,7 @@ export function registrationAllowedModels(configuration: ReturnType<typeof parse
  * models, its runtime's catalog, and the provider reading every model's
  * headroom is read from. A resumed Instance's model is chosen from these. */
 export type RegistrationModelFacts = Pick<RegistrationLaunchCandidate, "models" | "modelCatalog" | "modelAliases" |
-  "parameterModel" | "supportsRequestedEffort" | "supportsDefaultModelEffort" | "supportsNativeModel"> & {
+  "parameterModel" | "supportsRequestedEffort" | "supportsDefaultModelEffort" | "supportsNativeModel" | "catalogModels"> & {
   observations?: { quota?: Pick<NonNullable<RegistrationLaunchCandidate["observations"]>["quota"], "usage"> };
 };
 
@@ -1318,14 +1322,19 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (!environment?.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= Date.parse(evaluatedAt)) {
           drop(); continue;
         }
+        // A machine whose owner declared no models keeps the runtime's
+        // default authority: the Space's models then run from the runtime's
+        // own catalog, which needs a daemon that switches the runtime to one.
+        const catalogModels = !environment.models.length && candidate.models.length ? candidate.models : undefined;
         const models = candidate.models.filter(model => environment.models.includes(model));
-        if (candidate.models.length && !models.length) { drop(); continue; }
+        if (candidate.models.length && !models.length && !catalogModels) { drop(); continue; }
         const route = routableRegistrationLaunch((online.length ? online : reconnecting)
           .filter(row => daemonCapable(row, "registration_launch_v3")), { runtimeDefaultOnly: !models.length,
           workspaceReferences: candidate.workspaceReferences, managedWorkspace: target.managedWorkspace === true,
           registeredWorkspaceIds: new Set(workspaces.map(row => String(row.workspace_id))) });
         if (!route) { drop(); continue; }
         const { daemon, workspaceReferences } = route;
+        if (catalogModels && !daemonCapable(daemon, "registration_native_model_v1")) { drop(); continue; }
         // A harness the machine reports older than the version xMatrix can
         // talk to would only fail at startup: it is named, never routed to.
         const tooOld = harnessTooOldOn(daemon, candidate.key.harness);
@@ -1359,6 +1368,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
         const unansweredAt = observation?.unanswered_at ? new Date(observation.unanswered_at).toISOString() : undefined;
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
+          ...(catalogModels ? { catalogModels } : {}),
           ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
