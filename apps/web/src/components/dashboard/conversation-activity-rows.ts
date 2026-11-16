@@ -113,7 +113,7 @@ function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
 
 /** Whether a message can drop its avatar and header under the row above. */
 export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
-  if (!previous || previous.folded || timelineItemGitHubFact(previous)) return false;
+  if (!previous || (previous.folded && !previous.pullRequests)) return false;
   return sameTurn(previous, item) && changedTags(previous, item).length === 0;
 }
 
@@ -166,18 +166,23 @@ function foldRow(items: TimelineItem[]): TimelineItem {
 export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
   let run: TimelineItem[] = [];
-  // One stretch of bare pull request facts: one slip, one entry per pull
-  // request in the order each first appears (docs/design/conversation-activity.md §4.1).
+  const pushMessage = (item: TimelineItem) => {
+    const previous = rows[rows.length - 1];
+    if (continuesPrevious(previous, item)) {
+      rows.push({ ...item, continuation: true });
+      return;
+    }
+    const retagged = retaggedFrom(rows, item);
+    rows.push(retagged ? { ...item, retagged } : item);
+  };
+  // One stretch of bare pull request facts is one GitHub message whose slip
+  // has an entry per pull request, in the order each first appears
+  // (docs/design/conversation-activity.md §4.1).
   let pulls = new Map<string, { ref: PullRequestRef; items: TimelineItem[] }>();
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
-    if (pulls.size > 0) {
-      const lines = [...pulls.values()];
-      const items = lines.flatMap((line) => line.items)
-        .sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
-      rows.push({ ...foldRow(items), id: `pull:${items[0]!.id}`, author: items[0]!.author, pullRequests: lines });
-    }
+    if (pulls.size > 0) pushMessage(pullRequestStretch([...pulls.values()]));
     pulls = new Map();
   };
   for (const item of timeline) {
@@ -196,16 +201,21 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
       continue;
     }
     flush();
-    const previous = rows[rows.length - 1];
-    if (continuesPrevious(previous, item)) {
-      rows.push({ ...item, continuation: true });
-      continue;
-    }
-    const retagged = retaggedFrom(rows, item);
-    rows.push(retagged ? { ...item, retagged } : item);
+    pushMessage(item);
   }
   flush();
   return rows;
+}
+
+/**
+ * A stretch of pull request facts as one message: GitHub's newest one, so it
+ * reads, is replied to and reacts as that message, standing where the stretch
+ * began. Only a stretch GitHub said nothing in is its opener's.
+ */
+function pullRequestStretch(lines: NonNullable<TimelineItem["pullRequests"]>): TimelineItem {
+  const items = lines.flatMap((line) => line.items).sort((left, right) => (left.sequence ?? 0) - (right.sequence ?? 0));
+  const said = [...items].reverse().find((item) => timelineItemGitHubFact(item)) ?? items[items.length - 1]!;
+  return { ...said, id: `pull:${items[0]!.id}`, sequence: foldRow(items).sequence, folded: items, pullRequests: lines };
 }
 
 export type FoldSummary = {

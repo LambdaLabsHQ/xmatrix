@@ -1,7 +1,9 @@
 import { appCommand, findAppConnection } from "./apps";
 import {
-  ChannelActivityInvalid, normalizeChannelActivity, type GitHubPullRequestFact,
+  CHANNEL_ACTIVITY_PROVENANCE, ChannelActivityInvalid, GITHUB_PULL_REQUEST_FACT_METADATA_KEY, normalizeChannelActivity,
+  type GitHubPullRequestFact,
 } from "@xmatrix/protocol";
+import { dispatchProductMessageAppend } from "./product-message-append";
 import {
   githubConnectionInstallationFor, readGitHubPullRequestOpen, type GitHubCommitCheckVerdict,
 } from "./app-connectors";
@@ -153,6 +155,7 @@ export interface PullRequestSubscriptionDependencies {
   installationFor: typeof githubConnectionInstallationFor;
   pullRequestOpen: typeof readGitHubPullRequestOpen;
   command: typeof appCommand;
+  announce: typeof dispatchProductMessageAppend;
 }
 
 interface PullRequestSubscriber {
@@ -197,7 +200,30 @@ export async function subscribeConversationToPullRequest(env: Env,
   const connection = await connectionReaching(env, input, owner, repo, dependencies);
   if (!connection) return false;
   await subscribe(env, input, connection.id, input.repository, input.number, dependencies);
+  await announceFollowing(env, input, dependencies);
   return true;
+}
+
+/**
+ * GitHub says in the conversation that it now follows the pull request, so
+ * what it posts later is seen to come from that subscription. Context for
+ * Agents and never unread: it reports what the opener just did.
+ */
+async function announceFollowing(env: Env, input: PullRequestSubscriber & { repository: string; number: number },
+  dependencies: Partial<PullRequestSubscriptionDependencies>): Promise<void> {
+  const ref = `${input.repository}#${input.number}`;
+  const url = `https://github.com/${input.repository}/pull/${input.number}`;
+  const fact: GitHubPullRequestFact = { repository: input.repository, number: input.number, url, event: "subscribed" };
+  const key = `${input.commandId}:${input.channelId}`;
+  await (dependencies.announce ?? dispatchProductMessageAppend)(env, input.channelId, {
+    commandId: `product:github-pull-request-follow:${key}`.slice(0, 200),
+    messageId: `app:github:follow:${key}`.slice(0, 200),
+    channelId: input.channelId,
+    body: `Following [${ref}](${url}) in this conversation: its CI results, reviews, comments and merge will arrive here.`,
+    principal: { kind: "user", id: input.ownerUserId },
+    appAuthorId: "github",
+    residual: { appMetadata: { xmatrixProvenance: CHANNEL_ACTIVITY_PROVENANCE, [GITHUB_PULL_REQUEST_FACT_METADATA_KEY]: fact } },
+  });
 }
 
 /**

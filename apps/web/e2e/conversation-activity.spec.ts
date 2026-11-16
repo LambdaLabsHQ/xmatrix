@@ -83,7 +83,7 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
   // finding after stay whole; codex:2's entry ends its next run.
   await expect(folds.nth(0)).toContainText("claude:1");
   await expect(folds.nth(0)).toContainText("✓ e2e regression 191/191");
-  // Its pull request is a slip of its own, like any App's receipt.
+  // Its pull request is a slip of its own, like any App's receipt, under its finding.
   const pull = page.locator("[data-pull-requests]");
   await expect(pull).toHaveText(/#3043.*opened by claude:1/u);
   await expect(pull.getByRole("link", { name: "LambdaLabsHQ/xmatrix#3043" }))
@@ -94,8 +94,9 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
   // What anyone said stays whole, however soon its sender said more.
   await expect(page.locator(".app-message-timeline").getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
 
-  // A second message moments later from the same person drops the header.
-  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(1);
+  // A second message moments later from the same sender drops the header: the
+  // reviewer's second request, and claude:1's pull request after its finding.
+  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(2);
 
   // Opening a run shows every entry it stands for, in order.
   await folds.nth(0).getByRole("button").first().click();
@@ -485,6 +486,8 @@ function pullRequestLife() {
   return [
     entry(reviewer, 10, "Reload automatically when the network comes back."),
     opened(18, 121),
+    entry(github, 18, `Following [LambdaLabsHQ/NomadCafe#121](${pullUrl}) in this conversation.`, {
+      metadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: { ...pullFact, event: "subscribed" } } }),
     entry(github, 19, `CI passed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 3ffa10b.`, {
       metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_passed", sha: "3ffa10b" } } }),
     entry(github, 20, `yiming reviewed [LambdaLabsHQ/NomadCafe#121](${pullUrl})\n\nCan the retry back off?`, {
@@ -499,7 +502,7 @@ function pullRequestLife() {
   ];
 }
 
-test("a pull request is one line per stretch, and a person's review is a line over their words", async ({ page }) => {
+test("GitHub's pull request facts are its messages: one slip per stretch, a review's words whole", async ({ page }) => {
   const messages = pullRequestLife();
   await openGeneralChannelWithHistory(page, { ...E2E_CHANNEL, messageCount: messages.length,
     lastMessageSequence: messages.length, updatedAt: at(26) }, messages);
@@ -509,20 +512,22 @@ test("a pull request is one line per stretch, and a person's review is a line ov
   await expect(slips).toHaveCount(2);
   await expect(slips.nth(0).locator("[data-pull-request]")).toHaveCount(1);
   const opened = slips.nth(0).locator("[data-pull-request='#121']");
-  await expect(opened).toHaveText(/#121.*opened by claude:1 · CI passed/u);
+  // From opening, through the subscription GitHub made here, to what it reported.
+  await expect(opened).toHaveText(/#121.*opened by claude:1 · following here · CI passed/u);
   await expect(opened.getByRole("link", { name: "LambdaLabsHQ/NomadCafe#121" })).toHaveAttribute("href", pullUrl);
   const later = slips.nth(1).locator("[data-pull-request]");
   await expect(later).toHaveCount(2);
-  await expect(later.nth(0)).toHaveText(/#121 Reload on reconnect.*CI failed: web, ios · merged/u);
+  await expect(later.nth(0)).toHaveText(/#121 Reload on reconnect.*CI failed: web, ios · merged · stopped following/u);
   await expect(later.nth(0).getByRole("link", { name: "web" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/NomadCafe/runs/1");
   await expect(later.nth(1)).toHaveText(/#122.*opened by claude:1/u);
-  // A person's review is a slip of the same paper, its words whole; no GitHub avatar anywhere.
+  // A person's review is GitHub's message too, its words whole on the same slip.
   const review = page.locator("[data-github-fact='reviewed']");
   await expect(review).toHaveText(/yiming reviewed #121.*Can the retry back off\?/u);
-  await expect(page.locator(".app-message-timeline").getByText("App", { exact: true })).toHaveCount(0);
+  // These are GitHub's messages: one GitHub header heads the run of them that follows the person's.
+  await expect(page.locator(".app-message-timeline").getByText("GitHub", { exact: true })).toHaveCount(1);
   // The same tinted slip as any App's receipt.
-  const tint = (slip: Locator) => slip.locator(".app-connector-receipt").evaluate((element) =>
+  const tint = (slip: Locator) => slip.evaluate((element) =>
     `${getComputedStyle(element).backgroundColor}/${getComputedStyle(element).borderRadius}`);
   expect(await tint(review)).toBe(await tint(slips.nth(0)));
 });

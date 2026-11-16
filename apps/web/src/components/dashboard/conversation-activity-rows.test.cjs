@@ -56,7 +56,7 @@ test("one Instance's run of activity folds into one row that keeps its place", (
   assert.deepEqual(pull.pullRequests.map((line) => line.ref),
     [{ repository: "a/b", number: 3043, url: "https://github.com/a/b/pull/3043" }], "a pull request is its own slip");
   assert.equal(finding.folded, undefined, "a finding is talk and stays whole");
-  assert.equal(finding.continuation, undefined, "a fold above breaks continuation");
+  assert.equal(finding.continuation, true, "a pull request is its opener's message when GitHub said nothing of it");
 });
 
 const github = { author: "GitHub", kind: "app", id: "app:github" };
@@ -81,7 +81,8 @@ test("a stretch of pull request facts is one slip, one entry per pull request; p
     : row.body), ["Cause: no retry after the network drops.", "#121:2 #122:1", "reviewed", "#122:1 #121:1"]);
   assert.equal(rows[1].id, "pull:message:m-2");
   assert.equal(rows[1].folded.length, 3, "every entry of the stretch is read with it");
-  assert.equal(rows[2].continuation, undefined, "a review stands on its own");
+  assert.equal(rows[1].author, "GitHub", "a stretch GitHub spoke in is GitHub's message");
+  assert.equal(rows[2].continuation, true, "GitHub's messages moments apart read as one turn, like any sender's");
 });
 
 test("anyone else's entry ends a run, so interleaving stays visible", () => {

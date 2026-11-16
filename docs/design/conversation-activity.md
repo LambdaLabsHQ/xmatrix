@@ -202,17 +202,21 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   the time at the right edge. No avatar and no identity tags; the
   avatar column holds the fold's disclosure, or the pull request mark when a
   lone pull request leaves nothing to open.
-- **Pull request slips.** GitHub's facts read like every other App's: on the
-  tinted receipt slip (`.app-connector-receipt`), set in the text column. A
+- **Pull request slips.** What GitHub reports about a pull request is
+  GitHub's message: its header (avatar, name, App) and, as its body, the
+  tinted receipt slip every App's message uses (`.app-connector-receipt`).
+  The whole path is visible in one place, from the subscription being made
+  to what it delivers: when the Hub subscribes the conversation it posts
+  GitHub's `subscribed` fact (context for Agents, never unread), and a
   stretch of bare pull request facts (a Run's `pull_request` entry; GitHub's
-  CI verdict, merge and close, `xmatrixGitHubPullRequest` metadata, §3.6) is
-  one slip with one entry per pull request in the order each first appears:
-  a head with the mark of where it stands now (open, CI passed, CI failed,
-  merged, closed), `#121` and its title once GitHub said it, and the latest
-  time; beneath, its steps (`opened by claude:1 · CI passed · merged`). Talk
-  ends the stretch. A person's review or comment is a slip headed
-  `yiming requested changes on #121` with their words whole beneath, so no
-  GitHub avatar interrupts the conversation.
+  subscribed, CI verdict, merge and close, `xmatrixGitHubPullRequest`
+  metadata, §3.6) is one message with one slip entry per pull request: its
+  current mark, `#121` and its title once GitHub said it, the latest time,
+  and beneath its steps `opened by claude:1 · following here · CI passed ·
+  merged · stopped following` (closing ends the subscription). Talk ends the
+  stretch; GitHub's messages moments apart share one header like any
+  sender's. A person's review or comment is GitHub's message with a slip
+  headed `yiming requested changes on #121` over their words.
 - **Folding.** Consecutive activity entries from the same Instance merge into
   one row with a time range and a count; the newest items are shown inline.
   Any entry from anyone else, or any message, ends the fold, so interleaving

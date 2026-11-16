@@ -253,9 +253,17 @@ test("a pull request is subscribed only through the Space's connection that reac
   const input = { spaceId: "space-1", channelId: "channel-1", ownerUserId: "user-1",
     repository: "Acme/App", number: 7, commandId: "activity:r-1" };
   const connection = { id: "space-1:github", status: "configured" };
+  const announced = [];
   const deps = (overrides) => ({ findConnection: async () => connection, installationFor: async () => "42",
-    command: async (_env, kind, value) => { commands.push({ kind, value }); }, ...overrides });
+    command: async (_env, kind, value) => { commands.push({ kind, value }); },
+    announce: async (_env, channelId, value) => { announced.push({ channelId, ...value }); }, ...overrides });
   assert.equal(await subscribeConversationToPullRequest({}, input, deps()), true);
+  // GitHub says it follows the pull request here, as context: nobody is woken or left unread by it.
+  assert.equal(announced.length, 1);
+  assert.equal(announced[0].appAuthorId, "github");
+  assert.equal(announced[0].messageId, "app:github:follow:activity:r-1:channel-1");
+  assert.deepEqual(announced[0].residual, { appMetadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: {
+    repository: "Acme/App", number: 7, url: "https://github.com/Acme/App/pull/7", event: "subscribed" } } });
   assert.deepEqual(commands[0], { kind: "put-relation", value: {
     commandId: "product:github-pull-request:activity:r-1", connectionId: "space-1:github",
     channelId: "channel-1", sourceKind: "issue", sourceRef: "github:issue:acme/app#7",
@@ -264,6 +272,7 @@ test("a pull request is subscribed only through the Space's connection that reac
   assert.equal(await subscribeConversationToPullRequest({}, input, deps({
     installationFor: async () => { throw new Error("github_installation_not_linked_to_space"); } })), false);
   assert.equal(commands.length, 1);
+  assert.equal(announced.length, 1, "nothing is announced for a pull request that is not followed");
 });
 
 test("a subscription made before its issue existed named an earlier issue and hears nothing", async () => {

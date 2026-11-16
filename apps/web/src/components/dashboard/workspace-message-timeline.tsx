@@ -142,7 +142,7 @@ import {
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
-import { FoldedActivityRow, GitHubFactRow, PullRequestSlipRow } from "./conversation-activity-row";
+import { FoldedActivityRow, GitHubWordsSlip, PullRequestSlip } from "./conversation-activity-row";
 import { HumanAboveViewJump, TIMELINE_ROW_ID_ATTRIBUTE } from "./timeline-human-above";
 import {
   buildConversationRows,
@@ -1183,16 +1183,12 @@ export const MessageTimeline = memo(function MessageTimeline({
                 )}
               >
                 {since && message.id === sinceRowId && <SinceDivider digest={since} />}
-                {message.pullRequests ? (
-                  <PullRequestSlipRow row={message} />
-                ) : message.folded ? (
+                {message.folded && !message.pullRequests ? (
                   <FoldedActivityRow
                     row={message}
                     expanded={openFolds.has(message.id)}
                     onToggle={toggleFold}
                   />
-                ) : timelineItemGitHubFact(message) ? (
-                  <GitHubFactRow row={message} />
                 ) : (
                 <MessageRow
                   message={message}
@@ -1945,6 +1941,11 @@ export const MessageRow = memo(function MessageRow({
     const legacy = message.senderId === "app:stripe" ? legacyStripeEventFacts(message.body) : undefined;
     return eventCardOf(message.metadata) ?? (legacy ? stripeEventWords(legacy).card : undefined);
   }, [message.senderKind, message.senderId, message.metadata, message.body]);
+  // A person's review or comment from GitHub; a stretch of bare pull request facts arrives as `pullRequests`.
+  const githubFact = useMemo(() => {
+    const fact = timelineItemGitHubFact(message);
+    return fact?.event === "reviewed" || fact?.event === "commented" ? fact : undefined;
+  }, [message]);
   const connectorReceipt = useMemo(() => message.senderKind !== "app" ? undefined
     : message.provenance === "system_fact" ? parseConnectorReceipt(message.body)
     : privateEventOwner ? [{ subject: "New message", detail: "", private: true }] : undefined,
@@ -2682,6 +2683,10 @@ export const MessageRow = memo(function MessageRow({
       spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
   ) : eventCard ? (
     <EventCard card={eventCard} spaceId={channel?.spaceId ?? null} token={token} userId={currentUserIdentityId.replace(/^user:/, "")} />
+  ) : message.pullRequests ? (
+    <PullRequestSlip lines={message.pullRequests} />
+  ) : githubFact ? (
+    <GitHubWordsSlip fact={githubFact} />
   ) : connectorReceipt ? (
     <div {...(message.messageId && !connectorReceipt.some(entry => entry.private) ? { [MESSAGE_BODY_ATTRIBUTE]: message.messageId } : {})}>
       <ConnectorReceiptCard entries={connectorReceipt} collapsed={collapsible && !expanded} components={markdownComponents}

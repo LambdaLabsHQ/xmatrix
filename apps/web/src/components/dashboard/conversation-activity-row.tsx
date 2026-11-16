@@ -2,7 +2,7 @@
 
 import { Fragment, memo, type ReactNode } from "react";
 import {
-  ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
+  BellRing, ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -14,11 +14,13 @@ import { MESSAGE_HEADER_TIMESTAMP_CLASS_NAME } from "./row-frames";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { foldSummary, timelineItemActivity, timelineItemGitHubFact } from "./conversation-activity-rows";
 import type { TimelineItem } from "./workspace-shell-message-model";
+import type { GitHubPullRequestFact } from "@xmatrix/protocol";
 
 /*
  * What is not talk (docs/design/conversation-activity.md §4.1): a run of an
- * Instance's plan as one line, and GitHub's pull request facts and people's
- * reviews on the same tinted slip as every other App's receipt.
+ * Instance's plan as one line. GitHub's pull request facts and people's
+ * reviews are GitHub's messages whose bodies are the same tinted slip as
+ * every other App's receipt (PullRequestSlip, GitHubWordsSlip).
  */
 
 function Time({ value, className }: { value: string; className?: string }) {
@@ -190,6 +192,14 @@ function PullRequestStep({ item }: { item: TimelineItem }) {
   if (timelineItemActivity(item)?.kind === "pull_request") return <>opened by {item.author}</>;
   const fact = timelineItemGitHubFact(item);
   if (!fact) return null;
+  if (fact.event === "subscribed") {
+    return (
+      <span title="This conversation follows the pull request through the Space's GitHub connection: its CI results, reviews, comments and merge arrive here."
+        className="text-foreground/80">
+        <BellRing className="mr-1 inline size-3 align-[-1px]" aria-hidden="true" />following here
+      </span>
+    );
+  }
   if (fact.event === "ci_passed") return <>CI passed</>;
   if (fact.event === "ci_failed") {
     return (
@@ -212,7 +222,7 @@ function PullRequestStep({ item }: { item: TimelineItem }) {
   return null;
 }
 
-type PullRequestState = { icon: LucideIcon; tone: StatusTone; title?: string };
+type PullRequestState = { icon: LucideIcon; tone: StatusTone; title?: string; ended?: boolean };
 
 /**
  * Where the pull request stands after these steps, said once by its mark (the
@@ -222,91 +232,75 @@ function pullRequestState(items: readonly TimelineItem[]): PullRequestState {
   let state: PullRequestState = { icon: GitPullRequest, tone: "settled" };
   for (const item of items) {
     const fact = timelineItemGitHubFact(item);
-    if (fact?.event === "merged") state = { icon: GitMerge, tone: "settled", title: fact.title };
-    else if (fact?.event === "closed") state = { icon: GitPullRequestClosed, tone: "secondary", title: fact.title };
+    if (fact?.event === "merged") state = { icon: GitMerge, tone: "settled", title: fact.title, ended: true };
+    else if (fact?.event === "closed") {
+      state = { icon: GitPullRequestClosed, tone: "secondary", title: fact.title, ended: true };
+    }
     else if (fact?.event === "ci_failed") state = { ...state, icon: CircleX, tone: "alert" };
     else if (fact?.event === "ci_passed") state = { ...state, icon: CircleCheck, tone: "settled" };
   }
   return state;
 }
 
-/**
- * A slip of the tinted paper every App's receipt is drawn on
- * (connector-receipt-card.tsx), set in the text column: GitHub's facts read
- * like any other connector's.
- */
-function GitHubSlip({ attributes, anchorId, children }: {
-  attributes: Record<string, string>; anchorId?: string; children: ReactNode;
-}) {
-  return (
-    <div className="px-5 py-1" id={anchorId} data-activity-row="" {...attributes}>
-      <div className="app-connector-receipt ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))]">
-        {children}
-      </div>
-    </div>
-  );
-}
-
 function SlipHead({ icon: Icon, tone, children, time }: {
-  icon: LucideIcon; tone: StatusTone; children: ReactNode; time: string;
+  icon: LucideIcon; tone: StatusTone; children: ReactNode; time?: string;
 }) {
   return (
     <p className="app-connector-receipt-head">
       <Icon aria-hidden="true" className={statusInkClass(tone)} />
       <span className="app-connector-receipt-subject">{children}</span>
-      <Time value={time} className="ml-auto pl-3 text-xs text-muted-foreground" />
+      {time && <Time value={time} className="ml-auto pl-3 text-xs text-muted-foreground" />}
     </p>
   );
 }
 
 /**
- * One stretch of pull request facts: a slip with one entry per pull request,
- * its mark and `#121 Reload on reconnect`, over its steps
- * `opened by claude:1 · CI passed · merged`. Talk ends the stretch.
+ * The body of GitHub's message for a stretch of pull request facts, on the
+ * tinted slip every App's receipt is drawn on (connector-receipt-card.tsx):
+ * one entry per pull request, its mark and `#121 Reload on reconnect`, over
+ * its steps `opened by claude:1 · CI passed · merged`. A stretch of several
+ * messages puts each step's time on its entry.
  */
-export const PullRequestSlipRow = memo(function PullRequestSlipRow({ row }: { row: TimelineItem }) {
-  const lines = row.pullRequests ?? [];
-  const lone = lines.length === 1 && lines[0]!.items.length === 1 ? lines[0]!.items[0] : undefined;
+export function PullRequestSlip({ lines }: { lines: NonNullable<TimelineItem["pullRequests"]> }) {
+  const several = lines.length > 1 || lines.some((line) => line.items.length > 1);
   return (
-    <GitHubSlip attributes={{ "data-pull-requests": lines.map((line) => `#${line.ref.number}`).join(" ") }}
-      anchorId={lone ? entryAnchorId(lone) : undefined}>
+    <div className="app-connector-receipt" data-pull-requests={lines.map((line) => `#${line.ref.number}`).join(" ")}>
       {lines.map(({ ref, items }) => {
         const state = pullRequestState(items);
-        const last = items[items.length - 1]!;
         return (
           <div key={`${ref.repository}#${ref.number}`} className="app-connector-receipt-entry" data-pull-request={`#${ref.number}`}>
-            <SlipHead icon={state.icon} tone={state.tone} time={last.sentAt}>
+            <SlipHead icon={state.icon} tone={state.tone} {...(several ? { time: items[items.length - 1]!.sentAt } : {})}>
               <PullRef {...ref} />{state.title && <> {state.title}</>}
             </SlipHead>
             <p className="app-connector-receipt-detail text-[13px] text-muted-foreground">
               {items.map((item, index) => (
-                <span key={item.id} id={lone ? undefined : entryAnchorId(item)} title={formatMessageDateTime(item.sentAt)}>
+                <span key={item.id} id={entryAnchorId(item)} title={formatMessageDateTime(item.sentAt)}>
                   {index > 0 && " · "}<PullRequestStep item={item} />
                 </span>
               ))}
+              {/* Closing ends the subscription (github-pull-request-subscription.ts), said or not. */}
+              {state.ended && " · stopped following"}
             </p>
+
           </div>
         );
       })}
-    </GitHubSlip>
+    </div>
   );
-});
+}
 
 /**
- * A person's review or comment on a pull request, from GitHub: a slip headed
- * `yiming requested changes on #121`, their words whole beneath it.
+ * The body of GitHub's message for a person's review or comment: a slip
+ * headed `yiming requested changes on #121`, their words whole beneath it.
  */
-export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: TimelineItem }) {
-  const fact = timelineItemGitHubFact(row);
-  if (!fact || (fact.event !== "reviewed" && fact.event !== "commented")) return null;
+export function GitHubWordsSlip({ fact }: { fact: GitHubPullRequestFact }) {
+  if (fact.event !== "reviewed" && fact.event !== "commented") return null;
   const pull = <PullRef repository={fact.repository} number={fact.number} url={fact.url} />;
   const changes = fact.event === "reviewed" && fact.verdict === "changes requested";
   return (
-    <GitHubSlip attributes={{ "data-github-fact": fact.event }}>
+    <div className="app-connector-receipt" data-github-fact={fact.event}>
       <div className="app-connector-receipt-entry">
-        <SlipHead icon={fact.event === "reviewed" ? Eye : MessageSquare} tone={changes ? "attention" : "settled"}
-          time={row.sentAt}>
-          <span className="sr-only">{row.author}: </span>
+        <SlipHead icon={fact.event === "reviewed" ? Eye : MessageSquare} tone={changes ? "attention" : "settled"}>
           {fact.event === "reviewed" ? (
             <>{fact.actor} {changes ? "requested changes on" : fact.verdict} {pull}</>
           ) : (
@@ -318,6 +312,6 @@ export const GitHubFactRow = memo(function GitHubFactRow({ row }: { row: Timelin
         </SlipHead>
         {fact.words && <div className="app-connector-receipt-detail"><RichMessageContent body={fact.words} /></div>}
       </div>
-    </GitHubSlip>
+    </div>
   );
-});
+}
