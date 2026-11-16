@@ -30,7 +30,7 @@ import {
   type DesktopBridge,
 } from "@/lib/desktop/bridge";
 import { requestCliSessionExchange } from "@/lib/desktop/session-exchange";
-import { AppSignInRefused, authorizeAppWithApple, signInAppWithProvider } from "@/lib/app-sign-in";
+import { AppSignInRefused, authorizeAppWithApple, signInAppWithExistingSession, signInAppWithProvider } from "@/lib/app-sign-in";
 import { NEW_ACCOUNT_FLAG } from "@/components/auth/new-account-step";
 import { Input } from "@/components/ui/input";
 import { APP_SIGN_IN_FINISH_PATH, WEB_PROXY_ROUTES, type AuthResponse } from "@xmatrix/protocol";
@@ -280,6 +280,25 @@ function LoginContent() {
     // link below remains the user-gesture fallback when a browser blocks it.
     window.location.assign(nativeReturnUrl);
   }, [cliComplete, nativeReturnUrl]);
+
+  const existingAppSignInRef = useRef(false);
+  useEffect(() => {
+    if (existingAppSignInRef.current || authLoading || user || cliMode || !desktopBridge?.authorizeInBrowser) return;
+    existingAppSignInRef.current = true;
+    const bridge = desktopBridge;
+    let cancelled = false;
+    void signInAppWithExistingSession(bridge).then(async (signedIn) => {
+      if (cancelled || !signedIn) return;
+      setSignedInPath(signedIn.newAccount && !nextPath ? `/app?${NEW_ACCOUNT_FLAG}=1` : nextPath || "/app");
+      await setSessionFromAuthResponseRef.current(signedIn.session);
+    }).catch((signInError: unknown) => {
+      if (cancelled || isAbort(signInError)) return;
+    });
+    return () => {
+      cancelled = true;
+    };
+    // One attempt when the app opens unsigned-in. The buttons remain if this browser has no web session.
+  }, [authLoading, cliMode, desktopBridge, nextPath, user]);
 
   useEffect(() => {
     if (!desktopBridge || cliMode || authLoading || user || desktopLoginStartedRef.current) {

@@ -32,7 +32,7 @@ export function LegalDocument({
   return (
     <div className="site-page min-h-screen text-foreground">
       <header className="site-legal-header border-b border-border bg-background">
-        <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-5 sm:px-8">
+        <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-4 py-3 px-5 sm:px-8">
           <BrandMark href="/" />
           <nav aria-label="Legal documents" className="flex flex-wrap justify-end gap-x-4 gap-y-1 text-sm font-medium">
             {legalLinks.map((link) => (

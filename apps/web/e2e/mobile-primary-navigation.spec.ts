@@ -184,7 +184,7 @@ test("tapping Channels once opens the mobile channel list", async ({ page }) => 
   await openMoreChildWorkspace(page);
 
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
-  // Pages, Channels, Status and More; Agents lives behind More with Machines and Schedules.
+  // Pages, Channels, Status and More; Agents lives behind More with Machines.
   await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Status", "More"]);
   await expect(primaryNav.getByRole("button", { name: "Follow-ups", exact: true })).toHaveCount(0);
   // Direct messages live on the Channels page.

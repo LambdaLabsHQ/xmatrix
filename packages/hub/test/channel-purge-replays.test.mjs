@@ -100,12 +100,12 @@ integration("Channel erasure commits progress before cumulative round trips exha
     assert.match(saved.row_plan_digest, /^[a-f0-9]{64}$/u);
     // An older plan's cursor must revisit dependencies inserted before it.
     await f.run("UPDATE data.channel_deletions SET step=999,row_plan_digest=repeat('0',64)");
-    await f.run(`INSERT INTO data.automations(automation_id,owner_user_id,channel_id,next_run_at,enabled,
-      version,payload_json,created_at,updated_at,page_id)
-      VALUES('older-plan-dependency','owner','erased',now(),true,1,'{}',now(),now(),'page')`);
+    await f.run(`INSERT INTO data.norn_programs(space_id,channel_id,program_id,author_kind,author_id,
+      authority_user_id,source,ledger_json,state) VALUES('space','erased','older-plan-dependency','user','owner',
+      'owner','','{}','completed')`);
     const advance = () => database.transaction(context, tx => purgeChannelRows(tx, input));
     assert.equal(await advance(), false);
-    assert.equal((await f.run("SELECT count(*)::int AS n FROM data.automations"))[0].n, 0);
+    assert.equal((await f.run("SELECT count(*)::int AS n FROM data.norn_programs"))[0].n, 0);
     let complete = false;
     for (let attempt = 0; attempt < 32 && !complete; attempt++) complete = await advance();
     assert.equal(complete, true);

@@ -13,6 +13,7 @@ import { durableObjectFailureMetadata } from "../../durable-object-request-failu
 import { gmailReadFailureMetadata } from "../gmail-read-failure";
 import { oauthStateMetadata } from "../../oauth-state-diagnostic";
 import { agentBindingFailureMetadata } from "../../runtime-transport/agent-binding-failure";
+import { runtimeSessionOriginMetadata } from "../../runtime-transport/runtime-operation-failure";
 
 /** Diagnostic provenance only; never copy arbitrary tags, contexts or mechanism data. */
 function token(value: unknown): string | undefined {
@@ -78,6 +79,7 @@ export function sentryEventMetadata(event: Record<string, unknown>): string[] {
     lines.push(...machineDaemonCredentialFailureMetadata((extra as Record<string, unknown>).machine_credential_reason,
       (extra as Record<string, unknown>).machine_credential_expired_for_s));
     lines.push(...machineRegistryCausalityMetadata(extra as Record<string, unknown>));
+    lines.push(...runtimeSessionOriginMetadata(extra as Record<string, unknown>));
     lines.push(...durableObjectFailureMetadata((extra as Record<string, unknown>).durable_object_failure));
     const diagnosticId = safeServerDiagnosticId((extra as Record<string, unknown>).diagnosticId);
     if (diagnosticId) lines.push(`Diagnostic reference: ${diagnosticId}`);

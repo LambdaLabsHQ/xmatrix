@@ -16,7 +16,7 @@ integration("parallel allocations across Spaces are unrestricted and terminal ev
     await setup.query(`CREATE SCHEMA ${schema}`);
     for (const file of ["0059_expand_agent_registration_keys.sql", "0065_expand_registration_environment.sql",
       "0066_expand_registration_allocations.sql", "0070_expand_registration_launch_intents.sql",
-      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql",
+      "0071_expand_registration_quota_observations.sql", "0119_expand_registration_quota_windows.sql", "0158_expand_registration_quota_account.sql", "0255_expand_registration_quota_scoped_windows.sql",
       "0236_expand_registration_quota_waiters.sql"]) await setup.query(rewrite(await readFile(new URL(`../migrations/${file}`, import.meta.url), "utf8")));
     await setup.query(`CREATE TABLE ${schema}.machine_daemons
       (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,connection_epoch bigint)`);
@@ -35,10 +35,12 @@ integration("parallel allocations across Spaces are unrestricted and terminal ev
     // Prelaunch probes must not let a skewed daemon clock poison the ordering
     // fence, or let delayed/expired readings replace an exhausted account.
     const quotaNow = Date.now();
-    const observe = (remaining, observedOffset, expiresOffset, quotaPoolId = "probe-pool") => database.transaction({},
-      tx => upsertRegistrationQuotaObservation(tx, { ownerUserId: "owner", quotaPoolId, remaining,
-        observedAt: new Date(quotaNow + observedOffset).toISOString(),
-        expiresAt: new Date(quotaNow + expiresOffset).toISOString(), source: "provider" }));
+    const observe = (remaining, observedOffset, expiresOffset, quotaPoolId = "probe-pool") => {
+      const observedAt = new Date(quotaNow + observedOffset).toISOString();
+      return database.transaction({}, tx => upsertRegistrationQuotaObservation(tx, { ownerUserId: "owner", quotaPoolId,
+        record: { observedAt, windows: [], account: { value: remaining, observedAt,
+          expiresAt: new Date(quotaNow + expiresOffset).toISOString(), source: "provider" } } }));
+    };
     const readQuota = async (quotaPoolId = "probe-pool") => (await setup.query(
       `SELECT remaining,observed_at FROM ${schema}.registration_quota_observations WHERE owner_user_id='owner' AND quota_pool_id=$1`,
       [quotaPoolId])).rows;

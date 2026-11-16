@@ -185,18 +185,11 @@ integration("unaddressed publications require one current author choice and neve
       await assert.rejects(pick("revoked"), error => error.code === "channel_not_found");
       await f.run("UPDATE data.space_members SET role='owner' WHERE user_id='owner'");
     });
-    await t.test("existing recipients and Automation occurrences keep their own delivery owner", async () => {
+    await t.test("existing recipients keep their own delivery owner", async () => {
       await channel("sleeping");
       await f.run(`INSERT INTO data.instances(instance_id,run_id,channel_id,channel_instance_id,status,version,created_at,updated_at,rest_state)
         VALUES('sleeping:1','sleeping:1#1','sleeping',1,'offline',1,now(),now(),'sleeping')`);
       await observe("sleeping"); assert.deepEqual(await read("sleeping"), []);
-      await channel("scheduled", { sequence: 1 });
-      await f.run(`INSERT INTO data.automation_occurrences(occurrence_id,automation_id,automation_version,owner_user_id,scheduled_for,status,
-        attempts,next_attempt_at,run_id,instance_id,control_id,created_at,updated_at,message_id)
-        VALUES('occurrence','task',1,'owner',now(),'pending',0,now(),'scheduled-run','scheduled-instance','scheduled-control',now(),now(),'scheduled')`);
-      await observe("scheduled"); assert.deepEqual(await read("scheduled"), []);
-      await assert.rejects(choices.open({ requestId: "automation-open", channelId: "scheduled", messageId: "scheduled", authorUserId: "owner" }),
-        error => error.code === "launch_choice_unavailable");
     });
   } finally { await f.close(); }
 });

@@ -1,7 +1,8 @@
 import { utf8ByteLength } from "./hex.js";
 import { parseAgentRegistrationKey, type AgentRegistrationKey } from "./agent-registration.js";
 import { parseAgentRoutingDeclaration, type AgentRoutingDeclaration } from "./agent-routing.js";
-import { AGENT_PRESET_BACKENDS, type AgentPresetBackend } from "./agent-presets.js";
+import { AGENT_ACCESS_MODES, AGENT_PRESET_BACKENDS, agentAccessGrant, type AgentAccessGrant, type AgentAccessMode,
+  type AgentPreset, type AgentPresetBackend } from "./agent-presets.js";
 import { hasControlCharacter } from "./field-validation.js";
 
 /** How the Hub starts this harness on this machine. The Hub maintains it; the
@@ -12,6 +13,10 @@ export interface AgentRegistrationLaunch {
   runtimeArgs: string[];
   backend?: AgentPresetBackend;
   acpArgs?: string[];
+  /** The access mode the machine's owner confirmed when adding the Agent.
+   * Absent on a registration added before the confirmation existed, which
+   * launches as `full`: what every launch was until then. */
+  access?: AgentAccessMode;
 }
 
 /** Physical declarations belong to the machine owner. Workspace choice and
@@ -45,7 +50,7 @@ const RETIRED_LAUNCH_FIELDS = ["requestReviewer", "sandboxMode"];
 export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationLaunch {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid registration launch");
   const row = value as Record<string, unknown>;
-  if (Object.keys(row).some(field => !["runtime", "runtimeArgs", "backend", "acpArgs", ...RETIRED_LAUNCH_FIELDS].includes(field))) {
+  if (Object.keys(row).some(field => !["runtime", "runtimeArgs", "backend", "acpArgs", "access", ...RETIRED_LAUNCH_FIELDS].includes(field))) {
     throw new Error("Invalid registration launch fields");
   }
   const backend = row.backend === undefined ? undefined : launchText(row.backend, 40, "backend");
@@ -54,10 +59,41 @@ export function parseAgentRegistrationLaunch(value: unknown): AgentRegistrationL
   }
   const acpArgs = row.acpArgs === undefined ? undefined : launchArgs(row.acpArgs, "acpArgs");
   if (acpArgs?.length && backend !== "acp") throw new Error("Registration launch ACP arguments require the ACP backend");
+  if (row.access !== undefined && !AGENT_ACCESS_MODES.includes(row.access as AgentAccessMode)) {
+    throw new Error("Invalid registration launch access");
+  }
   return { runtime: launchText(row.runtime, 4_000, "runtime"),
     runtimeArgs: row.runtimeArgs === undefined ? [] : launchArgs(row.runtimeArgs, "runtimeArgs"),
     ...(backend ? { backend: backend as AgentPresetBackend } : {}),
-    ...(acpArgs?.length ? { acpArgs } : {}) };
+    ...(acpArgs?.length ? { acpArgs } : {}),
+    ...(row.access === undefined ? {} : { access: row.access as AgentAccessMode }) };
+}
+
+/**
+ * A registration launch as it starts: its access grant, and the argv that
+ * carries the grant's args (the ACP argv for the generic ACP backend unless
+ * the launch declares its own). The spawn and everything that shows a
+ * registration's access read this one resolution.
+ *
+ * A daemon released before the grant reads access args only from the argv, so
+ * they are joined there. That daemon adds Grok's flag itself; Grok's stay in
+ * the grant alone.
+ */
+export function agentLaunchAccess(launch: AgentRegistrationLaunch | undefined, preset: AgentPreset | undefined):
+  { access: AgentAccessGrant; confirmed: boolean; runtimeArgs: string[]; acpArgs: string[] } {
+  const mode = launch?.access ?? "full", access = agentAccessGrant(preset, mode);
+  const full = preset?.access?.full?.args ?? [], grok = preset?.backend === "grok-acp";
+  const acp = (launch?.backend ?? preset?.backend) === "acp" && !launch?.runtimeArgs.length;
+  const declared = (acp ? launch?.acpArgs : launch?.runtimeArgs) ?? [];
+  // Before its owner was asked, a launch that declared its own arguments
+  // started with exactly those: the grant reports the ones they carry and adds none.
+  if (launch?.access === undefined && declared.length && !grok) access.args = access.args.filter(arg => declared.includes(arg));
+  const base = declared.length ? declared : (acp ? preset?.acpArgs ?? ["acp"] : preset?.defaultArgs) ?? [];
+  // `ask` drops a full-access arg saved with the launch before the modes existed.
+  const kept = mode === "ask" ? base.filter(arg => !full.includes(arg)) : [...base];
+  const argv = grok ? kept : [...kept, ...access.args.filter(arg => !kept.includes(arg))];
+  return { access, confirmed: launch?.access !== undefined,
+    runtimeArgs: acp ? [] : argv, acpArgs: acp ? argv : launch?.acpArgs ?? [] };
 }
 
 export interface AgentEnvironmentCommand {

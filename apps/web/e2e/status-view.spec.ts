@@ -2,9 +2,8 @@ import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 /* Status is the Space at work. The paper is the overview: how many agents are
-   working, what each runtime does, every machine with who works on it, and
-   what runs next. The list is the Agents, Machines and Schedules lists one
-   after another, each folded to its first rows, each row opening in its own
+   working, what each runtime does, and every machine with who works on it.
+   The list is the Agents and Machines lists one after another, each folded to its first rows, each row opening in its own
    destination. */
 
 const recent = () => new Date().toISOString();
@@ -54,18 +53,8 @@ const channel = {
       channelId: E2E_CHANNEL.id, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
       status: item.idle > slot ? "idle" : "busy" })) }])),
 };
-const automation = (id: string, name: string, minutes: number) => ({
-  id, version: 1, ownerUserId: "e2e-user", authorityRootUserId: "e2e-user", name, channelId: E2E_CHANNEL.id,
-  canManage: true, capabilities: { update: true, pause: true, requestPause: false, resume: false, delete: true,
-    reasonRequired: false },
-  message: { body: "Check" }, expression: { kind: "text", ref: `task:${id}`, language: "natural-language", text: "Check" },
-  intervalMinutes: 60, enabled: true, createdAt: E2E_NOW, updatedAt: E2E_NOW,
-  nextRunAt: new Date(Date.now() + minutes * 60_000).toISOString(), runCount: 0, deliveryCount: 0,
-});
-
 async function openStatus(page: import("@playwright/test").Page) {
-  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel], machineDaemons: daemons,
-    automations: [automation("later", "Weekly digest", 120), automation("soon", "Nightly sync", 4)] });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel], machineDaemons: daemons });
   await fixtureJson(page, "status-catalog", /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?.*)?$/u, {
     registrations,
     capabilities: [...new Set(registrations.map((item) => item.key.harness))].sort().map((harness) => ({
@@ -82,7 +71,7 @@ test.describe("on a phone", () => {
     const dock = page.getByRole("navigation", { name: "Primary" });
     await expect(dock.getByRole("button", { name: "Status" })).toBeVisible();
     await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
-    await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("2/3 machines busy · 2 schedules");
+    await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("2/3 machines busy");
 
     // Each runtime once, busiest first; one with nobody working is faint, not hidden.
     const runtimes = page.getByTestId("status-runtime").filter({ visible: true });
@@ -97,9 +86,6 @@ test.describe("on a phone", () => {
     await expect(rows.nth(1)).toContainText("+1");
     await expect(rows.nth(2)).toContainText("Idle");
     await expect(rows.nth(3)).toContainText("Offline");
-
-    // What runs next, soonest first.
-    await expect(page.getByTestId("status-schedule-row").filter({ visible: true }).first()).toContainText("Nightly sync");
 
     await rows.nth(0).tap();
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=/u);
@@ -117,7 +103,7 @@ test("the desktop rail opens Status, where each machine row shows its load", asy
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents$/u);
 });
 
-test("on a desktop Status lists agents, machines and schedules folded to one screen", async ({ page }) => {
+test("on a desktop Status lists agents and machines folded to one screen", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
   // Its own list takes the conversation list's place.
@@ -136,13 +122,7 @@ test("on a desktop Status lists agents, machines and schedules folded to one scr
   await machinesGroup.getByTestId("tool-list-more").click();
   await expect(machinesGroup.getByTestId("machine-row")).toHaveCount(machines.length);
 
-  await expect(list.getByTestId("schedule-row").first()).toContainText("Nightly sync");
-
   // Nothing chosen here: the overview stays beside the list.
   await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
   await expect(page.getByTestId("status-machine-row").filter({ visible: true })).toHaveCount(machines.length);
-
-  await list.getByTestId("schedule-row").first().click();
-  await expect(page).toHaveURL(/\?schedule=soon$/u);
-  await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "Nightly sync" })).toBeVisible();
 });

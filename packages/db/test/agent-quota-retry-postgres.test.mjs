@@ -42,7 +42,8 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       await Promise.all([choose("explicit", id), choose("explicit", id)]);
       const rows = await repository.due("explicit");
       assert.equal(rows.length, 1);
-      const [a, b] = await Promise.all([repository.dispatch({ channelId: "explicit", row: rows[0] }), repository.dispatch({ channelId: "explicit", row: rows[0] })]);
+      const [{ admission: a }, { admission: b }] = await Promise.all([repository.dispatch({ channelId: "explicit", row: rows[0] }),
+        repository.dispatch({ channelId: "explicit", row: rows[0] })]);
       assert.deepEqual(a, b, "transport and two-device replay retain the attempt generation");
       await admission("explicit", a);
       await choose("explicit", id, "cancel");
@@ -59,7 +60,7 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       assert.equal(new Date(row.refused_through).toISOString(), refusedThrough, "the retry keeps the reading that refused");
       assert.equal((await read("verifying", id)).state, "offered", "the card does not claim a wait nobody chose");
       // Not cleared after all (a model's own pool): back to its offer, fenced by the newer refusal.
-      const permit = await repository.dispatch({ channelId: "verifying", row });
+      const { admission: permit } = await repository.dispatch({ channelId: "verifying", row });
       const newer = new Date().toISOString();
       await repository.settle("verifying", row, "waiting", null, "registration_quota_exhausted", newer);
       const after = (await f.client.query(`SELECT state,next_check_at,refused_through,generation FROM data.agent_quota_retries
@@ -87,6 +88,20 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
         .verify_until, null, "a continuation is never verified on its own");
       assert.equal(await repository.wake("continuation"), 0);
     });
+    await t.test("a continuation keeps the model it first dispatched on through a redelivery", async () => {
+      const id = await source("resume-model"); await choose("resume-model", id);
+      const [row] = await repository.due("resume-model");
+      assert.equal((await repository.dispatch({ channelId: "resume-model", row, resumeModel: "claude-sonnet-5-5" })).resumeModel,
+        "claude-sonnet-5-5");
+      const [redelivered] = (await f.client.query("SELECT * FROM data.agent_quota_retries WHERE retry_id=$1", [id])).rows;
+      assert.equal(redelivered.resume_model, "claude-sonnet-5-5");
+      assert.equal((await repository.dispatch({ channelId: "resume-model", row: redelivered, resumeModel: "other" })).resumeModel,
+        "claude-sonnet-5-5", "a redelivery resumes on the model already chosen");
+      // The runtime's default is a model too; none is no switch.
+      const plain = await source("resume-default"); await choose("resume-default", plain);
+      const [first] = await repository.due("resume-default");
+      assert.equal((await repository.dispatch({ channelId: "resume-default", row: first, resumeModel: "" })).resumeModel, "");
+    });
     await t.test("a wake that lands while a check is under way is not put back to sleep", async () => {
       const id = await source("racing"); await choose("racing", id);
       const [row] = await repository.due("racing");
@@ -102,7 +117,7 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
       const id = await source("stopped");
       await choose("stopped", id);
       const [row] = await repository.due("stopped");
-      const permit = await repository.dispatch({ channelId: "stopped", row });
+      const { admission: permit } = await repository.dispatch({ channelId: "stopped", row });
       await tx(async transaction => {
         await lockChannelLifecycle(transaction, { channelId: "stopped", capability: "runtime_new_work" });
         await fenceChannelRunsForStop(transaction, { spaceId: "space", channelId: "stopped", actorUserId: "owner",
@@ -133,13 +148,13 @@ integration("quota recovery is explicit, source-bound, replayable and fenced wit
     await t.test("a definitively refused attempt advances once; old permits cannot dispatch its replacement", async () => {
       const id = await source("generation"); await choose("generation", id);
       const [row] = await repository.due("generation");
-      const old = await repository.dispatch({ channelId: "generation", row });
+      const { admission: old } = await repository.dispatch({ channelId: "generation", row });
       await repository.settle("generation", row, "waiting", Date.now()-1);
       await repository.settle("generation", row, "waiting", Date.now()-1);
       const [next] = await repository.due("generation");
       assert.equal(next.generation, old.generation + 1);
       await assert.rejects(admission("generation", old), error => error.code === "quota_retry_cancelled");
-      const current = await repository.dispatch({ channelId: "generation", row: next });
+      const { admission: current } = await repository.dispatch({ channelId: "generation", row: next });
       await admission("generation", current);
       await repository.settle("generation", next, "dispatched");
       assert.equal((await read("generation", id)).state, "dispatched");

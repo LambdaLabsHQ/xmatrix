@@ -10,6 +10,7 @@ import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { useSpaceBilling } from "./space-billing";
 import { allowanceUsed, SpaceUsage } from "./space-usage";
+import { storeLegalLinks, storePlanLabel } from "./store-legal";
 
 /**
  * Busy and status for a store's Billing section: one store action runs at a
@@ -104,7 +105,7 @@ export function canPurchaseFromStore(billing: Billing | undefined): boolean {
  */
 export function StoreBillingFrame({ testId, storeName, provider, userId, space, billing, coverage, products, busy, onPurchase, actions, terms, message }: {
   testId: string; storeName: string; provider: "apple" | "google"; userId: string; space: { name: string }; billing: Billing | undefined; coverage: string;
-  products: { key: string; displayPrice: string; interval: "month" | "year" }[]; busy: boolean;
+  products: { key: string; title: string; displayPrice: string; interval: "month" | "year" }[]; busy: boolean;
   onPurchase: (key: string) => void; actions: React.ReactNode; terms: string; message: string;
 }) {
   const active = billing?.plan === "pro";
@@ -116,13 +117,15 @@ export function StoreBillingFrame({ testId, storeName, provider, userId, space, 
     <p>The subscription is bound to this Space. Switching Spaces or restoring purchases does not move it. Rebinding is not supported.</p>
     {canPurchase && <div className="flex flex-wrap gap-2">{products.map((product) => <button key={product.key} disabled={busy}
       className={actionClass({ variant: "primary", size: "md" })} onClick={() => onPurchase(product.key)}>
-      {product.displayPrice} / {product.interval === "month" ? "month" : "year"}
+      {storePlanLabel(product)}
     </button>)}</div>}
     {!canPurchase && !active && <p>Only the owner of a Space with one human seat and no existing subscription can purchase {storeName} Pro.</p>}
     {active && billing?.subscription?.billingProvider !== provider && <p>This Space already has a subscription managed by its owner.</p>}
     <div className="flex flex-wrap gap-2">{actions}</div>
     <p className="text-xs text-muted-foreground">{terms}</p>
-    <div className="flex gap-4 text-sm"><Link href="/terms">Terms of Service</Link><Link href="/privacy">Privacy Policy</Link></div>
+    <div className="flex flex-wrap gap-4 text-sm" data-testid={`${testId}-legal`}>{storeLegalLinks(provider).map((link) => link.external
+      ? <a key={link.href} href={link.href} target="_blank" rel="noopener noreferrer">{link.label}</a>
+      : <Link key={link.href} href={link.href}>{link.label}</Link>)}</div>
     {message && <p role="status">{message}</p>}
   </div>;
 }

@@ -163,6 +163,7 @@ pub fn zai_monitor_quota_usages(map: &serde_json::Map<String, Value>) -> Vec<Llm
             remaining: first_f64(item, &["remaining", "available", "left"]),
             percent: normalized_quota_percent(percent, used, limit),
             reset_at,
+            scope: None,
         });
     }
     quotas

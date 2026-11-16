@@ -1,10 +1,11 @@
 /**
  * Agent usage presentation: the provider quota windows the router reads for a
  * registration, one reading per window. Numbers come as the Hub stored them;
- * a window without a name is shown without inventing one.
+ * a window without a name is shown without inventing one. A scoped window
+ * (one model's own quota) is named with its scope first: "Fable · Weekly".
  */
 
-import { currentRoutingQuotaWindows, type AgentRegistrationLiveState } from "@xmatrix/protocol";
+import { currentRoutingQuotaWindows, formatQuotaBalance, type AgentRegistrationLiveState } from "@xmatrix/protocol";
 
 import type { MeterReading } from "./machine-load-panel";
 
@@ -43,6 +44,15 @@ export function agentUsageReadings(quota: AgentRegistrationLiveState["quota"], n
   return [...windowReadings(quota, now), ...accountReadings(quota.account)];
 }
 
+/** A prepaid account reads as the money left; it has no window to meter. */
+export function agentBalanceReadings(balance: AgentRegistrationLiveState["balance"]): MeterReading[] {
+  if (!balance) return [];
+  const spent = balance.allowed === false || balance.amount <= 0;
+  return [...(balance.allowed === false
+    ? [{ key: "account", label: "Provider", value: "Refusing requests", high: true }] : []),
+    { key: "balance", label: "Balance", value: `${formatQuotaBalance(balance)} left`, high: spent }];
+}
+
 /** The provider's verdict on the account: it may serve past a used-up window
  * on credits, or refuse whatever the windows say. */
 function accountReadings(account: NonNullable<AgentRegistrationLiveState["quota"]>["account"]): MeterReading[] {
@@ -68,8 +78,8 @@ function windowReadings(quota: NonNullable<AgentRegistrationLiveState["quota"]>,
   const ordered = [...windows].sort((left, right) =>
     (Date.parse(left.resetAt ?? "") || Infinity) - (Date.parse(right.resetAt ?? "") || Infinity));
   return ordered.map((window, index) => ({
-    key: `${window.label || "window"}:${index}`,
-    label: windowName(window.label),
+    key: `${window.scope ? `${window.scope}:` : ""}${window.label || "window"}:${index}`,
+    label: window.scope ? `${window.scope} · ${windowName(window.label)}` : windowName(window.label),
     value: `${Math.round(window.usedPercent)}% used`,
     detail: formatResetIn(window.resetAt, now),
     fraction: Math.max(0, Math.min(1, window.usedPercent / 100)),
@@ -86,7 +96,7 @@ export function agentUsageGlance(quota: AgentRegistrationLiveState["quota"], now
     .filter((reading) => reading.fraction !== undefined)
     .map((reading) => ({
       key: reading.key,
-      label: shortLabels[reading.label] ?? reading.label,
+      label: reading.label.split(" · ").map((part) => shortLabels[part] ?? part).join(" · "),
       percent: Math.round(reading.fraction! * 100),
       detail: `${reading.label}: ${reading.value}${reading.detail ? ` · ${reading.detail}` : ""}`,
     }));

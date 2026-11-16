@@ -49,12 +49,12 @@ export class DingTalkEffectCoordinator {
       target: new DingTalkEffectParticipant(this.target.database,target,this.target.path!) };
   }
   /** Candidate discovery at the target placement, never a copied primary ACL. */
-  async destinations(job: DingTalkInboundJob,kind: "channel" | "automation") {
+  async destinations(job: DingTalkInboundJob) {
     this.plan("0".repeat(64),"t",this.target);dingtalkInboundHandle({ app: this.app,job });
     const sourceRef="dingtalk:inbound-"+await sha256Hex(JSON.stringify([job.connectionId,job.scopeDigest,job.inboundGeneration]));
     const placement=await new PostgresSpacePlacementDirectory(this.target.database).resolve({ requestId: crypto.randomUUID(),operation: "app.dingtalk.cross-target-discovery" },job.spaceId);
     return this.target.database.transaction({ requestId: crypto.randomUUID(),operation: "app.dingtalk.cross-target-candidates",
-      placement: { spaceId: placement.spaceId,shardId: placement.shardId,placementEpoch: placement.placementEpoch } },tx=>dingtalkEffectTargets(tx,job,sourceRef,kind));
+      placement: { spaceId: placement.spaceId,shardId: placement.shardId,placementEpoch: placement.placementEpoch } },tx=>dingtalkEffectTargets(tx,job,sourceRef));
   }
   async execute(input: { job: DingTalkInboundJob; destination: DingTalkEffectDestination; proof: DingTalkCoordinationNativeProof;
     signal: AbortSignal; runTarget(database: AuthorityDatabase,authority: DingTalkEffectAuthority,current: Current): Promise<unknown> }) {

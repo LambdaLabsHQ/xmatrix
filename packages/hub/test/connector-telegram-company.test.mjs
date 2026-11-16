@@ -83,7 +83,7 @@ test("Telegram removal affects only the selected bot; joining never regrants", (
 });
 test("Telegram ingress rejects unauthenticated parsing and retries failed durable delivery without Automation", async () => {
   const effects = [], deps = { ...TELEGRAM_INGRESS_DEPENDENCIES, native: async () => native, rooms: () => ({ confirm: async () => effects.push("confirmed"), route: async () => binding, current: async () => true }),
-    client: () => ({ confirmAdministrator: async () => effects.push("administrator") }), apps: () => ({}), deliver: async () => { effects.push("delivery"); throw Error("commit failed"); }, automate: async () => effects.push("automation") };
+    client: () => ({ confirmAdministrator: async () => effects.push("administrator") }), apps: () => ({}), deliver: async () => { effects.push("delivery"); throw Error("commit failed"); }, events: async () => effects.push("automation") };
   const request = payload => new Request("https://hub.example.test", { method: "POST", headers: { "x-telegram-bot-api-secret-token": native.secret }, body: JSON.stringify(payload) });
   assert.equal((await handleTelegramAppDelivery(env, new Request("https://hub.example.test", { method: "POST", body: "bad JSON" }), deps)).status, 401); assert.deepEqual(effects, []);
   assert.equal((await handleTelegramAppDelivery(env, request(update({ text: `/xmatrix_link@xMatrixFixtureBot ${"n".repeat(32)}` })), deps)).status, 200);

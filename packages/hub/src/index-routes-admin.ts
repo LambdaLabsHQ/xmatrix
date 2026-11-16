@@ -29,7 +29,6 @@ import { PLATFORM_ADMIN_REQUIRED_MESSAGE, resolvePlatformAdmin } from "./admin-p
 import { operatorTokenAuthorizes } from "./admin-operator-token";
 import { RelayPostgresAgentLaunchCoordinatorService } from "./postgres-agent-launch-coordinator";
 import { wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
-import { handOverAutomationChannels } from "./channel-automation-work";
 import { backfillHumanHandles } from "./human-handle-mint";
 import {
   PermissionFailure,
@@ -162,18 +161,6 @@ export function registerIndexRoutesAdmin(app: Hono<{ Bindings: Env }>): void {
     // A failed page is retried with the same cursor.
     return c.json({ channels: page.channels.length, failed, next: failed ? cursor ?? { shard: 0, after: "" } : page.next },
       failed ? 503 : 200);
-  }));
-  /* The one-time cutover to per-Channel Automation timing: wake every Channel
-     with Automation work, a page at a time. Post `next` back until it is null. */
-  app.post("/api/admin/automation/handover", (c) => jsonErrors(c, async () => {
-    await requirePartitionOperator(c.req.raw, c.env);
-    const body: { shardId?: unknown; afterChannelId?: unknown } = await c.req.json<Record<string, unknown>>().catch(() => ({}));
-    const page = await handOverAutomationChannels(c.env, {
-      ...(typeof body.shardId === "string" && body.shardId ? { shardId: body.shardId } : {}),
-      ...(typeof body.afterChannelId === "string" && body.afterChannelId
-        ? { afterChannelId: body.afterChannelId } : {}),
-    });
-    return c.json(page, page.failed ? 503 : 200);
   }));
 
   app.post("/api/admin/channel-family-partitions/:channelId/repair-agent-senders", (c) => jsonErrors(c, async () => {

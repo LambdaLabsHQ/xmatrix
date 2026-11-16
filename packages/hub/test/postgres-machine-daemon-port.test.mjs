@@ -537,7 +537,7 @@ test("every claimed spawn carries official Hub prompts and its harness preset", 
   assert.equal(byPreset.harness.id, "claude");
   assert.equal(byPreset.harness.agentType, "claude_code");
   assert.equal(byPreset.harness.backend, "claude-print");
-  assert.deepEqual(byPreset.harness.defaultArgs, ["--dangerously-skip-permissions"]);
+  assert.deepEqual(byPreset.harness.launcherNames.slice(0, 2), ["claude", "claude-code"]);
   assert.equal(byPreset.harness.displayName, undefined, "presentation fields stay on the Hub");
   assert.equal(byLauncher.harness.id, "codex");
   assert.equal(custom.harness, undefined, "a custom runtime has no Hub preset to send");

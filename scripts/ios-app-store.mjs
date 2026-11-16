@@ -13,6 +13,18 @@ const state = (row) => row.attributes.appVersionState ?? row.attributes.appStore
 const query = (values) => new URLSearchParams(values).toString();
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+export const REQUIRED_DESCRIPTION_LINKS = Object.freeze([
+  "https://www.apple.com/legal/internet-services/itunes/dev/stdeula/",
+  "https://xmatrix.sh/privacy",
+]);
+
+// App Review asked (Guideline 3.1.2(c), 2026-11-15) that the Notes field say
+// where each required subscription disclosure is, for every future submission.
+export const SUBSCRIPTION_REVIEW_NOTE = "Subscriptions: xMatrix Pro Monthly (1 month) and xMatrix Pro Annual (1 year) are sold in Settings > Billing. " +
+  "Each purchase button shows the subscription title, length and App Store price; the same screen links the Terms of Use (EULA) " +
+  "(Apple's standard EULA, https://www.apple.com/legal/internet-services/itunes/dev/stdeula/) and the Privacy Policy (https://xmatrix.sh/privacy). " +
+  "The App Description links both, and the Privacy Policy field points to https://xmatrix.sh/privacy.";
+
 export function validateMetadata(metadata) {
   const allowed = ["bundleId", "copyright", "localizations"];
   if (!metadata || Object.keys(metadata).some((key) => !allowed.includes(key)) || metadata.bundleId !== "sh.xmatrix.app") {
@@ -29,6 +41,13 @@ export function validateMetadata(metadata) {
     if (Object.keys(entry).some((key) => key !== "locale" && !(key in limits))) throw new Error("Unrecognized public metadata field.");
     for (const [key, limit] of Object.entries(limits)) {
       if (typeof entry[key] !== "string" || !entry[key].length || [...entry[key]].length > limit) throw new Error(`Invalid metadata field: ${key}.`);
+    }
+    // Guideline 3.1.2(c): every localization of an app with auto-renewable
+    // subscriptions must link the Terms of Use (EULA) and privacy policy. The
+    // release overwrites the description with this file, so a link added only
+    // in App Store Connect would be lost on the next submission.
+    for (const link of REQUIRED_DESCRIPTION_LINKS) {
+      if (!entry.description.includes(link)) throw new Error(`Metadata description must link ${link}.`);
     }
     for (const key of ["supportUrl", "marketingUrl"]) {
       let url;
@@ -220,7 +239,7 @@ export async function submitRelease(api, { appId, version, buildNumber, metadata
   }
   if (!review) throw new Error("Configure private App Review details at Apple before enabling submission.");
   const details = review.attributes;
-  const notes = privateNotes ? `${privateNotes}\n\nRelease: ${version} (${buildNumber}).` : details.notes;
+  const notes = privateNotes ? `${privateNotes}\n\n${SUBSCRIPTION_REVIEW_NOTE}\n\nRelease: ${version} (${buildNumber}).` : details.notes;
   if (typeof notes !== "string" || !notes.trim() || notes.length > 4000) throw new Error("Private App Review notes are missing or exceed Apple's limit.");
   for (const field of ["contactFirstName", "contactLastName", "contactEmail", "contactPhone"]) {
     if (!details[field]) throw new Error("Private App Review contact information is incomplete.");

@@ -203,3 +203,18 @@ test("empty and null complete relationships remain usable snapshots", async () =
     assert.deepEqual(writes(accepted.calls), [`PATCH ${path}`]);
   }
 });
+
+test("an uploaded asset's per-read assetToken does not invalidate its delete plan, but a changed checksum does", async () => {
+  const deletion = { path: { id: "shot-1" } };
+  let reads = 0, checksum = "a";
+  const shot = () => ({ data: { type: "subscriptionAppStoreReviewScreenshots", id: "shot-1", attributes: {
+    fileName: "SOURCE", fileSize: 10, sourceFileChecksum: checksum, assetToken: `token-${++reads}`, assetDeliveryState: { state: "COMPLETE" } } } });
+  const routes = { "GET /v1/subscriptionAppStoreReviewScreenshots/shot-1": shot, "DELETE /v1/subscriptionAppStoreReviewScreenshots/shot-1": null };
+  const planned = await run(routes, command("api_plan", "subscriptionAppStoreReviewScreenshots_deleteInstance", deletion));
+  const deleted = await run(routes, command("api_write", "subscriptionAppStoreReviewScreenshots_deleteInstance", { ...deletion, digest: digestOf(planned) }));
+  assert.deepEqual(writes(deleted.calls), ["DELETE /v1/subscriptionAppStoreReviewScreenshots/shot-1"]);
+  checksum = "b";
+  const stale = await withApple(routes, () => assert.rejects(ACTIONS.api_write.execute({ credentials },
+    statement(command("api_write", "subscriptionAppStoreReviewScreenshots_deleteInstance", { ...deletion, digest: digestOf(planned) }))), /resource changed/u));
+  assert.deepEqual(writes(stale.calls), []);
+});

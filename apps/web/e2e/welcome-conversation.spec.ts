@@ -162,6 +162,40 @@ test.describe("an agent too old for xMatrix", () => {
   });
 });
 
+test.describe("a Mac browser", () => {
+  test.use({ ...E2E_DESKTOP_CONTEXT,
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" });
+
+  test("is offered the app first, with the terminal one click away", async ({ page }) => {
+    // Most new people left within half a minute of a terminal command (11-01);
+    // on a Mac or PC the app connects the computer without one.
+    await welcomeOnFirstOpen(page);
+    const welcome = page.getByTestId("connect-machine");
+    await expect(welcome).toContainText("Get the xMatrix app on this computer", { timeout: 20_000 });
+    await expect(welcome.getByRole("link", { name: "Download for macOS" })).toHaveAttribute("href", /latest-(arm64|x64)\.dmg$/u);
+    await expect(welcome).not.toContainText("--connect");
+    await expect(welcome).not.toContainText("Approve it here");
+    await welcome.screenshot({ path: test.info().outputPath("app-first-mac.png") });
+    await welcome.getByRole("button", { name: "Use a terminal instead" }).click();
+    await expect(welcome).toContainText("Run this on your computer");
+    await expect(welcome).toContainText("Approve it here");
+  });
+});
+
+test.describe("a Windows browser in Chinese", () => {
+  test.use({ ...E2E_DESKTOP_CONTEXT, locale: "zh-CN",
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36" });
+
+  test("is offered the Windows installer first", async ({ page }) => {
+    await welcomeOnFirstOpen(page);
+    const welcome = page.getByTestId("connect-machine");
+    await expect(welcome).toContainText("在这台电脑上装 xMatrix App", { timeout: 20_000 });
+    await expect(welcome.getByRole("link", { name: "下载 Windows 版" })).toHaveAttribute("href", /latest-x64\.exe$/u);
+    await expect(welcome.getByRole("button", { name: "改用终端" })).toBeVisible();
+    await welcome.screenshot({ path: test.info().outputPath("app-first-windows-zh.png") });
+  });
+});
+
 test.describe("desktop app", () => {
   test.use(E2E_DESKTOP_CONTEXT);
 

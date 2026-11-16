@@ -5,7 +5,7 @@ import { registrationLaunchContextReader } from "./registration-launch-context";
 import { START_INTENT_DECLINED, registrationLaunchChooser } from "./registration-launch-choice";
 import { REGISTRATION_PREPARATION_REJECTION_CODES, digestCanonicalCloneCborV1 } from "@xmatrix/protocol";
 import type { RoutingEvaluator } from "./agent-routing-evaluation";
-import type { AutoLaunchTags, HarnessTooOld, MachineAgents, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { AutoLaunchTags, HarnessTooOld, MachineAgents, OfflineMachine, QuotaExhausted, QuotaRetryRegistration, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
 import {
   PostgresChannelSpaceDirectory, PostgresRegistrationLaunchRepository, PostgresRegistrationRebornRepository,
   PostgresQuotaRetryRepository,
@@ -61,14 +61,15 @@ export async function executeRegistrationLaunchDispatch(input: {
         code: REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code) || /^[a-z][a-z0-9_]{2,79}$/u.test(item.code)
           ? item.code : "registration_launch_rejected",
         ...(item.tooOld ? { tooOld: item.tooOld } : {}),
-        ...(item.offline ? { offline: item.offline } : {}), ...(item.machineAgents ? { machineAgents: item.machineAgents } : {}) })),
+        ...(item.offline ? { offline: item.offline } : {}), ...(item.machineAgents ? { machineAgents: item.machineAgents } : {}),
+        ...(item.quotaExhausted ? { quotaExhausted: item.quotaExhausted } : {}) })),
     });
   }
   // A recorded refusal answers its summon now; accepted launches answer as the coordinator publishes them.
   if (result.rejected.length && input.env) await publishChannelInvocationsChanged(input.env as Env, input.channelId);
   const rejected = [];
   /** Used-up refusals with what they rested on, for a quota retry's own re-check. */
-  const quotaRefusals: Array<{ selectionIndex: number; registrations: SpaceAgentRegistrationKey[]; refusedThrough: string }> = [];
+  const quotaRefusals: Array<{ selectionIndex: number; registrations: QuotaRetryRegistration[]; refusedThrough: string }> = [];
   for (const item of result.rejected) {
     const { quotaTargets, quotaRefusedThrough, ...publicItem } = item;
     // A refusal for used-up quota rests on a reading that may already be out
@@ -317,19 +318,29 @@ async function newestMessageFor(env: Env, input: { channelId: string; instanceId
   return newest ? { messageId: newest.messageId as string, body: newest.body as string } : undefined;
 }
 
-/** Holds a source Instance whose provider quota ran out until its window resets. */
+/** Records what a source Instance's refused turn used up of its provider quota. */
 export function holdRegistrationUsageLimit(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string; resetsAt?: string;
+  quotaScope?: string; usage?: unknown;
 }) {
   return executeRegistrationUsageLimitHold({ ...runtimePlacement(env), ...input });
 }
 
-/** A reborn of a source Instance as a fresh registration Run of its tuple. */
+/** A reborn of a source Instance as a fresh registration Run of its tuple,
+ * on `preferredRuntimeModel` instead of its predecessor's model when given. */
 export function prepareRegistrationReborn(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceMessageId: string;
   sourceInstanceId: string; sourceMention?: string; prompt: string; quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
+  preferredRuntimeModel?: string;
 }) {
   return executeRegistrationRebornPrepare({ ...runtimePlacement(env), ...input });
+}
+
+/** What decides the model a stopped Instance can continue on. */
+export async function readContinuationModelFacts(env: Env, input: {
+  commandId: string; channelId: string; sourceInstanceId: string;
+}) {
+  return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).continuationModelFacts(input);
 }
 
 /** Jev decides whether a new conversation's first message asks for an Agent;
@@ -475,7 +486,7 @@ async function placedRebornRepository(input: { env?: AppConnectorEnv; database: 
 export async function executeRegistrationRebornPrepare(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
   channelId: string; sourceMessageId: string; sourceInstanceId: string; sourceMention?: string; prompt: string;
-  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
+  quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission; preferredRuntimeModel?: string;
 }) {
   return (await placedRebornRepository(input, "reborn")).prepare(input);
 }
@@ -489,11 +500,12 @@ export async function executeRestingInstanceWake(input: {
   return (await placedRebornRepository(input, "reborn")).wakeResting(input);
 }
 
-/** The source Instance's provider account is used up: its pool is held empty
- * until the reset. Moving its work is a separate `handoff:@auto`. */
+/** A turn of the source Instance was refused for its provider usage limit:
+ * what it used up and the reading it was told from are recorded together.
+ * Moving its work (a `handoff:@auto`, or a quota retry) is separate. */
 export async function executeRegistrationUsageLimitHold(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceInstanceId: string; resetsAt?: string;
+  channelId: string; sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown;
 }) {
   return (await placedRebornRepository(input, "handoff")).holdUsageLimit(input);
 }
@@ -511,7 +523,7 @@ interface MessageLaunchResult {
 /** A summon the dispatch refused, and what it names: a program too old, offline machines,
  * or what a named machine runs. */
 export interface MessageLaunchRejection { code: string; sourceMention?: string; tooOld?: HarnessTooOld;
-  offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaRetryId?: string; selectionIndex?: number }
+  offline?: OfflineMachine[]; machineAgents?: MachineAgents; quotaExhausted?: QuotaExhausted; quotaRetryId?: string; selectionIndex?: number }
 
 type MessageLaunchDependencies = {
   launch?: (input: MessageLaunch) => Promise<MessageLaunchResult>;

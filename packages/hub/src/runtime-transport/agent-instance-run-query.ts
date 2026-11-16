@@ -1,3 +1,4 @@
+import type { RegistrationUsageLimit } from "@xmatrix/db";
 import { retryablePostgresFailure } from "../postgres-error-classification";
 
 /** What an Agent Instance socket reads and changes of its own Run and Instance. */
@@ -6,9 +7,10 @@ export interface AgentInstanceRuntime {
   getRun(input: { runId: string; ownerUserId: string }): Promise<Record<string, unknown>>;
   /** One Instance connect, transition, handoff fence or presentation. */
   transition(command: Record<string, unknown>): Promise<Record<string, unknown>>;
-  /** Records that the Instance's harness hit its usage limit, so the Channel hands off. */
+  /** Records what the Instance's refused turn used up of its provider quota,
+   * with the reading the daemon told it from. */
   holdUsageLimit(input: { commandId: string; actorUserId: string; channelId: string;
-    sourceInstanceId: string; resetsAt?: string }): Promise<unknown>;
+    sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown }): Promise<RegistrationUsageLimit | undefined>;
   /** Records whether the Run rests, which starts or withdraws its idle sleep (instance-idle-sleep.ts). */
   markResting?(input: { runId: string; channelId: string; ownerUserId: string; resting: boolean }): Promise<unknown>;
 }

@@ -104,8 +104,9 @@ export async function machineRunLifecycleReport(
     repoPool: input.eventType === "machine_spawn_result" ? machineSpawnRepoPoolMetadata(payload) : undefined,
     preserveInstanceForReborn: input.runLifecycleStopPurpose === "reborn-predecessor",
   });
-  // A Run the report changed, an execution or a stop result moves a summon's, stop's or reply's chip.
-  if (value.reused !== true && (input.eventType === "machine_execution_report" || input.eventType === "machine_stop_result" ||
+  // A Run the report changed, a recorded execution or a stop result moves a summon's, stop's or reply's chip.
+  if (value.reused !== true && (input.eventType === "machine_execution_report" && value.status === "recorded" ||
+      input.eventType === "machine_stop_result" ||
       (Array.isArray(value.changedRunIds) && value.changedRunIds.length > 0))) {
     await publishChannelInvocationsChanged(env, text(input.channelId, "channelId", 300));
   }

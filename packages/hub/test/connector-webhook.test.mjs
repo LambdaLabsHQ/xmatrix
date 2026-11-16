@@ -183,7 +183,7 @@ test("a failed route lookup stops Channel delivery and Automation", async () => 
     if (sourceRef === "webhook:*") throw new Error("route lookup unavailable");
     return [{ channelId: "channel-a", authorityRootUserId: "user-a", features: ["delivery"] }];
   } });
-  dependencies.automations = async () => { automated = true; };
+  dependencies.events = async () => { automated = true; };
   await assert.rejects(runIngress(dependencies), /route lookup unavailable/u);
   assert.equal(appended.length, 0);
   assert.equal(automated, false);
@@ -201,7 +201,7 @@ test("partial Channel failure rejects the delivery; retry uses identical append 
     if (failing && channelId === "b") return new Response("{}", { status: 503 });
     return new Response("{}");
   };
-  dependencies.automations = async () => { automated += 1; };
+  dependencies.events = async () => { automated += 1; };
   await assert.rejects(runIngress(dependencies), /Connector Channel delivery failed/u);
   assert.equal(automated, 0);
   failing = false;

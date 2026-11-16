@@ -169,7 +169,7 @@ test("explicit unknown projections withdraw cached quota without removing counte
 test("usage-limit holds reach catalog and member presentation without a fabricated window", async () => {
   const channels = [channel("held")];
   const database = { transaction: async (_context, callback) => callback({ query: async () => [{
-    owner_user_id: "owner", machine_id: "machine", harness: "claude", remaining: 0,
+    owner_user_id: "owner", machine_id: "machine", harness: "claude", source: "daemon", remaining: 0,
     observed_at: now, expires_at: new Date(Date.now() + 60_000).toISOString(), windows_json: null,
   }] }) };
   await projectRegistrationQuota(database, channels, "held-read");

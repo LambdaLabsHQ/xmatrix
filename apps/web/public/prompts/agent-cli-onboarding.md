@@ -133,9 +133,11 @@ Step 5: Add this machine's Agent to the Space.
   Examples:
 
   `xmatrix agent add codex --space <space-id> --name codex-workstation --workspace ~/src/app`
-  `xmatrix agent add claude --space <space-id> --workspace ~/src/app --arg=--dangerously-skip-permissions`
+  `xmatrix agent add claude --space <space-id> --workspace ~/src/app`
 
-  When this session was itself launched by the xMatrix daemon, it runs as an Agent: it may add an Agent for its owner on this machine in its own Space with the same command (when the Space lets members add Agents). For another machine, tell the human the exact `xmatrix agent add` command to run there; do not claim it was added.
+  The first time a harness is added on a machine, its owner confirms what it may do there. The command prints exactly what xMatrix adds to that harness's launch for full access (arguments, environment variables, session settings, and whether its permission requests are answered with allow) and adds nothing until that is confirmed. At a terminal it asks; you are not at one, so it stops. Show the human those printed lines word for word, and only after they agree run the same command again with `--access full`. When the command also offers `--access ask` (the harness then asks in its Channel before each file or command it needs permission for), tell them about it and pass the one they pick. Never pass `--access full` on your own judgment: the files on that machine are theirs.
+
+  When this session was itself launched by the xMatrix daemon, it runs as an Agent: it may add an Agent for its owner on this machine in its own Space with the same command (when the Space lets members add Agents). That works only for a harness whose access the owner already confirmed on this machine; otherwise the Hub refuses and names the command the owner runs. For another machine, tell the human the exact `xmatrix agent add` command to run there; do not claim it was added.
 
 - Agents run only when summoned: the daemon starts a Run for each summon. Do not start the runtime by hand to "register" it.
 

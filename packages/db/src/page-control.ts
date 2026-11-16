@@ -7,11 +7,11 @@ import { MessageAuthorityError } from "./message-authority-error.js";
 import { ControlError } from "./control-error.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import { singleReadStatements } from "./single-read-statements.js";
+import { retryTransactionBeforeCommit } from "./transaction-recovery.js";
 import { channelCapabilityPredicate, requireChannelCapability } from "./channel-capability-policy.js";
 import { loadChannelAgentPresence } from "./channel-agent-presence.js";
 import { requireAgentChannelAccess, type AgentChannelRunProof } from "./agent-channel-access.js";
 import { PostgresChannelSpaceDirectory, PostgresSpacePlacementDirectory } from "./placement.js";
-import { removePageAutomations } from "./automation-page-anchor.js";
 import { keepSectionChanges, readRevisionBodies, walkSectionChanges, type SectionRevisionRow } from "./page-section-changes.js";
 import { keepBlames, walkBlame, type BlameRevisionRow } from "./page-blame.js";
 import type {
@@ -260,10 +260,7 @@ interface CoWritingInput {
   requestId: string; spaceId: string; pageId: string; principal: PagePrincipal; conversationId: string;
 }
 
-/**
- * A committed revision. Its schedule lines are synced to the page's
- * Automations after the commit, by the Hub (docs/design/pages-live-document.md §6.4).
- */
+/** A committed revision. */
 export interface PageCommit {
   page: PageSummary; revision: PageRevision;
 }
@@ -325,6 +322,20 @@ export async function inActiveSpace<T>(database: AuthorityDatabase,
   ErrorType: new (code: string, status: number) => Error,
   callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
   return database.transaction(await activeSpaceContext(database, input, ErrorType), callback);
+}
+
+/** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
+export async function readInActiveSpace<T>(database: AuthorityDatabase,
+  input: { requestId: string; operation: string; spaceId: string },
+  ErrorType: new (code: string, status: number) => Error,
+  callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
+  const session = database.openSession();
+  try {
+    const context = await activeSpaceContext(session, input, ErrorType);
+    return await callback(singleReadStatements(session, context));
+  } finally {
+    await session.close();
+  }
 }
 
 /** A page as one actor sees it: their access, and whether it is the Space's governance page. */
@@ -389,33 +400,6 @@ async function accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: A
   }).filter((row) => row.canRead);
 }
 
-/** Every page a principal can read in a Space, with whether they can edit it; none when they are not a member. */
-export async function pageAccessMap(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal):
-  Promise<Map<string, { canEdit: boolean; agentSuggestOnly: boolean }>> {
-  let actor: PageActor;
-  try {
-    actor = await pageActor(tx, spaceId, principal, false);
-  } catch (error) {
-    if (error instanceof PageControlError && error.status < 500) return new Map();
-    throw error;
-  }
-  return new Map((await accessibleTree(tx, spaceId, actor, [])).map((row) =>
-    [row.page_id, { canEdit: row.canEdit, agentSuggestOnly: row.agent_suggest_only }]));
-}
-
-/**
- * What a principal may do with one page, in the caller's transaction. An
- * Agent Run acts with its owner's access, and only while it is live.
- */
-export async function pageAccess(tx: DatabaseTransaction, spaceId: string, principal: PagePrincipal,
-  pageId: string, write: boolean): Promise<{ canRead: boolean; canEdit: boolean; agentSuggestOnly: boolean;
-    actor: PageActor }> {
-  const actor = await pageActor(tx, spaceId, principal, write);
-  const row = (await accessibleTree(tx, spaceId, actor, [])).find((item) => item.page_id === pageId);
-  return { canRead: Boolean(row), canEdit: Boolean(row?.canEdit), agentSuggestOnly: Boolean(row?.agent_suggest_only),
-    actor };
-}
-
 export interface PageRepositoryOptions {
   /** The deployment's own operator Space, which is not charged Agent credits. */
   creditsWaivedSpaceId?: string;
@@ -443,15 +427,9 @@ export class PostgresPageRepository {
   }
 
   /** Lock-free reads retain READ COMMITTED's per-statement snapshots and placement fences. */
-  private async readInSpace<T>(requestId: string, operation: string, spaceId: string,
+  private readInSpace<T>(requestId: string, operation: string, spaceId: string,
     callback: (tx: DatabaseTransaction) => Promise<T>): Promise<T> {
-    const session = this.database.openSession();
-    try {
-      const context = await activeSpaceContext(session, { requestId, operation, spaceId }, PageControlError);
-      return await callback(singleReadStatements(session, context));
-    } finally {
-      await session.close();
-    }
+    return readInActiveSpace(this.database, { requestId, operation, spaceId }, PageControlError, callback);
   }
 
   private accessibleTree(tx: DatabaseTransaction, spaceId: string, actor: Actor,
@@ -603,7 +581,7 @@ export class PostgresPageRepository {
   async tree(input: { requestId: string; spaceId: string; principal: PagePrincipal }):
     Promise<{ pages: PageSummary[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
+    return this.readInSpace(bounded(input.requestId, "requestId"), "page.tree", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       // How far a person has read each page is theirs: an Agent Run has none.
@@ -661,7 +639,8 @@ export class PostgresPageRepository {
     revision?: number; conversationId?: string; blockId?: string }): Promise<{ page: PageDocument }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
-    return this.inSpace(bounded(input.requestId, "requestId"), "page.read", spaceId, async (tx) => {
+    const requestId = bounded(input.requestId, "requestId");
+    const load = async (tx: DatabaseTransaction): Promise<{ page: PageDocument }> => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const row = await this.page(tx, spaceId, actor, pageId, "read");
       const revision = input.revision === undefined ? Number(row.head_revision) : input.revision;
@@ -681,7 +660,15 @@ export class PostgresPageRepository {
         });
       }
       return { page: { ...this.summary(row), body: rev.body ?? "", revisionInfo: revisionOf(rev) } };
-    });
+    };
+    // The conversation link is one idempotent row. A lost response before
+    // COMMIT cannot have committed it, so that attempt runs once more. A read
+    // with no link takes no lock and must not open a transaction.
+    if (input.conversationId) {
+      return retryTransactionBeforeCommit(this.database, await activeSpaceContext(this.database,
+        { requestId, operation: "page.read", spaceId }, PageControlError), load);
+    }
+    return this.readInSpace(requestId, "page.read", spaceId, load);
   }
 
   async create(input: { requestId: string; spaceId: string; principal: PagePrincipal;
@@ -1557,7 +1544,7 @@ export class PostgresPageRepository {
   }
 
   async remove(input: { requestId: string; spaceId: string; pageId: string; principal: PagePrincipal }):
-    Promise<{ removed: boolean; automationChannels: string[]; programChannels: string[] }> {
+    Promise<{ removed: boolean; programChannels: string[] }> {
     const spaceId = bounded(input.spaceId, "spaceId");
     const pageId = bounded(input.pageId, "pageId");
     return this.inSpace(bounded(input.requestId, "requestId"), "page.remove", spaceId, async (tx) => {
@@ -1573,7 +1560,6 @@ export class PostgresPageRepository {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }
-      const automationChannels = await removePageAutomations(tx, { spaceId, pageId, at: new Date().toISOString() });
       const removed = await tx.query({ name: "page_remove_v1",
         text: "DELETE FROM data.pages WHERE space_id=$1 AND page_id=$2 RETURNING page_id",
         values: [spaceId, pageId], maxRows: 1 });
@@ -1582,7 +1568,7 @@ export class PostgresPageRepository {
         text: `UPDATE data.norn_programs SET stop_reason='Removed with its page',updated_at=clock_timestamp()
           WHERE space_id=$1 AND page_id=$2 AND state='running' AND stop_reason IS NULL RETURNING channel_id`,
         values: [spaceId, pageId], maxRows: 200 })).map(row => String(row.channel_id));
-      return { removed: removed.length === 1, automationChannels, programChannels };
+      return { removed: removed.length === 1, programChannels };
     });
   }
 

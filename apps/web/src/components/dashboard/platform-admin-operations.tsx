@@ -1,17 +1,15 @@
 "use client";
 
 /**
- * The platform's moving parts: Machines and the runtimes on them, Runs, and
- * Automations. Statuses, counts, and times only;
- * Machine host names, Run payloads, and Automation prompts or errors are not
- * part of this read.
+ * The platform's moving parts: Machines and the runtimes on them, and Runs.
+ * Statuses, counts, and times only; Machine host names and Run payloads are
+ * not part of this read.
  */
 
 import type { AdminOperations, AdminOperationsHarness, AdminOperationsMachine } from "@xmatrix/protocol";
 
-import { noticeClass } from "@/components/ui/status-tone";
 import { AdminTable, type AdminColumn } from "./admin-table";
-import { TimeCell, adminAutomationStats, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
+import { TimeCell, adminPercent, adminStatusLine, adminSum } from "./platform-admin-cells";
 import { openAdminUser, useAdminOperations } from "./platform-admin-data";
 import { adminTime, formatAdminCount } from "./platform-admin-overview";
 import { ToolDetailSection } from "./tool-split";
@@ -48,29 +46,22 @@ const HARNESS_COLUMNS: AdminColumn<AdminOperationsHarness>[] = [
 export function PlatformAdminOperations({ token }: { token?: string }) {
   return (
     <AdminQueryView title="Operations" query={useAdminOperations(token)} generatedAt={(operations) => operations.generatedAt}
-      emptyTitle="No operations data yet" emptyBody="Machines, Runs, and Automations appear here once they exist.">
+      emptyTitle="No operations data yet" emptyBody="Machines and Runs appear here once they exist.">
       {(operations) => <div className="space-y-7"><OperationsBody operations={operations} /></div>}
     </AdminQueryView>
   );
 }
 
 function OperationsBody({ operations }: { operations: AdminOperations }) {
-  const { runs, automations } = operations;
+  const { runs } = operations;
   const machines = adminSum(operations.machinesByStatus);
   const online = operations.machinesByStatus.online ?? 0;
   const started = adminSum(runs.byStatus);
   const failedRuns = runs.byStatus.failed ?? 0;
-  const occurrences = adminSum(automations.occurrencesByStatus);
   const cut = (key: string, what: string) =>
     operations.truncated.includes(key) ? `Showing the most recent ${what} only; the Hub caps one read.` : undefined;
   return (
     <>
-      {automations.overdue > 0 && (
-        <p role="status" className={noticeClass("attention", "rounded-lg px-4 py-3")}>
-          {formatAdminCount(automations.overdue)} Automation occurrences are past their scheduled time.
-        </p>
-      )}
-
       <ToolDetailSection title="Machines">
         <AdminStatGrid stats={[
           { label: "Machines", value: formatAdminCount(machines),
@@ -108,16 +99,6 @@ function OperationsBody({ operations }: { operations: AdminOperations }) {
             date: day.date, messages: day.started,
           }))} />
         </div>
-      </ToolDetailSection>
-
-      <ToolDetailSection title="Automations">
-        <AdminStatGrid stats={[
-          ...adminAutomationStats(automations, operations.days),
-          { label: "Overdue", value: formatAdminCount(automations.overdue), hint: "Pending past their time" },
-        ]} />
-        {occurrences > 0 && (
-          <p className="mt-3 text-xs text-muted-foreground">Occurrences by status: {adminStatusLine(automations.occurrencesByStatus)}</p>
-        )}
       </ToolDetailSection>
 
     </>

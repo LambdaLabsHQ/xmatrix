@@ -12,8 +12,8 @@ checker, evaluator and ledger.
 
 A message whose Markdown has one top-level fenced block tagged `norn run` is
 a program. A block tagged `norn` is only shown, and so is one inside a quote.
-The message is the program's identity: seen again, it starts nothing. People,
-Agents and Automations start a program the same way, by sending the message.
+The message is the program's identity: seen again, it starts nothing. People
+and Agents start a program the same way, by sending the message.
 
 The Hub checks the program when the message is committed. A program that does
 not check starts nothing, and a reply under the message names the line and
@@ -36,9 +36,8 @@ carries why. Typing the fence keeps that whole string. A space opens an
 ordinary one-word language (`` ```ts ``). Enter opens a fence whose info has a
 space in it (`` ```norn run review ``, `` ```norn run 物业费 ``).
 
-A saved revision is synced like the Page's schedule lines
-(`syncPagePrograms`, from the Page session's commit, a new Page, and a
-restored revision), as whoever wrote it:
+A saved revision is synced (`syncPagePrograms`, from the Page session's
+commit, a new Page, and a restored revision), as whoever wrote it:
 
 - A new block that checks starts its program.
 - A changed block revises its running program: the same ledger is evaluated
@@ -151,10 +150,11 @@ polls.
 ## Delivering a request
 
 This version delivers to a harness by its name (`@codex`, `@claude`, …) and
-to `@auto`. Each delivery starts a new Run. A request to a person, or to an
-Instance by its address, is settled `Broke` with that reason; cards for
-people come later. A request offered to several with `anyOf` is taken for the
-group by the first of them this host can reach.
+to `@auto`, each delivery starting a new Run, and to a person by name (below).
+A program that names an Instance by its address has its request settled
+`Broke` with that reason; an Instance holds a request only when its holder
+delegated it there ([Delegating](#delegating)). A request offered to several
+with `anyOf` is taken for the group by the first of them this host can reach.
 
 The coordinator posts one message per holding, as xMatrix, in reply to the
 program's message. Its id is `norn:<reference>:<epoch>`, so a repeat appends
@@ -225,19 +225,74 @@ ends, or they can no longer read the conversation (`Broke`, by the same
 records how on the card's message as a command result and the wait on them
 ends.
 
+## Delegating
+
+Whoever holds a request can delegate it, once, to one participant who answers
+it for them ([Norn spec §7](https://github.com/norn-lang/norn/blob/main/docs/spec.md#7-where-programs-live)):
+a person who cannot judge a question passes it to an Agent that can, or an
+Agent passes a decision that is not its to make to its person. The program
+does not see it: the request keeps its identity, its `~by` and its form, and
+takes a new epoch, so it is a new holding and a new delivery message. The
+ledger records who delegated it, to whom, when and why.
+
+- A person delegates from the card (**Delegate…**:
+  `POST /api/channels/:channel/norn-requests/:ref/delegate`), found by their
+  id as for an answer. An Agent Run uses
+  `xmatrix delegate <request> @who '<why>'`, and its delivery offers it.
+- The delegate is a person who can read the conversation, by name; an Agent
+  by its harness name, whose new Run takes it; or an Instance here by its
+  address (`@claude:2`), whose Run is the program's authority's or the
+  delegator's own, and which takes messages. The delivery goes to that
+  Instance alone, as to one asked again on a Page, and tells it that
+  answering does not end its Run. A participant the request leaves out
+  (`~except`) is refused, and so is a person for a request with conditions
+  such as `~repo`.
+- The delegate's delivery says who delegated it and quotes their words. A
+  person's card says so too, and its **Decline** reads **Give back**.
+- A delegate's answer settles the request. Their refusal or failure gives it
+  back to whoever delegated it instead (a new holding, delivered to them with
+  the delegate's words), and the program reads nothing; so does a delegate
+  that nobody works on any more, and an Instance that no longer takes
+  messages. Only whom the program asked can refuse or fail a request.
+- The card of a person who delegated says to whom (a note beginning
+  `NORN_DELEGATED_NOTE`) and no longer waits on them. While the request is
+  open they may take it back from that card
+  (`POST /api/channels/:channel/norn-requests/:ref/reclaim`): it comes to them
+  again as a new holding, and what the delegate answers afterwards is
+  refused. The request's index row keeps who delegated it by their id, or
+  the owner of the Agent that did (`norn_requests.delegator_user_id`, expand
+  migration 0256), while the ledger says it is delegated; the request's view
+  tells them (`yoursToTakeBack`). An Agent does not take a request back.
+- A program's own `handOver` or `cancel` ends a delegation, and the
+  deadline passes as it would have.
+
 ## Asking with a command
 
 An Agent Run that needs one answer does not have to write a program:
 `xmatrix confirm @Daniel Ship 4.2 now? --by 1d --otherwise No`,
 `xmatrix choose @Daniel "Which plan?" Monthly Yearly`, `xmatrix ask @codex …`.
 The Hub writes the program (`nornQuestionSource`), posts it to the Run's
-conversation as xMatrix, where everyone reads what is asked of whom, and
-starts it with the Run's Instance as its author and the Run's owner as its
-authority. Its result is the reply itself (`Answered(Yes)`, `Refused(…)`,
-`NoReply`), told to the Instance by its address, so it wakes to read it.
-`--otherwise` is what silence means: the answer taken when `--by` passes.
+conversation as xMatrix, and starts it with the Run's Instance as its author
+and the Run's owner as its authority. Its result is the reply itself
+(`Answered(Yes)`, `Refused(…)`, `NoReply`), told to the Instance by its
+address, so it wakes to read it. `--otherwise` is what silence means: the
+answer taken when `--by` passes.
+The Instance that asked can call the question off while it is open:
+`xmatrix cancel <request>` marks that program, and only that program, to
+stop, and the same call runs its pass. The request ends `Cancelled`, a
+person's card says it is no longer asked, an Agent that held it is let go,
+and the asker reads the program's end. A program an Agent wrote in a message
+is not called off this way.
 What xMatrix says for such a program is not threaded under the program's
 message, because that message is xMatrix's own and takes no reply.
+
+A person reads such a question once, on its card. The card names the Agent
+Instance that asks (`nornRequest.asker`, `claude:2`) and what silence means
+(`nornRequest.otherwise`), and its closing note says how it ended, including
+the answer taken for silence. The program's message (`norn-ask:…`) and its
+end (`norn-end:norn-ask:…`) are the asker's to read: the Web gives them no
+row, and the catalog neither previews them nor counts them unread
+(`isNornAskProgramMessage`).
 
 ## A reference shows the request
 
@@ -321,13 +376,12 @@ declares (`NORN_HOST_INTERFACE` in `norn-host.ts`):
 `every(1d)->or(ciFailed("acme/app"))->forEach(_ => run(…)->wait)` runs a
 round on its beat and at once when CI fails. Each pass stores the streams the
 program waits on or listens to (`norn_programs.waits_json`, expand migration
-0251). An event, arriving where Automation triggers arrive
-(`automation-triggers.ts`), is recorded as an occurrence in the ledger of
-every running program that waits on a matching stream, and the program is
+0251). An event arrives in `outside-events.ts`, from GitHub's webhook or a
+connector's ingress. It is recorded as an occurrence in the ledger of every
+running program that waits on a matching stream, and the program is
 evaluated at once (`norn-events.ts`). The value is the event in words, with
-its link. A program hears an event only under the rule an Automation does:
-its authority is a member who may act, and the Space's connection still
-covers the event's source. A program listens while a round of its loop is
+its link. A program hears an event only when its authority is a member who
+may act and the Space's connection still covers the event's source. A program listens while a round of its loop is
 out, too: the streams its loops take from are stored with the ones it waits
 on (`pass.listening`). Events that arrive during a round are kept in the
 ledger and are one more round when that one is over, with the latest event;
@@ -382,8 +436,14 @@ go once. Some stay (`NORN_INSTANCE_STAYS_SQL`):
 - one that asked a question (`xmatrix ask`, `confirm`, `choose`) whose program
   still runs, so the answer finds it;
 - in a Page program's conversation, the one a running program asks again by
-  name, and the one that ended a request last (answered, refused, or failed).
+  name, and the one that ended a request last (answered, refused, or failed);
+- one a request was delegated to by its address: it was already at work here,
+  and was not started for the request.
 
+An Instance a delivery started is let go the same way once its Agent
+delegated the request (`norn_requests.delegated_away_instance_id`, expand
+migration 0257): the request goes on with someone else, and nothing is left
+for it here unless one of the rules above keeps it.
 So a Page program's conversation always has the Agent that did the work last:
 a person who writes there after the program reaches it, with what it knows.
 The others are let go, also while the program runs, so a routine does not
@@ -439,9 +499,9 @@ by itself from there; the Agent that stayed takes what they say next.
 
 ## Not in this version
 
-- Requests to an existing Instance by its address.
+- Requests to an existing Instance by its address, other than one its holder
+  delegated there.
 - Facts from outside that hold once (a given pull request merged, a release
   that contains it).
 - A preview of what an edit to a Page's program would change before it is saved.
-- Moving `--wait`, cards, Automations and pull request subscriptions onto
-  the ledger.
+- Moving `--wait`, cards and pull request subscriptions onto the ledger.

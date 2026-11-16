@@ -22,6 +22,7 @@ import {
   type SocialSignInProvider,
   type WebAuthSession,
 } from "./auth-client";
+import { rememberAppSignOut } from "./app-sign-in";
 import { sessionNotReadyMessage, type SessionNotReadyGap } from "./session-not-ready";
 import { sameValue } from "./same-value";
 import {
@@ -340,6 +341,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async (options?: { redirectTo?: LogoutDestination }) => {
     const destination = logoutDestination(options?.redirectTo);
+    // Recorded first: the person is leaving this account, whatever the sign-out below answers.
+    rememberAppSignOut();
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
       router.push(destination);

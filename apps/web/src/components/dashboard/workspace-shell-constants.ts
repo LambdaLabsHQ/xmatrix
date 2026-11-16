@@ -157,8 +157,6 @@ export const RELAY_CLIENT_PROFILE_STORAGE_KEY = "xmatrix:relay-v2:client-profile
 
 export const DESKTOP_SETUP_VERSION = 1;
 
-export const AUTOMATION_REFRESH_INTERVAL_MS = 15_000;
-
 export const QUICK_REACTION_EMOJIS = ["👍", "❤️", "😂", "🎉", "👀", "✅"];
 
 /* The one chip material: `LiquidGlassPill`, the primitive the composer's

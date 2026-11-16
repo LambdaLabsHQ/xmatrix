@@ -36,6 +36,29 @@ async fn list_machine_daemons_api(
     Ok(response.daemons)
 }
 
+/// A preset's `access` block: per access level, what xMatrix adds to the
+/// launch, exactly as written. The launch code has no per-harness branch.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccess {
+    #[serde(default)]
+    pub full: AgentPresetAccessLevel,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPresetAccessLevel {
+    /// Joined to the launcher's argv (the ACP argv for the generic ACP backend).
+    #[serde(default)]
+    pub args: Vec<String>,
+    /// Environment variables set on the harness's own process.
+    #[serde(default)]
+    pub env: std::collections::BTreeMap<String, String>,
+    /// Sent when the harness's native session starts.
+    #[serde(default)]
+    pub session: std::collections::BTreeMap<String, String>,
+}
+
 /// One harness in the shared registry (`packages/protocol/src/agent-presets.json`).
 /// The JSON is the single source of truth for launcher aliases, backends,
 /// config directories, and install hints; Rust and TypeScript both read it, so
@@ -59,6 +82,9 @@ pub struct AgentPreset {
     /// already speaks ACP with no subcommand; absent defaults to `["acp"]`.
     #[serde(default)]
     pub acp_args: Option<Vec<String>>,
+    /// What xMatrix adds to this harness's launch to give it full access.
+    #[serde(default)]
+    pub access: AgentPresetAccess,
     #[serde(default)]
     pub avatar_url: String,
     pub launcher_names: Vec<String>,
@@ -71,6 +97,20 @@ pub struct AgentPreset {
 }
 
 impl AgentPreset {
+    /// The grant of a launch in `full` access (`agentAccessGrant` in
+    /// `@xmatrix/protocol`): what a launch runs with when no Hub grant reached it.
+    pub fn full_access_grant(
+        &self,
+    ) -> xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+        xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+            mode: "full".into(),
+            args: self.access.full.args.clone(),
+            env: self.access.full.env.clone(),
+            session: self.access.full.session.clone(),
+            approves_requests: matches!(self.backend.as_str(), "acp" | "grok-acp" | "claude-print"),
+        }
+    }
+
     /// The legacy `agentType` string this harness registers with the Hub.
     pub fn agent_type(&self) -> &str {
         self.agent_type.as_deref().unwrap_or(&self.id)
@@ -590,6 +630,7 @@ mod tests {
             default_args: vec![],
             backend: "claude-print".to_string(),
             acp_args: None,
+            access: Default::default(),
             avatar_url: String::new(),
             launcher_names: vec!["definitely-not-a-real-binary-xyz".to_string()],
             classic_config_dirs: vec![],

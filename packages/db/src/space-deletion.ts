@@ -8,7 +8,6 @@ import { SpaceControlError } from "./space-control.js";
 /** How long an owner can restore a Space after asking to delete it. */
 export const SPACE_DELETION_RESTORE_WINDOW_MS = 7 * 24 * 60 * 60 * 1_000;
 export const SPACE_DELETION_MEMBER_MAX = 9_999;
-export const SPACE_DELETION_AUTOMATION_MAX = 10_000;
 const PURGE_BATCH_ROWS = 500;
 const PURGE_STEP_ROW_BUDGET = 2_000;
 const PURGE_OBJECT_BATCH = 100;
@@ -23,7 +22,6 @@ export interface SpaceDeletionRow extends QueryResultRow {
   purge_after: Date | string;
   state: SpaceDeletionState;
   members_json: SpaceDeletionMember[] | null;
-  automations_json: SpaceDeletionAutomation[] | null;
   purge_step: string | null;
   purge_cursor: string | null;
   purged_rows: string | number;
@@ -41,12 +39,6 @@ export interface SpaceDeletionMember {
   displayName: string | null;
   avatarUrl: string | null;
   createdAt: string;
-}
-
-/** An Automation that was enabled when the Space was scheduled for deletion. */
-export interface SpaceDeletionAutomation {
-  automationId: string;
-  version: number;
 }
 
 const iso = (value: Date | string): string => new Date(value).toISOString();
@@ -67,7 +59,7 @@ export function serializeSpaceDeletion(row: SpaceDeletionRow): Record<string, un
 }
 
 const DELETION_COLUMNS = `space_id,space_name,owner_user_id,requested_at,purge_after,state,
-  members_json,automations_json,purge_step,purge_cursor,purged_rows,purged_objects,
+  members_json,purge_step,purge_cursor,purged_rows,purged_objects,
   purge_started_at,completed_at,version`;
 
 export async function lockSpaceDeletion(
@@ -123,9 +115,8 @@ export async function listScheduledSpaceDeletions(
 }
 
 /**
- * Removes every membership and pauses every enabled Automation, keeping both
- * as restore evidence. The caller holds the Space row lock and has proven the
- * actor is its owner.
+ * Removes every membership, keeping it as restore evidence. The caller holds
+ * the Space row lock and has proven the actor is its owner.
  */
 export async function scheduleSpaceDeletion(
   transaction: DatabaseTransaction,
@@ -152,17 +143,6 @@ export async function scheduleSpaceDeletion(
     email: row.email, displayName: row.display_name, avatarUrl: row.avatar_url,
     createdAt: iso(row.created_at),
   }));
-  const automations = (await transaction.query<QueryResultRow & {
-    automation_id: string; version: string | number;
-  }>({
-    name: "space_deletion_automation_pause_v1",
-    text: `UPDATE data.automations SET enabled=false, version=version+1, updated_at=$2
-      WHERE enabled AND channel_id IN (SELECT channel_id FROM data.channels WHERE space_id=$1)
-      RETURNING automation_id, version`,
-    values: [spaceId, at], maxRows: SPACE_DELETION_AUTOMATION_MAX,
-  })).map((row): SpaceDeletionAutomation => ({
-    automationId: row.automation_id, version: Number(row.version),
-  }));
   for (const [name, table] of [
     ["space_deletion_invites_v1", "data.space_invites"],
     ["space_deletion_join_requests_v1", "data.space_join_requests"],
@@ -188,10 +168,10 @@ export async function scheduleSpaceDeletion(
         (space_id,space_name,owner_user_id,requested_at,purge_after,state,members_json,
          automations_json,purge_step,purge_cursor,purged_rows,purged_objects,
          purge_started_at,completed_at,version,updated_at)
-      VALUES ($1,$2,$3,$4,$5,'scheduled',$6::jsonb,$7::jsonb,NULL,NULL,0,0,NULL,NULL,1,$4)
+      VALUES ($1,$2,$3,$4,$5,'scheduled',$6::jsonb,'[]'::jsonb,NULL,NULL,0,0,NULL,NULL,1,$4)
       RETURNING ${DELETION_COLUMNS}`,
     values: [spaceId, input.spaceName.slice(0, 200), input.ownerUserId, at, purgeAfter,
-      JSON.stringify(members), JSON.stringify(automations)],
+      JSON.stringify(members)],
     maxRows: 1,
   });
   return { deletion: serializeSpaceDeletion(inserted[0]!), members };
@@ -241,15 +221,6 @@ export async function restoreSpaceDeletion(
       maxRows: 0,
     });
   }
-  for (const automation of deletion.automations_json ?? []) {
-    // An Automation someone changed since it was paused keeps its current state.
-    await transaction.query({
-      name: "space_restore_automation_v1",
-      text: `UPDATE data.automations SET enabled=true, version=version+1, updated_at=$3
-        WHERE automation_id=$1 AND version=$2 AND NOT enabled AND NOT (owner_user_id=ANY($4::text[]))`,
-      values: [automation.automationId, automation.version, at, input.deletedUserIds ?? []], maxRows: 0,
-    });
-  }
   await transaction.query({
     name: "space_restore_deletion_v1",
     text: "DELETE FROM data.space_deletions WHERE space_id=$1 AND state='scheduled'",
@@ -270,9 +241,6 @@ const SPACE_CHANNELS = "(SELECT channel_id FROM data.channels WHERE space_id=$1)
 export const SPACE_PURGE_STEPS: readonly { table: string; predicate: string }[] = Object.freeze([
   ...["data.norn_shadow_observations","data.norn_shadow_transitions","data.norn_shadow_comparisons",
     "data.norn_notices","data.norn_requests","data.norn_programs"].map(table => ({ table,predicate: "space_id=$1" })),
-  { table: "data.automation_occurrences", predicate:
-    `automation_id IN (SELECT automation_id FROM data.automations WHERE channel_id IN ${SPACE_CHANNELS})` },
-  { table: "data.automations", predicate: `channel_id IN ${SPACE_CHANNELS}` },
   ...["data.run_agent_registrations", "data.registration_stop_intents"]
     .map((table) => ({ table, predicate: "space_id=$1" })),
   ...[

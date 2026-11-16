@@ -70,7 +70,7 @@ export function GooglePlaySpaceBillingSection({ userId, space }: { userId: strin
   const google = billing?.subscription?.billingProvider === "google";
   return <StoreBillingFrame testId="google-play-billing" storeName="Google Play" provider="google" userId={userId} space={space} billing={billing}
     coverage="Google Play Pro covers one human seat and 5,000 Agent credits each month for Agent/app writing and paid X actions; people write in xMatrix for free. Agents do not occupy seats. Model-provider subscriptions are separate."
-    products={products.map((product) => ({ key: product.basePlanId, displayPrice: product.displayPrice, interval: product.interval }))}
+    products={products.map((product) => ({ key: product.basePlanId, title: product.interval === "month" ? "xMatrix Pro Monthly" : "xMatrix Pro Annual", displayPrice: product.displayPrice, interval: product.interval }))}
     busy={busy} onPurchase={(key) => { const product = products.find((item) => item.basePlanId === key); if (product) purchase(product); }}
     terms="Payment is charged to your Google Play account. Subscriptions renew automatically until cancelled in Google Play; cancelling keeps Pro until the end of the paid period."
     message={message} actions={<>

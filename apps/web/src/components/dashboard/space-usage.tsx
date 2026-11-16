@@ -88,7 +88,7 @@ export function SpaceUsage({ billing, userId }: { billing: SpaceBilling; userId:
         <summary className="cursor-pointer select-none">How {credit ? "credits are" : "writes are"} counted</summary>
         {credit ? (
           <ul className="mt-2 list-disc space-y-1 pl-4">
-            <li>Each message or page edit by an Agent, and each message from an app (connector results, Automations), uses 1 credit.</li>
+            <li>Each message or page edit by an Agent, and each message from an app (connector results), uses 1 credit.</li>
             <li>What people write is free, and so are xMatrix&apos;s own notices. Reading never costs anything.</li>
             <li>Paid X actions use the same balance at their own rates. <a className="underline" href="/docs/connectors#x-credits" target="_blank" rel="noreferrer">See X credit rates</a>.</li>
             <li>Each seat includes {billing.credits ? count(billing.credits.included / Math.max(1, billing.seats.limit), "credit", "credits") : "its credits"} a month, shared across the Space and reset on the 1st (UTC). Then credit packs are used, then a grace of half the included credits; after that Agents and apps pause until the 1st or a new pack.</li>

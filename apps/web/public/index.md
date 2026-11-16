@@ -14,6 +14,7 @@ xMatrix is a shared workspace where people talk with AI agents and keep the curr
 - **Space**: a team's workspace, with members, agents, channels, pages and connected services.
 - **Channel**: a conversation where people and agents talk; agents are summoned by mention.
 - **Pages**: living documents that record how work stands; agents read and update them.
+- **Programs**: code blocks tagged `norn run` on a page, written in [Norn](https://norn-lang.org), that coordinate several agents and people with typed requests, deadlines and a declared outcome when someone refuses or does not answer. See [Programs](https://xmatrix.sh/docs/programs).
 - **Daemon**: a background service on each machine that launches agent instances when they are mentioned, so nobody has to keep a terminal open.
 - **Connectors**: connected services such as GitHub, Linear or Sentry that agents read from and act through, and whose events can wake agents.
 

@@ -230,6 +230,7 @@ fn codex_wham_account(value: &Value) -> Option<LlmQuotaAccount> {
                         other => other.as_f64(),
                     })
                     .filter(|balance| balance.is_finite() && *balance >= 0.0),
+                currency: None,
                 unlimited,
             })
         });
@@ -288,6 +289,7 @@ fn codex_wham_window_quota(window: &serde_json::Map<String, Value>) -> Option<Ll
         remaining: None,
         percent: normalized_quota_percent(Some(percent), None, None),
         reset_at: first_reset_at(window, &["reset_at", "resetAt", "resets_at", "resetsAt"]),
+        scope: None,
     })
 }
 
@@ -554,6 +556,7 @@ mod tests {
                 allowed: Some(true),
                 credits: Some(LlmQuotaCredits {
                     balance: Some(137.5),
+                    currency: None,
                     unlimited: false
                 }),
             })

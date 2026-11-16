@@ -1,9 +1,9 @@
 ---
-title: "Living pages and scheduled AI agents · xMatrix Docs"
-description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Automations that run agents on a schedule."
+title: "Living pages and programs that keep them true · xMatrix Docs"
+description: "Keep project docs true with xMatrix Pages: shared Markdown that people and agents edit together, and Norn programs that run agents on a schedule or an event."
 ---
 
-# Pages and Automations
+# Pages
 
 Conversations move fast and are hard to read later. Pages are where a Space keeps what is true now: current state, decisions in force and open work. People talk; agents keep the pages current.
 
@@ -57,50 +57,55 @@ A heading slug is the heading in lower case with spaces as hyphens and punctuati
 
 Select a passage in a page and start a discussion: a conversation anchored to that passage. When it reaches an outcome, write the outcome into the page and resolve the discussion.
 
-## Automations
+## Programs
 
-An Automation is a schedule written in a page: a standing instruction in the section it keeps true that, on a cadence, at a time, or when something happens, starts an agent to keep that section true. It is a line of the page, written the way [Obsidian Tasks](https://publish.obsidian.md/tasks/) writes a recurring or scheduled task, and you read and change it like any other text. Each run happens in a fresh conversation linked to the section.
+Work that repeats, waits for a date or starts when something happens is written on the page as a program: a code block tagged `norn run` and a name, in the section it keeps true. Programs are written in [Norn](https://norn-lang.org), and saving the page starts them. You read and change one like any other text on the page.
 
-```markdown
+An agent that keeps a section current, every 12 hours:
+
+````markdown
 ## Open work
-- [ ] @auto repo:acme/web read the issues opened since the last run and update this section 🔁 every 12 hours
-- [ ] Remind me to renew the domain ⏳ 2026-11-03 09:00 +08:00
+
+```norn run triage
+open Std
+routine(~every=12h, ~from=2026-11-16T09:00Z, ~who=@auto(~repo="acme/web"),
+  ~otherwise=@claude(~repo="acme/web"),
+  "Read the issues opened since the last run and update this section")
 ```
+````
 
-The text before `🔁` or `⏳` is an ordinary message, read with the [same syntax](syntax.md) as one you type. Start it with `@auto` or a harness name so that an agent is started; without a mention the schedule only posts its text. Do not address a numbered instance such as `@claude:2`: each run's conversation is new, so no such instance exists there.
+A reminder on a date:
 
-### When it runs
+````markdown
+```norn run renew-domain
+after(2026-11-03T01:00Z)->wait
+say(@alice, "Renew the domain this week")
+```
+````
 
-`🔁` sets the cadence: `every 30 minutes`, `every 12 hours`, `every day`, `every 2 weeks`, or short forms such as `every 12h`. It runs at most every 15 minutes and at least every 30 days.
+A round every day, and at once when CI fails:
 
-After the cadence, `, on <event>` adds an event that also runs it, up to eight.
+````markdown
+```norn run build-watch
+open Std
+routine(~every=1d, ~from=2026-11-16T09:00Z, ~on=ciFailed("acme/web"),
+  ~who=@auto(~repo="acme/web"), ~otherwise=@claude(~repo="acme/web"),
+  "Check the build and fix what is broken")
+```
+````
 
-| After `🔁 every day` | Runs when |
-| --- | --- |
-| `, on merged:owner/repo` | A pull request is merged in that repository |
-| `, on merged:owner/repo@main:src/api,docs` | The same, limited to a branch and to paths |
-| `, on ci-failed:owner/repo` | CI fails in that repository |
-| `, on ci-failed:owner/repo@main:build.yml` | The same, limited to a branch and a workflow |
-| `, on sentry:issue.created:web` | A connected app's event arrives: `<app>:<event>[:<source>]` |
-| `, on linear:*` | Any event of that app |
+Times are UTC. `~from` is when the first round happens and the beat later rounds keep, `~who` does the work, and `~otherwise` names who is asked once more when a round does not end in an answer. `~on` adds a round when an event occurs, such as `ciFailed("owner/repo")` or `prMerged("owner/repo")`. A program can also ask people, wait for their answer under a deadline, and pass work between several agents. [Programs](programs.md) covers the language, requests, events and limits.
 
-Events that arrive close together are combined into one run, and the run's message names them.
+### How a program runs
 
-`⏳` with a date, a time and its offset runs it once, as a reminder that waits on you in Needs you. When it has run, its line is checked off: `- [x] … ✅ 2026-11-03`. With `🔁`, `⏳` sets when its first run happens.
-
-### Changing them
-
-Change the line. `- [-]` pauses a schedule and `- [ ]` resumes it; deleting the line deletes it. A line that cannot run as written, such as `every 3 months` or an event in a repository the Space's GitHub connection does not cover, shows why next to it, and `xmatrix page edit` prints it.
-
-A schedule runs as the person who last changed its line, with that person's access; when an agent changes it, as the agent's owner.
+- Each block has its own conversation, linked to the page. Its requests, answers and results are posted there.
+- Under the block, the page shows where the program stands: what it has asked and how that ended, whom it waits for, and what it does next. A block that cannot run as written shows why, and `xmatrix page edit` prints it.
+- A program runs as the person who last saved it, with that person's access; when an agent saves it, as the agent's owner.
+- Edit the block to change the program; what it already asked is not asked again. Remove the block to stop it.
 
 ```sh
-xmatrix page automation list <page-id>
-xmatrix page automation run <page-id> <automation-id>      # once now; the cadence is unchanged
-xmatrix page automation pause|resume|delete <page-id> <automation-id>
+xmatrix page read <page-id>     # lists the page's programs and how each stands
 ```
-
-In the app, the Space's schedules are listed under **Schedules**.
 
 ## Public pages
 

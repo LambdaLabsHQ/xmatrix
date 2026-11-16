@@ -8,7 +8,6 @@ import {
   PageSession, PageSessionConflict, encodeNotice, type PageSessionPorts, type PageSessionPrincipal,
   type PageSessionState,
 } from "./page-session";
-import { tellPageAutomationChannels } from "./page-automation-wake";
 import { startPageSummary } from "./page-summary";
 import type { Env } from "./types";
 import { platformAdminSpaceId } from "./admin-platform-access";
@@ -17,8 +16,7 @@ import { pageCoWriteDataPoint } from "./page-co-write-diagnostics";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 import { parsePageOutputWrite } from "./page-output-receipts";
-import { pageSchedules, type PageScheduleProblem } from "@xmatrix/protocol";
-import { syncPageSchedules } from "./page-schedule-sync";
+import type { PageScheduleProblem } from "@xmatrix/protocol";
 import { pageProgramsKey, syncPagePrograms } from "./norn-page-programs";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 
@@ -140,7 +138,6 @@ export class RelayPageSession extends DurableObject<Env> {
           const result = await pages(this.env).edit({ requestId: crypto.randomUUID(), spaceId: this.need("space"),
             pageId: this.need("page"), principal: pagePrincipalFromSession(principal), ...input });
           if (result.revision.kind !== "suggestion") {
-            this.schedulesChanged(principal, input.body, result.page.headRevision);
             this.programsChanged(principal, input.body);
           }
           return { revision: result.revision.revision, kind: result.revision.kind, headRevision: result.page.headRevision,
@@ -435,32 +432,6 @@ export class RelayPageSession extends DurableObject<Env> {
    * a change during a summary is picked up when that summary ends.
    */
   /**
-   * The page's schedules are its lines (pages-live-document.md §6.1): a
-   * revision that changed them is synced to its Automations as whoever wrote
-   * it, after the commit, one sync at a time. A revision that left every
-   * schedule line as it was syncs nothing.
-   */
-  private schedulesSynced: string | null = null;
-  private schedulesSyncing: Promise<void> = Promise.resolve();
-
-  private schedulesChanged(principal: PageSessionPrincipal, body: string, revision: number): void {
-    const key = JSON.stringify(pageSchedules(body).map((line) => [line.source, line.blockId]));
-    if (key === this.schedulesSynced) return;
-    this.schedulesSynced = key;
-    const userId = principal.kind === "agent" ? principal.ownerUserId ?? "" : principal.id;
-    if (!userId) return;
-    this.schedulesSyncing = this.schedulesSyncing.then(() => syncPageSchedules(this.env, {
-      spaceId: this.need("space"), pageId: this.need("page"), revision, userId, viaAgentRun: principal.kind === "agent",
-    })).then(() => undefined, (error) => {
-      // The next revision that touches a schedule line syncs again; dispatch checks the line meanwhile.
-      this.schedulesSynced = null;
-      console.error("Page schedules did not sync", { pageId: this.pageId,
-        error: error instanceof Error ? error.message : String(error) });
-    });
-    this.later(this.schedulesSyncing);
-  }
-
-  /**
    * The page's programs are its `norn run` blocks: a revision that changed
    * them is synced as whoever wrote it, after the commit, one sync at a time.
    * The event that committed the revision waits for its sync, so the sync runs
@@ -677,7 +648,6 @@ export class RelayPageSession extends DurableObject<Env> {
       try {
         if (await repository.exists(identity)) {
           const removed = await repository.remove({ ...identity, principal: pagePrincipalFromSession(principal) });
-          await tellPageAutomationChannels(this.env, removed.automationChannels);
           for (const channelId of removed.programChannels ?? []) await wakeAgentLaunchCoordinator(this.env, channelId, ["norn"]);
         }
       } catch (error) {

@@ -26,7 +26,7 @@ export function PlatformAdminTabs({ token }: { token?: string }) {
           content: <PlatformAdminUsers token={token} /> },
         { key: "spaces", wide: true, label: "Spaces", icon: Building, summary: "Every Space and its usage",
           content: <PlatformAdminSpaces token={token} /> },
-        { key: "operations", wide: true, label: "Operations", icon: Activity, summary: "Machines, Runs, Automations, delivery",
+        { key: "operations", wide: true, label: "Operations", icon: Activity, summary: "Machines, Runs, delivery",
           content: <PlatformAdminOperations token={token} /> },
         { key: "billing", wide: true, label: "Billing", icon: CreditCard, summary: "Subscriptions and paid calls",
           content: <PlatformAdminBilling token={token} /> },

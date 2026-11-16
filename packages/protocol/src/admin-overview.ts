@@ -49,7 +49,9 @@ export interface AdminPlatformTotals {
   agentInstances: number;
   machines: number;
   onlineMachines: number;
+  /** @deprecated Automations are retired, so these are always zero. Webs before #1680 still read them; remove them once the stable Web no longer does. */
   scheduledTasks: number;
+  /** @deprecated Automations are retired, so these are always zero. Webs before #1680 still read them; remove them once the stable Web no longer does. */
   enabledScheduledTasks: number;
   storageLogicalBytes: number;
   archivedSegmentBytes: number;

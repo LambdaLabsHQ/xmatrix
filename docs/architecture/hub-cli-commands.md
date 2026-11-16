@@ -35,8 +35,6 @@ commands keep working.
 
 ## Moved so far
 
-- `automation list|update|pause|resume|cancel-execution|delete`
-  (`cli-commands-automation.ts`). Output is unchanged.
 - `call "<connector command>" [--private|--public] [--json]` (`cli-commands-call.ts`) is a new
   Hub-defined command, available without updating a CLI that supports Hub
   commands. It calls `/api/connectors/call` with the caller's own credential;
@@ -54,13 +52,19 @@ commands keep working.
 - `reply <request> <answer>…`, `refuse <request> <why>…`, `broke <request> <why>…` and
   `requests [--json]` (`cli-commands-requests.ts`) are new Hub-defined commands. The Agent Run
   that holds a request of a Norn program ends it, and reads the open requests it holds or waits
-  on ([Norn host](norn-host.md)).
+  on ([Norn host](norn-host.md)). A delegate's `refuse` or `broke` gives the request back to
+  whoever delegated it.
+
+- `delegate <request> <who> <why>…` (`cli-commands-requests.ts`) is a new Hub-defined command.
+  The Agent Run that holds a request delegates it to a person here, an Agent, or an Instance here
+  by its address, who answers it for it ([Norn host](norn-host.md#delegating)).
 
 - `confirm <who> <question>…`, `choose <who> <question> <options>…` and `ask <who> <question>…`
   (`cli-commands-requests.ts`) are new Hub-defined commands. An Agent Run asks a person or an Agent
   one question without writing its program: the Hub writes the program into the Run's
   conversation, and the answer comes back to the Run as the program's result. `--by` closes it at
   a time, and `--otherwise` names the answer taken then ([Norn host](norn-host.md)).
+  `cancel <request>` calls such a question off while it is open: only the Instance that asked it can.
 
 Moving another command: add it to the Hub table with the same options and
 output, delete its clap definition and handler from the CLI. Older CLIs keep

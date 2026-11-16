@@ -85,7 +85,7 @@ export async function publishSignedOutStartNotice(env: Env,
 /**
  * A Machine fact about a Run a message asked for answers on that message's
  * chip, recorded on the message, never posted as another one. A Run nothing in
- * the Channel asked for (a stop from elsewhere, an Automation) still says it
+ * the Channel asked for (a stop from elsewhere) still says it
  * as a notice, because nothing else would.
  */
 async function deliverMachineNotice(env: Env, command: Record<string, unknown> & { channelId: string; body: string },

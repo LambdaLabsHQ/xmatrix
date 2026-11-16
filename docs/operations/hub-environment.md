@@ -114,8 +114,6 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RATE_LIMIT_ENFORCED` | var | Refuses over-limit request allowances (credential, anonymous, Human sign-in) with 429 and Retry-After only when "true"; otherwise they are only logged. Production pins true. |
 | `RELAY_AGENT_APP_POLICY_LOCATOR` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_AUTHORITY_OBSERVABILITY_ENABLED` | var | Writes authority observation only when "true". |
-| `RELAY_AUTOMATION_EXECUTION_ENABLED` | var | Runs Automation occurrences; off when unset. |
-| `RELAY_AUTOMATION_RUN_TIMEOUT_MS` | var | Default deadline for Automation runs without their own timeout. |
 | `RELAY_CHANNEL_FAMILY_DATA` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_CHANNEL_FAMILY_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
 | `RELAY_CONTROL_PLANE_DIRECTORY` | binding | Retired Durable Object namespace, kept bound as a 410 shell over its historical rows. |
@@ -169,4 +167,3 @@ Never set these in production.
 | `XMATRIX_MOCK_AUTH_TOKEN` | secret | Bearer token that signs in the mock user; never set in production. |
 | `XMATRIX_MOCK_AUTH_USER_ID` | var | Mock user id. |
 | `XMATRIX_MOCK_AUTH_USERS` | var | JSON map of mock tokens to users. |
-| `XMATRIX_MOCK_SCHEDULE_DELAY_MS` | var | Automation cadence seed honored only with mock auth. |

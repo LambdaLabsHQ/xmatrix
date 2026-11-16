@@ -9,7 +9,11 @@ fn main() {
     if !(windows && msvc) {
         return;
     }
-    let manifest = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join(manifest);
+    let manifest =
+        std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").unwrap()).join(manifest);
     println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
-    println!("cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}", manifest.display());
+    println!(
+        "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
+        manifest.display()
+    );
 }

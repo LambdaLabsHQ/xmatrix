@@ -3,7 +3,8 @@ import test from "node:test";
 import { isLaunchHintRejection, launchRefusal, parameterFailureCodeFromDecisionRecord, preparationFailureSummary,
   preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut,
   harnessSignedOutNoticeOf, HARNESS_SIGNED_OUT_NOTICE_KIND, daemonOfflineRefusal, machineOfflineNoticeOf,
-  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, parseMachineAgents, REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
+  MACHINE_OFFLINE_NOTICE_KIND, parseOfflineMachines, parseMachineAgents, parseQuotaExhausted,
+  REGISTRATION_PREPARATION_REJECTION_CODES } from "../dist/index.js";
 
 test("every registered summon rejection has a public, bounded explanation", () => {
   for (const code of REGISTRATION_PREPARATION_REJECTION_CODES) {
@@ -79,6 +80,17 @@ test("a named machine that does not run the Agent says what it does run", () => 
   assert.equal(parseMachineAgents({ machineName: "Laptop", harnesses: ["Codex"] }), undefined);
   assert.equal(parseMachineAgents({ machineName: "", harnesses: [] }), undefined);
   assert.equal(parseMachineAgents({ machineName: "Laptop", harnesses: Array.from({ length: 65 }, () => "codex") }), undefined);
+});
+
+test("a named model whose own quota is used up says until when", () => {
+  const detail = { model: "Fable 5.2", resetsAt: "2026-11-19T08:00:00.000Z" };
+  assert.equal(preparationRejectionMessage("registration_quota_exhausted", detail),
+    "The provider quota for Fable 5.2 is used up until 2026-11-19 08:00 UTC. Choose another model or Agent, " +
+    "or wait for the reset and send your message again. No launch was allocated.");
+  // Without a stored detail the code alone stands; a detail is read back only whole.
+  assert.match(preparationRejectionMessage("registration_quota_exhausted"), /provider account quota/);
+  assert.equal(parseQuotaExhausted({ model: "Fable 5.2", resetsAt: "soon" }), undefined);
+  assert.equal(parseQuotaExhausted({ resetsAt: detail.resetsAt }), undefined);
 });
 
 test("a launch only a too-old harness could take names the program, its version and the update", () => {

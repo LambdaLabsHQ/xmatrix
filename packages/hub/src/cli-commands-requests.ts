@@ -10,8 +10,10 @@ function answer(verb: "reply" | "refuse" | "broke", outcome: "answered" | "refus
     positionals: [{ name: "request", help: "The request, as its message names it" }, { name: verb === "reply" ? "answer" : "why", variadic: true, help: what }],
     async run(call, { positionals, lists }) {
       const result = await call("POST", HUB_ROUTES.norn_request_answer, { requestRef: positionals.request, outcome,
-        text: (lists[verb === "reply" ? "answer" : "why"] ?? []).join(" ") }) as { refusal?: string; status: string };
+        text: (lists[verb === "reply" ? "answer" : "why"] ?? []).join(" ") }) as { refusal?: string; status: string; returnedTo?: string };
       if (result.refusal) return { stdout: "", stderr: `error: ${result.refusal}\n`, exitCode: 1 };
+      // A delegate that refuses or fails gives the request back: it is not closed.
+      if (result.returnedTo) return { stdout: `Recorded. The request went back to ${result.returnedTo}, who delegated it to you.\n` };
       return { stdout: `Recorded. The request is closed${result.status === "running" ? "" : ", and its program has ended"}.\n` };
     },
   };
@@ -56,6 +58,26 @@ export const NORN_REQUEST_COMMANDS: CliCommand[] = [
     "The answer, in the form the request's message asks for, e.g. Sound, or Flawed(\"no owner on failure\")"),
   answer("refuse", "refused", "Decline a request you hold", "Why you will not do it"),
   answer("broke", "broke", "Report that a request you hold could not be done", "What went wrong"),
+  {
+    path: ["delegate"], about: "Delegate a request you hold to someone who answers it for you",
+    positionals: [{ name: "request", help: "The request, as its message names it" },
+      { name: "who", help: "Who answers it for you: a person here (@Daniel), an Agent (@codex), or an Instance here (@claude:2)" },
+      { name: "why", variadic: true, help: "Why it is theirs to answer, in your words" }],
+    async run(call, { positionals, lists }) {
+      const result = await call("POST", HUB_ROUTES.norn_request_delegate, { requestRef: positionals.request, to: positionals.who,
+        reason: (lists.why ?? []).join(" ") }) as { refusal?: string };
+      if (result.refusal) return { stdout: "", stderr: `error: ${result.refusal}\n`, exitCode: 1 };
+      return { stdout: `Delegated to ${positionals.who}: they answer it now, and if they will not or cannot, it comes back. End your turn if nothing else is left to do.\n` };
+    },
+  },
+  {
+    path: ["cancel"], about: "Call off a question you asked with confirm, choose or ask",
+    positionals: [{ name: "request", help: "The question's request, as `xmatrix requests` lists it among those your programs wait on" }],
+    async run(call, { positionals }) {
+      await call("POST", HUB_ROUTES.norn_request_call_off, { requestRef: positionals.request });
+      return { stdout: "Called off. Whoever holds it is told it is no longer asked, and the program's end comes back to you.\n" };
+    },
+  },
   {
     path: ["requests"], about: "List the open requests you hold and those your programs wait on",
     options: [{ name: "json", kind: "flag", help: "Print the requests as JSON" }],

@@ -589,7 +589,7 @@ function recordSummarySource(
 
 /**
  * A Channel tree leaving its Space takes no source-Space authority with it:
- * enabled Automations pause, Channel-bound trace authority ends,
+ * Channel-bound trace authority ends,
  * App subscriptions are removed, and unfinished routing and reborn work is
  * cancelled. Live Runs are stopped separately by terminalizeArchivedChannelTree.
  */
@@ -598,12 +598,6 @@ async function releaseChannelTreeForMove(
   channelIds: readonly string[],
   at: string,
 ): Promise<void> {
-  await transaction.query({
-    name: "channel_move_pause_automations_v1",
-    text: `UPDATE data.automations SET enabled=false, version=version+1, updated_at=$2
-      WHERE enabled AND channel_id=ANY($1::text[])`,
-    values: [channelIds, at], maxRows: 0,
-  });
   await transaction.query({
     name: "channel_move_expire_trace_access_v1",
     text: `UPDATE data.trace_access_grants SET status='expired', version=version+1,

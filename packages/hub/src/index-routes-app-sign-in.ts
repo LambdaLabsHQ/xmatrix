@@ -23,19 +23,34 @@ const NEW_ACCOUNT_WINDOW_MS = 10 * 60 * 1000;
  * An app signs in at Google or GitHub in the system's sign-in sheet or browser
  * (app-sign-in.ts): `start` opens the provider, `finish` is where the provider
  * comes back to, and `token` is where the app redeems what `finish` handed it.
+ * A start declares one intent. `session_only` answers from the browser's web
+ * session and never opens a provider, so an app opening unsigned-in needs no
+ * second sign-in. A provider start always opens that provider, signed in or
+ * not: choosing Google or GitHub is how a person picks another account.
  */
 export function registerAppSignInRoutes(app: Hono<{ Bindings: Env }>): void {
   app.get(HUB_ROUTES.app_sign_in_start, async (c) => {
     const provider = c.req.query("provider");
+    const sessionOnly = c.req.query("session_only") === "1";
     const redirectUri = appSignInRedirectUri(c.req.query("redirect_uri"));
     const challenge = c.req.query("code_challenge");
     const state = c.req.query("state");
-    if (!APP_SIGN_IN_PROVIDERS.includes(provider as AppSignInProvider) || !redirectUri
+    const providerOk = APP_SIGN_IN_PROVIDERS.includes(provider as AppSignInProvider);
+    if (providerOk === sessionOnly || !redirectUri
       || c.req.query("code_challenge_method") !== "S256" || !isPkceChallenge(challenge) || !isAppSignInState(state)) {
       return endedPage(c, 400, "This sign-in link isn't valid. Go back to xMatrix and start again.");
     }
     const flowId = await brokerJson<{ flowId: string }>(c, "start", { challenge, redirectUri, state });
     if (!flowId) return endedPage(c, 503, "xMatrix couldn't start the sign-in. Go back and try again.");
+    if (sessionOnly) {
+      let existing: Awaited<ReturnType<typeof betterAuthUserFromCookies>> = null;
+      try {
+        existing = await betterAuthUserFromCookies(c.env, c.req.header("cookie") ?? null);
+      } catch (error) {
+        console.error("App sign-in could not read the browser session", { error: (error as Error).message });
+      }
+      return answerAppSignIn(c, flowId.flowId, existing);
+    }
     const finish = new URL(HUB_ROUTES.app_sign_in_finish, hubAuthBaseUrl(c.env));
     finish.searchParams.set("flow", flowId.flowId);
     const failed = new URL(finish);
@@ -89,6 +104,25 @@ export function registerAppSignInRoutes(app: Hono<{ Bindings: Env }>): void {
     return c.json({ ...session, hubUrl: hubOrigin(c.req.raw), relayUrl: deriveHumanConnectionUrl(c.req.url) },
       200, { "cache-control": "no-store" });
   });
+}
+
+/** Hands the app its code for the browser's current account, or says there is none. */
+async function answerAppSignIn(
+  c: Context<{ Bindings: Env }>,
+  flowId: string,
+  signedIn: Awaited<ReturnType<typeof betterAuthUserFromCookies>>,
+): Promise<Response> {
+  const user = signedIn?.user;
+  const answer = await brokerJson<{ redirectUri: string; state: string; code?: string }>(c, "answer",
+    { flowId, ...(user ? { user } : {}) });
+  if (!answer) return endedPage(c, 503, "xMatrix couldn't start the sign-in. Go back and try again.");
+  const newAccount = signedIn?.createdAt != null && Date.now() - signedIn.createdAt < NEW_ACCOUNT_WINDOW_MS;
+  await logAuthMetric({
+    routeGroup: "app_sign_in_start", status: 302, outcome: user ? "existing_session" : "sign_in_required",
+    ...(user ? { userId: user.id } : {}),
+  });
+  return c.redirect(appSignInCallback(answer.redirectUri, answer.state,
+    answer.code ? { code: answer.code, newAccount } : { error: "sign_in_required" }), 302);
 }
 
 async function brokerJson<T>(c: Context<{ Bindings: Env }>, action: "start" | "answer", body: object): Promise<T | null> {

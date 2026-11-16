@@ -302,6 +302,24 @@ export function parseOfflineMachines(value: unknown): OfflineMachine[] | undefin
   return machines;
 }
 
+/** A summon that named a model whose provider quota is used up: which
+ * model, and when its quota is next back. */
+export interface QuotaExhausted { model: string; resetsAt: string }
+
+/** A stored used-up refusal's model and reset read back; anything else carries no detail. */
+export function parseQuotaExhausted(value: unknown): QuotaExhausted | undefined {
+  const stored = storedDetail(value);
+  const model = stored?.field("model", 160), resetsAt = stored?.field("resetsAt", 64);
+  return model && resetsAt && Number.isFinite(Date.parse(resetsAt)) ? { model, resetsAt } : undefined;
+}
+
+/** The named model, when its quota is back, and what to do meanwhile. */
+function quotaExhaustedMessage({ model, resetsAt }: QuotaExhausted): string {
+  const at = new Date(Date.parse(resetsAt)).toISOString().slice(0, 16).replace("T", " ");
+  return `The provider quota for ${model} is used up until ${at} UTC. Choose another model or Agent, ` +
+    "or wait for the reset and send your message again. No launch was allocated.";
+}
+
 /** The harnesses a named machine runs in the Space, for a summon that named
  * it for a harness it does not run. */
 export interface MachineAgents { machineName: string; harnesses: string[] }
@@ -399,16 +417,18 @@ function harnessTooOldMessage(tooOld: HarnessTooOld): string {
 }
 
 /** `detail` is what the rejection stored for its code: an invalid answer's
- * failure, what is too old, which machines are offline, or what a named
- * machine runs. */
+ * failure, what is too old, which machines are offline, what a named
+ * machine runs, or which named model is used up until when. */
 export function preparationRejectionMessage(code: string, detail?: unknown): string | undefined {
   const answer = code === "routing_parameter_invalid_answer" ? parseDecisionAnswerFailure(detail) : undefined;
   const tooOld = code === "registration_harness_outdated" ? parseHarnessTooOld(detail) : undefined;
   const offline = code === "registration_daemon_offline" ? parseOfflineMachines(detail) : undefined;
   const machineAgents = code === "registration_machine_unavailable" ? parseMachineAgents(detail) : undefined;
+  const quotaExhausted = code === "registration_quota_exhausted" ? parseQuotaExhausted(detail) : undefined;
   return answer ? parameterAnswerMessage(answer) : tooOld ? harnessTooOldMessage(tooOld)
     : offline ? daemonOfflineMessage(offline)
     : machineAgents ? machineAgentsMessage(machineAgents)
+    : quotaExhausted ? quotaExhaustedMessage(quotaExhausted)
     : Object.hasOwn(PREPARATION_REJECTION_MESSAGES, code) ? PREPARATION_REJECTION_MESSAGES[code] : undefined;
 }
 

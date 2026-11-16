@@ -248,6 +248,67 @@ test("details rail shows live instance header labels instead of message snapshot
   await expect(liveStatus).not.toContainText("fix/history-snapshot");
 });
 
+function prepaidAgentChannel(usage: Record<string, unknown>) {
+  return {
+    ...messageChannel(),
+    memberPresence: {
+      "agent:deepseek": { registration: { ...FIXTURE_AGENT_REGISTRATION, harness: "deepseek" },
+        kind: "agent",
+        status: "idle",
+        label: "DeepSeek",
+        instances: [{
+          id: "instance-deepseek-live",
+          channelInstanceId: "4",
+          label: "deepseek:4",
+          connectedAt: E2E_NOW,
+          lastSeenAt: E2E_NOW,
+          status: "idle",
+          model: "DeepSeek-V4.1-Flash",
+          effort: "high",
+          usage: { contextUsedTokens: 30_000, contextWindowTokens: 1_000_000, ...usage },
+        }],
+      },
+    },
+  };
+}
+
+const PREPAID_AGENT_MESSAGE = agentMessage({
+  messageId: "message-deepseek-live",
+  sequence: 1,
+  body: "Balance check.",
+  instanceId: "instance-deepseek-live",
+  channelInstanceId: "4",
+  instanceLabel: "deepseek:4",
+  from: { identityId: "agent:deepseek", label: "DeepSeek", agentName: "DeepSeek",
+    model: "DeepSeek-V4.1-Flash", effort: "high" },
+});
+
+test("a prepaid Agent's card shows the money left on its account", async ({ page }, testInfo) => {
+  // The reading as the Hub serves it for a prepaid account: no window, the balance in the account.
+  await openGeneralChannel(page, prepaidAgentChannel({
+    quotaState: "observed", quotaSource: "provider_api", quotaObservedAt: E2E_NOW, quotaUsages: [],
+    quotaAccount: { allowed: true, credits: { balance: 6.97, currency: "CNY" } },
+  }), [PREPAID_AGENT_MESSAGE]);
+  const liveStatus = page.locator(".app-details [data-live-agent-header-chips]");
+  await expect(liveStatus.locator("[data-status-chip='model']")).toContainText("DeepSeek-V4.1-Flash");
+  await expect(liveStatus.getByTitle("Provider balance: ¥6.97 left")).toHaveText("¥6.97");
+  await expect(liveStatus.locator("[data-usage-meter-chip]")).toHaveCount(1);
+  await expect(liveStatus.locator("[data-usage-meter-chip]")).toContainText("ctx");
+  await testInfo.attach("prepaid-balance-card", {
+    body: await page.locator(".app-details").screenshot(), contentType: "image/png" });
+});
+
+test("a prepaid Agent's card without a reading keeps its other tags", async ({ page }, testInfo) => {
+  // A key the provider refuses, or a failed read, leaves no reading.
+  await openGeneralChannel(page, prepaidAgentChannel({ quotaState: "unknown" }), [PREPAID_AGENT_MESSAGE]);
+  const liveStatus = page.locator(".app-details [data-live-agent-header-chips]");
+  await expect(liveStatus.locator("[data-status-chip='model']")).toContainText("DeepSeek-V4.1-Flash");
+  await expect(liveStatus.locator("[data-usage-meter-chip]")).toContainText("ctx");
+  await expect(liveStatus.getByText("¥")).toHaveCount(0);
+  await testInfo.attach("prepaid-unread-card", {
+    body: await page.locator(".app-details").screenshot(), contentType: "image/png" });
+});
+
 test("agent message header does not present a usage-limit snapshot as current state", async ({ page }) => {
   await openGeneralChannel(page, messageChannel(), [
     agentMessage({

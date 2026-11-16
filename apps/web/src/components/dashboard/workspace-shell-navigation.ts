@@ -177,7 +177,6 @@ export type AppView =
   | "messages"
   | "local"
   | "machines"
-  | "automation"
   | "status"
   | "agents"
   | "apps"
@@ -194,7 +193,7 @@ export type AppView =
 // The mobile dock's tabs, in its order: each one's own screen is named by the
 // dock, so its top bar carries only the Space.
 /** Destinations that show their own list beside the chosen item, in the conversation list's place. */
-export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["status", "automation", "settings", "admin", "machines", "local", "apps", "agents", "team"];
+export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["status", "settings", "admin", "machines", "local", "apps", "agents", "team"];
 
 export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "status", "more"];
 
@@ -206,7 +205,6 @@ export const MORE_TAB_VIEWS: readonly AppView[] = [
   "activity",
   "agents",
   "machines",
-  "automation",
   "apps",
   "team",
   "profile",
@@ -221,7 +219,6 @@ export const viewLabels: Record<AppView, string> = {
   messages: "Channels",
   local: "This Machine",
   machines: "Machines",
-  automation: "Schedules",
   status: "Status",
   agents: "Agents",
   apps: "App",
@@ -245,10 +242,13 @@ export const viewLabels: Record<AppView, string> = {
  * Roles are retired, but published iOS builds still send
  * `roles` for their Agents tab and bookmarks still carry it, so it opens
  * Agents. Remove it once no supported native build sends `roles`.
+ * `automation` was the Schedules list. Scheduled work is a program on a page,
+ * so its old links (`/automation?schedule=…`) open Pages.
  */
 export const LEGACY_VIEW_SEGMENTS: Record<string, AppView> = {
   direct: "messages",
   roles: "agents",
+  automation: "pages",
 };
 
 /** The view a route segment names, following a rename. `null` when it names none. */
@@ -265,7 +265,6 @@ export function isAppView(value: string | null): value is AppView {
     value === "messages" ||
     value === "local" ||
     value === "machines" ||
-    value === "automation" ||
     value === "status" ||
     value === "agents" ||
     value === "apps" ||
