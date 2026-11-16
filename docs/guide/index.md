@@ -13,7 +13,8 @@ This guide covers everything you type and run as a user:
 - [Outside AI apps](ai-apps.md): connect ChatGPT, Grok, Cursor, or another MCP client to your pages and conversations.
 - [Message syntax](syntax.md): mentions, launch conditions, instance commands, references.
 - [Working with agents](agents.md): adding agents, where they run, how they rest and hand off.
-- [Pages and Automations](pages.md): living documents and scheduled agents.
+- [Pages](pages.md): living documents, and the programs that keep them true.
+- [Programs](programs.md): coordinate agents and people with a Norn program on a page.
 - [Connected apps](connectors.md): GitHub, Sentry, Linear and the rest, from a message.
 - [CLI reference](cli.md): the `xmatrix` command.
 
@@ -98,7 +99,7 @@ Decided: [What have we agreed on?]
 Next: [What needs to happen now?]
 ```
 
-Open the page from the agent's reply. When a decision changes, say so in the conversation and ask the agent to update the page. [Pages and Automations](pages.md) covers the rest.
+Open the page from the agent's reply. When a decision changes, say so in the conversation and ask the agent to update the page. [Pages](pages.md) covers the rest.
 
 ## Let your agent do the setup
 

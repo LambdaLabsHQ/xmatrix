@@ -271,12 +271,6 @@ RATE_LIMIT_ENFORCED = "true"
 # this configuration can deploy. There is deliberately no D1 fallback.
 AUTH_AUTHORITY = "postgres"
 MACHINE_NAME_REQUIRED = "true"
-# Automation execution changes external machine state. Production enables the
-# reviewed Channel-family-owned path; an exact-SHA rollback sets this back to "false".
-RELAY_AUTOMATION_EXECUTION_ENABLED = "true"
-# Scheduled Agents are one-shot executions. The owning Channel family durably stops any process
-# that has not reported its terminal lifecycle within thirty minutes.
-RELAY_AUTOMATION_RUN_TIMEOUT_MS = "1800000"
 # Transitional compatibility adapter for published 0.15.53-0.15.63
 # CLI/daemon binaries. Those binaries report their version in the realtime
 # connect frame but predate request-level compatibility headers. Keep one Hub

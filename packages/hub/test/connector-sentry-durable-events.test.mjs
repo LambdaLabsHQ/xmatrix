@@ -84,7 +84,7 @@ function drainer() {
   const apps = { connectorEventRoutes: async input => { calls.routes.push(input); return input.sourceRef.endsWith("*") ? [] :
     [{ channelId: "channel", authorityRootUserId: "owner", features: ["issue.created", "alert"] }]; } };
   const { deliverEvent } = ingressModule(name => ({ "../app-connectors": {}, "../index-shared": {},
-    "../automation-triggers": {}, "../product-message-append": {}, "./credentials": {}, "@xmatrix/protocol": {},
+    "../outside-events": {}, "../product-message-append": {}, "./credentials": {}, "@xmatrix/protocol": {},
     "./oauth": {}, "./event-format": {}, "../space-language": spaceLanguageModule })[name]);
   const dependencies = { receipts: () => receipts, credentials: () => ({ resolve: async () => { if (state.failCredentials) throw new Error("PRIVATE_TOKEN"); return ({ connectionId: job.connectionId,
     status: "configured", version: state.resolvedVersion, values: fields }); } }), refresh: async () => { calls.refreshes++;
@@ -94,9 +94,13 @@ function drainer() {
       return { id: state.wrongProject ? "8" : "7", slug: "test-project", organization: { id: "9", slug: "company" } }; },
     apps: () => apps, append: async (_env, channelId, command) => { calls.appended.push({ channelId, command });
       if (state.rotateAfterAppend) state.version += 1;
-      return new Response(null, { status: state.failAppend ? 503 : 200 }); }, automations: async (_env, input) => {
-      calls.automation.push(input); if (state.failAutomation) throw new Error("private-provider-error"); return 0; } };
-  const imports = { "@xmatrix/protocol": { sha256Hex }, "../automation-triggers": {}, "../product-message-append": {},
+      return new Response(null, { status: state.failAppend ? 503 : 200 }); }, events: async (_env, input) => {
+      calls.automation.push(input); if (state.failAutomation) {
+        const error = new Error("private-provider-error");
+        if (state.failAutomationClass) { error.name = "RuntimeDatabaseFailure"; error.code = "53300"; }
+        throw error;
+      } return 0; } };
+  const imports = { "@xmatrix/protocol": { sha256Hex }, "../outside-events": {}, "../product-message-append": {},
     "./credentials": {}, "./connection-credentials": {}, "./event-format": { connectorEvent, record },
     "./event-ingress": { deliverEvent }, "./http": { ProviderRequestError }, "./sentry-installation": { sentryInstallationClient, validateSentryInstallationCredentials } };
   const { drainSentryEvents } = drainModule(name => imports[name]);
@@ -177,5 +181,19 @@ test("Sentry drain failures name their stage and safe provider status, retain re
     }
     assert.equal(logs.length, 6);
     assert.doesNotMatch(JSON.stringify(logs), /private|PRIVATE|company|space|test-project/iu);
+  } finally { capture.mock.restore(); }
+});
+test("a typed drain failure names its class and code without its message", async () => {
+  const logs = [];
+  const capture = mock.method(console, "error", (...args) => logs.push(args));
+  try {
+    const run = drainer();
+    run.state.failAutomation = true;
+    run.state.failAutomationClass = true;
+    await run.run();
+    assert.deepEqual(logs.at(-1), ["Sentry event attempt failed",
+      { stage: "automation", errorClass: "RuntimeDatabaseFailure:53300" }]);
+    assert.doesNotMatch(JSON.stringify(logs), /private-provider-error|PRIVATE/iu);
+    assert.equal(run.calls.finish[0].outcome, "retry");
   } finally { capture.mock.restore(); }
 });

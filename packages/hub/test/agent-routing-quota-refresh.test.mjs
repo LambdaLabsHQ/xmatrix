@@ -32,6 +32,21 @@ test("quota refresh issues probes and never waits for or writes a reading itself
   ], "the probe names harnesses and digests only; pools stay server-bound");
 });
 
+test("a pool held without a window is read afresh, newer than its hold, beside the others' ordinary read", async () => {
+  const commands = [];
+  const heldSince = "2026-11-15T12:00:00.000Z";
+  await refreshAgentRoutingQuota({ env: {}, directory: {}, channelId: "channel", actorUserId: "caller",
+    runtime: { launchChannelSpace: async () => ({ spaceId: "space" }) },
+    registrationTargets: async () => ["grok", "claude"].map(harness => ({ ownerUserId: "owner", machineId: "machine",
+      hostId: "host", harness, connectionEpoch: 5, quotaPoolId: `pool-${harness}`, configurationDigest: "a".repeat(64),
+      targetId: `registration:${harness}`, ...(harness === "claude" ? { heldSince } : {}) })),
+  }, { machines: machines(), issue: async (command) => { commands.push(command); return {}; } });
+  const probes = commands.map(command => [command.payload.probe.targets.map(target => target.targetId),
+    command.payload.probe.fresh === true, command.payload.readAfter, command.payload.probe.scopedQuotaUsages]);
+  assert.deepEqual(probes.sort(), [[["registration:claude"], true, heldSince, true],
+    [["registration:grok"], false, undefined, true]]);
+});
+
 test("a daemon without the probe capability is not asked", async () => {
   let issued = false;
   const result = await refreshAgentRoutingQuota({ env: {}, directory: {}, channelId: "channel", actorUserId: "caller",

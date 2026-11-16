@@ -26,7 +26,7 @@ function fixture(connections = [connection()]) {
         values: { oauthToken: `fixture-${c.installationId}`, oauthAppClientId: 'oac_app',
           oauthConfigurationId: c.installationId, oauthTeamId: 'team_A' } }; } }),
     async append(_env, _channel, input) { appends.push(input); return Response.json({}); },
-    async automations(_env, input) { automations.push(input); },
+    async events(_env, input) { automations.push(input); },
   };
   return { appends, automations, queries, routeQueries, resolved, retirements, apps, dependencies };
 }

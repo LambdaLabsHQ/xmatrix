@@ -2213,6 +2213,8 @@ pub(crate) const DAEMON_CAPABILITIES: &[&str] = &[
     "registration_default_effort_v1",
     // The runtime may start on a model from its own catalog instead of its default.
     "registration_native_model_v1",
+    // An `ask` launch's permission requests are shown in its Channel.
+    "registration_access_ask_v1",
     // A registered launch may run in a private managed directory.
     "registration_managed_v1",
     "reply_recovery_v1",
@@ -3889,6 +3891,7 @@ mod daemon_capability_tests {
             "registration_launch_v3",
             "registration_default_effort_v1",
             "registration_native_model_v1",
+            "registration_access_ask_v1",
             "registration_managed_v1",
         ] {
             assert!(DAEMON_CAPABILITIES.contains(&capability), "{capability}");

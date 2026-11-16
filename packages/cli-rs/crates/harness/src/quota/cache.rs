@@ -11,7 +11,7 @@
 // request, which is exactly the kind of drift four copies invite.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
@@ -190,6 +190,8 @@ pub(crate) const MAX_KEYED_SLOTS: usize = 128;
 
 pub(crate) struct KeyedProviderUsageCache {
     slots: OnceLock<Mutex<HashMap<String, CachedUsage>>>,
+    /// One gate per key while a read of it is wanted: see [`Self::single_flight`].
+    gates: OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>>,
     fresh_ttl: Duration,
     error_ttl: Duration,
 }
@@ -198,8 +200,40 @@ impl KeyedProviderUsageCache {
     pub const fn new(fresh_ttl: Duration, error_ttl: Duration) -> Self {
         Self {
             slots: OnceLock::new(),
+            gates: OnceLock::new(),
             fresh_ttl,
             error_ttl,
+        }
+    }
+
+    /// Run `read` for `key` unless a read of the same key is already in
+    /// flight; a caller that arrives meanwhile waits for it and gets the
+    /// reading it stored, so one account is never asked twice at once.
+    /// `read` stores its own result; a read that stored nothing (it gave up)
+    /// is not shared and the next waiter reads for itself.
+    pub(crate) async fn single_flight<F, Fut>(&self, key: &str, read: F) -> Option<LlmUsage>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = Option<LlmUsage>>,
+    {
+        let asked = Instant::now();
+        let gate = {
+            let mut gates = self
+                .gates
+                .get_or_init(|| Mutex::new(HashMap::new()))
+                .lock()
+                .unwrap_or_else(|poison| poison.into_inner());
+            gates.retain(|_, gate| Arc::strong_count(gate) > 1);
+            gates.entry(key.to_string()).or_default().clone()
+        };
+        let _turn = gate.lock().await;
+        let shared = self.slots().lock().ok().and_then(|cache| {
+            let (fetched_at, usage) = cache.get(key)?;
+            (*fetched_at >= asked).then(|| usage.clone())
+        });
+        match shared {
+            Some(usage) => usage,
+            None => read().await,
         }
     }
 
@@ -300,6 +334,33 @@ mod tests {
             Some("2026-09-21T18:00:00Z".to_string()),
             "the cached observation time is preserved, not re-stamped"
         );
+    }
+
+    #[tokio::test]
+    async fn concurrent_reads_of_one_account_share_one_request() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let cache = KeyedProviderUsageCache::new(Duration::from_secs(120), Duration::from_secs(60));
+        let requests = AtomicUsize::new(0);
+        let read = |key: &'static str| {
+            let (cache, requests) = (&cache, &requests);
+            async move {
+                cache
+                    .single_flight(key, || async {
+                        requests.fetch_add(1, Ordering::SeqCst);
+                        tokio::time::sleep(Duration::from_millis(20)).await;
+                        let reading = Some(usage("2026-11-15T18:00:00Z", 100.0));
+                        cache.store(key, reading.clone());
+                        reading
+                    })
+                    .await
+            }
+        };
+        let (first, second, other) = tokio::join!(read("a"), read("a"), read("b"));
+        assert!(first.is_some() && second.is_some() && other.is_some());
+        assert_eq!(requests.load(Ordering::SeqCst), 2, "one per account");
+        // A read asked after that one finished goes to the provider again.
+        read("a").await;
+        assert_eq!(requests.load(Ordering::SeqCst), 3);
     }
 
     #[test]

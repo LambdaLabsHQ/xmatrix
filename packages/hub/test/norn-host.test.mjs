@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { nornFlow } from "../src/norn-plan.ts";
-import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
+import { appStream, checkNornProgram, githubStream, nornAnswerBody, nornAsking, nornBlocks, nornOutcomeText, nornPageEnd, nornPersonBody, nornQuestionSource, nornRequestCard, personHolder, nornDelivery, nornProgramIn, nornProgramProblems, nornStartLedger, nornStep, readNornAnswer } from "../src/norn-host.ts";
 
 const review = `type verdict = Sound | Flawed(string)
 let rec settle = draft =>
@@ -322,6 +322,75 @@ switch choose(@Daniel, "How risky is this release?", [Low, High("say why")], ~by
     ["@Daniel answered: Low", "@Daniel declined: not mine", "It closed without an answer."]);
 });
 
+test("a person who cannot judge a request delegates it to an Agent here, and the program reads that answer as any", () => {
+  const { state, step } = program(`switch confirm(@Daniel, "Clean up the expired commands?", ~by=2d)->wait {
+| Answered(Yes) => "clean"
+| Answered(No) | NoReply => "keep"
+| other => fail(other)
+}`);
+  const [asked] = step().open;
+  // An Instance here by its address holds a request only when its holder delegated it there; a program that
+  // names one itself is still not delivered (see "a request this host cannot deliver ends at once").
+  const delegated = step({ requestId: asked.requestId, epoch: asked.epoch, delegateTo: "@claude:2", reason: "I cannot judge this" });
+  assert.equal(delegated.result.refusal, undefined);
+  assert.deepEqual(delegated.open.map(row => [row.holder, row.epoch, row.delegated]), [["@claude:2", asked.epoch + 1, true]]);
+  // The delegate is told for whom it answers, in their quoted words, and that a refusal gives it back.
+  const request = state.ledger.requests[asked.requestId];
+  const delivery = nornDelivery(request, asked.requestRef, { there: "@claude:2", delegation: state.ledger.delegations.at(-1) }).body;
+  assert.match(delivery, /Daniel delegated this request to you: you answer it for them\.\nTheir words:\n```text\nI cannot judge this\n```/u);
+  assert.match(delivery, /gives it back to Daniel; it does not end the request/u);
+  assert.doesNotMatch(delivery, /xmatrix delegate/u);
+  // An Instance that was at work here before it was delegated the request is not told that answering ends its Run.
+  const atWork = nornDelivery(request, asked.requestRef, { there: "@claude:2", atWork: true, delegation: state.ledger.delegations.at(-1) }).body;
+  assert.match(atWork, /It does not end your Run: you were at work here before it came, and you go on:/u);
+  assert.doesNotMatch(atWork, /It ends your Run/u);
+  // The delegator's own answer no longer counts; the delegate's settles the request.
+  assert.equal(step({ requestId: asked.requestId, epoch: asked.epoch, reply: { typed: "No" } }).result.refusal, "Not the request's holder");
+  assert.equal(step({ requestId: asked.requestId, epoch: asked.epoch + 1, reply: { typed: "Yes" } }).result.status, "completed");
+  assert.equal(state.ledger.ended.result.value, "clean");
+  assert.deepEqual([request.holder, state.ledger.requests[asked.requestId].delegatedBy], ["@claude:2", "@Daniel"]);
+});
+
+test("a delegate who will not answer gives the request back to whoever delegated it, and nothing ends", () => {
+  const { state, step } = program(`confirm(@Daniel, "Clean up?")->wait`);
+  const [asked] = step().open;
+  step({ requestId: asked.requestId, epoch: asked.epoch, delegateTo: "@Bob", reason: "Yours to judge" });
+  // A person delegated to reads on their card who delegated it, and that declining gives it back.
+  const held = state.ledger.requests[asked.requestId];
+  assert.equal(nornRequestCard(held, asked.requestRef, "user-bob").delegatedBy, "@Daniel");
+  assert.match(nornPersonBody(held, undefined, state.ledger.delegations.at(-1)),
+    /^@Bob Clean up\?\n\nDaniel delegated this request to you: you answer it for them\.\nTheir words:\n```text\nYours to judge\n```\nDeclining gives it back to Daniel\./u);
+  const why = "Production data is not mine to judge";
+  const back = step({ requestId: asked.requestId, epoch: asked.epoch + 1, reply: { tag: "Refused", reason: why } });
+  // Not a refusal of the request: the program is still waiting, and the request is the delegator's again.
+  assert.deepEqual([back.result.status, back.result.refusal, back.result.returnedTo], ["running", undefined, "@Daniel"]);
+  assert.deepEqual(back.open.map(row => [row.holder, row.epoch, row.delegated]), [["@Daniel", asked.epoch + 2, false]]);
+  assert.equal(nornAnswerBody("refused", why, back.result.returnedTo), `I gave this back to Daniel: ${why}`);
+  // Their new card says who gave it back and why.
+  assert.match(nornPersonBody(state.ledger.requests[asked.requestId], undefined, state.ledger.delegations.at(-1)),
+    /Bob, to whom you delegated this request, gave it back: it is yours to answer again\.\nTheir words:/u);
+  // Whom the program asked is offered delegation in its delivery; a delegate is not (see above).
+  const agent = program(`run(@codex, "Review")->wait`);
+  const [run] = agent.step().open;
+  assert.match(nornDelivery(agent.state.ledger.requests[run.requestId], run.requestRef).body,
+    new RegExp(`xmatrix delegate ${run.requestRef} @name '<why>'`, "u"));
+});
+
+test("a request is delegated only where this host can deliver it, once, and the delegator can take it back", () => {
+  const { state, step } = program(`run(@auto(~repo="acme/app"), "Fix the flaky test")->wait`);
+  const [asked] = step().open;
+  const delegate = (to, epoch = asked.epoch) => step({ requestId: asked.requestId, epoch, delegateTo: to }).result.refusal;
+  // Conditions on where to run are an Agent's to meet; a group is not one participant.
+  assert.match(delegate("@Daniel"), /is a person: the request's conditions, such as ~repo, apply to an Agent/u);
+  assert.match(delegate("anyOf"), /cannot deliver a request to anyOf/u);
+  assert.equal(delegate("@codex"), undefined);
+  assert.equal(delegate("@claude", asked.epoch + 1), "A delegate answers the request or gives it back; they cannot delegate it again");
+  const back = step({ requestId: asked.requestId, reclaim: true });
+  assert.deepEqual([back.result.refusal, back.open.map(row => [row.holder, row.epoch, row.delegated])], [undefined, [["@auto", asked.epoch + 2, false]]]);
+  assert.equal(step({ requestId: asked.requestId, reclaim: true }).result.refusal, "The request is not delegated");
+  assert.equal(state.ledger.requests[asked.requestId].conditions.repo, "acme/app");
+});
+
 test("a question asked with a command is its program: the request, waited on, with what silence means", () => {
   assert.deepEqual(nornQuestionSource({ verb: "ask", who: "@Daniel", question: 'Which "address"?\nThe billing one.' }),
     { source: 'ask(@Daniel, "Which \\"address\\"?\\nThe billing one.")->wait' });
@@ -341,6 +410,22 @@ test("a question asked with a command is its program: the request, waited on, wi
     [{ verb: "confirm", who: "@Daniel", question: "?", by: "1d", otherwise: "Maybe" }, /one of Yes, No/u]]) {
     assert.match(nornQuestionSource(input).refusal, why);
   }
+});
+
+test("a question asked with a command reads on its card: the Agent that asks, and what silence means", () => {
+  const { source } = nornQuestionSource({ verb: "choose", who: "@Daniel", question: "Drop the tables?", options: ["DropTables", "KeepTables"],
+    by: "1d", otherwise: "KeepTables" });
+  const asking = nornAsking({ authorMention: "@claude:2", source, askedWithCommand: true });
+  assert.deepEqual(asking, { asker: "claude:2", otherwise: "KeepTables" });
+  // A program someone wrote says what silence means in its own words: only the command's program is read for it.
+  assert.deepEqual(nornAsking({ authorMention: null, source, askedWithCommand: false }), { asker: null, otherwise: null });
+  const asked = program(source);
+  const [open] = asked.step().open;
+  const request = asked.state.ledger.requests[open.requestId];
+  assert.deepEqual([nornRequestCard(request, open.requestRef, "user-1", asking).asker, nornRequestCard(request, open.requestRef, "user-1", asking).otherwise],
+    ["claude:2", "KeepTables"]);
+  assert.match(nornPersonBody(request, asking).split("\n").at(-1), /; without an answer, KeepTables\. claude:2 asks\.$/u);
+  assert.equal(nornOutcomeText("@Daniel", { tag: "NoReply" }, asking.otherwise), "It closed without an answer, so KeepTables.");
 });
 
 test("a program opens the standard library: a routine is one line, and a decision has its default", () => {

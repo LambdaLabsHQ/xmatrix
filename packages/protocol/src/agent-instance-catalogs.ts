@@ -67,6 +67,9 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
         ? { supportsPersonality: candidate.supportsPersonality }
         : {}),
       ...(cleanAgentPresentationText(candidate.upgrade, 128) ? { upgrade: cleanAgentPresentationText(candidate.upgrade, 128) } : {}),
+      ...(cleanAgentPresentationTextList(candidate.quotaScopes, 64)
+        ? { quotaScopes: cleanAgentPresentationTextList(candidate.quotaScopes, 64) }
+        : {}),
     };
     seen.set(model.toLowerCase(), entry);
     models.push(entry);

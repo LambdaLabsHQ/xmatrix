@@ -43,7 +43,7 @@ export class DingTalkEffectParticipant {
   targetDatabase(authority: DingTalkEffectAuthority): AuthorityDatabase {
     let used=false;
     const wrap=<T>(database: AuthorityDatabase,rawContext: DatabaseRequestContext,run: (tx: DatabaseTransaction)=>Promise<T>): Promise<T> => {
-      if (rawContext.statement || !rawContext.placement || !["message.append","automation.trigger"].includes(rawContext.operation))
+      if (rawContext.statement || !rawContext.placement || rawContext.operation!=="message.append")
         return database.transaction(rawContext,run);
       if (used) throw denied();used=true;
       return database.transaction(dingtalkPrepareContext(rawContext,this.plan,this.path),async tx => {

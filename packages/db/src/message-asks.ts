@@ -21,8 +21,7 @@ const RECEIVER_SQL = `EXISTS (SELECT 1 FROM data.instances i WHERE i.channel_id=
   OR EXISTS (SELECT 1 FROM data.runs r WHERE r.channel_id=m.channel_id AND r.status IN ('starting','running'))
   OR m.agent_invocation_targets_json IS NOT NULL
   OR EXISTS (SELECT 1 FROM data.message_attention a WHERE a.space_id=m.space_id AND a.channel_id=m.channel_id
-    AND a.message_id=m.message_id AND a.subject_id LIKE 'user:%' AND a.kind IN ('mention','reply','broadcast'))
-  OR EXISTS (SELECT 1 FROM data.automation_occurrences occurrence WHERE occurrence.message_id=m.message_id)`;
+    AND a.message_id=m.message_id AND a.subject_id LIKE 'user:%' AND a.kind IN ('mention','reply','broadcast'))`;
 
 // The first-message decision owns a new unnamed conversation from append,
 // including the gap before its row is inserted. A failed undecided reading
@@ -53,7 +52,6 @@ const OTHER_STARTUP_SQL = `EXISTS (SELECT 1 FROM data.first_message_launch_choic
       AND first.author_kind IN ('user','agent') AND first.message_kind='xmatrix.message.text'
       AND first.edited_at IS NULL AND first.recalled_at IS NULL AND first.deleted_at IS NULL
       AND first.sent_at>clock_timestamp()-make_interval(secs => ${FIRST_MESSAGE_LAUNCH_HOLD_LIMIT_MS / 1000})
-      AND NOT EXISTS (SELECT 1 FROM data.automation_occurrences occurrence WHERE occurrence.message_id=first.message_id)
       AND NOT EXISTS (SELECT 1 FROM data.first_message_launch_choices choice
         WHERE choice.channel_id=first.channel_id AND choice.message_id=first.message_id)))`;
 

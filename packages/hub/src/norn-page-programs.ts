@@ -1,7 +1,7 @@
 import { PostgresNornProgramRepository, PostgresPageRepository, readDeletedConversations, readNornProgram, readNornRequest, readPageNornPrograms } from "@xmatrix/db";
 import type { NornRequestView, PageProgramStatus, PageScheduleProblem } from "@xmatrix/protocol";
 import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
-import { effectivelyRestricted } from "./automation-occurrence-conversation";
+import { effectivelyRestricted } from "./page-restriction";
 import { deterministicConversationId } from "./deterministic-id";
 import { checkNornProgram, nornBlocks, nornBlockSource, nornStartLedger, nornStep, plainAnswer as answerText, plainResult as resultText } from "./norn-host";
 import { nornFlow } from "./norn-plan";
@@ -131,7 +131,8 @@ export async function nornRequestView(env: Env, input: { spaceId: string; reques
   return { ref: input.requestRef, channelId: found.channelId, holder: request.holder, text: request.text,
     state: request.reply === null ? "open" : OUTCOMES[request.reply.tag],
     reply: request.reply === null ? null : request.reply.tag === "Answered" ? answerText(request.reply.value)
-      : "reason" in request.reply ? request.reply.reason : null };
+      : "reason" in request.reply ? request.reply.reason : null,
+    ...(found.delegatedByReader ? { yoursToTakeBack: true } : {}) };
 }
 
 /**

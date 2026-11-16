@@ -8,6 +8,7 @@ import {
   machineTagSelects,
   parseAutoLaunchMentions,
   routingModelOptionNamed,
+  routingModelWrittenName,
   type AutoLaunchField,
   type AutoLaunchMention,
   type AutoLaunchTags,
@@ -133,7 +134,11 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
       ? routingModelOptionNamed(model, selected.model) : selected.model === model.model);
     const observed = (registration.modelCatalog ?? []).filter(model => model.model && (allowed.length
       ? allowed.includes(model.model) : native || model.model === registration.parameterModel));
-    const reported = allowed.length || native ? observed.map(model => model.model) : [];
+    // A native catalog is addressed by any name it gives a model, so an opaque
+    // selector is written as that model's name. A declared list is matched exactly.
+    const reported = allowed.length || native
+      ? observed.map(model => native ? routingModelWrittenName(model, observed) : model.model) : [];
+    const selectedModel = native && selected.model ? observed.find(named)?.model ?? selected.model : selected.model;
     if (selected.model && (native ? !observed.some(named) : !allowed.includes(selected.model))) continue;
     const spoken = machineMentionValue(machineId, registration.machineName);
     add("machine", spoken, spoken === machineId ? machineLaunchTagValue(machineId) : registration.machineName,
@@ -142,7 +147,7 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
     const selectedParameters = launchHarnessParameters(selected);
     for (const parameter of registration.parameters ?? []) {
       if (selectedParameters[parameter.id] !== undefined || ["model", "models", "effort", "reasoning_effort"].includes(parameter.id) ||
-          selected.model && registration.parameterModel && selected.model !== registration.parameterModel) continue;
+          selectedModel && registration.parameterModel && selectedModel !== registration.parameterModel) continue;
       for (const value of parameter.options) {
         const id = `launch:parameter:${parameter.id}:${value}`;
         if (seen.has(id)) continue;

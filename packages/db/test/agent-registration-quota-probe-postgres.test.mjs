@@ -72,9 +72,12 @@ integration("registration quota probe targets are the Space's authorized, singly
 
     // Instance readings feed the same pool. Magnitude never chooses the winner.
     const key = { ownerUserId: "owner", machineId: "m1", harness: "claude" };
+    // Another window than the probe read (a reset apart): within one window a
+    // share used read as used up is kept (see registration-quota-scopes).
+    const instanceReset = new Date(Date.parse(resetAt) + 3_600_000).toISOString();
     const sample = (ago, percent) => ({ quotaSource: "provider_api",
       quotaObservedAt: new Date(Date.now() - ago).toISOString(),
-      quotaUsages: [{ label: "5h", percent, resetAt }] });
+      quotaUsages: [{ label: "5h", percent, resetAt: instanceReset }] });
     const fresh = sample(100, 12);
     await observeRegistrationQuota(database, key, fresh, "fresh-instance");
     await observeRegistrationQuota(database, key, sample(5000, 99), "late-instance");

@@ -151,15 +151,15 @@ export interface ConnectorDelivery {
   credentials: Readonly<Record<string, string>>;
 }
 
-/** A provider event in the one shape routing, messages and Automations read. */
+/** A provider event in the one shape routing, messages and programs read. */
 export interface ConnectorEvent {
-  /** Stable per delivery: message ids and Automation events dedupe on it. */
+  /** Stable per delivery: message ids dedupe on it. */
   eventId: string;
   /** Lower-case source ref a Channel subscribes to, e.g. `webhook:deploys`. */
   sourceRef: string;
   /** One of the manifest's `events.features` ids. */
   feature: string;
-  /** One line, used by Automation occurrences. */
+  /** One line, said to the programs that wait for the event. */
   summary: string;
   /** Bounded markdown posted to subscribed Channels. Untrusted content. */
   body: string;

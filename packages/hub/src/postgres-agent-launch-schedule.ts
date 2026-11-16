@@ -1,10 +1,10 @@
 import type { CoordinatorStep } from "./postgres-agent-launch-coordinator";
 
 /** A kind of work a Channel coordinator pass can do. */
-export type ScheduledStep = CoordinatorStep | "automation";
+export type ScheduledStep = CoordinatorStep;
 
 export const SCHEDULED_STEPS: readonly ScheduledStep[] = [
-  "registrationPreparation", "registrationStop", "runTerminal", "reborn", "launch", "turnRetry", "quotaRetry", "idleSleep", "firstMessageSummon", "norn", "automation",
+  "registrationPreparation", "registrationStop", "runTerminal", "reborn", "launch", "turnRetry", "quotaRetry", "idleSleep", "firstMessageSummon", "norn",
 ];
 
 /** When each kind of a Channel's work is next due; a kind with none is absent. */
@@ -90,4 +90,12 @@ export type PendingWake = { all: true } | { all: false; named: ScheduledStep[] }
 export function mergeWake(pending: PendingWake | undefined, work: readonly ScheduledStep[] | undefined): PendingWake {
   if (!work || pending?.all) return { all: true };
   return { all: false, named: [...new Set([...(pending?.named ?? []), ...work])] };
+}
+
+/**
+ * A wake as this Hub reads it back from storage. A deploy can leave one that names a kind this Hub
+ * does not have; like a wake request naming an unknown kind, it wakes every kind.
+ */
+export function storedWake(pending: PendingWake | undefined): PendingWake | undefined {
+  return pending && !pending.all && !pending.named.every(isScheduledStep) ? { all: true } : pending;
 }

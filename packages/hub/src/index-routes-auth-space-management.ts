@@ -12,7 +12,7 @@ import { githubConnectAuthorizeUrl, githubConnectReturnUrl, githubGrant, githubG
 import { startChannelAbout, type ChannelAboutStart } from "./channel-about";
 import { dispatchProductGitHubWebhook } from "./product-github-webhook-authority-adapter";
 import { githubCatalogChanged } from "./github-catalog-events";
-import { fireGitHubAutomationTriggers } from "./automation-triggers";
+import { githubEventArrived } from "./outside-events";
 import { onPullRequestNamingBlocks } from "./github-pull-request-blocks";
 import { MAX_INVITE_EMAILS_PER_REQUEST, InviteEmailRequest, AdminInviteEmailRequest, normalizeInviteEmails, signGitHubAppState, verifyGitHubAppState, sendSpaceInviteEmails, requireAuth, requireHumanAuth, requireAdmin, productCommandId, jsonErrors, spaceResponse } from "./index-shared";
 import { appOrigin } from "./deployment-origins";
@@ -295,9 +295,10 @@ export function registerIndexRoutesAuthSpaceManagement(app: Hono<{ Bindings: Env
       await onPullRequestNamingBlocks(c.env, payload as Record<string, unknown>)
         .catch((error: unknown) => console.error("pull request block handling failed", error));
     }
-    // Page Automations this event fires (pages-live-document.md §6.2); likewise, a failure must not lose the delivery to conversations.
-    await fireGitHubAutomationTriggers(c.env, event, payload as Record<string, unknown>)
-      .catch((error: unknown) => console.error("Automation triggers failed", error));
+    // The Norn programs that wait for this event (norn-host.md, "Events from outside");
+    // likewise, a failure must not lose the delivery to conversations.
+    await githubEventArrived(c.env, event, payload as Record<string, unknown>)
+      .catch((error: unknown) => console.error("GitHub event did not reach its programs", error));
     return c.json(await dispatchProductGitHubWebhook({
       env: c.env,
       event,

@@ -432,7 +432,7 @@ export function DeletePageDialog({ open, title, hasChildren, onClose, onDelete }
       <div className="space-y-2 px-5 py-4 text-sm">
         <p className="break-words font-semibold">{title}</p>
         <p>{hasChildren ? "Move or delete its child pages first."
-          : "This permanently deletes the page and its version history, and stops its automations. Linked conversations are kept."}</p>
+          : "This permanently deletes the page and its version history, and stops its programs. Linked conversations are kept."}</p>
         {error && <p role="alert" className={noticeClass("attention")}>{error}</p>}
       </div>
       <DialogPanelFooter>

@@ -61,7 +61,7 @@ export async function teamsInteraction(payload: Record<string, unknown>, app: Te
     const nonce = value.match(/^link ([A-Za-z0-9_-]{32})$/u)?.[1];
     return nonce ? { ...base, kind: "link", nonce, reference } : { ...base, kind: "ignored" };
   }
-  // Confirmation capabilities never cross into Channel messages, diagnostics or Automations.
+  // Confirmation capabilities never cross into Channel messages, diagnostics or programs.
   if (/\blink\s+[A-Za-z0-9_-]{32}/iu.test(payload.text)) return { ...base, kind: "ignored" };
   return { ...base, kind: "message", reference, event: connectorEvent({
     eventId: "teams:" + await sha256Hex(JSON.stringify([app.appId, app.tenantId, conversation.id, payload.id])),

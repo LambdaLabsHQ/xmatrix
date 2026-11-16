@@ -18,6 +18,9 @@ With `--dangerously-skip-permissions` Claude sends `can_use_tool` only for
 tools that need a person; every other tool is allowed with its input
 unchanged, so the permission prompt tool changes nothing else.
 
+In `ask` access the same card carries the harness's permission requests
+(`docs/design/agent-access.md`).
+
 Secrets are never relayed: a Codex question marked `isSecret` is answered
 empty, and ACP URL-mode elicitations are cancelled.
 

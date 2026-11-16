@@ -190,13 +190,6 @@ export {
 } from "./machine-resource-history.js";
 export { MachineIdentityAdoptionError, adoptLegacyMachineIds } from "./machine-identity-adoption.js";
 export {
-  PostgresAutomationRepository,
-  AutomationControlError,
-  CHANNEL_AUTOMATION_WAKE_SQL,
-} from "./automation-control.js";
-export { automationName } from "./automation-commit.js";
-export { AUTOMATION_OUTCOME_BATCH, type AutomationOccurrenceFacts } from "./automation-outcome-facts.js";
-export {
   PostgresTraceAccessRepository,
   TraceAccessControlError,
   type TraceAccessAuthorityResult,
@@ -226,12 +219,13 @@ export { PostgresRegistrationExecutionRepository } from "./agent-registration-ex
 export { firstMessageSummonId, readMessageInvocationSelections, XMATRIX_SYSTEM_AUTHOR_ID } from "./message-invocation-selections.js";
 export { PostgresRegistrationRevocationRepository, type RegistrationStopIntent } from "./agent-registration-revocation.js";
 
-export type { RegistrationLaunchCandidate, RegistrationLaunchChooser } from "./agent-registration-launch.js";
+export type { RegistrationLaunchCandidate, RegistrationLaunchChooser, RegistrationModelFacts } from "./agent-registration-launch.js";
 export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationCancellations } from "./agent-registration-launch.js";
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
   type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
-export { readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+export { ACCOUNT_QUOTA_SCOPE, readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+  UNRESOLVED_QUOTA_SCOPE, type RegistrationQuotaUsage, type RegistrationUsageLimit,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 
 export {
@@ -245,7 +239,7 @@ export { MACHINE_OFFLINE_REST_REASON, PostgresRegistrationRebornRepository, WAKE
 
 export type { RegistrationRepositoryCatalog, RegistrationRepositoryReader } from "./registration-repository-authority.js";
 export {
-  inActiveSpace, namedPageBody, pageAccess, pageAccessMap, pageActor, pageBody, PageControlError,
+  inActiveSpace, readInActiveSpace, namedPageBody, pageActor, pageBody, PageControlError,
   pagePositionBetween, pageTitle, PostgresPageRepository, renamedPageBody, UNNAMED_PAGE,
 } from "./page-control.js";
 export type {
@@ -271,11 +265,11 @@ export {
 } from "./space-roles.js";
 export { readCliReleaseOwners, requestMachineCliUpdateCheck, recordMachineCliUpdateStatus, failMachineCliUpdateCheck,
   type MachineCliUpdateCheckDecision } from "./machine-cli-release.js";
-export { readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
+export { HARNESS_RELEASE_TARGETS_SQL, readHarnessActionStatus, readHarnessReleaseTargets, readRecentHarnessActions, type HarnessRelease, type HarnessReleaseTarget } from "./machine-harness-actions.js";
 export { readLatestWorktreeListing, readWorktreeActionStatus } from "./machine-worktree-actions.js";
 export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } from "./governance.js";
 
-export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaExpiries,
+export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaUsages,
   readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
 export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, settleRegistrationQuotaWaits,

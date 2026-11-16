@@ -44,3 +44,38 @@ test("execution acknowledgement uses PostgreSQL without requiring a new connecti
   assert.ok(calls.some(query => query.name === "runtime_message_execution_upsert_v2"));
   assert.ok(calls.every(query => !/UPDATE data\.(runs|instances)/u.test(query.text)), "only execution observation storage may change");
 });
+
+// Its daemon deletes a report only on a receipt and resends it every five
+// seconds until then: a report no retry could store is answered once, for good.
+function finalReceiptDatabase(owner, prior) {
+  return sessionAuthorityDatabase(async query => {
+    if (query.name === "channel_space_directory_resolve_v2") return [{ channel_id: "channel", space_id: "space",
+      shard_id: "shard-1", placement_epoch: 1, entity_version: 1 }];
+    if (query.name === "space_placement_resolve_v1") return [{ space_id: "space", shard_id: "shard-1", placement_epoch: 1,
+      state: "active", target_shard_id: null, plan_class: "single" }];
+    if (query.name === "runtime_execution_report_owner_v5") return owner;
+    if (["runtime_message_execution_prior_v1", "runtime_execution_report_receipt_v1"].includes(query.name)) return prior;
+    if (query.name === "runtime_message_execution_upsert_v2") return [];
+    throw new Error(`Unexpected query ${query.name}`);
+  });
+}
+
+test("a report whose Run binding is gone gets a final receipt, not an error its daemon retries", async () => {
+  const command = executionReportCommand(principal, { ...body, requestId: randomUUID() });
+  const receipt = await machineRunLifecycleReport({}, command, { database: finalReceiptDatabase([], []) });
+  assert.equal(receipt.status, "source_unavailable");
+  assert.equal(receipt.reason, "run_binding_unavailable");
+  assert.equal(receipt.executionId, body.report.executionId);
+  const wrongKey = await machineRunLifecycleReport({}, command, { database: finalReceiptDatabase([{ run_id: "run",
+    instance_id: "instance", execution_key: "another-key", channel_instance_id: 1 }], []) });
+  assert.equal(wrongKey.reason, "run_binding_unavailable");
+});
+
+test("a report that conflicts with the evidence the Hub holds is superseded, not retried", async () => {
+  const command = executionReportCommand(principal, { ...body, requestId: randomUUID() });
+  const receipt = await machineRunLifecycleReport({}, command, { database: finalReceiptDatabase([{ run_id: "run",
+    instance_id: "instance", execution_key: "execution-key", channel_instance_id: 1 }],
+  [{ binding_digest: "other", report_digest: "other", revision: 5, state: "completed" }]) });
+  assert.equal(receipt.status, "superseded");
+  assert.equal(receipt.reason, "conflicting_evidence");
+});

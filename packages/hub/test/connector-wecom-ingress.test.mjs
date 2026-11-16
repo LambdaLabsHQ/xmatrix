@@ -9,7 +9,7 @@ function fixture() {
   const state={active:true,targets:[target],fail:false},calls=[];
   const dependencies={...WECOM_INGRESS_DEPENDENCIES,companies:()=>({routes:async value=>{calls.push(['route',value]);return state.targets;},current:async()=>state.active}),
     apps:()=>({}),deliver:async(...args)=>{calls.push(['deliver',args.slice(3)]);if(state.fail)throw Error('private-delivery-error');},
-    automations:async(_env,value)=>{calls.push(['automation',value]);},append:async()=>new Response(null,{status:200})};
+    events:async(_env,value)=>{calls.push(['automation',value]);},append:async()=>new Response(null,{status:200})};
   return {state,calls,handle:request=>handleWeComAppDelivery(env,request,dependencies)};
 }
 test("signed native WeCom text notifies only current company/member grants without disclosing content or private ids",async()=>{

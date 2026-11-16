@@ -37,7 +37,7 @@ function fixture() {
     accounts: () => accounts,
     credentials: () => ({ async resolve() { throw new Error("platform delivery must not read a Space secret"); } }),
     async append(_env, _channel, input) { appends.push(input); return Response.json({}); },
-    async automations(_env, input) { automations.push(input); },
+    async events(_env, input) { automations.push(input); },
   };
   return { queries, appends, retirements, automations, dependencies, state };
 }

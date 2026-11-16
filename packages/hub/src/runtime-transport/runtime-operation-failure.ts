@@ -150,9 +150,10 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
   const failure = { code: "runtime.session_failed", diagnosticId: `diag_${crypto.randomUUID()}`,
     retryable: false, stage: "runtime.session" };
   // Where it was thrown, never what it said: an unclassified error's message
-  // may carry request data, so the log keeps only its class and call sites.
-  // Typed credential and database reports own their event and fixed diagnosis.
-  // A second console capture would discard those fields and duplicate it.
+  // may carry request data, so the log keeps its class, call sites and a fixed
+  // shape token (XMATRIX-HUB-AX). Typed credential and database reports own
+  // their event and fixed diagnosis. A second console capture would discard
+  // those fields and duplicate it.
   const reported = reportMachineDaemonCredentialFailure(error, failure.diagnosticId) ||
     reportMachineRegistryCausalityFailure(error, failure.diagnosticId) ||
     reportRuntimeDatabaseFailure(error, failure.diagnosticId);
@@ -161,11 +162,13 @@ export function runtimeOperationFailure(error: unknown): RuntimeOperationFailure
 }
 
 /**
- * The error's class and its innermost function names: code locations only.
+ * The error's class, its innermost function names, and a fixed shape token.
  * Keep names in a scalar: Sentry normalizes nested console arguments before
  * building the title, replacing an array here with the literal `[Array]`.
+ * The shape never copies the message: a platform sentence maps to one token,
+ * anything else is only how long that sentence was.
  */
-export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string } {
+export function runtimeFailureOrigin(error: unknown): { errorClass: string; origin: string; errorShape: string } {
   const errorClass = error instanceof Error && /^[A-Za-z_$][\w$]{0,79}$/u.test(error.constructor.name)
     ? error.constructor.name : typeof error;
   const stack = error instanceof Error && typeof error.stack === "string" ? error.stack : "";
@@ -173,7 +176,54 @@ export function runtimeFailureOrigin(error: unknown): { errorClass: string; orig
     .map((line) => /^\s*at (?:async )?([A-Za-z_$][\w$.<>]{0,119}) \(/u.exec(line)?.[1])
     .filter((name): name is string => name !== undefined)
     .slice(0, 4).join(",");
-  return { errorClass, origin };
+  return { errorClass, origin, errorShape: boundedRuntimeErrorShape(error) };
+}
+
+/** Exact platform sentences. The circular-JSON prefix is the one exception: V8 appends a constructor path, and the token stops before that tail. */
+const RUNTIME_ERROR_SHAPES: ReadonlyMap<string, string> = new Map([
+  ["Can't call WebSocket send() after close()", "websocket_send_after_close"],
+  ["Network connection lost.", "network_connection_lost"],
+  ["The operation was aborted.", "aborted"],
+  ["The user aborted a request.", "aborted"],
+  ["Converting circular structure to JSON", "json_circular"],
+  ["Do not know how to serialize a BigInt", "json_bigint"],
+  ["BigInt value can't be serialized in JSON", "json_bigint"],
+]);
+
+const RUNTIME_ERROR_SHAPE_TOKENS = new Set([
+  "empty", "websocket_send_after_close", "network_connection_lost", "aborted",
+  "json_circular", "json_bigint", "unlisted_1_16", "unlisted_17_80", "unlisted_81_240", "unlisted_241_plus",
+]);
+
+function boundedRuntimeErrorShape(error: unknown): string {
+  if (!(error instanceof Error) || typeof error.message !== "string" || error.message.length === 0) return "empty";
+  const known = RUNTIME_ERROR_SHAPES.get(error.message);
+  if (known) return known;
+  // V8 continues the circular-structure sentence with a constructor path.
+  // That tail can name a type; the token stops at the fixed prefix.
+  if (error.message.startsWith("Converting circular structure to JSON")) return "json_circular";
+  const length = error.message.length;
+  return length <= 16 ? "unlisted_1_16" : length <= 80 ? "unlisted_17_80"
+    : length <= 240 ? "unlisted_81_240" : "unlisted_241_plus";
+}
+
+/** The class, call sites and shape a console capture already recorded. Anything else is dropped. */
+export function runtimeSessionOriginMetadata(extra: Record<string, unknown>): string[] {
+  const lines: string[] = [];
+  const errorClass = extra.errorClass;
+  if (typeof errorClass === "string" &&
+      /^(?:string|number|boolean|undefined|object|function|symbol|bigint|[A-Za-z_$][\w$]{0,79})$/u.test(errorClass)) {
+    lines.push(`Runtime error class: ${errorClass}`);
+  }
+  const origin = extra.origin;
+  if (typeof origin === "string" &&
+      /^(?:[A-Za-z_$][\w$.<>]{0,119})(?:,[A-Za-z_$][\w$.<>]{0,119}){0,3}$/u.test(origin)) {
+    lines.push(`Runtime error origin: ${origin}`);
+  }
+  if (typeof extra.errorShape === "string" && RUNTIME_ERROR_SHAPE_TOKENS.has(extra.errorShape)) {
+    lines.push(`Runtime error shape: ${extra.errorShape}`);
+  }
+  return lines;
 }
 
 const CLIENT_FAILURES = {

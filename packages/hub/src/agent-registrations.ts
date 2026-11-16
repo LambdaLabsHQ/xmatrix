@@ -4,6 +4,7 @@ import { PostgresAgentRegistrationRepository, PostgresRegistrationAccessReposito
   type AuthorityDatabase } from "@xmatrix/db";
 import type { parseAgentEnvironmentCommand, parseAgentRegistrationCommand, parseAgentRegistrationKey,
   parseSpaceAgentRegistrationKey, HarnessProfileCommand } from "@xmatrix/protocol";
+import { agentAccessGrant, agentAccessModes, agentPresetById, agentPresetForLauncher } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase, createPostgresAuthorityFleet, type PostgresAuthorityFleetEnv } from "./postgres-authority-fleet";
 import { issueRegistrationQuotaProbes, type QuotaProbeIssueDependencies } from "./agent-routing-quota-refresh";
 import type { Env } from "./types";
@@ -126,11 +127,15 @@ async function withEnvironments<T>(env: RegistrationEnv, database: AuthorityData
   try { return await work(session); } finally { await session.close(); }
 }
 
-/** A Machine owner's harness environment. */
+/** A Machine owner's harness environment, with the access modes this harness
+ * can be given and what full access adds to its launch: what its owner is
+ * shown before confirming a mode. */
 export function getAgentEnvironment(env: RegistrationEnv, input: { actorUserId: string; key: EnvironmentKey },
   database?: AuthorityDatabase) {
-  return withEnvironments(env, database, session => new PostgresAgentEnvironmentRepository(session)
-    .get({ ...input, requestId: crypto.randomUUID() }));
+  const preset = agentPresetById(input.key.harness) ?? agentPresetForLauncher(input.key.harness);
+  return withEnvironments(env, database, async session => ({
+    ...await new PostgresAgentEnvironmentRepository(session).get({ ...input, requestId: crypto.randomUUID() }),
+    fullAccess: agentAccessGrant(preset, "full"), accessModes: agentAccessModes(preset) }));
 }
 
 /** Changes a Machine owner's harness environment; running executions on that Machine are rechecked. */

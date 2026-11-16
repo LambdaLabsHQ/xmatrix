@@ -24,9 +24,12 @@ export function useInstalledHarnesses(spaceId?: string | null, token?: string | 
     bulkLock.current = true;
     setEnablingAll(true);
     try {
+      // One question for everything about to be added, not one per harness.
+      const confirmed = await control.confirmAdds(candidates);
+      if (!confirmed) return;
       for (const candidate of candidates) {
         const toggle = harnessSpaceSwitch(candidate.registration);
-        if (toggle && !toggle.on && !(await control.set(candidate.key, candidate.preset, true))) break;
+        if (toggle && !toggle.on && !(await control.set(candidate.key, candidate.preset, true, confirmed))) break;
       }
     } finally {
       bulkLock.current = false;

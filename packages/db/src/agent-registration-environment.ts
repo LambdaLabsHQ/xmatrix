@@ -23,8 +23,10 @@ export class PostgresAgentEnvironmentRepository {
 
   async get(input: { key: AgentRegistrationKey; actorUserId: string; requestId: string }) {
     const key = parseAgentRegistrationKey(input.key);
+    // A machine's owner reads their own environment before the harness is
+    // first added there (it is what they confirm access against): none is held yet.
+    if (input.actorUserId !== key.ownerUserId) throw new RegistrationAccessError("registration_not_found", 404);
     return this.database.transaction({ requestId: input.requestId, operation: "registration.environment.get" }, async tx => {
-      await owner(tx, input.actorUserId, key);
       const rows = await tx.query({ name: "registration_environment_read_v1", text: `SELECT declaration_json,version
         FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
       values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 });

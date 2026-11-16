@@ -8,10 +8,11 @@
 //! `CURSOR_API_KEY` or `CURSOR_AUTH_TOKEN` wins over both.
 //!
 //! Cursor reports a billing-cycle meter (`totalPercentUsed`) plus Auto and API
-//! bucket percentages. The CLI has no machine-readable `usage` subcommand, so
+//! pool percentages. The CLI has no machine-readable `usage` subcommand, so
 //! this reader calls the same Connect RPC the dashboard and `/usage` use.
-//! Agents shows all three windows. Hub routing picks Auto vs API by the
-//! selected model (Auto/Composer/Grok → Auto; third-party → API).
+//! The Auto and API pools are scoped windows: each constrains only the models
+//! that spend it ([`cursor_quota_scope_for_model`]), and the runtime marks
+//! every catalog row with its pool.
 //!
 //! Generic ACP otherwise has no account quota source for Cursor; without this
 //! hook the Agents page and `xmatrix list` show `-`.
@@ -166,25 +167,45 @@ fn cursor_reset_at(root: &serde_json::Map<String, Value>) -> Option<String> {
     rfc3339_from_unix_millis(&raw)
 }
 
-fn push_percent_window(
-    quotas: &mut Vec<LlmQuotaUsage>,
-    label: &str,
-    percent: Option<f64>,
-    reset_at: Option<&str>,
-) {
-    let Some(percent) = percent.filter(|value| value.is_finite() && *value >= 0.0) else {
-        return;
-    };
-    let exhausted = percent >= 100.0;
-    quotas.push(percent_window(
-        label,
-        "cursor",
-        percent,
-        exhausted,
-        reset_at.map(str::to_string),
-    ));
+/// The pool a Cursor model spends: `Auto` (Auto, Composer, Grok, the runtime
+/// `default`) or `API` (third-party Claude, GPT, Gemini, ...). The scope its
+/// catalog row carries and the scope of that pool's window.
+pub fn cursor_quota_scope_for_model(model: &str) -> &'static str {
+    let id = model.trim().to_ascii_lowercase();
+    if id.is_empty()
+        || id == "default"
+        || id == "auto"
+        || id.starts_with("default[")
+        || id.starts_with("composer")
+        || id.starts_with("grok")
+    {
+        "Auto"
+    } else {
+        "API"
+    }
 }
 
+/// A billing-cycle window, `scope`d to a pool or of the whole account.
+fn cycle_window(
+    percent: Option<f64>,
+    reset_at: Option<&str>,
+    scope: Option<&str>,
+) -> Option<LlmQuotaUsage> {
+    let percent = percent.filter(|value| value.is_finite() && *value >= 0.0)?;
+    let mut window = percent_window(
+        "1mo",
+        "cursor",
+        percent,
+        percent >= 100.0,
+        reset_at.map(str::to_string),
+    );
+    window.scope = scope.map(str::to_string);
+    Some(window)
+}
+
+/// The Auto and API pools as scoped windows. The cycle total is the account
+/// window only when Cursor reports no pool: beside them it is neither, since a
+/// used-up total does not stop a pool that still has quota.
 pub(crate) fn cursor_period_usage_from_value(value: &Value) -> Option<LlmUsage> {
     let root = value.as_object()?;
     // A disabled meter still answers; treat it as no reading rather than inventing 0%.
@@ -196,35 +217,36 @@ pub(crate) fn cursor_period_usage_from_value(value: &Value) -> Option<LlmUsage> 
         .and_then(Value::as_object)
         .or(Some(root))?;
     let reset_at = cursor_reset_at(root);
-    let mut quotas = Vec::new();
-    push_percent_window(
-        &mut quotas,
-        "1mo",
-        first_f64(
-            plan,
-            &[
-                "totalPercentUsed",
-                "total_percent_used",
-                "percentUsed",
-                "percent_used",
-                "percent",
-            ],
-        ),
-        reset_at.as_deref(),
+    let reset_at = reset_at.as_deref();
+    let pools: Vec<LlmQuotaUsage> = [
+        ("Auto", &["autoPercentUsed", "auto_percent_used"]),
+        ("API", &["apiPercentUsed", "api_percent_used"]),
+    ]
+    .into_iter()
+    .filter_map(|(scope, keys)| cycle_window(first_f64(plan, keys), reset_at, Some(scope)))
+    .collect();
+    let total = first_f64(
+        plan,
+        &[
+            "totalPercentUsed",
+            "total_percent_used",
+            "percentUsed",
+            "percent_used",
+            "percent",
+        ],
     );
-    push_percent_window(
-        &mut quotas,
-        "Auto",
-        first_f64(plan, &["autoPercentUsed", "auto_percent_used"]),
-        reset_at.as_deref(),
-    );
-    push_percent_window(
-        &mut quotas,
-        "API",
-        first_f64(plan, &["apiPercentUsed", "api_percent_used"]),
-        reset_at.as_deref(),
-    );
-    super::observed_provider_quotas(quotas)
+    let account = cycle_window(total, reset_at, None).filter(|_| pools.is_empty());
+    if account.is_none() && pools.is_empty() {
+        return None;
+    }
+    Some(LlmUsage {
+        quota_source: Some("provider_api".to_string()),
+        quota_observed_at: super::observed_now(),
+        quota_usages: account.map(|window| vec![window]),
+        // Every Cursor reading is complete: no pool is a statement too.
+        scoped_quota_usages: Some(pools),
+        ..LlmUsage::default()
+    })
 }
 
 #[cfg(test)]
@@ -254,17 +276,48 @@ mod tests {
         });
         let usage = cursor_period_usage_from_value(&value).expect("usage");
         assert_eq!(usage.quota_source.as_deref(), Some("provider_api"));
-        let windows = usage.quota_usages.expect("windows");
-        assert_eq!(windows.len(), 3);
+        assert!(usage.quota_observed_at.is_some());
+        // Beside the pools the cycle total gates nothing.
+        assert!(usage.quota_usages.is_none());
+        let pools = usage.scoped_quota_usages.expect("pools");
+        assert_eq!(pools.len(), 2);
+        assert_eq!(pools[0].scope.as_deref(), Some("Auto"));
+        assert_eq!(pools[0].label.as_deref(), Some("1mo"));
+        assert_eq!(pools[0].percent, Some(59.01));
+        assert_eq!(pools[0].remaining, None);
+        assert_eq!(pools[0].reset_at.as_deref(), Some("2026-10-13T09:32:23Z"));
+        assert_eq!(pools[1].scope.as_deref(), Some("API"));
+        assert_eq!(pools[1].percent, Some(100.0));
+        assert_eq!(pools[1].remaining, Some(0.0));
+    }
+
+    #[test]
+    fn without_pools_the_cycle_total_is_the_account_window() {
+        let value = serde_json::json!({
+            "billingCycleEnd": "1791883943000",
+            "planUsage": { "totalPercentUsed": 60.35 }
+        });
+        let usage = cursor_period_usage_from_value(&value).expect("usage");
+        let windows = usage.quota_usages.expect("account window");
+        assert_eq!(windows.len(), 1);
         assert_eq!(windows[0].label.as_deref(), Some("1mo"));
+        assert_eq!(windows[0].scope, None);
         assert_eq!(windows[0].percent, Some(60.35));
-        assert_eq!(windows[0].remaining, None);
-        assert_eq!(windows[0].reset_at.as_deref(), Some("2026-10-13T09:32:23Z"));
-        assert_eq!(windows[1].label.as_deref(), Some("Auto"));
-        assert_eq!(windows[1].percent, Some(59.01));
-        assert_eq!(windows[2].label.as_deref(), Some("API"));
-        assert_eq!(windows[2].percent, Some(100.0));
-        assert_eq!(windows[2].remaining, Some(0.0));
+        assert!(
+            usage
+                .scoped_quota_usages
+                .is_some_and(|pools| pools.is_empty())
+        );
+    }
+
+    #[test]
+    fn models_spend_the_auto_or_the_api_pool() {
+        for model in ["", "default", "Auto", "default[]", "composer-2.5", "grok-4"] {
+            assert_eq!(cursor_quota_scope_for_model(model), "Auto", "{model:?}");
+        }
+        for model in ["claude-4.5-sonnet", "gpt-5", "gemini-3-pro"] {
+            assert_eq!(cursor_quota_scope_for_model(model), "API", "{model:?}");
+        }
     }
 
     #[test]

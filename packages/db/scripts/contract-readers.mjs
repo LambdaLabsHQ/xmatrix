@@ -18,12 +18,30 @@ export function removedTables(sql) {
   return [...relationStatements(sql)].flatMap(({ droppedTable, renamed }) => droppedTable ?? renamed ?? []);
 }
 
+const EDGE = "([^A-Za-z0-9_]|$)";
+const START = "(^|[^A-Za-z0-9_])";
+
+/**
+ * Patterns for the ways runtime code reaches a table. No Hub pool sets a
+ * search_path, so SQL reaches `data.x` only by naming it with its schema
+ * (`data.x`, `"data"."x"`) or by interpolating a string that holds the bare
+ * name (`data.${table}` with `table: "x"`). A bare word is not a reference: a
+ * route such as `/api/automations` or a field `{ automations: [] }` shares the
+ * name and touches no table. A name the migration gives without a schema is
+ * matched as any bare word, as before.
+ */
+export function readerPatterns(table) {
+  const [schema, name] = table.includes(".") ? table.split(".") : [null, table];
+  if (!schema) return [`${START}${name}${EDGE}`];
+  return [`${START}"?${schema}"?\\."?${name}"?${EDGE}`, `["'\`]${name}["'\`]`];
+}
+
 /** Runtime source lines at `ref` that still name one of `tables`. */
 export function runtimeReaders(ref, tables) {
   if (tables.length === 0) return [];
-  const patterns = tables.flatMap((table) => ["-e", table.split(".")[1]]);
+  const patterns = tables.flatMap((table) => readerPatterns(table).flatMap((pattern) => ["-e", pattern]));
   try {
-    return execFileSync("git", ["grep", "-n", "-w", ...patterns, ref, "--", ...RUNTIME_SOURCE],
+    return execFileSync("git", ["grep", "-n", "-E", ...patterns, ref, "--", ...RUNTIME_SOURCE],
       { cwd: REPOSITORY, encoding: "utf8" }).trim().split("\n");
   } catch (error) {
     if (error.status === 1) return [];

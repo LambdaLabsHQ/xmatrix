@@ -413,6 +413,7 @@ export class PostgresMachineLifecycleRepository {
     // Instance merely because an earlier report terminalized its predecessor.
     const terminalInstances = input.preserveInstanceForReborn === true ? [] : await this.database.transaction({
       requestId: commandId, operation: "machine-lifecycle.terminal-instances",
+      statement: "single_read",
       placement: { spaceId: placement.spaceId, shardId: placement.shardId,
         placementEpoch: placement.placementEpoch },
     }, tx => tx.query<QueryResultRow>({ name: "machine_lifecycle_terminal_instances_v1", text: `SELECT i.instance_id
@@ -578,7 +579,6 @@ export class PostgresMachineLifecycleRepository {
         status='expired',version=version+1,decided_at=COALESCE(decided_at,$2)
         WHERE instance_id=$1 AND status='approved' AND duration IN ('once','channel')`,
       values: [run.instance_id, input.at], maxRows: 0 });
-    if (!cancellation) await this.updateSchedule(tx, runId, body, input.eventType, input.payload, status, input.at);
     return status || input.repoPool || cleanupConfirmed || restChanged ? runId : undefined;
   }
 
@@ -614,26 +614,6 @@ export class PostgresMachineLifecycleRepository {
         AND (NOT $5::boolean OR rest_state IS NULL OR rest_state='interrupted')
       RETURNING instance_id`, values: [rest, input.at, instanceId, runId, refineOnly], maxRows: 1 });
     return changed.length > 0;
-  }
-
-  private async updateSchedule(tx: DatabaseTransaction, runId: string, body: Record<string, unknown>,
-    eventType: string, payload: Record<string, unknown>, status: string | undefined, at: string) {
-    const { automationOccurrenceId: occurrenceId, automationId } = automationRunIdentity(body);
-    if (!occurrenceId || !automationId || !status) return;
-    if (eventType === "machine_spawn_result" && payload.ok !== true || eventType === "machine_run_exited") {
-      const succeeded = status === "completed";
-      const detail = succeeded ? null : failureDetail(payload);
-      await tx.query({ name: "machine_lifecycle_occurrence_finish_v2", text: `UPDATE
-        data.automation_occurrences SET status=$1,lease_owner=NULL,lease_until=NULL,
-        error_code=$2,error_message=$3,updated_at=$4,finished_at=$4
-        WHERE occurrence_id=$5 AND automation_id=$6 AND run_id=$7
-          AND status IN ('prepared','dispatched')`, values: [succeeded ? "dispatched" : "failed",
-      succeeded ? null : eventType === "machine_spawn_result" ? "machine_spawn_failed" : "machine_run_failed",
-      detail, at, occurrenceId, automationId, runId], maxRows: 0 });
-      await tx.query({ name: "machine_lifecycle_task_finish_v2", text: `UPDATE data.automations
-        SET last_error=$1,version=version+1,updated_at=$2 WHERE automation_id=$3 AND last_run_id=$4`,
-      values: [detail, at, automationId, runId], maxRows: 0 });
-    }
   }
 
   private async reconcileSnapshot(tx: DatabaseTransaction, input: { spaceId: string; ownerUserId: string; machineId: string;

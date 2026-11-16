@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState, type ReactNode } from "react";
-import { WEB_PROXY_ROUTES } from "@xmatrix/protocol";
-import { ArrowUp, Loader2, MessageCircleQuestion, Pencil, X } from "lucide-react";
+import { NORN_DELEGATED_NOTE, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
+import { ArrowUp, Forward, Loader2, MessageCircleQuestion, Pencil, Undo2, X } from "lucide-react";
 
 import { AskCard, AskError } from "./ask-card";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
@@ -10,12 +10,15 @@ import { userErrorMessage } from "@/lib/user-facing-error";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 import { errorFromResponse } from "@/lib/query/api-client";
 import { actionClass } from "@/components/ui/action-tone";
+import { useNornRequest } from "./page-reference-chip";
 
 /**
  * A request a Norn program made of a person (docs/architecture/norn-host.md).
  * The message carries what is asked and what an answer may be; only the
  * person it was delivered to sees the controls, and the Hub takes an answer
  * from nobody else. How it ended is the note the Hub records on the message.
+ * They may also delegate it to someone who answers it for them (Norn spec §7);
+ * while it is open they may take it back from this card.
  */
 export interface NornRequestMetadata {
   ref: string;
@@ -27,6 +30,12 @@ export interface NornRequestMetadata {
   context: string | null;
   options: string[];
   by: string | null;
+  /** The Agent Instance whose program asks (`claude:2`); null when a person wrote the program. */
+  asker: string | null;
+  /** The answer taken when it closes unanswered, where the asker said so. */
+  otherwise: string | null;
+  /** Who delegated the request to this person (`@Daniel`); declining gives it back to them. */
+  delegatedBy: string | null;
 }
 
 export function nornRequestMetadata(metadata: Record<string, unknown> | undefined): NornRequestMetadata | null {
@@ -39,7 +48,8 @@ export function nornRequestMetadata(metadata: Record<string, unknown> | undefine
   if (!ref || !verb || !holder || !holderUserId || !asked) return null;
   return { ref, verb, holder, holderUserId, text: asked, about: text(record.about) ?? null, context: text(record.context) ?? null,
     options: Array.isArray(record.options) ? record.options.filter((option): option is string => typeof option === "string") : [],
-    by: text(record.by) ?? null };
+    by: text(record.by) ?? null, asker: text(record.asker) ?? null, otherwise: text(record.otherwise) ?? null,
+    delegatedBy: text(record.delegatedBy) ?? null };
 }
 
 /** An option the person completes before sending: `High(say why)` takes words of their own. */
@@ -84,19 +94,19 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
     requestAnimationFrame(() => field.current?.focus());
   };
 
+  const [delegating, setDelegating] = useState(false);
+  const [to, setTo] = useState("");
+  const [why, setWhy] = useState("");
+  const post = (url: string, body: unknown) => postNornRequest(fetch, token, url, body);
+
   async function send(result: "answered" | "refused", text: string) {
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch(WEB_PROXY_ROUTES.channel_norn_request_answer(channelId, request.ref), {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ outcome: result, text }),
-      });
-      if (!response.ok) throw await errorFromResponse(response);
-      const taken = await response.json() as { refusal?: string };
-      if (taken.refusal) setError(taken.refusal);
-      else setSent(result === "answered" ? `You answered: ${text}` : `You declined: ${text}`);
+      const refusal = await post(WEB_PROXY_ROUTES.channel_norn_request_answer(channelId, request.ref), { outcome: result, text });
+      if (refusal) setError(refusal);
+      else setSent(result === "answered" ? `You answered: ${text}`
+        : request.delegatedBy ? `You gave it back to ${request.delegatedBy.replace(/^@/u, "")}: ${text}` : `You declined: ${text}`);
     } catch (answerError) {
       setError(userErrorMessage(answerError, "Couldn't send your answer"));
     } finally {
@@ -104,30 +114,65 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
     }
   }
 
+  async function delegate() {
+    const who = to.trim().startsWith("@") ? to.trim() : `@${to.trim()}`;
+    setBusy(true);
+    setError(null);
+    try {
+      const refusal = await post(WEB_PROXY_ROUTES.channel_norn_request_delegate(channelId, request.ref),
+        { to: who, ...(why.trim() ? { reason: why.trim() } : {}) });
+      if (refusal) setError(refusal);
+      else setSent(`${NORN_DELEGATED_NOTE}${who.slice(1)}${why.trim() ? `: ${why.trim()}` : ""}`);
+    } catch (delegateError) {
+      setError(userErrorMessage(delegateError, "Couldn't delegate the request"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const decline = (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={() => void send("refused", words.trim() || "Declined")}
-      className={actionClass({ variant: "quiet", size: "sm" })}
-    >
-      <X className="size-3.5" />
-      Decline
-    </button>
+    <span className="flex items-center gap-1">
+      {/* A request delegated to this person is theirs to answer, not to pass on again. */}
+      {!request.delegatedBy && (
+        <button
+          type="button"
+          disabled={busy}
+          aria-expanded={delegating}
+          onClick={() => setDelegating((shown) => !shown)}
+          className={actionClass({ variant: "quiet", size: "sm" })}
+        >
+          <Forward className="size-3.5" />
+          Delegate…
+        </button>
+      )}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => void send("refused", words.trim() || (request.delegatedBy ? "Given back" : "Declined"))}
+        className={actionClass({ variant: "quiet", size: "sm" })}
+      >
+        <X className="size-3.5" />
+        {request.delegatedBy ? "Give back" : "Decline"}
+      </button>
+    </span>
   );
+  // Whoever delegated the request from this card may take it back while it is open.
+  const delegatedAway = isHolder && (outcome ?? sent)?.startsWith(NORN_DELEGATED_NOTE) === true;
 
   return (
     <AskCard
-      who="A program"
+      who={request.asker ?? "A program"}
       kind={request.about ?? undefined}
       icon={<MessageCircleQuestion className="size-3.5" />}
       open={open}
       aside={open && decline}
       question={<div className="app-ask-question">{render(asked)}</div>}
       detail={<>
+        {request.delegatedBy && <div>{request.delegatedBy.replace(/^@/u, "")} delegated this to you: you answer it for them.</div>}
         {more && <div className="app-ask-more">{render(more)}</div>}
         {request.context && <div className="whitespace-pre-wrap [overflow-wrap:anywhere]">{request.context}</div>}
-        {request.by && !outcome && <div>Closes {new Date(request.by).toLocaleString()}. Without an answer by then it counts as no reply.</div>}
+        {request.by && !outcome && sent === null && <div>Closes {new Date(request.by).toLocaleString()}. {request.otherwise
+          ? `Without an answer by then: ${request.otherwise}.` : "Without an answer by then it counts as no reply."}</div>}
       </>}
       status={outcome ? { tone: "settled", label: outcome }
         : sent ? { tone: "settled", label: sent }
@@ -136,7 +181,40 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
         : choices.length === 0 && { tone: "attention", label: "Waiting for your answer" }}
     >
       <AskError error={error} loadError={null} action="Couldn't send your answer" onRetry={() => setError(null)} />
-      {open && (
+      {delegatedAway && <TakeBack requestRef={request.ref} onTakeBack={() => post(WEB_PROXY_ROUTES.channel_norn_request_reclaim(channelId, request.ref), {})} />}
+      {open && delegating && (
+        <form
+          className="mt-3 flex flex-wrap items-center gap-2"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (to.trim()) void delegate();
+          }}
+        >
+          <input
+            value={to}
+            disabled={busy}
+            onChange={(event) => setTo(event.target.value)}
+            placeholder="@claude:2, @codex, or a person here"
+            aria-label="Who answers it for you"
+            autoComplete="off"
+            className="h-7 min-w-36 flex-1 rounded-md border border-border bg-transparent px-2 text-sm text-foreground placeholder:text-muted-foreground"
+          />
+          <input
+            value={why}
+            disabled={busy}
+            onChange={(event) => setWhy(event.target.value)}
+            placeholder="Why (optional)"
+            aria-label="Why it is theirs to answer"
+            autoComplete="off"
+            className="h-7 min-w-40 flex-[2] rounded-md border border-border bg-transparent px-2 text-sm text-foreground placeholder:text-muted-foreground"
+          />
+          <button type="submit" disabled={busy || !to.trim()} className={actionClass({ variant: "primary", size: "sm" })}>
+            {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Forward className="size-3.5" />}
+            Delegate
+          </button>
+        </form>
+      )}
+      {open && !delegating && (
         <div className="mt-3 flex flex-col gap-2">
           {choices.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
@@ -191,5 +269,45 @@ export function NornRequestCard({ request, channelId, outcome, token, userId, re
         </div>
       )}
     </AskCard>
+  );
+}
+
+/** Posts to one of a request's routes; the Hub's refusal, if it gave one. */
+async function postNornRequest(fetch: typeof globalThis.fetch, token: string | null | undefined, url: string, body: unknown): Promise<string | undefined> {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) throw await errorFromResponse(response);
+  return (await response.json() as { refusal?: string }).refusal;
+}
+
+/**
+ * Taking a delegated request back, offered while the Hub says the reader
+ * delegated it and it is still open. It comes to them again as a new card.
+ */
+function TakeBack({ requestRef, onTakeBack }: { requestRef: string; onTakeBack: () => Promise<string | undefined> }) {
+  const { found } = useNornRequest(requestRef);
+  const [state, setState] = useState<{ busy?: boolean; done?: boolean; error?: string }>({});
+  if (state.done) return <div className="mt-2 text-[13px] text-muted-foreground">You took it back: it comes to you again here.</div>;
+  if (!found?.yoursToTakeBack) return null;
+  return (
+    <div className="mt-2 flex items-center gap-2">
+      <button
+        type="button"
+        disabled={state.busy}
+        onClick={() => {
+          setState({ busy: true });
+          void onTakeBack().then((refusal) => setState(refusal ? { error: refusal } : { done: true }),
+            (takeBackError: unknown) => setState({ error: userErrorMessage(takeBackError, "Couldn't take the request back") ?? "Couldn't take the request back" }));
+        }}
+        className={actionClass({ variant: "secondary", size: "sm" })}
+      >
+        {state.busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <Undo2 className="size-3.5" />}
+        Take back
+      </button>
+      {state.error && <span className="text-[13px] text-destructive">{state.error}</span>}
+    </div>
   );
 }

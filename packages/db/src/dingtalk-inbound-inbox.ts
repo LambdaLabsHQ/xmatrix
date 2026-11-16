@@ -186,12 +186,12 @@ export class PostgresDingTalkInboundInboxRepository {
       signal: captured.signal,source: tx => this.currentTransaction(tx,captured) });
   }
   /** Candidate enumeration does not substitute for actual-owner authorization. */
-  async effectDestinations(input: Request & { job: DingTalkInboundJob; kind: "channel" | "automation" }) {
+  async effectDestinations(input: Request & { job: DingTalkInboundJob }) {
     dingtalkInboundHandle(input);
     return this.database.transaction({ requestId: text(input.requestId,"requestId",200),operation: "app.dingtalk.effect-candidates" },async tx => {
       const current=await this.currentTransaction(tx,input);
       if (!current) dingtalkDenied();
-      return dingtalkEffectTargets(tx,input.job,current.sourceRef,input.kind);
+      return dingtalkEffectTargets(tx,input.job,current.sourceRef);
     });
   }
   async maintain(input: Request) {

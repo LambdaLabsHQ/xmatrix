@@ -1,4 +1,5 @@
 use super::*;
+use std::io::{IsTerminal, Write};
 use xmatrix_cli_core::protocol;
 
 /// A field of the registration of the Run this CLI runs inside.
@@ -66,7 +67,9 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             runtime,
             args,
             workspace,
+            access,
         } => {
+            let in_run = run_owner.is_some();
             let owner_user_id = match run_owner {
                 Some(owner) => owner,
                 None => {
@@ -109,6 +112,14 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
                 ),
                 None => None,
             };
+            // What the Agent may do on this machine is its owner's to confirm,
+            // once per harness here. Inside a Run the Hub decides: a Run never
+            // confirms for its owner.
+            let access = if in_run {
+                None
+            } else {
+                confirm_access(hub_url, token, &key, preset, access).await?
+            };
             let body = add_command(
                 &key,
                 name.unwrap_or_else(|| preset.id.clone()),
@@ -120,6 +131,7 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
                         args
                     },
                     backend: preset.backend.clone(),
+                    access,
                 },
                 default_workspace,
             );
@@ -136,6 +148,9 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
             // Its Runs start on this machine, so its daemon must be up.
             ensure_local_daemon_started(hub_url, token).await
         }
+        AgentCommand::Access { harness, mode } => {
+            machine_access(hub_url, token, harness, mode).await
+        }
         AgentCommand::Show {
             harness,
             space,
@@ -145,6 +160,23 @@ pub(super) async fn run(hub_url: &str, token: &str, command: AgentCommand) -> er
         } => {
             let key = resolve_key(hub_url, &space, owner, machine, harness).await?;
             let mut value = details(hub_url, token, &space, &key).await?;
+            // What a launch of it adds on its machine, as the Hub resolves it.
+            let catalog: Value = http::request_json(
+                &with_route(hub_url, &protocol::space_agent_registrations_route(&space)),
+                "GET",
+                Some(token),
+                None,
+            )
+            .await?;
+            if let Some(listed) = catalog["registrations"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .find(|listed| listed["key"] == key)
+                && !listed["access"].is_null()
+            {
+                value["launchAccess"] = listed["access"].clone();
+            }
             if connections {
                 let route = format!(
                     "/api/spaces/{}/app-connections",
@@ -276,24 +308,27 @@ async fn list(
         .max()
         .unwrap_or(7);
     println!(
-        "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
+        "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {:<6} {}",
         "MACHINE".bold(),
         "ONLINE".bold(),
         "HARNESS".bold(),
         "NAME".bold(),
         "STATE".bold(),
         "QUOTA".bold(),
+        "ACCESS".bold(),
         "OWNER".bold()
     );
     for registration in &registrations {
         println!(
-            "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {}",
+            "{:<width$} {:<8} {:<10} {:<16} {:<22} {:<6} {:<6} {}",
             text(&registration["machineName"]),
             online_label(registration),
             text(&registration["key"]["harness"]),
             text(&registration["displayName"]),
             state_label(registration),
             quota_label(registration),
+            // What its launches may do on its Machine; `agent show` lists what that adds.
+            text(&registration["access"]["mode"]),
             text(&registration["ownerName"])
         );
     }
@@ -317,8 +352,19 @@ fn online_label(registration: &Value) -> &'static str {
     }
 }
 
-/// The provider quota left in its tightest window, while the reading is current.
+/// The provider quota left while the reading is current: the share of its
+/// tightest window, or the money on a prepaid account, which has no window.
 fn quota_label(registration: &Value) -> String {
+    let balance = &registration["live"]["balance"];
+    if let (Some(balance), Some(currency)) =
+        (balance["amount"].as_f64(), balance["currency"].as_str())
+    {
+        return match currency {
+            "CNY" => format!("¥{balance:.2}"),
+            "USD" => format!("${balance:.2}"),
+            _ => format!("{balance:.2} {currency}"),
+        };
+    }
     registration["live"]["quota"]["remainingPercent"]
         .as_f64()
         .map(|percent| format!("{}%", percent.round()))
@@ -494,6 +540,190 @@ struct AgentLaunch {
     runtime: String,
     args: Vec<String>,
     backend: String,
+    /// The access mode its owner confirmed with this add.
+    access: Option<String>,
+}
+
+/// What full access adds to a harness's launch, word for word as the Hub
+/// resolves it (`AgentAccessGrant`), then what that means on the machine.
+fn access_disclosure(name: &str, grant: &Value) -> Vec<String> {
+    let mut lines = Vec::new();
+    for arg in grant["args"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+    {
+        lines.push(format!("  adds the argument               {arg}"));
+    }
+    for (key, value) in grant["env"].as_object().into_iter().flatten() {
+        lines.push(format!(
+            "  sets the environment variable    {key}={}",
+            value.as_str().unwrap_or_default()
+        ));
+    }
+    for (key, value) in grant["session"].as_object().into_iter().flatten() {
+        lines.push(format!(
+            "  starts each session with         {key}={}",
+            value.as_str().unwrap_or_default()
+        ));
+    }
+    if lines.is_empty() {
+        lines.push("  adds no argument or environment variable to its launch".into());
+    }
+    if grant["approvesRequests"].as_bool() == Some(true) {
+        lines.push(format!(
+            "  answers every permission request {name} makes with allow"
+        ));
+    }
+    lines.insert(
+        0,
+        format!("With full access, xMatrix starts {name} like this:"),
+    );
+    lines.push(format!(
+        "{name} then works without asking before it changes a file or runs a command, and xMatrix sets no limit on which files it reaches."
+    ));
+    lines
+}
+
+/// The access mode this add confirms, or none when the owner already
+/// confirmed one for this harness on this machine. The disclosure is printed
+/// before anything is written; without `--access` a person at a terminal is
+/// asked, and anything else is refused with what to show the owner.
+async fn confirm_access(
+    hub_url: &str,
+    token: &str,
+    key: &Value,
+    preset: &AgentPreset,
+    access: Option<String>,
+) -> error::Result<Option<String>> {
+    let held = held_environment(hub_url, token, key).await?;
+    if let Some(mode) = held["environment"]["launch"]["access"].as_str() {
+        println!(
+            "Access on this machine: {mode}, as its owner confirmed for {} earlier",
+            preset.display_name
+        );
+        return Ok(None);
+    }
+    for line in access_disclosure(&preset.display_name, &held["fullAccess"]) {
+        eprintln!("{line}");
+    }
+    let asks = offers_ask(&held);
+    if asks {
+        eprintln!("{}", ask_disclosure(&preset.display_name));
+    }
+    if access.is_some() {
+        return Ok(access);
+    }
+    if !(std::io::stdin().is_terminal() && std::io::stderr().is_terminal()) {
+        return Err(CliError::Launch(
+            "Nothing was added. This machine's owner confirms the access above first: show it to them, and once they agree run the same command with --access full".into(),
+        ));
+    }
+    if asks {
+        eprint!(
+            "Access for {} on this machine? [full/ask/none] ",
+            preset.display_name
+        );
+    } else {
+        eprint!(
+            "Add {} with full access on this machine? [y/N] ",
+            preset.display_name
+        );
+    }
+    std::io::stderr().flush()?;
+    let mut answer = String::new();
+    std::io::stdin().read_line(&mut answer)?;
+    match answer.trim().to_ascii_lowercase().as_str() {
+        "y" | "yes" | "full" => Ok(Some("full".into())),
+        "ask" if asks => Ok(Some("ask".into())),
+        _ => Err(CliError::Launch("Nothing was added".into())),
+    }
+}
+
+/// The machine owner's environment for a harness, with what full access adds
+/// to its launch and the modes it can be given, as the Hub resolves them.
+async fn held_environment(hub_url: &str, token: &str, key: &Value) -> error::Result<Value> {
+    http::request_json(
+        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_QUERY_ROUTE),
+        "POST",
+        Some(token),
+        Some(
+            serde_json::json!({ "ownerUserId": key["ownerUserId"], "machineId": key["machineId"],
+            "harness": key["harness"] }),
+        ),
+    )
+    .await
+}
+
+fn offers_ask(held: &Value) -> bool {
+    held["accessModes"]
+        .as_array()
+        .is_some_and(|modes| modes.iter().any(|mode| mode == "ask"))
+}
+
+fn ask_disclosure(name: &str) -> String {
+    format!(
+        "With ask access (--access ask), xMatrix adds none of that: {name} runs on its own defaults, and each time it wants permission for a file or a command it asks in the Channel it is working in and waits. Plain xmatrix commands are not asked about."
+    )
+}
+
+/// Show what a harness's Agents may do on this machine, or change it. The
+/// change is the owner's environment command against the version just read.
+async fn machine_access(
+    hub_url: &str,
+    token: &str,
+    harness: String,
+    mode: Option<String>,
+) -> error::Result<()> {
+    let owner_user_id = config::load_session_for_hub(hub_url)
+        .await
+        .ok_or_else(|| CliError::Auth("Log in as the machine owner first".into()))?
+        .user
+        .id;
+    let preset = concrete_preset(&harness)?;
+    let key = serde_json::json!({ "ownerUserId": owner_user_id,
+        "machineId": config::get_or_create_machine_id(hub_url).await?, "harness": preset.id });
+    let held = held_environment(hub_url, token, &key).await?;
+    let launch = &held["environment"]["launch"];
+    if !launch.is_object() {
+        return Err(CliError::Launch(format!(
+            "{} is not added on this machine yet: `xmatrix agent add {} --space <id>`",
+            preset.display_name, preset.id
+        )));
+    }
+    let Some(mode) = mode else {
+        match launch["access"].as_str() {
+            Some(current) => println!("{} on this machine: {current} access", preset.display_name),
+            None => println!(
+                "{} on this machine: full access, which its owner has not confirmed yet",
+                preset.display_name
+            ),
+        }
+        for line in access_disclosure(&preset.display_name, &held["fullAccess"]) {
+            println!("{line}");
+        }
+        if offers_ask(&held) {
+            println!("{}", ask_disclosure(&preset.display_name));
+        }
+        return Ok(());
+    };
+    let mut environment = held["environment"].clone();
+    environment["launch"]["access"] = Value::String(mode.clone());
+    let _: Value = http::request_json(
+        &with_route(hub_url, protocol::AGENT_ENVIRONMENT_COMMAND_ROUTE),
+        "POST",
+        Some(token),
+        Some(serde_json::json!({ "key": key, "commandId": format!("registration-access:{}", uuid::Uuid::new_v4()),
+            "expectedVersion": held["version"], "environment": environment })),
+    )
+    .await?;
+    println!(
+        "{} {} on this machine now has {mode} access; it applies to its next Runs",
+        "✓".green(),
+        preset.display_name
+    );
+    Ok(())
 }
 
 /// The Hub's `create` command: declare the harness on this machine, offer it
@@ -510,6 +740,9 @@ fn add_command(
     });
     if !launch.backend.trim().is_empty() {
         launch_json["backend"] = Value::String(launch.backend);
+    }
+    if let Some(access) = launch.access {
+        launch_json["access"] = Value::String(access);
     }
     let mut body = serde_json::json!({
         "action": "create",
@@ -608,6 +841,7 @@ mod tests {
                 runtime: "codex".into(),
                 args: vec!["--full-auto".into()],
                 backend: "codex-app".into(),
+                access: Some("full".into()),
             },
             Some("/repo".into()),
         );
@@ -617,7 +851,7 @@ mod tests {
         assert_eq!(body["defaultWorkspace"], "/repo");
         assert_eq!(
             body["environment"]["launch"],
-            serde_json::json!({"runtime":"codex","runtimeArgs":["--full-auto"],"backend":"codex-app"})
+            serde_json::json!({"runtime":"codex","runtimeArgs":["--full-auto"],"backend":"codex-app","access":"full"})
         );
         assert_eq!(body["environment"]["enabled"], true);
         let no_backend = add_command(
@@ -627,11 +861,41 @@ mod tests {
                 runtime: "x".into(),
                 args: vec![],
                 backend: " ".into(),
+                access: None,
             },
             None,
         );
         assert!(no_backend["environment"]["launch"].get("backend").is_none());
+        // Without a confirmation the add writes no mode: a Run never confirms
+        // for its owner, and a harness confirmed earlier keeps its mode.
+        assert!(no_backend["environment"]["launch"].get("access").is_none());
         assert!(no_backend.get("defaultWorkspace").is_none());
+    }
+
+    #[test]
+    fn the_access_disclosure_names_everything_the_grant_adds() {
+        let lines = access_disclosure(
+            "DeepSeek Harness",
+            &serde_json::json!({"mode":"full","args":["--flag"],"env":{"DSH_PERMISSION_MODE":"danger-full-access"},
+                "session":{"sandbox":"danger-full-access"},"approvesRequests":true}),
+        )
+        .join("\n");
+        for written in [
+            "--flag",
+            "DSH_PERMISSION_MODE=danger-full-access",
+            "sandbox=danger-full-access",
+            "answers every permission request DeepSeek Harness makes with allow",
+        ] {
+            assert!(lines.contains(written), "{written}");
+        }
+        // A harness xMatrix passes nothing to is said to get nothing, not left blank.
+        let bare = access_disclosure(
+            "OpenCode",
+            &serde_json::json!({"mode":"full","args":[],"env":{},"session":{},"approvesRequests":true}),
+        )
+        .join("\n");
+        assert!(bare.contains("adds no argument or environment variable"));
+        assert!(bare.contains("answers every permission request OpenCode makes with allow"));
     }
 
     #[test]
@@ -698,6 +962,14 @@ mod tests {
         assert_eq!(quota_label(&row), "12%");
         assert!(on_machine(&row, "laptop") && on_machine(&row, "machine:abc"));
         assert!(!on_machine(&row, "Workstation"));
+        // A prepaid account has no window: the money left is the reading.
+        let prepaid = |currency: &str| serde_json::json!({"live":{"balance":{"amount":12.3,"currency":currency,"allowed":true}}});
+        assert_eq!(quota_label(&prepaid("CNY")), "¥12.30");
+        assert_eq!(quota_label(&prepaid("USD")), "$12.30");
+        assert_eq!(quota_label(&prepaid("EUR")), "12.30 EUR");
+        let credits = serde_json::json!({"live":{"quota":{"remainingPercent":1,
+            "windows":[{"usedPercent":100}],"account":{"credits":{"balance":40}}}}});
+        assert_eq!(quota_label(&credits), "1%");
         let unreported = serde_json::json!({"state":"enabled"});
         assert_eq!(
             (online_label(&unreported), quota_label(&unreported).as_str()),

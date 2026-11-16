@@ -8,8 +8,8 @@ type AuthorizeRequest = { url: string; redirectParam: string };
  * A phone app that can open the provider's page in place: the shell's sheet is
  * stubbed to answer the address the Hub would send it back to.
  */
-async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop"; newAccount?: boolean; appleFailure?: string }) {
-  await page.addInitScript(({ inPlace, answerState, client = "ios", newAccount = false, appleFailure }) => {
+async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerState?: "same" | "other"; client?: "ios" | "desktop"; newAccount?: boolean; appleFailure?: string; existingSession?: boolean }) {
+  await page.addInitScript(({ inPlace, answerState, client = "ios", newAccount = false, appleFailure, existingSession = false }) => {
     const shell = window as unknown as Record<string, unknown>;
     shell.__xmatrixDisableMockAuth = true;
     shell.__authorizeRequests = [];
@@ -31,7 +31,14 @@ async function openAsPhoneApp(page: Page, options: { inPlace: boolean; answerSta
       ...(inPlace ? {
         authorizeInBrowser: async (request: AuthorizeRequest) => {
           (shell.__authorizeRequests as AuthorizeRequest[]).push(request);
-          const state = answerState === "same" ? new URL(request.url).searchParams.get("state") : "someone-elses-state";
+          // A test that follows the app across page loads listens here.
+          void (shell.__noteAuthorize as ((url: string) => Promise<void>) | undefined)?.(request.url);
+          const start = new URL(request.url);
+          const state = answerState === "same" || start.searchParams.get("session_only") === "1"
+            ? start.searchParams.get("state") : "someone-elses-state";
+          if (start.searchParams.get("session_only") === "1" && !existingSession) {
+            return `xmatrix://auth?error=sign_in_required&state=${state}`;
+          }
           return `xmatrix://auth?code=${"c".repeat(64)}&state=${state}${newAccount ? "&new_account=1" : ""}`;
         },
       } : {}),
@@ -108,7 +115,9 @@ for (const newAccount of [false, true]) {
 
     expect(new URL(page.url()).searchParams.get("new_account")).toBe(newAccount ? "1" : null);
 
-    const [request] = await page.evaluate(() => (window as unknown as { __authorizeRequests: AuthorizeRequest[] }).__authorizeRequests);
+    const requests = await page.evaluate(() => (window as unknown as { __authorizeRequests: AuthorizeRequest[] }).__authorizeRequests);
+    const request = requests.find((item) => new URL(item.url).searchParams.get("provider") === "google");
+    if (!request) throw new Error("Google sign-in was not opened");
     const start = new URL(request.url);
     expect(start.pathname).toBe("/api/auth/app/start");
     expect(request.redirectParam).toBe("redirect_uri");
@@ -121,6 +130,36 @@ for (const newAccount of [false, true]) {
       .toBe(start.searchParams.get("code_challenge"));
   });
 }
+
+test("an app already signed in on the web finishes without a provider", async ({ page }) => {
+  await openAsPhoneApp(page, { inPlace: true, existingSession: true, client: "desktop" });
+  const redeemed = await stubRedemption(page);
+  await page.goto("/login");
+  await page.waitForURL(/\/app/u);
+  const [request] = await page.evaluate(() => (window as unknown as { __authorizeRequests: AuthorizeRequest[] }).__authorizeRequests);
+  const start = new URL(request.url);
+  expect(start.searchParams.get("session_only")).toBe("1");
+  expect(start.searchParams.has("provider")).toBe(false);
+  expect(redeemed).toHaveLength(1);
+});
+
+test("signing out in the app does not sign straight back in with the browser's account", async ({ page }) => {
+  await openAsPhoneApp(page, { inPlace: true, existingSession: true, newAccount: true, client: "desktop" });
+  await stubRedemption(page);
+  const opened: URLSearchParams[] = [];
+  await page.exposeFunction("__noteAuthorize", (url: string) => { opened.push(new URL(url).searchParams); });
+  await page.goto("/login");
+  await page.waitForURL(/\/app/u);
+  expect(opened.map((params) => params.get("session_only"))).toEqual(["1"]);
+  await page.getByRole("button", { name: "Use a different account" }).click();
+  await page.waitForURL(/\/login/u);
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
+  // The login page that sign-out lands on opens nothing by itself.
+  expect(opened).toHaveLength(1);
+  // Choosing a provider is how the other account is picked.
+  await page.getByRole("button", { name: "Continue with Google" }).click();
+  await expect.poll(() => opened.map((params) => params.get("provider"))).toEqual([null, "google"]);
+});
 
 test("an answer carrying another sign-in's state is refused before any code is redeemed", async ({ page }) => {
   await openAsPhoneApp(page, { inPlace: true, answerState: "other" });

@@ -16,7 +16,7 @@ async function drainer() {
     userId:"owner",mode:"poll",historyId:"100",pendingWake:false,
     nextSearchAt:new Date(Date.now()+900000).toISOString(),selection:{address:"me@example.com",account:"ca_owned",owner:"user:owner",
       refreshToken:"private-refresh",appIdentity:await polling.gmailPollIdentity(env),pollToken:{accessToken:"private-access",expiresAt:Date.now()+3600000}}};
-  const calls={finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[],stored:[]};
+  const calls={reported:[],finish:[],stage:[],append:[],automation:[],cached:[],searched:0,read:[],stored:[]};
   const autoRead={result:{detail:"private body"}};
   // The owner's subscription to this mailbox; tests add others.
   const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
@@ -32,6 +32,7 @@ async function drainer() {
     version:1,connectionGeneration:"generation",values:{mailboxes:JSON.stringify([job.selection])}})})},
     "./gmail-mailboxes":{parseMailboxes},"./gmail-poll-client":polling,"./gmail-notification-api":{gmailIncomingChanges},
     "./gmail-watch-client":{},"./http":{ProviderRequestError},
+    "./gmail-read-failure":{reportGmailNotificationFailure:error=>{calls.reported.push(error);}},
     "./gmail-auto-read":{autoReadGmailMessage:async(_env,input)=>{
       calls.read.push(input);return typeof autoRead.result==="function" ? autoRead.result() : autoRead.result;}},
     "./private-result-content":{writeConnectorPrivateResult:async(_env,input)=>{calls.stored.push(input);}},
@@ -40,7 +41,7 @@ async function drainer() {
       for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body,
         messageId:`app:${provider}:${event.eventId}:${route.channelId}`,appMetadata,stored:calls.stored.length});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
-    "../automation-triggers":{fireConnectorAutomationTriggers:async(_env,event)=>{calls.automation.push(event);}}};
+    "../outside-events":{connectorEventArrived:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
   return {job,state,calls,routes,autoRead,run:()=>drainGmailNotifications(env)};
 }
@@ -108,6 +109,8 @@ test("pending changes, transient confirmation failure and lost authority retain 
   const changed=await drainer();changed.job.pendingWake=true;
   await fetched([{body:counts},{status:503,body:{}}],changed.run);
   assert.deepEqual(changed.calls.finish,["retry"]);assert.equal(changed.calls.stage.length,0);
+  // A retried failure is reported, so a stuck mailbox is seen.
+  assert.equal(changed.calls.reported.length,1);
   const stopped=await drainer();stopped.state.current=false;
   await fetched([],stopped.run);
   assert.deepEqual(stopped.calls.finish,["blocked"]);assert.equal(stopped.calls.append.length,0);

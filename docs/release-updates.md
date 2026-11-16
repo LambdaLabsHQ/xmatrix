@@ -13,6 +13,279 @@ on again. The welcome
 conversation's sign-in row offers the same. An Agent's own request for a
 sign-in, and a machine with no Agent in the Space, keep the sign-in alone.
 Web only. Recovery is a CI-validated beta Web reverting this change.
+
+## Unreleased: a Gmail notification retried after its read was saved is delivered
+
+A mailbox's new-mail notifications stopped for good when a notification pass
+failed after its automatic read had been saved privately: every retry wrote
+the private record again with the same command ids but a new expiry, which
+was refused as a reused command, so the mailbox paused with its later mail
+behind it (one mailbox from 2026-11-13). Each private-record write now uses
+its own commands for the same record, a connector result already saved for
+its message stands, and a retried notification pass is reported to Sentry by
+its error class, code and status. Hub only; a paused mailbox resumes on its
+own and delivers what waited. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: a turn refused for its model's quota continues on another model
+
+When a turn is refused because its own model's quota is used up (Claude's
+`Fable` week), the quota retry its author chooses resumes the Instance at once
+in the same session on another model of the same harness that has quota,
+chosen the way a launch chooses (the runtime default first, then its catalog,
+or the registration's declared models, never one the refused scopes
+constrain), instead of waiting for that model's reset; with none, or when the
+registration no longer offers the kind of model it ran, it waits as before.
+Its next resume goes back to the original model once a reading shows that
+model has quota. A resting Instance wakes unless the model it last ran is used
+up. The Agents page and Instance tags name a model's own window by its scope
+(`Fable · 1w`), and a summon naming a used-up model says until when. The
+stored `remaining` of a reading now agrees with the windows kept used up. Hub,
+beta Web and protocol, with expand migration 0258
+(`agent_quota_retries.resume_model`, so a redelivered dispatch resumes on the
+same model); the resumed model reaches the runtime as the preferred or
+requested model a launch already sends. Recovery is a CI-validated beta
+reverting this change; the column is then ignored.
+
+## Unreleased: an Agent that delegates its request is let go
+
+An Agent whose Run was started for a Norn request and then delegated it with
+`xmatrix delegate` stayed in the conversation; it is now let go like one
+whose request ended, unless it still holds another request or waits on a
+question. An Instance delegated a request by its address is told that
+answering does not end its Run. Hub only; expand migration 0257 adds
+`norn_requests.delegated_away_instance_id`. Recovery is a CI-validated beta
+Hub reverting this change; the column is then ignored.
+
+## Unreleased: an Agent can call off a question it asked
+
+`xmatrix cancel <request>` lets the Agent Instance that asked a question with
+`xmatrix confirm`, `choose` or `ask` call it off while it is open. The
+request ends `Cancelled`, the person's card says it is no longer asked, and
+the Agent reads the program's end. Only that Instance can, and only for such
+a question. Hub only, no migration. Recovery is a CI-validated beta Hub
+reverting this change.
+
+## Unreleased: whoever holds a request of a Norn program can delegate it
+
+A person asked on a card can delegate the request to an Agent in the
+conversation (`@claude:2`), an Agent by name, or another member, who answers
+it for them; while it is open, **Take back** returns it. An Agent delegates
+with `xmatrix delegate`. The delegate's answer settles the request; their
+refusal gives it back. Norn is vendored at norn-lang/norn#41, which defines
+delegation; the program does not see it. Hub and beta Web; expand migration
+0256 adds `norn_requests.delegator_user_id`. Recovery is a CI-validated beta
+reverting this change: the column is then unused, a request delegated to an
+Instance meanwhile ends `Broke` at its next pass, and one delegated to a
+person or an Agent by name stays with them.
+
+## Unreleased: quota is read per account and model
+
+A provider's quota now has two kinds of window: account windows, which stop
+every model, and scoped windows, which stop only the models whose catalog row
+names their scope (Claude's per-model week such as `Fable`, Cursor's `Auto`
+and `API` pools). A launch drops a used-up model before Jev chooses, including
+the runtime default when that is the used-up one; a pool is refused whole only
+when its account, or every model it could run, is used up, and a model the
+author named is refused with when it is back. A turn refused for one model's
+quota no longer holds the pool or hands the work to another harness: its
+reading is recorded and the quota retry waits on that model's windows alone.
+A limit the daemon could not tell holds the pool until its reset and asks the
+machine for a fresh complete reading on the next launch, Channel refresh or
+reconnect; that reading releases the hold or narrows it to the window
+resetting with it. Hub's Cursor special cases are gone. Hub only, with expand
+migration 0254 (`registration_quota_observations.scoped_windows_json`,
+`scoped_observed_at`, `scoped_expires_at`; `windows_json`/`observed_at`/
+`expires_at` are the account part). A daemon that predates scopes behaves as
+before: its usage limit holds the whole pool and hands off. Recovery is a
+CI-validated beta Hub reverting this change; the added columns are ignored.
+
+## Unreleased: the retired Automation storage is dropped
+
+Contract migration 0253 drops `data.automation_occurrence_runs`,
+`data.automation_occurrence_conversation_id(text)`, `data.automation_occurrences`
+and `data.automations`, which no code reads or writes since #1682. It refuses
+while any Automation is still enabled and attached to its page; paused,
+finished and detached rows go with their tables. An administrator applied it
+through the PostgreSQL Contract Migration workflow at this change's reviewed
+PR head before it merged. No product change. Recovery is forward only: the
+rows held no Automation that could run.
+
+## Unreleased: schedule lines no longer run; scheduled work is a `norn run` program
+
+A task line ending in `🔁 every …` or `⏳ <time>` is plain text: the Hub does
+not sync it, fire it on an event or run it. An Agent edit that leaves one on a
+page is answered with the line and the advice to write it as a program, a code
+block tagged `norn run <name>` on the same page. Schedules lists are empty, and
+a CLI's `page automation` commands answer that schedule lines are retired.
+Hub only, no product change: the Automation tables it left behind are dropped
+by contract migration 0253. Recovery is a CI-validated beta Hub reverting this
+change; the rows are gone, so a revert cannot resume an Automation.
+
+## Unreleased: signing out of an app, or choosing a provider, leaves the browser's account
+
+After an app signed in with the browser's web session, signing out of the app
+(including "Use a different account" on a new account) landed on the sign-in
+page, which signed straight back in with that same account. Choosing Google or
+GitHub also returned the browser's account without opening the provider, so
+no other account could be picked. A sign-in start now declares one intent:
+only the app's own check of the browser session reads it, and a chosen
+provider always opens with its account chooser. An app window where the person
+signed out does not resume the browser session. The desktop app's browser tab
+no longer reads "Sign-in didn't finish" when the browser simply isn't signed
+in. Hub, beta Web and desktop, no migration. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: an app uses the browser's existing sign-in
+
+Opening the desktop or phone app no longer asks for Google or GitHub when that
+browser is already signed in on the web. The app's sign-in reads the browser's
+session and hands the app a code for that account; with no session it returns
+to the app's own provider buttons. The connect card no longer tells a person
+to sign in with the same account. Hub and beta Web, no migration. Recovery is
+a CI-validated beta reverting this change.
+
+## Unreleased: DeepSeek Harness is offered full access alone
+
+A DeepSeek Agent could be added asking first. In that mode xMatrix leaves
+DeepSeek Harness on its own `workspace-write` sandbox, which refuses the
+write every `xmatrix` command makes to `~/.config/xmatrix`: the Agent could
+not send a reply, and the sandbox fails the command outright instead of
+asking, so no card appeared either. The confirmation now offers DeepSeek
+Harness full access alone and the Hub refuses `ask` for it, as for Codex and
+ZCode. Hub and Web. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an Agent can be added asking first
+
+Confirming an Agent's access offered full access or nothing. A harness can now
+be added with `ask`: xMatrix adds none of the full-access parameters, the
+harness runs on its own defaults, and each time it wants permission for a file
+or a command the request appears as a card in the Channel it is working in,
+with the answers the harness offers, and waits for a person. One plain
+`xmatrix` message, page or read command is not asked about, so the Agent can
+still reply. Claude Code and the ACP harnesses can be given `ask`; Codex and
+ZCode are offered full access alone, and the Hub refuses `ask` for them. The
+add dialog and `xmatrix agent add --access ask` choose it, and the owner
+changes it later from the Agent's page or with
+`xmatrix agent access <harness> <full|ask>`. An `ask` launch runs only on a
+Machine whose CLI shows the cards; on an earlier one it does not start. Claude
+Code's grant now also states that its permission requests are answered with
+allow in full access, which the runtime always did. No schema change. Hub, Web
+and CLI. Recovery is a CI-validated beta reverting this change.
+## Unreleased: the access confirmation works for a harness never added on the machine
+
+The confirmation reads the owner's environment for the harness before the
+first add, and that read answered 404 until the harness had been added once,
+so adding a new harness from the Web or `xmatrix agent add` failed instead of
+asking. The owner now reads an empty environment, with what full access adds,
+for a harness not added yet; nobody else reads it, as before. Hub only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a machine's owner confirms an Agent's access when adding it
+
+Adding an Agent started its harness with full access without saying so. Every
+add now shows, word for word, what xMatrix adds to that harness's launch
+(arguments, environment variables, session settings, and whether its
+permission requests are answered with allow) and writes nothing until the
+machine's owner confirms. `xmatrix agent add` prints the lines and takes
+`--access full`; at a terminal it asks, and anywhere else it stops and says
+what to show the owner. The Web asks in one dialog from the New agent page, a
+harness switch, an install that turns its harness on, and "Bring them in". The
+confirmation is kept per harness on a machine, so adding the same harness to
+another Space does not ask again. An Agent Run cannot confirm for its owner:
+it adds only a harness already confirmed there. Agents added earlier keep
+running as they were; their page, `agent list` (new ACCESS column) and
+`agent show` report the access they run with, and their owner can confirm it
+from the page. No schema change. Hub, Web and CLI. A CLI or Web released
+before this adds without the confirmation, reported as unconfirmed. Recovery
+is a CI-validated beta reverting this change.
+## Unreleased: a client that predates balances no longer draws a prepaid account as "100%"
+
+A DeepSeek account's reading was listed under `live.quota` with a full share
+of headroom, so a CLI or Web older than the balance display printed "100%"
+beside an account holding a few yuan. A prepaid reading is now listed as
+`live.balance` (amount, currency, the provider's verdict) and no `quota`:
+older clients read nothing and show `-`; this CLI and Web show the money.
+Routing is unchanged. Hub, Web and CLI; a 4.2.1-beta.22 CLI shows `-` for the
+account until it updates. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: what xMatrix adds to a harness launch is declared once and reported
+
+xMatrix starts each harness so it stops asking before it touches files or runs
+a command, and did so from five places: Claude Code's
+`--dangerously-skip-permissions` in its preset's default arguments,
+Antigravity's in its ACP arguments, Grok's `--always-approve`, Codex's
+`sandbox=danger-full-access` and `approvalPolicy=never` and ZCode's
+`mode=yolo` hard-coded in the daemon, and the ACP bridges answering every
+permission request with allow. Each preset now declares its own under
+`access.full`, DeepSeek Harness's `DSH_PERMISSION_MODE=danger-full-access`
+among them, and the Hub resolves them into one grant per launch
+(`docs/design/agent-access.md`). The daemon applies that grant and nothing of
+its own, and the registration catalog reports it, so what is shown is what
+runs. A registration launch may carry `access` (`full` or `ask`); none is
+`full`, so every existing Agent launches with exactly the parameters it had.
+The undocumented `XMATRIX_CODEX_APP_SANDBOX`, `XMATRIX_CODEX_APP_APPROVAL` and
+`XMATRIX_ZCODE_APP_MODE` overrides are gone. No schema change: the launch is
+a JSON declaration. Hub and CLI; a Machine on an earlier CLI keeps its
+hard-coded behaviour and receives Claude Code's and Antigravity's flags in
+the arguments the Hub sends. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: a DeepSeek Agent can run xmatrix from its own shell
+
+DeepSeek Harness kept its own default permission mode, `workspace-write`, so
+its shell could not write `~/.config/xmatrix` and every `xmatrix` command an
+Agent ran there stopped at `Operation not permitted (os error 1)` unless the
+Agent raised its permission for that one call. xMatrix now starts it with
+`DSH_PERMISSION_MODE=danger-full-access`: it may write outside the workspace
+and no longer asks before each command, as the other harnesses already run.
+The variable is listed in the preset (`access.full.env`), the same data the launch
+reads. The harness also removes `XMATRIX_EXECUTION_KEY` from every command it
+runs, which made `send --final-for` refuse; the CLI now reads the key from
+the daemon's record of the Run whose request capability the command holds. A
+refused write to the profile lock names the file. CLI and Hub (the registry
+a Machine receives); it applies to DeepSeek Runs started after a Machine
+runs this CLI. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a summon names its model by the model's name, not its selector
+
+Picking a model for a summon wrote the id its harness selects the model with.
+DeepSeek Harness selects with a JSON pair, so the message read
+`model:"[""deepseek-official"",""deepseek-flash""]"`. The composer now writes
+the name that harness's own catalog gives the model
+(`model:DeepSeek-V4.1-Flash`) whenever the id would need quoting and no other
+model in that catalog carries the name; otherwise it writes the id as before. The Hub already resolved a written name to its model, so
+the launch is unchanged, and a message already sent keeps the text it was
+written with. Only a registration that uses the runtime's own catalog is
+affected; an owner-declared model list is still matched exactly. Beta Web
+only. Recovery is a CI-validated Web release reverting this change.
+
+## Unreleased: a DeepSeek Agent shows the balance left on its API key
+
+A DeepSeek Agent's card and its `xmatrix agent list` row said nothing about
+quota, because DeepSeek has no window to meter: an API key is billed against
+a prepaid balance. The runtime now reads DeepSeek's balance endpoint with the
+key DeepSeek Harness already holds and reports the money left with its
+currency: a tag on the card (`¥12.34`), "Balance" on the Agents page, and the
+QUOTA column of `agent list`. An account DeepSeek says can no longer pay for
+a request reads as out of quota, so routing passes it over. A missing or
+refused key leaves the reading absent, as before. The daemon's pre-launch
+quota read also covers OpenCode, whose quota was only known while one of its
+Instances ran. No schema change. Hub, Web and CLI; the balance appears once a
+Machine runs this CLI. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an execution report the Hub can never store is answered once
+
+A daemon keeps each execution report until the Hub gives it a receipt and
+sends it again every five seconds until then. A report whose Run is gone was
+answered 403, and one that conflicts with what the Hub already holds 409, so
+those reports came back forever: about 400,000 of the Hub's 470,000 requests
+a day, each one a Postgres transaction. The Hub now answers both once with a
+final receipt (`source_unavailable` / `superseded`, with a reason). Released
+daemons already accept those, so their queues drain without a client
+update. Nothing is stored for those reports. Hub only. Recovery is a
+CI-validated beta that reverts this change.
+
 ## Unreleased: On a Mac or PC, bringing agents in starts with the app
 
 Most new people left within half a minute of being shown a terminal command.

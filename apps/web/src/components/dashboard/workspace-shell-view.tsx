@@ -3,6 +3,7 @@
 import dynamic from "next/dynamic";
 import { AnimationActivityScope } from "@/components/ui/decoration-animation";
 import { ChannelDeletionDialog } from "./channel-deletion-dialog";
+import { AgentAccessConfirmationHost } from "./agent-access";
 import { ChannelTransferQueue } from "./channel-transfer-queue";
 import { spaceRoleFor as transferSpaceRole } from "./workspace-shell-recovered";
 
@@ -170,9 +171,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     spaces,
     projects,
     setProjects,
-    automations,
-    automationExecutionEnabled,
-    scheduleFocusId,
     events,
     agentTraceReplicas,
     agents,
@@ -213,10 +211,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loadingAgentPresetDiscoveries,
     localActionBusy,
     localActionError,
-    automationBusy,
-    automationError,
-    automationLoadError,
-    loadingAutomations,
     runtimeCheck,
     checkingDesktopUpdates,
     draft,
@@ -313,13 +307,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     revealLocalWorkspace,
     checkLocalRuntime,
     completeDesktopSetup,
-    toggleAutomation,
-    runAutomation,
-    deleteAutomation,
     openLocalAgentDiscovery,
     changeAppView,
     openHarnessProfile,
-    clearScheduleFocus,
     openAppsForSpace,
     backToMore,
     selectSpace,
@@ -428,10 +418,14 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     bringingLocalLock.current = true;
     setBringingLocal(true);
     try {
-      for (const presetId of presetIds) {
+      const adds = presetIds.flatMap((presetId) => {
         const preset = AGENT_PRESETS.find((candidate) => candidate.id === presetId);
-        if (preset && !(await installedFleet.set(harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId, presetId), preset, true))) break;
-      }
+        return preset ? [{ key: harnessSpaceKey(currentSpaceId, user.id, desktopContext.machineId!, presetId), preset }] : [];
+      });
+      // One question for everything about to be added, not one per harness.
+      const confirmed = await installedFleet.confirmAdds(adds);
+      if (!confirmed) return;
+      for (const add of adds) if (!(await installedFleet.set(add.key, add.preset, true, confirmed))) break;
     } finally { bringingLocalLock.current = false; setBringingLocal(false); }
   }
   const keepHarnessSetup = installedFleet.enablingAll || bringingLocal ||
@@ -1435,8 +1429,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       localManagedAgents={localManagedAgents}
       agentPresetDiscoveries={agentPresetDiscoveries}
       loadingAgentPresetDiscoveries={loadingAgentPresetDiscoveries}
-      automations={automations}
-      automationExecutionEnabled={automationExecutionEnabled}
       spaces={spaces}
       events={events}
       currentSpace={currentSpace}
@@ -1451,13 +1443,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       desktopUpdateStatus={desktopUpdateStatus}
       localActionBusy={localActionBusy}
       localActionError={localActionError}
-      automationBusy={automationBusy}
-      automationError={automationError}
-      automationLoadError={automationLoadError}
-      loadingAutomations={loadingAutomations}
-      scheduleFocusId={scheduleFocusId}
-      onScheduleFocusConsumed={clearScheduleFocus}
-      onOpenPage={openPage}
       onOpenConversation={(channelId) => navigateToChannel(channelId)}
       runtimeCheck={runtimeCheck}
       localSetupReady={localSetupReady}
@@ -1478,9 +1463,6 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onRevealLocalWorkspace={(workspace) => void revealLocalWorkspace(workspace)}
       onCheckLocalRuntime={(runtime) => void checkLocalRuntime(runtime)}
       onCompleteDesktopSetup={() => void completeDesktopSetup()}
-      onToggleAutomation={(automation) => void toggleAutomation(automation)}
-      onRunAutomation={(automation) => void runAutomation(automation)}
-      onDeleteAutomation={(automation) => void deleteAutomation(automation)}
       joinRequestsBySpace={joinRequestsBySpace}
       onDecideJoinRequest={resolveSpaceJoinRequest}
       onCreateSpaceInviteCode={createSpaceInviteCode}
@@ -1510,6 +1492,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     // Files are accepted by the whole window, not by the composer element, so
     // the drop surface has to sit above the app's isolate stacking context.
     <AttachmentDropZoneProvider>
+    <AgentAccessConfirmationHost />
     {deletingChannel && <ChannelDeletionDialog key={deletingChannel.id} channel={deletingChannel} token={token}
       onCancel={() => setDeletingChannel(null)} onDeleted={channelDeleted} />}
     <FaceSpaceContext.Provider value={currentSpaceId}>

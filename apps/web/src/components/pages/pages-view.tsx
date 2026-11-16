@@ -309,9 +309,9 @@ export function pageDocumentQuery(userId: string | null, spaceId: string, pageId
 }
 
 /**
- * A page's discussions with the conversations they name (its margin), its section awareness and its
- * Automations. Their keys do not carry the page's revision: the live session's commits invalidate them,
- * so a page opens on what was read ahead and keeps it on screen while it is read again.
+ * A page's discussions with the conversations they name (its margin) and its section awareness. Their
+ * keys do not carry the page's revision: the live session's commits invalidate them, so a page opens on
+ * what was read ahead and keeps it on screen while it is read again.
  */
 function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, token: string) {
   return {
@@ -321,7 +321,7 @@ function pageLinksQuery(userId: string | null, spaceId: string, pageId: string, 
   };
 }
 
-const PAGE_REVISION_QUERIES = ["page-links", "page-automations", "page-programs", "page-awareness"];
+const PAGE_REVISION_QUERIES = ["page-links", "page-programs", "page-awareness"];
 // Co-writing commits arrive many a second; what they move beside the page is read again once they settle.
 const REVISION_REFRESH_MS = 1_000;
 
@@ -889,14 +889,6 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     return started.length ? [...listed, ...started.map((link) => ({ conversationId: link.conversationId, name: null,
       activityAt: link.createdAt, headSequence: 0, readSequence: 0, lastMessage: null, agents: [] }))] : listed;
   }, [links.data, startedLinks]);
-  // The page's Automations, drawn as chips where the text references them (pages-live-document.md §6).
-  const automations = useQuery({
-    queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "page-automations", [spaceId, pageId]),
-    enabled: Boolean(spaceId && pageId), refetchInterval: () => refetchUnlessHumanPush(30_000),
-    queryFn: ({ signal }) => pageApi.automations(spaceId!, pageId!, token, signal).then((result) => result.automations),
-  });
-  const automationsById = useMemo(() => new Map((automations.data ?? []).map((item) => [item.id, item])),
-    [automations.data]);
   // A message or an Agent in one of the page's conversations brings its card up to date.
   const linkedKey = [...new Set(linkList.map((link) => link.conversationId))].sort().join(",");
   const refetchLinks = links.refetch;
@@ -1763,7 +1755,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                         actions={sectionActions} headingActions={headingActions} sections={sections}
                         onBlocks={(next) => startTransition(() => setEditorBlocks({ session, blocks: next }))}
                         follow={follow} onOpenConversation={openConversation} discussions={discussions}
-                        automations={automationsById} programs={programsByName} onProgramsPresent={setHasProgram} references={references} completion={completion}
+                        programs={programsByName} onProgramsPresent={setHasProgram} references={references} completion={completion}
                         summons={pageSummons}
                         focusedConversationId={activeConversationId ?? focused} readCard={readCard}
                         onFocusConversation={setFocused}

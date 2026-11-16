@@ -39,3 +39,21 @@ export function gmailReadFailureMetadata(extra: Record<string, unknown>): string
       typeof status !== "string" || status !== "unavailable" && !/^[1-5]\d\d$/u.test(status)) return [];
   return [`Gmail automatic read failure: ${phase} · ${kind} · status=${status}`];
 }
+
+/**
+ * A notification pass that failed and will be retried. The pass used to fail
+ * silently on every retry, so a mailbox stopped notifying for days unseen.
+ * Only the error's class, authority code and status are reported, never its text.
+ */
+export function reportGmailNotificationFailure(error: unknown): void {
+  const kind = error instanceof Error && /^[A-Za-z]{1,60}$/u.test(error.name) ? error.name : "unclassified";
+  const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" &&
+    /^[a-z_]{1,60}$/u.test(error.code) ? error.code : "none";
+  const raw = error && typeof error === "object" && "status" in error ? Number(error.status) : NaN;
+  const status = Number.isInteger(raw) && raw >= 100 && raw <= 599 ? String(raw) : "unavailable";
+  reportError(serverCodeFailure(error, "GmailNotificationFailure", `Gmail notification pass failed (${kind}; ${code}; ${status})`), {
+    operation: "gmail.notification", fingerprint: ["gmail-notification", kind, code, status],
+    ids: { gmail_notification_kind: kind, gmail_notification_code: code, gmail_notification_status: status },
+  });
+  console.warn("Gmail notification pass failed", { kind, code, status });
+}

@@ -22,7 +22,7 @@ test("only signed catalog-changing GitHub events invalidate linked Spaces and pu
   routes(name => ({
     "./connectors/delivery-proof": deliveryProof,
     "./github-catalog-events": changed,
-    "./automation-triggers": { fireGitHubAutomationTriggers: async () => {} },
+    "./outside-events": { githubEventArrived: async () => {} },
     "./product-github-webhook-authority-adapter": { dispatchProductGitHubWebhook: async () => ({ ok: true }) },
   })[name] ?? {}).registerIndexRoutesAuthSpaceManagement(app);
   const request = (event, payload, signature = true) => {

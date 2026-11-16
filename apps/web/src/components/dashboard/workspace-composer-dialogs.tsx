@@ -36,6 +36,7 @@ import {
   formatPercent,
   Tag,
   tagsFromUsage,
+  BALANCE_TAG_KEY,
   UsageLimitSummary,
 } from "./workspace-shell-formatters";
 
@@ -1854,7 +1855,6 @@ export const ChannelDetails = memo(function ChannelDetails({
             onManageApps={onManageApps}
           />
 
-          {/* Automations are made on a page, in the section they keep true; this lists the ones running here. */}
           {/* The desktop title carries delete; the phone has no title icons. */}
           {onDeleteChannel && mobileOverlayOpen && <button type="button" onClick={onDeleteChannel}
             className="text-sm font-medium text-destructive hover:underline">Delete Channel…</button>}
@@ -1947,6 +1947,7 @@ const LiveAgentPresentationChips = memo(function LiveAgentPresentationChips({
   // update cannot make the live instance card look as if it has no usage.
   const usageMeterTags = instance.usage
     ? tagsFromUsage(instance.usage).filter((tag) => {
+        if (tag.key === BALANCE_TAG_KEY) return true;
         if (tag.percent === undefined) return false;
         const statusChipId = tag.key === "ctx" ? "ctx" : `quota:${tag.label.toLowerCase()}`;
         return !statusChipIds.has(statusChipId);

@@ -3,7 +3,7 @@
  *
  * A Space lives on one shard, so each physical shard is asked and the one that
  * holds it answers. Each query names its columns: metadata only. Message and
- * page bodies, Automation payloads and error text, connector secrets, scopes
+ * page bodies, connector secrets, scopes
  * and errors, billing provider ids and payload digests, invite tokens, and
  * every `metadata_json` are never selected.
  */
@@ -58,10 +58,6 @@ interface ConnectorRow extends QueryResultRow {
   created_by: string | null; created_at: Time; last_checked_at: Time | null;
 }
 
-interface AutomationRow extends QueryResultRow {
-  total: Count; enabled: Count; with_error: Count; run_count: Count; last_run_at: Time | null;
-}
-
 interface StatusRow extends QueryResultRow { status: string; total: Count; last_at?: Time | null }
 
 interface BillingRow extends QueryResultRow {
@@ -80,7 +76,7 @@ interface ActivityRow extends QueryResultRow {
   day: string; messages: Count; human_messages: Count; agent_messages: Count;
 }
 
-/** Space-scoped Channels: Runs and Automations reach their Space through them. */
+/** Space-scoped Channels: Runs reach their Space through them. */
 const SPACE_CHANNELS = "SELECT channel_id FROM data.channels WHERE space_id = $1";
 
 async function readShard(
@@ -165,27 +161,6 @@ async function readShard(
       maxRows: bound + 1,
     });
 
-    const automations = (await transaction.query<AutomationRow>({
-      name: "postgres_admin_space_automations_v1",
-      text: `SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE enabled) AS enabled,
-          COUNT(*) FILTER (WHERE last_error IS NOT NULL) AS with_error,
-          COALESCE(SUM(run_count), 0) AS run_count, MAX(last_run_at) AS last_run_at
-        FROM data.automations WHERE channel_id IN (${SPACE_CHANNELS})`,
-      values: [spaceId],
-      maxRows: 1,
-    }))[0];
-
-    const occurrences = await transaction.query<StatusRow>({
-      name: "postgres_admin_space_occurrences_v1",
-      text: `SELECT occurrence.status, COUNT(*) AS total
-        FROM data.automation_occurrences occurrence
-        JOIN data.automations automation USING (automation_id)
-        WHERE automation.channel_id IN (${SPACE_CHANNELS}) AND occurrence.scheduled_for >= $2
-        GROUP BY occurrence.status ORDER BY occurrence.status LIMIT 50`,
-      values: [spaceId, since],
-      maxRows: 50,
-    });
-
     const runs = await transaction.query<StatusRow>({
       name: "postgres_admin_space_runs_v1",
       text: `SELECT status, COUNT(*) AS total, MAX(created_at) AS last_at FROM data.runs
@@ -264,7 +239,6 @@ async function readShard(
     const memberRows = cut(members, "members");
     const ownerEmail = members.find((row) => row.user_id === space.owner_user_id)?.email;
     const lastMessageAt = optionalIso(totals?.last_message_at);
-    const lastAutomationRunAt = optionalIso(automations?.last_run_at);
 
     return {
       space: {
@@ -316,14 +290,8 @@ async function readShard(
           ...(lastCheckedAt ? { lastCheckedAt } : {}),
         };
       }),
-      automations: {
-        total: count(automations?.total),
-        enabled: count(automations?.enabled),
-        withError: count(automations?.with_error),
-        runCount: count(automations?.run_count),
-        ...(lastAutomationRunAt ? { lastRunAt: lastAutomationRunAt } : {}),
-        occurrencesByStatus: byStatus(occurrences),
-      },
+      // Retired: Webs before #1680 still read it (AdminSpaceDetail.automations).
+      automations: { total: 0, enabled: 0, withError: 0, runCount: 0, occurrencesByStatus: {} },
       runs: {
         total: runs.reduce((sum, row) => sum + count(row.total), 0),
         byStatus: byStatus(runs),

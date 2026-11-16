@@ -1172,7 +1172,7 @@ impl AgentSenderIdentity {
             ]),
             instance_id: agent_sender_env_value(&["XMATRIX_AGENT_INSTANCE_ID"]),
             run_id: agent_sender_env_value(&["XMATRIX_RUN_ID"]),
-            execution_key: agent_sender_env_value(&["XMATRIX_EXECUTION_KEY"]),
+            execution_key: xmatrix_cli_core::access::run_execution_key(),
         }
     }
 

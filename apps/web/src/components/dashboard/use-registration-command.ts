@@ -23,7 +23,7 @@ export function useRegistrationCommand(spaceId: string, token: string, onChanged
     setPendingId(registrationTupleId(key));
     setNotice(null);
     try {
-      if (change.kind === "disable" || change.kind === "enable") {
+      if (change.kind === "disable" || change.kind === "enable" || change.kind === "access") {
         // The owner's switch for this agent on its machine, in every Space.
         const physical = { ownerUserId: key.ownerUserId, machineId: key.machineId, harness: key.harness };
         const current = await xmatrixApiRequest<EnvironmentState>({

@@ -593,7 +593,8 @@ impl ProfileStore {
             .truncate(false)
             .read(true)
             .write(true)
-            .open(&lock_path)?;
+            .open(&lock_path)
+            .map_err(|error| registry_lock_refusal(&lock_path, error))?;
         set_private_file_permissions(&lock_path)?;
         lock.lock_exclusive()?;
         let result = operation(self);
@@ -604,6 +605,25 @@ impl ProfileStore {
             (Ok(_), Err(err)) => Err(CliError::Io(err)),
         }
     }
+}
+
+/// Every command opens this lock for writing. A sandbox that confines writes
+/// to the workspace refuses it, and a bare `Operation not permitted` names
+/// neither the file nor the way out.
+fn registry_lock_refusal(lock_path: &Path, error: std::io::Error) -> CliError {
+    if error.kind() != std::io::ErrorKind::PermissionDenied {
+        return CliError::Io(error);
+    }
+    CliError::Io(std::io::Error::new(
+        error.kind(),
+        format!(
+            "xmatrix cannot write {}: {error}. Every xmatrix command locks this file; \
+             when a sandbox confines this shell's writes, allow writes to {} or run \
+             the command outside the sandbox",
+            lock_path.display(),
+            lock_path.parent().unwrap_or(lock_path).display(),
+        ),
+    ))
 }
 
 fn finalize_profile_purge(

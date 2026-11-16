@@ -1,4 +1,4 @@
-import type { HarnessTooOld, LaunchRefusal, OfflineMachine, SpaceAgentRegistrationKey } from "@xmatrix/protocol";
+import type { HarnessTooOld, LaunchRefusal, OfflineMachine, QuotaRetryRegistration } from "@xmatrix/protocol";
 import type { DatabaseTransaction } from "./contracts.js";
 import { ControlError } from "./control-error.js";
 
@@ -7,9 +7,13 @@ export class RegistrationAccessError extends ControlError {
   /** `tooOld`: what a `registration_harness_outdated` refusal says is too old;
    * `offline`: the machines a `registration_daemon_offline` refusal waits for. */
   constructor(code: string, status: number, readonly tooOld?: HarnessTooOld,
-    readonly offline?: OfflineMachine[], readonly quotaTargets?: SpaceAgentRegistrationKey[],
+    readonly offline?: OfflineMachine[],
+    /** For a used-up refusal: the registrations it names, each with the model it would run. */
+    readonly quotaTargets?: QuotaRetryRegistration[],
     /** For a used-up refusal: the reading it rested on, so only a newer one is news. */
-    readonly quotaRefusedThrough?: string) {
+    readonly quotaRefusedThrough?: string,
+    /** For a refusal of a model the author named: when its quota is next back. */
+    readonly quotaResetsAt?: string) {
     super(code, status, code, status >= 500);
   }
 

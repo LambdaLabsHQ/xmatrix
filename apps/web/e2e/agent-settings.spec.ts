@@ -1,5 +1,6 @@
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { AGENT_ENVIRONMENT_QUERY, E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs,
+  unconfirmedAccess } from "./workspace-fixtures";
 
 const key = { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-remote", harness: "codex" };
 const registration = { key, displayName: "codex", machineName: "Remote server", ownerName: "E2E", state: "enabled",
@@ -62,4 +63,37 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   await page.getByRole("button", { name: "Save" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "profile")).toEqual([
     { harness: "codex", description: prose, expectedRevision: 2 }]);
+});
+
+test("an Agent's page lists exactly what its launch adds, and its owner confirms an access they were never asked about", async ({ page }) => {
+  const launch = { runtime: "codex", runtimeArgs: [] };
+  const environment = { schemaVersion: 1, enabled: true, models: [], description: "", availability: "unknown", capabilities: [], launch };
+  // One Agent per kind of thing a launch adds, each with the grant the Hub
+  // resolves from its real preset: session values, an argument, an
+  // environment variable, and nothing but the answered requests.
+  const held = ["codex", "claude", "deepseek", "opencode"].map((harness) => ({ ...registration, key: { ...key, harness },
+    displayName: harness, access: { ...unconfirmedAccess(harness).fullAccess, confirmed: false } }));
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  await fixtureJson(page, "catalog", CATALOG, { registrations: held,
+    capabilities: held.map((location) => ({ harness: location.key.harness, models: [], locations: [location] })) });
+  await fixtureJson(page, "environment", AGENT_ENVIRONMENT_QUERY, { ...unconfirmedAccess("codex"), key, version: 5, environment }, { method: "POST" });
+  await fixtureJson(page, "environment-command", "**/api/xmatrix/agent-environments/commands", { key, version: 6 }, { method: "POST" });
+  for (const location of [...held].reverse()) {
+    const grant = location.access;
+    await page.goto(`/app/personal-sspaceperso/agents`);
+    await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).nth(held.indexOf(location)).click();
+    const lines = page.getByTestId("agent-access").getByTestId("agent-access-lines").getByRole("listitem");
+    // One line for each thing the grant adds, written as the grant writes it:
+    // none missing, none borrowed from another harness.
+    const written = [...grant.args, ...Object.entries(grant.env).map(([name, value]) => `${name}=${value}`),
+      ...Object.entries(grant.session).map(([name, value]) => `${name}=${value}`)];
+    await expect(lines, location.key.harness).toHaveCount((written.length || 1) + (grant.approvesRequests ? 1 : 0));
+    for (const [index, value] of written.entries()) await expect(lines.nth(index), location.key.harness).toContainText(value);
+    await page.screenshot({ path: test.info().outputPath(`agent-access-${location.key.harness}.png`) });
+  }
+  // Codex was shown last. Its owner confirms what they just read.
+  await page.getByTestId("agent-access").getByRole("button", { name: "Review and confirm" }).click();
+  await page.getByRole("dialog", { name: "Codex: full access on this machine?" }).getByRole("button", { name: "Confirm with full access" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "environment-command")).toEqual([expect.objectContaining({
+    expectedVersion: 5, environment: { ...environment, launch: { ...launch, access: "full" } } })]);
 });

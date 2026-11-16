@@ -48,6 +48,10 @@ export interface AgentRegistrationSummary {
   canDescribe?: boolean;
   /** Where it stands right now. Absent from a Hub that does not report it. */
   live?: AgentRegistrationLiveState;
+  /** Exactly what a launch of it adds for its access mode. `confirmed` is false
+   * while it runs on the `full` it had before its owner was asked. Absent
+   * without an owner environment, and from a Hub that does not report it. */
+  access?: import("./agent-presets.js").AgentAccessGrant & { confirmed: boolean };
 }
 
 /**
@@ -70,6 +74,12 @@ export interface AgentRegistrationLiveState {
    * verdict on the account from the same read. */
   quota?: { remainingPercent: number; observedAt: string; expiresAt: string; windows?: RoutingQuotaWindow[];
     account?: LlmQuotaAccount };
+  /** The money left on a prepaid account, while that reading is current and to
+   * the same readers as `quota`. Such an account has no window, so its reading
+   * is never a `quota`: a share of headroom there would be shown as a
+   * percentage by a client that predates balances. `allowed` is the
+   * provider's word on whether the money still covers a request. */
+  balance?: { amount: number; currency: string; allowed?: boolean; observedAt: string; expiresAt: string };
 }
 
 export type AgentRegistrationMachinePlatform = "windows" | "macos" | "linux";

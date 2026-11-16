@@ -62,6 +62,38 @@ test("an option that takes words is completed before it is sent, and a request c
     .toEqual([{ outcome: "answered", text: "High(\"the migration is not rehearsed\")" }]);
 });
 
+test("the person asked delegates the request from its card to an Agent here, and takes it back while it is theirs", async ({ page }) => {
+  const asked = await openCard(page, card(request()));
+  await fixtureJson(page, "delegate", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/delegate`,
+    { status: "running" }, { method: "POST" });
+  await fixtureJson(page, "reclaim", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/reclaim`,
+    { status: "running" }, { method: "POST" });
+  // The Hub says whether it is still open and theirs to take back; the card offers it only then.
+  await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
+    channelId: CHANNEL.id, holder: "@claude:2", text: "Ship release 4.2 to everyone?", state: "open", reply: null, yoursToTakeBack: true } });
+  await asked.getByRole("button", { name: "Delegate…" }).click({ timeout: 20_000 });
+  await asked.getByLabel("Who answers it for you").fill("claude:2");
+  await asked.getByLabel("Why it is theirs to answer").fill("You read the release notes");
+  await page.screenshot({ path: test.info().outputPath("norn-request-delegate.png") });
+  await asked.getByRole("button", { name: "Delegate", exact: true }).click();
+  await expect(asked).toContainText("Delegated to claude:2: You read the release notes");
+  await expect(asked).toHaveAttribute("data-ask-card", "settled");
+  await expect.poll(() => fixtureRequestBodies(page, "delegate")).toEqual([{ to: "@claude:2", reason: "You read the release notes" }]);
+  await asked.getByRole("button", { name: "Take back" }).click();
+  await expect(asked).toContainText("You took it back");
+  await expect.poll(() => fixtureRequestBodies(page, "reclaim")).toEqual([{}]);
+});
+
+test("a request delegated to the reader says by whom, and declining it gives it back", async ({ page }) => {
+  const asked = await openCard(page, card(request({ delegatedBy: "@Daniel" })));
+  await expect(asked).toContainText("Daniel delegated this to you: you answer it for them.", { timeout: 20_000 });
+  // A delegate answers it or gives it back; passing it on again is not theirs to do.
+  await expect(asked.getByRole("button", { name: "Delegate…" })).toHaveCount(0);
+  await asked.getByRole("button", { name: "Give back" }).click();
+  await expect(asked).toContainText("You gave it back to Daniel: Given back");
+  await expect.poll(() => fixtureRequestBodies(page, "answer")).toEqual([{ outcome: "refused", text: "Given back" }]);
+});
+
 test("everyone else reads whom it waits for, and afterwards how it ended", async ({ page }) => {
   const waiting = await openCard(page, card(request({ holder: "@Daniel", holderUserId: "someone-else" })));
   await expect(waiting).toContainText("Waiting for @Daniel", { timeout: 20_000 });
@@ -133,4 +165,34 @@ test("a long task is read in full as paragraphs, not as a chip or a cut line", a
   await expect(block.locator("code")).toHaveText("admin aggregate pool get");
   await expect(page.getByTestId("request-reference-chip")).toHaveCount(0);
   await page.screenshot({ path: test.info().outputPath("norn-long-request-paragraphs.png") });
+});
+
+test("a question an Agent asked with a command is one card: it names the asker, and neither its program nor its end takes a row", async ({ page }) => {
+  const question = "数据库里两张没人用的旧定时表，要删吗？删的话我先改一道安全检查并发版，再请你点一次工作流；不删就留着，对用户没有影响。";
+  const asked = request({ verb: "choose", options: ["DropTables", "KeepTables"], about: null, text: question, asker: "claude:2",
+    otherwise: "KeepTables" });
+  await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [{ ...CHANNEL, messageCount: 3, lastMessageSequence: 3 }] });
+  await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { hasMore: false, messages: [
+    { messageId: "norn-ask:0b5e", channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
+      body: `claude asks E2E Tester:\n\n\`\`\`norn run\ntype choice = DropTables | KeepTables\nswitch choose(@E2E Tester, "${question}", [DropTables, KeepTables], ~by=1d)->wait {\n| NoReply => Answered(KeepTables)\n| other => other\n}\n\`\`\`` },
+    { ...card(asked), sequence: 2 },
+    { messageId: "norn-end:norn-ask:0b5e", channelId: CHANNEL.id, sequence: 3, sentAt: E2E_NOW, from: XMATRIX,
+      body: "@claude:2 The program finished: Answered(DropTables)" }] });
+  await fixtureJson(page, "answer", `**/api/xmatrix/channels/${CHANNEL.id}/norn-requests/rabcdefgh23/answer`,
+    { status: "running" }, { method: "POST" });
+  await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+  const shown = page.locator("[data-ask-card]");
+  await expect(shown).toContainText(question, { timeout: 20_000 });
+  await expect(shown).toContainText("claude:2 asks");
+  await expect(shown).toContainText("Without an answer by then: KeepTables.");
+  const timeline = page.locator("main");
+  await expect(timeline).not.toContainText("type choice");
+  await expect(timeline).not.toContainText("The program finished");
+  // Nor does the conversation's row preview it: the row shows the card's words.
+  await expect(page.getByText(/The program fini/u)).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("norn-ask-one-card.png") });
+  await shown.getByRole("button", { name: "DropTables" }).click();
+  await expect(shown).toContainText("You answered: DropTables");
+  await expect(shown).not.toContainText("Without an answer by then");
+  await page.screenshot({ path: test.info().outputPath("norn-ask-answered.png") });
 });

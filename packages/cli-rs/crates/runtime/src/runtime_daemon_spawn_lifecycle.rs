@@ -85,6 +85,11 @@ fn resolve_registration_spawn(
             CliError::Launch("Registered launch is missing the Hub's preset for its harness".into())
         })?;
     let mut resolved = intent.clone();
+    let declared_args = if harness.backend == "acp" && intent.runtime_args.is_empty() {
+        intent.agent_acp_args.clone()
+    } else {
+        intent.runtime_args.clone()
+    };
     if resolved.runtime_args.is_empty() {
         resolved.runtime_args = harness.default_args.clone();
     }
@@ -115,6 +120,33 @@ fn resolve_registration_spawn(
     if resolved.agent_acp_args.is_empty() {
         resolved.agent_acp_args = harness.acp_args.clone().unwrap_or_default();
     }
+    // The Hub's grant is the launch's access. A Hub that predates it sends
+    // none, and the launch is what it always was: the preset's full access,
+    // except that an argv the registration declared started as declared
+    // (Grok's aside, whose flag the bridge added).
+    let access = resolved.access.take().unwrap_or_else(|| {
+        let mut access = xmatrix_cli_agent::agent_preset_by_id(&harness.id)
+            .map(xmatrix_cli_agent::AgentPreset::full_access_grant)
+            .unwrap_or_else(|| xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant {
+                mode: "full".into(),
+                ..Default::default()
+            });
+        if !declared_args.is_empty() && harness.backend != "grok-acp" {
+            access.args.retain(|arg| declared_args.contains(arg));
+        }
+        access
+    });
+    // Its args join the argv the harness starts with: the ACP argv for the
+    // generic ACP backend unless the launch declares its own.
+    if resolved.agent_backend.as_deref() == Some("acp") && resolved.runtime_args.is_empty() {
+        if !access.args.is_empty() && resolved.agent_acp_args.is_empty() && harness.acp_args.is_none() {
+            resolved.agent_acp_args = vec!["acp".to_string()];
+        }
+        resolved.agent_acp_args = access.with_args(&resolved.agent_acp_args);
+    } else {
+        resolved.runtime_args = access.with_args(&resolved.runtime_args);
+    }
+    resolved.access = Some(access);
     Ok(resolved)
 }
 
@@ -772,6 +804,7 @@ async fn handle_daemon_spawn_request(
             agent_backend: intent.agent_backend.as_deref(),
             agent_preset_id: intent.agent_preset_id.as_deref(),
             agent_acp_args: &intent.agent_acp_args,
+            access: intent.access.as_ref(),
             agent_name: &intent.agent_name,
             identity_id: intent.identity_id.as_deref(),
             role_initial_prompt: intent.role_initial_prompt.as_deref(),
@@ -2020,6 +2053,37 @@ fn apply_authoritative_agent_execution_env(
     Ok(env)
 }
 
+/// Passes the launch's access grant to its wrapper and sets the grant's
+/// environment on it, which the harness it starts inherits. A grant names
+/// harness variables only: nothing of xMatrix's own, and nothing the process
+/// loader reads.
+fn apply_spawn_access(
+    mut env: BTreeMap<String, String>,
+    access: &xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant,
+) -> error::Result<BTreeMap<String, String>> {
+    let name_ok = |name: &str| {
+        !name.is_empty()
+            && name.len() <= 128
+            && name.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+            && !name.starts_with("XMATRIX_")
+            && !name.starts_with("LD_")
+            && !name.starts_with("DYLD_")
+            && name != "PATH"
+    };
+    if access.env.len() > 16
+        || access.env.iter().any(|(name, value)| {
+            !name_ok(name) || value.len() > 1024 || value.chars().any(char::is_control)
+        })
+    {
+        return Err(CliError::Launch(
+            "spawn request contains an invalid access environment".into(),
+        ));
+    }
+    env.extend(access.env.clone());
+    env.insert("XMATRIX_AGENT_ACCESS".into(), serde_json::to_string(access)?);
+    Ok(env)
+}
+
 struct HeadlessAgentSpawn<'a> {
     hub_url: &'a str,
     registration: &'a xmatrix_cli_core::agent_registration::RegistrationLaunchBinding,
@@ -2033,6 +2097,7 @@ struct HeadlessAgentSpawn<'a> {
     agent_backend: Option<&'a str>,
     agent_preset_id: Option<&'a str>,
     agent_acp_args: &'a [String],
+    access: Option<&'a xmatrix_cli_core::machine_daemon_connection::AgentAccessGrant>,
     agent_name: &'a str,
     identity_id: Option<&'a str>,
     role_initial_prompt: Option<&'a str>,
@@ -2129,6 +2194,7 @@ async fn spawn_headless_agent(
         agent_backend,
         agent_preset_id,
         agent_acp_args,
+        access,
         agent_name,
         identity_id,
         role_initial_prompt,
@@ -2186,6 +2252,9 @@ async fn spawn_headless_agent(
     )?;
     local_env = apply_spawn_bootstrap_prompts(local_env, bootstrap_prompts)?;
     local_env.extend(auto_update.env);
+    if let Some(access) = access {
+        local_env = apply_spawn_access(local_env, access)?;
+    }
     local_env.insert(
         "XMATRIX_AGENT_REGISTRATION".into(),
         serde_json::to_string(&registration.key)?,
@@ -2290,6 +2359,7 @@ async fn spawn_headless_agent(
         "XMATRIX_AUTO_JOIN_CHANNEL_ID",
         "XMATRIX_ACP",
         "XMATRIX_ACP_ARGS",
+        "XMATRIX_AGENT_ACCESS",
         "XMATRIX_ACTIVE_CHANNEL_DIR",
         "XMATRIX_CHANNEL_MIRROR_DIR",
         "XMATRIX_CLAUDE_PRINT",

@@ -7,7 +7,7 @@ import {
 
 test.use(E2E_DESKTOP_CONTEXT);
 
-const BACKGROUND_READS = ["workspaces", "automations", "machine-daemons"];
+const BACKGROUND_READS = ["workspaces", "machine-daemons"];
 
 test.describe("Phone startup navigation", () => {
   test.use(E2E_MOBILE_CONTEXT);
@@ -52,8 +52,8 @@ async function openPendingStartup(page: Page, id: string, pattern: string, expec
 }
 
 async function expectStartupDeadlineEscape(page: Page) {
-  expect(await fixtureRequests(page, "automations")).toHaveLength(0);
-  await expect.poll(async () => (await fixtureRequests(page, "automations")).length,
+  expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
+  await expect.poll(async () => (await fixtureRequests(page, "workspaces")).length,
     { timeout: 12_000 }).toBeGreaterThan(0);
 }
 
@@ -68,7 +68,7 @@ test.describe("Desktop startup with no Channel named", () => {
           } } });
       await page.goto("/app/personal-sspaceperso/channels", { waitUntil: "domcontentloaded" });
       await expect.poll(async () => (await fixtureRequests(page, "desktop-catalog")).length).toBe(1);
-      expect(await fixtureRequests(page, "automations")).toHaveLength(0);
+      expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
       await releaseFixture(page, "desktop-catalog");
       await expectBackgroundReads(page, true, 3_000);
     });
@@ -100,7 +100,7 @@ test("exact Channel links start history before resolve and defer secondary reque
   await expect.poll(async () => (await fixtureRequests(page, "startup-history")).length).toBe(1);
   await expect(page.getByText("Startup history ready", { exact: true })).toHaveCount(0);
   await expect.poll(async () => (await fixtureRequests(page, "startup-resolve")).length).toBe(1);
-  expect(await fixtureRequests(page, "automations")).toHaveLength(0);
+  expect(await fixtureRequests(page, "workspaces")).toHaveLength(0);
   await releaseFixture(page, "startup-resolve");
   await expect(page.getByText("Startup history ready", { exact: true })).toBeVisible();
   expect(await fixtureRequests(page, "client-compatibility")).toHaveLength(1);

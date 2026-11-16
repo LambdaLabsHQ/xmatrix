@@ -23,12 +23,13 @@ function compileFunction(name, dependencies = {}) {
     ...Object.values(dependencies));
 }
 
-const quotaLabel = (quota) => quota.label || quota.window || "";
+const quotaWindowLabel = compileFunction("quotaWindowLabel");
+const quotaLabel = compileFunction("quotaLabel", { quotaWindowLabel });
 
 function quotaDisplayFixture() {
   const order = ["5h", "1w", "2h", "1mo"];
   return { order, compareQuotaUsageForDisplay: compileFunction("compareQuotaUsageForDisplay", {
-    quotaLabel, QUOTA_DISPLAY_ORDER: order,
+    quotaLabel, quotaWindowLabel, QUOTA_DISPLAY_ORDER: order,
   }) };
 }
 
@@ -78,16 +79,57 @@ test("duplicate quota values resolve identically when provider order changes", (
   assert.equal(selectedPercent([...sameReset].reverse()), 68);
 });
 
-test("an authoritative unnamed hold shows quota exhaustion without inventing a window", () => {
+function usageTagFixture(providerQuotaUsages) {
+  const quotaAccountBalance = (account) => account?.credits?.balance !== undefined && account.credits.currency
+    ? { amount: account.credits.balance, currency: account.credits.currency } : undefined;
+  const providerAccountBalance = compileFunction("providerAccountBalance", { quotaAccountBalance });
+  return {
+    tagsFromUsage: compileFunction("tagsFromUsage", { providerQuotaUsages, providerAccountBalance,
+      formatQuotaBalance: ({ amount, currency }) => `${currency} ${amount}`, BALANCE_TAG_KEY: "quota:balance",
+      usageContextPercent: compileFunction("usageContextPercent") }),
+    accountQuotaUsage: compileFunction("accountQuotaUsage", { providerQuotaUsages, providerAccountBalance }),
+  };
+}
+
+test("a prepaid balance is a tag of its own, with no meter and no window", () => {
+  const { tagsFromUsage, accountQuotaUsage } = usageTagFixture(() => []);
+  const prepaid = { quotaSource: "provider_api", quotaObservedAt: "2026-10-03T21:01:00Z", quotaUsages: [],
+    quotaAccount: { allowed: true, credits: { balance: 12.34, currency: "CNY" } } };
+  assert.deepEqual(tagsFromUsage(prepaid),
+    [{ key: "quota:balance", label: "CNY 12.34", title: "Provider balance: CNY 12.34 left" }]);
+  assert.deepEqual(accountQuotaUsage(prepaid).quotaAccount, prepaid.quotaAccount);
+  assert.deepEqual(tagsFromUsage({ ...prepaid, quotaSource: undefined }), [], "only a provider read is a balance");
+  assert.deepEqual(tagsFromUsage({ ...prepaid, quotaAccount: { credits: { balance: 40 } } }), [],
+    "credit units are not money");
+});
+
+test("a model's own window is shown with its scope after the account's, and is no account limit", () => {
   const normalizeQuotaUsageList = compileFunction("normalizeQuotaUsageList", {
     quotaPercent: compileFunction("quotaPercent"), quotaResetHasPassed: () => false,
-    isCodexQuotaUsage: () => false, quotaLabel, compareQuotaUsageForDisplay: () => 0,
+    isCodexQuotaUsage: () => false, quotaLabel, quotaWindowLabel,
+    compareQuotaUsageForDisplay: quotaDisplayFixture().compareQuotaUsageForDisplay,
     dedupeQuotaUsagesByLabel: compileFunction("dedupeQuotaUsagesByLabel", { quotaLabel }),
   });
   const providerQuotaUsages = compileFunction("providerQuotaUsages", { normalizeQuotaUsageList });
-  const tagsFromUsage = compileFunction("tagsFromUsage", { providerQuotaUsages,
-    usageContextPercent: compileFunction("usageContextPercent") });
-  const accountQuotaUsage = compileFunction("accountQuotaUsage", { providerQuotaUsages });
+  const usage = { quotaSource: "provider_api", quotaUsages: [{ label: "seven_day", percent: 55 }, { label: "5h", percent: 3 }],
+    scopedQuotaUsages: [{ label: "1w", percent: 100, scope: "Fable" }] };
+  assert.deepEqual(providerQuotaUsages(usage).map(quotaLabel), ["5h", "1w", "Fable · 1w"]);
+  const usageLimitSummary = compileFunction("usageLimitSummary", {
+    providerQuotaUsages, quotaPercent: compileFunction("quotaPercent"), quotaResetHasPassed: () => false,
+    quotaAtLimit: compileFunction("quotaAtLimit"), formatPercent: (value) => `${value}%`,
+    quotaTitle: (quota) => quotaLabel(quota), quotaLabel,
+  });
+  assert.equal(usageLimitSummary(usage), undefined, "Fable's week used up leaves the account below its limit");
+});
+
+test("an authoritative unnamed hold shows quota exhaustion without inventing a window", () => {
+  const normalizeQuotaUsageList = compileFunction("normalizeQuotaUsageList", {
+    quotaPercent: compileFunction("quotaPercent"), quotaResetHasPassed: () => false,
+    isCodexQuotaUsage: () => false, quotaLabel, quotaWindowLabel, compareQuotaUsageForDisplay: () => 0,
+    dedupeQuotaUsagesByLabel: compileFunction("dedupeQuotaUsagesByLabel", { quotaLabel }),
+  });
+  const providerQuotaUsages = compileFunction("providerQuotaUsages", { normalizeQuotaUsageList });
+  const { tagsFromUsage, accountQuotaUsage } = usageTagFixture(providerQuotaUsages);
   const usageLimitSummary = compileFunction("usageLimitSummary");
   const held = { quotaState: "exhausted", quotaSource: "provider_api",
     quotaObservedAt: "2026-10-03T21:01:00Z", quotaUsages: [{ percent: 100 }] };

@@ -2,7 +2,7 @@ import { plainRecord } from "./plain-record.js";
 import { cleanAgentModelCatalog as cleanModelCatalog, cleanAgentCommands as cleanCommands,
   cleanAgentCapabilities, cleanAgentPresentationText as cleanText,
   cleanAgentPresentationTextList as cleanTextList } from "./agent-instance-catalogs.js";
-import { parseLlmQuotaAccount, parseQuotaObservedAt, localLlmUsage,
+import { hasProviderQuotaReading, parseLlmQuotaAccount, parseQuotaObservedAt, localLlmUsage, quotaAccountBalance,
   type LlmQuotaUsage, type LlmUsage } from "./authority-runtime.js";
 import { parseHarnessParameters, harnessParameterEnabled, harnessParameterKind, harnessParameterValueLabel,
   type HarnessParameter } from "./harness-parameters.js";
@@ -351,7 +351,7 @@ function mergeUsagePreferringQuotas(
   incoming = withoutUntrustedQuotaUsage(incoming);
   if (!incoming || Object.keys(incoming).length === 0) return current;
   if (!current) return incoming;
-  if (incoming.quotaUsages?.length) {
+  if (hasProviderQuotaReading(incoming)) {
     const previousTime = Date.parse(current.quotaObservedAt ?? "");
     const incomingTime = Date.parse(incoming.quotaObservedAt ?? "");
     // Concurrent turn/periodic frames can reach the wire out of order. Local
@@ -359,7 +359,10 @@ function mergeUsagePreferringQuotas(
     if (Number.isFinite(previousTime) && Number.isFinite(incomingTime) && incomingTime < previousTime) {
       return { ...current, ...localLlmUsage(incoming) };
     }
-    return { ...current, ...incoming, quotaObservedAt: incoming.quotaObservedAt };
+    // One read states every quota fact: a partial one (no scoped windows)
+    // must not carry the previous read's scoped windows forward as its own.
+    const { scopedQuotaUsages: _previousScoped, ...rest } = current;
+    return { ...rest, ...incoming, quotaObservedAt: incoming.quotaObservedAt };
   }
   if (current.quotaUsages?.length) {
     return { ...current, ...incoming, quotaUsages: current.quotaUsages };
@@ -369,7 +372,7 @@ function mergeUsagePreferringQuotas(
 
 function withoutUntrustedQuotaUsage(usage: LlmUsage | undefined): LlmUsage | undefined {
   if (!usage) return undefined;
-  if (usage.quotaSource === "provider_api" && usage.quotaUsages?.length) return usage;
+  if (hasProviderQuotaReading(usage)) return usage;
   return localLlmUsage(usage);
 }
 
@@ -540,12 +543,17 @@ function cleanUsage(value: unknown): LlmUsage | undefined {
   } else if (value.quotaSource === "provider_api") {
     if (value.quotaState === "observed" || value.quotaState === "exhausted") usage.quotaState = value.quotaState;
     const quotaUsages = cleanQuotaUsages(value.quotaUsages);
-    if (quotaUsages) {
+    // Present, even empty, marks a complete reading; each window needs its scope.
+    const scopedQuotaUsages = Array.isArray(value.scopedQuotaUsages)
+      ? (cleanQuotaUsages(value.scopedQuotaUsages) ?? []).filter((window) => window.scope) : undefined;
+    const quotaAccount = parseLlmQuotaAccount(value.quotaAccount);
+    // A prepaid account has no window: its balance alone is the reading.
+    if (quotaUsages || scopedQuotaUsages?.length || quotaAccountBalance(quotaAccount)) {
       usage.quotaSource = "provider_api";
-      usage.quotaUsages = quotaUsages;
+      if (quotaUsages) usage.quotaUsages = quotaUsages;
+      if (scopedQuotaUsages) usage.scopedQuotaUsages = scopedQuotaUsages;
       const quotaObservedAt = parseQuotaObservedAt(value.quotaObservedAt);
       if (quotaObservedAt) usage.quotaObservedAt = quotaObservedAt;
-      const quotaAccount = parseLlmQuotaAccount(value.quotaAccount);
       if (quotaAccount) usage.quotaAccount = quotaAccount;
     }
   }
@@ -567,6 +575,7 @@ function cleanQuotaUsages(value: unknown): LlmQuotaUsage[] | undefined {
       ...(cleanText(candidate.label, 64) ? { label: cleanText(candidate.label, 64) } : {}),
       ...(cleanText(candidate.window, 64) ? { window: cleanText(candidate.window, 64) } : {}),
       ...(cleanText(candidate.resetAt, 64) ? { resetAt: cleanText(candidate.resetAt, 64) } : {}),
+      ...(cleanText(candidate.scope, 64) ? { scope: cleanText(candidate.scope, 64) } : {}),
     };
     for (const key of ["used", "limit", "remaining", "percent"] as const) {
       const number = cleanNonnegativeNumber(candidate[key]);

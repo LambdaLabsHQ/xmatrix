@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { PostgresAutomationRepository, PostgresBillingRepository, PostgresChannelCatalogRepository,
+import { PostgresBillingRepository, PostgresChannelCatalogRepository,
   PostgresPageRepository } from "../dist/index.js";
 import { integration } from "./postgres-database.fixture.mjs";
 import { spaceSecretFixture } from "./space-secret-postgres.fixture.mjs";
-import { recoveringDatabase, recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
+import { recoveringDatabase, recoveringPageRepository, recoveringSpaceControl } from "./response-fault-postgres.fixture.mjs";
 import { describePageConversations } from "../dist/page-conversations.js";
 
 async function assertReadRecovery(read, expected, clients, injectFault) {
@@ -20,13 +20,11 @@ async function assertReadRecovery(read, expected, clients, injectFault) {
 
 // The existing catalog privacy tests use healthy connections. Exercise the
 // repository through the real client and SQL when a read response disappears,
-// including a later access check: recovery must still redact private events.
+// including a later access check: recovery must not reveal a closed conversation.
 integration("catalogs and page activity recover lost SELECTs without losing access checks (XMATRIX-HUB-96/8P/99)", async () => {
   const f = await spaceSecretFixture();
-  const automationId = crypto.randomUUID();
   let fault;
   const { database, clients } = recoveringDatabase(() => fault);
-  const repository = new PostgresAutomationRepository(database);
   const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
     principal: { kind: "user", id: f.ids.owner } };
   try {
@@ -34,26 +32,7 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
       VALUES($1,0,now())`, [f.ids.space]);
     const pages = new PostgresPageRepository(database);
     const { page } = await pages.create({ ...input,
-      title: "Synthetic recovery audit", body: `[Recovery](xmatrix:automation/${automationId})` });
-    await f.client.query(`INSERT INTO data.automations
-      (automation_id,owner_user_id,channel_id,next_run_at,enabled,version,payload_json,trigger_events,page_id,created_at,updated_at)
-      VALUES($1,$2,$3,now()+interval '1 day',true,1,$4::jsonb,$5::jsonb,$6,now(),now())`,
-    [automationId, f.ids.owner, f.ids.channel, JSON.stringify({ payloadVersion: 2,
-      intervalMinutes: 60, message: { body: "Synthetic recovery audit" } }),
-    JSON.stringify([{ summary: "SYNTHETIC-PRIVATE-EVENT" }]), page.pageId]);
-    for (const read of [() => repository.list(input),
-      () => repository.listPage({ ...input, userId: f.ids.owner, pageId: page.pageId }),
-      () => repository.get({ ...input, automationId })]) {
-      for (const matches of [/FROM data\.automations t JOIN/u, /SELECT c\.channel_id\s+FROM data\.channels c JOIN data\.space_members/u]) {
-        fault = { matches, remaining: 1, error: new Error("Query read timeout"), checkouts: [] };
-        const result = await read();
-        assert.equal((result.task ?? result.tasks[0]).id, automationId);
-        assert.match(JSON.stringify(result), /SYNTHETIC-PRIVATE-EVENT/u);
-        assert.equal(fault.checkouts.length, 1);
-        assert.equal(fault.checkouts[0].ended, true, "the lost response's checkout is destroyed");
-        assert.ok(clients.indexOf(fault.checkouts[0]) < clients.length - 1, "recovery checks out a new connection");
-      }
-    }
+      title: "Synthetic recovery audit", body: "Recovery" });
     const catalog = new PostgresChannelCatalogRepository(database);
     const catalogInput = { ...input, view: "flat", filter: "all" };
     // HUB-8P lost the counts response, after its page SELECT had succeeded.
@@ -87,6 +66,10 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
     readCases.push({ read: () => pages.search({ ...input, query: "Recovery" }), evidence: page.pageId,
       matches: [/SELECT role FROM data\.space_members/u, /data\.page_title\(r.body\) AS title, r.body/u],
       failureMatch: /data\.page_title\(r.body\) AS title, r.body/u });
+    // HUB-CX lost BEGIN on the page tree itself. The tree is the same lock-free read as search.
+    readCases.push({ read: () => pages.tree(input), evidence: page.pageId,
+      matches: [/SELECT role FROM data\.space_members/u, /FROM data\.page_reads/u],
+      failureMatch: /FROM data\.page_reads/u });
     for (const { read, evidence, matches: stages, failureMatch } of readCases) {
       const expected = await read();
       assert.ok(JSON.stringify(expected).includes(evidence), "the accessible page or live activity is returned");
@@ -114,28 +97,8 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
       assert.equal(fault.checkouts.length, 1);
     }
     fault = undefined;
-    await f.client.query("UPDATE data.channels SET mode='open' WHERE channel_id=$1", [f.ids.channel]);
-    await f.client.query("UPDATE data.space_members SET role='participant' WHERE space_id=$1 AND user_id=$2",
-      [f.ids.space, f.ids.owner]);
-    fault = { matches: /SELECT c\.channel_id\s+FROM data\.channels c JOIN data\.space_members/u,
-      remaining: 1, error: new Error("Connection terminated unexpectedly"), checkouts: [] };
-    const redacted = await repository.list(input);
-    assert.equal(redacted.tasks[0].id, automationId);
-    assert.doesNotMatch(JSON.stringify(redacted), /SYNTHETIC-PRIVATE-EVENT/u);
-    assert.equal(fault.checkouts.length, 1);
-    // Repeated loss stays bounded and propagates instead of returning an empty catalog.
-    fault = { matches: /FROM data\.automations t JOIN/u,
-      remaining: 3, error: new Error("Query read timeout"), checkouts: [] };
-    await assert.rejects(repository.list(input), /Query read timeout/u);
-    assert.equal(fault.checkouts.length, 2);
-    // An answered SQL failure is never retried.
-    fault = { matches: /FROM data\.automations t JOIN/u, remaining: 3,
-      error: Object.assign(new Error("statement timeout"), { code: "57014" }), checkouts: [] };
-    await assert.rejects(repository.list(input), /statement timeout/u);
-    assert.equal(fault.checkouts.length, 1);
   } finally {
     await f.client.query("DELETE FROM data.page_links WHERE space_id=$1", [f.ids.space]);
-    await f.client.query("DELETE FROM data.automations WHERE automation_id=$1", [automationId]);
     await f.close();
   }
 });
@@ -143,12 +106,8 @@ integration("catalogs and page activity recover lost SELECTs without losing acce
 // Healthy awareness/blame tests and generic client retry tests cannot catch
 // these repositories opening BEGIN or losing a later history/body response.
 integration("page awareness and blame recover lost reads with access and placement fences (XMATRIX-HUB-AS)", async () => {
-  const f = await spaceSecretFixture();
   let fault;
-  const { database, clients } = recoveringDatabase(() => fault);
-  const pages = new PostgresPageRepository(database);
-  const input = { requestId: crypto.randomUUID(), spaceId: f.ids.space,
-    principal: { kind: "user", id: f.ids.owner } };
+  const { f, clients, pages, input } = await recoveringPageRepository(() => fault);
   const accessRead = /SELECT p\.page_id,p\.parent_page_id/u;
   const bodyRead = /SELECT revision, body FROM data\.page_revisions/u;
   try {

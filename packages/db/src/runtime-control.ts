@@ -13,7 +13,7 @@ import { readInvocationProgress } from "./runtime-invocation-progress.js";
 import { readContinuationMachineConstraint, readContinuationSource } from "./runtime-continuation-source.js";
 import { queryMessageAgentTargets } from "./message-agent-targets.js";
 import { queryMessageExecutions, selectRunExecutionSources } from "./runtime-message-executions.js";
-import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines, parseMachineAgents,
+import { ACTIVE_RUN_STATUS_SQL, isActiveRunStatus, isRunStatus, isTerminalRunStatus, validRunTransition, type RunStatus, PREPARATION_REJECTION_MESSAGES, REGISTRATION_PREPARATION_REJECTION_CODES, preparationRejectionMessage, parseDecisionAnswerFailure, parseHarnessTooOld, parseHarnessSignedOut, parseOfflineMachines, parseMachineAgents, parseQuotaExhausted,
   parsePresentedRoutingDecision, rebornFailureReason, isAgentStatus,
   isLiveAgentStatus, LIVE_AGENT_STATUS_SQL, agentPresetById, type HarnessSignedOut, normalizeAgentPresetRuntime, type AgentStatus, type AgentLaunchState,
   type RuntimeOperationFailure, type SerializedAgentContinuation, type SerializedAgentLaunch, type SerializedAgentInvocationRejection, type SerializedAgentStop, type AgentStopPhase, type AgentInvocationQueryPage, type AgentLaunchActivity, type InvocationDiagnosticsReport } from "@xmatrix/protocol";
@@ -69,40 +69,6 @@ export function runtimeChannelCapability(tx: DatabaseTransaction, channelId: str
 
 const { text, integer, object: record } = commandFields((field) =>
   new RuntimeControlError("invalid_runtime_request", 400, `${field} is invalid`));
-
-/** Runtime-owned cancellation fence. Call inside the scheduling transaction so
- * revocation and occupancy release commit together. This is not process-death evidence. */
-export async function cancelRunExecution(tx: DatabaseTransaction, input: {
-  runId: string; ownerUserId: string; channelId: string; at: string;
-  reason: "timeout" | "owner";
-}): Promise<void> {
-  const rows = await tx.query<QueryResultRow>({ name: "runtime_execution_cancel_lock_v1",
-    text: `SELECT r.*,i.instance_id FROM data.runs r LEFT JOIN data.instances i
-      ON i.run_id=r.run_id WHERE r.run_id=$1 FOR UPDATE OF r`,
-    values: [input.runId], maxRows: 1 });
-  const run = rows[0];
-  if (!run || run.owner_user_id !== input.ownerUserId || run.channel_id !== input.channelId) {
-    throw new RuntimeControlError("conflict", 409, "Scheduled execution ownership does not match");
-  }
-  const body = metadata(run);
-  if (body.executionCancellation && isTerminalRunStatus(run.status)) return;
-  if (!isActiveRunStatus(run.status)) {
-    throw new RuntimeControlError("conflict", 409, "Run is already terminal");
-  }
-  const cancellation = { reason: input.reason, requestedAt: input.at,
-    processCleanup: { status: "pending", attempts: 0, nextAttemptAt: input.at } };
-  await tx.query({ name: "runtime_execution_cancel_v1", text: `UPDATE data.runs
-    SET status='failed',version=version+1,updated_at=$2,finished_at=$2,
-      metadata_json=metadata_json || $3::jsonb WHERE run_id=$1`,
-    values: [input.runId, input.at, JSON.stringify({ executionCancellation: cancellation,
-      terminalError: input.reason === "timeout" ? "Execution deadline exceeded; execution cancelled"
-        : "Execution cancelled by its owner" })], maxRows: 0 });
-  await tx.query({ name: "runtime_execution_cancel_launch_v1", text: `UPDATE data.agent_launches
-    SET state='cancelled',retryable=false,lease_owner=NULL,lease_until=NULL,
-      version=version+1,updated_at=$2,finished_at=$2 WHERE run_id=$1
-      AND state NOT IN ('cancelled','failed')`, values: [input.runId, input.at], maxRows: 0 });
-  await expireInstanceTraceAccess(tx, run.instance_id, input.at);
-}
 
 function runStatus(value: unknown): RunStatus {
   const result = text(value, "status", 32) as RunStatus;
@@ -393,7 +359,8 @@ function serializeInvocationRejections(row: QueryResultRow): SerializedAgentInvo
         ? { offline: parseOfflineMachines(value.offline)! } : {}),
       message: known ? preparationRejectionMessage(code, code === "registration_harness_outdated" ? value.tooOld
         : code === "registration_daemon_offline" ? value.offline
-        : code === "registration_machine_unavailable" ? value.machineAgents : value.answerFailure)!
+        : code === "registration_machine_unavailable" ? value.machineAgents
+        : code === "registration_quota_exhausted" ? value.quotaExhausted : value.answerFailure)!
         : "This invocation could not be prepared. Review its address and Agent configuration.",
       rejectedAt: iso(row.created_at)!, evidenceExpiresAt: iso(row.expires_at)! }];
   });
@@ -545,7 +512,7 @@ export class PostgresRuntimeRepository {
   /** Bounded historical outcomes only. They neither reserve capacity nor authorize a launch. */
   async recordRoutingRejections(input: { channelId: string; sourceMessageId: string; actorUserId: string;
     rejected: Array<{ sourceMention: string; code: string; routingDecision?: unknown;
-      answerFailure?: unknown; tooOld?: unknown; offline?: unknown; machineAgents?: unknown }> }) {
+      answerFailure?: unknown; tooOld?: unknown; offline?: unknown; machineAgents?: unknown; quotaExhausted?: unknown }> }) {
     const channelId = text(input.channelId, "channelId", 300);
     const sourceMessageId = text(input.sourceMessageId, "sourceMessageId", 160);
     const commandId = `routing-preflight:${sourceMessageId}`;
@@ -563,9 +530,10 @@ export class PostgresRuntimeRepository {
       const tooOld = item.code === "registration_harness_outdated" ? parseHarnessTooOld(item.tooOld) : undefined;
       const offline = item.code === "registration_daemon_offline" ? parseOfflineMachines(item.offline) : undefined;
       const machineAgents = item.code === "registration_machine_unavailable" ? parseMachineAgents(item.machineAgents) : undefined;
+      const quotaExhausted = item.code === "registration_quota_exhausted" ? parseQuotaExhausted(item.quotaExhausted) : undefined;
       return { sourceMention, targetRef: "auto", code: item.code,
         ...(answerFailure ? { answerFailure } : {}), ...(tooOld ? { tooOld } : {}),
-        ...(offline ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}),
+        ...(offline ? { offline } : {}), ...(machineAgents ? { machineAgents } : {}), ...(quotaExhausted ? { quotaExhausted } : {}),
         ...(item.routingDecision ? { routingDecision: routingDecisionView(item.routingDecision) } : {}) };
     });
     const placement = await this.channelPlacement(commandId, channelId,
@@ -1458,8 +1426,11 @@ export class PostgresRuntimeRepository {
       }
       if (!transitions[currentState]?.includes(target)) {
         if (current.state === target) return { launch: serializeAgentLaunch(current) };
-        throw new RuntimeControlError("launch_transition_conflict", 409,
-          `Invalid Agent Launch transition ${String(current.state)} -> ${target}`);
+        // The sentence stays off the log. Both ends are launch states, so the
+        // token is a fixed label the next rejection can be grouped by.
+        throw Object.assign(new RuntimeControlError("launch_transition_conflict", 409,
+          `Invalid Agent Launch transition ${currentState} -> ${target}`),
+          { reason: `${currentState}_to_${target}` });
       }
       // The daemon's report time may trail the Hub clock that created the
       // Launch and its Run; evidence keeps it, row clocks never move backward.
