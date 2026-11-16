@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: "Following" a pull request no longer wakes every Agent in the conversation
+
+When a Run opened a pull request, GitHub's "Following repo#N in this
+conversation" line (#1710) was appended as an ordinary App message: it woke
+every resting Instance in the conversation, reached every live one as work,
+and counted as unread, although the line is context that reports what the
+Run just did. Whether a message is an activity entry was marked twice (its
+`activity` provenance and its `xmatrix.activity` kind) by each writer, and
+whether it is context was decided twice (live delivery read the provenance,
+the App wake path did not). Both now come from one protocol rule: the
+append derives the kind from the provenance, and every delivery path reads
+`isAgentContextMessage`. An App's own events (CI verdicts, reviews, merges)
+still wake and reach Agents as work. Hub only. Recovery is a CI-validated
+Hub beta reverting this change.
+
 ## Unreleased: a pull request's GitHub messages read as one connector story
 
 What GitHub reported about a pull request an Agent opened (CI passed or
