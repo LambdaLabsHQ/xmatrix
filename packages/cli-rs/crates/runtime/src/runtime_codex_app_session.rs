@@ -103,6 +103,96 @@ fn save_codex_resume_session_id(key: Option<&str>, session_id: Option<&str>) -> 
     save_resume_session_id("codex-resume", "Codex", key, session_id)
 }
 
+/// The startup failure code of a resume Codex refused because another live
+/// Codex process still writes the thread (protocol `machine-startup-failure`).
+const HARNESS_SESSION_IN_USE: &str = "harness_session_in_use";
+
+/// Which process opened a session's Codex thread as its writer, so a later
+/// resume that Codex refuses can name it. Codex allows one writer per thread
+/// across every process on the computer and does not say which holds it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexThreadWriter {
+    thread_id: String,
+    codex_pid: u32,
+    wrapper_pid: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    run_id: Option<String>,
+    opened_at_millis: u64,
+}
+
+fn codex_thread_writer_path(key: Option<&str>) -> Option<PathBuf> {
+    let key = key.map(str::trim).filter(|key| !key.is_empty())?;
+    Some(resume_session_path("codex-writer", key))
+}
+
+/// Best effort: the record only names a holder in a later failure.
+fn save_codex_thread_writer(key: Option<&str>, writer: &CodexThreadWriter) {
+    let Some(path) = codex_thread_writer_path(key) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(bytes) = serde_json::to_vec(writer) {
+        let _ = std::fs::write(path, bytes);
+    }
+}
+
+fn load_codex_thread_writer(key: Option<&str>) -> Option<CodexThreadWriter> {
+    let raw = std::fs::read(codex_thread_writer_path(key)?).ok()?;
+    serde_json::from_slice(&raw).ok()
+}
+
+fn codex_resume_refused_for_active_writer(err: &CliError) -> bool {
+    err.to_string().contains("already has an active writer")
+}
+
+/// A resume Codex refused because another live process holds the thread. The
+/// saved thread stays this session's: starting a new one would quietly drop
+/// the conversation. The failure names the holder when this computer recorded
+/// it and that same process is still running, and says how to end the
+/// conflict.
+fn codex_thread_in_use_error(
+    thread_id: &str,
+    writer: Option<&CodexThreadWriter>,
+    processes: &[runtime_daemon_idle_sleep::ProcessView],
+) -> CliError {
+    let holder = writer
+        .filter(|writer| writer.thread_id == thread_id)
+        .filter(|writer| {
+            runtime_daemon_idle_sleep::is_marker_writer(
+                writer.codex_pid,
+                writer.opened_at_millis,
+                processes,
+            )
+        });
+    let detail = match holder {
+        Some(writer) => format!(
+            "{HARNESS_SESSION_IN_USE}: Codex conversation {thread_id} is still open in Codex \
+             process {} on this computer, so it cannot be resumed here. That process was \
+             started by xMatrix process {}{} and is still running. End that process (or stop \
+             the Agent Run it serves), then send the message again. xMatrix does not start a \
+             new conversation in its place.",
+            writer.codex_pid,
+            writer.wrapper_pid,
+            writer
+                .run_id
+                .as_deref()
+                .map(|run| format!(" for Run {run}"))
+                .unwrap_or_default(),
+        ),
+        None => format!(
+            "{HARNESS_SESSION_IN_USE}: Codex conversation {thread_id} is still open in another \
+             Codex process on this computer (for example `codex resume` in a terminal, or a \
+             Codex app-server that outlived its Agent), so it cannot be resumed here. Close \
+             that Codex process, then send the message again. xMatrix does not start a new \
+             conversation in its place."
+        ),
+    };
+    CliError::Launch(detail)
+}
+
 #[cfg(test)]
 fn grok_resume_session_path(key: &str) -> PathBuf {
     resume_session_path("grok-resume", key)
@@ -2170,8 +2260,24 @@ impl CodexAppSession {
         if let Some(instructions) = developer_instructions {
             params["developerInstructions"] = Value::String(instructions);
         }
-        let result = if resume_thread_id.is_some() {
-            self.request("thread/resume", params).await?
+        let result = if let Some(thread_id) = resume_thread_id.as_deref() {
+            match self.request("thread/resume", params).await {
+                Ok(result) => result,
+                Err(err) if codex_resume_refused_for_active_writer(&err) => {
+                    let writer = load_codex_thread_writer(resume_session_key);
+                    let processes = tokio::task::spawn_blocking(
+                        runtime_daemon_idle_sleep::process_snapshot,
+                    )
+                    .await
+                    .unwrap_or_default();
+                    return Err(codex_thread_in_use_error(
+                        thread_id,
+                        writer.as_ref(),
+                        &processes,
+                    ));
+                }
+                Err(err) => return Err(err),
+            }
         } else {
             self.request("thread/start", params).await?
         };
@@ -2210,6 +2316,18 @@ impl CodexAppSession {
             ));
         }
         save_codex_resume_session_id(resume_session_key, self.thread_id.as_deref())?;
+        if let (Some(thread_id), Some(codex_pid)) = (self.thread_id.clone(), self.child.id()) {
+            save_codex_thread_writer(
+                resume_session_key,
+                &CodexThreadWriter {
+                    thread_id,
+                    codex_pid,
+                    wrapper_pid: std::process::id(),
+                    run_id: non_empty_env("XMATRIX_RUN_ID"),
+                    opened_at_millis: unix_millis_now(),
+                },
+            );
+        }
 
         Ok(())
     }

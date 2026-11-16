@@ -148,6 +148,18 @@ function handleCodexTurnOrder(message) {
   }
 }
 
+// Codex lets one process write a thread: a resume while another live
+// app-server holds it is refused, exactly as Codex words it.
+function handleCodexResumeHeld(message) {
+  if (message.method === "thread/resume") {
+    send({ jsonrpc: "2.0", id: message.id, error: { code: -32600,
+      message: `thread ${message.params.threadId} already has an active writer` } });
+    return;
+  }
+  if (handleCodexSessionRequest(message)) return;
+  if (message.id !== undefined) response(message, {});
+}
+
 function beginCodexFixtureTurn(message, turnId) {
   if (handleCodexSessionRequest(message)) return;
   if (message.method !== "turn/start") {
@@ -751,6 +763,7 @@ function handleCodexTraceOrder(message) {
 const handlers = {
   codex: handleCodex,
   "codex-turn-order": handleCodexTurnOrder,
+  "codex-resume-held": handleCodexResumeHeld,
   "codex-trace-order": handleCodexTraceOrder,
   "codex-turn-failure": handleCodexTurnFailure,
   "codex-capacity-recover": handleCodexCapacity,
@@ -788,7 +801,8 @@ if (!handlers[provider]) {
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (!line.trim()) return;
   const message = JSON.parse(line);
-  if (provider === "codex-turn-order" && process.argv[3]?.startsWith("--capture-requests=")) {
+  if ((provider === "codex-turn-order" || provider === "codex-resume-held") &&
+      process.argv[3]?.startsWith("--capture-requests=")) {
     appendFileSync(process.argv[3].slice("--capture-requests=".length), `${JSON.stringify(message)}\n`);
   }
   handlers[provider](message);

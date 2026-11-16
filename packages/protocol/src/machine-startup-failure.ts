@@ -17,6 +17,12 @@ export const REPOSITORY_ACCESS_UNAVAILABLE = "repository_access_unavailable";
  * program and its install. */
 const HARNESS_MISSING = "harness_missing";
 
+/** The code a Run fails with when its harness refuses to resume the
+ * Instance's session because another live process on the machine still holds
+ * it (Codex's one writer per thread). The detail names the session and, when
+ * the machine knows it, the process holding it. */
+export const HARNESS_SESSION_IN_USE = "harness_session_in_use";
+
 const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
 
 /** The refusal text the Hub's repository-token mint answers with; the daemon
@@ -35,6 +41,7 @@ export function publicMachineStartupFailure(detail: unknown): PublicMachineStart
   if (/\brepository_access_unavailable\b/u.test(text)) code = REPOSITORY_ACCESS_UNAVAILABLE;
   // The daemon found the harness's launcher missing before starting anything.
   else if (/\bharness_missing\b/u.test(text)) code = HARNESS_MISSING;
+  else if (/\bharness_session_in_use\b/u.test(text)) code = HARNESS_SESSION_IN_USE;
   else if (/\bbase_ref_unresolved\b/u.test(text) || text.includes("could not resolve origin default branch")) code = "repository_base_unresolved";
   else if (/\bdisk_exhausted\b/u.test(text) || text.includes("no space left on device")) code = "machine_disk_full";
   else if (/\bfetch_required_failed\b/u.test(text)) code = "repository_fetch_failed";

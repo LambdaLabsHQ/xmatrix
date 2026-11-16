@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a Codex conversation another process still holds is said once, with who holds it
+
+When Codex refused to resume an Agent's conversation because another live
+Codex process on the same computer still had it open (`thread … already has
+an active writer`), every Run of that Agent failed with Codex's bare refusal,
+and each message in the Channel posted another copy of it (121 for one
+Windows user on 2026-11-13). The CLI now records which Codex process and
+xMatrix process opened each Agent's conversation, and a refused resume fails
+with `harness_session_in_use`, naming that process when it is still running
+and saying to end it (or the Run it serves) and send the message again. The
+conversation is kept: no new one is started in its place. The Hub posts that
+failure once per Instance, Channel and holder, so later Runs failing the same
+way add nothing. CLI, Hub and protocol. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a program that is not signed in gives its owner two answers
 
 The card for a program that could not take work because it is not signed in
