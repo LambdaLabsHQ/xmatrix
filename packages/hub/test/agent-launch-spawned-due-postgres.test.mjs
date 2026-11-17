@@ -13,6 +13,18 @@ const nextChannelDueAt = async (database, shardId, channelId) => {
 const url = process.env.XMATRIX_TEST_POSTGRES_URL;
 const integration = url || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true" ? test : test.skip;
 
+/** A Channel of a Space placed on shard-0, and the SQL to set up its Launches. */
+async function placedChannel(database, id) {
+  const space = `space-${id}`, channel = `channel-${id}`;
+  const sql = (text, values = [], maxRows = 10) => database.transaction({ requestId: id, operation: "test.launch-due" },
+    tx => tx.query({ name: `test_launch_due_${randomUUID()}`, text, values, maxRows }));
+  await sql(`INSERT INTO control.postgres_shards VALUES ('shard-0','active','shard-0',now(),now()) ON CONFLICT DO NOTHING`, [], 0);
+  await sql(`INSERT INTO control.space_placement (space_id,shard_id,placement_epoch,state,plan_class,created_at,updated_at)
+    VALUES ($1,'shard-0',1,'active','standard',now(),now())`, [space], 0);
+  await sql(`INSERT INTO data.space_control_heads (space_id,commit_sequence,updated_at) VALUES ($1,0,now())`, [space], 0);
+  return { space, channel, sql };
+}
+
 // 2026-10-02: eight Channel About sessions — background Runs that never
 // connect an Instance — stayed `spawned` for 6 to 11 hours. Each was re-read
 // every 5 seconds, and every re-read ran its Channel's full coordinator pass:
@@ -20,14 +32,9 @@ const integration = url || process.env.XMATRIX_REQUIRE_POSTGRES_TEST === "true" 
 integration("a spawned Launch whose spawn is recorded is not due, so it no longer drives its Channel", async () => {
   assert.ok(url, "XMATRIX_TEST_POSTGRES_URL is required");
   const database = createAuthorityDatabase({ connectionString: url, shardId: "shard-0" }).openSession();
-  const id = randomUUID(), space = `space-${id}`, channel = `channel-${id}`;
-  const sql = (text, values = [], maxRows = 10) => database.transaction({ requestId: id, operation: "test.launch-spawned-due" },
-    tx => tx.query({ name: `test_launch_spawned_due_${randomUUID()}`, text, values, maxRows }));
+  const id = randomUUID();
   try {
-    await sql(`INSERT INTO control.postgres_shards VALUES ('shard-0','active','shard-0',now(),now()) ON CONFLICT DO NOTHING`, [], 0);
-    await sql(`INSERT INTO control.space_placement (space_id,shard_id,placement_epoch,state,plan_class,created_at,updated_at)
-      VALUES ($1,'shard-0',1,'active','standard',now(),now())`, [space], 0);
-    await sql(`INSERT INTO data.space_control_heads (space_id,commit_sequence,updated_at) VALUES ($1,0,now())`, [space], 0);
+    const { space, channel, sql } = await placedChannel(database, id);
     let ordinal = 0;
     const launch = async (name, state, spawned, durable) => {
       // Natural identities: `<channel>:<ordinal>` and its first Run `#1`.
@@ -71,15 +78,10 @@ integration("a spawned Launch whose spawn is recorded is not due, so it no longe
 integration("a Launch's due time keeps its milliseconds", async () => {
   assert.ok(url, "XMATRIX_TEST_POSTGRES_URL is required");
   const database = createAuthorityDatabase({ connectionString: url, shardId: "shard-0" }).openSession();
-  const id = randomUUID(), space = `space-${id}`, channel = `channel-${id}`, runId = `${channel}:1#1`;
-  const sql = (text, values = [], maxRows = 10) => database.transaction({ requestId: id, operation: "test.launch-due-ms" },
-    tx => tx.query({ name: `test_launch_due_ms_${randomUUID()}`, text, values, maxRows }));
-  const dueAt = "2099-01-01T00:00:00.750Z";
+  const id = randomUUID(), dueAt = "2099-01-01T00:00:00.750Z";
   try {
-    await sql(`INSERT INTO control.postgres_shards VALUES ('shard-0','active','shard-0',now(),now()) ON CONFLICT DO NOTHING`, [], 0);
-    await sql(`INSERT INTO control.space_placement (space_id,shard_id,placement_epoch,state,plan_class,created_at,updated_at)
-      VALUES ($1,'shard-0',1,'active','standard',now(),now())`, [space], 0);
-    await sql(`INSERT INTO data.space_control_heads (space_id,commit_sequence,updated_at) VALUES ($1,0,now())`, [space], 0);
+    const { space, channel, sql } = await placedChannel(database, id);
+    const runId = `${channel}:1#1`;
     await sql(`INSERT INTO data.runs (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
       VALUES ($1,'owner',$2,'running',1,'{}'::jsonb,now(),now())`, [runId, channel], 0);
     await sql(`INSERT INTO data.agent_launches (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,
