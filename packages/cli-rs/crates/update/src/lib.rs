@@ -2057,6 +2057,31 @@ function Stop-DaemonCommandProcesses {
     throw 'existing daemon process did not stop before binary replacement'
   }
 }
+# The task's watchdog trigger (see daemon_service.rs) can start the old daemon
+# between the stop and the binary replacement. That daemon keeps the task
+# running, so Start-ScheduledTask would be ignored and the update rolled back:
+# stop it and let the task settle before starting the new one.
+function Clear-WatchdogStartedDaemon {
+  Stop-DaemonCommandProcesses
+  $settleDeadline = [DateTime]::UtcNow.AddSeconds(10)
+  while ([DateTime]::UtcNow -lt $settleDeadline -and (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue).State -eq 'Running') {
+    Start-Sleep -Milliseconds 200
+  }
+}
+# Tasks registered before the watchdog trigger existed get it here, without
+# stopping the task: Task Scheduler restarts only a task that failed to start,
+# never a daemon that exited later (#1750). Failure only loses the watchdog.
+function Add-DaemonWatchdogTrigger {
+  try {
+    $current = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    if (@($current.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }).Count -gt 0) { return }
+    $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
+    Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger) | Out-Null
+    Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
+  } catch {
+    Write-DaemonUpdateLog "daemon watchdog trigger was not added: $($_.Exception.Message)"
+  }
+}
 function Test-ManagedLauncherTask($taskAction) {
   if (-not $taskAction) { return $false }
   $daemonRoot = Join-Path (Split-Path -Parent $installPath) 'xmatrix-daemon'
@@ -2263,6 +2288,7 @@ fn windows_update_handoff_script(
              Write-DaemonUpdateLog \"replaced stable CLI at $installPath without generation pointer activation\"\n\
            }}\n\
            if ($task -and ($taskWasRunning -or $daemonWasRunning)) {{\n\
+             if (-not $managedLauncher) {{ Clear-WatchdogStartedDaemon }}\n\
              Start-ScheduledTask -TaskName $taskName\n\
            }} elseif (-not $task) {{\n\
 {unmanaged_start}\
@@ -2273,6 +2299,7 @@ fn windows_update_handoff_script(
              Write-DaemonUpdateLog ({commit_log})\n\
            }}\n\
            if ($pendingGenerationPath -and (Test-Path -LiteralPath $pendingGenerationPath)) {{ Remove-Item -LiteralPath $pendingGenerationPath -Force -ErrorAction Stop }}\n\
+           if ($task -and -not $managedLauncher) {{ Add-DaemonWatchdogTrigger }}\n\
            Write-DaemonUpdateReceipt 'committed' {latest_version} $installPath $null\n\
            Remove-Item -LiteralPath $installBackupPath -Force -ErrorAction SilentlyContinue\n\
            if ($generationPointerBackupPath) {{ Remove-Item -LiteralPath $generationPointerBackupPath -Force -ErrorAction SilentlyContinue }}\n\
@@ -3479,6 +3506,24 @@ mod tests {
         assert!(script.contains("Start-ScheduledTask -TaskName $taskName"));
         assert!(script.contains("if ($managedLauncher)"));
         assert!(script.contains("Move-ReplacingLockedFile"));
+        // A daemon the watchdog trigger started mid-update is cleared before
+        // the task is started, and older tasks gain the watchdog (#1750).
+        let clear = script
+            .find("if (-not $managedLauncher) { Clear-WatchdogStartedDaemon }")
+            .expect("direct task clears a watchdog-started daemon");
+        let start = script[clear..]
+            .find("Start-ScheduledTask -TaskName $taskName")
+            .expect("then starts the task");
+        assert!(start > 0);
+        let watchdog = script
+            .find("if ($task -and -not $managedLauncher) { Add-DaemonWatchdogTrigger }")
+            .expect("direct task gains the watchdog trigger");
+        assert!(
+            watchdog
+                < script
+                    .find("Write-DaemonUpdateReceipt 'committed'")
+                    .unwrap()
+        );
     }
 
     #[test]

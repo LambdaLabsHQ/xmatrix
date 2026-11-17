@@ -50,6 +50,12 @@ without a signed continuity migration.
   only invokes it.
 - That task runs at logon and executes the exact stable CLI path, for example
   `C:\Users\<user>\.local\bin\xmatrix.exe daemon`, from that same directory.
+- Task Scheduler's restart settings only retry a task that fails to start; they never restart a daemon that exits
+  later. The task therefore also has a watchdog trigger that repeats every minute; with `MultipleInstances IgnoreNew`
+  it does nothing while the daemon runs and brings an exited daemon back within a minute, as `Restart=always` and
+  `KeepAlive` do on Linux and macOS. `setup daemon` re-registers a task that lacks it, and a daemon self-update adds it
+  to an existing direct task in place (without stopping the task). Before starting the task after replacing the binary,
+  the update stops any daemon the watchdog started in between, so the start is not ignored.
 - Installer idempotency retains only that exact executable, argument, and working-directory tuple. Any historical
   WScript bridge, generation selector, or other task action is replaced on the next `setup daemon` run and has no
   current startup authority.

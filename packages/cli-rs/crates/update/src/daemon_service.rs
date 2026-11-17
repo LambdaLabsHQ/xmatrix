@@ -311,6 +311,11 @@ $action = New-ScheduledTaskAction `
 # needs an elevated shell; a standard user gets "Access is denied".
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+# The restart settings below only cover a task that fails to start; Task
+# Scheduler never restarts a daemon that exits later. This trigger asks for the
+# task every minute, and IgnoreNew makes that a no-op while the daemon runs, so
+# an exited daemon is back within a minute, as launchd/systemd do elsewhere.
+$watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
 $settings = New-ScheduledTaskSettingsSet `
   -RestartCount 999 `
   -RestartInterval (New-TimeSpan -Minutes 1) `
@@ -332,7 +337,8 @@ if ($existingTask) {
     $existingAction -and
     ([System.IO.Path]::GetFullPath([string]$existingAction.Execute) -ieq [System.IO.Path]::GetFullPath($InstallPath)) -and
     ([string]$existingAction.Arguments).Trim() -eq "daemon" -and
-    ([System.IO.Path]::GetFullPath([string]$existingAction.WorkingDirectory) -ieq [System.IO.Path]::GetFullPath($installDirectory))
+    ([System.IO.Path]::GetFullPath([string]$existingAction.WorkingDirectory) -ieq [System.IO.Path]::GetFullPath($installDirectory)) -and
+    (@($existingTask.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }).Count -gt 0)
   )
 }
 
@@ -340,7 +346,7 @@ if (-not $keepExistingTask) {
   Register-ScheduledTask `
     -TaskName $taskName `
     -Action $action `
-    -Trigger $trigger `
+    -Trigger @($trigger, $watchdogTrigger) `
     -Settings $settings `
     -Description "Starts the xMatrix daemon at user login." `
     -Force | Out-Null
@@ -631,6 +637,13 @@ mod tests {
         assert!(script.contains("-WorkingDirectory $installDirectory"));
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
         assert!(script.contains("-RestartCount 999"));
+        // Task Scheduler restarts only a task that failed to start; the
+        // repeating trigger is what brings back a daemon that exited (#1750).
+        assert!(script.contains(
+            "New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)"
+        ));
+        assert!(script.contains("-Trigger @($trigger, $watchdogTrigger)"));
+        assert!(script.contains("$_.Repetition.Interval -eq 'PT1M'"));
         assert!(script.contains("$keepExistingTask = ("));
         assert!(script.contains("if (-not $keepExistingTask)"));
         assert!(script.contains("GetFullPath([string]$existingAction.Execute)"));
