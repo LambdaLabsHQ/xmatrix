@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
+
+The Hub cached the in-flight read of a Better Auth public key and let other
+requests await it. A Worker request cannot settle on a promise another request
+created, so when the first request ended before its read finished, every request
+waiting on it failed authentication with "can never settle" (Sentry HUB-DJ, 8
+events on 2026-11-17). The cache now holds only keys that have finished loading;
+concurrent first reads of one key each read it once. Signature, issuer, audience
+and expiry checks are unchanged. Hub only. Recovery is a CI-validated Hub beta
+reverting this change.
+
 ## Unreleased: the answer field on a request card has its own fill
 
 The line where the reader writes an answer on a request card (pencil, "Write

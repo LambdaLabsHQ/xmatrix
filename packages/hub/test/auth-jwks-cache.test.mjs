@@ -43,15 +43,19 @@ test("reuses an imported Better Auth public key within one D1 binding", async ()
   assert.equal(source.reads(), 1);
 });
 
-test("coalesces concurrent reads for the same Better Auth key", async () => {
+test("concurrent first reads each settle on their own read, then share the cached key", async () => {
+  // A Worker request cannot await another request's unsettled read (HUB-DJ),
+  // so concurrent first reads are not coalesced onto one promise.
   const source = d1(await publicJwk());
   const keys = await Promise.all(
-    Array.from({ length: 20 }, () => getBetterAuthPublicKey(source.env, "key-2")),
+    Array.from({ length: 3 }, () => getBetterAuthPublicKey(source.env, "key-2")),
   );
 
-  assert.ok(keys[0]);
-  assert.ok(keys.every((key) => key === keys[0]));
-  assert.equal(source.reads(), 1);
+  assert.ok(keys.every(Boolean));
+  assert.equal(source.reads(), 3);
+  const cached = await getBetterAuthPublicKey(source.env, "key-2");
+  assert.ok(cached);
+  assert.equal(source.reads(), 3);
 });
 
 test("isolates cached keys by D1 binding", async () => {
@@ -81,7 +85,7 @@ test("reports a failed key read instead of answering it as an unknown key, and r
   assert.equal(source.reads(), 2);
 });
 
-test("evicts malformed public keys instead of retaining a rejected promise", async () => {
+test("does not cache a malformed public key", async () => {
   const source = d1("not-json");
   await assert.rejects(
     getBetterAuthPublicKey(source.env, "malformed-key"),
