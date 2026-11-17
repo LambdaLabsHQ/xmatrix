@@ -1,11 +1,13 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { argumentValue, argumentValues, runCliMain } from "./cli-entrypoint.mjs";
+import { assertSecretPolicy, secretNamesFromWrangler } from "./wrangler-secret-policy.mjs";
 
 /** Gradual part of a release the new Hub serves before it takes all traffic. */
 export const DEFAULT_CANARY_PERCENT = 10;
@@ -99,6 +101,7 @@ export async function deployWithCanary({
   secretsFile,
   outdir,
   url,
+  expectedSecretNames = null,
   defines = [],
   canaryPercent = DEFAULT_CANARY_PERCENT,
   holdMs = DEFAULT_HOLD_SECONDS * 1000,
@@ -108,6 +111,9 @@ export async function deployWithCanary({
   if (typeof tag !== "string" || !/^[0-9a-f]{40}$/u.test(tag)) fail("tag must be the release commit's full Git SHA");
   const missing = Object.entries({ config, secretsFile, outdir, url }).filter(([, value]) => !value).map(([name]) => name);
   if (missing.length > 0) fail(`missing required ${missing.join(", ")}`);
+  if (expectedSecretNames !== null && (!Array.isArray(expectedSecretNames) || expectedSecretNames.some((name) => typeof name !== "string" || name.length === 0))) {
+    fail("expected secret names must be a list of names");
+  }
   assertPercent(canaryPercent);
   assertHoldMs(holdMs);
 
@@ -144,6 +150,21 @@ export async function deployWithCanary({
     await runWithRetry(run, plainDeployArgs, deployAttempts, sleep);
     await health({ expectedSha: tag });
     return { mode: "single", reason: "durable-object-lifecycle" };
+  }
+
+  if (expectedSecretNames) {
+    // Secrets arrive with the upload. Prove the names this release selected are
+    // readable before a single request can reach the new version, so a missing
+    // secret fails here instead of after the canary has already taken 100%.
+    try {
+      const listed = await run(["secret", "list", ...workerArgs, "--format", "json"]);
+      assertSecretPolicy(secretNamesFromWrangler(listed.stdout), {
+        required: expectedSecretNames,
+        forbiddenPrefixes: ["XMATRIX_MOCK_AUTH"],
+      });
+    } catch (error) {
+      fail(`secret names are not ready for ${tag} before traffic: ${error.message}`);
+    }
   }
 
   if (!previousVersionId) {
@@ -253,6 +274,9 @@ async function main(argv = process.argv.slice(2)) {
     secretsFile: argumentValue(argv, "--secrets-file"),
     outdir: argumentValue(argv, "--outdir"),
     url,
+    expectedSecretNames: argumentValue(argv, "--expected-secrets") === undefined
+      ? null
+      : JSON.parse(readFileSync(argumentValue(argv, "--expected-secrets"), "utf8")),
     defines: argumentValues(argv, "--define"),
     canaryPercent: Number(argumentValue(argv, "--canary-percent", String(DEFAULT_CANARY_PERCENT))),
     holdMs: Number(argumentValue(argv, "--hold-seconds", String(DEFAULT_HOLD_SECONDS))) * 1000,
@@ -261,3 +285,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 runCliMain(import.meta.url, main);
+

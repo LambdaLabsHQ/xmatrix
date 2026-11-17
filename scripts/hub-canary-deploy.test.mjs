@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
@@ -14,7 +14,7 @@ const TAG = "a".repeat(40);
 const PREVIOUS = "previous-version";
 const NEXT = "next-version";
 
-function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }], healthErrorAt = null, failOn = null } = {}) {
+function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }], healthErrorAt = null, failOn = null, secretNames = ["XMATRIX_SECRET_CATALOG_KEY"] } = {}) {
   const calls = [];
   const healthCalls = [];
   const sleeps = [];
@@ -27,6 +27,9 @@ function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }],
     }
     if (args[0] === "versions" && args[1] === "list") {
       return { stdout: JSON.stringify([{ id: NEXT, annotations: { "workers/tag": TAG } }, { id: PREVIOUS }]) };
+    }
+    if (args[0] === "secret" && args[1] === "list") {
+      return { stdout: JSON.stringify(secretNames.map((name) => ({ name, type: "secret_text" }))) };
     }
     return { stdout: "" };
   };
@@ -51,6 +54,7 @@ function options(parts) {
     secretsFile: "/tmp/secrets.json",
     outdir: "/tmp/bundle",
     url: "https://xmatrix-hub.example.test/",
+    expectedSecretNames: ["XMATRIX_SECRET_CATALOG_KEY"],
     defines: ["XMATRIX_SENTRY_DSN:\"https://example.test/1\""],
     holdMs: 120_000,
   };
@@ -70,14 +74,22 @@ test("a release serves a canary split, verifies the new version, then takes 100%
   assert.match(parts.calls[1], /--secrets-file \/tmp\/secrets\.json/u);
   assert.match(parts.calls[1], /--define XMATRIX_SENTRY_DSN:"https:\/\/example\.test\/1"/u);
   assert.match(parts.calls[2], /^versions list --config wrangler\.generated\.production\.toml --name xmatrix-hub --json$/u);
-  assert.match(parts.calls[3], /versions deploy .*--config wrangler\.generated\.production\.toml .*--version-id next-version --percentage 10 --version-id previous-version --percentage 90/u);
+  assert.match(parts.calls[3], /^secret list --config wrangler\.generated\.production\.toml --name xmatrix-hub --format json$/u);
+  assert.match(parts.calls[4], /versions deploy .*--config wrangler\.generated\.production\.toml .*--version-id next-version --percentage 10 --version-id previous-version --percentage 90/u);
   assert.deepEqual(parts.healthCalls, [
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
     { expectedSha: TAG },
   ]);
   assert.deepEqual(parts.sleeps, [120_000]);
-  assert.match(parts.calls[4], new RegExp(`versions deploy .*--version-id ${NEXT} --percentage 100`, "u"));
+  assert.match(parts.calls[5], new RegExp(`versions deploy .*--version-id ${NEXT} --percentage 100`, "u"));
+});
+
+test("a missing required secret fails before any request reaches the new version", async () => {
+  const parts = harness({ secretNames: ["SOME_OTHER_SECRET"] });
+  await assert.rejects(deployWithCanary(options(parts)), /secret names are not ready.*required Worker secrets are missing: XMATRIX_SECRET_CATALOG_KEY/u);
+  assert.ok(!parts.calls.some((call) => call.startsWith("versions deploy")));
+  assert.equal(parts.healthCalls.length, 0);
 });
 
 test("a canary that fails verification rolls production back before failing the release", async () => {
@@ -159,3 +171,4 @@ test("a deployment without its target URL or tag fails before touching productio
   await assert.rejects(deployWithCanary({ ...options(parts), tag: "not-a-sha" }), /full Git SHA/u);
   assert.deepEqual(parts.calls, []);
 });
+

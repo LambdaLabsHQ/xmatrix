@@ -20,6 +20,7 @@ test("production Hub upload and post-deploy smoke bind the authorized release SH
   assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /node \.\.\/\.\.\/scripts\/hub-canary-deploy\.mjs/u);
   assert.match(deploy.run, /--tag "\$XMATRIX_DEPLOY_SHA"/u);
   assert.match(deploy.run, /--url "\$XMATRIX_HUB_ORIGIN\/"/u);
+  assert.match(deploy.run, /--expected-secrets "\$RUNNER_TEMP\/production-hub-expected-secret-names\.json"/u);
   assert.match(deploy.run, /--hold-seconds "\$\{XMATRIX_HUB_CANARY_HOLD_SECONDS:-180\}"/u);
   assert.equal(hub.env.XMATRIX_HUB_CANARY_HOLD_SECONDS, "${{ vars.XMATRIX_HUB_CANARY_HOLD_SECONDS }}");
   assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);

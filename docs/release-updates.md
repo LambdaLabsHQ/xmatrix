@@ -16,9 +16,11 @@ after the new Hub is proven, so the previous Hub stays compatible during the
 window. A release that changes a Durable Object class lifecycle cannot be
 uploaded as a version or rolled back across; `wrangler versions upload` refuses
 it and the release deploys once without a canary. Secrets are Worker-level and
-do not roll back with code. `XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold
-(default 180 s). Hub only. Recovery is a CI-validated Hub beta reverting this
-change.
+do not roll back with code. After the upload and before any traffic moves, the
+release verifies that every secret name it selected is readable; a missing name
+fails there instead of after the canary has taken all traffic.
+`XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold (default 180 s). Hub only.
+Recovery is a CI-validated Hub beta reverting this change.
 
 ## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
 
