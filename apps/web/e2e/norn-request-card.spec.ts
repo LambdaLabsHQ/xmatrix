@@ -48,6 +48,12 @@ test("a request for words says it waits for the reader's answer, and leads with 
   await expect(asked.getByRole("heading")).not.toContainText("page:fbfd3bc1");
   await expect(asked).toContainText("Waiting for your answer");
   await expect(asked.getByPlaceholder("Write your answer here…")).toBeVisible();
+  // The field is filled apart from the brass slip, without an edge.
+  const answerRow = asked.locator(".app-ask-answer");
+  const fill = (locator: typeof answerRow) => locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+  expect(await fill(answerRow)).not.toBe(await fill(asked));
+  expect(await fill(answerRow)).not.toBe("rgba(0, 0, 0, 0)");
+  await expect(asked.getByLabel("Your answer")).toHaveCSS("border-top-width", "0px");
   await expect(page.locator("main")).not.toContainText("system fact");
   await page.screenshot({ path: test.info().outputPath("norn-request-words.png") });
 });

@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: the answer field on a request card has its own fill
+
+The line where the reader writes an answer on a request card (pencil, "Write
+your answer here…", round Send) is now a borderless strip in the paper's own
+colour, so it stands apart from the brass card around it instead of blending
+into it. Web only. Recovery is a CI-validated Web beta reverting this change.
+
 ## Unreleased: model catalogs keep over 100 models and `/effort` lists options while asleep
 
 Runtimes reporting more than 100 models (or more than 8 aliases) now retain
