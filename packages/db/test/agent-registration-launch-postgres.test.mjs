@@ -1184,6 +1184,11 @@ integration("launch survives a hostname change with stale Workspace metadata and
       WHERE run_id=$1`, [sleeper.runId]);
     assert.deepEqual(await reborn.chooseWakeEffort({ commandId: "wake-effort", channelId: "channel", instanceId: sleeper.instanceId,
       effort: "high" }), { selected: "high" });
+    const sleeperRow = (await sql(`SELECT channel_instance_id FROM data.instances WHERE instance_id=$1`, [sleeper.instanceId])).rows[0];
+    const sleeperSwitchTarget = await reborn.switchTargetFacts({ commandId: "wake-switch-target", channelId: "channel",
+      ordinal: Number(sleeperRow.channel_instance_id) });
+    assert.deepEqual([sleeperSwitchTarget?.declaredModels, sleeperSwitchTarget?.currentEffort, sleeperSwitchTarget?.takesWakeEffort],
+      [["model"], "high", true]);
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
     assert.deepEqual(targeted.dropped.map(item => [item.instanceId, item.model, item.sourceMessageId, Date.parse(item.resetsAt) > Date.now()]),
