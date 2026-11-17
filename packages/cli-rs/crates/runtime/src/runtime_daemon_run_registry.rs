@@ -1,4 +1,19 @@
 impl DaemonRunChild {
+    fn is_live_process(&self) -> bool {
+        if crate::process_tree::process_alive(self.pid) {
+            return true;
+        }
+        #[cfg(windows)]
+        if let Some(handoff) = self.handoff.as_ref() {
+            return handoff.previous_is_alive();
+        }
+        #[cfg(not(windows))]
+        if let Some(handoff) = self.handoff.as_ref() {
+            return crate::process_tree::process_alive(handoff.previous_pid);
+        }
+        false
+    }
+
     fn terminate_tree(&mut self) -> Result<(), String> {
         if let Some(process_tree) = self.process_tree.as_mut() {
             process_tree.terminate().map_err(|error| error.to_string())
@@ -91,7 +106,6 @@ fn record_daemon_run_wake_metrics(
 async fn collect_finished_daemon_children(registry: &DaemonRunRegistry) -> Vec<DaemonRunExit> {
     let mut guard = registry.lock().await;
     let mut finished = Vec::new();
-    #[cfg(windows)]
     let mut handoff_changed = false;
     for (key, managed) in guard.iter_mut() {
         if managed.stop_in_progress {
@@ -101,6 +115,18 @@ async fn collect_finished_daemon_children(registry: &DaemonRunRegistry) -> Vec<D
         #[cfg(windows)]
         if managed.handoff.is_some() {
             if let Err(error) = reconcile_windows_run_handoff(managed) {
+                append_daemon_registry_audit(&format!(
+                    "handoff_reconcile_failed key={key} error={error}"
+                ));
+                eprintln!("daemon Run handoff reconciliation failed: {error}");
+            }
+            handoff_changed |= managed.handoff.is_none();
+            persist_daemon_run_sidecar(&persisted_daemon_run_from_child(managed));
+            continue;
+        }
+        #[cfg(not(windows))]
+        if managed.handoff.is_some() {
+            if let Err(error) = reconcile_unix_run_handoff(managed) {
                 append_daemon_registry_audit(&format!(
                     "handoff_reconcile_failed key={key} error={error}"
                 ));
@@ -233,7 +259,6 @@ async fn collect_finished_daemon_children(registry: &DaemonRunRegistry) -> Vec<D
             }
         }
     }
-    #[cfg(windows)]
     if handoff_changed {
         persist_daemon_run_registry_locked(&guard);
     }
@@ -269,13 +294,40 @@ fn rebind_managed_daemon_run_pid(
         rollback_windows_run_handoff(managed).map_err(|error| error.to_string())?;
         return Ok((key.clone(), candidate_pid, None));
     }
+    #[cfg(not(windows))]
+    if let Some(handoff) = managed.handoff.as_mut() {
+        if new_pid != handoff.previous_pid || !handoff.previous_is_alive() {
+            return Err("run handoff is in progress; refusing unrelated rebind".into());
+        }
+        let candidate_pid = managed.pid;
+        rollback_unix_run_handoff(managed).map_err(|error| error.to_string())?;
+        return Ok((key.clone(), candidate_pid, None));
+    }
     let old_pid = managed.pid;
     if old_pid == new_pid {
         return Ok((key.clone(), old_pid, None));
     }
-    let retained_child = managed.child.take();
-    managed.pid = new_pid;
-    Ok((key.clone(), old_pid, retained_child))
+    #[cfg(not(windows))]
+    {
+        let previous_status =
+            read_daemon_run_status_marker(managed.status_file_path.as_deref())
+                .filter(|marker| marker.pid == old_pid);
+        managed.handoff = Some(UnixRunHandoff {
+            previous_pid: old_pid,
+            previous_child: managed.child.take(),
+            previous_tree: managed.process_tree.take(),
+            previous_status,
+            started_millis: unix_millis_now(),
+        });
+        managed.pid = new_pid;
+        Ok((key.clone(), old_pid, None))
+    }
+    #[cfg(windows)]
+    {
+        let retained_child = managed.child.take();
+        managed.pid = new_pid;
+        Ok((key.clone(), old_pid, retained_child))
+    }
 }
 
 /// Handles a `POST /request/rebind-run` from a run's own shell during a live
@@ -342,6 +394,164 @@ async fn rebind_daemon_run_pid(
         "newPid": payload.new_pid,
     })
     .to_string())
+}
+
+/// Owned by the exact Run row, so exit monitoring, stop and rollback share
+/// one transaction. Both process trees stay owned until readiness is proven.
+#[cfg(not(windows))]
+struct UnixRunHandoff {
+    previous_pid: u32,
+    previous_child: Option<std::process::Child>,
+    previous_tree: Option<process_tree::ProcessTreeGuard>,
+    previous_status: Option<DaemonRunStatusMarker>,
+    started_millis: u64,
+}
+
+#[cfg(not(windows))]
+#[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedUnixRunHandoff {
+    previous_pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    previous_status: Option<Value>,
+    started_millis: u64,
+}
+
+#[cfg(not(windows))]
+impl UnixRunHandoff {
+    fn previous_is_alive(&mut self) -> bool {
+        if let Some(child) = self.previous_child.as_mut() {
+            match child.try_wait() {
+                Ok(Some(_)) => return false,
+                Ok(None) => return true,
+                Err(_) => {}
+            }
+        }
+        crate::process_tree::process_alive(self.previous_pid)
+    }
+
+    fn stop_previous(&mut self) -> error::Result<()> {
+        if let Some(tree) = self.previous_tree.as_mut() {
+            tree.terminate()?;
+        } else if self.previous_is_alive() {
+            terminate_daemon_pid(self.previous_pid)?;
+        }
+        Ok(())
+    }
+
+    fn persisted(&self) -> PersistedUnixRunHandoff {
+        PersistedUnixRunHandoff {
+            previous_pid: self.previous_pid,
+            previous_status: self.previous_status.as_ref().map(|status| {
+                serde_json::to_value(status).expect("Run status contains JSON-serializable fields")
+            }),
+            started_millis: self.started_millis,
+        }
+    }
+}
+
+#[cfg(not(windows))]
+fn recover_unix_run_handoff(managed: &mut DaemonRunChild, receipt: PersistedUnixRunHandoff) {
+    let previous_status = receipt
+        .previous_status
+        .and_then(|value| serde_json::from_value::<DaemonRunStatusMarker>(value).ok())
+        .filter(|status| status.pid == receipt.previous_pid);
+    if receipt.previous_pid == managed.pid
+        || !crate::process_tree::process_alive(receipt.previous_pid)
+    {
+        // Never resurrect a dead predecessor. If the original has already
+        // retired, the candidate is the only Run wrapper.
+        return;
+    }
+    managed.handoff = Some(UnixRunHandoff {
+        previous_pid: receipt.previous_pid,
+        previous_child: None,
+        previous_tree: None,
+        previous_status,
+        started_millis: receipt.started_millis,
+    });
+    if let Err(error) = rollback_unix_run_handoff(managed) {
+        append_daemon_registry_audit(&format!(
+            "handoff_recovery_failed pid={} error={error}",
+            managed.pid
+        ));
+    }
+}
+
+#[cfg(not(windows))]
+fn rollback_unix_run_handoff(managed: &mut DaemonRunChild) -> error::Result<()> {
+    let Some(handoff) = managed.handoff.as_mut() else {
+        return Ok(());
+    };
+    if crate::process_tree::process_alive(managed.pid) {
+        terminate_daemon_pid(managed.pid)
+            .inspect_err(|error| eprintln!("handoff candidate cleanup failed: {error}"))?;
+    }
+    if !handoff.previous_is_alive() {
+        // Both wrappers are gone. Let the next monitor sweep report the
+        // candidate's failure.
+        managed.handoff = None;
+        return Ok(());
+    }
+    if let (Some(status_path), Some(previous_status)) = (
+        managed.status_file_path.as_deref(),
+        handoff.previous_status.as_ref(),
+    ) && !persist_daemon_run_status_marker_unlocked(status_path, previous_status)
+    {
+        return Err(CliError::Launch("could not restore handoff status".into()));
+    }
+    let handoff = managed.handoff.take().expect("handoff is still owned");
+    if let Some(mut child) = managed.child.take() {
+        tokio::task::spawn_blocking(move || {
+            let _ = child.wait();
+        });
+    }
+    let candidate_pid = managed.pid;
+    managed.pid = handoff.previous_pid;
+    managed.child = handoff.previous_child;
+    managed.process_tree = handoff.previous_tree;
+    managed.exit_audited = false;
+    persist_daemon_run_sidecar(&persisted_daemon_run_from_child(managed));
+    append_daemon_registry_audit(&format!(
+        "handoff_rolled_back candidate_pid={candidate_pid} restored_pid={}",
+        managed.pid
+    ));
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn reconcile_unix_run_handoff(managed: &mut DaemonRunChild) -> error::Result<()> {
+    let Some(handoff) = managed.handoff.as_mut() else {
+        return Ok(());
+    };
+    let candidate_alive = crate::process_tree::process_alive(managed.pid);
+    let ready = candidate_alive
+        && read_daemon_run_status_marker(managed.status_file_path.as_deref()).is_some_and(
+            |marker| {
+                replacement_wrapper_is_ready(
+                    &marker,
+                    managed.pid,
+                    xmatrix_cli_core::version::current(),
+                    handoff.started_millis,
+                )
+            },
+        );
+    if ready {
+        handoff.stop_previous()?;
+        let mut handoff = managed.handoff.take().expect("handoff is still owned");
+        if let Some(mut child) = handoff.previous_child.take() {
+            tokio::task::spawn_blocking(move || {
+                let _ = child.wait();
+            });
+        }
+        append_daemon_registry_audit(&format!("handoff_committed pid={}", managed.pid));
+    } else if !candidate_alive
+        || unix_millis_now().saturating_sub(handoff.started_millis)
+            >= UPDATE_SELF_READY_TIMEOUT_SECS * 1000
+    {
+        rollback_unix_run_handoff(managed)?;
+    }
+    Ok(())
 }
 
 /// Owned by the exact Run row, so exit monitoring, stop and rollback share
@@ -435,6 +645,10 @@ fn recover_windows_run_handoff(managed: &mut DaemonRunChild, receipt: PersistedW
 #[cfg(all(test, windows))]
 #[path = "tests/tests_windows_run_handoff.rs"]
 mod windows_run_handoff_tests;
+
+#[cfg(all(test, not(windows)))]
+#[path = "tests/tests_unix_run_handoff.rs"]
+mod unix_run_handoff_tests;
 
 #[cfg(windows)]
 fn stop_handoff_process(
@@ -796,7 +1010,7 @@ fn daemon_run_exit_detail(
 async fn live_repo_pool_state(registry: &DaemonRunRegistry) -> repo_pool::PoolLiveness {
     let mut liveness = repo_pool::PoolLiveness::default();
     for child in registry.lock().await.values() {
-        if !crate::process_tree::process_alive(child.pid) {
+        if !child.is_live_process() {
             continue;
         }
         if let Some(binding) = child.repo_pool_binding.as_ref() {
@@ -839,7 +1053,7 @@ pub(crate) async fn harness_has_live_run(registry: &DaemonRunRegistry, preset_id
             .agent_preset_id
             .as_deref()
             .is_none_or(|id| id == preset_id)
-            && crate::process_tree::process_alive(managed.pid)
+            && managed.is_live_process()
     })
 }
 
@@ -1147,6 +1361,14 @@ fn daemon_run_snapshot_items_from_guard(
                 Some(handoff) if handoff.previous_is_alive() => {
                     (Some(handoff.previous_status.clone()), handoff.previous_pid)
                 }
+                _ => (marker, pid),
+            };
+            #[cfg(not(windows))]
+            let (marker, pid) = match managed.handoff.as_ref() {
+                Some(handoff) if crate::process_tree::process_alive(handoff.previous_pid) => (
+                    handoff.previous_status.clone().or(marker),
+                    handoff.previous_pid,
+                ),
                 _ => (marker, pid),
             };
             let (status_phase, wrapper_ready_at_millis) =
@@ -2093,7 +2315,6 @@ async fn stop_daemon_child(
         );
     }
     let persisted = persisted_daemon_run_from_child(managed);
-    #[cfg(windows)]
     if let Some(handoff) = managed.handoff.as_mut() {
         handoff.stop_previous()?;
     }

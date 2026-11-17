@@ -296,6 +296,8 @@ fn persisted_daemon_run_from_child(managed: &DaemonRunChild) -> PersistedDaemonR
     PersistedDaemonRun {
         #[cfg(windows)]
         handoff: managed.handoff.as_ref().map(WindowsRunHandoff::persisted),
+        #[cfg(not(windows))]
+        handoff: managed.handoff.as_ref().map(UnixRunHandoff::persisted),
         pid: managed.pid,
         profile_id: config::active_profile_context().map(|profile| profile.id.as_str().to_string()),
         cwd: managed.cwd.clone(),
@@ -453,6 +455,13 @@ fn daemon_run_sidecar_is_recoverable(run: &PersistedDaemonRun) -> bool {
         {
             return true;
         }
+    }
+    #[cfg(not(windows))]
+    if let Some(receipt) = run.handoff.as_ref()
+        && daemon_run_recovery_files_are_private(run)
+        && crate::process_tree::process_alive(receipt.previous_pid)
+    {
+        return true;
     }
     daemon_run_recovery_files_are_private(run)
         && marker.pid == run.pid
@@ -951,7 +960,6 @@ fn daemon_run_child_from_persisted(
     request_broker: Option<&DaemonRequestBroker>,
 ) -> DaemonRunChild {
     let mut child = DaemonRunChild {
-        #[cfg(windows)]
         handoff: None,
         child: None,
         process_tree: None,
@@ -981,6 +989,10 @@ fn daemon_run_child_from_persisted(
     #[cfg(windows)]
     if let Some(receipt) = run.handoff {
         recover_windows_run_handoff(&mut child, receipt);
+    }
+    #[cfg(not(windows))]
+    if let Some(receipt) = run.handoff {
+        recover_unix_run_handoff(&mut child, receipt);
     }
     child
 }
@@ -1413,7 +1425,6 @@ async fn register_daemon_child(
     guard.insert(
         key,
         DaemonRunChild {
-            #[cfg(windows)]
             handoff: None,
             child: Some(spawned.child),
             process_tree: Some(spawned.process_tree),
