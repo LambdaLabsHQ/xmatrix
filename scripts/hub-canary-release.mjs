@@ -14,6 +14,7 @@
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
+import { argumentValue, argumentValues } from "./cli-arguments.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
 import { validateHubHealthResponse, waitForHubHealth } from "./hub-postdeploy-smoke.mjs";
 
@@ -239,19 +240,6 @@ export async function releaseHub(options, deps) {
     }
     throw new Error(`${reason}\nrolled the Hub back to ${baseline.id} (${baselineTag ?? "unknown tag"})`);
   }
-}
-
-function argumentValue(argv, flag, fallback) {
-  const index = argv.indexOf(flag);
-  return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
-}
-
-function argumentValues(argv, flag) {
-  const values = [];
-  for (let index = 0; index < argv.length - 1; index += 1) {
-    if (argv[index] === flag) values.push(argv[index + 1]);
-  }
-  return values;
 }
 
 function realRun(args, { cwd }) {

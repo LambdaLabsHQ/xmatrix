@@ -3,6 +3,7 @@
 import process from "node:process";
 import fs from "node:fs";
 
+import { argumentValue } from "./cli-arguments.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel } from "./release-version-order.mjs";
 
@@ -222,11 +223,6 @@ export async function waitForHubHealth({
   }
   const detail = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(`Hub post-deploy smoke failed after ${attempts} attempts: ${detail}`);
-}
-
-function argumentValue(argv, flag, fallback) {
-  const index = argv.indexOf(flag);
-  return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
 }
 
 /** Repeated `--header "Name: value"` arguments as a request header object. */
