@@ -64,11 +64,13 @@ test("a release serves a canary split, verifies the new version, then takes 100%
   assert.equal(result.previousVersionId, PREVIOUS);
   assert.equal(result.versionId, NEXT);
   assert.equal(DEFAULT_CANARY_PERCENT, 10);
+  assert.match(parts.calls[0], /^deployments status --config wrangler\.generated\.production\.toml --name xmatrix-hub --json$/u);
   assert.ok(parts.calls[1].startsWith("versions upload"));
   assert.match(parts.calls[1], /--tag a{40}/u);
   assert.match(parts.calls[1], /--secrets-file \/tmp\/secrets\.json/u);
   assert.match(parts.calls[1], /--define XMATRIX_SENTRY_DSN:"https:\/\/example\.test\/1"/u);
-  assert.match(parts.calls[3], new RegExp(`versions deploy .*--version-id ${NEXT} --percentage 10 --version-id ${PREVIOUS} --percentage 90`, "u"));
+  assert.match(parts.calls[2], /^versions list --config wrangler\.generated\.production\.toml --name xmatrix-hub --json$/u);
+  assert.match(parts.calls[3], /versions deploy .*--config wrangler\.generated\.production\.toml .*--version-id next-version --percentage 10 --version-id previous-version --percentage 90/u);
   assert.deepEqual(parts.healthCalls, [
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
