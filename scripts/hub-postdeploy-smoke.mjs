@@ -84,11 +84,11 @@ export function validatePostgresReadinessResponse(response, payload) {
   return payload;
 }
 
-async function fetchNoCacheJson(target, fetchImpl, label) {
+async function fetchNoCacheJson(target, fetchImpl, label, headers = {}) {
   const response = await fetchImpl(target, {
     method: "GET",
     redirect: "error",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    headers: { Accept: "application/json", "Cache-Control": "no-cache", ...headers },
     signal: AbortSignal.timeout(10_000),
   });
   const contentType = response.headers.get("content-type") ?? "";
@@ -98,15 +98,15 @@ async function fetchNoCacheJson(target, fetchImpl, label) {
   return { response, payload: await response.json() };
 }
 
-async function verifyPostgresReadiness(target, fetchImpl) {
+async function verifyPostgresReadiness(target, fetchImpl, headers = {}) {
   const endpoint = new URL("/health/postgres", target);
   const { response, payload } = await fetchNoCacheJson(
-    endpoint, fetchImpl, "PostgreSQL readiness",
+    endpoint, fetchImpl, "PostgreSQL readiness", headers,
   );
   return validatePostgresReadinessResponse(response, payload);
 }
 
-async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion) {
+async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion, extraHeaders = {}) {
   const endpoint = new URL("/api/client-compatibility", target);
   const admittedResponse = await fetchImpl(endpoint, {
     method: "GET",
@@ -117,6 +117,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
       "x-xmatrix-client-component": "cli",
       "x-xmatrix-client-version": compatibilityPolicy.minimumVersions.cli,
       "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
+      ...extraHeaders,
     },
     signal: AbortSignal.timeout(10_000),
   });
@@ -139,6 +140,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
         "x-xmatrix-client-component": "cli",
         "x-xmatrix-client-version": cliVersion,
         "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
+        ...extraHeaders,
       },
       signal: AbortSignal.timeout(10_000),
     });
@@ -158,6 +160,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
         "x-xmatrix-client-component": "app",
         "x-xmatrix-client-version": webVersion,
         "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
+        ...extraHeaders,
       },
       signal: AbortSignal.timeout(10_000),
     });
@@ -167,7 +170,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
   const missingResponse = await fetchImpl(endpoint, {
     method: "GET",
     redirect: "error",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    headers: { Accept: "application/json", "Cache-Control": "no-cache", ...extraHeaders },
     signal: AbortSignal.timeout(10_000),
   });
   validateHubCompatibilityResponse(
@@ -187,6 +190,7 @@ export async function waitForHubHealth({
   expectedSha,
   webVersion,
   cliVersion,
+  headers = {},
 }) {
   const target = new URL(url);
   if (target.protocol !== "https:") throw new Error("post-deploy smoke URL must use HTTPS");
@@ -200,10 +204,10 @@ export async function waitForHubHealth({
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const { response, payload } = await fetchNoCacheJson(target, fetchImpl, "health");
+      const { response, payload } = await fetchNoCacheJson(target, fetchImpl, "health", headers);
       const health = validateHubHealthResponse(response, payload, expectedSha);
-      await verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion);
-      if (postgresReadiness) await verifyPostgresReadiness(target, fetchImpl);
+      await verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion, headers);
+      if (postgresReadiness) await verifyPostgresReadiness(target, fetchImpl, headers);
       return {
         ...health,
         compatibility: "enforced",
@@ -225,11 +229,39 @@ function argumentValue(argv, flag, fallback) {
   return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
 }
 
+/** Repeated `--header "Name: value"` arguments as a request header object. */
+export function parseSmokeHeaders(values) {
+  const headers = {};
+  for (const raw of values) {
+    const index = raw.indexOf(":");
+    if (index <= 0) throw new Error(`--header must be "Name: value", got ${JSON.stringify(raw)}`);
+    const name = raw.slice(0, index).trim();
+    const value = raw.slice(index + 1).trim();
+    if (!/^[A-Za-z0-9!#$%&'*+.^_`|~-]+$/u.test(name)) {
+      throw new Error(`--header name is not a valid HTTP token: ${JSON.stringify(name)}`);
+    }
+    if (value === "" || /[\r\n]/u.test(value)) {
+      throw new Error(`--header ${name} needs a non-empty single-line value`);
+    }
+    if (Object.hasOwn(headers, name)) throw new Error(`--header ${name} was given more than once`);
+    headers[name] = value;
+  }
+  return headers;
+}
+
+function argumentValues(argv, flag) {
+  const values = [];
+  for (let index = 0; index < argv.length - 1; index += 1) {
+    if (argv[index] === flag) values.push(argv[index + 1]);
+  }
+  return values;
+}
+
 async function main(argv = process.argv.slice(2)) {
   const url = argumentValue(argv, "--url");
   if (!url) {
     throw new Error(
-      "usage: hub-postdeploy-smoke.mjs --url <https-url> [--attempts n] [--delay-ms n] [--postgres-readiness] [--expected-sha sha] [--web-version version] [--cli-version version]",
+      "usage: hub-postdeploy-smoke.mjs --url <https-url> [--attempts n] [--delay-ms n] [--postgres-readiness] [--expected-sha sha] [--web-version version] [--cli-version version] [--header \"Name: value\"]...",
     );
   }
   const result = await waitForHubHealth({
@@ -240,6 +272,7 @@ async function main(argv = process.argv.slice(2)) {
     expectedSha: argumentValue(argv, "--expected-sha"),
     webVersion: argumentValue(argv, "--web-version"),
     cliVersion: argumentValue(argv, "--cli-version"),
+    headers: parseSmokeHeaders(argumentValues(argv, "--header")),
   });
   console.log(
     `[hub-postdeploy] healthy service=${result.service} status=${result.status} compatibility=${result.compatibility} postgres=${result.postgres} attempt=${result.attempt}`,

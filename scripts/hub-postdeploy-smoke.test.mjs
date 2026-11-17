@@ -4,6 +4,7 @@ import test from "node:test";
 import { parse } from "yaml";
 
 import {
+  parseSmokeHeaders,
   validateHubCompatibilityResponse,
   validateHubHealthResponse,
   validatePostgresReadinessResponse,
@@ -17,7 +18,13 @@ test("production Hub upload and post-deploy smoke bind the authorized release SH
   const deploy = hub.steps.find((step) => step.name === "Deploy tagged Hub to production");
   const smoke = hub.steps.find((step) => step.name === "Verify deployed production Hub health");
   const edge = hub.steps.find((step) => step.name === "Apply and verify the tagged MCP edge policy");
-  assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /wrangler deploy[^\n]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  const deployRun = deploy.run.replace(/\\\n\s*/gu, " ");
+  assert.match(deployRun, /node \.\.\/\.\.\/scripts\/hub-canary-release\.mjs/u);
+  assert.match(deployRun, /--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(deployRun, /--smoke-url "\$XMATRIX_HUB_ORIGIN\/"/u);
+  assert.match(deployRun, /--canary-percent 10/u);
+  assert.match(deployRun, /--observe-seconds 90/u);
+  assert.doesNotMatch(deployRun, /wrangler deploy/u, "the canary script owns the deploy path");
   assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
   // The edge mutation stays inside the existing immutable production job,
   // after its first deployment and SHA verification, using the protected token.
@@ -198,6 +205,40 @@ test("Next smoke checks PostgreSQL readiness when explicitly requested", async (
   });
   assert.deepEqual(paths, ["/", "/api/client-compatibility", "/api/client-compatibility", "/health/postgres"]);
   assert.equal(result.postgres, "ready_cache_disabled");
+});
+
+test("a version override header reaches every smoke request", async () => {
+  const seen = [];
+  const revision = "d".repeat(40);
+  const override = { "Cloudflare-Workers-Version-Overrides": 'xmatrix-hub="version-next"' };
+  await waitForHubHealth({
+    url: "https://xmatrix-hub.example.test/",
+    attempts: 1,
+    expectedSha: revision,
+    headers: override,
+    fetchImpl: async (url, init) => {
+      seen.push(new Headers(init.headers).get("Cloudflare-Workers-Version-Overrides"));
+      return new URL(url).pathname === "/api/client-compatibility"
+        ? compatibilityResponse(init)
+        : Response.json({ status: "ok", service: "xmatrix-hub",
+          deployment: { versionId: "version-next", revision } });
+    },
+  });
+  assert.equal(seen.length, 3);
+  assert.ok(seen.every((value) => value === override["Cloudflare-Workers-Version-Overrides"]));
+});
+
+test("--header parsing accepts a dictionary override and refuses unsafe input", () => {
+  assert.deepEqual(parseSmokeHeaders(['Cloudflare-Workers-Version-Overrides: xmatrix-hub="v1"']), {
+    "Cloudflare-Workers-Version-Overrides": 'xmatrix-hub="v1"',
+  });
+  for (const bad of ["missing-colon", ": value", "Bad Header: value", "X-Test: two\nlines"]) {
+    assert.throws(() => parseSmokeHeaders([bad]), /--header/u, bad);
+  }
+  assert.throws(
+    () => parseSmokeHeaders(["X-Test: one", "X-Test: two"]),
+    /more than once/u,
+  );
 });
 
 function compatibilityResponse(init) {

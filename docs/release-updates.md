@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: a Hub release canaries a version and rolls back on failure
+
+A Hub release now uploads its bundle as a Cloudflare version, proves that
+version at 0% traffic with a version-override health and compatibility check,
+sends 10% of traffic to it for a 90-second window, and only then promotes it to
+100%. If any check in that window fails, the release returns the Hub's code to
+the running version and fails the job; the database is untouched. Expand
+migrations are harmless to the previous Hub and contract migrations still ship
+only after the new Hub is verified, so a code rollback never crosses a schema.
+A release that changes a Durable Object class lifecycle cannot be uploaded as a
+version; it keeps the plain full deploy, with no canary and no rollback. Hub
+only. Recovery from a failed canary is the existing re-run-failed-jobs path;
+there is no schema rollback.
+
 ## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
 
 The Hub cached the in-flight read of a Better Auth public key and let other

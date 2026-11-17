@@ -494,17 +494,27 @@ jobs:
             fi
             error_reporting=(--define "XMATRIX_SENTRY_DSN:\"$SENTRY_DSN\"" --define "XMATRIX_SENTRY_RELEASE:\"$GITHUB_REF_NAME\"")
           fi
-          for attempt in 1 2 3; do
-            # --outdir keeps the exact deployed bundle and its map for error reporting.
-            if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" --tag "$XMATRIX_DEPLOY_SHA" \
-                --outdir "$RUNNER_TEMP/hub-bundle" "${error_reporting[@]}"; then
-              break
-            else
-              status=$?
-            fi
-            if [ "$attempt" -eq 3 ]; then exit "$status"; fi
-            sleep $((attempt * 20))
-          done
+          # Canary the uploaded version at a small traffic share, prove it with a
+          # version override, then promote it. Any failure in that window rolls
+          # the Hub code back to the running version. A bundle that changes a
+          # Durable Object class lifecycle cannot be uploaded; that release takes
+          # the plain deploy path instead (no canary, no rollback).
+          # --outdir keeps the exact deployed bundle and its map for error reporting.
+          define_args=()
+          if [ "${#error_reporting[@]}" -gt 0 ]; then
+            for ((i = 1; i < ${#error_reporting[@]}; i += 2)); do
+              define_args+=(--define "${error_reporting[$i]}")
+            done
+          fi
+          node ../../scripts/hub-canary-release.mjs \
+            --config "$XMATRIX_HUB_CONFIG" \
+            --tag "$XMATRIX_DEPLOY_SHA" \
+            --secrets-file "$secrets_file" \
+            --outdir "$RUNNER_TEMP/hub-bundle" \
+            --smoke-url "$XMATRIX_HUB_ORIGIN/" \
+            --canary-percent 10 \
+            --observe-seconds 90 \
+            "${define_args[@]}"
 
       # Hub stack traces name the bundle `index.js`; error reporting sends them
       # as `app:///index.js`, which resolves against this map. The Worker never
