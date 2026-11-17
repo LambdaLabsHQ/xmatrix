@@ -460,6 +460,11 @@ fn daemon_run_sidecar_is_recoverable(run: &PersistedDaemonRun) -> bool {
     if let Some(receipt) = run.handoff.as_ref()
         && daemon_run_recovery_files_are_private(run)
         && crate::process_tree::process_alive(receipt.previous_pid)
+        && unix_process_matches_identity(
+            receipt.previous_pid,
+            receipt.previous_start_time,
+            receipt.started_millis,
+        )
     {
         return true;
     }

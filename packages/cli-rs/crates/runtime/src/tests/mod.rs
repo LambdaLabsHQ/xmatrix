@@ -141,7 +141,7 @@ fn test_empty_daemon_run_child() -> super::DaemonRunChild {
     }
 }
 
-fn test_empty_persisted_daemon_run() -> super::PersistedDaemonRun {
+pub(crate) fn test_empty_persisted_daemon_run() -> super::PersistedDaemonRun {
     let mut run = super::persisted_daemon_run_from_child(&test_empty_daemon_run_child());
     run.profile_id = None;
     run.updated_at = "1".to_string();
