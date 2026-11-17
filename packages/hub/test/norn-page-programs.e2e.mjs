@@ -62,7 +62,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
     const ofMessage = async messageId => (await call(`${pages.replace(/\/pages$/u, "")}/norn-programs/${encodeURIComponent(messageId)}`)).program;
     assert.deepEqual(await ofMessage(history.messages[0].messageId), { ...running, next: (await programs())[0].next });
     assert.equal(await ofMessage(history.messages.at(-1).messageId), null);
-    const delivery = history.messages.find(message => /^@codex\n/u.test(message.body));
+    const delivery = history.messages.find(message => message.body.startsWith("@codex\n"));
     const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
 
     // An edit that leaves the program's text alone changes nothing; the same request stands.
