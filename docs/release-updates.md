@@ -1,28 +1,24 @@
 # Release Updates
 
-## Unreleased: a Hub release is canaried and rolls its code back on failure
+## Unreleased: the Hub deploys as a canary and rolls its code back on failure
 
-`scripts/hub-canary-deploy.mjs` owns the production Hub deployment in
-`server-release.yml`. It uploads the tagged release as a Worker version, gives
-it 10% of traffic for three minutes, verifies that version through a Cloudflare
-version override (`hub-postdeploy-smoke.mjs --version-override`), then promotes
-it to 100% and verifies the public origin again. A failure during the split,
-the hold, the promotion or the final check deploys the previous version back at
-100% and fails the release, so no deployment receipt is written and the
-immutable tag stays for a re-run or the next train.
+`scripts/hub-canary-deploy.mjs` now owns the production Hub deployment. It
+uploads the tagged release as a Worker version, gives it 10% of traffic for
+three minutes, verifies that version through a Cloudflare version override
+(`hub-postdeploy-smoke.mjs --version-override`), then promotes it to 100% and
+verifies the public origin. A failure during the split, the hold, the promotion
+or the final check deploys the previous version back at 100% and fails the
+release.
 
 Only Worker code rolls back; PostgreSQL schema does not. The train applies
 expand migrations before this step and ships contract migrations separately
 after the new Hub is proven, so the previous Hub stays compatible during the
-window. Secrets uploaded with the new version are Worker-level and do not roll
-back with the code.
-
-A release that changes a Durable Object class lifecycle cannot be uploaded as a
-version or rolled back across. `wrangler versions upload` refuses it; the script
-then deploys once with `wrangler deploy` and logs that the release had no
-canary. Use the repository variable `XMATRIX_HUB_CANARY_HOLD_SECONDS` to change
-the hold (default 180 s); `--canary-percent` defaults to 10 and is bounded to
-1-50.
+window. A release that changes a Durable Object class lifecycle cannot be
+uploaded as a version or rolled back across; `wrangler versions upload` refuses
+it and the release deploys once without a canary. Secrets are Worker-level and
+do not roll back with code. `XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold
+(default 180 s). Hub only. Recovery is a CI-validated Hub beta reverting this
+change.
 
 ## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
 
