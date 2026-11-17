@@ -43,6 +43,7 @@ jobs:
       XMATRIX_DEPLOY_SHA: ${{ inputs.deploy_sha }}
       GITHUB_TOKEN: ${{ github.token }}
       NODE_USE_ENV_PROXY: "1"
+      XMATRIX_HUB_CANARY_HOLD_SECONDS: ${{ vars.XMATRIX_HUB_CANARY_HOLD_SECONDS }}
     steps:
       - name: Configure Linux runner proxy before checkout
         shell: bash
@@ -494,17 +495,18 @@ jobs:
             fi
             error_reporting=(--define "XMATRIX_SENTRY_DSN:\"$SENTRY_DSN\"" --define "XMATRIX_SENTRY_RELEASE:\"$GITHUB_REF_NAME\"")
           fi
-          for attempt in 1 2 3; do
-            # --outdir keeps the exact deployed bundle and its map for error reporting.
-            if pnpm exec wrangler deploy --config "$XMATRIX_HUB_CONFIG" --secrets-file "$secrets_file" --tag "$XMATRIX_DEPLOY_SHA" \
-                --outdir "$RUNNER_TEMP/hub-bundle" "${error_reporting[@]}"; then
-              break
-            else
-              status=$?
-            fi
-            if [ "$attempt" -eq 3 ]; then exit "$status"; fi
-            sleep $((attempt * 20))
-          done
+          # A canary window with automatic code rollback. Only expand
+          # migrations have run at this point, so rolling the Worker back to
+          # its previous version never crosses a schema change.
+          node ../../scripts/hub-canary-deploy.mjs \
+            --config "$XMATRIX_HUB_CONFIG" \
+            --secrets-file "$secrets_file" \
+            --tag "$XMATRIX_DEPLOY_SHA" \
+            --outdir "$RUNNER_TEMP/hub-bundle" \
+            --url "$XMATRIX_HUB_ORIGIN/" \
+            --worker xmatrix-hub \
+            --hold-seconds "${XMATRIX_HUB_CANARY_HOLD_SECONDS:-180}" \
+            "${error_reporting[@]}"
 
       # Hub stack traces name the bundle `index.js`; error reporting sends them
       # as `app:///index.js`, which resolves against this map. The Worker never

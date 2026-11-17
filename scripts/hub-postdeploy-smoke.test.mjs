@@ -17,7 +17,11 @@ test("production Hub upload and post-deploy smoke bind the authorized release SH
   const deploy = hub.steps.find((step) => step.name === "Deploy tagged Hub to production");
   const smoke = hub.steps.find((step) => step.name === "Verify deployed production Hub health");
   const edge = hub.steps.find((step) => step.name === "Apply and verify the tagged MCP edge policy");
-  assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /wrangler deploy[^\n]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /node \.\.\/\.\.\/scripts\/hub-canary-deploy\.mjs/u);
+  assert.match(deploy.run, /--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(deploy.run, /--url "\$XMATRIX_HUB_ORIGIN\/"/u);
+  assert.match(deploy.run, /--hold-seconds "\$\{XMATRIX_HUB_CANARY_HOLD_SECONDS:-180\}"/u);
+  assert.equal(hub.env.XMATRIX_HUB_CANARY_HOLD_SECONDS, "${{ vars.XMATRIX_HUB_CANARY_HOLD_SECONDS }}");
   assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
   // The edge mutation stays inside the existing immutable production job,
   // after its first deployment and SHA verification, using the protected token.
@@ -166,6 +170,32 @@ test("post-deploy smoke rejects non-HTTPS targets and exhausts its bound", async
     }),
     /failed after 2 attempts/,
   );
+});
+
+test("a canary check pins the version under test without touching the rest of production", async () => {
+  const overrides = [];
+  const revision = "d".repeat(40);
+  const result = await waitForHubHealth({
+    url: "https://xmatrix-hub.example.test/",
+    attempts: 1,
+    expectedSha: revision,
+    versionOverride: `xmatrix-hub="${"version-canary"}"`,
+    fetchImpl: async (url, init) => {
+      overrides.push(new Headers(init.headers).get("Cloudflare-Workers-Version-Overrides"));
+      if (new URL(url).pathname === "/api/client-compatibility") return compatibilityResponse(init);
+      return Response.json({ status: "ok", service: "xmatrix-hub", deployment: { versionId: "version-canary", revision } });
+    },
+  });
+  assert.equal(result.service, "xmatrix-hub");
+  assert.deepEqual(overrides, [
+    `xmatrix-hub="version-canary"`,
+    `xmatrix-hub="version-canary"`,
+    `xmatrix-hub="version-canary"`,
+  ]);
+  for (const invalid of ["version-canary", 'xmatrix-hub="has space"', '="version"']) {
+    await assert.rejects(waitForHubHealth({ url: "https://xmatrix-hub.example.test/", versionOverride: invalid }),
+      /versionOverride must be/u, invalid);
+  }
 });
 
 test("Next smoke checks PostgreSQL readiness when explicitly requested", async () => {
