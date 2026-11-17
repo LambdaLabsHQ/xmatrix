@@ -1,5 +1,12 @@
 # Release Updates
 
+## Unreleased: a refused `/model` writes its reset to the nearest minute
+
+A provider can state a reset a fraction of a second early (17:59:59.747 for
+18:00), and the refusal then read "used up until 2026-11-19 17:59 UTC". The
+sentence now says the minute it means. Hub only. Recovery is a CI-validated
+Hub beta reverting this change.
+
 ## Unreleased: a model's own used-up quota is no longer read as available while other models are served
 
 A Claude account whose Fable week was used up kept being offered for Fable:
