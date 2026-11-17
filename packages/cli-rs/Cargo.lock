@@ -3254,6 +3254,7 @@ dependencies = [
  "xmatrix-cli-args",
  "xmatrix-cli-core",
  "xmatrix-cli-workspace",
+ "xmatrix-process-tree",
 ]
 
 [[package]]
