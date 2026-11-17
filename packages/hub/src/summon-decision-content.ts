@@ -42,27 +42,33 @@ export function withSummonDecisionContent(input: {
 export function withDecisionClock(record: (event: RoutingDecisionEvent) => Promise<void>,
   resolveClock: () => Promise<{ arm(): Promise<void> }>): (event: RoutingDecisionEvent) => Promise<void> {
   let clock: Promise<{ arm(): Promise<void> }> | undefined;
+  // The re-arm after a write runs beside what follows it (the model call, or
+  // the launch), not before it. The next write waits for it, so the arms keep
+  // their order. It never rejects: its failure is only logged.
+  let rearm: Promise<void> = Promise.resolve();
   return async event => {
     clock ??= resolveClock();
     let target;
     try { target = await clock; }
     catch { clock = undefined; throw new DecisionEvidenceStepFailed("clock_resolve"); }
+    await rearm;
     await evidenceStep("clock_arm", () => retrySummonDecisionStep(() => target.arm()));
     await record(event);
     // The record is durable. This re-arm only covers an alarm that ran between the first arm and
     // the write and found nothing to keep; the next summon in the Space re-arms it. A failure here
     // must not reject a decision whose evidence is already stored.
-    try { await retrySummonDecisionStep(() => target.arm()); }
-    catch {
+    rearm = retrySummonDecisionStep(() => target.arm()).catch(() => {
       console.error(JSON.stringify({ event: "summon_decision_clock_rearm_failed",
         decisionId: event.decisionId, phase: event.status }));
-    }
+    });
   };
 }
 
 /** Production composition uses the same content authority and bucket as private uploads. */
 export function summonDecisionEvaluator(env: PostgresAuthorityFleetEnv & { RELAY_PAYLOAD_BUCKET?: R2Bucket; RELAY_SUMMON_DECISION_CLOCK?: DurableObjectNamespace }, context: {
   evaluate: RoutingEvaluator; actorUserId: string; channelId: string; sourceMessageId: string; invocationId: string;
+  /** The Space the caller already resolved the Channel's placement to; without it the clock reads the directory. */
+  spaceId?: string;
 }): RoutingEvaluator {
   if (!env.RELAY_PAYLOAD_BUCKET || !env.RELAY_POSTGRES_SHARD_ID || !env.RELAY_SUMMON_DECISION_CLOCK) {
     return Object.assign(((request, options) => context.evaluate(request, options)) as RoutingEvaluator, {
@@ -71,16 +77,23 @@ export function summonDecisionEvaluator(env: PostgresAuthorityFleetEnv & { RELAY
   }
   const database = createPostgresAuthorityDatabase(env, { applicationName: "xmatrix-summon-evidence",
     statementTimeoutMs: 5_000, transactionTimeoutMs: 10_000, lockTimeoutMs: 2_000 });
-  const captured = withSummonDecisionContent({ ...context, bucket: env.RELAY_PAYLOAD_BUCKET,
+  const { spaceId: placedSpaceId, ...decision } = context;
+  const captured = withSummonDecisionContent({ ...decision, bucket: env.RELAY_PAYLOAD_BUCKET,
     content: new PostgresContentRepository(database, env.RELAY_POSTGRES_SHARD_ID) });
   const namespace = env.RELAY_SUMMON_DECISION_CLOCK;
-  captured.recordDecision = withDecisionClock(captured.recordDecision!, () =>
-    retrySummonDecisionStep(() => new PostgresChannelSpaceDirectory(database).resolve({
+  const clockOf = (spaceId: string) => {
+    const stub = namespace.get(namespace.idFromName(spaceId)) as unknown as { arm(spaceId: string): Promise<void> };
+    return { arm: () => stub.arm(spaceId) };
+  };
+  // A summon already knows its Space from the placement that owns its launch,
+  // so the clock reads no directory row on the way to the model call.
+  captured.recordDecision = withDecisionClock(captured.recordDecision!, () => placedSpaceId
+    ? Promise.resolve(clockOf(placedSpaceId))
+    : retrySummonDecisionStep(() => new PostgresChannelSpaceDirectory(database).resolve({
       requestId: crypto.randomUUID(), operation: "decision.clock.resolve",
     }, context.channelId)).then(route => {
       if (!route) throw new Error("Decision Space is unavailable");
-      const stub = namespace.get(namespace.idFromName(route.spaceId)) as unknown as { arm(spaceId: string): Promise<void> };
-      return { arm: () => stub.arm(route.spaceId) };
+      return clockOf(route.spaceId);
     }));
   return captured;
 }

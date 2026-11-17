@@ -67,7 +67,7 @@ export function jevEvaluator(env: RuntimeEnv, context: {
   const apiKey = env.JEV_AI_GATEWAY_API_KEY?.trim();
   if (!apiKey) return undefined;
   const { feature, ...decision } = context;
-  return spaceId => summonDecisionEvaluator(env, { ...decision, evaluate: meterJev(env, { feature, scope: { spaceId } },
+  return spaceId => summonDecisionEvaluator(env, { ...decision, spaceId, evaluate: meterJev(env, { feature, scope: { spaceId } },
     createJevClient({ apiKey, timeoutMs: 5000 }).evaluate) });
 }
 

@@ -149,3 +149,23 @@ test('a re-arm failure after the evidence is durable does not reject the decisio
   assert.equal(choices.environment.choice, 'candidate_0');
   assert.deepEqual(stored, ['started', 'succeeded']);
 });
+
+// The re-arm after a write only covers an alarm that ran between the first arm
+// and the write; waiting for it put a Durable Object round trip between the
+// stored input and the model call on every summon.
+test('the model call does not wait for the re-arm after the input is stored', { timeout: 5_000 }, async () => {
+  const stored = [];
+  let arms = 0, releaseRearm;
+  const rearmed = new Promise(resolve => { releaseRearm = resolve; });
+  const recordDecision = withDecisionClock(async event => { stored.push(event.status); },
+    async () => ({ async arm() { arms++; if (arms === 2) await rearmed; } }));
+  const evaluate = Object.assign(async () => {
+    assert.equal(arms, 2, 'the re-arm after the input record has started');
+    releaseRearm();
+    return valid;
+  }, { recordDecision });
+  const choices = await evaluateRoutingChoices(request, evaluate);
+  assert.equal(choices.environment.choice, 'candidate_0');
+  assert.deepEqual(stored, ['started', 'succeeded']);
+  assert.equal(arms, 4, 'each write is armed before and re-armed after, in order');
+});
