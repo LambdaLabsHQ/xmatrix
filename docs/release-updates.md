@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a pull request's line names it and leaves out the subscription
+
+GitHub's line for a pull request read `#1754` alone, with `following here`
+and later `stopped following` among its steps. Those words described how its
+updates reach the conversation, looked like a control that did nothing when
+clicked, and left the pull request unnamed until it merged. The title is now
+read when the conversation subscribes, so the line reads `#1754 <title>` from
+the start and later lines keep it; the steps are only what happened to the
+pull request (`opened by claude:2 · CI passed · merged`). The subscription
+message stays as context for Agents. Hub, Protocol and Web. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: `launch:force` is retired; only a send's launch request starts an Agent
 
 Every send that should start Agents already asks to (the composer, `xmatrix

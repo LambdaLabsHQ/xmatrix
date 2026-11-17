@@ -2,7 +2,7 @@
 
 import { Fragment, memo, type ReactNode } from "react";
 import {
-  BellRing, ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
+  ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
   MessageSquare,
   type LucideIcon,
 } from "lucide-react";
@@ -187,19 +187,20 @@ export const FoldedActivityRow = memo(function FoldedActivityRow({
   );
 });
 
+/**
+ * Whether an entry is a step a person reads. The subscription is how the steps
+ * after it get here, not a step of the pull request: it names the pull request
+ * (its title) and is context for Agents, but says nothing on the line.
+ */
+function isPullRequestStep(item: TimelineItem): boolean {
+  return timelineItemGitHubFact(item)?.event !== "subscribed";
+}
+
 /** One step of a pull request, in words: "opened by claude:1", "CI passed", "merged". */
 function PullRequestStep({ item }: { item: TimelineItem }) {
   if (timelineItemActivity(item)?.kind === "pull_request") return <>opened by {item.author}</>;
   const fact = timelineItemGitHubFact(item);
   if (!fact) return null;
-  if (fact.event === "subscribed") {
-    return (
-      <span title="This conversation follows the pull request through the Space's GitHub connection: its CI results, reviews, comments and merge arrive here."
-        className="text-foreground/80">
-        <BellRing className="mr-1 inline size-3 align-[-1px]" aria-hidden="true" />following here
-      </span>
-    );
-  }
   if (fact.event === "ci_passed") return <>CI passed</>;
   if (fact.event === "ci_failed") {
     return (
@@ -265,22 +266,27 @@ export function PullRequestSlip({ lines }: { lines: NonNullable<TimelineItem["pu
   const several = lines.length > 1 || lines.some((line) => line.items.length > 1);
   return (
     <div className="app-connector-receipt" data-pull-requests={lines.map((line) => `#${line.ref.number}`).join(" ")}>
-      {lines.map(({ ref, items }) => {
+      {lines.map(({ ref, items, title }) => {
         const state = pullRequestState(items);
+        const steps = items.filter(isPullRequestStep);
         return (
           <div key={`${ref.repository}#${ref.number}`} className="app-connector-receipt-entry" data-pull-request={`#${ref.number}`}>
             <SlipHead icon={state.icon} tone={state.tone} {...(several ? { time: items[items.length - 1]!.sentAt } : {})}>
-              <PullRef {...ref} />{state.title && <> {state.title}</>}
+              <PullRef {...ref} />{(state.title || title) && <> {state.title || title}</>}
             </SlipHead>
-            <p className="app-connector-receipt-detail text-[13px] text-muted-foreground">
-              {items.map((item, index) => (
-                <span key={item.id} id={entryAnchorId(item)} title={formatMessageDateTime(item.sentAt)}>
-                  {index > 0 && " · "}<PullRequestStep item={item} />
-                </span>
-              ))}
-              {/* Closing ends the subscription (github-pull-request-subscription.ts), said or not. */}
-              {state.ended && " · stopped following"}
-            </p>
+            {/* The subscription keeps its anchor, so a link to its message still lands on this entry. */}
+            {items.filter((item) => !isPullRequestStep(item)).map((item) => (
+              <span key={item.id} id={entryAnchorId(item)} aria-hidden="true" />
+            ))}
+            {steps.length > 0 && (
+              <p className="app-connector-receipt-detail text-[13px] text-muted-foreground">
+                {steps.map((item, index) => (
+                  <span key={item.id} id={entryAnchorId(item)} title={formatMessageDateTime(item.sentAt)}>
+                    {index > 0 && " · "}<PullRequestStep item={item} />
+                  </span>
+                ))}
+              </p>
+            )}
 
           </div>
         );

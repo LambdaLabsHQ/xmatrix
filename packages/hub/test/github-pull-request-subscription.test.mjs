@@ -256,6 +256,7 @@ test("a pull request is subscribed only through the Space's connection that reac
   const announced = [];
   const deps = (overrides) => ({ findConnection: async () => connection, installationFor: async () => "42",
     command: async (_env, kind, value) => { commands.push({ kind, value }); },
+    pullRequestTitle: async () => "Reload on reconnect",
     announce: async (_env, channelId, value) => { announced.push({ channelId, ...value }); }, ...overrides });
   assert.equal(await subscribeConversationToPullRequest({}, input, deps()), true);
   // GitHub says it follows the pull request here, as context: nobody is woken or left unread by it.
@@ -263,7 +264,8 @@ test("a pull request is subscribed only through the Space's connection that reac
   assert.equal(announced[0].appAuthorId, "github");
   assert.equal(announced[0].messageId, "app:github:follow:activity:r-1:channel-1");
   assert.deepEqual(announced[0].residual, { appMetadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: {
-    repository: "Acme/App", number: 7, url: "https://github.com/Acme/App/pull/7", event: "subscribed" } } });
+    repository: "Acme/App", number: 7, url: "https://github.com/Acme/App/pull/7", event: "subscribed",
+    title: "Reload on reconnect" } } });
   assert.deepEqual(commands[0], { kind: "put-relation", value: {
     commandId: "product:github-pull-request:activity:r-1", connectionId: "space-1:github",
     channelId: "channel-1", sourceKind: "issue", sourceRef: "github:issue:acme/app#7",
@@ -273,6 +275,11 @@ test("a pull request is subscribed only through the Space's connection that reac
     installationFor: async () => { throw new Error("github_installation_not_linked_to_space"); } })), false);
   assert.equal(commands.length, 1);
   assert.equal(announced.length, 1, "nothing is announced for a pull request that is not followed");
+  // A title GitHub cannot give now does not stop the subscription: the pull request is named by number.
+  assert.equal(await subscribeConversationToPullRequest({}, input, deps({
+    pullRequestTitle: async () => { throw new Error("github_not_found"); } })), true);
+  assert.deepEqual(announced[1].residual.appMetadata.xmatrixGitHubPullRequest, {
+    repository: "Acme/App", number: 7, url: "https://github.com/Acme/App/pull/7", event: "subscribed" });
 });
 
 test("a subscription made before its issue existed named an earlier issue and hears nothing", async () => {

@@ -85,6 +85,23 @@ test("a stretch of pull request facts is one slip, one entry per pull request; p
   assert.equal(rows[2].continuation, true, "GitHub's messages moments apart read as one turn, like any sender's");
 });
 
+test("a pull request is named by the latest title GitHub said, in later stretches too", () => {
+  sequence = 0;
+  const rows = buildConversationRows([
+    pullRequest(claude1, 121, 18),
+    githubFact(121, 18, { event: "subscribed", title: "Reload when the network returns" }),
+    said(yiming, "Looks right.", 20),
+    githubFact(121, 21, { event: "ci_failed", sha: "9c41d2e", failed: [{ name: "web" }], more: 0 }),
+    said(yiming, "Rename it?", 22),
+    githubFact(121, 23, { event: "closed", title: "Reload on reconnect" }),
+  ]);
+  const titles = rows.filter((row) => row.pullRequests).map((row) => row.pullRequests[0].title);
+  assert.deepEqual(titles, ["Reload when the network returns", "Reload when the network returns", "Reload on reconnect"]);
+  sequence = 0;
+  const untitled = buildConversationRows([pullRequest(claude1, 7, 18)]);
+  assert.equal("title" in untitled[0].pullRequests[0], false, "a pull request GitHub has not named is its number");
+});
+
 test("anyone else's entry ends a run, so interleaving stays visible", () => {
   const rows = buildConversationRows([
     step(claude1, ["a"], 27),

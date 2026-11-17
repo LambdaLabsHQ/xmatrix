@@ -5,7 +5,7 @@ import {
 } from "@xmatrix/protocol";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import {
-  githubConnectionInstallationFor, readGitHubPullRequestOpen, type GitHubCommitCheckVerdict,
+  githubConnectionInstallationFor, readGitHubPullRequestOpen, readGitHubPullRequestTitle, type GitHubCommitCheckVerdict,
 } from "./app-connectors";
 import { record, text, type GitHubRepositoryFeature } from "./github-subscription-domain";
 import type { Env } from "./types";
@@ -154,6 +154,7 @@ export interface PullRequestSubscriptionDependencies {
   findConnection: typeof findAppConnection;
   installationFor: typeof githubConnectionInstallationFor;
   pullRequestOpen: typeof readGitHubPullRequestOpen;
+  pullRequestTitle: typeof readGitHubPullRequestTitle;
   command: typeof appCommand;
   announce: typeof dispatchProductMessageAppend;
 }
@@ -200,7 +201,10 @@ export async function subscribeConversationToPullRequest(env: Env,
   const connection = await connectionReaching(env, input, owner, repo, dependencies);
   if (!connection) return false;
   await subscribe(env, input, connection.id, input.repository, input.number, dependencies);
-  await announceFollowing(env, input, dependencies);
+  // The title names the pull request in the timeline from the start; without it the line still says "#121".
+  const title = await (dependencies.pullRequestTitle ?? readGitHubPullRequestTitle)(
+    env, connection, { owner, repo }, input.number).catch(() => "");
+  await announceFollowing(env, { ...input, title }, dependencies);
   return true;
 }
 
@@ -209,11 +213,13 @@ export async function subscribeConversationToPullRequest(env: Env,
  * what it posts later is seen to come from that subscription. Context for
  * Agents and never unread: it reports what the opener just did.
  */
-async function announceFollowing(env: Env, input: PullRequestSubscriber & { repository: string; number: number },
+async function announceFollowing(env: Env,
+  input: PullRequestSubscriber & { repository: string; number: number; title: string },
   dependencies: Partial<PullRequestSubscriptionDependencies>): Promise<void> {
   const ref = `${input.repository}#${input.number}`;
   const url = `https://github.com/${input.repository}/pull/${input.number}`;
-  const fact: GitHubPullRequestFact = { repository: input.repository, number: input.number, url, event: "subscribed" };
+  const fact: GitHubPullRequestFact = { repository: input.repository, number: input.number, url, event: "subscribed",
+    ...(input.title ? { title: input.title } : {}) };
   const key = `${input.commandId}:${input.channelId}`;
   await (dependencies.announce ?? dispatchProductMessageAppend)(env, input.channelId, {
     commandId: `product:github-pull-request-follow:${key}`.slice(0, 200),
