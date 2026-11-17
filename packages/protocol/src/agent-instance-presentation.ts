@@ -58,6 +58,9 @@ export function initialAgentInstancePresentation(input: {
   });
 }
 
+/** The model name a harness gives messages it wrote itself, which no model produced. */
+const SYNTHETIC_MODEL_NAME = "<synthetic>";
+
 export function mergeAgentInstancePresentation(
   current: Readonly<AgentInstancePresentation> | undefined,
   update: Readonly<AgentInstancePresenceUpdateMessage>,
@@ -91,7 +94,10 @@ export function mergeAgentInstancePresentation(
   if (hasOwn(update, "goal")) {
     set("goal", update.goal === null ? undefined : cleanGoal(update.goal));
   }
-  if (hasOwn(update, "model")) {
+  // Claude Code names the messages it writes itself (a used-up limit, an API
+  // error) `<synthetic>`. No model produced them: a runtime that reports that
+  // name has not changed what the Instance runs.
+  if (hasOwn(update, "model") && update.model !== SYNTHETIC_MODEL_NAME) {
     const model = cleanModelId(update.model);
     if (model !== next.model && !hasOwn(update, "parameters") && next.parameters !== undefined) {
       set("parameters", []);

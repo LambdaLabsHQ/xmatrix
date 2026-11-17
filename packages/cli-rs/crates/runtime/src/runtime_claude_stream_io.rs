@@ -63,6 +63,9 @@ use crate::{
     write_current_run_model,
 };
 
+/// The model name Claude Code gives the messages it writes itself.
+const CLAUDE_SYNTHETIC_MODEL: &str = "<synthetic>";
+
 /// Claude's own account of its background tasks: `system/task_started` opens
 /// one, and it closes on a `system/task_notification` or `system/task_updated`
 /// that reports it ended; repeats are no-ops. One per provider process, so a
@@ -639,7 +642,13 @@ pub(crate) async fn claude_stream_reader(
             || (value_type == Some("system")
                 && value.get("subtype").and_then(Value::as_str) == Some("init"));
         let mut presentation_changed = false;
-        if model_bearing && let Some(model) = extract_llm_model(&value) {
+        // Claude Code writes its own error messages (a used-up limit, an API
+        // failure) as assistant messages of the model `<synthetic>`: no model
+        // produced them, and the session still runs the one it ran before.
+        if model_bearing
+            && let Some(model) = extract_llm_model(&value)
+            && model != CLAUDE_SYNTHETIC_MODEL
+        {
             presentation_changed = model_state.set_current(&model);
             if presentation_changed {
                 write_current_run_model(Some(&model));
