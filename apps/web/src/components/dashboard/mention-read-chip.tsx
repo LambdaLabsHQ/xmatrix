@@ -284,7 +284,8 @@ function InteractionSegmentView({ segment, scope, starting }: {
         unavailable={scope?.launchStatusUnavailable} notices={scope?.notices} />;
     case "runtime-control.v1":
       return <MentionControlChip invocation={segment.invocation} outcome={segment.outcome}
-        notice={segment.notice} sentAt={scope?.sentAt} onRunCommand={scope?.onRunCommand} />;
+        notice={segment.notice} sentAt={scope?.sentAt} onRunCommand={scope?.onRunCommand}
+        notes={scope?.notices?.filter(notice => !notice.controlOutcomes && notice.body)} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
     default:

@@ -1,3 +1,4 @@
+import { recordCommandResult } from "./command-result";
 import { publishChannelInvocationsChanged, publishChannelPresenceChanged } from "./channel-live-judgment";
 import type { AppConnectorEnv } from "./app-connectors";
 import { registrationRepositoryCatalog } from "./registration-repository-catalog";
@@ -254,6 +255,17 @@ export async function wakeRestingInstances(env: Env, input: {
 }) {
   const value = await executeRestingInstanceWake({ ...runtimePlacement(env), ...input });
   if (value.woken.length > 0) await wakeAgentLaunchCoordinator(env, input.channelId, ["reborn", "launch"]);
+  // A model chosen for its wake that has since read as used up was not used:
+  // the statement that chose it says so, where its author reads the answer.
+  for (const { instanceId, model, resetsAt, sourceMessageId } of value.dropped ?? []) {
+    if (!sourceMessageId) continue;
+    await recordCommandResult(env, { channelId: input.channelId, messageId: sourceMessageId,
+      key: `wake-model-dropped:${instanceId}`.slice(0, 80), entry: { note: {
+        text: `It woke on the model it last ran: the provider quota for ${model} is used up until ` +
+          `${new Date(Date.parse(resetsAt)).toISOString().slice(0, 16).replace("T", " ")} UTC.` } } })
+      .catch((error: unknown) => console.warn("Dropped wake model was not recorded",
+        { error: error instanceof Error ? error.message : String(error) }));
+  }
   // Its card shows it waking, or waiting for its machine, now rather than at the next read.
   if (value.woken.length > 0 || value.refused.length > 0) {
     await publishChannelPresenceChanged(env, input.channelId,
@@ -348,10 +360,13 @@ export async function readSwitchTargetFacts(env: Env, input: { commandId: string
   return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).switchTargetFacts(input);
 }
 
-/** Record the model a resting Instance starts on when it next wakes; undefined when it no longer rests. */
-export async function chooseInstanceWakeModel(env: Env, input: { commandId: string; channelId: string; instanceId: string; model: string }) {
+/** Record the model or effort a resting Instance starts on when it next wakes; undefined when it no longer rests. */
+export async function chooseInstanceWakeModel(env: Env, input: { commandId: string; channelId: string; instanceId: string;
+  model?: string; effort?: string; sourceMessageId?: string }) {
   try {
-    return await (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).chooseWakeModel(input);
+    const repository = await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn");
+    return input.effort !== undefined ? await repository.chooseWakeEffort({ ...input, effort: input.effort })
+      : await repository.chooseWakeModel({ ...input, model: input.model ?? "" });
   } catch (error) {
     if (error instanceof RegistrationAccessError && error.code === "instance_not_resting") return undefined;
     throw error;

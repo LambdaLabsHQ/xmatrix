@@ -125,6 +125,9 @@ test("a switch written to a resting Instance waits for its wake", () => {
     "@claude:3 is asleep. It starts on claude-fable-5-2 when it wakes.", true]);
   assert.deepEqual(view.steps.map(step => [step.label, step.state]),
     [["Switch to fable requested", "done"], ["Recorded for its next wake", "done"]]);
+  const [effort] = parseAgentControlInvocations("@claude:3 /effort high");
+  assert.equal(controlView(effort, { kind: "effort", target: "claude:3", status: "switched", selected: "high", onWake: true },
+    undefined, { fresh: false }).detail, "@claude:3 is asleep. It starts at effort high when it wakes.");
 });
 
 test("a refused switch offers its author one step, said as what it does", () => {

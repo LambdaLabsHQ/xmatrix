@@ -1160,9 +1160,23 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.deepEqual((await reborn.wakeResting({ commandId: "wake-model-used-up", channelId: "channel",
       sourceMessageId: "model-used-up", targetInstanceId: sleeper.instanceId })).refused.map(item => item.code),
     ["registration_quota_exhausted"]);
-    await sql(`DELETE FROM control.registration_quota_observations`);
+    // A model a person chose for its wake that has read as used up since is
+    // not what strands it: it wakes on the model it last ran, the choice is
+    // dropped and named with the statement that made it. An effort chosen
+    // for the wake goes with the resume.
+    await sql(`UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1`, [sleeper.instanceId,
+      { model: "provider/other", modelsObservedAt: new Date().toISOString(),
+        models: [{ model: "provider/model", displayName: "Fable 5.2", quotaScopes: ["Fable"] }, { model: "provider/other" }] }]);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"wakeRuntimeModel":"provider/model","wakeRuntimeModelSource":"statement"}'
+      WHERE run_id=$1`, [sleeper.runId]);
+    assert.deepEqual(await reborn.chooseWakeEffort({ commandId: "wake-effort", channelId: "channel", instanceId: sleeper.instanceId,
+      effort: "high" }), { selected: "high" });
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
+    assert.deepEqual(targeted.dropped.map(item => [item.instanceId, item.model, item.sourceMessageId, Date.parse(item.resetsAt) > Date.now()]),
+      [[sleeper.instanceId, "provider/model", "statement", true]]);
+    assert.equal((await sql(`SELECT metadata_json ? 'wakeRuntimeModel' AS kept FROM data.runs WHERE run_id=$1`, [sleeper.runId])).rows[0].kept, false);
+    await sql(`DELETE FROM control.registration_quota_observations`);
     assert.deepEqual(targeted.woken.map(item => item.instanceId), [sleeper.instanceId],
       "a Connector receipt wakes its caller without waking a sleeping peer");
     assert.deepEqual((await reborn.wakeResting({ commandId: "wake-replay", channelId: "channel", sourceMessageId: "message",
@@ -1189,6 +1203,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
     // An Instance that never acknowledged a delivery has a catch-up floor of 0,
     // which replays nothing: the waking message must be its first prompt.
     assert.equal(wakeIntent.spawn_payload_json.prompt, "what was the codeword?");
+    assert.equal(wakeIntent.spawn_payload_json.context.requestedEffort, "high", "the effort chosen while it rested starts with it");
+    assert.equal(Object.hasOwn(wakeIntent.run_input_json.metadata, "wakeRuntimeEffort"), false, "and is not chosen again for the wake after");
     assert.equal(wakeIntent.spawn_payload_json.sourceMessageId, "message",
       "a catch-up copy of the waking message is dropped as the summon echo");
     assert.equal(wakeIntent.run_input_json.metadata.sourceMessageId, "message");

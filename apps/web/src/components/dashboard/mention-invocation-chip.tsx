@@ -277,8 +277,10 @@ function NoticeLines({ notices }: { notices: readonly CommandNotice[] }) {
 /** A `/model` or `/effort` statement, highlighted whole like the `@` it starts
  * with, its value marked where it sits, and the Instance's answer beside it:
  * the switch receipt is drawn here instead of as a message of its own. */
-export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunCommand }: {
+export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunCommand, notes }: {
   invocation: AgentControlInvocation; outcome?: AgentControlOutcomeRecord; notice?: CommandNotice; sentAt?: string;
+  /** What the Hub said about this command after its answer, such as a wake that could not use the chosen model. */
+  notes?: readonly CommandNotice[];
   /** Present only for the statement's author: sends the refused switch's next step. */
   onRunCommand?: (body: string) => Promise<void>;
 }) {
@@ -302,6 +304,7 @@ export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunC
     view={view}
     action={next && { label: next.label, busyLabel: "Sending…", explanation: next.explanation,
       failure: "That was not sent. Try again.", run: () => onRunCommand!(next.body) }}
+    lead={notes?.length ? <NoticeLines notices={notes} /> : undefined}
     context={options.length ? <>
       <p className="app-invocation-description">
         {options.map((option, index) => <Fragment key={option}>{index > 0 && " "}

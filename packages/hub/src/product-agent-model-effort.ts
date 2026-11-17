@@ -40,6 +40,10 @@ export interface ProductAgentSwitchTarget {
   /** The provider's reading of the Instance's account. */
   usage?: unknown;
   harness?: string;
+  /** The model a person chose for its next wake while it rests. */
+  wakeModel?: string;
+  /** Its next resume can start at a chosen effort. */
+  takesWakeEffort?: true;
   /** Other Machines that run its harness and could take over its work, each
    * with its own account's reading. */
   elsewhere?: Array<{ machineName: string; usage: unknown }>;
@@ -63,6 +67,17 @@ function modelsWithQuota(target: ProductAgentSwitchTarget, now: number): string[
   if (routingQuotaObservation(target.usage, now) === undefined) return [];
   return (target.modelCatalog ?? []).filter(row => !usedUpUntil(target, row, now))
     .sort((left, right) => Number(right.isDefault === true) - Number(left.isDefault === true)).map(row => row.model);
+}
+
+/** True when no current reading tells this model's quota: the account was
+ * not read, or the model answers to scopes none of whose windows was. */
+function modelQuotaUnread(target: ProductAgentSwitchTarget, row: RoutingModelOption, now: number): boolean {
+  if (routingQuotaObservation(target.usage, now, { model: row }) === undefined) return true;
+  const scopes = (row.quotaScopes ?? []).map(scope => scope.trim().toLowerCase());
+  if (!scopes.length) return false;
+  const read = target.usage && typeof target.usage === "object"
+    ? (target.usage as { scopedQuotaUsages?: Array<{ scope?: string }> }).scopedQuotaUsages ?? [] : [];
+  return !read.some(window => typeof window.scope === "string" && scopes.includes(window.scope.trim().toLowerCase()));
 }
 
 const onMachine = (target: ProductAgentSwitchTarget) => target.machineName ? ` on ${target.machineName}` : "";
@@ -93,7 +108,9 @@ export async function decideProductAgentSwitch(input: {
   /** Record the model a resting Instance starts on when it next wakes:
    * the model recorded, or what it can start on when `written` is none of
    * them. Undefined when it stopped resting meanwhile. */
-  chooseOnWake?(written: string): Promise<{ selected: string } | { offers: string[] } | undefined>;
+  chooseOnWake?(kind: ProductAgentControlKind, written: string): Promise<{ selected: string } | { offers: string[] } | undefined>;
+  /** Ask the Instance's machine for one fresh read of its account's quota. */
+  readQuota?(): Promise<unknown>;
 }): Promise<ProductAgentControlOutcome> {
   const { command, now } = input;
   const name = command.target.replace(/:[1-9]\d*$/u, "");
@@ -131,6 +148,10 @@ export async function decideProductAgentSwitch(input: {
   if (target && (live || asleep) && row) {
     const resetsAt = usedUpUntil(target, row, now);
     if (resetsAt) return quotaRefusal(row.model, resetsAt);
+    // No current reading covers this model's quota: the statement is the
+    // event to read it on. The reading decides the next statement and the
+    // Instance's wake; this one goes on with what is known.
+    if (modelQuotaUnread(target, row, now)) await input.readQuota?.();
   }
   let first = await input.dispatch(target?.reportedModels);
   if (!target) return first;
@@ -142,13 +163,32 @@ export async function decideProductAgentSwitch(input: {
     if (!command.value) {
       if (offered.length) first = { status: "catalog", options: offered, ...(target.currentModel ? { current: target.currentModel } : {}) };
     } else if (input.chooseOnWake) {
-      const chosen = await input.chooseOnWake(command.value);
+      const chosen = await input.chooseOnWake("model", command.value);
       if (chosen && "selected" in chosen) return { status: "switched", selected: chosen.selected, onWake: true };
       if (chosen?.offers.length) {
         return { status: "error", message: `\`${command.value}\` is not one @${command.target} can start on. ` +
           `It can start on ${chosen.offers.map(option => `\`${option}\``).join(", ")}.` };
       }
       // It woke while this was decided: it is asked like any live Instance.
+      if (!chosen) first = await input.dispatch(target.reportedModels, true);
+    }
+  }
+  // An effort is recorded the same way, against the efforts of the model it
+  // will start on, when its next resume can carry one.
+  if (first.status === "no_instance" && asleep && command.kind === "effort" && command.value && input.chooseOnWake &&
+      target.takesWakeEffort) {
+    const starts = target.wakeModel ?? target.currentModel;
+    const catalog = target.modelCatalog ?? [];
+    const efforts = ((starts ? catalog.find(option => routingModelOptionNamed(option, starts)) : undefined) ??
+      catalog.find(option => option.isDefault))?.efforts.map(effort => effort.value) ?? [];
+    const selected = efforts.find(effort => effort.toLowerCase() === command.value!.toLowerCase());
+    if (efforts.length && !selected) {
+      return { status: "error", message: `\`${command.value}\` is not one @${command.target} can start at. ` +
+        `It can start at ${efforts.map(option => `\`${option}\``).join(", ")}.` };
+    }
+    if (selected) {
+      const chosen = await input.chooseOnWake("effort", selected);
+      if (chosen && "selected" in chosen) return { status: "switched", selected: chosen.selected, onWake: true };
       if (!chosen) first = await input.dispatch(target.reportedModels, true);
     }
   }

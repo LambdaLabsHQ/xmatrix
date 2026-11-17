@@ -373,7 +373,9 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
     switch (outcome.status) {
       case "switched":
         // A resting Instance has nothing to switch: the choice waits for its wake.
-        if (outcome.onWake) return result("Queued", `@${outcome.target} is asleep. It starts on ${outcome.selected} when it wakes.`);
+        if (outcome.onWake) {
+          return result("Queued", `@${outcome.target} is asleep. It starts ${noun === "model" ? "on" : "at effort"} ${outcome.selected} when it wakes.`);
+        }
         return result("Switched", `Now on ${outcome.selected}. A turn that was running was interrupted and continues on it.`);
       case "catalog":
         return result("Options", outcome.options.length
