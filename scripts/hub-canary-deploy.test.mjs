@@ -5,7 +5,9 @@ import {
   DEFAULT_CANARY_PERCENT,
   deployWithCanary,
   isDurableObjectLifecycleRefusal,
+  missingSecretNames,
   previousDeploymentVersion,
+  secretNamesInVersion,
   trafficArguments,
   versionIdForTag,
 } from "./hub-canary-deploy.mjs";
@@ -14,7 +16,7 @@ const TAG = "a".repeat(40);
 const PREVIOUS = "previous-version";
 const NEXT = "next-version";
 
-function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }], healthErrorAt = null, failOn = null } = {}) {
+function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }], healthErrorAt = null, failOn = null, secretBindings = null } = {}) {
   const calls = [];
   const healthCalls = [];
   const sleeps = [];
@@ -27,6 +29,10 @@ function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }],
     }
     if (args[0] === "versions" && args[1] === "list") {
       return { stdout: JSON.stringify([{ id: NEXT, annotations: { "workers/tag": TAG } }, { id: PREVIOUS }]) };
+    }
+    if (args[0] === "versions" && args[1] === "view") {
+      if (secretBindings === null) throw new Error("unexpected versions view");
+      return { stdout: JSON.stringify({ resources: { bindings: secretBindings } }) };
     }
     return { stdout: "" };
   };
@@ -158,4 +164,48 @@ test("a deployment without its target URL or tag fails before touching productio
   await assert.rejects(deployWithCanary({ ...options(parts), url: "" }), /missing required url/u);
   await assert.rejects(deployWithCanary({ ...options(parts), tag: "not-a-sha" }), /full Git SHA/u);
   assert.deepEqual(parts.calls, []);
+});
+
+test("only secret bindings count toward the expected names", () => {
+  assert.deepEqual(secretNamesInVersion({
+    resources: {
+      bindings: [
+        { type: "secret_text", name: "BETTER_AUTH_SECRET" },
+        { type: "plain_text", name: "SENTRY_DSN" },
+        { type: "secret_text" },
+      ],
+    },
+  }), ["BETTER_AUTH_SECRET"]);
+  assert.deepEqual(secretNamesInVersion(undefined), []);
+  assert.deepEqual(missingSecretNames(["A", "B"], ["A"]), ["B"]);
+  assert.deepEqual(missingSecretNames(["A"], ["A", "B"]), []);
+});
+
+test("an uploaded version missing an expected secret fails before traffic moves", async () => {
+  const parts = harness({ secretBindings: [{ type: "secret_text", name: "BETTER_AUTH_SECRET" }] });
+  await assert.rejects(
+    deployWithCanary({
+      ...options(parts),
+      expectedSecretNames: ["BETTER_AUTH_SECRET", "STRIPE_SECRET_KEY"],
+    }),
+    /missing production secrets: STRIPE_SECRET_KEY/u,
+  );
+  assert.ok(parts.calls.some((call) => call.startsWith(`versions view ${NEXT}`)));
+  assert.ok(!parts.calls.some((call) => call.startsWith("versions deploy")));
+  assert.deepEqual(parts.healthCalls, []);
+});
+
+test("the uploaded version's secret bindings are read before the split", async () => {
+  const parts = harness({
+    secretBindings: [
+      { type: "secret_text", name: "BETTER_AUTH_SECRET" },
+      { type: "plain_text", name: "SENTRY_DSN" },
+    ],
+  });
+  const result = await deployWithCanary({ ...options(parts), expectedSecretNames: ["BETTER_AUTH_SECRET"] });
+  assert.equal(result.mode, "canary");
+  const view = parts.calls.findIndex((call) => call.startsWith(`versions view ${NEXT}`));
+  const split = parts.calls.findIndex((call) => call.includes(`--version-id ${NEXT} --percentage 10`));
+  assert.ok(view >= 0, "the uploaded version is read");
+  assert.ok(split > view, "secrets are proven before any traffic moves");
 });

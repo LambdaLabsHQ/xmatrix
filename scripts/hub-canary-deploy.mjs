@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -56,6 +57,30 @@ export function trafficArguments(versionId, previousVersionId, percent) {
   ];
 }
 
+/** Secret binding names the uploaded version carries. */
+export function secretNamesInVersion(version) {
+  const bindings = Array.isArray(version?.resources?.bindings) ? version.resources.bindings : [];
+  return bindings
+    .filter((binding) => binding?.type === "secret_text" &&
+      typeof binding.name === "string" && binding.name.length > 0)
+    .map((binding) => binding.name);
+}
+
+/** Expected secret names the uploaded version does not carry. */
+export function missingSecretNames(expected, present) {
+  const carried = new Set(present);
+  return expected.filter((name) => !carried.has(name));
+}
+
+export function readExpectedSecretNames(file) {
+  const names = JSON.parse(readFileSync(file, "utf8"));
+  if (!Array.isArray(names) || names.length === 0 ||
+      names.some((name) => typeof name !== "string" || name.length === 0)) {
+    fail("expected secret names must be a non-empty JSON array of secret names");
+  }
+  return names;
+}
+
 function assertPercent(value) {
   if (!Number.isSafeInteger(value) || value < 1 || value > 50) {
     fail("canary percent must be an integer between 1 and 50");
@@ -102,6 +127,7 @@ export async function deployWithCanary({
   defines = [],
   canaryPercent = DEFAULT_CANARY_PERCENT,
   holdMs = DEFAULT_HOLD_SECONDS * 1000,
+  expectedSecretNames = null,
   uploadAttempts = 3,
   deployAttempts = 3,
 }) {
@@ -144,6 +170,22 @@ export async function deployWithCanary({
     await runWithRetry(run, plainDeployArgs, deployAttempts, sleep);
     await health({ expectedSha: tag });
     return { mode: "single", reason: "durable-object-lifecycle" };
+  }
+
+  // The uploaded version carries this release's secrets. Prove that before any
+  // traffic moves: a version missing a secret must never reach production.
+  if (expectedSecretNames !== null) {
+    if (!Array.isArray(expectedSecretNames) || expectedSecretNames.length === 0) {
+      fail("expected secret names must be a non-empty array");
+    }
+    const view = JSON.parse((await runWithRetry(run, [
+      "versions", "view", versionId, ...workerArgs, "--json",
+    ], uploadAttempts, sleep)).stdout);
+    const absent = missingSecretNames(expectedSecretNames, secretNamesInVersion(view));
+    if (absent.length > 0) {
+      fail(`uploaded version ${versionId} is missing production secrets: ${absent.join(", ")}`);
+    }
+    log(`[hub-canary] version ${versionId} carries ${expectedSecretNames.length} expected secrets`);
   }
 
   if (!previousVersionId) {
@@ -256,6 +298,9 @@ async function main(argv = process.argv.slice(2)) {
     defines: argumentValues(argv, "--define"),
     canaryPercent: Number(argumentValue(argv, "--canary-percent", String(DEFAULT_CANARY_PERCENT))),
     holdMs: Number(argumentValue(argv, "--hold-seconds", String(DEFAULT_HOLD_SECONDS))) * 1000,
+    expectedSecretNames: argumentValue(argv, "--expected-secret-names") === undefined
+      ? null
+      : readExpectedSecretNames(argumentValue(argv, "--expected-secret-names")),
   });
   console.log(`[hub-canary] deployed ${result.mode === "canary" ? `${result.canaryPercent}% then 100%` : "once"} ${argumentValue(argv, "--tag")}`);
 }

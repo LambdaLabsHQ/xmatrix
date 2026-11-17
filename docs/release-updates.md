@@ -13,12 +13,15 @@ release.
 Only Worker code rolls back; PostgreSQL schema does not. The train applies
 expand migrations before this step and ships contract migrations separately
 after the new Hub is proven, so the previous Hub stays compatible during the
-window. A release that changes a Durable Object class lifecycle cannot be
-uploaded as a version or rolled back across; `wrangler versions upload` refuses
-it and the release deploys once without a canary. Secrets are Worker-level and
-do not roll back with code. `XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold
-(default 180 s). Hub only. Recovery is a CI-validated Hub beta reverting this
-change.
+window. Before any traffic moves, the uploaded version's secret bindings must
+carry every name in the release's expected set, so a version missing a secret
+fails while the previous version still serves. A release that changes a
+Durable Object class lifecycle cannot be uploaded as a version or rolled back
+across; `wrangler versions upload` refuses it and the release deploys once
+without a canary, keeping the post-deploy secret policy check. Secrets are
+Worker-level and do not roll back with code.
+`XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold (default 180 s). Hub only.
+Recovery is a CI-validated Hub beta reverting this change.
 
 ## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
 
