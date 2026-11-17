@@ -468,9 +468,12 @@ impl HandoffReplacement {
     }
 
     fn stop(&mut self) {
+        #[cfg(not(windows))]
+        let _ = process_tree::terminate_process_tree(self.pid);
+        #[cfg(windows)]
         let _ = process_tree::terminate_single_process(self.pid);
         if let Some(child) = self.child.as_mut() {
-            let _ = child.try_wait();
+            let _ = child.wait();
         }
     }
 }
@@ -527,11 +530,8 @@ async fn spawn_handoff_replacement(
     }
     // The old wrapper tears down its child process tree (which includes this
     // command) on shutdown; a fresh session keeps the replacement out of that
-    // blast radius.
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
+    // blast radius and prevents tree cleanup from crossing between generations.
+    detach_daemon_child_process(&mut command);
     let mut child = command.spawn().map_err(|err| {
         CliError::Launch(format!(
             "Failed to start replacement wrapper from {}: {err}",
@@ -544,8 +544,8 @@ async fn spawn_handoff_replacement(
     // the registration points at it. This also carries run-scoped CLI
     // authority (`xmatrix send` / `request`) across the handoff.
     if let Err(err) = rebind_own_daemon_run(pid).await {
-        let _ = process_tree::terminate_single_process(pid);
-        let _ = child.try_wait();
+        let _ = process_tree::terminate_process_tree(pid);
+        let _ = child.wait();
         return Err(CliError::Launch(format!(
             "Replacement started but the daemon run could not be rebound: {err}"
         )));
