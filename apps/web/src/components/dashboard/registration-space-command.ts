@@ -51,12 +51,12 @@ export function registrationSpaceCommand(key: SpaceAgentRegistrationKey, current
 
 /** A model the Space sets runs only where the owner's grant allows it. The
  * owner's grant command that adds `model`, or nothing when it already allows
- * it (or the change clears the model). */
+ * it, the model is unchanged, or the change clears the model. */
 export function registrationModelGrantCommand(key: SpaceAgentRegistrationKey, current: AgentRegistrationDetails,
   model: string): Record<string, unknown> | undefined {
   const wanted = model.trim();
   const grant = current.access?.grant;
-  if (!wanted || grant?.limits.models.includes(wanted)) return undefined;
+  if (!wanted || wanted === (current.configuration?.model ?? "").trim() || grant?.limits.models.includes(wanted)) return undefined;
   if (!current.canManageOwnerGrant || !grant) {
     throw new UserFacingProblem(`Only the agent's owner can let it run ${wanted}.`);
   }

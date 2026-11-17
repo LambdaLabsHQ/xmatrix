@@ -96,6 +96,8 @@ test("a default model the owner's grant does not list is added to it, by the own
   const granted = { ...current, canManageOwnerGrant: true, access: { ...current.access, grant: { state: "active", revision: 5,
     limits: { models: ["old"], workspaces: ["repo:owner/project"], capabilities: [] } } } };
   assert.equal(registrationModelGrantCommand(key, granted, "old"), undefined);
+  assert.equal(registrationModelGrantCommand(key, { ...current, canManageOwnerGrant: true }, "old"), undefined,
+    "an unchanged model needs no grant, even when the registration records none");
   assert.equal(registrationModelGrantCommand(key, granted, "  "), undefined, "clearing the model needs no grant");
   assert.deepEqual(registrationModelGrantCommand(key, granted, " new "), { key, action: "owner-grant", state: "active",
     expectedRevision: 5, limits: { models: ["old", "new"], workspaces: ["repo:owner/project"], capabilities: [] } });
