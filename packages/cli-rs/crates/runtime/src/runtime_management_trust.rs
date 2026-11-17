@@ -117,8 +117,7 @@ fn image_extension_for_mime_type(mime_type: &str) -> Option<&'static str> {
 }
 
 struct DaemonRunChild {
-    #[cfg(windows)]
-    handoff: Option<WindowsRunHandoff>,
+    handoff: Option<DaemonRunHandoff>,
     child: Option<std::process::Child>,
     /// Parent-owned process-tree fence for a freshly spawned wrapper. The
     /// wrapper may exit before a provider-owned helper does, so the daemon
@@ -233,9 +232,8 @@ struct DaemonSessionValue {
 #[derive(Debug, Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct PersistedDaemonRun {
-    #[cfg(windows)]
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    handoff: Option<PersistedWindowsRunHandoff>,
+    handoff: Option<PersistedDaemonRunHandoff>,
     pid: u32,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     profile_id: Option<String>,

@@ -2300,7 +2300,6 @@ async fn spawn_headless_agent(
     let mut provisional_sidecar =
         match (repo_pool_binding, repo_pool_spawn_claim, run_files.as_ref()) {
             (Some(binding), Some(_claim), Some(files)) => Some(PersistedDaemonRun {
-                #[cfg(windows)]
                 handoff: None,
                 pid: 0,
                 profile_id: config::active_profile_context()

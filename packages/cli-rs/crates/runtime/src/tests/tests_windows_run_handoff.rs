@@ -71,12 +71,12 @@ impl Fixture {
             adoption_public_key: "test-public-key".into(),
             control_locator: "tcp://127.0.0.1:1".into(),
         };
-        managed.handoff = Some(WindowsRunHandoff {
+        managed.handoff = Some(DaemonRunHandoff {
             previous_pid: old_pid,
             previous_tree: Some(process_tree::track_detached_std_child(&old)),
             previous_child: Some(old),
             previous_evidence: evidence,
-            previous_status,
+            previous_status: Some(previous_status),
             started_millis: unix_millis_now(),
         });
         managed.process_tree = Some(process_tree::track_detached_std_child(&candidate));

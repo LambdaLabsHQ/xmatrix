@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a failed version handoff on Linux and macOS returns to the original wrapper
+
+When `update-self` moved a Run on Linux or macOS to a replacement wrapper and
+that replacement exited or timed out before serving its channel (for example,
+because Codex refused to open a thread the original wrapper still held), the
+daemon treated the replacement's exit as the Run's own exit and dropped the
+Run while the original wrapper kept running untracked. The daemon now retains
+the original wrapper's handle, process tree and status during the handoff on
+Linux and macOS just as on Windows, rolls back to the original wrapper when the
+replacement fails or times out, and isolates the replacement in its own session
+so cleanup never crosses generations. CLI only. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a failed Claude turn no longer shows the Agent on the model `<synthetic>`
 
 When a Claude turn fails on a used-up limit or an API error, Claude Code

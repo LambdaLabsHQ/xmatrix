@@ -294,8 +294,7 @@ fn append_daemon_registry_audit(event: &str) {
 
 fn persisted_daemon_run_from_child(managed: &DaemonRunChild) -> PersistedDaemonRun {
     PersistedDaemonRun {
-        #[cfg(windows)]
-        handoff: managed.handoff.as_ref().map(WindowsRunHandoff::persisted),
+        handoff: managed.handoff.as_ref().map(DaemonRunHandoff::persisted),
         pid: managed.pid,
         profile_id: config::active_profile_context().map(|profile| profile.id.as_str().to_string()),
         cwd: managed.cwd.clone(),
@@ -453,6 +452,18 @@ fn daemon_run_sidecar_is_recoverable(run: &PersistedDaemonRun) -> bool {
         {
             return true;
         }
+    }
+    #[cfg(not(windows))]
+    if let Some(receipt) = run.handoff.as_ref()
+        && daemon_run_recovery_files_are_private(run)
+        && crate::process_tree::process_alive(receipt.previous_pid)
+        && unix_process_matches_identity(
+            receipt.previous_pid,
+            receipt.previous_start_time,
+            receipt.started_millis,
+        )
+    {
+        return true;
     }
     daemon_run_recovery_files_are_private(run)
         && marker.pid == run.pid
@@ -951,7 +962,6 @@ fn daemon_run_child_from_persisted(
     request_broker: Option<&DaemonRequestBroker>,
 ) -> DaemonRunChild {
     let mut child = DaemonRunChild {
-        #[cfg(windows)]
         handoff: None,
         child: None,
         process_tree: None,
@@ -978,9 +988,8 @@ fn daemon_run_child_from_persisted(
     };
     let _ = restore_daemon_run_grants(&mut child, &run, auth_broker, request_broker);
     retain_unrestored_daemon_run_grant_keys(&mut child, &run);
-    #[cfg(windows)]
     if let Some(receipt) = run.handoff {
-        recover_windows_run_handoff(&mut child, receipt);
+        recover_run_handoff(&mut child, receipt);
     }
     child
 }
@@ -1413,7 +1422,6 @@ async fn register_daemon_child(
     guard.insert(
         key,
         DaemonRunChild {
-            #[cfg(windows)]
             handoff: None,
             child: Some(spawned.child),
             process_tree: Some(spawned.process_tree),
