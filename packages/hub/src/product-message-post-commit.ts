@@ -2,7 +2,7 @@ import { publishChannelInvocationsChanged } from "./channel-live-judgment";
 import { captureServerErrorDiagnostic } from "./server-error-diagnostic";
 import type { ChannelAttachment } from "@xmatrix/protocol";
 import { parseMessageInteraction, parseConnectorActionCommand, createInstanceMentions, filterOperationalMentions, hasRetiredAgentLaunchMention, isAutoLaunchSummonText, parseAutoLaunchMentions,
-  isLaunchHintRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
+  isMentionOnlyRejection, parseHarnessCapabilityMentions, PREPARATION_REJECTION_MESSAGES, RETIRED_AGENT_LAUNCH_NOTICE,
   REGISTRATION_PREPARATION_REJECTION_CODES, MACHINE_OFFLINE_NOTICE_KIND, preparationRejectionMessage,
   AGENT_QUOTA_RETRY_NOTICE_KIND } from "@xmatrix/protocol";
 import { nameDiscussionByFirstMessage, startChannelAbout } from "./channel-about";
@@ -265,12 +265,13 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // A successful dispatch can contain terminal preparation refusals without
     // allocating any Run. Persisted diagnose evidence alone is not a receipt.
     // The system notice is source-bound and idempotent across message retries.
-    // A hint already lives on the mention's card: Jev's reading, or how to
-    // name the machine. A launch that failed still tells the Channel.
+    // A mention its send did not ask to start lives on its card alone. Every
+    // summon that asked to start and did not, including one that must name its
+    // machine, tells the Channel: an Agent or CLI sender never sees the card.
     // A too-old program is named, and an offline machine's notice carries the summon to send again.
     const notices = new Map<string, Record<string, unknown> | undefined>();
     for (const item of rejected ?? []) {
-      if (isLaunchHintRejection(item.code)) continue;
+      if (isMentionOnlyRejection(item.code)) continue;
       const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
       const code = known ? item.code : "registration_launch_rejected";
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;

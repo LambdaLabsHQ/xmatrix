@@ -336,8 +336,8 @@ const LAUNCH_HINT_TITLES: Record<string, string> = {
 /**
  * A launch the Hub understood and is telling the author how to write. It
  * settles into the prose the same way a declined reading does: the card holds
- * the prompt, and the Channel is not told. A launch that failed keeps its
- * Failed chip.
+ * the prompt, and the Hub's notice tells the Channel too. A launch that failed
+ * keeps its Failed chip.
  */
 export function MentionLaunchHintChip({ rejection, labelContent }: {
   rejection: SerializedAgentInvocationRejection; labelContent?: ReactNode;

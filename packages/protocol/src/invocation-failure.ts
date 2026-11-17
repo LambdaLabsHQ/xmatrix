@@ -35,9 +35,9 @@ export function isMentionOnlyRejection(code: string): boolean {
 }
 
 /** A refusal that tells the author how the mention was read, or how to write
- * it so a launch can start. The mention's card is that prompt. Quota, an
- * offline machine, a missing registration and every other failure still
- * belong in the Channel. */
+ * it so a launch can start. The mention's card is that prompt. Only a mention
+ * its send did not ask to start stays off the Channel; the machine hints are
+ * also posted there, since an Agent or CLI sender never sees the card. */
 export const LAUNCH_HINT_REJECTION_CODES = [
   ...MENTION_ONLY_REJECTION_CODES,
   "registration_machine_not_auto_assigned",
@@ -105,7 +105,7 @@ export const PREPARATION_REJECTION_MESSAGES: Readonly<Record<string, string>> = 
   registration_effort_unavailable: "No registered environment offers the requested reasoning effort with the other launch parameters. No launch was allocated.",
   registration_directory_unavailable: "The requested directory is not authorized for any environment matching the other launch parameters. No launch was allocated.",
   registration_quota_exhausted: "The matching agents have used up their provider account quota. Choose another Agent, or wait for the provider to reset the quota and send your message again. No launch was allocated.",
-  registration_machine_not_auto_assigned: "Only machines their owners keep out of automatic assignment can run this; name one with machine:<name> to use it. No launch was allocated.",
+  registration_machine_not_auto_assigned: "Only machines their owners keep out of automatic assignment can run this; name one with machine:<name> to use it (xmatrix agent list marks them named only). No launch was allocated.",
   ...Object.fromEntries((["environment", "parameter"] as const).flatMap(phase =>
     Object.entries(REGISTRATION_JEV_FAILURES).map(([reason, description]) => [
       `registration_${phase}_${reason}`,
