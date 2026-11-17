@@ -42,7 +42,7 @@ const TEST_HUB_REQUIRED = [
   "XMATRIX_MOCK_AUTH_TOKEN",
 ];
 
-const POLICIES = {
+export const SECRET_POLICIES = {
   "test-hub-email-only": {
     required: TEST_HUB_REQUIRED,
     forbiddenPrefixes: ["GOOGLE_CLIENT_"],
@@ -74,7 +74,7 @@ const invokedDirectly = process.argv[1] && resolve(process.argv[1]) === fileURLT
 if (invokedDirectly) {
   try {
     const match = args.length === 1 ? /^--policy=(.+)$/u.exec(args[0]) : null;
-    const options = match ? POLICIES[match[1]] : undefined;
+    const options = match ? SECRET_POLICIES[match[1]] : undefined;
     if (!options) {
       throw new Error(
         "Usage: wrangler-secret-policy.mjs <json-file> " +

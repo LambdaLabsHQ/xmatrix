@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { argumentValue, argumentValues, runCliMain } from "./cli-entrypoint.mjs";
+import { assertSecretPolicy, SECRET_POLICIES } from "./wrangler-secret-policy.mjs";
 
 /** Gradual part of a release the new Hub serves before it takes all traffic. */
 export const DEFAULT_CANARY_PERCENT = 10;
@@ -46,6 +48,31 @@ export function versionIdForTag(versions, tag) {
  */
 export function isDurableObjectLifecycleRefusal(text) {
   return /durable object|migration|10211/iu.test(text ?? "");
+}
+
+/** Secret names a Worker version carries, as `wrangler versions view --json` reports them. */
+export function secretNamesOfVersion(version) {
+  const bindings = version?.resources?.bindings;
+  if (!Array.isArray(bindings)) fail("uploaded Hub version has no bindings to verify");
+  return bindings
+    .filter((binding) => binding?.type === "secret_text" && typeof binding.name === "string" && binding.name.length > 0)
+    .map((binding) => binding.name);
+}
+
+/**
+ * The uploaded version must carry every secret this release selected before
+ * any traffic reaches it. The Worker-level check after deploy is too late: a
+ * version missing a secret would already serve 10% and then 100%.
+ */
+export function assertVersionSecrets(version, expectedNames) {
+  if (!Array.isArray(expectedNames) || expectedNames.some((name) => typeof name !== "string" || !name)) {
+    fail("expected secret names must be a list of names");
+  }
+  const policy = SECRET_POLICIES["production-hub"];
+  assertSecretPolicy(secretNamesOfVersion(version), {
+    ...policy,
+    required: [...policy.required, ...expectedNames],
+  });
 }
 
 export function trafficArguments(versionId, previousVersionId, percent) {
@@ -100,6 +127,7 @@ export async function deployWithCanary({
   outdir,
   url,
   defines = [],
+  expectedSecretNames = [],
   canaryPercent = DEFAULT_CANARY_PERCENT,
   holdMs = DEFAULT_HOLD_SECONDS * 1000,
   uploadAttempts = 3,
@@ -145,6 +173,13 @@ export async function deployWithCanary({
     await health({ expectedSha: tag });
     return { mode: "single", reason: "durable-object-lifecycle" };
   }
+
+  // Prove the version itself carries the selected secrets before the first
+  // byte of traffic reaches it. No deployment has happened yet, so a failure
+  // here leaves the running version untouched.
+  const version = JSON.parse((await run(["versions", "view", versionId, ...workerArgs, "--json"])).stdout);
+  assertVersionSecrets(version, expectedSecretNames);
+  log(`[hub-canary] uploaded version carries the ${expectedSecretNames.length} selected secret name(s)`);
 
   if (!previousVersionId) {
     await runWithRetry(run, [
@@ -243,6 +278,7 @@ export function createHealthChecker({ url, exec = spawnSync } = {}) {
 
 async function main(argv = process.argv.slice(2)) {
   const url = argumentValue(argv, "--url");
+  const expectedSecretNamesPath = argumentValue(argv, "--expected-secret-names");
   const result = await deployWithCanary({
     run: createWranglerRunner({ cwd: process.cwd() }),
     health: createHealthChecker({ url }),
@@ -254,6 +290,9 @@ async function main(argv = process.argv.slice(2)) {
     outdir: argumentValue(argv, "--outdir"),
     url,
     defines: argumentValues(argv, "--define"),
+    expectedSecretNames: expectedSecretNamesPath
+      ? JSON.parse(readFileSync(expectedSecretNamesPath, "utf8"))
+      : [],
     canaryPercent: Number(argumentValue(argv, "--canary-percent", String(DEFAULT_CANARY_PERCENT))),
     holdMs: Number(argumentValue(argv, "--hold-seconds", String(DEFAULT_HOLD_SECONDS))) * 1000,
   });

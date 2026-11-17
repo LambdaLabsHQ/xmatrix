@@ -505,6 +505,7 @@ jobs:
             --outdir "$RUNNER_TEMP/hub-bundle" \
             --url "$XMATRIX_HUB_ORIGIN/" \
             --worker xmatrix-hub \
+            --expected-secret-names "$RUNNER_TEMP/production-hub-expected-secret-names.json" \
             --hold-seconds "${XMATRIX_HUB_CANARY_HOLD_SECONDS:-180}" \
             "${error_reporting[@]}"
 
