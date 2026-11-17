@@ -356,7 +356,8 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
   const noun = invocation.kind;
   // Who answered: a model the Hub's quota reading already shows used up, or
   // an Instance with no connection, was never asked.
-  const answeredBy = outcome?.status !== "error" ? "Instance answered"
+  const answeredBy = outcome?.status === "switched" && outcome.onWake ? "Recorded for its next wake"
+    : outcome?.status !== "error" ? "Instance answered"
     : outcome.starting ? "Instance not connected"
       : outcome.quotaExhausted?.resetsAt ? "Refused by xMatrix on the provider's quota reading" : "Instance answered";
   const result = (label: InvocationChip, detail: string, animate = false): InvocationView => {
@@ -371,6 +372,8 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
   if (outcome) {
     switch (outcome.status) {
       case "switched":
+        // A resting Instance has nothing to switch: the choice waits for its wake.
+        if (outcome.onWake) return result("Queued", `@${outcome.target} is asleep. It starts on ${outcome.selected} when it wakes.`);
         return result("Switched", `Now on ${outcome.selected}. A turn that was running was interrupted and continues on it.`);
       case "catalog":
         return result("Options", outcome.options.length

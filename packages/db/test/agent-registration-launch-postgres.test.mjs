@@ -840,6 +840,24 @@ integration("launch survives a hostname change with stale Workspace metadata and
     const facts = await factsOf('continuation-facts');
     assert.deepEqual([facts.models, facts.modelCatalog.map(row => [row.model, row.quotaScopes]), facts.supportsNativeModel],
       [[], [['provider/model', ['Model']], ['provider/other', undefined]], undefined]);
+    // A model chosen for it while it rests is recorded on its Run, in the
+    // runtime's own name for it, and is the model its next resume asks for.
+    const rested = (await sql(`SELECT status,rest_state FROM data.instances WHERE instance_id=$1`, [cold.instanceId])).rows[0];
+    const choose = model => reborn.chooseWakeModel({ commandId: `wake-model-${model}`, channelId: 'channel', instanceId: cold.instanceId, model });
+    await sql(`UPDATE data.instances SET status='offline',rest_state='sleeping' WHERE instance_id=$1`, [cold.instanceId]);
+    assert.deepEqual(await choose('unknown'), { offers: ['provider/model', 'provider/other'] });
+    assert.deepEqual(await choose('Other'), { selected: 'provider/other' });
+    assert.equal((await sql(`SELECT metadata_json->>'wakeRuntimeModel' AS model FROM data.runs WHERE run_id=$1`, [cold.runId])).rows[0].model,
+      'provider/other');
+    // The resume takes it as its model: here no daemon can switch to a catalog model yet, and it is refused as one is.
+    await assert.rejects(() => reborn.prepare({ commandId: 'wake-model-reborn', actorUserId: 'caller', channelId: 'channel',
+      sourceMessageId: 'repository', sourceInstanceId: cold.instanceId, prompt: 'continue' }),
+    error => error.code === 'registration_workspace_or_daemon_unavailable');
+    // One that no longer rests has no wake to record a model for.
+    await sql(`UPDATE data.instances SET rest_state=NULL WHERE instance_id=$1`, [cold.instanceId]);
+    await assert.rejects(() => choose('Other'), error => error.code === 'instance_not_resting');
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json-'wakeRuntimeModel' WHERE run_id=$1`, [cold.runId]);
+    await sql(`UPDATE data.instances SET status=$2,rest_state=$3 WHERE instance_id=$1`, [cold.instanceId, rested.status, rested.rest_state]);
     // And the reverse: a declared-model Instance is offered no catalog model.
     await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"useRuntimeDefaultModel":false,"requestedRuntimeModel":"provider/model"}'
       WHERE run_id=$1`, [cold.runId]);

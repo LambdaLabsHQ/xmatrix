@@ -342,3 +342,33 @@ test("a statement to an Instance that is still starting waits for its first repo
   };
   assert.deepEqual([await waits("running"), await waits("asleep")], [[false, true], [false]]);
 });
+
+test("a model written to a resting Instance is recorded for its wake, and a used-up one is still refused", async () => {
+  const asleep = (extra = {}) => running({ state: "asleep", ...extra });
+  const decideAsleep = (command, target, chooseOnWake, dispatch = async () => ({ status: "no_instance" })) =>
+    decideProductAgentSwitch({ command: { target: "claude:3", ...command }, target, now: NOW, dispatch, chooseOnWake });
+  const asked = [];
+  assert.deepEqual(await decideAsleep({ kind: "model", value: "opus" }, asleep(),
+    async (written) => { asked.push(written); return { selected: "claude-opus-5-5" }; }),
+  { status: "switched", selected: "claude-opus-5-5", onWake: true });
+  assert.deepEqual(asked, ["opus"]);
+  // A model it cannot start on names the ones it can.
+  assert.deepEqual(await decideAsleep({ kind: "model", value: "gpt" }, asleep(), async () => ({ offers: ["claude-opus-5-5"] })),
+    { status: "error", message: "`gpt` is not one @claude:3 can start on. It can start on `claude-opus-5-5`." });
+  // Used up: refused with its reset before anything is recorded.
+  const refused = await decideAsleep({ kind: "model", value: "fable" }, asleep({ usage: FABLE_USED_UP }),
+    async () => assert.fail("nothing to record"), async () => assert.fail("nothing to ask"));
+  assert.match(refused.message, /^the provider quota for claude-fable-5-2 on build-box is used up until 2026-11-19 18:00 UTC\./u);
+  // It woke meanwhile: it is asked as a live Instance, waiting for its report.
+  const waited = [];
+  assert.deepEqual(await decideAsleep({ kind: "model", value: "opus" }, asleep(), async () => undefined,
+    async (_models, awaitStarting) => { waited.push(awaitStarting === true);
+      return awaitStarting ? { status: "switched", selected: "claude-opus-5-5" } : { status: "no_instance" }; }),
+  { status: "switched", selected: "claude-opus-5-5" });
+  assert.deepEqual(waited, [false, true]);
+  // Its models are listed from what it last reported; an effort still waits for it to wake.
+  assert.deepEqual(await decideAsleep({ kind: "model" }, asleep({ usage: FABLE_USED_UP })),
+    { status: "catalog", options: ["claude-opus-5-5", "claude-fable-5-2"], current: "claude-opus-5-5",
+      usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
+  assert.match((await decideAsleep({ kind: "effort", value: "high" }, asleep())).message, /is asleep/u);
+});

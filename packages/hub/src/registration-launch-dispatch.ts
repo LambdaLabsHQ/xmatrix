@@ -348,6 +348,16 @@ export async function readSwitchTargetFacts(env: Env, input: { commandId: string
   return (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).switchTargetFacts(input);
 }
 
+/** Record the model a resting Instance starts on when it next wakes; undefined when it no longer rests. */
+export async function chooseInstanceWakeModel(env: Env, input: { commandId: string; channelId: string; instanceId: string; model: string }) {
+  try {
+    return await (await placedRebornRepository({ ...runtimePlacement(env), ...input }, "reborn")).chooseWakeModel(input);
+  } catch (error) {
+    if (error instanceof RegistrationAccessError && error.code === "instance_not_resting") return undefined;
+    throw error;
+  }
+}
+
 /** Jev decides whether a new conversation's first message asks for an Agent;
  * a Human author may choose first within the window. */
 export function decideNewConversationLaunch(env: Env, input: {

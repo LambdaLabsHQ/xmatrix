@@ -117,6 +117,16 @@ test("legacy routine stop confirmations disappear without a loaded command, whil
   assert.deepEqual([...folded], ["routine", "source-unloaded"]);
 });
 
+test("a switch written to a resting Instance waits for its wake", () => {
+  const [switching] = parseAgentControlInvocations("@claude:3 /model fable");
+  const view = controlView(switching, { kind: "model", target: "claude:3", status: "switched", selected: "claude-fable-5-2", onWake: true },
+    undefined, { fresh: false });
+  assert.deepEqual([view.label, view.detail, view.terminal], ["Queued",
+    "@claude:3 is asleep. It starts on claude-fable-5-2 when it wakes.", true]);
+  assert.deepEqual(view.steps.map(step => [step.label, step.state]),
+    [["Switch to fable requested", "done"], ["Recorded for its next wake", "done"]]);
+});
+
 test("a refused switch offers its author one step, said as what it does", () => {
   const [switching] = parseAgentControlInvocations("@claude:3 /model fable");
   const refused = (extra) => ({ kind: "model", target: "claude:3", status: "error", message: "refused", ...extra });
