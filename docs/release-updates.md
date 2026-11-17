@@ -1,5 +1,25 @@
 # Release Updates
 
+## Unreleased: the Hub deploys as a canary and rolls its code back on failure
+
+`scripts/hub-canary-deploy.mjs` now owns the production Hub deployment. It
+uploads the tagged release as a Worker version, gives it 10% of traffic for
+three minutes, verifies that version through a Cloudflare version override
+(`hub-postdeploy-smoke.mjs --version-override`), then promotes it to 100% and
+verifies the public origin. A failure during the split, the hold, the promotion
+or the final check deploys the previous version back at 100% and fails the
+release.
+
+Only Worker code rolls back; PostgreSQL schema does not. The train applies
+expand migrations before this step and ships contract migrations separately
+after the new Hub is proven, so the previous Hub stays compatible during the
+window. A release that changes a Durable Object class lifecycle cannot be
+uploaded as a version or rolled back across; `wrangler versions upload` refuses
+it and the release deploys once without a canary. Secrets are Worker-level and
+do not roll back with code. `XMATRIX_HUB_CANARY_HOLD_SECONDS` changes the hold
+(default 180 s). Hub only. Recovery is a CI-validated Hub beta reverting this
+change.
+
 ## Unreleased: a sign-in key read is never shared with another request (HUB-DJ)
 
 The Hub cached the in-flight read of a Better Auth public key and let other
