@@ -115,7 +115,6 @@ fn test_event_after(
 
 fn test_empty_daemon_run_child() -> super::DaemonRunChild {
     super::DaemonRunChild {
-        #[cfg(windows)]
         handoff: None,
         child: None,
         process_tree: None,
