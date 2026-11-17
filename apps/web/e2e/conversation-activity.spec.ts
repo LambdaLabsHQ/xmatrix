@@ -487,7 +487,8 @@ function pullRequestLife() {
     entry(reviewer, 10, "Reload automatically when the network comes back."),
     opened(18, 121),
     entry(github, 18, `Following [LambdaLabsHQ/NomadCafe#121](${pullUrl}) in this conversation.`, {
-      metadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: { ...pullFact, event: "subscribed" } } }),
+      metadata: { xmatrixProvenance: "activity", xmatrixGitHubPullRequest: { ...pullFact, event: "subscribed",
+        title: "Reload when the network returns" } } }),
     entry(github, 19, `CI passed on [LambdaLabsHQ/NomadCafe#121](${pullUrl}) at 3ffa10b.`, {
       metadata: { xmatrixGitHubPullRequest: { ...pullFact, event: "ci_passed", sha: "3ffa10b" } } }),
     entry(github, 20, `yiming reviewed [LambdaLabsHQ/NomadCafe#121](${pullUrl})\n\nCan the retry back off?`, {
@@ -512,12 +513,15 @@ test("GitHub's pull request facts are its messages: one slip per stretch, a revi
   await expect(slips).toHaveCount(2);
   await expect(slips.nth(0).locator("[data-pull-request]")).toHaveCount(1);
   const opened = slips.nth(0).locator("[data-pull-request='#121']");
-  // From opening, through the subscription GitHub made here, to what it reported.
-  await expect(opened).toHaveText(/#121.*opened by claude:1 · following here · CI passed/u);
+  // Named from the start by the title read when it was subscribed; the subscription itself is
+  // plumbing and says nothing on the line, which reads from opening to what GitHub reported.
+  await expect(opened).toHaveText(/#121 Reload when the network returns.*opened by claude:1 · CI passed$/u);
+  await expect(opened).not.toContainText("following");
   await expect(opened.getByRole("link", { name: "LambdaLabsHQ/NomadCafe#121" })).toHaveAttribute("href", pullUrl);
   const later = slips.nth(1).locator("[data-pull-request]");
   await expect(later).toHaveCount(2);
-  await expect(later.nth(0)).toHaveText(/#121 Reload on reconnect.*CI failed: web, ios · merged · stopped following/u);
+  // The latest title GitHub said names it; a merge says it is done without "stopped following".
+  await expect(later.nth(0)).toHaveText(/#121 Reload on reconnect.*CI failed: web, ios · merged$/u);
   await expect(later.nth(0).getByRole("link", { name: "web" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/NomadCafe/runs/1");
   await expect(later.nth(1)).toHaveText(/#122.*opened by claude:1/u);

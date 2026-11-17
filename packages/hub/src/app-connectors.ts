@@ -972,6 +972,13 @@ export async function readGitHubPullRequestHead(
   return sha;
 }
 
+/** A pull request's title now, or "" when GitHub gives none. */
+export async function readGitHubPullRequestTitle(
+  ...pull: Parameters<typeof readGitHubPullRequest>
+): Promise<string> {
+  return githubString((await readGitHubPullRequest(...pull)).title) ?? "";
+}
+
 /** Whether a pull request is open now. */
 export async function readGitHubPullRequestOpen(
   ...pull: Parameters<typeof readGitHubPullRequest>

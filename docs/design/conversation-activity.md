@@ -218,9 +218,12 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   stretch of bare pull request facts (a Run's `pull_request` entry; GitHub's
   subscribed, CI verdict, merge and close, `xmatrixGitHubPullRequest`
   metadata, §3.6) is one message with one slip entry per pull request: its
-  current mark, `#121` and its title once GitHub said it, the latest time,
-  and beneath its steps `opened by claude:1 · following here · CI passed ·
-  merged · stopped following` (closing ends the subscription). Talk ends the
+  current mark, `#121` and its title (read when the subscription is made,
+  then the latest GitHub said, carried into later stretches), the latest
+  time, and beneath its steps `opened by claude:1 · CI passed · merged`. The
+  subscription and its end are how the steps reach the conversation, not
+  steps a person acts on, so the line does not say them; the subscription
+  stays in the conversation as context for Agents. Talk ends the
   stretch; GitHub's messages moments apart share one header like any
   sender's. A person's review or comment is GitHub's message with a slip
   headed `yiming requested changes on #121` over their words.

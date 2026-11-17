@@ -270,7 +270,8 @@ export type TimelineItem = {
    * request, its opening and what GitHub reported about it, in the order each
    * first appears (conversation-activity-rows.ts).
    */
-  pullRequests?: { ref: { repository: string; number: number; url: string }; items: TimelineItem[] }[];
+  /** `title` is the pull request's latest title GitHub said up to this stretch, from any earlier fact too. */
+  pullRequests?: { ref: { repository: string; number: number; url: string }; items: TimelineItem[]; title?: string }[];
   /** Same sender as the row above, moments later, with the same tags: no header. */
   continuation?: boolean;
   /**

@@ -19,8 +19,12 @@ export type GitHubPullRequestFact = {
   number: number;
   url: string;
 } & (
-  /** The conversation now follows the pull request through the Space's GitHub connection. */
-  | { event: "subscribed" }
+  /**
+   * The conversation now follows the pull request through the Space's GitHub
+   * connection. Context for Agents; a timeline shows only its `title`, read
+   * when the subscription was made, so the pull request is named from the start.
+   */
+  | { event: "subscribed"; title?: string }
   | { event: "ci_passed"; sha: string }
   | { event: "ci_failed"; sha: string; failed: GitHubPullRequestFactCheck[]; more: number }
   /** `actor` is the person who merged or closed it; a GitHub App's bot is not named. */
@@ -52,7 +56,10 @@ export function githubPullRequestFactOf(metadata: unknown): GitHubPullRequestFac
   }
   const ref = { repository, number, url };
   const sha = string(fact.sha) ?? "";
-  if (fact.event === "subscribed") return { ...ref, event: "subscribed" };
+  if (fact.event === "subscribed") {
+    const title = string(fact.title);
+    return { ...ref, event: "subscribed", ...(title ? { title } : {}) };
+  }
   if (fact.event === "ci_passed") return { ...ref, event: "ci_passed", sha };
   if (fact.event === "ci_failed") {
     const failed = (Array.isArray(fact.failed) ? fact.failed : []).flatMap((entry): GitHubPullRequestFactCheck[] => {

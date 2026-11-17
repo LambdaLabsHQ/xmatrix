@@ -179,10 +179,17 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
   // has an entry per pull request, in the order each first appears
   // (docs/design/conversation-activity.md §4.1).
   let pulls = new Map<string, { ref: PullRequestRef; items: TimelineItem[] }>();
+  // A pull request is named by the latest title GitHub said, in any stretch so far.
+  const titles = new Map<string, string>();
   const flush = () => {
     if (run.length > 0) rows.push(foldRow(run));
     run = [];
-    if (pulls.size > 0) pushMessage(pullRequestStretch([...pulls.values()]));
+    if (pulls.size > 0) {
+      pushMessage(pullRequestStretch([...pulls].map(([key, line]) => {
+        const title = titles.get(key);
+        return title ? { ...line, title } : line;
+      })));
+    }
     pulls = new Map();
   };
   for (const item of timeline) {
@@ -190,6 +197,8 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
     if (pull) {
       if (run.length > 0) flush();
       const key = pullRequestKey(pull);
+      const fact = timelineItemGitHubFact(item);
+      if (fact && "title" in fact && fact.title) titles.set(key, fact.title);
       const line = pulls.get(key);
       if (line) line.items.push(item);
       else pulls.set(key, { ref: pull, items: [item] });
