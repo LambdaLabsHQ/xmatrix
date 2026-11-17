@@ -550,6 +550,12 @@ function quotaWindowReadings(windows: unknown, observed: number, now: number, al
   });
 }
 
+/** The account verdict as it bears on a scoped window: a refusal of the
+ * account refuses every model; being served says nothing of one model's own limit. */
+function scopedVerdict(allowed: boolean | undefined): boolean | undefined {
+  return allowed === false ? false : undefined;
+}
+
 /** A provider read (`provider_api`) with its read time; local session estimates never qualify. */
 function providerQuotaReading(usage: unknown, now: number):
   { row: Record<string, unknown>; observed: number; scopedObserved: number; allowed?: boolean } | undefined {
@@ -572,11 +578,15 @@ export function routingQuotaObservation(usage: unknown, now: number,
   const reading = providerQuotaReading(usage, now);
   if (!reading) return undefined;
   const { row, observed, allowed } = reading;
-  const readings = [
-    ...quotaWindowReadings(row.quotaUsages, observed, now, allowed, () => true),
-    ...quotaWindowReadings(row.scopedQuotaUsages, reading.scopedObserved, now, allowed,
-      window => routingQuotaScopeConstrains(window.scope, options?.model)),
-  ];
+  const account = quotaWindowReadings(row.quotaUsages, observed, now, allowed, () => true);
+  // A verdict is the provider's answer to one request, on the model that
+  // request ran. `allowed` says the account still serves past its own
+  // windows; it says nothing of another model's own limit, which the provider
+  // goes on refusing (2026-11-17: Opus requests were allowed all evening
+  // while every Fable request was refused until Fable's reset).
+  const scoped = quotaWindowReadings(row.scopedQuotaUsages, reading.scopedObserved, now, scopedVerdict(allowed),
+    window => routingQuotaScopeConstrains(window.scope, options?.model));
+  const readings = [...account, ...scoped];
   if (!readings.length) {
     // A prepaid account has no window: the provider's verdict on it, else
     // whether any money is left, is all the headroom there is to read.
@@ -587,12 +597,13 @@ export function routingQuotaObservation(usage: unknown, now: number,
       expiresAt: new Date(expires).toISOString(), source: "provider" };
   }
   // The tightest window counts; an exhausted window holds until its reset.
-  const windowRemaining = Math.min(...readings.map(item => item.remaining));
-  const exhausted = readings.filter(item => item.remaining === 0);
-  const expires = exhausted.length && allowed !== true ? Math.max(...exhausted.map(item => item.expires))
+  const least = (windows: QuotaWindowReading[]) => Math.min(...windows.map(item => item.remaining));
+  const exhausted = [...allowed === true ? [] : account, ...scoped].filter(item => item.remaining === 0);
+  const expires = exhausted.length ? Math.max(...exhausted.map(item => item.expires))
     : Math.min(...readings.map(item => item.expires));
-  const value = allowed === false ? 0
-    : allowed === true ? Math.max(windowRemaining, ROUTING_SERVED_PAST_LIMIT_REMAINING) : windowRemaining;
+  const accountRemaining = allowed === true && account.length
+    ? Math.max(least(account), ROUTING_SERVED_PAST_LIMIT_REMAINING) : least(account);
+  const value = allowed === false ? 0 : Math.min(accountRemaining, least(scoped));
   return { value, observedAt: new Date(observed).toISOString(),
     expiresAt: new Date(expires).toISOString(), source: "provider" };
 }
@@ -602,7 +613,7 @@ export function routingQuotaObservation(usage: unknown, now: number,
 export function routingScopedQuotaExpiry(usage: unknown, now: number): string | undefined {
   const reading = providerQuotaReading(usage, now);
   if (!reading) return undefined;
-  const readings = quotaWindowReadings(reading.row.scopedQuotaUsages, reading.scopedObserved, now, reading.allowed,
+  const readings = quotaWindowReadings(reading.row.scopedQuotaUsages, reading.scopedObserved, now, scopedVerdict(reading.allowed),
     window => typeof window.scope === "string" && Boolean(window.scope.trim()));
   return readings.length ? new Date(Math.max(...readings.map(item => item.expires))).toISOString() : undefined;
 }
