@@ -70,14 +70,14 @@ function modelsWithQuota(target: ProductAgentSwitchTarget, now: number): string[
 }
 
 /** True when no current reading tells this model's quota: the account was
- * not read, or the model answers to scopes none of whose windows was. */
+ * not read, or the model answers to scopes and the reading's scoped part was
+ * not read. A complete reading that lists no window for a scope has told it:
+ * the provider holds no such limit against the account now. */
 function modelQuotaUnread(target: ProductAgentSwitchTarget, row: RoutingModelOption, now: number): boolean {
   if (routingQuotaObservation(target.usage, now, { model: row }) === undefined) return true;
-  const scopes = (row.quotaScopes ?? []).map(scope => scope.trim().toLowerCase());
-  if (!scopes.length) return false;
-  const read = target.usage && typeof target.usage === "object"
-    ? (target.usage as { scopedQuotaUsages?: Array<{ scope?: string }> }).scopedQuotaUsages ?? [] : [];
-  return !read.some(window => typeof window.scope === "string" && scopes.includes(window.scope.trim().toLowerCase()));
+  if (!(row.quotaScopes ?? []).length) return false;
+  return !target.usage || typeof target.usage !== "object" ||
+    !Array.isArray((target.usage as { scopedQuotaUsages?: unknown }).scopedQuotaUsages);
 }
 
 const onMachine = (target: ProductAgentSwitchTarget) => target.machineName ? ` on ${target.machineName}` : "";

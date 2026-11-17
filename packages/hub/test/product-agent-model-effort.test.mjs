@@ -396,8 +396,8 @@ test("a model whose quota no current reading tells has it read, and the statemen
   const decideRead = (target, value = "fable") => decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value },
     target, now: NOW, dispatch: async () => ({ status: "switched", selected: "claude-fable-5-2" }),
     readQuota: async () => { reads.push(value); } });
-  const accountOnly = { ...FABLE_USED_UP, scopedQuotaUsages: [] };
-  // The account was read but not the Fable-only window: Fable's quota is unread, Opus's is not.
+  const { scopedQuotaUsages: _unread, ...accountOnly } = FABLE_USED_UP;
+  // The account was read but not its scoped part: Fable's quota is unread, Opus's is not.
   assert.equal((await decideRead(running({ usage: accountOnly }))).status, "switched");
   await decideRead(running({ usage: accountOnly }), "claude-opus-5-5");
   await decideRead(running(), "claude-opus-5-5");
@@ -405,5 +405,7 @@ test("a model whose quota no current reading tells has it read, and the statemen
   // A reading that covers the model asks for nothing.
   const covered = { ...FABLE_USED_UP, scopedQuotaUsages: [{ label: "1w", scope: "Fable", percent: 10, resetAt: "2026-11-19T18:00:00Z" }] };
   await decideRead(running({ usage: covered }));
+  // So does a complete reading that lists no Fable window: the provider holds no such limit now.
+  await decideRead(running({ usage: { ...FABLE_USED_UP, scopedQuotaUsages: [] } }));
   assert.deepEqual(reads, ["fable", "claude-opus-5-5"]);
 });

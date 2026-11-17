@@ -145,7 +145,8 @@ A refused switch offers the person who wrote it one step, in its answer
   the model it will start on, and goes with the resume's spawn once; onto a
   runtime-default model only a daemon that carries an effort there takes it.
 - A `/model` naming a model whose quota no current reading tells (the account
-  unread, or none of the model's own scopes read) asks the Instance's daemon
+  unread, or its scoped part unread; a complete reading that lists no window
+  for the model's scope has told it) asks the Instance's daemon
   for one fresh read: the statement is the event. The statement itself goes
   on with what is known. When a resting Instance then wakes and a current
   reading shows its chosen model used up while the model it last ran has

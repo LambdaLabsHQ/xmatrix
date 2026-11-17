@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: a `/model` asks for a quota read only when the reading is missing
+
+Since #1758 a `/model` asks the machine to read quota that no current
+reading tells. It also asked when a complete reading simply listed no limit
+for the model (the provider holds none against the account now), on every
+statement. It now asks only when the account or its per-model part was not
+read. Hub only. Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: `/effort` to a sleeping Agent takes effect when it wakes, and an unread quota is read
 
 `/effort` written to a sleeping Agent is recorded like `/model` (#1754): the
