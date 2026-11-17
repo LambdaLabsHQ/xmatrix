@@ -21,6 +21,8 @@ import { wakeAgentLaunchCoordinator } from "./agent-launch-coordinator-wake";
 import { QUOTA_VERIFY_WINDOW_MS, waitAfterQuotaRefusal } from "./quota-waits";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import type { Env } from "./types";
+import { recordAgentLaunchStage, type PostgresObservabilityEnv } from "./postgres-observability";
+import type { RegistrationLaunchChooser } from "@xmatrix/db";
 
 /** The Channel's active Space placement owns every registration launch in it. */
 async function channelLaunchRepository(input: { database: AuthorityDatabase; directory: AuthorityDatabase;
@@ -41,6 +43,50 @@ async function channelLaunchRepository(input: { database: AuthorityDatabase; dir
 /** Jev for one launch decision, in the Space its Channel is placed in. */
 type LaunchEvaluator = (spaceId: string) => RoutingEvaluator;
 
+/**
+ * The summon's stages before its Launch is prepared, each recorded as an
+ * Agent Launch stage (docs/performance/agent-launch.md): resolving the
+ * candidates, reading the Channel context, Jev's decision with its evidence,
+ * and preparing the Launch. One selection's stages are recorded; a message
+ * that summons more than one records the first resolve and each decision.
+ */
+function launchStageTiming(env: PostgresObservabilityEnv | undefined, startedAt = Date.now()) {
+  const record = (stage: string, durationMs: number, outcome: "ok" | "error" = "ok") => {
+    if (env) recordAgentLaunchStage({ env, stage, outcome, durationMs: Math.max(0, durationMs) });
+  };
+  let decisions = 0, decidedAt: number | undefined, contextMs = 0;
+  return {
+    context(read: (sourceSequence: number) => Promise<Record<string, unknown>>) {
+      return async (sourceSequence: number) => {
+        const at = Date.now();
+        try { return await read(sourceSequence); }
+        finally { contextMs += Date.now() - at; }
+      };
+    },
+    chooser(choose: RegistrationLaunchChooser): RegistrationLaunchChooser {
+      return async request => {
+        const at = Date.now();
+        if (decisions === 0) record("launch_resolve", at - startedAt);
+        decisions++;
+        contextMs = 0;
+        let outcome: "ok" | "error" = "error";
+        try {
+          const selected = await choose(request);
+          outcome = "ok";
+          return selected;
+        } finally {
+          decidedAt = Date.now();
+          if (contextMs > 0) record("launch_context", contextMs, outcome);
+          record("launch_decision", decidedAt - at - contextMs, outcome);
+        }
+      };
+    },
+    prepared(count: number) {
+      if (decisions === 1 && count === 1 && decidedAt !== undefined) record("launch_prepare", Date.now() - decidedAt);
+    },
+  };
+}
+
 export async function executeRegistrationLaunchDispatch(input: {
   quotaRetry?: import("@xmatrix/protocol").AgentQuotaRetryAdmission;
   onlySelectionIndex?: number;
@@ -49,10 +95,13 @@ export async function executeRegistrationLaunchDispatch(input: {
   /** "Start" on one summon its send did not launch. */
   forceMention?: string;
 }) {
+  const timing = launchStageTiming(input.env as PostgresObservabilityEnv | undefined);
   const { placement, repository } = await channelLaunchRepository(input);
-  const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? registrationLaunchChooser(input.evaluatorFor(placement.spaceId), registrationLaunchContextReader({
-    ...input, spaceId: placement.spaceId,
-  })) : undefined);
+  const result = await repository.dispatchFromMessage(input, input.evaluatorFor ? timing.chooser(registrationLaunchChooser(
+    input.evaluatorFor(placement.spaceId), timing.context(registrationLaunchContextReader({
+      ...input, spaceId: placement.spaceId,
+    })))) : undefined);
+  timing.prepared(result.prepared.length);
   if (result.rejected.length) {
     await new PostgresRuntimeRepository(input.database).recordRoutingRejections({
       channelId: input.channelId, sourceMessageId: input.sourceMessageId, actorUserId: input.actorUserId,
