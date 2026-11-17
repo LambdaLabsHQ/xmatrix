@@ -531,8 +531,16 @@ export type CoordinatorStep = "registrationPreparation" | "registrationStop" | "
   "idleSleep" | "firstMessageSummon" | "quotaRetry" | "norn";
 
 
+/** A timestamp column in epoch milliseconds. node-postgres returns a Date,
+ * and `String(date)` keeps only whole seconds: a due time read that way fell
+ * up to a second early, so the Channel's alarm woke before its work was due,
+ * found nothing to claim and came back a recheck later. */
+function columnMs(value: string | Date | null | undefined): number {
+  return value ? new Date(value).getTime() : Number.NaN;
+}
+
 function dueTime(value: string | Date | null | undefined): number | undefined {
-  const due = value ? Date.parse(String(value)) : Number.NaN;
+  const due = columnMs(value);
   return Number.isFinite(due) ? due : undefined;
 }
 
@@ -773,7 +781,7 @@ export class RelayPostgresAgentLaunchCoordinatorService {
     }
     const claimedAt = Date.now();
     const age = (later: number, earlier: string | Date | null): number => {
-      const value = earlier ? Date.parse(String(earlier)) : Number.NaN;
+      const value = columnMs(earlier);
       return Number.isFinite(value) ? Math.max(0, later - value) : 0;
     };
     const observe = () => {
@@ -781,9 +789,8 @@ export class RelayPostgresAgentLaunchCoordinatorService {
         env: this.env as Env,
         outcome: "ok" as const,
         preparedToWakeMs: Math.max(0, ...claimed.map(({ row }) => {
-          const wake = row.wake_requested_at
-            ? Date.parse(String(row.wake_requested_at)) : Number.NaN;
-          const prepared = row.prepared_at ? Date.parse(String(row.prepared_at)) : Number.NaN;
+          const wake = columnMs(row.wake_requested_at);
+          const prepared = columnMs(row.prepared_at);
           return Number.isFinite(wake) && Number.isFinite(prepared)
             ? Math.max(0, wake - prepared) : 0;
         })),

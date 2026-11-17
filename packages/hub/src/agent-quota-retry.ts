@@ -186,7 +186,7 @@ async function quotaRetryReadiness(
   const times = candidates.flatMap((candidate) => candidate.nextCheckAt === null ? [] : [candidate.nextCheckAt]);
   return {
     ready: candidates.some((candidate) => candidate.ready),
-    nextCheckAt: times.length ? Math.min(Date.parse(String(row.expires_at)), ...times) : null,
+    nextCheckAt: times.length ? Math.min(new Date(row.expires_at).getTime(), ...times) : null,
     fence: fence.toISOString(),
     doorbell: !candidates.some((candidate) => candidate.accountOpen),
   };
