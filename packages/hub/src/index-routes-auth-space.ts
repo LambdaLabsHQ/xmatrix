@@ -18,7 +18,7 @@ import { mintGitHubRepositoryToken } from "./app-connectors";
 import { listOwnerWorkspaces, workspaceRepository } from "./postgres-workspace-authority";
 import { isXmatrixOwnedDirectory } from "./workspace-path-policy";
 import { listOwnerMachineDaemons, machineDaemonCommand, machineDatabase, machineRepository } from "./machines";
-import { runtimeRepository, updateAgentLaunch } from "./runtime";
+import { recordRunCheckout, runtimeRepository, updateAgentLaunch } from "./runtime";
 import { controlErrorResponse } from "./postgres-authority-http";
 import { githubRepositoryTokenRunRefusal, legacyUnboundRepositoryTokenEnabled } from "./github-repository-token-run-binding";
 import { adoptLegacyMachineIds } from "@xmatrix/db";
@@ -688,6 +688,14 @@ export function registerIndexRoutesAuthSpace(app: Hono<{ Bindings: Env }>): void
       const grant = await mintGitHubRepositoryToken(
         c.env, connection as any, target.owner, target.repo,
       );
+      // A Run in its managed directory has just been given this repository
+      // (`xmatrix repo checkout`): its card names it from now on. Only shown,
+      // so a failure here never costs the Run its token.
+      if (runId) {
+        const shown = recordRunCheckout(c.env, { runId, executionKey, actorUserId: principal.ownerUserId,
+          repository: `${target.owner}/${target.repo}` });
+        try { c.executionCtx.waitUntil(shown); } catch { await shown; }
+      }
       return c.json(grant, 200, { "cache-control": "no-store" });
     } catch (error) {
       // A repository outside this Space's installation fails here, not later

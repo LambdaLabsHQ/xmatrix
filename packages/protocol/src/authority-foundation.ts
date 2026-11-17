@@ -1096,6 +1096,14 @@ export interface SerializedAgentInstance extends AgentInstancePresentation {
   cwd?: string;
   /** Repository admitted for this Run, for display only. */
   repository?: string;
+  /** The Run started in its xMatrix-managed working directory: no repository
+   * and no directory of the person's, so there is nothing to name until it
+   * checks one out. */
+  managedWorkspace?: true;
+  /** Repositories this Run checked out itself (`xmatrix repo checkout`), in
+   * the order it first asked for them. Only ever grows while the Instance's
+   * version stands, so a longer list is the newer one. For display only. */
+  checkedOutRepositories?: string[];
   /** Legacy wire field; current runtime discovery uses commands and capabilities. */
   skills?: AgentSkill[];
 }

@@ -84,13 +84,24 @@ function metadataText(
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+/** The repositories a Run checked out itself (`recordRunCheckout`), as summon references. */
+function checkedOutRepos(metadata: Record<string, unknown>): string[] {
+  const listed = metadata.checkedOutRepos;
+  if (!Array.isArray(listed)) return [];
+  return listed.flatMap((value) => {
+    const reference = typeof value === "string" ? repoSummonReference(value) : undefined;
+    return reference ? [reference] : [];
+  });
+}
+
 /**
  * The Run metadata fields a Presence entry shows. Only they leave PostgreSQL:
  * a Run's whole metadata averages 3.5 KB, and Presence is read on every live
  * fanout, so returning all of it made Presence a leading source of egress.
  */
 const PRESENCE_RUN_METADATA_KEYS = ["routedAs", "clientVersion", "machineId", "hostname", "hostId",
-  "hostName", "cwd", "canonicalCwd", "workspaceName", "gitBranch", "remoteRepo"] as const;
+  "hostName", "cwd", "canonicalCwd", "workspaceName", "gitBranch", "remoteRepo", "managedWorkspaceKey",
+  "checkedOutRepos"] as const;
 const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESENCE_RUN_METADATA_KEYS
   .map((key) => `'${key}',r.metadata_json->'${key}'`).join(",")}))`;
 /**
@@ -439,6 +450,9 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
   const runMetadata = row.run_metadata_json ?? {};
   const remoteRepo = metadataText(runMetadata, "remoteRepo");
   const repository = remoteRepo ? repoSummonReference(remoteRepo) : undefined;
+  // Started in its managed directory: nothing to name until it checks a repository out.
+  const managedWorkspace = !remoteRepo && metadataText(runMetadata, "managedWorkspaceKey") !== undefined;
+  const checkedOutRepositories = managedWorkspace ? checkedOutRepos(runMetadata) : [];
   const label = row.agent_name;
   const channelInstanceId = String(ordinal);
   const { usage: storedUsage, ...presentation } = definedAgentInstanceDurablePresentation(row.instance_presentation);
@@ -452,6 +466,8 @@ function instanceRecord(row: InstanceRecordRow): AgentInstanceRecord {
     lastSeenAt: iso(row.updated_at),
     status,
     ...(repository ? { repository } : {}),
+    ...(managedWorkspace ? { managedWorkspace: true as const } : {}),
+    ...(checkedOutRepositories.length ? { checkedOutRepositories } : {}),
     ...(usage ? { usage } : {}),
     ...(rest ? { rest } : {}),
     ...(rest === "wake_failed" && row.rest_reason ? { restReason: row.rest_reason } : {}),

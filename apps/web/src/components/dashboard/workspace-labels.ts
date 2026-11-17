@@ -27,13 +27,20 @@ function workspacePathParts(path: string): string[] {
   return normalized.split("/").filter(Boolean);
 }
 
-/** The admitted Run repository takes precedence over its managed checkout path. */
+/** The admitted Run repository takes precedence over its managed checkout path.
+ * A Run started in its xMatrix-managed directory has no place of the person's
+ * to name: it shows a repository only once it checked one out, the latest. */
 export function channelAgentInstanceWorkspaceTag(
   instance: SerializedAgentInstance,
   workspaces: SerializedWorkspace[]
 ): StatusChip | undefined {
   const repository = instance.repository && repoSummonReference(instance.repository);
   if (repository) return { id: "repo", label: "Repository", value: repository };
+  if (instance.managedWorkspace) {
+    const checkedOut = instance.checkedOutRepositories?.at(-1);
+    const latest = checkedOut && repoSummonReference(checkedOut);
+    return latest ? { id: "repo", label: "Repository", value: latest } : undefined;
+  }
 
   const workspace = workspaceForInstance(workspaces, instance);
   const repo = workspace && repoReferenceForWorkspace(workspace);

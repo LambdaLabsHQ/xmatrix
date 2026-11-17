@@ -238,3 +238,44 @@ integration("a connection's reports are ordered by (version, sequence) and fence
     await f.close();
   }
 });
+
+integration("a managed-directory Run's own checkouts name it once each, in order; other Runs are untouched", async () => {
+  const f = await spaceSecretFixture();
+  const runtime = new PostgresRuntimeRepository(f.database);
+  const spaces = new PostgresSpaceControlRepository(f.database, "shard-0");
+  const read = async () => {
+    const { channel } = await spaces.getChannel({ requestId: randomUUID(), spaceId: f.ids.space,
+      channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner }, knownInstanceIds: [f.ids.instance] });
+    return channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
+  };
+  const checkout = (repository, executionKey = f.context.executionKey) => runtime.recordRunCheckout({
+    requestId: randomUUID(), runId: f.ids.run, actorUserId: f.ids.owner, executionKey, repository });
+  const changed = { channelId: f.ids.channel, instanceId: f.ids.instance };
+  try {
+    // A Run in a directory of its own does not take checkouts as its name.
+    assert.equal(await checkout("team/project"), undefined);
+    await f.client.query(`UPDATE data.runs SET metadata_json=metadata_json||'{"managedWorkspaceKey":"registration-1"}'::jsonb
+      WHERE run_id=$1`, [f.ids.run]);
+    let record = await read();
+    assert.equal(record.managedWorkspace, true);
+    assert.equal(record.checkedOutRepositories, undefined);
+
+    assert.deepEqual(await checkout("team/project"), changed);
+    assert.equal(await checkout("team/project"), undefined, "a repository already named changes nothing");
+    assert.equal(await checkout("team/other", "another-execution"), undefined, "only the exact Run records");
+    assert.deepEqual(await checkout("team/other"), changed);
+    record = await read();
+    assert.deepEqual(record.checkedOutRepositories, ["team/project", "team/other"]);
+    assert.deepEqual(record.revision, { version: 1, sequence: 0 }, "a checkout moves no Instance revision");
+
+    // A `repo:` launch already names its repository.
+    await f.client.query(`UPDATE data.runs SET metadata_json=metadata_json||'{"remoteRepo":"team/launched"}'::jsonb
+      WHERE run_id=$1`, [f.ids.run]);
+    assert.equal(await checkout("team/third"), undefined);
+    record = await read();
+    assert.equal(record.repository, "team/launched");
+    assert.equal(record.managedWorkspace, undefined);
+  } finally {
+    await f.close();
+  }
+});
