@@ -38,7 +38,7 @@ integration("composite registration commands preserve identity, configuration an
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN connection_epoch bigint DEFAULT 3`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN metadata_json jsonb DEFAULT '{}'`);
     await client.query(`ALTER TABLE ${schema}.machine_daemons ADD COLUMN capabilities_json jsonb DEFAULT '[]'`);
-    await client.query(`CREATE TABLE ${schema}.machines (owner_user_id text,machine_id text,name text)`);
+    await client.query(`CREATE TABLE ${schema}.machines (owner_user_id text,machine_id text,name text,auto_assign boolean)`);
     await client.query(`CREATE TABLE ${schema}.workspaces (workspace_id text,owner_user_id text,machine_id text,canonical_cwd text)`);
     const placement = { spaceId: "a", shardId: "test", placementEpoch: 1 };
     const database = savepointDatabase(client, sql, context => { if (["registration.enroll.global", "registration.machine-labels"].includes(context.operation) ||
@@ -94,6 +94,11 @@ integration("composite registration commands preserve identity, configuration an
     await client.query(`INSERT INTO ${schema}.machines VALUES ('owner','machine','Studio')`);
     catalog = await repo.list(listing);
     assert.equal(catalog.registrations[0].machineName, "Studio");
+    assert.equal(catalog.registrations[0].live.machine.autoAssign, undefined);
+    // A Machine its owner keeps out of automatic assignment says so: enabled is not "takes any summon".
+    await client.query(`UPDATE ${schema}.machines SET auto_assign=false WHERE machine_id='machine'`);
+    assert.equal((await repo.list(listing)).registrations[0].live.machine.autoAssign, false);
+    await client.query(`UPDATE ${schema}.machines SET auto_assign=NULL WHERE machine_id='machine'`);
     assert.equal(catalog.registrations[0].ownerName, "Owner label");
     assert.equal(catalog.registrations[0].state, "enabled");
     assert.deepEqual(catalog.registrations[0].models, []);
