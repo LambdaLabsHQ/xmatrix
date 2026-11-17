@@ -10,6 +10,7 @@ model. A model whose provider quota is used up is still refused first, with
 its reset time, and `/model` with no value lists the models the Agent last
 reported. Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting
 this change.
+
 ## Unreleased: a Windows daemon that exits is started again within a minute
 
 The Windows `xmatrix-daemon` Scheduled Task only retried a task that failed to
