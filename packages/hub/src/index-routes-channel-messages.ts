@@ -135,7 +135,7 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       const launch = body.launch === true || body.summonIntents !== undefined;
       // A bare Agent name cannot identify a live Instance. Refuse before any
       // publication rather than report success for a message that cannot route;
-      // launch:force in public text does not replace an explicit launch request.
+      // No text in the body (such as the retired `launch:force`) replaces an explicit launch request.
       const unaddressed = launch || typeof body.body !== "string" ? [] : summonMentions(body.body);
       if (unaddressed.length) return c.json({
         error: "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.",

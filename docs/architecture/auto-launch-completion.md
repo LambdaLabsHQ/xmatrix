@@ -62,7 +62,9 @@ derived selection is that first word. A first word that is not a whole
 condition (`@repo:` alone, an unknown key) is prose. In conditions, a colon separates, and a value carrying whitespace is quoted
 with doubled quotes exactly as a workspace tail is (`pwd:"/Users/me/my work"`).
 Fields are `repo`, `pwd`, `machine` (stable ID), `model`, `effort`, `harness`,
-`launch:force`, and runtime-discovered `param.<id>:<value>` choices.
+and runtime-discovered `param.<id>:<value>` choices. The retired `launch:force`
+still parses, so old messages keep their summon range, but it asks nothing and
+the composer does not offer it.
 `fast:on` is the `param.fast:on` alias when advertised. Generic parameter IDs
 and values come from runtime snapshots rather than a list of tag names in the
 composer. See [harness parameters](harness-parameters.md) for discovery and
@@ -113,8 +115,8 @@ whoever wrote it, summons nobody, the Hub asks Jev whether the author wants an
 Agent to start now (`START_INTENT_CATEGORIES`: `summon` or `conversation`) in
 the same call that chooses the harness. A decided harness is never launched
 from there: xMatrix replies to the first message with an ordinary
-`@<harness> launch:force` message (`launch:force` because whether to start is
-already decided). That message's author is xMatrix itself (`system:xmatrix`),
+`@<harness>` message, appended with `launch: true` because whether to start is
+already decided. That message's author is xMatrix itself (`system:xmatrix`),
 and it launches as the first message's author: the launch authority accepts a
 `system:xmatrix` source only as `xmatrix-summon:<first-message-id>`, and only
 for the author of that message's recorded `start` decision. The message goes

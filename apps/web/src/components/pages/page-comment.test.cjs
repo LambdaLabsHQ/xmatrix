@@ -9,8 +9,8 @@ const CLAUDE = { name: "claude:3", conversationId: "co-writing", blockId: "intro
 const CODEX = { name: "codex:1", conversationId: "review", blockId: "plan" };
 
 test("a comment that mentions an Agent goes to it, at once", () => {
-  assert.deepEqual(commentBody("@codex check the numbers", AGENTS, CLAUDE), { body: "@codex launch:force check the numbers" });
-  assert.deepEqual(commentBody("shorter, @claude:2 please", AGENTS), { body: "shorter, @claude:2 launch:force please" });
+  assert.deepEqual(commentBody("@codex check the numbers", AGENTS, CLAUDE), { body: "@codex check the numbers" });
+  assert.deepEqual(commentBody("shorter, @claude:2 please", AGENTS), { body: "shorter, @claude:2 please" });
 });
 
 test("one that names nobody addresses the existing Instance in its own conversation", () => {
@@ -33,7 +33,7 @@ test("the taker is the Agent nearest the passage, among those the reader can wri
 
 test("a live Instance the comment names takes it in its own conversation, rather than a new one starting", () => {
   assert.deepEqual(commentBody("@Claude:3 shorter", AGENTS, CODEX, [CLAUDE, CODEX]), { body: "@claude:3 shorter", taker: CLAUDE });
-  assert.deepEqual(commentBody("@claude:2 shorter", AGENTS, CODEX, [CLAUDE]), { body: "@claude:2 launch:force shorter" },
+  assert.deepEqual(commentBody("@claude:2 shorter", AGENTS, CODEX, [CLAUDE]), { body: "@claude:2 shorter" },
     "one not live starts as before");
 });
 
@@ -47,5 +47,5 @@ test("without a live Instance the section's editing conversation keeps the comme
   assert.deepEqual(commentBody("make this shorter", AGENTS, undefined, [], "editing"),
     { body: "make this shorter", conversationId: "editing" });
   assert.deepEqual(commentBody("@codex check", AGENTS, undefined, [], "editing"),
-    { body: "@codex launch:force check" });
+    { body: "@codex check" });
 });

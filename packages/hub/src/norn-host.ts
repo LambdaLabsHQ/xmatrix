@@ -206,7 +206,7 @@ export function nornDelivery(request: LedgerRequest, requestRef: string, to: {
   /** How this holding came about, when a participant made it: delegated to this holder, or given back to it. */
   delegation?: Delegation | null } = {}): { body: string; answerFrom: number } {
   const [answer, ...types] = answerText(request).split("\n");
-  const asked = [to.there ?? [request.holder, ...summonConditions(request).words, "launch:force"].join(" "), "",
+  const asked = [to.there ?? [request.holder, ...summonConditions(request).words].join(" "), "",
     // The reference in its own code span is what a person's client draws as the request itself.
     `**Request** \`${requestReferenceToken(requestRef)}\``].join("\n");
   const answering = ["", "", fence(request.text),

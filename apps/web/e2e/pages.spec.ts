@@ -458,7 +458,7 @@ for (const width of [1000, 1440, 1600]) for (const refused of [false, true]) {
       return;
     }
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body)
-      .toMatch(/^@codex launch:force page:p-relay/u);
+      .toMatch(/^@codex page:p-relay/u);
     await expect(browser.getByText("Write in the page; your Agent responds here.", { exact: false })).toHaveCount(0);
     await expect(browser).not.toHaveURL(/conversation=/u);
     expect((await editor.locator("h1").first().boundingBox())!.y).toBe(titleTop);
@@ -613,7 +613,7 @@ test.describe("on a phone", () => {
     await expect(browser.getByTestId("pages-view").locator("article").getByRole("status")).toHaveCount(0);
     await releaseFixture(browser, "channel-create");
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@codex launch:force You're co-writing page:p-relay with me live\./u);
+      /^@codex You're co-writing page:p-relay with me live\./u);
     const writing = await fixtureCreatedChannelId(browser, "channel-create");
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ conversationId: writing, pageId: "p-relay" });
     // The conversation co-writes the page live before its Agent is called, so the Agent joins the page when it starts.
@@ -653,7 +653,7 @@ test.describe("on a phone", () => {
     await menu.getByRole("menuitem", { name: "Co-write with claude" }).click();
     await expect(menu).toBeHidden();
     await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-      /^@claude launch:force You're co-writing page:p-relay \(section #status\) with me live\./u);
+      /^@claude You're co-writing page:p-relay \(section #status\) with me live\./u);
     expect((await fixtureRequestBodies(browser, "link-create"))[0]).toMatchObject({ blockId: "status" });
   });
 
@@ -2076,7 +2076,7 @@ test("a co-writer's face says how long it has been thinking, and one that went q
   await browser.screenshot({ path: test.info().outputPath("co-writer-quiet.png") });
   await instead.click();
   await expect.poll(async () => (await fixtureRequestBodies(browser, "write-message"))[0]?.body).toMatch(
-    /^@claude launch:force You're co-writing page:p-relay with me live\./u);
+    /^@claude You're co-writing page:p-relay with me live\./u);
 });
 
 test("an Agent at work stands in the margin beside its line, its channel under it, and opens it right there", async ({ page: browser }) => {

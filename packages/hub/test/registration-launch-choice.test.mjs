@@ -518,7 +518,7 @@ test('a conversation co-writing a page is offered only the private managed direc
   const withRepo = { ...candidates[0], workspaceReferences: [...candidates[0].workspaceReferences, 'repo:owner/project'],
     workspaces: [...candidates[0].workspaces, { reference: 'repo:owner/project', repo: 'owner/project', machineId: 'first', description: 'API server' }] };
   const result = await registrationLaunchChooser(async input => { calls.push(input); return answer(input); })({
-    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [withRepo],
+    message: '@codex co-write this page', tags: {}, candidates: [withRepo],
     managedWorkspace: true, managedOnly: true });
   assert.deepEqual(Object.values(calls[0].questions.workspace.criteria),
     [JSON.stringify({ description: 'Private managed directory with no repository' })], "no repository, no registered directory");
@@ -535,7 +535,7 @@ test('with nothing left to choose Jev is not called, and each choice is recorded
   let calls = 0;
   const onlyOne = { ...candidates[0], models: [] };
   const result = await registrationLaunchChooser(async input => { calls++; return answer(input); })({
-    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [onlyOne],
+    message: '@codex co-write this page', tags: {}, candidates: [onlyOne],
     managedWorkspace: true, managedOnly: true });
   assert.equal(calls, 0, "one harness, one directory, the runtime's own model: no question is left");
   assert.equal(result.workspaceReference, undefined);
@@ -548,7 +548,7 @@ test('with nothing left to choose Jev is not called, and each choice is recorded
   // A choice beside it is still Jev's to make, and the one-option question goes with it as before.
   const asked = [];
   const withModels = await registrationLaunchChooser(async input => { asked.push(input); return answer(input); })({
-    message: '@codex launch:force co-write this page', tags: { launch: 'force' }, candidates: [candidates[0]],
+    message: '@codex co-write this page', tags: {}, candidates: [candidates[0]],
     managedWorkspace: true, managedOnly: true });
   assert.deepEqual(asked.map(call => Object.keys(call.questions)), [['workspace', 'modelEffort']]);
   assert.equal(withModels.parameterEvidence.choices.some(choice => choice.only), false);

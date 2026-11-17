@@ -831,7 +831,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     onlySelectionIndex?: number;
     commandId: string; actorUserId: string; channelId: string; sourceMessageId: string; body: string;
     /** "Start" on a mention its send did not launch: only that summon is
-     * prepared, as if it carried `launch:force`. */
+     * prepared, as if its send had asked to launch. */
     forceMention?: string;
   }, choose?: RegistrationLaunchChooser) {
     const actorUserId = text(input.actorUserId), channelId = text(input.channelId),
@@ -889,9 +889,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (recovered) { prepared.push(recovered); continue; }
         const options = selectionLaunchConditions(input.body, selection);
         if (options.error) throw new RegistrationAccessError("invalid_registration_launch", 400);
-        // A summon starts only when its send asked to launch, or its text says
-        // launch:force; otherwise it stays a mention with a Start on its card.
-        if (!source.launch && options.tags.launch !== "force" && input.forceMention === undefined) {
+        // A summon starts only when its send asked to launch, or its author
+        // pressed Start on its card; otherwise it stays a mention. Text never
+        // asks: `launch:force` in a body is read and ignored.
+        if (!source.launch && input.forceMention === undefined) {
           rejected.push({ selectionIndex, code: "launch_not_requested", sourceMention: summonText(selection) });
           continue;
         }
@@ -925,7 +926,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         try {
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
             ...(managedOnly ? { managedOnly } : {}), blocked: listed.blocked,
-            tags: input.forceMention !== undefined ? { ...options.tags, launch: "force" } : options.tags,
+            tags: options.tags,
             summon: { text: summonText(selection), start: selection.start, end: options.end } });
         }
         catch (error) {

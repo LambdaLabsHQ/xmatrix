@@ -320,12 +320,13 @@ test("a harness decided for a first message is summoned by an ordinary @ reply t
   await summonFirstMessageHarness(input, dependencies);
   const [{ command }] = appended;
   assert.equal(command.messageId, "xmatrix-summon:first");
-  assert.equal(command.body, "@codex launch:force");
+  assert.equal(command.body, "@codex");
+  assert.equal(command.launch, true, "the append asks to launch, as a person's send does");
   assert.equal(command.residual.replyToMessageId, "first");
   assert.equal(command.xmatrixAuthor, true, "xMatrix is the author");
   assert.deepEqual(command.principal, { kind: "user", id: "author" }, "authorized as the first message's author");
   assert.deepEqual(committed.map(value => [value.messageId, value.body, value.senderKind, value.senderId, value.actorUserId]),
-    [["xmatrix-summon:first", "@codex launch:force", "system", "xmatrix", "author"]]);
+    [["xmatrix-summon:first", "@codex", "system", "xmatrix", "author"]]);
   // Marked only once its dispatch returned; until then its coordinator retries it.
   assert.deepEqual(summoned, [{ channelId: "channel", messageId: "first", afterDispatch: 1 }]);
   // A retry reuses the same message, so it appends and launches nothing new.
