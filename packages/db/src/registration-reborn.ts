@@ -327,31 +327,38 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const sameMachine = (item: QueryResultRow) => item.owner_user_id === key!.ownerUserId && item.machine_id === key!.machineId;
     const machines = [...new Map([...registered.map(item => ({ ownerUserId: String(item.owner_user_id), machineId: String(item.machine_id) })),
       ...key ? [key] : []].map(item => [`${item.ownerUserId}\n${item.machineId}`, item])).values()].slice(0, 100);
-    const facts = key ? await this.directory.transaction({ requestId: commandId,
-      operation: "registration.switch.quota", statement: "single_read" }, tx => tx.query({
-      name: "registration_switch_quota_v4", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
-          CASE WHEN m.owner_user_id=$4 AND m.machine_id=$5 THEN e.declaration_json END AS own_declaration,
-          EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
-            AND d.machine_id=m.machine_id AND d.status='online') AS online,
-          EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
-            AND d.machine_id=m.machine_id AND d.status='online' AND d.capabilities_json ? 'machine_routing_effort_v1') AS carries_effort,
-          ${registrationQuotaColumns("q")}
-        FROM data.machines m
-        LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=m.owner_user_id
-          AND e.machine_id=m.machine_id AND e.harness=$3
-        ${currentRegistrationQuotaJoin("q")}
-        WHERE (m.owner_user_id,m.machine_id) IN (SELECT * FROM unnest($1::text[],$2::text[])) AND m.retired_at IS NULL`,
-      values: [machines.map(item => item.ownerUserId), machines.map(item => item.machineId), key.harness, key.ownerUserId, key.machineId],
-      maxRows: 100 })) : [];
+    const ownReg = registered.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId && item.harness === key.harness);
+    const needsDeclaredModels = Boolean(key && ownReg?.own_configuration && metadata.useRuntimeDefaultModel !== true);
+    const { facts, ownDeclaration } = key ? await this.directory.transaction({ requestId: commandId,
+      operation: "registration.switch.quota", statement: "single_read" }, async tx => {
+      const facts = await tx.query({
+        name: "registration_switch_quota_v3", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
+            EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
+              AND d.machine_id=m.machine_id AND d.status='online') AS online,
+            EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
+              AND d.machine_id=m.machine_id AND d.status='online' AND d.capabilities_json ? 'machine_routing_effort_v1') AS carries_effort,
+            ${registrationQuotaColumns("q")}
+          FROM data.machines m
+          LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=m.owner_user_id
+            AND e.machine_id=m.machine_id AND e.harness=$3
+          ${currentRegistrationQuotaJoin("q")}
+          WHERE (m.owner_user_id,m.machine_id) IN (SELECT * FROM unnest($1::text[],$2::text[])) AND m.retired_at IS NULL`,
+        values: [machines.map(item => item.ownerUserId), machines.map(item => item.machineId), key.harness],
+        maxRows: 100 });
+      const ownDeclaration = needsDeclaredModels ? (await tx.query({
+        name: "registration_switch_own_environment_v1",
+        text: `SELECT declaration_json FROM control.agent_registration_environments WHERE owner_user_id=$1 AND machine_id=$2 AND harness=$3`,
+        values: [key.ownerUserId, key.machineId, key.harness], maxRows: 1 }))[0]?.declaration_json : undefined;
+      return { facts, ownDeclaration };
+    }) : { facts: [], ownDeclaration: undefined };
     const nameCount = new Map<string, number>();
     for (const item of facts) nameCount.set(String(item.name).toLowerCase(), (nameCount.get(String(item.name).toLowerCase()) ?? 0) + 1);
     const own = facts.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId);
-    const ownReg = registered.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId && item.harness === key.harness);
     const declaredModels = (() => {
-      if (!ownReg?.own_configuration || !own?.own_declaration || metadata.useRuntimeDefaultModel === true) return [];
+      if (!ownReg?.own_configuration || !ownDeclaration || metadata.useRuntimeDefaultModel === true) return [];
       try {
         const allowed = parseSpaceAgentConfiguration(ownReg.own_configuration).routing?.models ?? [];
-        const envModels = parseAgentRegistrationEnvironment(own.own_declaration).models;
+        const envModels = parseAgentRegistrationEnvironment(ownDeclaration).models;
         return allowed.filter(model => envModels.includes(model));
       } catch { return []; }
     })();

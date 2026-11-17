@@ -803,7 +803,7 @@ integration("launch survives a hostname change with stale Workspace metadata and
       ordinal: Number(coldRow.channel_instance_id) });
     assert.deepEqual([switchTarget.instanceId, switchTarget.currentModel, switchTarget.declaredModels, switchTarget.reportedModels.length,
       switchTarget.modelCatalog.map(row => row.model)],
-    [cold.instanceId, 'provider/model', ['provider/model'], 2, ['provider/model', 'provider/other']]);
+    [cold.instanceId, 'provider/model', undefined, 2, ['provider/model', 'provider/other']]);
     assert.equal(switchTarget.state, ['starting', 'running'].includes(coldRow.status) ? coldRow.status : 'stopped');
     // A repository-backed Instance is also told where else its work can go on:
     // another online Machine of the Space that runs its harness and has a
@@ -1183,6 +1183,11 @@ integration("launch survives a hostname change with stale Workspace metadata and
       WHERE run_id=$1`, [sleeper.runId]);
     assert.deepEqual(await reborn.chooseWakeEffort({ commandId: "wake-effort", channelId: "channel", instanceId: sleeper.instanceId,
       effort: "high" }), { selected: "high" });
+    const sleeperRow = (await sql(`SELECT channel_instance_id FROM data.instances WHERE instance_id=$1`, [sleeper.instanceId])).rows[0];
+    const sleeperSwitchTarget = await reborn.switchTargetFacts({ commandId: "wake-switch-target", channelId: "channel",
+      ordinal: Number(sleeperRow.channel_instance_id) });
+    assert.deepEqual([sleeperSwitchTarget?.declaredModels, sleeperSwitchTarget?.currentEffort, sleeperSwitchTarget?.takesWakeEffort],
+      [["model"], "high", true]);
     const targeted = await reborn.wakeResting({ commandId: "wake-message", channelId: "channel", sourceMessageId: "message",
       targetInstanceId: sleeper.instanceId, prompt: "what was the codeword?" });
     assert.deepEqual(targeted.dropped.map(item => [item.instanceId, item.model, item.sourceMessageId, Date.parse(item.resetsAt) > Date.now()]),
