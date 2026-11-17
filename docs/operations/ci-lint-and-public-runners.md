@@ -43,10 +43,11 @@ jobs each finish in about two minutes including setup:
   online-index marker, so a CRLF checkout does not change migration identity
   or hide `CREATE INDEX CONCURRENTLY`. A second `tsc --noEmit` of that same
   program only repeated this lane's slowest stage;
-- `node-tests (static)`: the duplicate-code scan plus the build-independent
-  static checks (synchronized versions, dependency reachability, unused
+- `node-tests (static)`: the duplicate-code scan plus the static checks that
+  need no test run (synchronized versions, dependency reachability, unused
   imports, the pinned Apple and Google catalogs, duplicate CSS rules and the
-  source line limit), on their own runner. jscpd's
+  source line limit), on their own runner. It builds the package exports
+  first, which reachability reads. jscpd's
   default store rejected every lookup miss with a new `Error`, and the scan
   spent most of its CPU capturing those stack traces; it now uses a store with
   the same get/set contract that rejects misses with one shared reason, and

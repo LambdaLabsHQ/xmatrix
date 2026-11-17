@@ -317,22 +317,28 @@ function browserTestStages() {
 
 // `node-checks` runs the package, PostgreSQL and script tests, in pull request
 // CI and in every release train alike (.github/workflows/ci.yml, `changes`).
-// The build-independent static checks ride with the duplicate scan on its own
-// runner instead: the test group saturates its 4-CPU VM, while the scan is one
-// single-threaded process, so moving them there balances the two jobs. The
-// scan still never runs beside the process-tree timing lanes in a combined
-// invocation: a different parallel group keeps it after them.
+// The static checks ride with the duplicate scan on its own runner instead:
+// the test group saturates its 4-CPU VM, while the scan is one single-threaded
+// process, so moving them there balances the two jobs. That partition builds
+// the package exports first, because reachability reads them. The scan still
+// never runs beside the process-tree timing lanes in a combined invocation: a
+// different parallel group keeps it after them.
+// Reachability reads the built package exports, so the build is a
+// prerequisite of the static group too. `stageId` runs it once when one
+// process requests both partitions.
+const nodeBuildStage = {
+  stageId: "node-build",
+  label: "Build protocol and billing for executable evidence",
+  command: pnpm,
+  args: turboArgs(["build"], "@xmatrix/db^..."),
+};
 const nodeSetupStages = [
   {
     label: "Check Oxlint (--deny-warnings)",
     command: pnpm,
     args: ["exec", "oxlint", "--config", ".oxlintrc.json", "--deny-warnings", "."],
   },
-  {
-    label: "Build protocol and billing for executable evidence",
-    command: pnpm,
-    args: turboArgs(["build"], "@xmatrix/db^..."),
-  },
+  nodeBuildStage,
 ];
 const nodeTestLanes = [
   {
@@ -571,6 +577,8 @@ const partitions = {
     { ...rustClippyWindows, parallelGroup: "rust-clippy", parallelLane: "windows" },
   ],
   duplicates: [
+    // Reachability reads the built exports, so this partition builds too.
+    nodeBuildStage,
     {
       label: "Check duplicated code",
       command: pnpm,
