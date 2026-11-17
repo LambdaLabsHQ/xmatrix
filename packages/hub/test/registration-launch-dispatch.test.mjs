@@ -7,6 +7,13 @@ import {
   executeFirstMessageDecision,
 } from "../src/registration-launch-dispatch.ts";
 
+/** A directory that places the Channel in an active Space and answers nothing else. */
+const placedChannelDirectory = () => ({ cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
+  if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
+  if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
+  throw new Error(`unexpected ${query.name}`);
+} }) });
+
 const tooOld = { program: 'Cursor CLI', version: '2025.09.12-4852336', minimumVersion: '2026.01.01', machineName: 'Laptop', update: 'cursor-agent update' };
 
 test('composite dispatch persists sanitized rejection through current source and channel authority', async t => {
@@ -135,11 +142,7 @@ test("an Agent's first-message decision is persisted before its harness can be s
     t.mock.method(PostgresFirstMessageLaunchChoiceRepository.prototype, method, implementation);
   }
   t.mock.method(PostgresRegistrationLaunchRepository.prototype, 'readHarnessToStart', async () => 'codex');
-  const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
-    if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
-    if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
-    throw new Error(`unexpected ${query.name}`);
-  } }) };
+  const database = placedChannelDirectory();
   const result = await executeFirstMessageDecision({ ...firstMessageInput, database, directory: database,
     evaluatorFor: () => async () => { throw new Error('unused'); }, body: 'start an agent', window: false });
   assert.deepEqual(result, { claimed: true, harness: 'codex' });
@@ -160,11 +163,7 @@ test('a dispatch records how long it resolved, decided and prepared its Launch',
     await pause(30);
     return { selectionCount: 1, prepared: [{ launchId: 'launch', runId: 'run', instanceId: 'instance', reused: false }], rejected: [] };
   });
-  const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
-    if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
-    if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
-    throw new Error(`unexpected ${query.name}`);
-  } }) };
+  const database = placedChannelDirectory();
   await executeRegistrationLaunchDispatch({ env, database, directory: database, commandId: 'dispatch', actorUserId: 'caller',
     channelId: 'channel', sourceMessageId: 'message', body: '@codex inspect',
     evaluatorFor: () => Object.assign(async () => { throw new Error('not called'); }, {}) });
