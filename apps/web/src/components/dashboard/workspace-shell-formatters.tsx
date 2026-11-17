@@ -1,5 +1,5 @@
 "use client";
-import { usageWithoutQuota, accountQuotaUsageFromCandidates, formatQuotaBalance, mergeUsageAttributes, quotaAccountBalance } from "@xmatrix/protocol";
+import { usageWithoutQuota, accountQuotaUsageFromCandidates, agentModelEntry, formatQuotaBalance, mergeUsageAttributes, quotaAccountBalance, routingQuotaScopeConstrains, type AgentModelInfo } from "@xmatrix/protocol";
 export { accountQuotaUsageFromCandidates, mergeAccountLevelLlmUsage, mergeUsageAttributes } from "@xmatrix/protocol";
 export { exchangeDesktopCliSession } from "@/lib/desktop/session-exchange";
 import { directMediaLink } from "./attachment-media-type";
@@ -585,17 +585,24 @@ export function quotaResetHasPassed(quota: LlmQuotaUsage, now = Date.now()): boo
  * the account quota any live instance of the agent reported. Being at the limit
  * is the fact; which window ran out is detail that belongs in the hover title,
  * not in whether the mark appears.
+ *
+ * A scoped window (Claude's per-model week, Cursor's Auto and API pools) limits
+ * the instance when it constrains the model the instance runs, by the same rule
+ * the Hub refuses a launch on (`routingQuotaScopeConstrains`).
  */
 export function agentInstanceUsageLimit(
   presence: ChannelMemberPresence,
   instance: SerializedAgentInstance
 ): UsageLimitSummary | undefined {
   return usageLimitSummary(
-    mergeUsageAttributes(usageWithoutQuota(instance.usage), accountQuotaUsage(agentMemberUsage(presence)))
+    mergeUsageAttributes(usageWithoutQuota(instance.usage), accountQuotaUsage(agentMemberUsage(presence))),
+    agentModelEntry(instance.models, instance.model)
   );
 }
 
-export function usageLimitSummary(usage?: LlmUsage): UsageLimitSummary | undefined {
+/** `model` is the catalog entry of the model the verdict is about; without one
+ * only the account's windows count, as in the Hub. */
+export function usageLimitSummary(usage?: LlmUsage, model?: Pick<AgentModelInfo, "quotaScopes">): UsageLimitSummary | undefined {
   if (usage?.quotaState === "exhausted") return { label: "limit", severity: "limit", title: "Provider quota exhausted" };
   // The provider's verdict on the account outranks its windows: it may refuse
   // an account whose windows look fine, or keep serving one past a used-up
@@ -603,9 +610,8 @@ export function usageLimitSummary(usage?: LlmUsage): UsageLimitSummary | undefin
   const allowed = usage?.quotaAccount?.allowed;
   if (allowed === false) return { label: "limit", severity: "limit", title: "Usage limit reached: provider refuses requests" };
   const quota = providerQuotaUsages(usage)
-    // A scoped window limits only the models of its scope, not the account
-    // this verdict is about.
-    .filter((candidate) => !candidate.scope)
+    // A scoped window limits only the models of its scope.
+    .filter((candidate) => !candidate.scope || routingQuotaScopeConstrains(candidate.scope, model))
     .map((candidate) => ({ quota: candidate, percent: quotaPercent(candidate) }))
     // A limit warning is time-sensitive: keep this guard at the verdict boundary
     // even though providerQuotaUsages normalizes its display list as well.
@@ -628,7 +634,9 @@ export function usageLimitSummary(usage?: LlmUsage): UsageLimitSummary | undefin
   // and says what the tag adds: what pays for requests now, or when they come back.
   const window = quotaLabel(quota.quota);
   const percent = quota.percent;
-  if (atLimit && allowed === true) {
+  // Being served is the provider's answer on one request's model: it lifts the
+  // account's windows, never a model's own (`routingQuotaObservation`).
+  if (atLimit && allowed === true && !quota.quota.scope) {
     return {
       label: "credits",
       severity: "warning",

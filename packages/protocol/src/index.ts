@@ -695,3 +695,4 @@ export {
   definedAgentInstanceDurablePresentation, type AgentInstanceDurableKey, type AgentInstanceDurablePresentation,
   type AgentMessagePresentation, type AgentInstancePresentation,
 } from "./agent-instance-presentation.js";
+export { agentModelEntry } from "./agent-instance-catalogs.js";

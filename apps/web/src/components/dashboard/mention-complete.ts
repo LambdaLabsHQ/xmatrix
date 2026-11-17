@@ -15,7 +15,7 @@ import type {
   SerializedSpace,
   FaceOf,
 } from "@xmatrix/protocol";
-import { channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
+import { agentModelEntry, channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
 import {
   agentInteractionTarget,
   connectorInteractionTarget,
@@ -1053,15 +1053,8 @@ export function instanceEffortOptions(
   instance: SerializedAgentInstance
 ): Array<{ effort: string; description?: string }> {
   const models = instance.models || [];
-  const currentModel = instance.model?.trim().toLowerCase();
   const scoped =
-    (currentModel
-      ? models.find(
-          (item) =>
-            item.model?.trim().toLowerCase() === currentModel ||
-            item.id?.trim().toLowerCase() === currentModel
-        )
-      : undefined) ||
+    agentModelEntry(models, instance.model) ||
     models.find((item) => item.isDefault) ||
     models[0];
   const sourceModels = scoped ? [scoped] : models;

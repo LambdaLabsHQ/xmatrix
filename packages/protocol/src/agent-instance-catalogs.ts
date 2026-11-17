@@ -77,6 +77,22 @@ export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undef
   return models;
 }
 
+/**
+ * The catalog entry a running model is: the one whose id it is, else the one
+ * it otherwise names (model, display name or an alias, ignoring case), or the
+ * runtime's default entry when it names none. An alias can stand for several
+ * entries (Claude's `default` resolves to the model `opus` also names), so an
+ * exact selector wins. None when the catalog does not list it.
+ */
+export function agentModelEntry(models: readonly AgentModelInfo[] | undefined,
+  model: string | undefined): AgentModelInfo | undefined {
+  const wanted = model?.trim().toLowerCase();
+  if (!wanted) return models?.find(entry => entry.isDefault);
+  const named = (name: string | undefined) => name?.trim().toLowerCase() === wanted;
+  return models?.find(entry => named(entry.id)) ??
+    models?.find(entry => [entry.model, entry.displayName, ...entry.aliases ?? []].some(named));
+}
+
 export function cleanAgentCommands(value: unknown): AgentInstanceCommand[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const seen = new Set<string>();
