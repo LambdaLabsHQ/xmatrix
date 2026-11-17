@@ -33,7 +33,7 @@ async function withFixture(run) {
       WHERE channel_id=$1`, [ids.channel, ids.owner]);
     const appAPI = apps(name => ({ "@xmatrix/db": db, "@xmatrix/protocol": protocol,
       "./postgres-authority-http": { postgresAuthorityDatabase: () => database } })[name] ?? {});
-    const calls = { mint: 0, launch: 0, completion: 0, inference: 0 };
+    const calls = { mint: 0, launch: 0, completion: 0, inference: 0, checkouts: [] };
     const imports = {
       "@xmatrix/protocol": protocol, "@xmatrix/db": db,
       "./github-repository-token-run-binding": runBinding,
@@ -60,7 +60,8 @@ async function withFixture(run) {
         "./apps": appAPI,
       })[name] ?? {}),
       "./apps": appAPI,
-      "./runtime": { runtimeRepository: () => ({ getRun: async () => ({ run: { status: "running", channelId: ids.channel,
+      "./runtime": { recordRunCheckout: async (_env, checkout) => { calls.checkouts.push(checkout); },
+        runtimeRepository: () => ({ getRun: async () => ({ run: { status: "running", channelId: ids.channel,
         metadata: { executionKey: source.run.executionKey, machineId: ids.machine, remoteRepo: "org/repo" } } }) }) },
       "./index-routes-auth-space-instances": { registerIndexRoutesAuthSpaceInstances() {} },
       "./index-routes-auth-space-management": { registerIndexRoutesAuthSpaceManagement(app) {
@@ -103,6 +104,8 @@ integration("repository-token HTTP refuses a reader on both bound and legacy rou
         assert.equal(f.calls.mint, before, "no provider credential mint after demotion");
       }
     }
+    // Only the Run-bound mint a member was given names the Run's checkout.
+    assert.deepEqual(f.calls.checkouts.map(({ repository }) => repository), ["org/repo"]);
   });
 });
 
