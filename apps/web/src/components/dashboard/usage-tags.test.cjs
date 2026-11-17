@@ -3,6 +3,7 @@ const { test } = require("node:test");
 const fs = require("node:fs");
 const path = require("node:path");
 const ts = require("typescript");
+const { agentModelEntry, routingQuotaScopeConstrains } = require("@xmatrix/protocol");
 
 const source = fs.readFileSync(path.join(__dirname, "workspace-shell-formatters.tsx"), "utf8");
 
@@ -117,9 +118,36 @@ test("a model's own window is shown with its scope after the account's, and is n
   const usageLimitSummary = compileFunction("usageLimitSummary", {
     providerQuotaUsages, quotaPercent: compileFunction("quotaPercent"), quotaResetHasPassed: () => false,
     quotaAtLimit: compileFunction("quotaAtLimit"), formatPercent: (value) => `${value}%`,
-    quotaTitle: (quota) => quotaLabel(quota), quotaLabel,
+    quotaTitle: (quota) => quotaLabel(quota), quotaLabel, quotaResetLabel: () => undefined, routingQuotaScopeConstrains,
   });
   assert.equal(usageLimitSummary(usage), undefined, "Fable's week used up leaves the account below its limit");
+  assert.equal(usageLimitSummary(usage, { quotaScopes: ["Opus"] }), undefined, "nor another model");
+  const fable = usageLimitSummary(usage, { quotaScopes: ["fable"] });
+  assert.equal(fable?.severity, "limit", "but it is the limit of a Fable instance, as the Hub refuses it");
+  assert.equal(fable?.window, "Fable · 1w");
+  assert.equal(usageLimitSummary({ ...usage, quotaAccount: { allowed: true } }, { quotaScopes: ["Fable"] })?.severity,
+    "limit", "an account still served on another model does not lift Fable's own week");
+
+  // Cursor reports only its Auto and API pools, as scoped windows (#1725).
+  const cursor = { quotaSource: "provider_api", quotaUsages: [],
+    scopedQuotaUsages: [{ label: "1mo", percent: 100, scope: "Auto" }, { label: "1mo", percent: 100, scope: "API" }] };
+  assert.equal(usageLimitSummary(cursor, { quotaScopes: ["Auto"] })?.severity, "limit");
+  assert.equal(usageLimitSummary(cursor, { quotaScopes: ["API"] })?.severity, "limit");
+  const autoLeft = { ...cursor, scopedQuotaUsages: [{ label: "1mo", percent: 40, scope: "Auto" }, cursor.scopedQuotaUsages[1]] };
+  assert.equal(usageLimitSummary(autoLeft, { quotaScopes: ["Auto"] }), undefined, "an Auto model still has its pool");
+});
+
+test("an instance's model is its catalog entry: exact selector first, else any name, else the default", () => {
+  const models = [
+    { id: "default", model: "claude-opus", aliases: ["opus"], quotaScopes: ["Opus"], isDefault: true },
+    { id: "fable", model: "claude-fable", displayName: "Fable", aliases: ["default"], quotaScopes: ["Fable"] },
+  ];
+  assert.equal(agentModelEntry(models, "default")?.id, "default", "an exact selector wins over an alias");
+  assert.equal(agentModelEntry(models, " FABLE ")?.id, "fable");
+  assert.equal(agentModelEntry(models, "claude-opus")?.id, "default");
+  assert.equal(agentModelEntry(models, undefined)?.id, "default", "no model runs the runtime default");
+  assert.equal(agentModelEntry(models, "gpt-5"), undefined, "an unlisted model has no entry");
+  assert.equal(agentModelEntry(undefined, "fable"), undefined);
 });
 
 test("an authoritative unnamed hold shows quota exhaustion without inventing a window", () => {
