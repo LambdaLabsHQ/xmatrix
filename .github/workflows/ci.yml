@@ -124,7 +124,8 @@ jobs:
       # CI has two tiers, chosen here and nowhere else. A pull request runs
       # the fast tier, each job within about two minutes: the Node checks
       # with the package, PostgreSQL package and script tests (node-tests)
-      # and the duplicate scan beside them (node-tests (duplicates)), the
+      # and, beside them, the duplicate scan with the build-independent static
+      # checks (node-tests (static)), the
       # Web unit tests (web-unit), production build (web-build) and its lint
       # and typecheck (web-check), the Hub typecheck and deploy bundle
       # (hub-check) and Clippy for Linux and Windows (rust-clippy). The Node tests and the
@@ -228,7 +229,9 @@ jobs:
     # existing Linux CI pool by default; release callers retain their explicit
     # offload_runner override. Both tiers run the Node checks and give the
     # repository-wide duplicate scan a job of its own beside them: on one
-    # 4-CPU VM it could only follow them, as the job's longest stage. A
+    # 4-CPU VM it could only follow them, as the job's longest stage. The
+    # build-independent static checks ride with that scan, whose runner has
+    # spare cores, so the CPU-saturated test group loses that work. A
     # persistent full-tier runner runs both as one job. A pull request names
     # them node-tests, which the ledger never records, so only the full tier
     # vouches for the content a release reuses; it records node-checks only
@@ -238,7 +241,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"node-tests","partitions":"node-checks"},{"name":"node-tests (duplicates)","partitions":"duplicates"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (duplicates)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
+        include: ${{ fromJSON(needs.changes.outputs.tier == 'fast' && '[{"name":"node-tests","partitions":"node-checks"},{"name":"node-tests (static)","partitions":"duplicates"}]' || (inputs.hosted || github.event.pull_request.head.repo.fork || vars.XMATRIX_RUNNER_FLEET == 'github-hosted' || (vars.XMATRIX_RUNNER_FLEET != 'self-hosted' && github.event.repository.private == false)) && '[{"name":"node-checks","partitions":"node-checks"},{"name":"node-checks (static)","partitions":"duplicates"}]' || '[{"name":"node-checks","partitions":"node-checks duplicates"}]') }}
     runs-on: *offload_runner
     steps:
       - &checkout_selected_ref

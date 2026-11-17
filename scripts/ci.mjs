@@ -315,20 +315,30 @@ function browserTestStages() {
   ];
 }
 
-// `node-checks` runs the static Node checks with the package, PostgreSQL and
-// script tests, in pull request CI and in every release train alike
-// (.github/workflows/ci.yml, `changes`).
+// `node-checks` runs the package, PostgreSQL and script tests, in pull request
+// CI and in every release train alike (.github/workflows/ci.yml, `changes`).
+// The static checks ride with the duplicate scan on its own runner instead:
+// the test group saturates its 4-CPU VM, while the scan is one single-threaded
+// process, so moving them there balances the two jobs. That partition builds
+// the package exports first, because reachability reads them. The scan still
+// never runs beside the process-tree timing lanes in a combined invocation: a
+// different parallel group keeps it after them.
+// Reachability reads the built package exports, so the build is a
+// prerequisite of the static group too. `stageId` runs it once when one
+// process requests both partitions.
+const nodeBuildStage = {
+  stageId: "node-build",
+  label: "Build protocol and billing for executable evidence",
+  command: pnpm,
+  args: turboArgs(["build"], "@xmatrix/db^..."),
+};
 const nodeSetupStages = [
   {
     label: "Check Oxlint (--deny-warnings)",
     command: pnpm,
     args: ["exec", "oxlint", "--config", ".oxlintrc.json", "--deny-warnings", "."],
   },
-  {
-    label: "Build protocol and billing for executable evidence",
-    command: pnpm,
-    args: turboArgs(["build"], "@xmatrix/db^..."),
-  },
+  nodeBuildStage,
 ];
 const nodeTestLanes = [
   {
@@ -357,26 +367,27 @@ const nodeTestLanes = [
   },
   ...nodeTestStages({ allFiles: scriptTests }),
 ];
+const nodeStaticParallelGroup = "node-static-checks";
 const nodeStaticStages = [
   {
     label: "Check pinned Apple API types and operation catalog",
     command: process.execPath,
     args: ["scripts/app-store-connect-openapi.mjs", "--check"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "apple-api-check",
   },
   {
     label: "Check pinned Google Play API operation catalog",
     command: process.execPath,
     args: ["scripts/google-play-discovery.mjs", "--check"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "google-play-api-check",
   },
   {
     label: "Check synchronized versions",
     command: process.execPath,
     args: ["scripts/version.mjs", "check"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "version-check",
   },
   {
@@ -384,34 +395,34 @@ const nodeStaticStages = [
     command: pnpm,
     args: ["run", "check:reachability"],
     env: { KNIP_OXC_RAW_TRANSFER: "0" },
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "reachability-check",
   },
   {
     label: "Check unused imports",
     command: pnpm,
     args: ["run", "check:unused-imports"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "unused-imports-check",
   },
   {
     label: "Check duplicate CSS rules",
     command: pnpm,
     args: ["run", "check:css-duplicate-rules"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "css-duplicate-rules-check",
   },
   {
     label: "Check source line limit (≤5000)",
     command: pnpm,
     args: ["run", "check:line-limit"],
-    parallelGroup: nodeTestParallelGroup,
+    parallelGroup: nodeStaticParallelGroup,
     parallelLane: "line-limit-check",
   },
 ];
 
 const partitions = {
-  "node-checks": [...nodeSetupStages, ...nodeTestLanes, ...nodeStaticStages],
+  "node-checks": [...nodeSetupStages, ...nodeTestLanes],
   web: [
     webBuildStep,
   ],
@@ -566,14 +577,22 @@ const partitions = {
     { ...rustClippyWindows, parallelGroup: "rust-clippy", parallelLane: "windows" },
   ],
   duplicates: [
+    // Reachability reads the built exports, so this partition builds too.
+    nodeBuildStage,
     {
       label: "Check duplicated code",
       command: pnpm,
       args: ["run", "check:duplicates"],
-      // Runs after, not beside, the Node check lanes when one process
-      // requests both: on a 4-CPU hosted VM the scan starves their
-      // process-tree timing tests. Hosted CI gives it a job of its own.
+      // Runs after, not beside, the test lanes when one process requests
+      // both: on a 4-CPU hosted VM the scan starves their process-tree
+      // timing tests. Its own parallel group keeps that order in a combined
+      // invocation, while hosted CI gives it a job of its own where these
+      // build-independent checks use the cores the single-threaded scan
+      // leaves idle.
+      parallelGroup: nodeStaticParallelGroup,
+      parallelLane: "duplicates",
     },
+    ...nodeStaticStages,
   ],
   // The Windows required gate runs the same Cargo suite. Platform-independent
   // duplicate-source validation runs in its own parallel required partition.

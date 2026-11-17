@@ -36,19 +36,26 @@ CI validates in two tiers, chosen in one place: the `changes` job of `ci.yml`
 (its `tier` output). Pull request CI is the fast tier, a pre-merge check whose
 jobs each finish in about two minutes including setup:
 
-- `node-tests`: Oxlint, synchronized versions, dependency reachability,
-  unused imports, duplicate CSS rules, the source line limit, and the
-  protocol, billing, PostgreSQL package and script tests. The package check
+- `node-tests`: Oxlint and the protocol, billing, PostgreSQL package and
+  script tests. The package check
   typechecks once, via the `tsc` build its tests run, then checks migration
   syntax. Migration files are normalized to LF before the checksum and the
   online-index marker, so a CRLF checkout does not change migration identity
   or hide `CREATE INDEX CONCURRENTLY`. A second `tsc --noEmit` of that same
   program only repeated this lane's slowest stage;
-- `node-tests (duplicates)`: the duplicate-code scan, on its own runner. jscpd's
+- `node-tests (static)`: the duplicate-code scan plus the static checks that
+  need no test run (synchronized versions, dependency reachability, unused
+  imports, the pinned Apple and Google catalogs, duplicate CSS rules and the
+  source line limit), on their own runner. It builds the package exports
+  first, which reachability reads. jscpd's
   default store rejected every lookup miss with a new `Error`, and the scan
   spent most of its CPU capturing those stack traces; it now uses a store with
   the same get/set contract that rejects misses with one shared reason, and
-  hashes with Node's one-shot MD5, the same digest jscpd computes;
+  hashes with Node's one-shot MD5, the same digest jscpd computes. The scan is
+  one single-threaded process, so the static checks use the cores it leaves
+  idle; they had been contending with the CPU-saturated test group. In a
+  combined invocation the scan still runs after, never beside, the
+  process-tree timing lanes;
 - `web-unit`, `web-build` and `web-check`: the Web unit tests, the production
   build, and the lint and typecheck that build would run (`next typegen`, then
   `tsc`, beside `next lint`); in the full tier the checked build stays the
@@ -104,7 +111,8 @@ validation uses one static job and four test-file shards; Web uses one primary
 job, four functional browser shards and a performance job. The primary job runs
 the unit tests and checked production build; the performance job starts
 alongside it on its own VM with one worker. Unsharded local runs still execute
-every performance case. The Node checks and the duplicate scan run as two jobs
+every performance case. The Node test lanes and the duplicate scan with the
+static checks run as two jobs
 beside each other. Together with Desktop, Android, both Rust jobs, the selector
 and aggregate, the full matrix has 19 jobs. The primary job also saves its
 Next.js and Turbo build caches without waiting for browser sampling to finish.
