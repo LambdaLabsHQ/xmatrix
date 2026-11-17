@@ -81,8 +81,11 @@ before checkout.
 Public Snapshot CI stays unrecorded.
 
 Protocol Markdown round-trip coverage keeps every Markdown file under `docs/`
-and the focused syntax cases. Each input and its canonical form are parsed
-once; the same two document objects prove serializer idempotence and document
+and the focused syntax cases. The documentation corpus is split into four
+strided test files, so the runner parses its shards in parallel instead of one
+file reading the whole corpus as the Node lane's tail; every page still belongs
+to exactly one shard. Each input and its canonical form are parsed once; the
+same two document objects prove serializer idempotence and document
 equivalence. Other focused tests exercise the canonicalization convenience API.
 This avoids repeating the parser solely to reconstruct values for assertions.
 Canonicalizing a page drops an escape of punctuation that cannot start markup
