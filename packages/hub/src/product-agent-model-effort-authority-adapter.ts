@@ -11,7 +11,7 @@ import {
   type ProductAgentControlResult,
 } from "./product-agent-model-effort";
 import { recordCommandResult } from "./command-result";
-import { readSwitchTargetFacts } from "./registration-launch-dispatch";
+import { chooseInstanceWakeModel, readSwitchTargetFacts } from "./registration-launch-dispatch";
 import { verifyRegistrationQuota } from "./quota-waits";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { postgresMessageLiveAudience, withPostgresMessageRequestScope } from "./postgres-message-authority";
@@ -116,7 +116,10 @@ export function createProductAgentControlAuthorityPort(input: {
         commandId: `product:switch-target:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId, ordinal }) : undefined;
       const asked = Date.now();
       const outcome = await decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: asked,
-        dispatch: (reportedModels, awaitStarting) => askRuntime({ channelId, target, kind, value, reportedModels, awaitStarting }) });
+        dispatch: (reportedModels, awaitStarting) => askRuntime({ channelId, target, kind, value, reportedModels, awaitStarting }),
+        ...(facts ? { chooseOnWake: (written: string) => chooseInstanceWakeModel(input.env, {
+          commandId: `product:wake-model:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId,
+          instanceId: facts.instanceId, model: written }) } : {}) });
       // The provider refused a model for quota that no reading explained:
       // that refusal is the event to read the account on. The reading says
       // which quota is used up and until when, for the Agents page and for

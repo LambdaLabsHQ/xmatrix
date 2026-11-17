@@ -17,6 +17,8 @@ export const SWITCH_CONTINUATION_FRAME_CAPABILITY = "switch_continuation_frame";
 
 export type ProductAgentControlOutcome =
   | { status: "switched"; selected: string;
+      /** Recorded for a resting Instance: it starts on `selected` when it wakes. */
+      onWake?: true;
       /** The switch cancelled this Instance's running turn under `requestId`. */
       continuation?: { instanceId: string; requestId: string } }
   | { status: "catalog"; current?: string; options: readonly string[]; usedUp?: AgentControlUsedUpOption[] }
@@ -88,6 +90,10 @@ export async function decideProductAgentSwitch(input: {
   now: number;
   /** `awaitStarting` asks the Runtime to wait for an Instance that has not reported yet. */
   dispatch(reportedModels: unknown[] | undefined, awaitStarting?: boolean): Promise<ProductAgentControlOutcome>;
+  /** Record the model a resting Instance starts on when it next wakes:
+   * the model recorded, or what it can start on when `written` is none of
+   * them. Undefined when it stopped resting meanwhile. */
+  chooseOnWake?(written: string): Promise<{ selected: string } | { offers: string[] } | undefined>;
 }): Promise<ProductAgentControlOutcome> {
   const { command, now } = input;
   const name = command.target.replace(/:[1-9]\d*$/u, "");
@@ -121,12 +127,31 @@ export async function decideProductAgentSwitch(input: {
         ...(target!.machineName ? { machineName: target!.machineName } : {}),
         ...(available.length ? { available } : {}), ...(elsewhere.length ? { elsewhere } : {}) } };
   };
-  if (target && live && row) {
+  const asleep = target?.state === "asleep";
+  if (target && (live || asleep) && row) {
     const resetsAt = usedUpUntil(target, row, now);
     if (resetsAt) return quotaRefusal(row.model, resetsAt);
   }
-  const first = await input.dispatch(target?.reportedModels);
+  let first = await input.dispatch(target?.reportedModels);
   if (!target) return first;
+  // A resting Instance has no session to switch, and the person should not
+  // have to come back when it wakes: the model is recorded and it starts on
+  // it. Its models are listed from what it last reported.
+  if (first.status === "no_instance" && asleep && command.kind === "model") {
+    const offered = (target.modelCatalog ?? []).map(option => option.model);
+    if (!command.value) {
+      if (offered.length) first = { status: "catalog", options: offered, ...(target.currentModel ? { current: target.currentModel } : {}) };
+    } else if (input.chooseOnWake) {
+      const chosen = await input.chooseOnWake(command.value);
+      if (chosen && "selected" in chosen) return { status: "switched", selected: chosen.selected, onWake: true };
+      if (chosen?.offers.length) {
+        return { status: "error", message: `\`${command.value}\` is not one @${command.target} can start on. ` +
+          `It can start on ${chosen.offers.map(option => `\`${option}\``).join(", ")}.` };
+      }
+      // It woke while this was decided: it is asked like any live Instance.
+      if (!chosen) first = await input.dispatch(target.reportedModels, true);
+    }
+  }
   // An Instance with a Run and no connection is starting, being reborn or
   // reconnecting: the statement waits for its next report and is applied
   // then, instead of being refused.
@@ -195,7 +220,8 @@ export interface ProductAgentControlResult {
 function outcomeRecord(command: ProductAgentControlCommand, outcome: ProductAgentControlOutcome): AgentControlOutcomeRecord {
   const statement = { kind: command.kind, target: command.target };
   switch (outcome.status) {
-    case "switched": return { ...statement, status: "switched", selected: outcome.selected };
+    case "switched": return { ...statement, status: "switched", selected: outcome.selected,
+      ...(outcome.onWake ? { onWake: true } : {}) };
     case "catalog": return { ...statement, status: "catalog", options: [...outcome.options],
       ...(outcome.current ? { current: outcome.current } : {}), ...(outcome.usedUp?.length ? { usedUp: outcome.usedUp } : {}) };
     case "no_instance": return { ...statement, status: "no_instance" };

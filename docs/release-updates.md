@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: `/model` to a sleeping Agent takes effect when it wakes
+
+A `/model` written to an Agent that was asleep answered that it had no
+session to switch and asked for the statement again after it woke. The
+choice is now recorded: the answer reads "@claude:3 is asleep. It starts on
+claude-fable-5-2 when it wakes", and its next wake or reborn starts on that
+model. A model whose provider quota is used up is still refused first, with
+its reset time, and `/model` with no value lists the models the Agent last
+reported. Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting
+this change.
+
 ## Unreleased: `/model` right after a reborn is applied, and a refused model's quota is read
 
 A `/model` sent in the seconds after `:reborn`, while the old Run was still

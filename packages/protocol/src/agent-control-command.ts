@@ -35,7 +35,9 @@ export interface AgentControlInvocation extends AgentControlCommand {
 
 /** What one statement came to, in statement order on the Hub's receipt. */
 export type AgentControlOutcomeRecord = Pick<AgentControlCommand, "kind" | "target"> & (
-  | { status: "switched"; selected: string }
+  | { status: "switched"; selected: string;
+      /** The Instance rests: it starts on `selected` when it next wakes. */
+      onWake?: true }
   | { status: "catalog"; current?: string; options: string[]; usedUp?: AgentControlUsedUpOption[] }
   | { status: "no_instance" }
   | { status: "error"; message: string; quotaExhausted?: AgentControlQuotaExhausted;

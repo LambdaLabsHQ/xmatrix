@@ -133,6 +133,15 @@ A refused switch offers the person who wrote it one step, in its answer
   next presence report (the event; fifteen seconds is only the bound) and is
   applied then. Only when it does not report in that time is the answer a
   refusal (`starting`), and it offers **Send again**.
+- A model written to a resting Instance is recorded on its Run
+  (`chooseWakeModel`, `wakeRuntimeModel`) and is the model its next wake or
+  reborn starts on; the statement answers `switched` with `onWake`, drawn as
+  "starts on <model> when it wakes". The choice keeps the Instance's kind of
+  model, as every resume does: a model its registration declares, or on the
+  runtime default a model of the catalog it last reported. A used-up model is
+  refused first, with its reset, and a wake decides its quota by the chosen
+  model. `/model` with no value lists what it last reported. An effort still
+  waits for the Instance to wake.
 - A provider refusal for quota that no reading explained asks the Instance's
   daemon for one fresh read of that account (`verifyRegistrationQuota`). The
   refusal is the event; the reading then tells the Agents page and the next

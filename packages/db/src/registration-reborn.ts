@@ -358,6 +358,37 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       ...(elsewhere.length ? { elsewhere } : {}) };
   }
 
+  /**
+   * Record the model a resting Instance starts on when it next wakes or is
+   * reborn, for a `/model` statement written while it rests. The choice keeps
+   * the Instance's kind of model, as a resume does: one of the models its
+   * registration declares, or on the runtime default a model of the runtime's
+   * own catalog as the Instance last reported it. `offers` names what could
+   * be chosen when `written` is none of them.
+   */
+  async chooseWakeModel(raw: { commandId: string; channelId: string; instanceId: string; model: string }):
+    Promise<{ selected: string } | { offers: string[] }> {
+    const commandId = text(raw.commandId), channelId = text(raw.channelId), instanceId = text(raw.instanceId);
+    const written = text(raw.model).trim();
+    const facts = await this.continuationModelFacts({ commandId, channelId, sourceInstanceId: instanceId });
+    const declared = facts?.models ?? [];
+    const catalog = declared.length ? [] : facts?.modelCatalog ?? [];
+    const selected = declared.find(model => model.toLowerCase() === written.toLowerCase()) ??
+      catalog.find(option => routingModelOptionNamed(option, written))?.model;
+    if (!selected || selected.length > 160) return { offers: declared.length ? declared : catalog.map(option => option.model) };
+    const recorded = await this.database.transaction({ requestId: commandId, operation: "registration.wake.model",
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_model_v1", text: `UPDATE data.runs run
+        SET metadata_json=run.metadata_json||jsonb_build_object('wakeRuntimeModel',$3::text),
+          version=run.version+1,updated_at=clock_timestamp()
+        FROM data.instances instance
+        WHERE instance.instance_id=$1 AND instance.channel_id=$2 AND run.run_id=instance.run_id
+          AND instance.rest_state IN ('sleeping','interrupted') AND run.status IN (${TERMINAL_RUN_STATUS_SQL})
+        RETURNING run.run_id`, values: [instanceId, channelId, selected], maxRows: 1 }));
+    // It woke between the statement and this write: the caller asks it live.
+    if (!recorded.length) throw new RegistrationAccessError("instance_not_resting", 409);
+    return { selected };
+  }
+
   /** Whether a Run moved off `original` for quota can go back to it: a
    * current reading shows that model has quota, it is still the registration's
    * kind of model, and a catalog model has a daemon that switches to it. */
@@ -384,15 +415,19 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const located = await this.locate(raw, "reborn");
     // A Run moved off its model for quota goes back to it on its next resume
     // once a reading shows that model has quota again.
-    const returning = raw.preferredRuntimeModel === undefined && located.originalRuntimeModel !== undefined &&
+    // A model a person chose while it rested is the model it resumes on: it
+    // is a choice, not a move for quota, so nothing is kept to go back to.
+    const chosen = raw.preferredRuntimeModel === undefined ? located.wakeRuntimeModel : undefined;
+    const returning = chosen === undefined && raw.preferredRuntimeModel === undefined && located.originalRuntimeModel !== undefined &&
       await this.originalModelBack(raw, located.originalRuntimeModel, located.useRuntimeDefaultModel);
-    const input = returning ? { ...raw, preferredRuntimeModel: located.originalRuntimeModel } : raw;
+    const input = chosen !== undefined ? { ...raw, preferredRuntimeModel: chosen }
+      : returning ? { ...raw, preferredRuntimeModel: located.originalRuntimeModel } : raw;
     const physical = await this.physical(input, located.key, located, "reborn", located.useRuntimeDefaultModel === true,
       located.useRuntimeDefaultModel === true && Boolean(input.preferredRuntimeModel));
     const at = new Date().toISOString();
     return this.database.transaction({ requestId: input.commandId, operation: `registration.${kind}.prepare`,
       placement: this.placement }, async tx => {
-      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at, returning);
+      const { source, successor } = await this.resumeSuccessor(tx, input, located, physical, at, returning || chosen !== undefined);
       // The written mention binds this reborn's status to its source message.
       const invocationSource = kind === "reborn" ? readContinuationSource({ schemaVersion: 1, kind: "reborn",
         sourceMessageId: input.sourceMessageId, sourceMessageVersion: 1, sourceMention: input.sourceMention,
@@ -499,8 +534,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const commandId = text(raw.commandId);
     const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v4", text: `SELECT
-        i.instance_id,r.owner_user_id,b.machine_id,b.harness,i.presentation_json->>'model' AS model,
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v5", text: `SELECT
+        i.instance_id,r.owner_user_id,b.machine_id,b.harness,
+        COALESCE(NULLIF(r.metadata_json->>'wakeRuntimeModel',''),i.presentation_json->>'model') AS model,
         i.presentation_json->'models' AS catalog_models,i.presentation_json->>'modelsObservedAt' AS catalog_observed_at
         FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
@@ -986,6 +1022,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       preferredRuntimeModel: metadata.useRuntimeDefaultModel === true && typeof metadata.preferredRuntimeModel === "string"
         ? metadata.preferredRuntimeModel : undefined,
       originalRuntimeModel: typeof metadata.originalRuntimeModel === "string" ? metadata.originalRuntimeModel : undefined,
+      // The model a person chose for it while it rested (`chooseWakeModel`).
+      wakeRuntimeModel: typeof metadata.wakeRuntimeModel === "string" && metadata.wakeRuntimeModel
+        ? metadata.wakeRuntimeModel : undefined,
       modelResource: typeof metadata.modelResource === "string" ? metadata.modelResource : undefined,
       hostname: typeof metadata.hostname === "string" ? metadata.hostname : undefined,
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : undefined,

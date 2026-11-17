@@ -2833,7 +2833,12 @@ fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
         );
         let outcome = match text(control, "status").as_deref() {
             Some("switched") => format!(
-                "switched to {}",
+                "{} {}",
+                if control.get("onWake").and_then(serde_json::Value::as_bool) == Some(true) {
+                    "asleep; starts when it wakes on"
+                } else {
+                    "switched to"
+                },
                 text(control, "selected").unwrap_or_default()
             ),
             Some("catalog") => {
@@ -3819,6 +3824,7 @@ mod tests {
                   "current": "high", "options": ["low", "high"],
                   "usedUp": [{ "option": "high", "resetsAt": "2026-11-19T18:00:00.000Z" }] },
                 { "kind": "effort", "target": "claude:9", "status": "no_instance" },
+                { "kind": "model", "target": "claude:4", "status": "switched", "selected": "fable", "onWake": true },
             ],
             "notes": [{ "id": "n-1", "text": "It closed without an answer.", "at": "2026-11-16T20:30:00Z" }],
         }));
@@ -3833,6 +3839,10 @@ mod tests {
         assert!(
             output
                 .contains("  [result] /effort @claude:9: not applied: no such running Instance\n"),
+            "{output}"
+        );
+        assert!(
+            output.contains("  [result] /model @claude:4: asleep; starts when it wakes on fable\n"),
             "{output}"
         );
         assert!(
