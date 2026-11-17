@@ -128,11 +128,16 @@ addressed Instance before and after its Runtime is asked
 A refused switch offers the person who wrote it one step, in its answer
 (`controlNextStep`), and the step is an ordinary command sent as them:
 
-- A statement to an Instance whose Run is recorded as starting waits, in the
-  Runtime cell, for that Instance's first presence report (the event; fifteen
-  seconds is only the bound) and is applied then. Only when it does not come
-  up in that time, or a running Instance holds no connection, is the answer a
+- A statement to an Instance that has a Run and no connection (starting,
+  being reborn, reconnecting) waits, in the Runtime cell, for that Instance's
+  next presence report (the event; fifteen seconds is only the bound) and is
+  applied then. Only when it does not report in that time is the answer a
   refusal (`starting`), and it offers **Send again**.
+- A provider refusal for quota that no reading explained asks the Instance's
+  daemon for one fresh read of that account (`verifyRegistrationQuota`). The
+  refusal is the event; the reading then tells the Agents page and the next
+  statement which quota is used up and until when. Until it arrives, models
+  that share the refused model's quota scopes are not listed as available.
 - The answer's second step says who answered: the Instance, xMatrix on the
   provider's quota reading (the Instance was never asked), or nobody because
   the Instance is not connected.

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: `/model` right after a reborn is applied, and a refused model's quota is read
+
+A `/model` sent in the seconds after `:reborn`, while the old Run was still
+recorded as running or stopping, was refused as "not connected" instead of
+waiting. It now waits for the Instance's next report (up to fifteen seconds)
+whenever the Instance has a Run and no connection, and is applied then. When
+a provider refuses a model for quota and xMatrix holds no reading of that
+model's own quota (the reading had lapsed), the refusal now asks the machine
+for one fresh read of the account, so the Agents page and the next `/model`
+say which quota is used up and until when; meanwhile, models that share the
+refused model's quota are no longer listed as still available. Hub and DB.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a refused `/model` offers the step that gets what was asked
 
 The answer to a refused `/model` now carries one button for the person who

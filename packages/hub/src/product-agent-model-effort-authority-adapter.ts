@@ -12,6 +12,7 @@ import {
 } from "./product-agent-model-effort";
 import { recordCommandResult } from "./command-result";
 import { readSwitchTargetFacts } from "./registration-launch-dispatch";
+import { verifyRegistrationQuota } from "./quota-waits";
 import { relayRuntimeCellsForOwners } from "./relay-authority-locator";
 import { postgresMessageLiveAudience, withPostgresMessageRequestScope } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
@@ -113,8 +114,19 @@ export function createProductAgentControlAuthorityPort(input: {
       const ordinal = Number(/:([1-9]\d{0,8})$/u.exec(target)?.[1]);
       const facts = Number.isSafeInteger(ordinal) ? await readSwitchTargetFacts(input.env, {
         commandId: `product:switch-target:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId, ordinal }) : undefined;
-      return decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: Date.now(),
+      const asked = Date.now();
+      const outcome = await decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: asked,
         dispatch: (reportedModels, awaitStarting) => askRuntime({ channelId, target, kind, value, reportedModels, awaitStarting }) });
+      // The provider refused a model for quota that no reading explained:
+      // that refusal is the event to read the account on. The reading says
+      // which quota is used up and until when, for the Agents page and for
+      // the next statement, which is then refused without asking the Instance.
+      if (outcome.status === "error" && outcome.quotaExhausted && !outcome.quotaExhausted.resetsAt && facts?.registration) {
+        await verifyRegistrationQuota(input.env, { registrations: [facts.registration], readAfter: new Date(asked).toISOString() })
+          .catch((error: unknown) => console.warn("Quota read after a refused switch was not issued",
+            { error: error instanceof Error ? error.message : String(error) }));
+      }
+      return outcome;
     },
 
     async recordOutcomes(channelId, outcomes) {

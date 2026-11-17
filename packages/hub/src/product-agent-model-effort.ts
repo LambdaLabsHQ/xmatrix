@@ -99,7 +99,13 @@ export async function decideProductAgentSwitch(input: {
   const row = target && command.kind === "model" && command.value
     ? (target.modelCatalog ?? []).find(option => routingModelOptionNamed(option, command.value!)) : undefined;
   const quotaRefusal = (model: string, resetsAt: string | undefined): ProductAgentControlOutcome => {
-    const available = modelsWithQuota(target!, now).filter(option => option !== model && option !== target!.currentModel);
+    // Without a reading of the refused model's own quota, the models that
+    // share its scopes cannot be told from it: none of them is promised.
+    const scopes = new Set(resetsAt ? [] : (row?.quotaScopes ?? []).map(scope => scope.trim().toLowerCase()));
+    const sharesScope = (option: string) => (target!.modelCatalog ?? []).some(candidate => candidate.model === option &&
+      (candidate.quotaScopes ?? []).some(scope => scopes.has(scope.trim().toLowerCase())));
+    const available = modelsWithQuota(target!, now).filter(option => option !== model && option !== target!.currentModel &&
+      !sharesScope(option));
     // A Machine is named only when its own reading shows this model has quota
     // there, and the model can be written after `model:` as it is.
     const elsewhere = row && target!.harness && !/[\s"]/u.test(row.model) && !/"/u.test(target!.harness)
@@ -121,9 +127,10 @@ export async function decideProductAgentSwitch(input: {
   }
   const first = await input.dispatch(target?.reportedModels);
   if (!target) return first;
-  // A Run recorded as starting has not reported yet: the statement waits for
-  // its first report and is applied then, instead of being refused.
-  const outcome = first.status === "no_instance" && target.state === "starting"
+  // An Instance with a Run and no connection is starting, being reborn or
+  // reconnecting: the statement waits for its next report and is applied
+  // then, instead of being refused.
+  const outcome = first.status === "no_instance" && live
     ? await input.dispatch(target.reportedModels, true) : first;
   if (outcome.status === "no_instance") {
     const address = `@${command.target}`;
@@ -133,7 +140,7 @@ export async function decideProductAgentSwitch(input: {
         ? `${address} has stopped. Start it again with ${address}:reborn, then send this again.`
         : target.state === "starting"
           ? `${address} is still starting${onMachine(target)} and did not come up while xMatrix waited. Send this again once it is running.`
-          : `${address} is not connected to xMatrix right now${onMachine(target)}. Send this again once it is back.`,
+          : `${address} is not connected to xMatrix right now${onMachine(target)} and did not come back while xMatrix waited. Send this again once it is back.`,
       ...(live ? { starting: true as const } : {}) };
   }
   if (outcome.status === "error" && command.kind === "model" && command.value && PROVIDER_QUOTA_REFUSAL.test(outcome.message)) {

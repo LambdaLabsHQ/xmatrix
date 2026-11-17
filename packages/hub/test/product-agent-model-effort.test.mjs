@@ -288,6 +288,14 @@ test("a provider's own quota refusal names the account and keeps the turn's cont
   assert.deepEqual(result, { status: "error", continuation,
     message: "the provider account on build-box has no quota left for claude-fable-5-2, and gave no reset time. @claude:3 stays on claude-opus-5-5.",
     quotaExhausted: { model: "claude-fable-5-2", machineName: "build-box" } });
+  // With the account read but not the refused model's own quota, a model
+  // sharing its scope is not promised; one outside it is.
+  const catalog = [...CATALOG, { model: "claude-fable-5-1", description: "", efforts: [], quotaScopes: ["Fable"] },
+    { model: "claude-sonnet-5-5", description: "", efforts: [] }];
+  const accountOnly = { ...FABLE_USED_UP, scopedQuotaUsages: [] };
+  const unread = await decide({ kind: "model", value: "fable" }, running({ modelCatalog: catalog, usage: accountOnly }),
+    { status: "error", message: "API error: 429 rate limit" });
+  assert.deepEqual(unread.result.quotaExhausted.available, ["claude-sonnet-5-5"]);
 });
 
 test("an Instance no Runtime cell holds is named for what it is", async () => {
@@ -298,7 +306,7 @@ test("an Instance no Runtime cell holds is named for what it is", async () => {
   assert.equal(await message("starting"),
     "@claude:3 is still starting on build-box and did not come up while xMatrix waited. Send this again once it is running.");
   assert.equal(await message("running"),
-    "@claude:3 is not connected to xMatrix right now on build-box. Send this again once it is back.");
+    "@claude:3 is not connected to xMatrix right now on build-box and did not come back while xMatrix waited. Send this again once it is back.");
   assert.equal(await message("asleep"),
     "@claude:3 is asleep, so it has no session to switch. It wakes on its next message; send this again then.");
   assert.equal(await message("stopped"),
@@ -324,9 +332,13 @@ test("a statement to an Instance that is still starting waits for its first repo
       return awaitStarting ? { status: "switched", selected: "claude-opus-5-5" } : { status: "no_instance" };
     } });
   assert.deepEqual([result, asked], [{ status: "switched", selected: "claude-opus-5-5" }, [false, true]]);
-  // An Instance that is running but holds no connection is not waited for.
-  const waited = [];
-  await decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value: "claude-opus-5-5" },
-    target: running(), now: NOW, dispatch: async (_models, awaitStarting) => { waited.push(awaitStarting === true); return { status: "no_instance" }; } });
-  assert.deepEqual(waited, [false]);
+  // One being reborn or reconnecting (a Run, no connection) is waited for the same way; one asleep is not.
+  const waits = async (state) => {
+    const waited = [];
+    await decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value: "claude-opus-5-5" },
+      target: running({ state }), now: NOW,
+      dispatch: async (_models, awaitStarting) => { waited.push(awaitStarting === true); return { status: "no_instance" }; } });
+    return waited;
+  };
+  assert.deepEqual([await waits("running"), await waits("asleep")], [[false, true], [false]]);
 });
