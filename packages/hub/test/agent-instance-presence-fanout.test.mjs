@@ -113,3 +113,16 @@ test("a binding its transport gave up is reported once, then dropped", async (t)
   assert.equal(gone.sent.length, 0);
   assert.deepEqual(reported.mock.calls.map(call => call.arguments[1]?.code), ["agent_delivery_binding_stale"]);
 });
+
+test("a switch addressed to an Instance that has not reported yet is answered on its first report", async () => {
+  const { transport } = productionAgentInstanceTransport(presentationRuntime().runtime);
+  const address = { channelId: "channel", target: "agent-a:1", kind: "model" };
+  // Nothing reports within the bound: there is no such Instance here.
+  assert.deepEqual(await transport.switchInstanceControl({ ...address, awaitStarting: true, startingWaitMs: 5 }), { status: "no_instance" });
+  const waiting = transport.switchInstanceControl({ ...address, awaitStarting: true, startingWaitMs: 5_000 });
+  const socket = new FakeSocket();
+  assert.equal(transport.rehydrate(socket, attachment("a", {}, { channelInstanceId: "1" })), true);
+  await transport.handleFrame(socket, JSON.stringify({ type: "presence_update", status: "idle", model: "opus",
+    models: [{ id: "opus", model: "opus" }] }));
+  assert.deepEqual(await waiting, { status: "catalog", options: ["opus"], current: "opus" });
+});

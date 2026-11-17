@@ -796,6 +796,39 @@ integration("launch survives a hostname change with stale Workspace metadata and
       switchTarget.modelCatalog.map(row => row.model)],
     [cold.instanceId, 'provider/model', 2, ['provider/model', 'provider/other']]);
     assert.equal(switchTarget.state, ['starting', 'running'].includes(coldRow.status) ? coldRow.status : 'stopped');
+    // A repository-backed Instance is also told where else its work can go on:
+    // another online Machine of the Space that runs its harness and has a
+    // current reading of its own account. Machines carry their owners' names.
+    assert.deepEqual([switchTarget.machineName, switchTarget.elsewhere], [undefined, undefined]);
+    const clone = (table, change) => sql(`INSERT INTO ${table} SELECT (jsonb_populate_record(NULL::${table},
+      to_jsonb(source)||$1::jsonb)).* FROM ${table} source WHERE source.machine_id='machine' AND source.harness='codex'`, [change]);
+    await sql(`INSERT INTO control.machine_execution_capacity SELECT (jsonb_populate_record(NULL::control.machine_execution_capacity,
+      to_jsonb(source)||'{"machine_id":"machine-2"}'::jsonb)).* FROM control.machine_execution_capacity source WHERE source.machine_id='machine'`);
+    for (const table of ['data.agent_registrations', 'data.space_agent_registrations', 'data.space_agent_registration_access',
+      'control.agent_registration_environments']) await clone(table, { machine_id: 'machine-2' });
+    await sql(`INSERT INTO data.machine_daemons SELECT (jsonb_populate_record(NULL::data.machine_daemons,
+      to_jsonb(source)||'{"machine_id":"machine-2","daemon_id":"daemon-2","host_id":"host-2","status":"online"}'::jsonb)).*
+      FROM data.machine_daemons source WHERE source.machine_id='machine' LIMIT 1`);
+    await sql(`INSERT INTO data.machines (owner_user_id,machine_id,name) VALUES ('owner','machine','build-box'),('owner','machine-2','spare-box')`);
+    await sql(`INSERT INTO control.registration_quota_observations (owner_user_id,quota_pool_id,remaining,observed_at,
+        expires_at,source,windows_json) VALUES ('owner','registration:machine-2:codex',60,statement_timestamp()-interval '1 second',
+        statement_timestamp()+interval '5 minutes','provider','[{"usedPercent":40}]')`);
+    await sql(`UPDATE control.agent_registration_environments SET declaration_json=declaration_json-'quotaPoolId' WHERE machine_id='machine-2'`);
+    const elsewhere = async () => (await reborn.switchTargetFacts({ commandId: `switch-elsewhere-${Math.random()}`, channelId: 'channel',
+      ordinal: Number(coldRow.channel_instance_id) }));
+    // A directory never leaves its Machine: only a repository-backed Run is offered one.
+    assert.deepEqual([(await elsewhere()).machineName, (await elsewhere()).elsewhere], ['build-box', undefined]);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json||'{"remoteRepo":"acme/app"}' WHERE run_id=$1`, [cold.runId]);
+    assert.deepEqual((await elsewhere()).elsewhere.map(machine => [machine.machineName, machine.usage.quotaUsages.length]), [['spare-box', 1]]);
+    // An offline Machine, or one without a current reading, is not offered.
+    await sql(`UPDATE data.machine_daemons SET status='offline' WHERE daemon_id='daemon-2'`);
+    assert.equal((await elsewhere()).elsewhere, undefined);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json-'remoteRepo' WHERE run_id=$1`, [cold.runId]);
+    await sql(`DELETE FROM control.registration_quota_observations WHERE quota_pool_id='registration:machine-2:codex'`);
+    await sql(`DELETE FROM data.machine_daemons WHERE daemon_id='daemon-2'`);
+    await sql(`DELETE FROM data.machines WHERE owner_user_id='owner' AND machine_id IN ('machine','machine-2')`);
+    for (const table of ['control.agent_registration_environments', 'data.space_agent_registration_access',
+      'data.space_agent_registrations', 'data.agent_registrations', 'control.machine_execution_capacity']) await sql(`DELETE FROM ${table} WHERE machine_id='machine-2'`);
     assert.equal(await reborn.switchTargetFacts({ commandId: 'switch-target-missing', channelId: 'channel', ordinal: 9_999 }), undefined);
     // A switch keeps the Instance's kind of model: one on the runtime default
     // of a registration that now declares models has nothing to switch to.

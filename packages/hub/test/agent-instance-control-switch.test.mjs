@@ -235,10 +235,11 @@ test("a cell that kept no catalog decides by the one the Instance row holds", as
       return Promise.resolve({ value: "fable" });
     },
   });
-  // Without the row's catalog the cell knows no model to offer, and says so.
-  const unknown = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model", value: "fable" });
-  assert.deepEqual(unknown, { status: "error", message: "@claude:1 has not reported which models it offers." });
-  assert.equal(asked, undefined);
+  // With no catalog anywhere the runtime is asked as written and answers for itself.
+  const unknown = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model", value: "Fable" });
+  assert.deepEqual(unknown, { status: "switched", selected: "fable" });
+  assert.equal(asked.kind, "model");
+  assert.equal(socket.sent.at(-1).model, "Fable");
 
   const listed = await transport.switchInstanceControl({ channelId: "channel-1", target: "claude:1", kind: "model",
     reportedModels: MODELS });

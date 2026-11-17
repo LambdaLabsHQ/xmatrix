@@ -1,7 +1,7 @@
 import { agentPresetForLauncher, cleanRuntimeOperationFailure, handoffInstanceMentionScanner, mentionAddressTokens, parseHandoffInstanceTarget, parseAutoLaunchMentions, rebornFailureReason, scanMentionAddresses, summarizeStopReceipts, type SerializedAgentLaunch, type SerializedAgentStop,
   type SerializedAgentMessageExecution, type SerializedAgentInvocationRejection, type SerializedAgentContinuation, type AgentLaunchActivity, type AgentStopInvocation,
   type AutoLaunchMention, type AgentControlInvocation, type AgentControlOutcomeRecord,
-  parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
+  agentControlHandoffStatement, parseRebornInstanceMentions, parseHandoffInstanceMentions, type FaceOf } from "@xmatrix/protocol";
 import { noticesNaming, type CommandNotice } from "./command-notices";
 
 export type InvocationTone = "active" | "waiting" | "error" | "success" | "neutral";
@@ -354,12 +354,17 @@ export const CONTROL_RECEIPT_PENDING_MS = 15_000;
 export function controlView(invocation: AgentControlInvocation, outcome: AgentControlOutcomeRecord | undefined,
   notice: CommandNotice | undefined, input: { fresh: boolean }): InvocationView {
   const noun = invocation.kind;
+  // Who answered: a model the Hub's quota reading already shows used up, or
+  // an Instance with no connection, was never asked.
+  const answeredBy = outcome?.status !== "error" ? "Instance answered"
+    : outcome.starting ? "Instance not connected"
+      : outcome.quotaExhausted?.resetsAt ? "Refused by xMatrix on the provider's quota reading" : "Instance answered";
   const result = (label: InvocationChip, detail: string, animate = false): InvocationView => {
     const status = invocationChipStatus(label, detail, animate);
     const answered = label !== "Switching" && label !== "Unconfirmed";
     return { ...status, terminal: answered, steps: [
       { label: invocation.value ? `Switch to ${invocation.value} requested` : `${noun === "model" ? "Models" : "Efforts"} requested`, state: "done" },
-      { label: "Instance answered", at: answered ? notice?.sentAt : undefined,
+      { label: answeredBy, at: answered ? notice?.sentAt : undefined,
         state: label === "Not found" || label === "Failed" ? "failed" : answered ? "done" : label === "Switching" ? "current" : "unknown" },
     ] };
   };
@@ -380,6 +385,24 @@ export function controlView(invocation: AgentControlInvocation, outcome: AgentCo
   if (notice) return result(/^(?:Could not|xMatrix could not find)/iu.test(notice.body) ? "Failed" : "Switched", notice.body);
   return input.fresh ? result("Switching", `Waiting for the Instance to answer.`, true)
     : result("Unconfirmed", "The Instance has not answered this switch.");
+}
+
+/** What the author of a refused switch can do about it in place: one step,
+ * said as what pressing it does, and the command that does it. */
+export type ControlNextStep = { label: string; explanation?: string; body: string };
+
+export function controlNextStep(invocation: AgentControlInvocation,
+  outcome: AgentControlOutcomeRecord | undefined): ControlNextStep | undefined {
+  if (outcome?.status !== "error") return undefined;
+  // An Instance that was still starting takes the same statement once it runs.
+  if (outcome.starting) return { label: "Send again", body: invocation.text };
+  const quota = outcome.quotaExhausted;
+  const machine = quota?.elsewhere?.[0];
+  if (!quota || !machine) return undefined;
+  // The step says the model it gets: the one that was asked for, on a Machine whose account still has it.
+  return { label: `Continue on ${machine.machineName} with ${quota.model}`,
+    explanation: `Stops @${invocation.target} and starts a new @${machine.harness} on ${machine.machineName} that continues its work on ${quota.model}. That machine's account still has quota for it.`,
+    body: agentControlHandoffStatement(invocation.target, machine.harness, machine.machineName, quota.model) };
 }
 
 /** A reborn or handoff the Hub refused before any Run existed: its notice is the answer. */

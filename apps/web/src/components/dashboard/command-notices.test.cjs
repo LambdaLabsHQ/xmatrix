@@ -2,7 +2,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 const { foldCommandNotices } = require("./command-notices.ts");
-const { segmentMessageInteraction, controlView, stopView } = require("./mention-invocation-state.ts");
+const { segmentMessageInteraction, controlView, controlNextStep, stopView } = require("./mention-invocation-state.ts");
 const { parseAgentControlInvocations } = require("@xmatrix/protocol");
 
 const sentAt = "2026-10-21T21:08:00Z";
@@ -61,6 +61,9 @@ test("each statement claims its own span and outcome", () => {
   const refused = controlView(controls[0], { kind: "model", target: "claude:1", status: "error",
     message: "the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus.",
     quotaExhausted: { model: "fable", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box" } }, undefined, { fresh: false });
+  // The model was refused on the Hub's reading; its Instance was never asked.
+  assert.deepEqual(refused.steps.map(step => [step.label, step.state]), [["Switch to fable requested", "done"],
+    ["Refused by xMatrix on the provider's quota reading", "failed"]]);
   assert.deepEqual([refused.label, refused.detail], ["Failed",
     "Could not switch the model: the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC. @claude:1 stays on opus."]);
   assert.equal(controlView({ ...controls[0], value: undefined }, { kind: "model", target: "claude:1", status: "catalog",
@@ -112,4 +115,19 @@ test("legacy routine stop confirmations disappear without a loaded command, whil
     human("human", "Stopped @claude on build-1.", { metadata: stopped }),
   ]);
   assert.deepEqual([...folded], ["routine", "source-unloaded"]);
+});
+
+test("a refused switch offers its author one step, said as what it does", () => {
+  const [switching] = parseAgentControlInvocations("@claude:3 /model fable");
+  const refused = (extra) => ({ kind: "model", target: "claude:3", status: "error", message: "refused", ...extra });
+  assert.deepEqual(controlNextStep(switching, refused({ starting: true })), { label: "Send again", body: "@claude:3 /model fable" });
+  assert.deepEqual(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2", machineName: "build-box",
+    elsewhere: [{ machineName: "spare box", harness: "claude" }, { machineName: "third", harness: "claude" }] } })),
+  { label: "Continue on spare box with claude-fable-5-2",
+    explanation: "Stops @claude:3 and starts a new @claude on spare box that continues its work on claude-fable-5-2. That machine's account still has quota for it.",
+    body: '@claude:3:handoff:@claude machine:"spare box" model:claude-fable-5-2' });
+  // Used up with nowhere else to run it, or refused for another reason: nothing to press.
+  assert.equal(controlNextStep(switching, refused({ quotaExhausted: { model: "claude-fable-5-2" } })), undefined);
+  assert.equal(controlNextStep(switching, refused({})), undefined);
+  assert.equal(controlNextStep(switching, { kind: "model", target: "claude:3", status: "switched", selected: "fable" }), undefined);
 });

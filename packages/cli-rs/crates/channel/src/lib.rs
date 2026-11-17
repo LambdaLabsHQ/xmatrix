@@ -2845,9 +2845,32 @@ fn command_result_lines(result: Option<&serde_json::Value>) -> Vec<String> {
                     .filter_map(serde_json::Value::as_str)
                     .collect::<Vec<_>>()
                     .join(", ");
-                match text(control, "current") {
-                    Some(current) => format!("current {current}; offers {options}"),
-                    None => format!("offers {options}"),
+                let used_up = control
+                    .get("usedUp")
+                    .and_then(serde_json::Value::as_array)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|entry| {
+                        Some(format!(
+                            "{} until {}",
+                            text(entry, "option")?,
+                            text(entry, "resetsAt")?
+                        ))
+                    })
+                    .collect::<Vec<_>>();
+                let offers = if options.is_empty() {
+                    "has reported no options yet".to_string()
+                } else {
+                    format!("offers {options}")
+                };
+                let listed = match text(control, "current") {
+                    Some(current) => format!("current {current}; {offers}"),
+                    None => offers,
+                };
+                if used_up.is_empty() {
+                    listed
+                } else {
+                    format!("{listed}; used up: {}", used_up.join(", "))
                 }
             }
             Some("no_instance") => "not applied: no such running Instance".to_string(),
@@ -3793,7 +3816,8 @@ mod tests {
                 { "kind": "model", "target": "claude:3", "status": "error",
                   "message": "the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC." },
                 { "kind": "effort", "target": "claude:3", "status": "catalog",
-                  "current": "high", "options": ["low", "high"] },
+                  "current": "high", "options": ["low", "high"],
+                  "usedUp": [{ "option": "high", "resetsAt": "2026-11-19T18:00:00.000Z" }] },
                 { "kind": "effort", "target": "claude:9", "status": "no_instance" },
             ],
             "notes": [{ "id": "n-1", "text": "It closed without an answer.", "at": "2026-11-16T20:30:00Z" }],
@@ -3803,7 +3827,7 @@ mod tests {
             "  [result] /model @claude:3: not applied: the provider quota for fable on build-box is used up until 2026-11-19 18:00 UTC.\n"
         ), "{output}");
         assert!(
-            output.contains("  [result] /effort @claude:3: current high; offers low, high\n"),
+            output.contains("  [result] /effort @claude:3: current high; offers low, high; used up: high until 2026-11-19T18:00:00.000Z\n"),
             "{output}"
         );
         assert!(

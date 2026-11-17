@@ -72,6 +72,8 @@ export type MentionReadMessageScope = {
   onRetryLaunch?: (launch: SerializedAgentLaunch) => Promise<void>;
   /** Present only for the message's author: start a summon its send only mentioned. */
   onLaunchAnyway?: (sourceMention: string) => Promise<void>;
+  /** Present only for the message's author: send the next step of a refused command. */
+  onRunCommand?: (body: string) => Promise<void>;
   /** When the message was sent, so a fresh summon can show it starting. */
   sentAt?: string;
   statuses?: readonly ChannelMentionReadStatus[];
@@ -282,7 +284,7 @@ function InteractionSegmentView({ segment, scope, starting }: {
         unavailable={scope?.launchStatusUnavailable} notices={scope?.notices} />;
     case "runtime-control.v1":
       return <MentionControlChip invocation={segment.invocation} outcome={segment.outcome}
-        notice={segment.notice} sentAt={scope?.sentAt} />;
+        notice={segment.notice} sentAt={scope?.sentAt} onRunCommand={scope?.onRunCommand} />;
     case "mention.v1":
       return <MentionReadChip target={segment.target} text={segment.text} token={segment.token} />;
     default:

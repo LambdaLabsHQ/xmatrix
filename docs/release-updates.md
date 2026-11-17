@@ -1,5 +1,24 @@
 # Release Updates
 
+## Unreleased: a refused `/model` offers the step that gets what was asked
+
+The answer to a refused `/model` now carries one button for the person who
+wrote it. When the model's provider quota is used up on the Instance's
+machine and another online machine of the Space runs the same Agent with
+quota for that model, **Continue on <machine> with <model>** hands the Instance's work to
+a new one there on that model (an ordinary handoff; the answer says it stops
+the Instance first). It is offered only for a repository-backed Instance and
+only for a machine whose own account reading shows quota for that model. A
+statement sent to an Instance that is still starting now waits for the
+Instance's first report (up to fifteen seconds) and is applied then; only if
+it does not come up is it refused, with **Send again**. The answer no longer
+says "Instance answered" for a refusal the Instance was never asked about. Machines are
+named as their owners named them, which is what `machine:` selects. An
+Instance that has reported no model catalog yet (its first turn still runs)
+is asked as written, since its runtime holds the catalog; before, the Hub
+refused it. `xmatrix channel history` marks used-up models in a listing.
+Hub, DB, Web and CLI. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: an Agent that cannot take work is listed under @ with why
 
 The @ list showed only Agents ready to take work, so an Agent that was enabled

@@ -475,6 +475,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onScrollGesture,
   onNearTop,
   onOpenAgentTrace,
+  onRunChannelCommand,
   onOpenHumanProfile,
   currentUserIdentityId,
   onReact,
@@ -519,6 +520,8 @@ export const MessageTimeline = memo(function MessageTimeline({
   onScrollGesture: () => void;
   onNearTop: () => void;
   onOpenAgentTrace: (target: AgentTraceTarget) => void;
+  /** Sends one command as the viewer, for a refused command's next step. Absent when the viewer cannot write here. */
+  onRunChannelCommand?: (body: string) => Promise<void>;
   /** Opens the Profile view for a human sender. Slack: the avatar is a link. */
   onOpenHumanProfile: (userId: string) => void;
   currentUserIdentityId: string;
@@ -1203,6 +1206,7 @@ export const MessageTimeline = memo(function MessageTimeline({
                   launchStatusUnavailable={agentLaunchQuery.isError}
                   onRetryAgentLaunch={retryAgentLaunch}
                   onLaunchAnyway={launchAnyway}
+                  onRunCommand={onRunChannelCommand}
                   onResendRefusedSummon={resendRefusedSummon}
                   ownsRefusedSummon={ownsRefusedSummon}
                   askOffered={asksByMessage.get(message.messageId || message.id)?.canAsk === true}
@@ -1772,6 +1776,7 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable,
   onRetryAgentLaunch,
   onLaunchAnyway,
+  onRunCommand,
   onResendRefusedSummon,
   ownsRefusedSummon,
   askOffered = false,
@@ -1819,6 +1824,7 @@ export const MessageRow = memo(function MessageRow({
   launchStatusUnavailable?: boolean;
   onRetryAgentLaunch: (launch: SerializedAgentLaunch) => Promise<void>;
   onLaunchAnyway?: (messageId: string, body: string, sourceMention: string) => Promise<void>;
+  onRunCommand?: (body: string) => Promise<void>;
   /** Sends a refused summon again (signed out, machine offline) once the cause is fixed; false when the viewer cannot. */
   onResendRefusedSummon?: (sourceMessageId: string, sourceMention: string) => Promise<boolean>;
   /** Whether the viewer wrote that refused summon, so the notice can offer to send it again. */
@@ -1927,10 +1933,12 @@ export const MessageRow = memo(function MessageRow({
     onRetryLaunch: onRetryAgentLaunch,
     ...(!contextOnly && message.own && message.messageId && onLaunchAnyway
       ? { onLaunchAnyway: (sourceMention: string) => onLaunchAnyway(message.messageId!, message.body, sourceMention) } : {}),
+    // The next step of a refused command is offered to the person who wrote it.
+    ...(!contextOnly && message.own && onRunCommand ? { onRunCommand } : {}),
     ...(!contextOnly && !message.editedAt ? { sentAt: message.sentAt } : {}),
     ...(message.sequence ? { sequence: message.sequence } : {}),
     ...(message.mentionReadStatuses?.length ? { statuses: message.mentionReadStatuses } : {}),
-  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
+  }), [message.mentionReadStatuses, message.sequence, agentLaunches, agentStops, stopReceiptsLoaded, invocationRejections, controlInvocations, message.commandNotices, continuationInvocations, messageTargetEvidence, launchStatusUnavailable, onRetryAgentLaunch, onLaunchAnyway, onRunCommand, contextOnly, displayBody, nonOperationalRanges, message.editedAt, message.own, message.messageId, message.body, message.sentAt]);
   // Only the Hub writes an App's system fact, so only there does a receipt's text read as one.
   // An App's event that carries its own private result (a new Gmail message the connector read) is drawn as that result.
   const privateEventOwner = message.senderKind === "app" && message.provenance !== "system_fact"

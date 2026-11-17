@@ -260,9 +260,19 @@ test("a model whose provider quota is used up is refused before its Instance is 
   const { result, dispatched } = await decide({ kind: "model", value: "fable" }, running({ usage: FABLE_USED_UP }));
   assert.deepEqual(result, { status: "error",
     message: "the provider quota for claude-fable-5-2 on build-box is used up until 2026-11-19 18:00 UTC. @claude:3 stays on claude-opus-5-5.",
-    quotaExhausted: { model: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box",
-      available: ["claude-opus-5-5"] } });
+    quotaExhausted: { model: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z", machineName: "build-box" } });
   assert.deepEqual(dispatched, []);
+});
+
+test("a used-up model names the Machines whose own reading leaves it quota", async () => {
+  const reading = (percent) => ({ ...FABLE_USED_UP,
+    scopedQuotaUsages: [{ label: "1w", scope: "Fable", percent, resetAt: "2026-11-19T18:00:00Z" }] });
+  const { result } = await decide({ kind: "model", value: "fable" }, running({ usage: FABLE_USED_UP, harness: "claude",
+    currentModel: "claude-sonnet-5-5",
+    elsewhere: [{ machineName: "spent-box", usage: reading(100) }, { machineName: "fresh-box", usage: reading(6) },
+      { machineName: "unread-box", usage: undefined }] }));
+  assert.deepEqual(result.quotaExhausted, { model: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z",
+    machineName: "build-box", available: ["claude-opus-5-5"], elsewhere: [{ machineName: "fresh-box", harness: "claude" }] });
 });
 
 test("a model with quota left is switched with the Instance row's catalog", async () => {
@@ -282,9 +292,13 @@ test("a provider's own quota refusal names the account and keeps the turn's cont
 
 test("an Instance no Runtime cell holds is named for what it is", async () => {
   const missing = { status: "no_instance" };
-  const message = async (state) => (await decide({ kind: "model", value: "fable" }, running({ state }), missing)).result.message;
+  const answer = async (state) => (await decide({ kind: "model", value: "fable" }, running({ state }), missing)).result;
+  const message = async (state) => (await answer(state)).message;
+  assert.deepEqual([(await answer("starting")).starting, (await answer("asleep")).starting], [true, undefined]);
   assert.equal(await message("starting"),
-    "@claude:3 is still starting on build-box and has not connected yet. Send this again once it is running.");
+    "@claude:3 is still starting on build-box and did not come up while xMatrix waited. Send this again once it is running.");
+  assert.equal(await message("running"),
+    "@claude:3 is not connected to xMatrix right now on build-box. Send this again once it is back.");
   assert.equal(await message("asleep"),
     "@claude:3 is asleep, so it has no session to switch. It wakes on its next message; send this again then.");
   assert.equal(await message("stopped"),
@@ -299,4 +313,20 @@ test("a listed catalog marks the models whose quota is used up", async () => {
   assert.deepEqual((await decide({ kind: "model" }, running({ usage: FABLE_USED_UP }), catalog)).result,
     { ...catalog, usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
   assert.deepEqual((await decide({ kind: "model" }, running(), catalog)).result, catalog);
+});
+
+test("a statement to an Instance that is still starting waits for its first report and is applied then", async () => {
+  const asked = [];
+  const result = await decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value: "claude-opus-5-5" },
+    target: running({ state: "starting" }), now: NOW,
+    dispatch: async (_models, awaitStarting) => {
+      asked.push(awaitStarting === true);
+      return awaitStarting ? { status: "switched", selected: "claude-opus-5-5" } : { status: "no_instance" };
+    } });
+  assert.deepEqual([result, asked], [{ status: "switched", selected: "claude-opus-5-5" }, [false, true]]);
+  // An Instance that is running but holds no connection is not waited for.
+  const waited = [];
+  await decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value: "claude-opus-5-5" },
+    target: running(), now: NOW, dispatch: async (_models, awaitStarting) => { waited.push(awaitStarting === true); return { status: "no_instance" }; } });
+  assert.deepEqual(waited, [false]);
 });
