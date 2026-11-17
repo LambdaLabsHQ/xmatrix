@@ -1022,6 +1022,18 @@ integration("launch survives a hostname change with stale Workspace metadata and
         'Shared model inference gateway');
       return { key: candidates[0].key, model: 'model', workspaceReference: 'repo:owner/shared' };
     });
+    // A daemon that checks out repositories itself starts the work in its
+    // managed directory, so the chooser is offered no repository: the GitHub
+    // list is not read on the way to the choice.
+    const readsBefore = catalogReads;
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json||'["run_repo_checkout_v1"]'::jsonb`);
+    await connectorLaunches.readHarnessToStart({ actorUserId: 'caller', body: 'Fix inference routing' }, async ({ candidates }) => {
+      assert.ok(candidates.every(candidate => candidate.supportsRepoCheckout === true));
+      assert.ok(!candidates[0].workspaces.some(item => item.repo), 'no repository is offered to a self-checkout Run');
+      return { key: candidates[0].key, model: 'model' };
+    });
+    assert.equal(catalogReads, readsBefore, 'a self-checkout summon reads no repository catalog');
+    await sql(`UPDATE data.machine_daemons SET capabilities_json=capabilities_json-'run_repo_checkout_v1'`);
     assert.deepEqual((await sql(`SELECT configuration_json FROM data.space_agent_registrations`)).rows, beforeConfig);
     assert.deepEqual((await sql(`SELECT grant_limits,policy_limits,grant_revision,policy_revision FROM data.space_agent_registration_access`)).rows, beforeAccess);
     const connectorRun = connected.prepared[0];

@@ -325,6 +325,9 @@ wrong too often, and a wrong guess cost the whole turn.
   all of its slots against the sweep.
 - Jev no longer chooses a repository when every candidate daemon advertises
   `run_repo_checkout_v1`; a machine whose daemon predates it still gets one
+  chosen at launch. Such a summon does not read the Space's GitHub repository
+  list either (a cold read of 133 repositories took about 8 s on the summon's
+  path): the list is read only when an environment still needs a repository
   chosen at launch.
 - Same-machine handoff does not carry checkouts: the successor checks out
   again, and the predecessor's slots are returned (with un-landed work

@@ -4,6 +4,7 @@ import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { registrationRepository, summonRepositoryCatalog,
   type RegistrationRepositoryCatalog } from "./registration-repository-authority.js";
+
 import {
   agentLaunchAccess,
   REGISTRATION_ACCESS_ASK_CAPABILITY,
@@ -327,6 +328,17 @@ export function registrationLaunchSpawnFields(launch: AgentRegistrationLaunch | 
     access,
     // A daemon released before the sandbox was retired sandboxes unless told not to.
     sandboxMode: "off" as const };
+}
+
+/** A summon's repository list, read at most once and only when asked for. */
+type RepositoryCatalogRead = () => Promise<RegistrationRepositoryCatalog | undefined> | undefined;
+
+function repositoryCatalogRead(read: RepositoryCatalogRead): RepositoryCatalogRead {
+  let started = false, value: ReturnType<RepositoryCatalogRead>;
+  return () => {
+    if (!started) { started = true; value = read(); }
+    return value;
+  };
 }
 
 export class PostgresRegistrationLaunchRepository extends RegistrationPreparationAuthority {
@@ -902,16 +914,16 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         // Writing a page needs no checkout: its Agent starts at once in that cwd, and no repository is read.
         // A comment that wants code says so with `repo:`/`pwd:`.
         const managedOnly = writesPage && managedWorkspace;
-        // Read alongside the candidates: the repository list comes from GitHub.
+        // The repository list comes from GitHub, so it is read only when the choice can offer it.
         const repositoryCatalog = managedOnly ? undefined
-          : summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo);
+          : repositoryCatalogRead(() => summonRepositoryCatalog(this.repositoryReader, actorUserId, options.tags.repo));
         const target = selection.target.kind === "registration"
           ? parseSpaceAgentRegistrationKey(selection.target.key)
           : selection.target.kind === "capability" ? { harness: selection.target.harness }
           // `@auto` reaches every registration its conditions allow.
           : { ...(options.tags.harness ? { harness: canonicalRegistrationHarness(options.tags.harness) } : {}),
             ...(options.tags.machine?.startsWith("machine:") ? { machineId: options.tags.machine } : {}) };
-        const listed = await this.candidatesFor({ ...target, managedWorkspace }, repositoryCatalog);
+        const listed = await this.candidatesFor({ ...target, managedWorkspace, checkoutAtRun: managedWorkspace }, repositoryCatalog);
         const candidates = listed.offered;
         if (!candidates.length) {
           const refusal = listed.offlineOnly ? daemonOfflineRefusal(listed.blocked)
@@ -1021,16 +1033,19 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       }
       return this.withHost(commandId, await this.prepare({ ...request, body: input.body }));
     }
-    // Read alongside the candidates: the repository list comes from GitHub.
-    const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, actorUserId, input.tags?.repo);
+    // The repository list comes from GitHub, so it is read only when the choice can offer it.
+    const repositoryCatalog = repositoryCatalogRead(() =>
+      summonRepositoryCatalog(this.repositoryReader, actorUserId, input.tags?.repo));
     const requiredHostCapabilities = hostObservedRequirements(input.requiredCapabilities ?? []);
-    const listed = await this.candidatesFor({ managedWorkspace: true, requiredHostCapabilities }, repositoryCatalog);
+    const checkoutAtRun = !input.tags?.repo && !input.tags?.pwd;
+    const listed = await this.candidatesFor({ managedWorkspace: true, checkoutAtRun, requiredHostCapabilities },
+      repositoryCatalog);
     const candidates = listed.offered
       .filter(candidate => !excluded || !sameAgentRegistration(candidate.key, excluded))
       .filter(candidate => !input.excludeRegistrations?.some(failed => sameAgentRegistration(candidate.key, failed)));
     if (!candidates.length) {
       // Say which requirement left nothing, rather than that nothing exists.
-      if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog)).offered.length) {
+      if (requiredHostCapabilities.length && (await this.candidatesFor({ managedWorkspace: true, checkoutAtRun }, repositoryCatalog)).offered.length) {
         throw new RegistrationAccessError("registration_capability_unavailable", 409);
       }
       const refusal = listed.offlineOnly ? daemonOfflineRefusal(listed.blocked)
@@ -1154,8 +1169,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
    * caller summons that harness with an ordinary `@<harness>` message. */
   async readHarnessToStart(input: { actorUserId: string; body: string; onHarness?: (harness: string) => Promise<void> },
     choose: RegistrationLaunchChooser): Promise<string> {
-    const repositoryCatalog = summonRepositoryCatalog(this.repositoryReader, text(input.actorUserId), undefined);
-    const listed = await this.candidatesFor({ managedWorkspace: true }, repositoryCatalog);
+    const repositoryCatalog = repositoryCatalogRead(() =>
+      summonRepositoryCatalog(this.repositoryReader, text(input.actorUserId), undefined));
+    const listed = await this.candidatesFor({ managedWorkspace: true, checkoutAtRun: true }, repositoryCatalog);
     const candidates = listed.offered;
     if (!candidates.length) {
       const refusal = launchRefusal("registration_not_found", undefined, listed.blocked);
@@ -1173,12 +1189,18 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     return { ...launch, hostId: String(rows[0]?.hostname ?? "") };
   }
 
+  /** `checkoutAtRun`: the summon names no repository or directory, so every
+   * environment whose daemon checks out repositories itself starts in its
+   * managed directory and the chooser offers no repository. The GitHub list is
+   * then read only when some environment still needs one chosen at launch. */
   private async candidatesFor(target: { harness?: string; ownerUserId?: string; machineId?: string; managedWorkspace?: boolean;
-    requiredHostCapabilities?: readonly string[] }, catalog?: Promise<RegistrationRepositoryCatalog | undefined>): Promise<{
+    checkoutAtRun?: boolean; requiredHostCapabilities?: readonly string[] }, catalog?: RepositoryCatalogRead): Promise<{
       offered: RegistrationLaunchCandidate[]; blocked: LaunchMachineBlock[];
       /** Nothing was offered, and every registration that was seen was offline. */
       offlineOnly: boolean }> {
-    catalog?.catch(() => undefined); // awaited below, after the registrations are read
+    const deferred = target.checkoutAtRun === true && target.managedWorkspace === true;
+    // Read alongside the registrations when the choice will need it.
+    const eager = deferred ? undefined : catalog?.();
     const rows = await this.database.transaction({ requestId: `registration-candidates:${target.harness ?? "auto"}`,
       operation: "registration.launch.candidates", placement: this.placement, statement: "single_read" }, tx => tx.query({
       name: "registration_launch_candidates_v3", text: `SELECT r.owner_user_id,r.machine_id,r.harness,r.configuration_json,
@@ -1192,7 +1214,20 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 101`,
       values: [this.placement.spaceId, target.harness ?? null, target.ownerUserId ?? null, target.machineId ?? null], maxRows: 101 }));
     if (rows.length > 100) throw new RegistrationAccessError("registration_candidates_limit", 409);
-    const repositoryCatalog = await catalog;
+    if (deferred && catalog) {
+      const listed = await this.candidatesFromRows(target, rows, undefined);
+      if (!listed.routeDropped && listed.offered.every(candidate => candidate.supportsRepoCheckout === true)) return listed;
+      return this.candidatesFromRows(target, rows, await catalog());
+    }
+    return this.candidatesFromRows(target, rows, await eager);
+  }
+
+  private async candidatesFromRows(target: { harness?: string; machineId?: string; managedWorkspace?: boolean;
+    requiredHostCapabilities?: readonly string[] }, rows: readonly QueryResultRow[],
+    repositoryCatalog: RegistrationRepositoryCatalog | undefined): Promise<{
+      offered: RegistrationLaunchCandidate[]; blocked: LaunchMachineBlock[]; offlineOnly: boolean;
+      /** An environment no daemon route served: with the repository list it might have been offered. */
+      routeDropped: boolean }> {
     const candidates = rows.flatMap(row => {
       const configuration = parseSpaceAgentConfiguration(row.configuration_json);
       if (configuration.routing?.enabled === false) return [];
@@ -1277,7 +1312,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       const blocked: LaunchMachineBlock[] = [];
       /** Offered through a daemon in the reconnect grace. */
       const waiting = new Set<RegistrationLaunchCandidate>();
-      let droppedOther = false;
+      let droppedOther = false, routeDropped = false;
       for (const candidate of candidates) {
         const workspaces = await tx.query({ name: "registration_launch_workspace_catalog_v1",
           text: `SELECT workspace_id,canonical_cwd,metadata_json FROM data.workspaces
@@ -1335,7 +1370,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           .filter(row => daemonCapable(row, "registration_launch_v3")), { runtimeDefaultOnly: !models.length,
           workspaceReferences: candidate.workspaceReferences, managedWorkspace: target.managedWorkspace === true,
           registeredWorkspaceIds: new Set(workspaces.map(row => String(row.workspace_id))) });
-        if (!route) { drop(); continue; }
+        if (!route) { routeDropped = true; drop(); continue; }
         const { daemon, workspaceReferences } = route;
         if (catalogModels && !daemonCapable(daemon, "registration_native_model_v1")) { drop(); continue; }
         // A harness the machine reports older than the version xMatrix can
@@ -1409,7 +1444,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
           ...(candidate.machineName ? { machineName: candidate.machineName } : {}), reason: "daemon_offline" });
         offered.splice(0, offered.length, ...ready);
       }
-      return { offered, blocked, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
+      return { offered, blocked, routeDropped, offlineOnly: offered.length === 0 && blocked.length > 0 && !droppedOther &&
         blocked.every(block => block.reason === "daemon_offline") };
     };
     return workspaceCatalog(singleReadStatements(this.directory, {

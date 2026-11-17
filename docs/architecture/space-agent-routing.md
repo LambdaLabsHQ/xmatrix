@@ -228,6 +228,12 @@ A launch from a conversation that co-writes a page (an active
 repository list is read and nothing is checked out, so the Agent starts at
 once. A `repo:` or `pwd:` in the message still gets what it names.
 
+A summon that names no `repo:` or `pwd:` reads no repository list either when
+every environment it could start on checks out repositories itself
+(`run_repo_checkout_v1`): the Agent starts in its managed directory and runs
+`xmatrix repo checkout` when its work needs code. The list is read, once, only
+when some environment would still need a repository chosen at launch.
+
 An owner can keep a Machine out of automatic assignment (`data.machines.auto_assign`
 false; the Machine page switch or `xmatrix machine auto-assign off`). Its
 environments are removed before Jev reads anything unless the launch names the
