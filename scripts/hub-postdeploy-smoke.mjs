@@ -98,7 +98,7 @@ async function fetchNoCacheJson(target, fetchImpl, label) {
   return { response, payload: await response.json() };
 }
 
-async function verifyPostgresReadiness(target, fetchImpl) {
+export async function verifyPostgresReadiness(target, fetchImpl) {
   const endpoint = new URL("/health/postgres", target);
   const { response, payload } = await fetchNoCacheJson(
     endpoint, fetchImpl, "PostgreSQL readiness",
@@ -106,7 +106,7 @@ async function verifyPostgresReadiness(target, fetchImpl) {
   return validatePostgresReadinessResponse(response, payload);
 }
 
-async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion) {
+export async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion) {
   const endpoint = new URL("/api/client-compatibility", target);
   const admittedResponse = await fetchImpl(endpoint, {
     method: "GET",

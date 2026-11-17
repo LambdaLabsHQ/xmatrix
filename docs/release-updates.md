@@ -4619,6 +4619,28 @@ Migration evidence: before consolidation, the effective YAML definitions were sa
 Recovery remains the established Production Release Recovery workflow: it may cancel only the exact preflight-success/PostgreSQL-readiness-waiting shape before any build or deploy job materializes, then resume the same authorized replacement run. The parent graph and that proof are unchanged. A consolidation failure must be fixed through a new CI-validated main revision and Release Intent; do not modify immutable tags, publish unverified assets, or bypass train authorization. The existing CLI manifest/envelope `workflow: "cli-release.yml"` value remains the compatibility label expected by installed Rust update and Windows continuity consumers; relocating the reusable publisher does not rewrite that wire field. Signing helpers retain the original Developer ID leaf/team checks, pinned Apple intermediate, private keychain isolation, and cleanup; no signing identity or artifact format changed.
 
 
+## Unreleased: Hub canary with automatic code rollback
+
+Every Hub deploy uploads the tagged revision as a Worker version
+(`wrangler versions upload --tag <sha>`, carrying this release's secret
+values and bundle) and serves it to 10% of production traffic for three
+minutes before promoting it to 100% (`scripts/hub-canary-rollout.mjs`). Each
+sampled health response that the new version answers must also pass the client
+compatibility gate and PostgreSQL readiness. Two failed samples of the new
+version, three consecutive unreachable samples, failing samples beyond 5% of
+the window, or fewer than three samples of the new version put the previous
+version back at 100% automatically. Promotion is followed by the existing
+health, PostgreSQL readiness and HTTPS redirect checks, and a failure there
+rolls back the same way. A rollback makes the release job fail, so no
+deployment receipt is written; the immutable tag stays, and a re-run of the
+failed jobs or the next train re-attempts the same release.
+
+The rollback changes Worker code only. Expand migrations have already run and
+are harmless to the previous version; contract migrations ship separately
+after the new Hub is verified, so the canary and its rollback never cross the
+schema. The deployed secret-name policy is verified between upload and canary,
+so a version cannot receive traffic with a missing secret.
+
 ## Unreleased: Web per release channel
 
 Every beta deploys the beta Web (`xmatrix-web-beta`, `https://beta.xmatrix.sh`,

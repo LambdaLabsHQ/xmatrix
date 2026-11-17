@@ -14,10 +14,20 @@ test("production Hub upload and post-deploy smoke bind the authorized release SH
   const workflow = parse(readFileSync(new URL("../.github/workflows/server-release.yml", import.meta.url), "utf8"));
   const hub = workflow.jobs.hub;
   assert.equal(hub.env.XMATRIX_DEPLOY_SHA, "${{ inputs.deploy_sha }}");
-  const deploy = hub.steps.find((step) => step.name === "Deploy tagged Hub to production");
+  const upload = hub.steps.find((step) => step.name === "Upload the tagged Hub version");
+  const secrets = hub.steps.find((step) => step.name === "Verify production Hub secret policy");
+  const rollout = hub.steps.find((step) => step.name === "Canary and promote the tagged Hub version");
   const smoke = hub.steps.find((step) => step.name === "Verify deployed production Hub health");
   const edge = hub.steps.find((step) => step.name === "Apply and verify the tagged MCP edge policy");
-  assert.match(deploy.run.replace(/\\\n\s*/gu, " "), /wrangler deploy[^\n]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(upload.run, /hub-canary-rollout\.mjs upload[\s\S]*--tag "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(upload.run, /--secrets-file "\$secrets_file"[\s\S]*--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.match(rollout.run, /hub-canary-rollout\.mjs rollout[\s\S]*--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
+  assert.equal(upload["working-directory"], "packages/hub");
+  assert.equal(rollout["working-directory"], "packages/hub");
+  // The canary cannot receive traffic before the deployed secret names match
+  // the release's expected set.
+  assert.ok(hub.steps.indexOf(secrets) > hub.steps.indexOf(upload));
+  assert.ok(hub.steps.indexOf(secrets) < hub.steps.indexOf(rollout));
   assert.match(smoke.run, /--expected-sha "\$XMATRIX_DEPLOY_SHA"/u);
   // The edge mutation stays inside the existing immutable production job,
   // after its first deployment and SHA verification, using the protected token.
