@@ -188,7 +188,8 @@ function continuationSpawnWorkspace(source: ContinuationSource, key: SpaceAgentR
 /** What a live switch of one Instance is decided against (`switchTargetFacts`). */
 export interface SwitchTargetFacts {
   instanceId: string;
-  /** `starting` and `running` have a Run; `asleep` wakes on its next message; `stopped` only by a reborn. */
+  /** `starting` and `running` have a Run (one being replaced by a reborn counts as running);
+   * `asleep` wakes on its next message; `stopped` only by a reborn. */
   state: "starting" | "running" | "asleep" | "stopped";
   agentName?: string;
   /** The Machine's name in its owner's words, as `machine:` selects it. */
@@ -200,6 +201,8 @@ export interface SwitchTargetFacts {
   modelCatalog?: RoutingModelOption[];
   usage?: ReturnType<typeof registrationQuotaUsage>;
   harness?: string;
+  /** The registration its Run is bound to: whose quota a refusal asks to be read. */
+  registration?: { ownerUserId: string; machineId: string; harness: string };
   /** Other online Machines of the Space that run the same harness and hold a
    * current provider reading, for a repository-backed Instance: where its
    * work could continue. Named as `machine:` selects them. */
@@ -342,11 +345,13 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const modelCatalog = routingModelCatalogObservation(row.catalog_models, row.catalog_observed_at, Date.now())?.value;
     const usage = registrationQuotaUsage(own);
     const runStatus = String(row.run_status);
-    const state = runStatus === "starting" || runStatus === "running" ? runStatus
+    // A Run being stopped for a reborn is replaced within moments: its
+    // Instance is on its way back, not gone.
+    const state = runStatus === "starting" ? "starting" : runStatus === "running" || runStatus === "stopping" ? "running"
       : row.rest_state === "sleeping" || row.rest_state === "interrupted" ? "asleep" : "stopped";
     return { instanceId: String(row.instance_id), state,
       ...(typeof metadata.agentName === "string" && metadata.agentName ? { agentName: metadata.agentName } : {}),
-      ...(own?.name ? { machineName: String(own.name) } : {}), ...(key ? { harness: key.harness } : {}),
+      ...(own?.name ? { machineName: String(own.name) } : {}), ...(key ? { harness: key.harness, registration: key } : {}),
       ...(typeof row.current_model === "string" && row.current_model ? { currentModel: row.current_model } : {}),
       ...(Array.isArray(row.catalog_models) && row.catalog_models.length ? { reportedModels: row.catalog_models } : {}),
       ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}),
