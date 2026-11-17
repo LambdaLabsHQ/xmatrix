@@ -801,9 +801,10 @@ integration("launch survives a hostname change with stale Workspace metadata and
       JOIN data.runs run ON run.run_id=instance.run_id WHERE instance.instance_id=$1`, [cold.instanceId])).rows[0];
     const switchTarget = await reborn.switchTargetFacts({ commandId: 'switch-target', channelId: 'channel',
       ordinal: Number(coldRow.channel_instance_id) });
+    // This Instance started on its runtime's default model, so it is offered what its runtime reports, not a declared list.
     assert.deepEqual([switchTarget.instanceId, switchTarget.currentModel, switchTarget.declaredModels, switchTarget.reportedModels.length,
       switchTarget.modelCatalog.map(row => row.model)],
-    [cold.instanceId, 'provider/model', ['provider/model'], 2, ['provider/model', 'provider/other']]);
+    [cold.instanceId, 'provider/model', undefined, 2, ['provider/model', 'provider/other']]);
     assert.equal(switchTarget.state, ['starting', 'running'].includes(coldRow.status) ? coldRow.status : 'stopped');
     // A repository-backed Instance is also told where else its work can go on:
     // another online Machine of the Space that runs its harness and has a
