@@ -62,9 +62,11 @@ export interface AgentRegistrationSummary {
 export interface AgentRegistrationLiveState {
   /** Whether the owner's daemon on this machine is connected; `lastSeenAt` is when that last changed.
    * `resources` is the connected daemon's current load sample, absent when it has none.
-   * `platform` is the OS its daemon last reported, absent when none did. */
+   * `platform` is the OS its daemon last reported, absent when none did.
+   * `autoAssign: false` when its owner keeps the machine out of automatic
+   * assignment, so only a summon that names it (`machine:<name>`) runs there. */
   machine: { online: boolean; lastSeenAt?: string; resources?: MachineResourceObservation;
-    platform?: AgentRegistrationMachinePlatform };
+    platform?: AgentRegistrationMachinePlatform; autoAssign?: false };
   /** Its Instances with a running process in this Space, in Channels the reader may read. */
   running: AgentRegistrationRunningInstance[];
   /** The provider quota the router reads for it, while that reading is current.

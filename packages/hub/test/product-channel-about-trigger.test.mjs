@@ -72,7 +72,7 @@ test("a mention its send did not launch posts no Channel notice; its card says w
   assert.match(notices[0].body, /registration_quota_exhausted/);
 });
 
-test("naming a machine is a card hint; quota and an offline machine still post", async () => {
+test("a machine hint is posted to the Channel too, so a CLI or Agent sender learns why nothing started", async () => {
   const input = { env: {}, channelId: "channel", messageId: "summon",
     senderKind: "user", senderId: "human", actorUserId: "human", body: "@auto task" };
   const notices = [];
@@ -84,7 +84,10 @@ test("naming a machine is a card hint; quota and an offline machine still post",
       { code: "registration_daemon_offline" },
     ] }) }, async value => notices.push(value)), true);
   assert.deepEqual(notices.map(notice => notice.body.match(/\((registration_[a-z_]+)\)/)?.[1]),
-    ["registration_quota_exhausted", "registration_daemon_offline"]);
+    ["registration_machine_not_auto_assigned", "registration_machine_ambiguous",
+      "registration_quota_exhausted", "registration_daemon_offline"]);
+  assert.match(notices[0].body, /^Agent launch failed: Only machines their owners keep out of automatic assignment can run this; name one with machine:<name>/);
+  assert.equal(notices[0].replyToMessageId, "summon");
 });
 
 test("an offline refusal posts which machine and the summon, so the Web can show how to bring it back", async () => {

@@ -464,6 +464,13 @@ fn state_label(registration: &Value) -> String {
     let state = registration["state"].as_str().unwrap_or("-");
     match blocker {
         Some(blocker) if state == "enabled" => blocker.replace('_', " "),
+        // Enabled, but its owner keeps the Machine out of automatic assignment:
+        // a summon runs here only when it names the Machine.
+        _ if state == "enabled"
+            && registration["live"]["machine"]["autoAssign"].as_bool() == Some(false) =>
+        {
+            "enabled, named only".to_string()
+        }
         _ => state.to_string(),
     }
 }
@@ -1152,6 +1159,18 @@ mod tests {
             state_label(&serde_json::json!({"state":"revoked"})),
             "revoked"
         );
+    }
+
+    #[test]
+    fn an_agent_on_a_machine_kept_out_of_automatic_assignment_lists_as_named_only() {
+        let row = serde_json::json!({"state":"enabled",
+            "live":{"machine":{"online":true,"autoAssign":false}}});
+        assert_eq!(state_label(&row), "enabled, named only");
+        let automatic = serde_json::json!({"state":"enabled","live":{"machine":{"online":true}}});
+        assert_eq!(state_label(&automatic), "enabled");
+        let disabled = serde_json::json!({"state":"disabled",
+            "live":{"machine":{"online":true,"autoAssign":false}}});
+        assert_eq!(state_label(&disabled), "disabled");
     }
 
     #[test]

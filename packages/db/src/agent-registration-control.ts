@@ -455,8 +455,8 @@ export class PostgresAgentRegistrationRepository {
     // while it is current.
     const labels = await this.database.transaction({ requestId: input.requestId, operation: "registration.machine-labels",
       statement: "single_read" },
-      tx => tx.query({ name: "registration_catalog_machine_labels_v12", text: `SELECT
-        requested.owner,requested.machine,requested.harness,machine.name,
+      tx => tx.query({ name: "registration_catalog_machine_labels_v13", text: `SELECT
+        requested.owner,requested.machine,requested.harness,machine.name,machine.auto_assign,
         e.declaration_json,daemon.online,daemon.last_seen_at,daemon.resources,daemon.platform,daemon.native_models,
         ${registrationQuotaColumns("quota")}
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
@@ -509,7 +509,9 @@ export class PostgresAgentRegistrationRepository {
       return { ...row, ...(access ? { access } : {}), models, modelCatalog: reported, ...(nativeModels ? { nativeModels: true as const } : {}), routingReady: !blocker, ...(blocker ? { routingBlocker: blocker } : {}),
         machineName: String(label?.name || row.machineName),
         live: { machine: { online: label?.online === true, ...(lastSeenAt ? { lastSeenAt } : {}),
-          ...(resources ? { resources } : {}), ...(platform ? { platform } : {}) },
+          ...(resources ? { resources } : {}), ...(platform ? { platform } : {}),
+          // Its owner keeps it out of automatic assignment: only a summon naming it runs here.
+          ...(label?.auto_assign === false ? { autoAssign: false as const } : {}) },
           running: row.live?.running ?? [], ...(quota ? { quota } : {}),
           ...(balance ? { balance } : {}) } };
     }) };
