@@ -275,6 +275,13 @@ test("a used-up model names the Machines whose own reading leaves it quota", asy
     machineName: "build-box", available: ["claude-opus-5-5"], elsewhere: [{ machineName: "fresh-box", harness: "claude" }] });
 });
 
+test("a reset the provider states a moment early is written as the minute it means", async () => {
+  const early = { ...FABLE_USED_UP, scopedQuotaUsages: [{ label: "1w", scope: "Fable", percent: 100, resetAt: "2026-11-19T17:59:59.747Z" }] };
+  const { result } = await decide({ kind: "model", value: "fable" }, running({ usage: early }));
+  assert.match(result.message, /used up until 2026-11-19 18:00 UTC\./u);
+  assert.equal(result.quotaExhausted.resetsAt, "2026-11-19T17:59:59.747Z");
+});
+
 test("a model with quota left is switched with the Instance row's catalog", async () => {
   const { result, dispatched } = await decide({ kind: "model", value: "claude-opus-5-5" }, running({ usage: FABLE_USED_UP }));
   assert.deepEqual(result, { status: "switched", selected: "claude-opus-5-5" });

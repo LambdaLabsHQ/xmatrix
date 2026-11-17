@@ -49,9 +49,11 @@ export interface ProductAgentSwitchTarget {
   elsewhere?: Array<{ machineName: string; usage: unknown }>;
 }
 
-/** `2026-11-19 18:00 UTC`: a reset as every refusal writes it. */
+/** `2026-11-19 18:00 UTC`: a reset as every refusal writes it, to the nearest
+ * minute. A provider states one reset a few milliseconds apart from read to
+ * read (17:59:59.747 for 18:00), and a person plans by the minute it means. */
 function utcMinute(at: string): string {
-  return `${new Date(Date.parse(at)).toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  return `${new Date(Math.round(Date.parse(at) / 60_000) * 60_000).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
 /** When the provider quota of one catalog model is back, while a current
