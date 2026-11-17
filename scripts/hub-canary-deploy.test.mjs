@@ -150,3 +150,10 @@ test("only a Durable Object lifecycle refusal skips the canary", () => {
   assert.equal(isDurableObjectLifecycleRefusal("Authentication error"), false);
   assert.equal(isDurableObjectLifecycleRefusal(undefined), false);
 });
+
+test("a deployment without its target URL or tag fails before touching production", async () => {
+  const parts = harness();
+  await assert.rejects(deployWithCanary({ ...options(parts), url: "" }), /missing required url/u);
+  await assert.rejects(deployWithCanary({ ...options(parts), tag: "not-a-sha" }), /full Git SHA/u);
+  assert.deepEqual(parts.calls, []);
+});

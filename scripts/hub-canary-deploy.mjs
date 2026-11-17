@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env node
+#!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
@@ -106,7 +106,8 @@ export async function deployWithCanary({
   deployAttempts = 3,
 }) {
   if (typeof tag !== "string" || !/^[0-9a-f]{40}$/u.test(tag)) fail("tag must be the release commit's full Git SHA");
-  if (!config || !secretsFile || !outdir || !url) fail("config, secrets file, outdir and URL are required");
+  const missing = Object.entries({ config, secretsFile, outdir, url }).filter(([, value]) => !value).map(([name]) => name);
+  if (missing.length > 0) fail(`missing required ${missing.join(", ")}`);
   assertPercent(canaryPercent);
   assertHoldMs(holdMs);
 
@@ -241,9 +242,6 @@ export function createHealthChecker({ url, exec = spawnSync } = {}) {
 
 async function main(argv = process.argv.slice(2)) {
   const url = argumentValue(argv, "--url");
-  if (!url) {
-    throw new Error("usage: hub-canary-deploy.mjs --config <path> --secrets-file <path> --tag <sha> --outdir <path> --url <https-url> [--hold-seconds n] [--canary-percent n] [--worker name] [--define key:value]");
-  }
   const result = await deployWithCanary({
     run: createWranglerRunner({ cwd: process.cwd() }),
     health: createHealthChecker({ url }),
