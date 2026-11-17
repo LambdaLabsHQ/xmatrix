@@ -109,6 +109,13 @@ export function createProductAgentControlAuthorityPort(input: {
       outcomes[0] ?? { status: "no_instance" };
   };
 
+  /** One fresh read of a registration's account, newer than `since`. A read
+   * already under way for it answers this one too. */
+  const readQuota = (registration: { ownerUserId: string; machineId: string; harness: string }, since: number) =>
+    verifyRegistrationQuota(input.env, { registrations: [registration], readAfter: new Date(since).toISOString() })
+      .catch((error: unknown) => console.warn("Quota read for a model switch was not issued",
+        { error: error instanceof Error ? error.message : String(error) }));
+
   return {
     async switchControl({ channelId, target, kind, value }) {
       const ordinal = Number(/:([1-9]\d{0,8})$/u.exec(target)?.[1]);
@@ -117,17 +124,17 @@ export function createProductAgentControlAuthorityPort(input: {
       const asked = Date.now();
       const outcome = await decideProductAgentSwitch({ command: { kind, target, ...(value ? { value } : {}) }, target: facts, now: asked,
         dispatch: (reportedModels, awaitStarting) => askRuntime({ channelId, target, kind, value, reportedModels, awaitStarting }),
-        ...(facts ? { chooseOnWake: (written: string) => chooseInstanceWakeModel(input.env, {
-          commandId: `product:wake-model:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId,
-          instanceId: facts.instanceId, model: written }) } : {}) });
+        ...(facts ? { chooseOnWake: (chosen: "model" | "effort", written: string) => chooseInstanceWakeModel(input.env, {
+          commandId: `product:wake-${chosen}:${input.sourceMessageId}:${ordinal}`.slice(0, 200), channelId,
+          instanceId: facts.instanceId, sourceMessageId: input.sourceMessageId,
+          ...(chosen === "model" ? { model: written } : { effort: written }) }) } : {}),
+        ...(facts?.registration ? { readQuota: () => readQuota(facts.registration!, asked) } : {}) });
       // The provider refused a model for quota that no reading explained:
       // that refusal is the event to read the account on. The reading says
       // which quota is used up and until when, for the Agents page and for
       // the next statement, which is then refused without asking the Instance.
       if (outcome.status === "error" && outcome.quotaExhausted && !outcome.quotaExhausted.resetsAt && facts?.registration) {
-        await verifyRegistrationQuota(input.env, { registrations: [facts.registration], readAfter: new Date(asked).toISOString() })
-          .catch((error: unknown) => console.warn("Quota read after a refused switch was not issued",
-            { error: error instanceof Error ? error.message : String(error) }));
+        await readQuota(facts.registration, asked);
       }
       return outcome;
     },

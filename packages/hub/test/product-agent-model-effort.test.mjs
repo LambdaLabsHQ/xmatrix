@@ -349,9 +349,9 @@ test("a model written to a resting Instance is recorded for its wake, and a used
     decideProductAgentSwitch({ command: { target: "claude:3", ...command }, target, now: NOW, dispatch, chooseOnWake });
   const asked = [];
   assert.deepEqual(await decideAsleep({ kind: "model", value: "opus" }, asleep(),
-    async (written) => { asked.push(written); return { selected: "claude-opus-5-5" }; }),
+    async (kind, written) => { asked.push([kind, written]); return { selected: "claude-opus-5-5" }; }),
   { status: "switched", selected: "claude-opus-5-5", onWake: true });
-  assert.deepEqual(asked, ["opus"]);
+  assert.deepEqual(asked, [["model", "opus"]]);
   // A model it cannot start on names the ones it can.
   assert.deepEqual(await decideAsleep({ kind: "model", value: "gpt" }, asleep(), async () => ({ offers: ["claude-opus-5-5"] })),
     { status: "error", message: "`gpt` is not one @claude:3 can start on. It can start on `claude-opus-5-5`." });
@@ -371,4 +371,39 @@ test("a model written to a resting Instance is recorded for its wake, and a used
     { status: "catalog", options: ["claude-opus-5-5", "claude-fable-5-2"], current: "claude-opus-5-5",
       usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
   assert.match((await decideAsleep({ kind: "effort", value: "high" }, asleep())).message, /is asleep/u);
+});
+
+test("an effort written to a resting Instance is recorded against the model it will start on", async () => {
+  const catalog = [{ model: "claude-opus-5-5", description: "", isDefault: true, efforts: [{ value: "low", description: "" }, { value: "high", description: "" }] },
+    { model: "claude-fable-5-2", description: "", efforts: [{ value: "max", description: "" }] }];
+  const asleep = (extra = {}) => running({ state: "asleep", modelCatalog: catalog, takesWakeEffort: true, ...extra });
+  const recorded = [];
+  const decideEffort = (value, target) => decideProductAgentSwitch({ command: { kind: "effort", target: "claude:3", value }, target,
+    now: NOW, dispatch: async () => ({ status: "no_instance" }),
+    chooseOnWake: async (kind, written) => { recorded.push([kind, written]); return { selected: written }; } });
+  assert.deepEqual(await decideEffort("HIGH", asleep()), { status: "switched", selected: "high", onWake: true });
+  // The model chosen for its wake decides which efforts there are.
+  assert.deepEqual(await decideEffort("max", asleep({ wakeModel: "claude-fable-5-2" })), { status: "switched", selected: "max", onWake: true });
+  assert.deepEqual(await decideEffort("max", asleep()),
+    { status: "error", message: "`max` is not one @claude:3 can start at. It can start at `low`, `high`." });
+  // A machine that cannot carry an effort onto a resume still asks for it after the wake.
+  assert.match((await decideEffort("high", asleep({ takesWakeEffort: undefined }))).message, /is asleep/u);
+  assert.deepEqual(recorded, [["effort", "high"], ["effort", "max"]]);
+});
+
+test("a model whose quota no current reading tells has it read, and the statement goes on", async () => {
+  const reads = [];
+  const decideRead = (target, value = "fable") => decideProductAgentSwitch({ command: { kind: "model", target: "claude:3", value },
+    target, now: NOW, dispatch: async () => ({ status: "switched", selected: "claude-fable-5-2" }),
+    readQuota: async () => { reads.push(value); } });
+  const accountOnly = { ...FABLE_USED_UP, scopedQuotaUsages: [] };
+  // The account was read but not the Fable-only window: Fable's quota is unread, Opus's is not.
+  assert.equal((await decideRead(running({ usage: accountOnly }))).status, "switched");
+  await decideRead(running({ usage: accountOnly }), "claude-opus-5-5");
+  await decideRead(running(), "claude-opus-5-5");
+  assert.deepEqual(reads, ["fable", "claude-opus-5-5"]);
+  // A reading that covers the model asks for nothing.
+  const covered = { ...FABLE_USED_UP, scopedQuotaUsages: [{ label: "1w", scope: "Fable", percent: 10, resetAt: "2026-11-19T18:00:00Z" }] };
+  await decideRead(running({ usage: covered }));
+  assert.deepEqual(reads, ["fable", "claude-opus-5-5"]);
 });

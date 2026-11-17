@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: `/effort` to a sleeping Agent takes effect when it wakes, and an unread quota is read
+
+`/effort` written to a sleeping Agent is recorded like `/model` (#1754): the
+answer reads "It starts at effort high when it wakes", checked against the
+efforts of the model it will start on. A `/model` naming a model whose quota
+xMatrix holds no current reading of now asks the machine to read it, so the
+next statement and the Agent's wake decide on a reading instead of a guess.
+If the reading then shows a model chosen for the wake is used up, the Agent
+wakes on the model it last ran instead of staying asleep until that quota
+resets, and the `/model` that chose it says so. Hub, DB and Web. Recovery is
+a CI-validated beta reverting this change.
+
 ## Unreleased: a pull request's line names it and leaves out the subscription
 
 GitHub's line for a pull request read `#1754` alone, with `following here`

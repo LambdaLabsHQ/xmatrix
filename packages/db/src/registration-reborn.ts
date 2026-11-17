@@ -201,6 +201,10 @@ export interface SwitchTargetFacts {
   modelCatalog?: RoutingModelOption[];
   usage?: ReturnType<typeof registrationQuotaUsage>;
   harness?: string;
+  /** The model a person chose for its next wake while it rests. */
+  wakeModel?: string;
+  /** Its next resume can start at a chosen effort. */
+  takesWakeEffort?: true;
   /** The registration its Run is bound to: whose quota a refusal asks to be read. */
   registration?: { ownerUserId: string; machineId: string; harness: string };
   /** Other online Machines of the Space that run the same harness and hold a
@@ -318,9 +322,12 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       ...key ? [key] : []].map(item => [`${item.ownerUserId}\n${item.machineId}`, item])).values()].slice(0, 100);
     const facts = key ? await this.directory.transaction({ requestId: commandId,
       operation: "registration.switch.quota", statement: "single_read" }, tx => tx.query({
-      name: "registration_switch_quota_v2", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
+      name: "registration_switch_quota_v3", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
           EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
-            AND d.machine_id=m.machine_id AND d.status='online') AS online,${registrationQuotaColumns("q")}
+            AND d.machine_id=m.machine_id AND d.status='online') AS online,
+          EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
+            AND d.machine_id=m.machine_id AND d.status='online' AND d.capabilities_json ? 'machine_routing_effort_v1') AS carries_effort,
+          ${registrationQuotaColumns("q")}
         FROM data.machines m
         LEFT JOIN control.agent_registration_environments e ON e.owner_user_id=m.owner_user_id
           AND e.machine_id=m.machine_id AND e.harness=$3
@@ -355,7 +362,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       ...(typeof row.current_model === "string" && row.current_model ? { currentModel: row.current_model } : {}),
       ...(Array.isArray(row.catalog_models) && row.catalog_models.length ? { reportedModels: row.catalog_models } : {}),
       ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}),
-      ...(elsewhere.length ? { elsewhere } : {}) };
+      ...(elsewhere.length ? { elsewhere } : {}),
+      ...(typeof metadata.wakeRuntimeModel === "string" && metadata.wakeRuntimeModel ? { wakeModel: metadata.wakeRuntimeModel } : {}),
+      // An effort reaches a declared model as it is; onto the runtime's
+      // default model only a daemon that carries one there takes it.
+      ...(metadata.useRuntimeDefaultModel !== true || own?.carries_effort === true ? { takesWakeEffort: true } : {}) };
   }
 
   /**
@@ -366,7 +377,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * own catalog as the Instance last reported it. `offers` names what could
    * be chosen when `written` is none of them.
    */
-  async chooseWakeModel(raw: { commandId: string; channelId: string; instanceId: string; model: string }):
+  async chooseWakeModel(raw: { commandId: string; channelId: string; instanceId: string; model: string; sourceMessageId?: string }):
     Promise<{ selected: string } | { offers: string[] }> {
     const commandId = text(raw.commandId), channelId = text(raw.channelId), instanceId = text(raw.instanceId);
     const written = text(raw.model).trim();
@@ -376,17 +387,31 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const selected = declared.find(model => model.toLowerCase() === written.toLowerCase()) ??
       catalog.find(option => routingModelOptionNamed(option, written))?.model;
     if (!selected || selected.length > 160) return { offers: declared.length ? declared : catalog.map(option => option.model) };
-    const recorded = await this.database.transaction({ requestId: commandId, operation: "registration.wake.model",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_model_v1", text: `UPDATE data.runs run
-        SET metadata_json=run.metadata_json||jsonb_build_object('wakeRuntimeModel',$3::text),
-          version=run.version+1,updated_at=clock_timestamp()
+    await this.recordWakeChoice(commandId, channelId, instanceId, { wakeRuntimeModel: selected,
+      ...(raw.sourceMessageId ? { wakeRuntimeModelSource: text(raw.sourceMessageId).slice(0, 200) } : {}) });
+    return { selected };
+  }
+
+  /** Record the effort a resting Instance starts at when it next wakes or is
+   * reborn. The caller has checked it against the models the Instance reported. */
+  async chooseWakeEffort(raw: { commandId: string; channelId: string; instanceId: string; effort: string }): Promise<{ selected: string }> {
+    const selected = text(raw.effort).trim();
+    if (!selected || selected.length > 80 || hasControlCharacter(selected)) throw new RegistrationAccessError("invalid_registration_reborn", 400);
+    await this.recordWakeChoice(text(raw.commandId), text(raw.channelId), text(raw.instanceId), { wakeRuntimeEffort: selected });
+    return { selected };
+  }
+
+  /** Write a choice for the next resume on the Run of an Instance that rests. */
+  private async recordWakeChoice(commandId: string, channelId: string, instanceId: string, choice: Record<string, string>) {
+    const recorded = await this.database.transaction({ requestId: commandId, operation: "registration.wake.choice",
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_choice_v1", text: `UPDATE data.runs run
+        SET metadata_json=run.metadata_json||$3::jsonb,version=run.version+1,updated_at=clock_timestamp()
         FROM data.instances instance
         WHERE instance.instance_id=$1 AND instance.channel_id=$2 AND run.run_id=instance.run_id
           AND instance.rest_state IN ('sleeping','interrupted') AND run.status IN (${TERMINAL_RUN_STATUS_SQL})
-        RETURNING run.run_id`, values: [instanceId, channelId, selected], maxRows: 1 }));
+        RETURNING run.run_id`, values: [instanceId, channelId, JSON.stringify(choice)], maxRows: 1 }));
     // It woke between the statement and this write: the caller asks it live.
     if (!recorded.length) throw new RegistrationAccessError("instance_not_resting", 409);
-    return { selected };
   }
 
   /** Whether a Run moved off `original` for quota can go back to it: a
@@ -515,7 +540,9 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       // the initial message id drops the copy as a summon echo.
       agentName: displayName, prompt: input.prompt, sourceMessageId: input.sourceMessageId,
       resumeWorktreeBootstrap: true,
-      context: model ? { requestedModel: model } : preferredRuntimeModel ? { preferredModel: preferredRuntimeModel } : {},
+      context: { ...(model ? { requestedModel: model } : preferredRuntimeModel ? { preferredModel: preferredRuntimeModel } : {}),
+        // An effort a person chose for it while it rested (`chooseWakeEffort`).
+        ...(source.wakeRuntimeEffort ? { requestedEffort: source.wakeRuntimeEffort } : {}) },
       ...continuationSpawnWorkspace(source, key, hostId, physical, at) };
     return { source, successor: { run, instance, spawn } };
   }
@@ -534,9 +561,10 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const commandId = text(raw.commandId);
     const targetInstanceId = raw.targetInstanceId === undefined ? null : text(raw.targetInstanceId);
     const candidates = await this.database.transaction({ requestId: commandId, operation: "registration.wake.candidates",
-      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v5", text: `SELECT
-        i.instance_id,r.owner_user_id,b.machine_id,b.harness,
-        COALESCE(NULLIF(r.metadata_json->>'wakeRuntimeModel',''),i.presentation_json->>'model') AS model,
+      placement: this.placement }, tx => tx.query({ name: "registration_wake_resting_candidates_v6", text: `SELECT
+        i.instance_id,i.run_id,r.owner_user_id,b.machine_id,b.harness,i.presentation_json->>'model' AS model,
+        NULLIF(r.metadata_json->>'wakeRuntimeModel','') AS wake_model,
+        NULLIF(r.metadata_json->>'wakeRuntimeModelSource','') AS wake_model_source,
         i.presentation_json->'models' AS catalog_models,i.presentation_json->>'modelsObservedAt' AS catalog_observed_at
         FROM data.instances i
         JOIN data.runs r ON r.run_id=i.run_id AND r.channel_id=i.channel_id
@@ -550,9 +578,22 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       values: [channelId, targetInstanceId], maxRows: MAX_WAKES_PER_MESSAGE }));
     const woken: Array<{ instanceId: string; intentId: string; state: string }> = [];
     const refused: Array<{ instanceId: string; code: string; permanent: boolean }> = [];
-    const usedUp = await this.usedUpInstances(commandId, candidates);
+    const { usedUp, chosenUsedUp } = await this.usedUpInstances(commandId, candidates);
+    /** Chosen wake models dropped for quota, each with the statement that chose it. */
+    const dropped: Array<{ instanceId: string; model: string; resetsAt: string; sourceMessageId?: string }> = [];
     for (const candidate of candidates) {
       const instanceId = String(candidate.instance_id);
+      const unusable = chosenUsedUp.get(instanceId);
+      if (unusable) {
+        await this.database.transaction({ requestId: `${commandId}:wake-model-drop`.slice(0, 200),
+          operation: "registration.wake.model-drop", placement: this.placement }, tx => tx.query({
+          name: "registration_wake_model_drop_v1", text: `UPDATE data.runs SET
+            metadata_json=metadata_json-'wakeRuntimeModel'-'wakeRuntimeModelSource',version=version+1,updated_at=clock_timestamp()
+            WHERE run_id=$1 AND metadata_json->>'wakeRuntimeModel'=$2`,
+          values: [String(candidate.run_id), unusable.model], maxRows: 0 }));
+        dropped.push({ instanceId, ...unusable,
+          ...(typeof candidate.wake_model_source === "string" ? { sourceMessageId: candidate.wake_model_source } : {}) });
+      }
       // Its provider account, or the model it runs, is used up (a sibling may
       // have just reported the limit): waking it would only fail the same way.
       // It keeps resting, and the first message after the reset wakes it.
@@ -587,7 +628,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           values: [instanceId, code, new Date().toISOString(), channelId], maxRows: 1 }));
       }
     }
-    return { woken, refused };
+    return { woken, refused, ...(dropped.length ? { dropped } : {}) };
   }
 
   /** Of these resting Instances, those whose model has no quota now on its
@@ -595,9 +636,11 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * the model each Instance last ran (its catalog row, the default's for the
    * runtime default; account windows alone without a current catalog). A
    * reported usage limit holds a pool so until the reset. */
-  private async usedUpInstances(commandId: string, candidates: readonly QueryResultRow[]): Promise<Set<string>> {
+  private async usedUpInstances(commandId: string, candidates: readonly QueryResultRow[]):
+    Promise<{ usedUp: Set<string>; chosenUsedUp: Map<string, { model: string; resetsAt: string }> }> {
     const keyed = candidates.filter(row => row.machine_id != null && row.harness != null);
-    if (!keyed.length) return new Set();
+    const chosenUsedUp = new Map<string, { model: string; resetsAt: string }>();
+    if (!keyed.length) return { usedUp: new Set(), chosenUsedUp };
     const rows = await this.directory.transaction({ requestId: `${commandId}:wake-quota`.slice(0, 200),
       operation: "registration.wake.quota" }, tx => tx.query({ name: "registration_wake_resting_quota_v2",
       text: `SELECT e.owner_user_id,e.machine_id,e.harness,${registrationQuotaColumns("q")}
@@ -609,15 +652,25 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
         keyed.map(row => String(row.harness))], maxRows: MAX_WAKES_PER_MESSAGE }));
     const readings = new Map(rows.map(row => [registrationTriple(row), row]));
     const now = Date.now();
-    return new Set(keyed.flatMap(candidate => {
+    const usedUp = new Set(keyed.flatMap(candidate => {
       const pool = readings.get(registrationTriple(candidate));
       if (!pool) return [];
       const catalog = routingModelCatalogObservation(candidate.catalog_models, candidate.catalog_observed_at, now)?.value ?? [];
-      const model = typeof candidate.model === "string" ? candidate.model : "";
-      const row = model ? catalog.find(option => routingModelOptionNamed(option, model)) : catalog.find(option => option.isDefault);
-      const reading = registrationQuotaReading(pool, row);
+      const readingOf = (model: string) => registrationQuotaReading(pool,
+        model ? catalog.find(option => routingModelOptionNamed(option, model)) : catalog.find(option => option.isDefault));
+      const last = readingOf(typeof candidate.model === "string" ? candidate.model : "");
+      // A model a person chose for its wake that has since read as used up
+      // would strand it until that model's reset: it wakes on the model it
+      // last ran instead, when that one has quota.
+      const chosen = typeof candidate.wake_model === "string" ? readingOf(candidate.wake_model) : undefined;
+      if (chosen && chosen.remainingPercent <= 0 && !(last && last.remainingPercent <= 0)) {
+        chosenUsedUp.set(String(candidate.instance_id), { model: String(candidate.wake_model), resetsAt: chosen.expiresAt });
+        return [];
+      }
+      const reading = chosen ?? last;
       return reading && reading.remainingPercent <= 0 ? [String(candidate.instance_id)] : [];
     }));
+    return { usedUp, chosenUsedUp };
   }
 
   /** Hand a predecessor's retained directory to a new Instance of another
@@ -1025,6 +1078,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       // The model a person chose for it while it rested (`chooseWakeModel`).
       wakeRuntimeModel: typeof metadata.wakeRuntimeModel === "string" && metadata.wakeRuntimeModel
         ? metadata.wakeRuntimeModel : undefined,
+      wakeRuntimeEffort: typeof metadata.wakeRuntimeEffort === "string" && metadata.wakeRuntimeEffort
+        ? metadata.wakeRuntimeEffort : undefined,
       modelResource: typeof metadata.modelResource === "string" ? metadata.modelResource : undefined,
       hostname: typeof metadata.hostname === "string" ? metadata.hostname : undefined,
       hostId: typeof metadata.hostId === "string" ? metadata.hostId : undefined,

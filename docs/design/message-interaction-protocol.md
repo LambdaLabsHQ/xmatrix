@@ -140,8 +140,17 @@ A refused switch offers the person who wrote it one step, in its answer
   model, as every resume does: a model its registration declares, or on the
   runtime default a model of the catalog it last reported. A used-up model is
   refused first, with its reset, and a wake decides its quota by the chosen
-  model. `/model` with no value lists what it last reported. An effort still
-  waits for the Instance to wake.
+  model. `/model` with no value lists what it last reported. An effort is
+  recorded the same way (`chooseWakeEffort`), checked against the efforts of
+  the model it will start on, and goes with the resume's spawn once; onto a
+  runtime-default model only a daemon that carries an effort there takes it.
+- A `/model` naming a model whose quota no current reading tells (the account
+  unread, or none of the model's own scopes read) asks the Instance's daemon
+  for one fresh read: the statement is the event. The statement itself goes
+  on with what is known. When a resting Instance then wakes and a current
+  reading shows its chosen model used up while the model it last ran has
+  quota, it wakes on that one, the choice is dropped, and a note on the
+  statement that chose it says so.
 - A provider refusal for quota that no reading explained asks the Instance's
   daemon for one fresh read of that account (`verifyRegistrationQuota`). The
   refusal is the event; the reading then tells the Agents page and the next
