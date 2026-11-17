@@ -30,6 +30,16 @@ test("directory launches and older Hub instances keep their workspace label", ()
     { id: "workspace", label: "Workspace", value: "dev/notes" });
 });
 
+test("a Run in its managed directory shows no tag until it checks a repository out", () => {
+  const instance = { machineId: "machine", cwd: "/home/dev/.xmatrix-management/registration-123",
+    workspaceName: "xMatrix managed workspace", managedWorkspace: true };
+  assert.equal(channelAgentInstanceWorkspaceTag(instance, []), undefined);
+  assert.equal(channelAgentInstanceWorkspaceTag(instance, [{ machineId: "machine", canonicalCwd: instance.cwd }]), undefined);
+  assert.deepEqual(channelAgentInstanceWorkspaceTag({ ...instance,
+    checkedOutRepositories: ["LambdaLabsHQ/xmatrix", "LambdaLabsHQ/docs"] }, []),
+    { id: "repo", label: "Repository", value: "LambdaLabsHQ/docs" }, "the latest checkout is named");
+});
+
 test("workspace path tails keep the distinguishing directories", () => {
   assert.equal(compactWorkspacePathTail("/Users/eevee/code/xmatrix"), "code/xmatrix");
   assert.equal(compactWorkspacePathTail("/Users/eevee/code/xmatrix-web"), "code/xmatrix-web");

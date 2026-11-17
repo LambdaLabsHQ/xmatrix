@@ -98,6 +98,28 @@ test("live and sleeping repo Instances project the Run repository without checko
   }
 });
 
+test("a Run in its managed directory names only the repositories it checked out", async () => {
+  const read = async (metadata) => (await loadChannelAgentPresence({ async query(input) {
+    return [row({ status: input.name === "channel_agent_presence_v12" ? "online" : "offline",
+      rest_state: input.name === "channel_agent_presence_v12" ? undefined : "sleeping",
+      workspace_canonical_cwd: ".xmatrix-management/registration-123", run_metadata_json: metadata })];
+  } }, "space-1", ["channel-1"])).get("channel-1");
+  for (const member of Object.values(await read({ managedWorkspaceKey: "registration-123" }))) {
+    assert.equal(member.instances[0].managedWorkspace, true);
+    assert.equal(member.instances[0].checkedOutRepositories, undefined);
+  }
+  for (const member of Object.values(await read({ managedWorkspaceKey: "registration-123",
+    checkedOutRepos: ["LambdaLabsHQ/xmatrix", 7, "https://github.com/team/project.git"] }))) {
+    assert.deepEqual(member.instances[0].checkedOutRepositories, ["LambdaLabsHQ/xmatrix", "team/project"]);
+  }
+  for (const member of Object.values(await read({ managedWorkspaceKey: "registration-123",
+    remoteRepo: "LambdaLabsHQ/xmatrix", checkedOutRepos: ["team/project"] }))) {
+    assert.equal(member.instances[0].managedWorkspace, undefined, "a repo: launch names its own repository");
+    assert.equal(member.instances[0].checkedOutRepositories, undefined);
+    assert.equal(member.instances[0].repository, "LambdaLabsHQ/xmatrix");
+  }
+});
+
 test("PostgreSQL Channel Presence fails closed instead of truncating active Instances", async () => {
   const transaction = { async query() { return Array.from({ length: 513 }, (_, index) => row({
     instance_id: `instance-${index}`,

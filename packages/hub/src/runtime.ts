@@ -14,7 +14,7 @@ import { boundedOccurrenceAt } from "./bounded-occurrence-time";
 import { summonDecisionEvaluator } from "./summon-decision-content";
 import { meterJev, type JevFeature, type UsageCostEnv } from "./usage-cost-metering";
 import type { Env } from "./types";
-import { publishChannelInvocationsChanged } from "./channel-live-judgment";
+import { publishChannelInvocationsChanged, publishChannelPresenceChanged } from "./channel-live-judgment";
 
 /** What Runs, Instances and their launches need from the Worker. */
 export interface RuntimeEnv extends PostgresAuthorityFleetEnv, AppConnectorEnv, UsageCostEnv {
@@ -40,6 +40,18 @@ export function runtimeRepository(
   database: AuthorityDatabase = runtimeDatabase(env),
 ): PostgresRuntimeRepository {
   return new PostgresRuntimeRepository(database, env.RELAY_POSTGRES_SHARD_ID?.trim() || undefined);
+}
+
+/** Name a repository a Run checked out itself on its Instance, and show the
+ * Channel's people the Instance again when that changed it. Never throws. */
+export async function recordRunCheckout(env: PostgresAuthorityFleetEnv, input: { runId: string; executionKey: string;
+  actorUserId: string; repository: string }): Promise<void> {
+  try {
+    const changed = await runtimeRepository(env).recordRunCheckout({ ...input, requestId: crypto.randomUUID() });
+    if (changed) await publishChannelPresenceChanged(env as Env, changed.channelId, [changed.instanceId]);
+  } catch (error) {
+    console.warn("A Run's checkout could not be shown", { errorCode: error instanceof Error ? error.name : "unknown" });
+  }
 }
 
 /** Moves an Agent Launch along as its daemon reports admission, spawn or failure. */

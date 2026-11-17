@@ -77,3 +77,18 @@ test("a registration's display facts ride with the record only for the registrat
   assert.equal(withNewestRegistrationPresentation(mergeInstanceRecord(renamed, later), renamed, later)
     .registrationPresentation.version, 4, "a newer record without the facts keeps the newest held name");
 });
+
+test("a checkout recorded on the Run survives a further-along report read before it", () => {
+  const checkedOut = record(2, 3, { managedWorkspace: true, checkedOutRepositories: ["team/project"] });
+  const laterReport = record(2, 4, { managedWorkspace: true, status: "busy" });
+  for (const [first, second] of [[checkedOut, laterReport], [laterReport, checkedOut]]) {
+    const merged = mergeInstanceRecord(first, second);
+    assert.equal(merged.revision.sequence, 4);
+    assert.equal(merged.status, "busy");
+    assert.deepEqual(merged.checkedOutRepositories, ["team/project"]);
+  }
+  assert.equal(mergeInstanceRecord(checkedOut, record(3, 0)).checkedOutRepositories, undefined,
+    "a new lifecycle starts from its own Run's checkouts");
+  assert.throws(() => record(1, 0, { checkedOutRepositories: [""] }), TypeError);
+  assert.throws(() => record(1, 0, { managedWorkspace: "yes" }), TypeError);
+});

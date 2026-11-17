@@ -414,6 +414,9 @@ function serializedInstance(row: QueryResultRow) {
     createdAt: iso(row.created_at), updatedAt: iso(row.updated_at) };
 }
 
+/** A Run names at most this many repositories it checked out itself. */
+const MAX_RUN_CHECKOUTS = 32;
+
 export class PostgresRuntimeRepository {
   private readonly channelDirectory: PostgresChannelSpaceDirectory;
   private readonly entityDirectory: PostgresEntitySpaceDirectory;
@@ -1767,6 +1770,44 @@ export class PostgresRuntimeRepository {
       }
       return { run: serializePostgresRun(rows[0]), ...(registrationAdmission ? { registrationAdmission } : {}) };
     });
+  }
+
+  /**
+   * Record a repository a live Run in its managed directory checked out for
+   * itself (`xmatrix repo checkout`), so its Instance can name it. The list
+   * keeps first-checkout order and only grows; a repository already on it, a
+   * Run launched with `repo:` or one in a directory of its own changes
+   * nothing. Returns the Instance to show again, or undefined when unchanged.
+   */
+  async recordRunCheckout(input: { requestId: string; runId: string; actorUserId: string; executionKey: string;
+    repository: string }): Promise<{ channelId: string; instanceId: string } | undefined> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const runId = text(input.runId, "runId", 300);
+    const repository = text(input.repository, "repository", 300);
+    const route = await this.entityDirectory.resolve(
+      { requestId, operation: "runtime.run-checkout.locate" }, "run", runId,
+    );
+    const placement = route ? await this.spaces.resolve(requestId, "runtime.run-checkout.placement", route.spaceId) : null;
+    const rows = await this.database.transaction(placement ? { requestId, operation: "runtime.run-checkout",
+      placement: { spaceId: placement.spaceId, shardId: placement.shardId,
+        placementEpoch: placement.placementEpoch } } : { requestId, operation: "runtime.run-checkout-legacy" },
+    tx => tx.query<QueryResultRow>({ name: "runtime_run_checkout_v1", text: `UPDATE data.runs r
+        SET metadata_json=r.metadata_json||jsonb_build_object('checkedOutRepos',
+          CASE WHEN jsonb_typeof(r.metadata_json->'checkedOutRepos')='array'
+            THEN r.metadata_json->'checkedOutRepos' ELSE '[]'::jsonb END||to_jsonb($3::text)),
+          version=r.version+1,updated_at=clock_timestamp()
+        WHERE r.run_id=$1 AND r.owner_user_id=$2 AND r.status IN ('starting','running')
+          AND r.metadata_json->>'executionKey'=$4
+          AND r.metadata_json ? 'managedWorkspaceKey' AND NOT r.metadata_json ? 'remoteRepo'
+          AND NOT COALESCE(r.metadata_json->'checkedOutRepos' @> jsonb_build_array($3::text),false)
+          AND COALESCE(jsonb_array_length(CASE WHEN jsonb_typeof(r.metadata_json->'checkedOutRepos')='array'
+            THEN r.metadata_json->'checkedOutRepos' END),0)<${MAX_RUN_CHECKOUTS}
+        RETURNING r.channel_id,(SELECT i.instance_id FROM data.instances i WHERE i.run_id=r.run_id LIMIT 1) AS instance_id`,
+    values: [runId, text(input.actorUserId, "actorUserId", 300), repository,
+      text(input.executionKey, "executionKey", 300)], maxRows: 1 }));
+    const row = rows[0];
+    return row && typeof row.instance_id === "string"
+      ? { channelId: String(row.channel_id), instanceId: row.instance_id } : undefined;
   }
 
   async getInstance(input: { requestId: string; instanceId: string; actorUserId: string }) {

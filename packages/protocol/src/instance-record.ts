@@ -42,6 +42,11 @@ export function parseInstanceRecord(value: unknown): InstanceRecord {
       ![value.connectedAt, value.lastSeenAt].every(time => typeof time === "string" && Number.isFinite(Date.parse(time)))) {
     throw new TypeError("Invalid Instance record");
   }
+  if ((value.managedWorkspace !== undefined && value.managedWorkspace !== true) ||
+      (value.checkedOutRepositories !== undefined && !(Array.isArray(value.checkedOutRepositories) &&
+        value.checkedOutRepositories.every(repo => typeof repo === "string" && repo.length > 0 && repo.length <= 300)))) {
+    throw new TypeError("Invalid Instance record");
+  }
   const registration = parseAgentRegistrationKey(value.registration);
   const record = { ...value, registration,
     ...(value.registrationPresentation !== undefined
@@ -92,7 +97,17 @@ export function mergeInstanceRecord(current: InstanceRecord | undefined, incomin
       !sameAgentRegistration(current.registration, incoming.registration)) {
     throw new TypeError("Instance record identity changed");
   }
-  return newerRevision(incoming.revision, current.revision) ? incoming : current;
+  const kept = newerRevision(incoming.revision, current.revision) ? incoming : current;
+  return withLongestCheckouts(kept, kept === incoming ? current : incoming);
+}
+
+/* A checkout is recorded on the Run, not reported by its runtime, so it moves
+   no revision. Within one Instance version the list only grows: a record with
+   the further-along revision may have been read before the checkout. */
+function withLongestCheckouts(kept: InstanceRecord, other: InstanceRecord): InstanceRecord {
+  const held = kept.checkedOutRepositories?.length ?? 0;
+  if (other.revision.version !== kept.revision.version || (other.checkedOutRepositories?.length ?? 0) <= held) return kept;
+  return { ...kept, checkedOutRepositories: other.checkedOutRepositories };
 }
 
 /** Temporary work is owned by the current socket. It cannot connect an
