@@ -54,6 +54,16 @@ async function addInstances(f) {
   };
 }
 
+/** The fixture Instance's record, as an exact Channel read answers it. */
+function fixtureInstanceRecord(f) {
+  const spaces = new PostgresSpaceControlRepository(f.database, "shard-0");
+  return async () => {
+    const { channel } = await spaces.getChannel({ requestId: randomUUID(), spaceId: f.ids.space,
+      channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner }, knownInstanceIds: [f.ids.instance] });
+    return channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
+  };
+}
+
 const states = (records) => Object.fromEntries(records.map((record) => [record.id.split(":").at(-1),
   { status: record.status, ...(record.rest ? { rest: record.rest } : {}), revision: record.revision }]));
 
@@ -150,12 +160,7 @@ integration("a Channel window is self-contained versioned records; its exact rea
 integration("a connection's reports are ordered by (version, sequence) and fenced to the row's current version", async () => {
   const f = await spaceSecretFixture();
   const runtime = new PostgresRuntimeRepository(f.database);
-  const spaces = new PostgresSpaceControlRepository(f.database, "shard-0");
-  const read = async () => {
-    const { channel } = await spaces.getChannel({ requestId: randomUUID(), spaceId: f.ids.space,
-      channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner }, knownInstanceIds: [f.ids.instance] });
-    return channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
-  };
+  const read = fixtureInstanceRecord(f);
   const current = async () => {
     const record = await read();
     return { status: record.status, ...(record.rest ? { rest: record.rest } : {}), revision: record.revision };
@@ -242,12 +247,7 @@ integration("a connection's reports are ordered by (version, sequence) and fence
 integration("a managed-directory Run's own checkouts name it once each, in order; other Runs are untouched", async () => {
   const f = await spaceSecretFixture();
   const runtime = new PostgresRuntimeRepository(f.database);
-  const spaces = new PostgresSpaceControlRepository(f.database, "shard-0");
-  const read = async () => {
-    const { channel } = await spaces.getChannel({ requestId: randomUUID(), spaceId: f.ids.space,
-      channelId: f.ids.channel, principal: { kind: "user", id: f.ids.owner }, knownInstanceIds: [f.ids.instance] });
-    return channel.instanceRecords.find((entry) => entry.id === f.ids.instance);
-  };
+  const read = fixtureInstanceRecord(f);
   const checkout = (repository, executionKey = f.context.executionKey) => runtime.recordRunCheckout({
     requestId: randomUUID(), runId: f.ids.run, actorUserId: f.ids.owner, executionKey, repository });
   const changed = { channelId: f.ids.channel, instanceId: f.ids.instance };
