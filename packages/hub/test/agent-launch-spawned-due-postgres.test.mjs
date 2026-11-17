@@ -63,3 +63,32 @@ integration("a spawned Launch whose spawn is recorded is not due, so it no longe
     await database.close();
   }
 });
+
+// node-postgres returns timestamptz columns as Dates, and String(date) keeps
+// only whole seconds. A due time read that way fell up to a second early, so
+// the Channel's alarm woke before its Launch was claimable, claimed nothing
+// and came back a recheck later: a 5 s retry ran after 6 to 7 s.
+integration("a Launch's due time keeps its milliseconds", async () => {
+  assert.ok(url, "XMATRIX_TEST_POSTGRES_URL is required");
+  const database = createAuthorityDatabase({ connectionString: url, shardId: "shard-0" }).openSession();
+  const id = randomUUID(), space = `space-${id}`, channel = `channel-${id}`, runId = `${channel}:1#1`;
+  const sql = (text, values = [], maxRows = 10) => database.transaction({ requestId: id, operation: "test.launch-due-ms" },
+    tx => tx.query({ name: `test_launch_due_ms_${randomUUID()}`, text, values, maxRows }));
+  const dueAt = "2099-01-01T00:00:00.750Z";
+  try {
+    await sql(`INSERT INTO control.postgres_shards VALUES ('shard-0','active','shard-0',now(),now()) ON CONFLICT DO NOTHING`, [], 0);
+    await sql(`INSERT INTO control.space_placement (space_id,shard_id,placement_epoch,state,plan_class,created_at,updated_at)
+      VALUES ($1,'shard-0',1,'active','standard',now(),now())`, [space], 0);
+    await sql(`INSERT INTO data.space_control_heads (space_id,commit_sequence,updated_at) VALUES ($1,0,now())`, [space], 0);
+    await sql(`INSERT INTO data.runs (run_id,owner_user_id,channel_id,status,version,metadata_json,created_at,updated_at)
+      VALUES ($1,'owner',$2,'running',1,'{}'::jsonb,now(),now())`, [runId, channel], 0);
+    await sql(`INSERT INTO data.agent_launches (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,
+        instance_id,execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
+      VALUES ($1,$2,$3,'trigger','registration','owner',$4,$5,$1,$1,'machine','host','prepared','{}',$6::timestamptz,now(),now())`,
+      [`launch-${id}`, space, channel, runId, `${channel}:1`, dueAt], 0);
+    const due = await nextChannelStepDue(database, "shard-0", channel);
+    assert.equal(due.launch, Date.parse(dueAt));
+  } finally {
+    await database.close();
+  }
+});
