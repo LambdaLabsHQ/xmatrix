@@ -110,9 +110,18 @@ test('a scoped window constrains only the models whose catalog row lists its sco
   assert.equal(fable.expiresAt, new Date('2026-09-23T18:00:00Z').toISOString());
   // Only exact names match: a prefix is another scope.
   assert.equal(routingQuotaObservation(usage, now, { model: { quotaScopes: ['Fab'] } }).value, 45);
-  // Served past its limits on credits: still eligible.
-  assert.equal(routingQuotaObservation({ ...usage, quotaAccount: { allowed: true } }, now,
-    { model: { quotaScopes: ['Fable'] } }).value, 1);
+  // A verdict that the account still serves came from a request on another
+  // model: Fable's own week stays used up until its reset, while the account
+  // and the models outside the scope are served.
+  const served = { ...usage, quotaAccount: { allowed: true } };
+  const refused = routingQuotaObservation(served, now, { model: { quotaScopes: ['Fable'] } });
+  assert.equal(refused.value, 0);
+  assert.equal(refused.expiresAt, new Date('2026-09-23T18:00:00Z').toISOString());
+  assert.equal(routingQuotaObservation(served, now, { model: { quotaScopes: ['Sonnet'] } }).value, 45);
+  // The account's own week at its limit is still served on that verdict; Fable's is not.
+  const full = { ...served, quotaUsages: [{ label: '1w', percent: 100, resetAt: '2026-09-23T18:00:00Z' }] };
+  assert.equal(routingQuotaObservation(full, now).value, 1);
+  assert.equal(routingQuotaObservation(full, now, { model: { quotaScopes: ['Fable'] } }).value, 0);
 });
 
 test('Cursor pools are scoped windows; a reading of pools alone says nothing of the account', () => {

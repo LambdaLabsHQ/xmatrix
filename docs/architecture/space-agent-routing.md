@@ -252,6 +252,11 @@ that offers the chosen location. Each has a fit (Jev's score for its harness ÷ 
   them: a refused account has none, and one still served past a used-up window
   on credits keeps 1%, eligible but after every account with window headroom.
   Whether to spend credits is the provider account's setting, not xMatrix's.
+  A verdict is the provider's answer to one request, on the model that request
+  ran, so being served bears on the account's windows only: one model's own
+  window (Claude's Fable week) that reads used up stays used up until its
+  reset, whatever requests on other models are answered. A refused account
+  still refuses every model.
 
 A machine without a current sample has unknown headroom, counted as none.
 

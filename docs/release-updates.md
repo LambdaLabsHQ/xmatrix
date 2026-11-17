@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: a model's own used-up quota is no longer read as available while other models are served
+
+A Claude account whose Fable week was used up kept being offered for Fable:
+`/model claude-fable-5-2` went to the machine and was refused with a 429, a
+sleeping Agent told to wake on Fable woke and failed its first turn ("You've
+hit your Fable limit · resets Nov 19"), and a summon naming Fable could be
+routed there. The reading did hold "Fable · 1w 100%". But every request the
+account's Agents made on Opus came back "allowed", and that verdict was read
+as the account being served past all its limits: it raised the used-up Fable
+window to "still eligible" and let it lapse after fifteen minutes. A verdict
+now bears on the account's own windows only. One model's own window that
+reads used up stays used up until its reset; a refused account still refuses
+every model. Hub and Web. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a `/model` asks for a quota read only when the reading is missing
 
 Since #1758 a `/model` asks the machine to read quota that no current
