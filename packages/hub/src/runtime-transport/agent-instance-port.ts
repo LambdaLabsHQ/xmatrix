@@ -11,6 +11,9 @@ import {
   CLIENT_UPGRADE_REQUIRED_CLOSE_CODE,
   crossChannelReplyRelay,
   isLiveAgentStatus,
+  routingModelEffortOptions,
+  routingModelOptionNamed,
+  routingModelOptions,
   sanitizeAgentInstancePresentation,
   type AgentStatus,
   type LiveAgentStatus,
@@ -548,9 +551,10 @@ export class AgentInstanceRuntimeTransport {
       : { ...live, presentation: { ...live.presentation,
         models: sanitizeAgentInstancePresentation({ models: input.reportedModels })?.models } };
 
+    const catalog = routingModelOptions(session.presentation?.models);
     const options = input.kind === "model"
-      ? agentInstanceModelOptions(session)
-      : agentInstanceEffortOptions(session);
+      ? catalog.map((option) => option.model)
+      : routingModelEffortOptions(catalog, session.presentation?.model);
     const current = input.kind === "model"
       ? session.presentation?.model
       : session.presentation?.effort;
@@ -565,9 +569,11 @@ export class AgentInstanceRuntimeTransport {
     // A model is also named by any selector or display name its runtime lists for it (Claude's `opus`).
     // An Instance that has reported no catalog yet (its first turn still runs)
     // is asked as written: its runtime holds the catalog and answers for it.
-    const selected = options.find((option) => option.toLowerCase() === input.value!.toLowerCase()) ??
-      (input.kind === "model" ? agentInstanceModelNamed(session, input.value) : undefined) ??
-      (options.length ? undefined : input.value.trim());
+    const selected = input.kind === "model"
+      ? (catalog.find((option) => routingModelOptionNamed(option, input.value!))?.model ??
+        (options.length ? undefined : input.value.trim()))
+      : (options.find((option) => option.toLowerCase() === input.value!.toLowerCase()) ??
+        (options.length ? undefined : input.value.trim()));
     if (!selected) {
       return {
         status: "error",
@@ -998,49 +1004,6 @@ export { agentInstanceCompatibility };
 /** `<agent-name>:<channel-instance-number>` — the same label `@agent:N` addresses. */
 function agentInstanceMentionTarget(session: Readonly<AgentInstanceRuntimeSession>): string {
   return `${session.principal.agentName || "agent"}:${session.run.channelInstanceId || "1"}`;
-}
-
-function agentInstanceModelOptions(
-  session: Readonly<AgentInstanceRuntimeSession>,
-): readonly string[] {
-  const seen = new Set<string>();
-  for (const model of session.presentation?.models ?? []) {
-    const value = model.model?.trim() || model.id?.trim();
-    if (value) seen.add(value);
-  }
-  return [...seen];
-}
-
-/** The model whose runtime selector, alias or display name is `written`, ignoring case. */
-function agentInstanceModelNamed(session: Readonly<AgentInstanceRuntimeSession>, written: string): string | undefined {
-  const wanted = written.trim().toLowerCase();
-  const named = (session.presentation?.models ?? []).find((model) =>
-    [model.id, model.displayName, ...model.aliases ?? []].some((name) => name?.trim().toLowerCase() === wanted));
-  return named?.model?.trim() || named?.id?.trim() || undefined;
-}
-
-/**
- * Efforts are a property of the selected model, so scope to it and fall back to
- * the default (then any) model rather than pooling every tier's efforts.
- */
-function agentInstanceEffortOptions(
-  session: Readonly<AgentInstanceRuntimeSession>,
-): readonly string[] {
-  const models = session.presentation?.models ?? [];
-  const current = session.presentation?.model?.trim().toLowerCase();
-  const scoped = (current
-    ? models.find((model) =>
-      model.model?.trim().toLowerCase() === current || model.id?.trim().toLowerCase() === current)
-    : undefined) ?? models.find((model) => model.isDefault) ?? models[0];
-  const seen = new Set<string>();
-  for (const entry of scoped?.supportedReasoningEfforts ?? []) {
-    const value = entry.reasoningEffort?.trim();
-    if (value) seen.add(value);
-  }
-  if (seen.size === 0 && scoped?.defaultReasoningEffort?.trim()) {
-    seen.add(scoped.defaultReasoningEffort.trim());
-  }
-  return [...seen];
 }
 
 function sameTraceHostSession(

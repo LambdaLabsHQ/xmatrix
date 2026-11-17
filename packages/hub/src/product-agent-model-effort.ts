@@ -1,5 +1,5 @@
-import { parseAgentControlCommands as parseProductAgentControlCommands, routingModelOptionNamed, routingQuotaObservation,
-  type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
+import { parseAgentControlCommands as parseProductAgentControlCommands, routingModelEffortOptions, routingModelOptionNamed,
+  routingQuotaObservation, type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
   type AgentControlQuotaExhausted, type AgentControlUsedUpOption,
   type AgentControlKind as ProductAgentControlKind, type RoutingModelOption } from "@xmatrix/protocol";
 export { parseProductAgentControlCommands };
@@ -33,6 +33,10 @@ export interface ProductAgentSwitchTarget {
   agentName?: string;
   machineName?: string;
   currentModel?: string;
+  /** The effort currently on the Instance, or queued for its next wake. */
+  currentEffort?: string;
+  /** Declared models of the Instance's registration when not on runtime default. */
+  declaredModels?: string[];
   /** The runtime's catalog as the Instance row stores it. */
   reportedModels?: unknown[];
   /** That catalog while it is fresh enough to decide quota by. */
@@ -159,9 +163,9 @@ export async function decideProductAgentSwitch(input: {
   if (!target) return first;
   // A resting Instance has no session to switch, and the person should not
   // have to come back when it wakes: the model is recorded and it starts on
-  // it. Its models are listed from what it last reported.
+  // it. Its models are listed from what its registration or runtime offered.
   if (first.status === "no_instance" && asleep && command.kind === "model") {
-    const offered = (target.modelCatalog ?? []).map(option => option.model);
+    const offered = target.declaredModels?.length ? target.declaredModels : (target.modelCatalog ?? []).map(option => option.model);
     if (!command.value) {
       if (offered.length) first = { status: "catalog", options: offered, ...(target.currentModel ? { current: target.currentModel } : {}) };
     } else if (input.chooseOnWake) {
@@ -175,23 +179,29 @@ export async function decideProductAgentSwitch(input: {
       if (!chosen) first = await input.dispatch(target.reportedModels, true);
     }
   }
-  // An effort is recorded the same way, against the efforts of the model it
-  // will start on, when its next resume can carry one.
-  if (first.status === "no_instance" && asleep && command.kind === "effort" && command.value && input.chooseOnWake &&
-      target.takesWakeEffort) {
-    const starts = target.wakeModel ?? target.currentModel;
-    const catalog = target.modelCatalog ?? [];
-    const efforts = ((starts ? catalog.find(option => routingModelOptionNamed(option, starts)) : undefined) ??
-      catalog.find(option => option.isDefault))?.efforts.map(effort => effort.value) ?? [];
-    const selected = efforts.find(effort => effort.toLowerCase() === command.value!.toLowerCase());
-    if (efforts.length && !selected) {
-      return { status: "error", message: `\`${command.value}\` is not one @${command.target} can start at. ` +
-        `It can start at ${efforts.map(option => `\`${option}\``).join(", ")}.` };
-    }
-    if (selected) {
-      const chosen = await input.chooseOnWake("effort", selected);
-      if (chosen && "selected" in chosen) return { status: "switched", selected: chosen.selected, onWake: true };
-      if (!chosen) first = await input.dispatch(target.reportedModels, true);
+  // An effort is listed and recorded the same way, against the efforts of
+  // the model it will start on, when its next resume can carry one.
+  if (first.status === "no_instance" && asleep && command.kind === "effort" && target.takesWakeEffort) {
+    const efforts = routingModelEffortOptions(target.modelCatalog ?? [], target.wakeModel ?? target.currentModel);
+    if (!command.value) {
+      if (efforts.length) {
+        first = { status: "catalog", options: efforts, ...(target.currentEffort ? { current: target.currentEffort } : {}) };
+      } else {
+        return { status: "error", message: `@${command.target} has not reported which efforts it offers.` };
+      }
+    } else if (!efforts.length) {
+      return { status: "error", message: `@${command.target} has not reported which efforts it offers.` };
+    } else {
+      const selected = efforts.find(effort => effort.toLowerCase() === command.value!.toLowerCase());
+      if (!selected) {
+        return { status: "error", message: `\`${command.value}\` is not one @${command.target} can start at. ` +
+          `It can start at ${efforts.map(option => `\`${option}\``).join(", ")}.` };
+      }
+      if (input.chooseOnWake) {
+        const chosen = await input.chooseOnWake("effort", selected);
+        if (chosen && "selected" in chosen) return { status: "switched", selected: chosen.selected, onWake: true };
+        if (!chosen) first = await input.dispatch(target.reportedModels, true);
+      }
     }
   }
   // An Instance with a Run and no connection is starting, being reborn or

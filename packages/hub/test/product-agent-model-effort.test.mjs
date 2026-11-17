@@ -373,10 +373,12 @@ test("a model written to a resting Instance is recorded for its wake, and a used
       return awaitStarting ? { status: "switched", selected: "claude-opus-5-5" } : { status: "no_instance" }; }),
   { status: "switched", selected: "claude-opus-5-5" });
   assert.deepEqual(waited, [false, true]);
-  // Its models are listed from what it last reported; an effort still waits for it to wake.
+  // Its models are listed from what it last reported, or its declared models when constrained.
   assert.deepEqual(await decideAsleep({ kind: "model" }, asleep({ usage: FABLE_USED_UP })),
     { status: "catalog", options: ["claude-opus-5-5", "claude-fable-5-2"], current: "claude-opus-5-5",
       usedUp: [{ option: "claude-fable-5-2", resetsAt: "2026-11-19T18:00:00.000Z" }] });
+  assert.deepEqual(await decideAsleep({ kind: "model" }, asleep({ declaredModels: ["claude-opus-5-5"] })),
+    { status: "catalog", options: ["claude-opus-5-5"], current: "claude-opus-5-5" });
   assert.match((await decideAsleep({ kind: "effort", value: "high" }, asleep())).message, /is asleep/u);
 });
 
@@ -388,6 +390,13 @@ test("an effort written to a resting Instance is recorded against the model it w
   const decideEffort = (value, target) => decideProductAgentSwitch({ command: { kind: "effort", target: "claude:3", value }, target,
     now: NOW, dispatch: async () => ({ status: "no_instance" }),
     chooseOnWake: async (kind, written) => { recorded.push([kind, written]); return { selected: written }; } });
+  // Bare /effort lists what the model it will start on offers, and missing catalogs fail explicitly.
+  assert.deepEqual(await decideEffort(undefined, asleep({ currentEffort: "low" })),
+    { status: "catalog", options: ["low", "high"], current: "low" });
+  assert.deepEqual(await decideEffort(undefined, asleep({ modelCatalog: [] })),
+    { status: "error", message: "@claude:3 has not reported which efforts it offers." });
+  assert.deepEqual(await decideEffort("high", asleep({ modelCatalog: [] })),
+    { status: "error", message: "@claude:3 has not reported which efforts it offers." });
   assert.deepEqual(await decideEffort("HIGH", asleep()), { status: "switched", selected: "high", onWake: true });
   // The model chosen for its wake decides which efforts there are.
   assert.deepEqual(await decideEffort("max", asleep({ wakeModel: "claude-fable-5-2" })), { status: "switched", selected: "max", onWake: true });

@@ -3,6 +3,7 @@ import { machineNetworkObservation } from "./machine-network.js";
 import { configurationFields } from "./configuration-fields.js";
 import { parseLaunchParameterEvidence, type LaunchParameterEvidence } from "./launch-parameter-evidence.js";
 import { canonicalRegistrationHarness } from "./agent-registration.js";
+import { cleanAgentModelCatalog } from "./agent-instance-catalogs.js";
 import { parseLlmQuotaAccount, quotaAccountBalance } from "./authority-runtime.js";
 import { hasControlCharacter, replaceControlCharacters } from "./field-validation.js";
 
@@ -34,6 +35,8 @@ export interface RoutingModelOption {
   model: string;
   description: string;
   efforts: Array<{ value: string; description: string }>;
+  /** Effort the runtime assumes when `efforts` lists none explicitly. */
+  defaultEffort?: string;
   /** Other names the runtime's catalog gives this model: its selectors (Claude's
    * `opus`) and display names. */
   names?: string[];
@@ -55,6 +58,31 @@ export function routingModelOptionNamed(option: RoutingModelOption, written: str
 }
 
 /**
+ * Effort levels available for `currentModel` in a normalized catalog, falling
+ * back to the runtime's default model (then first model) and `defaultEffort`.
+ * Shared by live `/effort` switches and resting-Instance wake choices.
+ */
+export function routingModelEffortOptions(
+  catalog: readonly RoutingModelOption[],
+  currentModel?: string,
+): string[] {
+  const current = currentModel?.trim();
+  const scoped = (current
+    ? catalog.find(option => option.model.toLowerCase() === current.toLowerCase()) ??
+      catalog.find(option => routingModelOptionNamed(option, current))
+    : undefined) ?? catalog.find(option => option.isDefault) ?? catalog[0];
+  const seen = new Set<string>();
+  for (const entry of scoped?.efforts ?? []) {
+    const value = entry.value.trim();
+    if (value) seen.add(value);
+  }
+  if (seen.size === 0 && scoped?.defaultEffort?.trim()) {
+    seen.add(scoped.defaultEffort.trim());
+  }
+  return [...seen];
+}
+
+/**
  * What a completion writes after `model:` for a catalog entry. A runtime's
  * model id can be an opaque selector that needs quoting (DeepSeek Harness
  * selects `["deepseek-official","deepseek-flash"]`); the entry's own catalog
@@ -69,39 +97,43 @@ export function routingModelWrittenName(option: RoutingModelOption, catalog: rea
   return own.find(name => !/\s/u.test(name)) ?? own[0] ?? option.model;
 }
 
+/**
+ * Derive visible routing and switch options from the shared Instance catalog
+ * cleaner (`cleanAgentModelCatalog`), preserving every reported model and alias
+ * within the presence payload's byte budget.
+ */
+export function routingModelOptions(value: unknown): RoutingModelOption[] {
+  const cleaned = cleanAgentModelCatalog(value) ?? [];
+  const plainText = (text: string | undefined) => (text && !hasControlCharacter(text) ? text : "");
+  const models: RoutingModelOption[] = [];
+  for (const entry of cleaned) {
+    if (entry.hidden === true) continue;
+    const names = [...new Set([entry.id, entry.displayName, ...entry.aliases ?? []]
+      .filter((name): name is string => Boolean(name && name !== entry.model)))];
+    const efforts: RoutingModelOption["efforts"] = [];
+    for (const effort of entry.supportedReasoningEfforts ?? []) {
+      if (!efforts.some(item => item.value === effort.reasoningEffort)) {
+        efforts.push({ value: effort.reasoningEffort, description: plainText(effort.description) });
+      }
+    }
+    models.push({
+      model: entry.model,
+      description: plainText(entry.description),
+      efforts,
+      ...(entry.defaultReasoningEffort ? { defaultEffort: entry.defaultReasoningEffort } : {}),
+      ...(names.length ? { names } : {}),
+      ...(entry.isDefault === true ? { isDefault: true as const } : {}),
+      ...(entry.quotaScopes?.length ? { quotaScopes: [...entry.quotaScopes] } : {}),
+    });
+  }
+  return models;
+}
+
 /** A received catalog is an observation, not permission or a fabricated default. */
 export function routingModelCatalogObservation(value: unknown, observedAt: unknown, now: number): RoutingObservation<RoutingModelOption[]> | undefined {
   const at = typeof observedAt === "string" ? Date.parse(observedAt) : NaN;
-  if (!Number.isFinite(at) || at > now || now - at >= 86_400_000 || !Array.isArray(value) || value.length > 100) return undefined;
-  const clean = (value: unknown, limit: number): string => typeof value === "string" && value.length <= limit && !hasControlCharacter(value) ? value.trim() : "";
-  const models: RoutingModelOption[] = [];
-  for (const raw of value) {
-    if (!raw || typeof raw !== "object" || raw.hidden === true) continue;
-    const model = clean(raw.model, 160);
-    if (!model) continue;
-    // A selector and the model it resolves to are one model: merge their names.
-    const aliases = Array.isArray(raw.aliases) ? raw.aliases.slice(0, 8).map((alias: unknown) => clean(alias, 160)) : [];
-    const names = [clean(raw.id, 160), clean(raw.displayName, 160), ...aliases].filter(name => name && name !== model);
-    const quotaScopes: string[] = Array.isArray(raw.quotaScopes)
-      ? raw.quotaScopes.slice(0, 8).map((scope: unknown) => clean(scope, 64)).filter(Boolean) : [];
-    const known = models.find(item => item.model === model);
-    if (known) {
-      const merged = [...new Set([...known.names ?? [], ...names])].slice(0, 8);
-      if (merged.length) known.names = merged;
-      if (raw.isDefault === true) known.isDefault = true;
-      const scopes = [...new Set([...known.quotaScopes ?? [], ...quotaScopes])].slice(0, 8);
-      if (scopes.length) known.quotaScopes = scopes;
-      continue;
-    }
-    const efforts: RoutingModelOption["efforts"] = [];
-    for (const effort of Array.isArray(raw.supportedReasoningEfforts) ? raw.supportedReasoningEfforts.slice(0, 16) : []) {
-      const value = clean(effort?.reasoningEffort, 80);
-      if (value && !efforts.some(item => item.value === value)) efforts.push({ value, description: clean(effort.description, 512) });
-    }
-    models.push({ model, description: clean(raw.description, 512), efforts,
-      ...(names.length ? { names: [...new Set(names)] } : {}), ...(raw.isDefault === true ? { isDefault: true as const } : {}),
-      ...(quotaScopes.length ? { quotaScopes: [...new Set(quotaScopes)] } : {}) });
-  }
+  if (!Number.isFinite(at) || at > now || now - at >= 86_400_000) return undefined;
+  const models = routingModelOptions(value);
   return models.length ? { value: models, observedAt: new Date(at).toISOString(),
     expiresAt: new Date(at + 86_400_000).toISOString(), source: "launch-authority" } : undefined;
 }

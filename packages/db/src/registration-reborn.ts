@@ -195,6 +195,10 @@ export interface SwitchTargetFacts {
   /** The Machine's name in its owner's words, as `machine:` selects it. */
   machineName?: string;
   currentModel?: string;
+  /** The effort currently on the Instance, or queued for its next wake. */
+  currentEffort?: string;
+  /** Declared models of the Instance's registration when not on runtime default. */
+  declaredModels?: string[];
   /** The runtime's catalog as the Instance row stores it, whatever its age. */
   reportedModels?: unknown[];
   /** That catalog while it is fresh enough to decide quota by. */
@@ -293,12 +297,13 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
   async switchTargetFacts(raw: { commandId: string; channelId: string; ordinal: number }): Promise<SwitchTargetFacts | undefined> {
     const commandId = text(raw.commandId), channelId = text(raw.channelId);
     const row = await this.database.transaction({ requestId: commandId, operation: "registration.switch.target",
-      placement: this.placement }, async tx => (await tx.query({ name: "registration_switch_target_v1", text: `SELECT
+      placement: this.placement }, async tx => (await tx.query({ name: "registration_switch_target_v2", text: `SELECT
           instance.instance_id,instance.rest_state,run.status AS run_status,run.metadata_json,
           binding.owner_user_id AS b_owner,binding.machine_id AS b_machine,binding.harness AS b_harness,
           instance.presentation_json->'models' AS catalog_models,
           instance.presentation_json->>'modelsObservedAt' AS catalog_observed_at,
-          instance.presentation_json->>'model' AS current_model
+          instance.presentation_json->>'model' AS current_model,
+          instance.presentation_json->>'effort' AS current_effort
         FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
         LEFT JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id
         WHERE instance.channel_id=$1 AND instance.channel_instance_id=$2`,
@@ -311,18 +316,21 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     // where else its harness runs. A name two owners both use selects neither.
     const registered = key ? await this.database.transaction({ requestId: commandId,
       operation: "registration.switch.machines", placement: this.placement }, tx => tx.query({
-      name: "registration_switch_machines_v1", text: `SELECT r.owner_user_id,r.machine_id,r.harness
+      name: "registration_switch_machines_v2", text: `SELECT r.owner_user_id,r.machine_id,r.harness,
+          CASE WHEN r.owner_user_id=$2 AND r.machine_id=$3 AND r.harness=$4 THEN r.configuration_json END AS own_configuration
         FROM data.space_agent_registrations r
         JOIN data.space_agent_registration_access a ON a.space_id=r.space_id AND a.owner_user_id=r.owner_user_id
           AND a.machine_id=r.machine_id AND a.harness=r.harness
         WHERE r.space_id=$1 AND a.grant_state='active' AND a.policy_state='enabled'
-        ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 501`, values: [this.placement.spaceId], maxRows: 501 })) : [];
+        ORDER BY r.owner_user_id,r.machine_id,r.harness LIMIT 501`,
+      values: [this.placement.spaceId, key.ownerUserId, key.machineId, key.harness], maxRows: 501 })) : [];
     const sameMachine = (item: QueryResultRow) => item.owner_user_id === key!.ownerUserId && item.machine_id === key!.machineId;
     const machines = [...new Map([...registered.map(item => ({ ownerUserId: String(item.owner_user_id), machineId: String(item.machine_id) })),
       ...key ? [key] : []].map(item => [`${item.ownerUserId}\n${item.machineId}`, item])).values()].slice(0, 100);
     const facts = key ? await this.directory.transaction({ requestId: commandId,
       operation: "registration.switch.quota", statement: "single_read" }, tx => tx.query({
-      name: "registration_switch_quota_v3", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
+      name: "registration_switch_quota_v4", text: `SELECT m.owner_user_id,m.machine_id,m.name,e.harness IS NOT NULL AS declared,
+          CASE WHEN m.owner_user_id=$4 AND m.machine_id=$5 THEN e.declaration_json END AS own_declaration,
           EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
             AND d.machine_id=m.machine_id AND d.status='online') AS online,
           EXISTS (SELECT 1 FROM data.machine_daemons d WHERE d.owner_user_id=m.owner_user_id
@@ -333,10 +341,20 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
           AND e.machine_id=m.machine_id AND e.harness=$3
         ${currentRegistrationQuotaJoin("q")}
         WHERE (m.owner_user_id,m.machine_id) IN (SELECT * FROM unnest($1::text[],$2::text[])) AND m.retired_at IS NULL`,
-      values: [machines.map(item => item.ownerUserId), machines.map(item => item.machineId), key.harness], maxRows: 100 })) : [];
+      values: [machines.map(item => item.ownerUserId), machines.map(item => item.machineId), key.harness, key.ownerUserId, key.machineId],
+      maxRows: 100 })) : [];
     const nameCount = new Map<string, number>();
     for (const item of facts) nameCount.set(String(item.name).toLowerCase(), (nameCount.get(String(item.name).toLowerCase()) ?? 0) + 1);
     const own = facts.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId);
+    const ownReg = registered.find(item => key && item.owner_user_id === key.ownerUserId && item.machine_id === key.machineId && item.harness === key.harness);
+    const declaredModels = (() => {
+      if (!ownReg?.own_configuration || !own?.own_declaration || metadata.useRuntimeDefaultModel === true) return [];
+      try {
+        const allowed = parseSpaceAgentConfiguration(ownReg.own_configuration).routing?.models ?? [];
+        const envModels = parseAgentRegistrationEnvironment(own.own_declaration).models;
+        return allowed.filter(model => envModels.includes(model));
+      } catch { return []; }
+    })();
     // A repository-backed Instance's work can continue on another Machine
     // (docs/same-machine-instance-handoff.md §2.2); a directory never leaves its own.
     const elsewhere = key && typeof metadata.remoteRepo === "string" && metadata.remoteRepo
@@ -356,10 +374,15 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     // Instance is on its way back, not gone.
     const state = runStatus === "starting" ? "starting" : runStatus === "running" || runStatus === "stopping" ? "running"
       : row.rest_state === "sleeping" || row.rest_state === "interrupted" ? "asleep" : "stopped";
+    const currentEffort = typeof metadata.wakeRuntimeEffort === "string" && metadata.wakeRuntimeEffort
+      ? metadata.wakeRuntimeEffort
+      : typeof row.current_effort === "string" && row.current_effort ? row.current_effort : undefined;
     return { instanceId: String(row.instance_id), state,
       ...(typeof metadata.agentName === "string" && metadata.agentName ? { agentName: metadata.agentName } : {}),
       ...(own?.name ? { machineName: String(own.name) } : {}), ...(key ? { harness: key.harness, registration: key } : {}),
       ...(typeof row.current_model === "string" && row.current_model ? { currentModel: row.current_model } : {}),
+      ...(currentEffort ? { currentEffort } : {}),
+      ...(declaredModels.length ? { declaredModels } : {}),
       ...(Array.isArray(row.catalog_models) && row.catalog_models.length ? { reportedModels: row.catalog_models } : {}),
       ...(modelCatalog ? { modelCatalog } : {}), ...(usage ? { usage } : {}),
       ...(elsewhere.length ? { elsewhere } : {}),

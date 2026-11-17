@@ -366,8 +366,7 @@ export class RelayRuntimeLive extends DurableObject<Env> {
           target,
           kind,
           ...(value ? { value } : {}),
-          ...(Array.isArray(payload?.reportedModels) && payload.reportedModels.length <= 100
-            ? { reportedModels: payload.reportedModels } : {}),
+          ...(Array.isArray(payload?.reportedModels) ? { reportedModels: payload.reportedModels } : {}),
           ...(payload?.awaitStarting === true ? { awaitStarting: true } : {}),
         }),
       }, { headers: { "cache-control": "no-store" } });

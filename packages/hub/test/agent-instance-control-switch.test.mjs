@@ -249,3 +249,28 @@ test("a cell that kept no catalog decides by the one the Instance row holds", as
   assert.deepEqual(switched, { status: "switched", selected: "fable" });
   assert.equal(socket.sent.some((frame) => frame.type === "agent_model_switch_requested"), true);
 });
+
+test("a catalog with more than 100 models and defaultReasoningEffort stays addressable", async () => {
+  const reportedModels = [
+    ...Array.from({ length: 100 }, (_, index) => ({ id: `model-${index}`, model: `model-${index}` })),
+    { id: "tail", model: "model-101", aliases: Array.from({ length: 10 }, (_, index) => `tail-${index + 1}`),
+      defaultReasoningEffort: "medium" },
+  ];
+  const { transport, socket } = liveTransport({
+    presentation: { model: "model-101" },
+    awaitControlResult: () => Promise.resolve({ value: "model-101" }),
+  });
+  const catalog = await transport.switchInstanceControl({
+    channelId: "channel-1", target: "claude:1", kind: "model", reportedModels,
+  });
+  assert.equal(catalog.status, "catalog");
+  assert.equal(catalog.options.length, 101);
+  assert.deepEqual(await transport.switchInstanceControl({
+    channelId: "channel-1", target: "claude:1", kind: "effort", reportedModels,
+  }), { status: "catalog", options: ["medium"] });
+  const switched = await transport.switchInstanceControl({
+    channelId: "channel-1", target: "claude:1", kind: "model", value: "tail-10", reportedModels,
+  });
+  assert.deepEqual(switched, { status: "switched", selected: "model-101" });
+  assert.equal(socket.sent.at(-1).model, "model-101");
+});

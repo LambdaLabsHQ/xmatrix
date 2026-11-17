@@ -283,3 +283,24 @@ test('a laptop is the only form factor a machine reports', () => {
   assert.deepEqual(machineResourceObservation({ observedAt, formFactor: 'laptop' }, now), { observedAt, formFactor: 'laptop' });
   assert.equal(machineResourceObservation({ observedAt, formFactor: 'desktop' }, now), undefined);
 });
+
+test('routing catalogs keep over 100 models, all aliases, and shared effort resolution', async () => {
+  const { cleanAgentModelCatalog } = await import('../dist/agent-instance-catalogs.js');
+  const { routingModelEffortOptions, routingModelOptionNamed } = await import('../dist/agent-routing.js');
+  const aliases = Array.from({ length: 10 }, (_, index) => `alias-${index + 1}`);
+  const many = [
+    { id: 'first', model: 'provider/first', defaultReasoningEffort: 'medium', aliases },
+    ...Array.from({ length: 100 }, (_, index) => ({
+      id: `m-${index + 2}`,
+      model: `provider/model-${index + 2}`,
+      ...(index === 99 ? { isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'high', description: 'Deep' }] } : {}),
+    })),
+  ];
+  const stored = cleanAgentModelCatalog(many);
+  assert.equal(stored.length, 101);
+  const observation = routingModelCatalogObservation(stored, new Date(now - 1000).toISOString(), now);
+  assert.equal(observation.value.length, 101);
+  assert.equal(routingModelOptionNamed(observation.value[0], 'alias-10'), true);
+  assert.deepEqual(routingModelEffortOptions(observation.value, 'alias-10'), ['medium']);
+  assert.deepEqual(routingModelEffortOptions(observation.value, 'unknown-model'), ['high']);
+});
