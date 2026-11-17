@@ -97,6 +97,8 @@ test("a default model the owner's grant does not list is added to it, by the own
     limits: { models: ["old"], workspaces: ["repo:owner/project"], capabilities: [] } } } };
   assert.equal(registrationModelGrantCommand(key, granted, "old"), undefined);
   assert.equal(registrationModelGrantCommand(key, granted, "  "), undefined, "clearing the model needs no grant");
+  assert.equal(registrationModelGrantCommand(key, { ...current, canManageOwnerGrant: true }, "new"), undefined,
+    "a registration that shows no grant leaves the model to the Hub");
   assert.deepEqual(registrationModelGrantCommand(key, granted, " new "), { key, action: "owner-grant", state: "active",
     expectedRevision: 5, limits: { models: ["old", "new"], workspaces: ["repo:owner/project"], capabilities: [] } });
   assert.throws(() => registrationModelGrantCommand(key, { ...granted, canManageOwnerGrant: false }, "new"),
