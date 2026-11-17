@@ -8762,12 +8762,21 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-problem-card.app-
 }
 
 /* An answer the reader writes on an ask (norn-request-card.tsx) is written
-   on the slip itself, not into a box (Daniel 2026-11-13: 这输入框太丑了, then
-   不要有边框): the questionnaire's own answer line, a pencil and the words,
-   with the composer's round Send at its end. With no box, the line has to say
-   by its ink that it waits to be written on (Daniel 2026-11-13: 根本看不出来需要你
-   写答案): until the reader writes, the pencil and the words inviting an
-   answer are in the card's brass, at the weight of the line saying who asks. */
+   on a strip of plain paper laid on the slip, not into a box (Daniel
+   2026-11-13: 这输入框太丑了, then 不要有边框): a pencil and the words, with the
+   composer's round Send at its end. The strip has no edge, but it is filled
+   with the paper's own colour so the field stands apart from the brass slip
+   around it (Daniel 2026-11-17: 这个输入框要有一个背景颜色区分). Until the reader
+   writes, the pencil and the words inviting an answer are in the card's brass,
+   at the weight of the line saying who asks (Daniel 2026-11-13: 根本看不出来需要你
+   写答案). */
+.xmatrix-app .app-ask-answer {
+  padding: 8px 8px 8px 12px;
+  border-radius: 10px;
+  background: var(--app-panel-paper, oklch(0.976 0.005 85));
+  cursor: text;
+}
+.xmatrix-app .app-ask-answer button { cursor: pointer; }
 .xmatrix-app .app-ask-answer textarea::placeholder {
   color: var(--app-ask-ink);
   font-weight: 700;
