@@ -46,9 +46,9 @@ mod platform {
 
     use tokio::process::Child;
     use windows_sys::Win32::Foundation::{
-        ERROR_ACCESS_DENIED, ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER, ERROR_NO_MORE_FILES,
-        FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree, WAIT_FAILED,
-        WAIT_OBJECT_0, WAIT_TIMEOUT,
+        ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_INVALID_HANDLE, ERROR_INVALID_PARAMETER,
+        ERROR_NO_MORE_FILES, FILETIME, GetLastError, HANDLE, INVALID_HANDLE_VALUE, LocalFree,
+        WAIT_FAILED, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
@@ -59,9 +59,10 @@ mod platform {
         TH32CS_SNAPPROCESS,
     };
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
-        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject,
+        AssignProcessToJobObject, CreateJobObjectW, IsProcessInJob,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JobObjectExtendedLimitInformation, OpenJobObjectW, SetInformationJobObject,
+        TerminateJobObject,
     };
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, GetProcessId, GetProcessTimes, IsProcessCritical, OpenProcess,
@@ -122,7 +123,14 @@ mod platform {
             if raw_job.is_null() {
                 return Err(io::Error::last_os_error());
             }
+            // A named create that finds the name taken opens that other Job
+            // instead; never join a Job this process did not create.
+            let already_exists =
+                name.is_some() && unsafe { GetLastError() } == ERROR_ALREADY_EXISTS;
             let job = unsafe { OwnedHandle::from_raw_handle(raw_job as RawHandle) };
+            if already_exists {
+                return Err(io::Error::from(io::ErrorKind::AlreadyExists));
+            }
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };
             info.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
             let configured = unsafe {
@@ -216,20 +224,60 @@ mod platform {
 
     pub fn configure_std_process_tree(_command: &mut std::process::Command) {}
 
-    pub fn bind_current_process_lifetime() -> io::Result<()> {
-        let job_name = format!("Local\\xmatrix-run-{}", uuid::Uuid::new_v4().simple());
-        let mut wide = std::ffi::OsStr::new(&job_name)
-            .encode_wide()
-            .collect::<Vec<_>>();
+    fn wide_name(name: &str) -> Vec<u16> {
+        let mut wide = std::ffi::OsStr::new(name).encode_wide().collect::<Vec<_>>();
         wide.push(0);
-        let guard =
-            ProcessTreeGuard::bind_handle_named(unsafe { GetCurrentProcess() }, Some(&wide))?;
+        wide
+    }
+
+    pub fn bind_current_process_lifetime() -> io::Result<()> {
+        // The Job is named after this wrapper's pid so a command started
+        // anywhere inside it can prove that membership from the pid alone
+        // (see `current_process_in_run_job`). The name is taken only if free.
+        let mut job_name = super::run_job_name(std::process::id());
+        let guard = match ProcessTreeGuard::bind_handle_named(
+            unsafe { GetCurrentProcess() },
+            Some(&wide_name(&job_name)),
+        ) {
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => {
+                job_name = format!("Local\\xmatrix-run-{}", uuid::Uuid::new_v4().simple());
+                ProcessTreeGuard::bind_handle_named(
+                    unsafe { GetCurrentProcess() },
+                    Some(&wide_name(&job_name)),
+                )?
+            }
+            other => other?,
+        };
         unsafe { std::env::set_var("XMATRIX_RUN_JOB_NAME", &job_name) };
         // The wrapper itself is a member of this kill-on-close job. Keep the
         // handle open until process teardown; the OS then closes it atomically
         // even for forced termination and kills every inherited descendant.
         std::mem::forget(guard);
         Ok(())
+    }
+
+    /// Whether this process belongs to the kill-on-close Job of the Agent
+    /// wrapper `wrapper_pid`. Job membership is inherited by every descendant,
+    /// cannot be left, and survives both a stripped environment and an
+    /// intermediate process exiting, so it identifies an Agent's commands
+    /// where the parent-pid chain no longer can.
+    pub fn current_process_in_run_job(wrapper_pid: u32) -> bool {
+        let name = wide_name(&super::run_job_name(wrapper_pid));
+        const JOB_OBJECT_QUERY: u32 = 0x0004;
+        let raw_job = unsafe { OpenJobObjectW(JOB_OBJECT_QUERY, 0, name.as_ptr()) };
+        if raw_job.is_null() {
+            return false;
+        }
+        let job = unsafe { OwnedHandle::from_raw_handle(raw_job as RawHandle) };
+        let mut member = 0;
+        let queried = unsafe {
+            IsProcessInJob(
+                GetCurrentProcess(),
+                job.as_raw_handle() as HANDLE,
+                &mut member,
+            )
+        };
+        queried != 0 && member != 0
     }
 
     fn process_handle(pid: u32, access: u32) -> io::Result<OwnedHandle> {
@@ -789,6 +837,10 @@ mod platform {
         Ok(())
     }
 
+    pub fn current_process_in_run_job(_wrapper_pid: u32) -> bool {
+        false
+    }
+
     pub fn process_alive(pid: u32) -> bool {
         let result = unsafe { libc::kill(pid as libc::pid_t, 0) };
         result == 0 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
@@ -985,6 +1037,10 @@ mod platform {
         Ok(())
     }
 
+    pub fn current_process_in_run_job(_wrapper_pid: u32) -> bool {
+        false
+    }
+
     pub fn process_alive(_pid: u32) -> bool {
         false
     }
@@ -1001,10 +1057,16 @@ mod platform {
     }
 }
 
+/// The name of the kill-on-close Job an Agent wrapper with this pid binds
+/// itself to on Windows.
+pub fn run_job_name(wrapper_pid: u32) -> String {
+    format!("Local\\xmatrix-run-pid-{wrapper_pid}")
+}
+
 pub use platform::{
     ProcessTreeGuard, bind_current_process_lifetime, configure_std_process_tree,
-    configure_tokio_process_tree, process_alive, terminate_process_tree,
-    termination_target_is_gone,
+    configure_tokio_process_tree, current_process_in_run_job, process_alive,
+    terminate_process_tree, termination_target_is_gone,
 };
 #[cfg(windows)]
 pub use platform::{process_file_times, terminate_single_process};
@@ -1208,8 +1270,8 @@ mod tests {
         read_descendant_pid, reap_descendant, temp_pid_file,
     };
     use super::{
-        bind_current_process_lifetime, guard_std_child, process_alive, terminate_process_tree,
-        track_detached_std_child,
+        bind_current_process_lifetime, current_process_in_run_job, guard_std_child, process_alive,
+        terminate_process_tree, track_detached_std_child,
     };
 
     fn spawn_parent_with_descendant(pid_file: &Path) -> Child {
@@ -1225,6 +1287,16 @@ mod tests {
         configure_fixture_command(&mut command, pid_file);
         super::configure_std_process_tree(&mut command);
         command.spawn().expect("spawn process-tree test parent")
+    }
+
+    #[test]
+    fn a_bound_wrapper_proves_membership_of_its_own_run_job_by_pid() {
+        // Parallel tests bind this same process more than once; whichever call
+        // took the pid name, this process is in that Job.
+        bind_current_process_lifetime().expect("bind wrapper lifetime job");
+        assert!(current_process_in_run_job(std::process::id()));
+        // No Job is named after a pid that never bound one.
+        assert!(!current_process_in_run_job(u32::MAX - 7));
     }
 
     #[test]

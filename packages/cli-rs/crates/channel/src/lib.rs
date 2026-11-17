@@ -1264,7 +1264,19 @@ struct DaemonRunStatusForSendGuard {
 }
 
 fn process_descends_from_persisted_daemon_agent_run() -> bool {
-    persisted_daemon_agent_run_ancestor_pid().is_some()
+    if persisted_daemon_agent_run_ancestor_pid().is_some() {
+        return true;
+    }
+    // Several matching Jobs name no single Run to act for, but still prove
+    // this is an Agent's command: fail closed on the Owner session.
+    #[cfg(windows)]
+    {
+        persisted_daemon_agent_run_pids()
+            .into_iter()
+            .any(xmatrix_process_tree::current_process_in_run_job)
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 /// Returns the exact daemon-managed Agent wrapper PID in the current process
@@ -1277,13 +1289,36 @@ pub fn persisted_daemon_agent_run_ancestor_pid() -> Option<u32> {
     }
     #[cfg(windows)]
     {
-        let parents = process_parent_ids()?;
-        tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
-            parents.get(&pid).copied()
-        })
+        // The parent chain breaks when a process between the wrapper and this
+        // command exits first (launcher shims, restarted provider shells), and
+        // a provider may also strip `XMATRIX_*`. Membership in the wrapper's
+        // kill-on-close Job survives both, so it decides when the chain
+        // cannot; otherwise such a command fell back to the Owner's session
+        // and posted as the human (#1749).
+        process_parent_ids()
+            .and_then(|parents| {
+                tracked_ancestor_pid(std::process::id(), &tracked_pids, |pid| {
+                    parents.get(&pid).copied()
+                })
+            })
+            .or_else(|| {
+                run_job_owner_pid(
+                    &tracked_pids,
+                    xmatrix_process_tree::current_process_in_run_job,
+                )
+            })
     }
     #[cfg(not(windows))]
     tracked_ancestor_pid(std::process::id(), &tracked_pids, parent_process_id)
+}
+
+/// The tracked Agent wrapper whose Job this process belongs to. Exactly one
+/// match is required: anything else is not evidence of one Run.
+#[cfg(any(windows, test))]
+fn run_job_owner_pid(tracked_pids: &HashSet<u32>, in_job_of: impl Fn(u32) -> bool) -> Option<u32> {
+    let mut owners = tracked_pids.iter().copied().filter(|pid| in_job_of(*pid));
+    let owner = owners.next()?;
+    owners.next().is_none().then_some(owner)
 }
 
 fn persisted_daemon_agent_run_pids() -> HashSet<u32> {
@@ -3146,7 +3181,7 @@ mod tests {
         build_send_message_body, channel_create_body, channel_entity_token, cmd_channel_create,
         command_refusal_message, decode_send_newline_escapes, format_history_message_at,
         is_agent_execution_context, is_intake, missing_body_message,
-        process_descends_from_tracked_pid, resolve_channel_selector,
+        process_descends_from_tracked_pid, resolve_channel_selector, run_job_owner_pid,
         should_refuse_user_attributed_send_without_agent_identity, tracked_ancestor_pid,
     };
     use std::collections::{HashMap, HashSet};
@@ -3513,6 +3548,17 @@ mod tests {
             tracked_ancestor_pid(500, &tracked_pids, |pid| parents.get(&pid).copied()),
             Some(100),
         );
+    }
+
+    #[test]
+    fn a_run_job_names_its_wrapper_only_when_exactly_one_tracked_job_holds_this_process() {
+        let tracked_pids = HashSet::from([100, 200, 300]);
+        assert_eq!(
+            run_job_owner_pid(&tracked_pids, |pid| pid == 200),
+            Some(200)
+        );
+        assert_eq!(run_job_owner_pid(&tracked_pids, |_| false), None);
+        assert_eq!(run_job_owner_pid(&tracked_pids, |pid| pid != 300), None);
     }
 
     #[test]

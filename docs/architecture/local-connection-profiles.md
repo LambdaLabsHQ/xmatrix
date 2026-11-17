@@ -140,6 +140,14 @@ execution lineage markers so the CLI can distinguish an Agent from an approved
 host-command descendant. Marker contents, ticket contents/directories, and all
 writes remain denied. Human credentials and the profile registry stay unreadable.
 
+A CLI command decides whether it runs for an Agent from its environment markers,
+then from the parent-process chain to a tracked daemon Run wrapper. On Windows it
+also checks membership of that wrapper's kill-on-close Job, named
+`Local\xmatrix-run-pid-<wrapper pid>` (a random name is used if that one is
+taken). Job membership is inherited, cannot be left, and survives a stripped
+environment and an exited intermediate process, so a provider shell that lost
+both still refuses the Owner's saved session instead of posting as the human.
+
 Run registry rows, recovery sidecars, request records/grants, broker state, and
 effect identities carry the immutable profile ID. ID-less historical records
 are accepted only for the legacy root. Rehydration rejects profile, Hub,

@@ -18,6 +18,7 @@ xmatrix-cli-core = { path = "../core" }
 xmatrix-cli-workspace = { path = "../workspace" }
 
 [target.'cfg(windows)'.dependencies]
+xmatrix-process-tree = { path = "../process-tree" }
 windows-sys = { workspace = true, features = [
   "Win32_Foundation",
   "Win32_System_Diagnostics_ToolHelp",
