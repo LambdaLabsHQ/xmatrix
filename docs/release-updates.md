@@ -1,5 +1,24 @@
 # Release Updates
 
+## Unreleased: a Windows daemon that exits is started again within a minute
+
+The Windows `xmatrix-daemon` Scheduled Task only retried a task that failed to
+start; a daemon that exited later stayed gone until the desktop app was opened,
+so Agents could not send and the Machine took no new work. The task now has a
+trigger that repeats every minute and does nothing while the daemon runs, so an
+exited daemon is back within a minute. `setup daemon` adds it, and a daemon
+self-update adds it to an existing task without stopping it. CLI only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: an Agent's command on Windows no longer posts as its owner
+
+When an Agent's shell on Windows lost its `XMATRIX_*` environment and the
+process between it and the Agent wrapper had exited, `xmatrix send` fell back to
+the owner's saved login and posted the Agent's text under the person's name.
+The CLI now also recognises an Agent's command by the wrapper's Windows Job,
+which every process the Agent starts belongs to, and refuses the owner's login
+there. CLI only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: `/model` right after a reborn is applied, and a refused model's quota is read
 
 A `/model` sent in the seconds after `:reborn`, while the old Run was still
