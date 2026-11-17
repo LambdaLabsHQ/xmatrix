@@ -926,3 +926,10 @@ test("an unbound live session never invents a card without registration", t => {
 function codexMember(instances) {
   return { kind: "agent", label: "Codex", registration: { ownerUserId: "owner-1", machineId: "machine-1", harness: "codex" }, instances };
 }
+
+test("a harness's own error message names no model the Instance runs", () => {
+  const running = mergeAgentInstancePresentation(undefined, { type: "presence_update", model: "claude-opus-5-5" });
+  // Claude Code writes a used-up limit as a message of the model `<synthetic>`.
+  assert.equal(mergeAgentInstancePresentation(running, { type: "presence_update", model: "<synthetic>" }).model, "claude-opus-5-5");
+  assert.equal(mergeAgentInstancePresentation(running, { type: "presence_update", model: "claude-sonnet-5-5" }).model, "claude-sonnet-5-5");
+});

@@ -473,6 +473,17 @@ sleep 30
             .unwrap()
             .ends_with("You have hit your weekly limit · resets Oct 4, 11pm (UTC)")
     );
+    // The message Claude Code wrote for the failure names no model that ran:
+    // nothing the session reports says it now runs `<synthetic>`.
+    assert!(
+        !fixture
+            .frames
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|frame| frame.to_string().contains("<synthetic>")),
+        "the synthetic model must not be reported"
+    );
     assert!(uuid::Uuid::parse_str(frame["requestId"].as_str().unwrap()).is_ok());
     fixture.finish().await;
 }

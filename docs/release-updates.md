@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: a failed Claude turn no longer shows the Agent on the model `<synthetic>`
+
+When a Claude turn fails on a used-up limit or an API error, Claude Code
+writes the error as an assistant message whose model is `<synthetic>`. That
+name replaced the Agent's model on its card, in message headers and in
+`/model` ("current: <synthetic>") until its next real reply. The runtime no
+longer takes it for a model, and the Hub ignores it from a runtime that still
+reports it. Hub and CLI. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: a refused `/model` writes its reset to the nearest minute
 
 A provider can state a reset a fraction of a second early (17:59:59.747 for
