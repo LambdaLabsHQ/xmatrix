@@ -16,13 +16,14 @@ struct UnixHandoffFixture {
 }
 
 fn spawn_sleep_process() -> std::process::Child {
-    std::process::Command::new("sleep")
+    let mut command = std::process::Command::new("sleep");
+    command
         .arg("120")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .unwrap()
+        .stderr(Stdio::null());
+    detach_daemon_child_process(&mut command);
+    command.spawn().unwrap()
 }
 
 fn status_marker(pid: u32, phase: &str, ready: Option<u64>) -> DaemonRunStatusMarker {
@@ -260,7 +261,7 @@ async fn unix_handoff_daemon_restart_recovers_and_restores_original() {
         let persisted = persisted_daemon_run_from_child(&fixture.registry.lock().await[TEST_RUN_ID]);
         fixture.kill_candidate_and_mark_failed();
 
-        let restored = daemon_run_child_from_persisted(persisted, None, None);
+        let restored = daemon_run_child_from_persisted(persisted.clone(), None, None);
         assert_eq!(restored.pid, old_pid);
         assert!(restored.handoff.is_none());
         assert_eq!(
@@ -269,6 +270,109 @@ async fn unix_handoff_daemon_restart_recovers_and_restores_original() {
                 .pid,
             old_pid
         );
+
+        let mut recycled = persisted;
+        recycled.handoff.as_mut().unwrap().previous_start_time = Some(1);
+        assert!(!daemon_run_sidecar_is_recoverable(&recycled));
+        let rejected = daemon_run_child_from_persisted(recycled, None, None);
+        assert_ne!(rejected.pid, old_pid);
     })
     .await;
+}
+
+#[tokio::test]
+async fn unix_handoff_unreaped_zombie_candidate_triggers_rollback() {
+    run_with_candidate_handoff(|mut fixture| async move {
+        let old_pid = fixture.old_pid;
+        let _ = fixture.candidate.as_mut().unwrap().kill();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        assert!(
+            collect_finished_daemon_children(&fixture.registry)
+                .await
+                .is_empty()
+        );
+        fixture.assert_restored_original().await;
+        assert_eq!(
+            fixture.registry.lock().await[TEST_RUN_ID].pid,
+            old_pid
+        );
+    })
+    .await;
+}
+
+#[tokio::test]
+async fn unix_handoff_commit_leaves_session_isolated_replacement_alive() {
+    let fixture = UnixHandoffFixture::new();
+    let mut tree_cleanup = Vec::new();
+    // Simulate update-self inside the old session leader spawning a replacement
+    // via detach_daemon_child_process (setsid). Without setsid, the replacement
+    // stays in old's session and terminate_process_tree(old_pid) kills it too.
+    let mut old_shell = std::process::Command::new("sh");
+    old_shell
+        .arg("-c")
+        .arg("sleep 120")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    detach_daemon_child_process(&mut old_shell);
+    let old_proc = old_shell.spawn().unwrap();
+    let old_pid = old_proc.id();
+    tree_cleanup.push(process_tree::track_detached_std_child(&old_proc));
+
+    let mut candidate_cmd = std::process::Command::new("sleep");
+    candidate_cmd
+        .arg("120")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    detach_daemon_child_process(&mut candidate_cmd);
+    let mut candidate_proc = candidate_cmd.spawn().unwrap();
+    let candidate_pid = candidate_proc.id();
+    tree_cleanup.push(process_tree::track_detached_std_child(&candidate_proc));
+
+    config::scope_profile_context(fixture.profile.clone(), async {
+        let status_path = fixture.root.join("session-isolation.status.json");
+        let mut managed = daemon_run_child_from_persisted(
+            PersistedDaemonRun {
+                pid: old_pid,
+                run_id: Some("run:session-isolation".into()),
+                execution_key: Some("exec:session-isolation".into()),
+                status_file_path: Some(status_path.clone()),
+                ..crate::tests::test_empty_persisted_daemon_run()
+            },
+            None,
+            None,
+        );
+        managed.process_tree = Some(process_tree::track_detached_std_child(&old_proc));
+        managed.child = Some(old_proc);
+        let registry: DaemonRunRegistry = Arc::new(AsyncMutex::new(HashMap::from([(
+            "run:session-isolation".into(),
+            managed,
+        )])));
+        {
+            let mut guard = registry.lock().await;
+            rebind_managed_daemon_run_pid(
+                &mut guard,
+                "run:session-isolation",
+                "exec:session-isolation",
+                candidate_pid,
+            )
+            .unwrap();
+        }
+        persist_daemon_run_status_marker_unlocked(
+            &status_path,
+            &status_marker(candidate_pid, "runtime_ready", Some(unix_millis_now() + 1)),
+        );
+        assert!(collect_finished_daemon_children(&registry).await.is_empty());
+        assert!(candidate_proc.try_wait().unwrap().is_none());
+        assert!(crate::process_tree::process_alive(candidate_pid));
+    })
+    .await;
+
+    let _ = candidate_proc.kill();
+    let _ = candidate_proc.wait();
+    for mut tree in tree_cleanup {
+        let _ = tree.terminate();
+    }
 }

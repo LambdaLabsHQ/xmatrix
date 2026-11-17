@@ -305,6 +305,8 @@ fn rebind_managed_daemon_run_pid(
             previous_tree: managed.process_tree.take(),
             previous_status,
             started_millis: unix_millis_now(),
+            previous_start_time: unix_process_start_time(old_pid),
+            candidate_start_time: unix_process_start_time(new_pid),
         });
         managed.pid = new_pid;
         Ok((key.clone(), old_pid, None))
@@ -383,6 +385,48 @@ async fn rebind_daemon_run_pid(
     .to_string())
 }
 
+#[cfg(not(windows))]
+fn unix_process_info(pid: u32) -> Option<(u64, bool)> {
+    sysinfo::set_open_files_limit(0);
+    let mut system = sysinfo::System::new();
+    let target = sysinfo::Pid::from_u32(pid);
+    system.refresh_processes_specifics(
+        sysinfo::ProcessesToUpdate::Some(&[target]),
+        true,
+        sysinfo::ProcessRefreshKind::nothing(),
+    );
+    system.process(target).map(|process| {
+        let live = !matches!(
+            process.status(),
+            sysinfo::ProcessStatus::Zombie | sysinfo::ProcessStatus::Dead
+        );
+        (process.start_time(), live)
+    })
+}
+
+#[cfg(not(windows))]
+fn unix_process_start_time(pid: u32) -> Option<u64> {
+    unix_process_info(pid).map(|(start_time, _)| start_time)
+}
+
+#[cfg(not(windows))]
+fn unix_process_matches_identity(
+    pid: u32,
+    expected_start_time: Option<u64>,
+    alive_at_millis: u64,
+) -> bool {
+    const PROCESS_START_SLACK_MILLIS: u64 = 2_000;
+    unix_process_info(pid).is_some_and(|(start_time, live)| {
+        live && match expected_start_time {
+            Some(expected) => start_time == expected,
+            None => {
+                start_time.saturating_mul(1_000)
+                    <= alive_at_millis.saturating_add(PROCESS_START_SLACK_MILLIS)
+            }
+        }
+    })
+}
+
 /// Owned by the exact Run row, so exit monitoring, stop and rollback share
 /// one transaction. Both process trees stay owned until readiness is proven.
 #[cfg(not(windows))]
@@ -392,6 +436,8 @@ struct UnixRunHandoff {
     previous_tree: Option<process_tree::ProcessTreeGuard>,
     previous_status: Option<DaemonRunStatusMarker>,
     started_millis: u64,
+    previous_start_time: Option<u64>,
+    candidate_start_time: Option<u64>,
 }
 
 #[cfg(not(windows))]
@@ -399,6 +445,10 @@ struct UnixRunHandoff {
 #[serde(rename_all = "camelCase")]
 struct PersistedUnixRunHandoff {
     previous_pid: u32,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    previous_start_time: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    candidate_start_time: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     previous_status: Option<Value>,
     started_millis: u64,
@@ -415,6 +465,11 @@ impl UnixRunHandoff {
             }
         }
         crate::process_tree::process_alive(self.previous_pid)
+            && unix_process_matches_identity(
+                self.previous_pid,
+                self.previous_start_time,
+                self.started_millis,
+            )
     }
 
     fn stop_previous(&mut self) -> error::Result<()> {
@@ -429,6 +484,8 @@ impl UnixRunHandoff {
     fn persisted(&self) -> PersistedUnixRunHandoff {
         PersistedUnixRunHandoff {
             previous_pid: self.previous_pid,
+            previous_start_time: self.previous_start_time,
+            candidate_start_time: self.candidate_start_time,
             previous_status: self.previous_status.as_ref().map(|status| {
                 serde_json::to_value(status).expect("Run status contains JSON-serializable fields")
             }),
@@ -445,9 +502,14 @@ fn recover_unix_run_handoff(managed: &mut DaemonRunChild, receipt: PersistedUnix
         .filter(|status| status.pid == receipt.previous_pid);
     if receipt.previous_pid == managed.pid
         || !crate::process_tree::process_alive(receipt.previous_pid)
+        || !unix_process_matches_identity(
+            receipt.previous_pid,
+            receipt.previous_start_time,
+            receipt.started_millis,
+        )
     {
-        // Never resurrect a dead predecessor. If the original has already
-        // retired, the candidate is the only Run wrapper.
+        // Never resurrect a dead predecessor or act on a reused pid. If the
+        // original has already retired, the candidate is the only Run wrapper.
         return;
     }
     managed.handoff = Some(UnixRunHandoff {
@@ -456,6 +518,8 @@ fn recover_unix_run_handoff(managed: &mut DaemonRunChild, receipt: PersistedUnix
         previous_tree: None,
         previous_status,
         started_millis: receipt.started_millis,
+        previous_start_time: receipt.previous_start_time,
+        candidate_start_time: receipt.candidate_start_time,
     });
     if let Err(error) = rollback_unix_run_handoff(managed) {
         append_daemon_registry_audit(&format!(
@@ -495,8 +559,23 @@ fn finish_handoff_rollback(
     Ok(())
 }
 
-fn handoff_candidate_is_ready(managed: &DaemonRunChild, started_millis: u64) -> bool {
-    crate::process_tree::process_alive(managed.pid)
+fn handoff_candidate_alive(managed: &mut DaemonRunChild) -> bool {
+    if let Some(child) = managed.child.as_mut() {
+        return child.try_wait().ok().flatten().is_none();
+    }
+    #[cfg(windows)]
+    {
+        crate::process_tree::process_alive(managed.pid)
+    }
+    #[cfg(not(windows))]
+    {
+        crate::process_tree::process_alive(managed.pid)
+            && unix_process_info(managed.pid).is_some_and(|(_, live)| live)
+    }
+}
+
+fn handoff_candidate_is_ready(managed: &mut DaemonRunChild, started_millis: u64) -> bool {
+    handoff_candidate_alive(managed)
         && read_daemon_run_status_marker(managed.status_file_path.as_deref()).is_some_and(
             |marker| {
                 replacement_wrapper_is_ready(
@@ -526,7 +605,7 @@ fn reconcile_run_handoff(managed: &mut DaemonRunChild) -> error::Result<()> {
         let mut handoff = managed.handoff.take().expect("handoff is still owned");
         handoff.stop_previous()?;
         finish_handoff_commit(managed, handoff.previous_child.take());
-    } else if !crate::process_tree::process_alive(managed.pid)
+    } else if !handoff_candidate_alive(managed)
         || unix_millis_now().saturating_sub(started_millis) >= UPDATE_SELF_READY_TIMEOUT_SECS * 1000
     {
         #[cfg(windows)]
@@ -543,8 +622,15 @@ fn rollback_unix_run_handoff(managed: &mut DaemonRunChild) -> error::Result<()> 
         return Ok(());
     };
     if crate::process_tree::process_alive(managed.pid) {
-        terminate_daemon_pid(managed.pid)
-            .inspect_err(|error| eprintln!("handoff candidate cleanup failed: {error}"))?;
+        let same_candidate = match handoff.candidate_start_time {
+            Some(expected) => unix_process_start_time(managed.pid) == Some(expected),
+            None => read_daemon_run_status_marker(managed.status_file_path.as_deref())
+                .is_some_and(|marker| marker.pid == managed.pid),
+        };
+        if same_candidate {
+            terminate_daemon_pid(managed.pid)
+                .inspect_err(|error| eprintln!("handoff candidate cleanup failed: {error}"))?;
+        }
     }
     if !handoff.previous_is_alive() {
         managed.handoff = None;
