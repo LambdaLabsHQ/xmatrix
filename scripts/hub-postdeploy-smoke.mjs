@@ -3,7 +3,7 @@
 import process from "node:process";
 import fs from "node:fs";
 
-import { argumentValue } from "./cli-arguments.mjs";
+import { argumentValue, argumentValues } from "./cli-arguments.mjs";
 import { runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel } from "./release-version-order.mjs";
 
@@ -243,14 +243,6 @@ export function parseSmokeHeaders(values) {
     headers[name] = value;
   }
   return headers;
-}
-
-function argumentValues(argv, flag) {
-  const values = [];
-  for (let index = 0; index < argv.length - 1; index += 1) {
-    if (argv[index] === flag) values.push(argv[index + 1]);
-  }
-  return values;
 }
 
 async function main(argv = process.argv.slice(2)) {
