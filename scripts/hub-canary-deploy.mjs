@@ -112,6 +112,7 @@ export async function deployWithCanary({
   assertHoldMs(holdMs);
 
   const defineArgs = defines.flatMap((define) => ["--define", define]);
+  const workerArgs = ["--config", config, "--name", workerName];
   const uploadArgs = [
     "versions", "upload", "--config", config, "--tag", tag,
     "--secrets-file", secretsFile, "--outdir", outdir, ...defineArgs,
@@ -121,7 +122,7 @@ export async function deployWithCanary({
     "--tag", tag, "--outdir", outdir, ...defineArgs,
   ];
 
-  const status = await run(["deployments", "status", "--name", workerName, "--json"]).catch((error) => {
+  const status = await run(["deployments", "status", ...workerArgs, "--json"]).catch((error) => {
     // A Worker that has never been deployed has no rollback base yet.
     if (/no deployments|not found/iu.test(`${error?.stderr ?? ""}\n${error?.message ?? ""}`)) return null;
     throw error;
@@ -132,7 +133,7 @@ export async function deployWithCanary({
   try {
     await runWithRetry(run, uploadArgs, uploadAttempts, sleep);
     for (let attempt = 1; attempt <= 3 && versionId === undefined; attempt += 1) {
-      const versions = JSON.parse((await run(["versions", "list", "--name", workerName, "--json"])).stdout);
+      const versions = JSON.parse((await run(["versions", "list", ...workerArgs, "--json"])).stdout);
       versionId = versionIdForTag(versions, tag) ?? undefined;
       if (versionId === undefined && attempt < 3) await sleep(2_000);
     }
@@ -147,7 +148,7 @@ export async function deployWithCanary({
 
   if (!previousVersionId) {
     await runWithRetry(run, [
-      "versions", "deploy", "--name", workerName,
+      "versions", "deploy", ...workerArgs,
       ...trafficArguments(versionId, null, canaryPercent),
       "--yes", "--message", `release ${tag}`,
     ], deployAttempts, sleep);
@@ -159,7 +160,7 @@ export async function deployWithCanary({
     let rolledBack = false;
     try {
       await run([
-        "versions", "deploy", "--name", workerName,
+        "versions", "deploy", ...workerArgs,
         "--version-id", previousVersionId, "--percentage", "100",
         "--yes", "--message", `automatic rollback from ${tag}`,
       ]);
@@ -173,7 +174,7 @@ export async function deployWithCanary({
 
   try {
     await runWithRetry(run, [
-      "versions", "deploy", "--name", workerName,
+      "versions", "deploy", ...workerArgs,
       ...trafficArguments(versionId, previousVersionId, canaryPercent),
       "--yes", "--message", `canary ${tag} at ${canaryPercent}%`,
     ], deployAttempts, sleep);
@@ -191,7 +192,7 @@ export async function deployWithCanary({
 
   try {
     await runWithRetry(run, [
-      "versions", "deploy", "--name", workerName,
+      "versions", "deploy", ...workerArgs,
       "--version-id", versionId, "--percentage", "100",
       "--yes", "--message", `release ${tag}`,
     ], deployAttempts, sleep);
