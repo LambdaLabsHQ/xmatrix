@@ -1,4 +1,5 @@
 import type { AgentInstanceCommand, AgentModelInfo } from "./authority-foundation.js";
+import { hasControlCharacter } from "./field-validation.js";
 import { plainRecord } from "./plain-record.js";
 
 // The runtime writer and durable Instance reader use the same catalogs.
@@ -10,66 +11,73 @@ export function cleanAgentCapabilities(value: unknown): string[] | undefined {
   return Array.isArray(value) ? cleanAgentPresentationTextList(value, 128) ?? [] : undefined;
 }
 
+function cleanCatalogIdentifier(value: unknown, maxLength: number): string | undefined {
+  const clean = cleanAgentPresentationText(value, maxLength);
+  return clean && !hasControlCharacter(clean) ? clean : undefined;
+}
+
 export function cleanAgentModelCatalog(value: unknown): AgentModelInfo[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const seen = new Map<string, AgentModelInfo>();
   const models: AgentModelInfo[] = [];
   for (const candidate of value) {
     if (!record(candidate)) continue;
-    const id = cleanAgentPresentationText(candidate.id, 128);
-    const model = cleanAgentPresentationText(candidate.model, 128) || id;
+    const rawId = cleanCatalogIdentifier(candidate.id, 160);
+    const model = cleanCatalogIdentifier(candidate.model, 160) || rawId;
+    const id = rawId || model;
     if (!id || !model) continue;
+    const displayName = cleanCatalogIdentifier(candidate.displayName, 160);
+    const rawAliases = (Array.isArray(candidate.aliases) ? candidate.aliases : [])
+      .map(alias => cleanCatalogIdentifier(alias, 160))
+      .filter((alias): alias is string => Boolean(alias));
     // One entry per model; another selector for it is kept as that entry's alias.
-    const names = [id, cleanAgentPresentationText(candidate.displayName, 128), ...cleanAgentPresentationTextList(candidate.aliases, 128) ?? []]
+    const names = [id, displayName, ...rawAliases]
       .filter((name): name is string => Boolean(name));
     const known = seen.get(model.toLowerCase());
     if (known) {
       const aliases = [...new Set([...known.aliases ?? [], ...names])]
         .filter(name => name !== known.id && name !== known.model && name !== known.displayName);
       if (aliases.length) known.aliases = aliases;
+      if (candidate.isDefault === true) known.isDefault = true;
       continue;
     }
     const efforts = Array.isArray(candidate.supportedReasoningEfforts)
       ? candidate.supportedReasoningEfforts.flatMap((effort) => {
           if (!record(effort)) return [];
-          const reasoningEffort = cleanAgentPresentationText(effort.reasoningEffort, 64);
+          const reasoningEffort = cleanCatalogIdentifier(effort.reasoningEffort, 80);
+          const description = cleanAgentPresentationText(effort.description, 512);
           return reasoningEffort
             ? [{
                 reasoningEffort,
-                ...(cleanAgentPresentationText(effort.description, 256)
-                  ? { description: cleanAgentPresentationText(effort.description, 256) }
-                  : {}),
+                ...(description ? { description } : {}),
               }]
             : [];
         })
       : undefined;
-    const aliases = cleanAgentPresentationTextList(candidate.aliases, 128);
+    const aliases = rawAliases.length ? [...new Set(rawAliases)] : undefined;
+    const quotaScopes = (Array.isArray(candidate.quotaScopes) ? candidate.quotaScopes : [])
+      .map(scope => cleanCatalogIdentifier(scope, 64))
+      .filter((scope): scope is string => Boolean(scope));
+    const description = cleanAgentPresentationText(candidate.description, 512);
+    const defaultReasoningEffort = cleanCatalogIdentifier(candidate.defaultReasoningEffort, 80);
+    const inputModalities = cleanAgentPresentationTextList(candidate.inputModalities, 32);
+    const upgrade = cleanCatalogIdentifier(candidate.upgrade, 160);
     const entry: AgentModelInfo = {
       id,
       model,
       ...(aliases?.length ? { aliases } : {}),
-      ...(cleanAgentPresentationText(candidate.displayName, 128)
-        ? { displayName: cleanAgentPresentationText(candidate.displayName, 128) }
-        : {}),
-      ...(cleanAgentPresentationText(candidate.description, 512)
-        ? { description: cleanAgentPresentationText(candidate.description, 512) }
-        : {}),
+      ...(displayName ? { displayName } : {}),
+      ...(description ? { description } : {}),
       ...(typeof candidate.hidden === "boolean" ? { hidden: candidate.hidden } : {}),
       ...(typeof candidate.isDefault === "boolean" ? { isDefault: candidate.isDefault } : {}),
-      ...(cleanAgentPresentationText(candidate.defaultReasoningEffort, 64)
-        ? { defaultReasoningEffort: cleanAgentPresentationText(candidate.defaultReasoningEffort, 64) }
-        : {}),
+      ...(defaultReasoningEffort ? { defaultReasoningEffort } : {}),
       ...(efforts?.length ? { supportedReasoningEfforts: efforts } : {}),
-      ...(cleanAgentPresentationTextList(candidate.inputModalities, 32)
-        ? { inputModalities: cleanAgentPresentationTextList(candidate.inputModalities, 32) }
-        : {}),
+      ...(inputModalities ? { inputModalities } : {}),
       ...(typeof candidate.supportsPersonality === "boolean"
         ? { supportsPersonality: candidate.supportsPersonality }
         : {}),
-      ...(cleanAgentPresentationText(candidate.upgrade, 128) ? { upgrade: cleanAgentPresentationText(candidate.upgrade, 128) } : {}),
-      ...(cleanAgentPresentationTextList(candidate.quotaScopes, 64)
-        ? { quotaScopes: cleanAgentPresentationTextList(candidate.quotaScopes, 64) }
-        : {}),
+      ...(upgrade ? { upgrade } : {}),
+      ...(quotaScopes.length ? { quotaScopes: [...new Set(quotaScopes)] } : {}),
     };
     seen.set(model.toLowerCase(), entry);
     models.push(entry);

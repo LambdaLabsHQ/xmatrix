@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: model catalogs keep over 100 models and `/effort` lists options while asleep
+
+Runtimes reporting more than 100 models (or more than 8 aliases) now retain
+their full catalog across routing and `/model` / `/effort` switches instead of
+dropping it at an arbitrary count cap. Bare `/effort` to a sleeping Agent also
+lists the effort levels of the model it will wake on, and bare `/model` to a
+sleeping Agent respects declared models when constrained. Hub only. Recovery is
+a CI-validated Hub beta reverting this change.
+
 ## Unreleased: a failed version handoff on Linux and macOS returns to the original wrapper
 
 When `update-self` moved a Run on Linux or macOS to a replacement wrapper and
