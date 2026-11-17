@@ -62,7 +62,7 @@ const TRANSIENT_ERROR_CODES = new Set([
   "DATABASE_CIRCUIT_OPEN",
 ]);
 const AGENT_LAUNCH_STAGES = new Set([
-  "message_commit_to_interpret", "launch_resolve", "launch_prepare", "directory_publish",
+  "message_commit_to_interpret", "launch_resolve", "launch_context", "launch_decision", "launch_prepare", "directory_publish",
   "command_issue", "reverse_wake", "daemon_claim", "daemon_admit", "daemon_spawn",
   "instance_connect", "first_reply_append",
 ]);

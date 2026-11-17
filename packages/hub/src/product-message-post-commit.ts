@@ -233,6 +233,13 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     filterOperationalMentions(input.body, createInstanceMentions(input.body)).length > 0;
   // A conversation's first message is read the same whoever wrote it.
   if (!directMention && input.senderKind !== "user" && input.sequence !== 1) return false;
+  // How long the summon waited between its commit and its dispatch. A reborn
+  // or handoff records it where its own interpretation starts.
+  const committedMs = Date.parse(input.committedAt || "");
+  if (!lifecycleRanges.length && Number.isFinite(committedMs)) {
+    recordAgentLaunchStage({ env: input.env, stage: "message_commit_to_interpret", outcome: "ok",
+      durationMs: Math.max(0, Date.now() - committedMs) });
+  }
   // The dispatch is idempotent per message (its command id), and a connection
   // lost before COMMIT committed nothing: run it again a bounded number of times
   // instead of leaving the summon prepared with nobody to finish it.

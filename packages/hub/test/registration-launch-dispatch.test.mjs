@@ -145,3 +145,33 @@ test("an Agent's first-message decision is persisted before its harness can be s
   assert.deepEqual(result, { claimed: true, harness: 'codex' });
   assert.deepEqual(calls, [['open', 'm1'], ['recommend', 'codex'], ['claim', 'jev', 'codex']]);
 });
+
+// A summon's stages before its Launch is prepared are recorded, so their
+// distribution across every launch says where "Starting" spends its time.
+test('a dispatch records how long it resolved, decided and prepared its Launch', async t => {
+  const { PostgresRegistrationLaunchRepository } = await import('@xmatrix/db');
+  const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const points = [];
+  const env = { RELAY_AUTHORITY_OBSERVABILITY_ENABLED: 'true',
+    RELAY_AUTHORITY_OBSERVABILITY_AE: { writeDataPoint: point => points.push(point) } };
+  t.mock.method(PostgresRegistrationLaunchRepository.prototype, 'dispatchFromMessage', async (_input, choose) => {
+    await pause(40);
+    await choose({ message: '@codex inspect', tags: {}, candidates: [] }).catch(() => undefined);
+    await pause(30);
+    return { selectionCount: 1, prepared: [{ launchId: 'launch', runId: 'run', instanceId: 'instance', reused: false }], rejected: [] };
+  });
+  const database = { cacheMode: 'disabled', transaction: async (_context, callback) => callback({ query: async query => {
+    if (query.name === 'channel_space_directory_resolve_v2') return [{ channel_id: 'channel', space_id: 'space', shard_id: 'shard', placement_epoch: 1, entity_version: 1 }];
+    if (query.name === 'space_placement_resolve_v1') return [{ space_id: 'space', shard_id: 'shard', placement_epoch: 1, state: 'active', target_shard_id: null, plan_class: 'single' }];
+    throw new Error(`unexpected ${query.name}`);
+  } }) };
+  await executeRegistrationLaunchDispatch({ env, database, directory: database, commandId: 'dispatch', actorUserId: 'caller',
+    channelId: 'channel', sourceMessageId: 'message', body: '@codex inspect',
+    evaluatorFor: () => Object.assign(async () => { throw new Error('not called'); }, {}) });
+  const stages = Object.fromEntries(points.filter(point => point.blobs[0] === 'agent_launch_stage')
+    .map(point => [point.blobs[2], { outcome: point.blobs[4], ms: point.doubles[0] }]));
+  assert.deepEqual(Object.keys(stages).sort(), ['launch_decision', 'launch_prepare', 'launch_resolve']);
+  assert.ok(stages.launch_resolve.ms >= 35, 'the resolve covers the time before the choice');
+  assert.equal(stages.launch_decision.outcome, 'error', 'a refused choice is recorded as one');
+  assert.ok(stages.launch_prepare.ms >= 25, 'the prepare covers the time after the choice');
+});
