@@ -16,7 +16,7 @@ type BetterAuthPublicKey = Awaited<ReturnType<typeof importJWK>>;
 
 type BetterAuthPublicKeyCacheEntry = {
   expiresAt: number;
-  publicKey: Promise<BetterAuthPublicKey | null>;
+  publicKey: BetterAuthPublicKey;
 };
 
 const publicKeysByDatabase = new WeakMap<
@@ -28,15 +28,19 @@ const publicKeysByDatabase = new WeakMap<
  * Cache only imported public verification keys. JWT claims and verification
  * results remain request-local, so every token still receives a full signature,
  * issuer, audience, and expiry check.
+ *
+ * Only a settled key is cached. A Worker request cannot await a promise another
+ * request created: once that request ends, its unsettled read is dropped and
+ * every waiter fails ("can never settle", HUB-DJ). Concurrent first reads of
+ * one key each read it; the first to settle fills the cache.
  */
 export async function getBetterAuthPublicKey(
   env: Env,
   kid: string,
 ): Promise<BetterAuthPublicKey | null> {
   const cache = cacheForDatabase(authorityCacheKey(env));
-  const now = Date.now();
   const cached = cache.get(kid);
-  if (cached && cached.expiresAt > now) {
+  if (cached && cached.expiresAt > Date.now()) {
     // Refresh insertion order so the bounded map behaves as an LRU cache.
     cache.delete(kid);
     cache.set(kid, cached);
@@ -44,23 +48,16 @@ export async function getBetterAuthPublicKey(
   }
   if (cached) cache.delete(kid);
 
-  const entry: BetterAuthPublicKeyCacheEntry = {
-    expiresAt: now + BETTER_AUTH_PUBLIC_KEY_CACHE_TTL_MS,
-    publicKey: loadBetterAuthPublicKey(env, kid),
-  };
-  cache.set(kid, entry);
+  // A missing key is not cached, so a newly rotated key is found on the next
+  // request; a failed read propagates and is not cached either.
+  const publicKey = await loadBetterAuthPublicKey(env, kid);
+  if (!publicKey) return null;
+  cache.set(kid, {
+    expiresAt: Date.now() + BETTER_AUTH_PUBLIC_KEY_CACHE_TTL_MS,
+    publicKey,
+  });
   pruneOldestPublicKeys(cache);
-
-  try {
-    const publicKey = await entry.publicKey;
-    // Do not negative-cache unknown keys or transient D1 failures. A newly
-    // rotated key must be available on the next request.
-    if (!publicKey && cache.get(kid) === entry) cache.delete(kid);
-    return publicKey;
-  } catch (error) {
-    if (cache.get(kid) === entry) cache.delete(kid);
-    throw error;
-  }
+  return publicKey;
 }
 
 function cacheForDatabase(
