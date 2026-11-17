@@ -3,7 +3,7 @@
 import process from "node:process";
 import fs from "node:fs";
 
-import { runCliMain } from "./cli-entrypoint.mjs";
+import { argumentValue, runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel } from "./release-version-order.mjs";
 
 function isReleaseVersion(version) {
@@ -84,11 +84,15 @@ export function validatePostgresReadinessResponse(response, payload) {
   return payload;
 }
 
-async function fetchNoCacheJson(target, fetchImpl, label) {
+async function fetchNoCacheJson(target, fetchImpl, label, extraHeaders = {}) {
   const response = await fetchImpl(target, {
     method: "GET",
     redirect: "error",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    headers: {
+      Accept: "application/json",
+      "Cache-Control": "no-cache",
+      ...extraHeaders,
+    },
     signal: AbortSignal.timeout(10_000),
   });
   const contentType = response.headers.get("content-type") ?? "";
@@ -98,15 +102,15 @@ async function fetchNoCacheJson(target, fetchImpl, label) {
   return { response, payload: await response.json() };
 }
 
-async function verifyPostgresReadiness(target, fetchImpl) {
+async function verifyPostgresReadiness(target, fetchImpl, extraHeaders) {
   const endpoint = new URL("/health/postgres", target);
   const { response, payload } = await fetchNoCacheJson(
-    endpoint, fetchImpl, "PostgreSQL readiness",
+    endpoint, fetchImpl, "PostgreSQL readiness", extraHeaders,
   );
   return validatePostgresReadinessResponse(response, payload);
 }
 
-async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion) {
+async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion, extraHeaders = {}) {
   const endpoint = new URL("/api/client-compatibility", target);
   const admittedResponse = await fetchImpl(endpoint, {
     method: "GET",
@@ -114,6 +118,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
     headers: {
       Accept: "application/json",
       "Cache-Control": "no-cache",
+      ...extraHeaders,
       "x-xmatrix-client-component": "cli",
       "x-xmatrix-client-version": compatibilityPolicy.minimumVersions.cli,
       "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
@@ -136,6 +141,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
       headers: {
         Accept: "application/json",
         "Cache-Control": "no-cache",
+        ...extraHeaders,
         "x-xmatrix-client-component": "cli",
         "x-xmatrix-client-version": cliVersion,
         "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
@@ -155,6 +161,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
       headers: {
         Accept: "application/json",
         "Cache-Control": "no-cache",
+        ...extraHeaders,
         "x-xmatrix-client-component": "app",
         "x-xmatrix-client-version": webVersion,
         "x-xmatrix-client-protocol": String(compatibilityPolicy.protocolVersion),
@@ -167,7 +174,7 @@ async function verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion
   const missingResponse = await fetchImpl(endpoint, {
     method: "GET",
     redirect: "error",
-    headers: { Accept: "application/json", "Cache-Control": "no-cache" },
+    headers: { Accept: "application/json", "Cache-Control": "no-cache", ...extraHeaders },
     signal: AbortSignal.timeout(10_000),
   });
   validateHubCompatibilityResponse(
@@ -185,6 +192,7 @@ export async function waitForHubHealth({
   delayImpl = delay,
   postgresReadiness = false,
   expectedSha,
+  versionOverride,
   webVersion,
   cliVersion,
 }) {
@@ -196,14 +204,22 @@ export async function waitForHubHealth({
   if (!Number.isSafeInteger(delayMs) || delayMs < 0 || delayMs > 30_000) {
     throw new Error("delayMs must be an integer between 0 and 30000");
   }
+  // A gradual deployment can pin one request to the version under test while
+  // the rest of production keeps the previous version.
+  if (versionOverride !== undefined && !/^[A-Za-z0-9._-]+="[A-Za-z0-9._-]+"$/u.test(versionOverride)) {
+    throw new Error('versionOverride must be <worker>="<version-id>"');
+  }
+  const overrideHeaders = versionOverride === undefined
+    ? {}
+    : { "Cloudflare-Workers-Version-Overrides": versionOverride };
 
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      const { response, payload } = await fetchNoCacheJson(target, fetchImpl, "health");
+      const { response, payload } = await fetchNoCacheJson(target, fetchImpl, "health", overrideHeaders);
       const health = validateHubHealthResponse(response, payload, expectedSha);
-      await verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion);
-      if (postgresReadiness) await verifyPostgresReadiness(target, fetchImpl);
+      await verifyCompatibilityGate(target, fetchImpl, webVersion, cliVersion, overrideHeaders);
+      if (postgresReadiness) await verifyPostgresReadiness(target, fetchImpl, overrideHeaders);
       return {
         ...health,
         compatibility: "enforced",
@@ -220,16 +236,11 @@ export async function waitForHubHealth({
   throw new Error(`Hub post-deploy smoke failed after ${attempts} attempts: ${detail}`);
 }
 
-function argumentValue(argv, flag, fallback) {
-  const index = argv.indexOf(flag);
-  return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
-}
-
 async function main(argv = process.argv.slice(2)) {
   const url = argumentValue(argv, "--url");
   if (!url) {
     throw new Error(
-      "usage: hub-postdeploy-smoke.mjs --url <https-url> [--attempts n] [--delay-ms n] [--postgres-readiness] [--expected-sha sha] [--web-version version] [--cli-version version]",
+      "usage: hub-postdeploy-smoke.mjs --url <https-url> [--attempts n] [--delay-ms n] [--postgres-readiness] [--expected-sha sha] [--version-override worker=\"version\"] [--web-version version] [--cli-version version]",
     );
   }
   const result = await waitForHubHealth({
@@ -238,6 +249,7 @@ async function main(argv = process.argv.slice(2)) {
     delayMs: Number(argumentValue(argv, "--delay-ms", "5000")),
     postgresReadiness: argv.includes("--postgres-readiness"),
     expectedSha: argumentValue(argv, "--expected-sha"),
+    versionOverride: argumentValue(argv, "--version-override"),
     webVersion: argumentValue(argv, "--web-version"),
     cliVersion: argumentValue(argv, "--cli-version"),
   });
@@ -247,3 +259,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 runCliMain(import.meta.url, main);
+

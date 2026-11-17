@@ -135,6 +135,28 @@ Declared by the committed `packages/hub/wrangler.toml`. Deployments do not chang
 | `RELAY_SUMMON_DECISION_CLOCK` | binding | Per-Space clock for decision retention. |
 | `RELAY_X_UPLOAD_EXECUTOR` | binding | Per-upload durable X video executor; stores only references and scheduling state. |
 
+## Gradual Hub deployment and code rollback
+
+`scripts/hub-canary-deploy.mjs` owns the production Hub deployment in
+`server-release.yml`. It uploads the tagged release as a Worker version, gives
+it 10% of traffic for three minutes, verifies that version through a Cloudflare
+version override (`hub-postdeploy-smoke.mjs --version-override`), then promotes
+it to 100% and verifies the public origin again.
+
+A failure during the split, the hold, the promotion or the final check deploys
+the previous version back at 100% and fails the release. Only Worker code rolls
+back; PostgreSQL schema does not. The train applies expand migrations before
+this step and ships contract migrations separately after the new Hub is proven,
+so the previous Hub stays compatible during the window. Use the repository
+variable `XMATRIX_HUB_CANARY_HOLD_SECONDS` to change the hold (default 180 s);
+`--canary-percent` defaults to 10 and is bounded to 1-50.
+
+A release that changes a Durable Object class lifecycle cannot be uploaded as a
+version or rolled back across. `wrangler versions upload` refuses it; the script
+then deploys once with `wrangler deploy` and logs that the release had no
+canary. Secrets uploaded with the new version are Worker-level and do not roll
+back with the code.
+
 ## Official deployment operations
 
 Used only by the operators of the hosted xMatrix deployment. Leave unset.
