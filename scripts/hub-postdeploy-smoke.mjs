@@ -1,9 +1,9 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 import process from "node:process";
 import fs from "node:fs";
 
-import { runCliMain } from "./cli-entrypoint.mjs";
+import { argumentValue, runCliMain } from "./cli-entrypoint.mjs";
 import { releaseChannel } from "./release-version-order.mjs";
 
 function isReleaseVersion(version) {
@@ -236,11 +236,6 @@ export async function waitForHubHealth({
   throw new Error(`Hub post-deploy smoke failed after ${attempts} attempts: ${detail}`);
 }
 
-function argumentValue(argv, flag, fallback) {
-  const index = argv.indexOf(flag);
-  return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
-}
-
 async function main(argv = process.argv.slice(2)) {
   const url = argumentValue(argv, "--url");
   if (!url) {
@@ -264,3 +259,4 @@ async function main(argv = process.argv.slice(2)) {
 }
 
 runCliMain(import.meta.url, main);
+

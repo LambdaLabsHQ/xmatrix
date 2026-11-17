@@ -1,11 +1,11 @@
-#!/usr/bin/env node
+﻿#!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-import { runCliMain } from "./cli-entrypoint.mjs";
+import { argumentValue, argumentValues, runCliMain } from "./cli-entrypoint.mjs";
 
 /** Gradual part of a release the new Hub serves before it takes all traffic. */
 export const DEFAULT_CANARY_PERCENT = 10;
@@ -237,19 +237,6 @@ export function createHealthChecker({ url, exec = spawnSync } = {}) {
     if (result.error) throw result.error;
     if (result.status !== 0) throw new Error(`Hub health check failed (${result.status})`);
   };
-}
-
-function argumentValue(argv, flag, fallback) {
-  const index = argv.indexOf(flag);
-  return index >= 0 && index < argv.length - 1 ? argv[index + 1] : fallback;
-}
-
-function argumentValues(argv, flag) {
-  const values = [];
-  for (let index = 0; index < argv.length - 1; index += 1) {
-    if (argv[index] === flag) values.push(argv[index + 1]);
-  }
-  return values;
 }
 
 async function main(argv = process.argv.slice(2)) {
