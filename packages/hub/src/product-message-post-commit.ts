@@ -192,12 +192,12 @@ export async function summonFirstMessageHarness(input: { env: ProductMessagePost
     summoned: typeof markFirstMessageSummoned } =
     { append: dispatchProductMessageAppend, postCommit: dispatchProductMessagePostCommit, summoned: markFirstMessageSummoned },
 ): Promise<void> {
-  // The decision already answered whether to start, so Jev's intent check is skipped.
-  const body = `@${input.harness} launch:force`;
+  // The decision already answered whether to start: the append asks to launch, as a person's send does.
+  const body = `@${input.harness}`;
   const messageId = firstMessageSummonId(input.messageId);
   const response = await dependencies.append(input.env, input.channelId, {
     commandId: `first-message-summon:${input.messageId}`.slice(0, 200), messageId, channelId: input.channelId, body,
-    principal: { kind: "user", id: input.actorUserId }, xmatrixAuthor: true,
+    principal: { kind: "user", id: input.actorUserId }, xmatrixAuthor: true, launch: true,
     residual: { replyToMessageId: input.messageId },
   });
   if (!response.ok) throw new Error(`First message summon append failed (${response.status})`);

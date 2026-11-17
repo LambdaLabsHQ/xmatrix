@@ -320,7 +320,6 @@ export type ComposerMentionSpan = {
   end: number;
   /** `reference` is a picked channel or page the draft shows by name. */
   kind: "user" | "agent" | "summon" | "reference";
-  forced?: boolean;
   invalid?: boolean;
   self?: boolean;
   /** The face the sent chip leads with, drawn over the `@`: a member's, or the harness a summon names. `@auto` has none yet. */
@@ -340,7 +339,6 @@ export function composerMentionSpans(text: string, index: MentionReadIndex | nul
   if (!/[@＠]/u.test(text)) return [];
   const spans: ComposerMentionSpan[] = parseAutoLaunchMentions(text).map(mention => ({
     start: mention.start, end: mention.end, kind: "summon",
-    ...(mention.tags.launch === "force" ? { forced: true } : {}),
     ...(mention.error ? { invalid: true } : {}),
     ...(mention.tags.harness ? { face: { kind: "agent" as const, name: mention.tags.harness, harness: mention.tags.harness } } : {}),
   }));

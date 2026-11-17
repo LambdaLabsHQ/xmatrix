@@ -162,7 +162,6 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
       for (const effort of model.efforts) add("effort", effort.value);
     }
   }
-  add("launch", "force", "force · Start without xMatrix's intent check");
   return interleaveLaunchFields(result);
 }
 
@@ -204,8 +203,7 @@ export function summonStartCandidates(candidates: MentionCandidate[]): MentionCa
  */
 export function summonConditionCandidates(candidates: MentionCandidate[], query: string): MentionCandidate[] {
   if (!query) return [];
-  const conditions = candidates.filter(candidate => candidate.launchField &&
-    candidate.launchField !== "harness" && candidate.launchField !== "launch");
+  const conditions = candidates.filter(candidate => candidate.launchField && candidate.launchField !== "harness");
   const typed = query.toLowerCase();
   const matched = query.includes(":") ? filterLaunchCandidates(conditions, query) : conditions.filter(candidate => {
     const [field, ...rest] = candidate.name.split(":");

@@ -39,7 +39,7 @@ switch run(@codex, "Review the design")->wait {
 | other => fail(other)
 }`))).message;
     const delivery = await until(async () => (await messages()).find(message =>
-      message.replyToMessageId === sent.messageId && message.body.startsWith("@codex launch:force")), "the delivery");
+      message.replyToMessageId === sent.messageId && /^@codex\n/u.test(message.body)), "the delivery");
     const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)?.[1];
     assert.ok(requestRef, delivery.body);
     assert.match(delivery.body, /verdict = Sound \| Flawed\(string\)/u);

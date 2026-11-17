@@ -62,7 +62,7 @@ test("a program block on a page runs in a conversation of its own, and the page 
     const ofMessage = async messageId => (await call(`${pages.replace(/\/pages$/u, "")}/norn-programs/${encodeURIComponent(messageId)}`)).program;
     assert.deepEqual(await ofMessage(history.messages[0].messageId), { ...running, next: (await programs())[0].next });
     assert.equal(await ofMessage(history.messages.at(-1).messageId), null);
-    const delivery = history.messages.find(message => message.body.startsWith("@codex launch:force"));
+    const delivery = history.messages.find(message => /^@codex\n/u.test(message.body));
     const requestRef = /`request:(r[a-z0-9]+)`/u.exec(delivery.body)[1];
 
     // An edit that leaves the program's text alone changes nothing; the same request stands.
@@ -101,7 +101,6 @@ ask(@codex, "Now shorten it", ~about=draft)->wait`, "norn run") });
     // The second request goes to that Instance by its address: no new Run starts, and the same Run answers it.
     const second = await until(async () => (await deliveries())[1], "the second delivery");
     assert.match(second.body, /^@codex:\d+\n/u);
-    assert.doesNotMatch(second.body, /launch:force/u);
     await assert.rejects(daemon.inbox.waitFor(message => message.type === "machine_spawn_agent" && message.runId !== spawn.runId,
       "a second spawn", 1_500), /waiting for a second spawn/u);
     const held = await run(worker, runToken, ["requests"]);

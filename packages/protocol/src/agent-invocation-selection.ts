@@ -143,8 +143,8 @@ export function deriveHarnessInvocationSelections(source: {
 
 /** The summons a message writes, each through its last condition: harness shouts,
  * `@auto` and condition summons. Each starts an Agent only when its send asks to
- * launch (`xmatrix send --launch`, the web composer) or it says `launch:force`. */
-export function summonMentions(body: string): Array<{ start: number; end: number; text: string; force: boolean }> {
+ * launch (`xmatrix send --launch`, the web composer). */
+export function summonMentions(body: string): Array<{ start: number; end: number; text: string }> {
   let ranges: ReturnType<typeof nonOperationalMentionRanges> | undefined;
   const summons = [...parseHarnessCapabilityMentions(body),
     ...parseAutoLaunchMentions(body).filter(mention => isAutoLaunchSummonText(mention.text))
@@ -154,7 +154,7 @@ export function summonMentions(body: string): Array<{ start: number; end: number
     .sort((left, right) => left.start - right.start);
   return summons.map(({ start, end }) => {
     const options = selectionLaunchConditions(body, { start, end, text: body.slice(start, end) });
-    return { start, end: options.end, text: body.slice(start, options.end), force: options.tags.launch === "force" };
+    return { start, end: options.end, text: body.slice(start, options.end) };
   });
 }
 

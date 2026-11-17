@@ -29,9 +29,7 @@ export function commentBody<Agent extends CommentTaker>(text: string, agents: re
       const start = match.index! + match[1]!.length;
       return { body: `${text.slice(0, start)}@${named.name}${text.slice(match.index! + match[0].length)}`, taker: named };
     }
-    if (!agents.some((agent) => agent.toLowerCase() === name.split(":")[0])) continue;
-    const end = match.index! + match[0].length;
-    return { body: `${text.slice(0, end)} launch:force${text.slice(end)}` };
+    if (agents.some((agent) => agent.toLowerCase() === name.split(":")[0])) return { body: text };
   }
   return taker ? { body: `@${taker.name} ${text}`, taker }
     : conversationId ? { body: text, conversationId } : { body: `@auto ${text}` };

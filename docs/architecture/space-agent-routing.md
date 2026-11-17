@@ -217,7 +217,7 @@ second call chooses them for the environment that runs the work.
 
 A question with one option is answered by that option. A call in which every
 question has one option is not made, so it costs no model round trip and stores
-no decision evidence. Typical cases are a `launch:force` summon of one harness
+no decision evidence. Typical cases are a summon of one harness
 into a single location, using the runtime's own model or a model the message
 names. From `registration-parameters-v11` (and in v12), such a choice is recorded `only`: its
 answer, with certainty 1, as a fact rather than a reading. A launch for which
@@ -496,8 +496,8 @@ request carries `launch: true` (`xmatrix send --launch`, the MCP `send_message`
 tool's `launch`). The public HTTP send endpoint refuses an operational summon
 without that request, with HTTP 400 `agent_instance_required`, before publishing
 the message. Address an existing Instance as `@<agent>:<instance>` instead, or
-resend with `--launch` to start one. `launch:force` in public message text does
-not substitute for the launch request. Code and quoted examples remain text.
+resend with `--launch` to start one. No text in a message substitutes for the
+launch request: the retired `launch:force` is ignored on every path (2026-11-17). Code and quoted examples remain text.
 The web composer, the CLI's interactive chat and a Page schedule line always ask. An Agent's live
 reply over the Runtime WebSocket never does, so an Agent naming another in a
 report starts nothing. The request is stored with the message (in
@@ -505,7 +505,7 @@ report starts nothing. The request is stored with the message (in
 so a quota retry or recovery reads the same answer. Historical messages and
 internal runtime replies that did not ask to start retain the rejection
 `launch_not_requested`; the mention's card offers its author Start. Trusted
-internal first-message summons retain their existing `launch:force` path.
+internal first-message summons append with `launch: true`, as Norn deliveries do.
 
 Jev no longer reads whether a mention is a request (the 2026-09-26 intent
 question and the composer's draft reading were removed): it chooses only the

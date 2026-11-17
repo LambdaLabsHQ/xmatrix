@@ -97,8 +97,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
         launch: { runtime: "/opt/codex/bin/codex", runtimeArgs: ["--full-auto"], backend: "codex-app", sandboxMode: "workspace-write" } } });
     const body = "@codex task", bodyHash = await digestCanonicalCloneCborV1(body);
     // `launch: false` is a send that did not ask to start the Agents it mentions.
-    const source = async (id, launch = true) => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
-      [id, bodyHash, { ...(launch ? { launch: true } : {}), selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: bodyHash,
+    const source = async (id, launch = true, hash = bodyHash) => sql(`INSERT INTO data.messages VALUES ('space','channel',$1,'user','caller',$2,1,1,1,$3,NULL,NULL,NULL)`,
+      [id, hash, { ...(launch ? { launch: true } : {}), selections: { schemaVersion: 1, sourceRevision: 1, sourceBodyHash: hash,
         selections: [{ start: 0, end: 6, text: "@codex", target: { kind: "registration", key } }] } }]);
     await source("message");
     const launches = new PostgresRegistrationLaunchRepository(database, database, placement);
@@ -315,6 +315,15 @@ integration("launch survives a hostname change with stale Workspace metadata and
     assert.equal(declined.selectionCount, 1);
     assert.deepEqual(declined.prepared, []);
     assert.equal(declined.rejected[0].code, "launch_not_requested");
+    // Text never asks: an Agent's live reply carries no launch request, and the retired
+    // `launch:force` written after its summon does not stand in for one.
+    const forcedBody = "@codex launch:force task";
+    await source("text-force", false, await digestCanonicalCloneCborV1(forcedBody));
+    const textForced = await launches.dispatchFromMessage({ commandId: "text-force", actorUserId: "caller",
+      channelId: "channel", sourceMessageId: "text-force", body: forcedBody },
+      async () => assert.fail("launch:force in the text allocates nothing and asks no question"));
+    assert.deepEqual(textForced.prepared, []);
+    assert.equal(textForced.rejected[0].code, "launch_not_requested");
     await source("dispatch-source");
     const dispatched = await launches.dispatchFromMessage({ commandId: "dispatch", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "dispatch-source", body }, async ({ candidates, sourceSequence, summon }) => {

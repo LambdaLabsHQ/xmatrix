@@ -301,7 +301,7 @@ test("a summon's first condition rows name each kind before a second of any", ()
   const runtimeDefault = [{ ...registrations[0], models: [], parameterModel: "test-model" }];
   const fields = autoLaunchCandidates(many, { harness: "codex" }, runtimeDefault)
     .filter(candidate => candidate.id !== "launch:auto").slice(0, 5).map(candidate => candidate.launchField);
-  assert.deepEqual(fields, ["repo", "pwd", "machine", "effort", "launch"]);
+  assert.deepEqual(fields, ["repo", "pwd", "machine", "effort", "repo"]);
 });
 
 test("a fresh @ offers a condition by its value, and picking it opens the summon with it", () => {

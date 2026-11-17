@@ -399,11 +399,11 @@ test("the draft paints exactly the mentions the sent message will chip", () => {
   assert.deepEqual(spans("@nobody a@legend.com `@legend`\n> @legend"), []);
 });
 
-test("a summon paints its whole written expression, flagging force and malformed conditions", () => {
-  const text = "@codex repo:owner/xmatrix launch:force 修一下 @auto repo:owner/xmatrix pwd:/tmp";
+test("a summon paints its whole written expression, flagging malformed conditions", () => {
+  const text = "@codex repo:owner/xmatrix 修一下 @auto repo:owner/xmatrix pwd:/tmp";
   const spans = composerMentionSpans(text, INDEX);
-  assert.deepEqual(spans.map(({ start, end, kind, forced }) => ({ text: text.slice(start, end), kind, ...(forced ? { forced } : {}) })), [
-    { text: "@codex repo:owner/xmatrix launch:force", kind: "summon", forced: true },
+  assert.deepEqual(spans.map(({ start, end, kind }) => ({ text: text.slice(start, end), kind })), [
+    { text: "@codex repo:owner/xmatrix", kind: "summon" },
     { text: "@auto repo:owner/xmatrix pwd:/tmp", kind: "summon" },
   ]);
   assert.equal(spans[0].invalid, undefined);
