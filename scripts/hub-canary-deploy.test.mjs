@@ -6,6 +6,7 @@ import {
   deployWithCanary,
   isDurableObjectLifecycleRefusal,
   previousDeploymentVersion,
+  secretNamesOfVersion,
   trafficArguments,
   versionIdForTag,
 } from "./hub-canary-deploy.mjs";
@@ -14,7 +15,12 @@ const TAG = "a".repeat(40);
 const PREVIOUS = "previous-version";
 const NEXT = "next-version";
 
-function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }], healthErrorAt = null, failOn = null } = {}) {
+function harness({
+  statusVersions = [{ version_id: PREVIOUS, percentage: 100 }],
+  healthErrorAt = null,
+  failOn = null,
+  secretNames = ["XMATRIX_SECRET_CATALOG_KEY"],
+} = {}) {
   const calls = [];
   const healthCalls = [];
   const sleeps = [];
@@ -27,6 +33,13 @@ function harness({ statusVersions = [{ version_id: PREVIOUS, percentage: 100 }],
     }
     if (args[0] === "versions" && args[1] === "list") {
       return { stdout: JSON.stringify([{ id: NEXT, annotations: { "workers/tag": TAG } }, { id: PREVIOUS }]) };
+    }
+    if (args[0] === "versions" && args[1] === "view") {
+      return {
+        stdout: JSON.stringify({
+          resources: { bindings: secretNames.map((name) => ({ type: "secret_text", name })) },
+        }),
+      };
     }
     return { stdout: "" };
   };
@@ -70,14 +83,47 @@ test("a release serves a canary split, verifies the new version, then takes 100%
   assert.match(parts.calls[1], /--secrets-file \/tmp\/secrets\.json/u);
   assert.match(parts.calls[1], /--define XMATRIX_SENTRY_DSN:"https:\/\/example\.test\/1"/u);
   assert.match(parts.calls[2], /^versions list --config wrangler\.generated\.production\.toml --name xmatrix-hub --json$/u);
-  assert.match(parts.calls[3], /versions deploy .*--config wrangler\.generated\.production\.toml .*--version-id next-version --percentage 10 --version-id previous-version --percentage 90/u);
+  assert.match(parts.calls[3], /^versions view next-version --config wrangler\.generated\.production\.toml --name xmatrix-hub --json$/u);
+  assert.match(parts.calls[4], /versions deploy .*--config wrangler\.generated\.production\.toml .*--version-id next-version --percentage 10 --version-id previous-version --percentage 90/u);
   assert.deepEqual(parts.healthCalls, [
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
     { expectedSha: TAG, versionOverride: `xmatrix-hub="${NEXT}"` },
     { expectedSha: TAG },
   ]);
   assert.deepEqual(parts.sleeps, [120_000]);
-  assert.match(parts.calls[4], new RegExp(`versions deploy .*--version-id ${NEXT} --percentage 100`, "u"));
+  assert.match(parts.calls[5], new RegExp(`versions deploy .*--version-id ${NEXT} --percentage 100`, "u"));
+});
+
+test("the uploaded version carries the selected secrets before any traffic", async () => {
+  const parts = harness({ secretNames: ["XMATRIX_SECRET_CATALOG_KEY", "STRIPE_SECRET_KEY"] });
+  await deployWithCanary({ ...options(parts), expectedSecretNames: ["STRIPE_SECRET_KEY"] });
+  const view = parts.calls.findIndex((call) => call.startsWith("versions view"));
+  const deploy = parts.calls.findIndex((call) => call.startsWith("versions deploy"));
+  assert.ok(view > -1 && deploy > view, "the version is read before its first traffic split");
+});
+
+test("a version missing a selected secret fails before any deployment", async () => {
+  const parts = harness({ secretNames: ["XMATRIX_SECRET_CATALOG_KEY"] });
+  await assert.rejects(
+    deployWithCanary({ ...options(parts), expectedSecretNames: ["STRIPE_SECRET_KEY"] }),
+    /required Worker secrets are missing: STRIPE_SECRET_KEY/u,
+  );
+  assert.ok(!parts.calls.some((call) => call.startsWith("versions deploy")));
+  assert.ok(!parts.calls.some((call) => call.startsWith("deploy ")));
+  assert.deepEqual(parts.healthCalls, []);
+});
+
+test("only secret_text bindings count as carried secrets", () => {
+  assert.deepEqual(secretNamesOfVersion({
+    resources: {
+      bindings: [
+        { type: "secret_text", name: "A" },
+        { type: "plain_text", name: "B" },
+        { type: "secret_text", name: "C" },
+      ],
+    },
+  }), ["A", "C"]);
+  assert.throws(() => secretNamesOfVersion({}), /no bindings/u);
 });
 
 test("a canary that fails verification rolls production back before failing the release", async () => {
