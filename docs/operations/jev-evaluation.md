@@ -38,7 +38,7 @@ and named Boolean, Choice or Score `questions`. Routing is one possible caller;
 this package does not launch Agents, choose Machines or alter production routing.
 
 Jev does not read whether a launch mention is a request: a summon starts only
-when its send asked to (`launch: true`, or `launch:force` in the text). A
+when its send asked to (`launch: true`); text in the body never asks. A
 `launch_not_requested` rejection (or an old `summon_intent_*` one) is not a
 failure, so the Channel gets no notice: the mention's own card says why and
 offers Start. The same is true of a hint that only tells the

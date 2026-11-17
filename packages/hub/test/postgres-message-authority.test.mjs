@@ -601,7 +601,7 @@ test("xMatrix's own message is committed as system:xmatrix, authorized by the Hu
   const database = agentAppendDatabase({ sequenceChannelId: "channel-1", rows: openAppendRows("channel-1") });
   const append = (extra = {}) => postgresMessageAppend({}, "channel-1", {
     commandId: "command-xmatrix-1", messageId: "xmatrix-summon:first", channelId: "channel-1",
-    body: "@codex launch:force", principal: { kind: "user", id: "author" }, xmatrixAuthor: true, ...extra,
+    body: "@codex", principal: { kind: "user", id: "author" }, xmatrixAuthor: true, ...extra,
   }, { database, spaceId: "space-1", placement: { spaceId: "space-1", shardId: "shard-0", placementEpoch: 1 } });
   const result = await append();
   assert.partialDeepStrictEqual(result.senderSnapshot, { identityId: "system:xmatrix", kind: "system", label: "xMatrix" });

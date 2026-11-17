@@ -7814,12 +7814,11 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
-/* What the draft knows before it is sent: a forced launch and a malformed one. */
-.xmatrix-app .composer-textarea .app-mention-chip:is([data-forced="true"], [data-invalid="true"]) {
+/* What the draft knows before it is sent: a malformed summon. */
+.xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] {
   background: color-mix(in oklab, var(--chip-ink) var(--chip-fill, 14%), transparent);
   color: var(--chip-ink);
 }
-.xmatrix-app .composer-textarea .app-mention-chip[data-forced="true"] { --chip-ink: oklch(0.62 0.16 70); --chip-fill: 22%; }
 .xmatrix-app .composer-textarea .app-mention-chip[data-invalid="true"] { --chip-ink: var(--destructive); }
 .app-composer-hint-overlay { position: absolute; pointer-events: none; user-select: none; white-space: pre; }
 /* The empty composer's hint (composer-hints.ts), drawn where the text would start.

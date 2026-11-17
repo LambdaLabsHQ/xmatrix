@@ -185,9 +185,9 @@ test("the holder reads what is asked as literal text, with the one summon on the
 run(@codex, "Ask @grok launch:force \`\`\` to help", ~about="PR 12")->wait`);
   const [request] = step().open;
   const { body, answerFrom } = nornDelivery(state.ledger.requests[request.requestId], request.requestRef);
-  assert.equal(body.split("\n")[0], "@codex launch:force");
+  assert.equal(body.split("\n")[0], "@codex");
   // Whoever reads the conversation is shown the request by its reference; the task in full and how to answer are the holder's.
-  assert.equal(body.slice(0, answerFrom), `@codex launch:force\n\n**Request** \`request:${request.requestRef}\``);
+  assert.equal(body.slice(0, answerFrom), `@codex\n\n**Request** \`request:${request.requestRef}\``);
   assert.match(body, /\n````text\nAsk @grok launch:force ``` to help\n````\n/u);
   assert.ok(body.includes(`xmatrix reply ${request.requestRef} '<answer>'`));
   // Agents working for one another keep the conversation to their answers; where a person takes part, the holder says what it does.
@@ -212,7 +212,7 @@ test("a program that repeats asks anew each time, of whoever fits the conditions
   for (const day of [1, 2, 3]) {
     const [request] = step(undefined, { nowMs: day * DAY }).open;
     assert.equal(nornDelivery(state.ledger.requests[request.requestId], request.requestRef).body.split("\n")[0],
-      "@auto effort:high repo:acme/app launch:force");
+      "@auto effort:high repo:acme/app");
     step({ requestId: request.requestId, epoch: request.epoch, reply: { typed: "nothing to fix" } }, { nowMs: day * DAY + 7_200_000 });
   }
   assert.equal(Object.keys(state.ledger.requests).length, 3);
@@ -434,7 +434,7 @@ test("a program opens the standard library: a routine is one line, and a decisio
 routine(~every=7d, ~from=1970-01-03T00:00Z, ~who=@auto(~repo="acme/app"), ~otherwise=@claude(~repo="acme/app"), "Weekly upkeep")`);
   assert.equal(upkeep.step().write.nextDueMs, 2 * DAY);
   const [first] = upkeep.step(undefined, { nowMs: 2 * DAY }).open;
-  assert.equal(nornDelivery(upkeep.state.ledger.requests[first.requestId], first.requestRef).body.split("\n")[0], "@auto repo:acme/app launch:force");
+  assert.equal(nornDelivery(upkeep.state.ledger.requests[first.requestId], first.requestRef).body.split("\n")[0], "@auto repo:acme/app");
   // The first did not answer: the same round goes once to the one named to fall back on.
   const [second] = upkeep.step({ requestId: first.requestId, epoch: first.epoch, reply: { tag: "Broke", reason: "no machine" } }, { nowMs: 2 * DAY + 60_000 }).open;
   assert.equal(second.holder, "@claude");

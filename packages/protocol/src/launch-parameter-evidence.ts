@@ -47,7 +47,7 @@ export interface LaunchParameterEvidence {
   placement?: { profile: "balanced"; ranking: LaunchPlacementCandidate[] };
   /** Before `registration-parameters-v6`: Jev's choice among whole environments. */
   environment?: LaunchDecisionStage;
-  /** How the launch mention was read as a request: Jev's answer, or the author's `launch:force`. */
+  /** How the launch mention was read as a request: Jev's answer, or the author's own summon. */
   intent?: { source: "jev"; selected: "summon"; probabilities: Record<string, number> } | { source: "author" }
     /** Jev read it as a request while the author typed, and the author sent it. */
     | { source: "draft" };

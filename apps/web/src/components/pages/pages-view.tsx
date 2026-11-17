@@ -1286,8 +1286,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
       if (summon && writing !== summon.pageId) updateSummon(summon.id, { pageId: writing });
       const where = `page:${writing}${blockId ? ` (section #${blockId})` : ""}`;
       // The page itself tells the Agent what it needs, live, as turns its runtime hands it (§4.2).
-      const firstMessage = mentioned ? `@${harness} launch:force ${pageReferenceToken(writing, blockId)}`
-        : `@${harness} launch:force You're co-writing ${where} with me live. The page sends you ` +
+      const firstMessage = mentioned ? `@${harness} ${pageReferenceToken(writing, blockId)}`
+        : `@${harness} You're co-writing ${where} with me live. The page sends you ` +
           "what changed as I write, and you answer there, in the page; nothing to do here until it does.";
       const conversationId = await onDiscuss({ spaceId, pageId: writing, blockId: blockId ?? "", restricted,
         name: `Co-writing ${section ? `${page.title} › ${section}` : page.title}`, firstMessage, open: false,

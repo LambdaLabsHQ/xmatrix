@@ -355,7 +355,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     }
     // A summon's send already asked for it to start. A message that summons
     // nobody has no such request; Jev reads whether its author wants work started at all.
-    const judgeStart = summon === undefined && askToStart === true && tags.launch !== "force";
+    const judgeStart = summon === undefined && askToStart === true;
     const state: Parameters<RoutingEvaluator>[0]["state"] = JSON.parse(JSON.stringify({
       message, ...(context ? { channelContext: context } : {}),
     }));

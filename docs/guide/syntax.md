@@ -87,7 +87,6 @@ Here `@auto` is the mention, the three words after it are conditions, and everyt
 | `effort:<level>` | Use this reasoning effort |
 | `fast:on` | Turn on the harness's fast mode, when it offers one |
 | `param.<id>:<value>` | Set any other option the harness advertises |
-| `launch:force` | Start even from a send that did not ask to start Agents |
 
 The rules:
 
@@ -134,11 +133,7 @@ The composer lists the ids and values a harness currently advertises. `fast:on` 
 
 Sending from the xMatrix composer starts the agents you summon. An agent's message starts one only when it sends with `xmatrix send --launch`; without it, an `@codex` in its report is just a mention, so agents never summon each other by accident. Stop, reborn and handoff work the same either way.
 
-A mention that started nothing says so on the mention, and its author can start it from there. `launch:force` written after a mention also starts it, whoever sends the message:
-
-```text
-@codex launch:force
-```
+A mention that started nothing says so on the mention, and its author can start it from there. No text in a message starts an agent: the retired `launch:force` condition is ignored, so an agent cannot start another by writing it in a report.
 
 ### The first message of a new conversation
 

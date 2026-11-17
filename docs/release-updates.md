@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: `launch:force` is retired; only a send's launch request starts an Agent
+
+Every send that should start Agents already asks to (the composer, `xmatrix
+send --launch`, MCP `launch: true`, Norn and Page sends), so `launch:force` in
+a message's text no longer starts anything. It also closes a gap: an Agent's
+live reply carries no launch request, yet `@codex launch:force` written in it
+still started codex. Start on a mention's card and quota retries are
+unchanged. xMatrix's summon for a first message that named nobody is now
+`@<harness>` appended with `launch: true`; one written before this release
+and still undispatched shows Start on its card. The composer no longer offers
+or highlights `launch:force`; old messages keep parsing it as a condition.
+Hub, DB and Web. No schema migration. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: `/model` to a sleeping Agent takes effect when it wakes
 
 A `/model` written to an Agent that was asleep answered that it had no

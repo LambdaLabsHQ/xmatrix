@@ -530,7 +530,6 @@ function chipData(span: ComposerMentionSpan): Record<string, string> {
     "data-mention": "",
     "data-start": String(span.start),
     "data-kind": span.kind,
-    ...(span.forced ? { "data-forced": "true" } : {}),
     ...(span.invalid ? { "data-invalid": "true" } : {}),
   };
 }

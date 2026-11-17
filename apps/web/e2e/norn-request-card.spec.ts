@@ -104,7 +104,7 @@ test("everyone else reads whom it waits for, and afterwards how it ended", async
 });
 
 test("a request of an Agent reads as the request, without the Agent's copy of the task or how it answers", async ({ page }) => {
-  const asked = "@claude repo:acme/app launch:force\n\n**Request** `request:rabcdefgh23`";
+  const asked = "@claude repo:acme/app\n\n**Request** `request:rabcdefgh23`";
   const answering = "\n\n```text\nRecord why the next iOS build needs a device recording.\nKeep the whole task here.\n```\n\n"
     + "The request is from a program. End this turn with exactly one of these:\n\n- `xmatrix reply rabcdefgh23 '<answer>'` when it is done.";
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
@@ -133,7 +133,7 @@ test("a request's reference in a message reads as the request: what is asked, of
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
     channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
-    body: "@codex launch:force\n\n**Request** `request:rabcdefgh23` from a program. Your answer goes back to the program." }], hasMore: false });
+    body: "@codex\n\n**Request** `request:rabcdefgh23` from a program. Your answer goes back to the program." }], hasMore: false });
   await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
     channelId: CHANNEL.id, holder: "@codex", text: "Audit the day's merges\nand the changelog", state: "answered", reply: "nothing to fix" } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
@@ -151,7 +151,7 @@ test("a long task is read in full as paragraphs, not as a chip or a cut line", a
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [CHANNEL] });
   await fixtureJson(page, "history", `**/api/xmatrix/channels/${CHANNEL.id}/history**`, { messages: [{ messageId: "delivery",
     channelId: CHANNEL.id, sequence: 1, sentAt: E2E_NOW, from: XMATRIX,
-    body: "@codex launch:force\n\n**Request** `request:rabcdefgh23`" }], hasMore: false });
+    body: "@codex\n\n**Request** `request:rabcdefgh23`" }], hasMore: false });
   await fixtureJson(page, "request", "**/api/xmatrix/spaces/*/norn-requests/rabcdefgh23", { request: { ref: "rabcdefgh23",
     channelId: CHANNEL.id, holder: "@codex", text: `${first}\n\n${second}`, state: "open" } });
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
