@@ -48,3 +48,18 @@ test("one-time purchases are listed with their type and review state, and the re
     { app: BUNDLE, products: "app.beans.mega" }), /no In-App Purchase app\.beans\.mega/u));
   assert.deepEqual(writes(missing.calls), []);
 });
+
+test("a partial purchase catalog is disclosed and never used to select submissions", async () => {
+  const routes = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": {
+    data: [purchase("p-1", "app.beans.starter", "CONSUMABLE", "READY_TO_SUBMIT")],
+    links: { next: "https://api.appstoreconnect.apple.com/v1/apps/6760000001/inAppPurchasesV2?cursor=2" } } };
+  const shown = await run(routes, `@appstoreconnect:in_app_purchases:${BUNDLE}`);
+  assert.match(shown.value.summary, /list is incomplete/u);
+  for (const products of ["", "app.beans.starter", "app.beans.later"]) {
+    const refused = await withApple(routes, () => assert.rejects(ACTIONS.submit_in_app_purchases.execute({ credentials },
+      { app: BUNDLE, products }), /no purchases were submitted/u));
+    assert.deepEqual(writes(refused.calls), []);
+  }
+  const foreign = { ...routes, "GET /v1/apps/6760000001/inAppPurchasesV2": { data: [], links: { next: "https://evil.example/v1/apps" } } };
+  await assert.rejects(run(foreign, `@appstoreconnect:in_app_purchases:${BUNDLE}`), /outside its API/u);
+});

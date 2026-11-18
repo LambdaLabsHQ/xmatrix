@@ -50,7 +50,7 @@ export interface AppStoreConnectApi {
     /** Keep Apple's error text out of the receipt: the call carries review contact or sign-in details. */
     quiet?: boolean; accept?: string }): Promise<Record<string, unknown>>;
   /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
-  list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[] }>;
+  list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[]; next?: string }>;
   /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
   report(path: string, query: Record<string, string>, accept?: string): Promise<string | undefined>;
 }
@@ -200,9 +200,10 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
         if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return a list");
         rows.push(...response.data.flatMap((row) => appleResource(row) ?? []));
         included.push(...(Array.isArray(response.included) ? response.included : []).flatMap((row) => appleResource(row) ?? []));
-        next = text(record(response.links).next) || undefined;
+        const link = text(record(response.links).next);
+        next = link ? apiUrl(link).toString() : undefined;
       }
-      return { rows, included };
+      return { rows, included, ...(next ? { next } : {}) };
     },
   };
 }

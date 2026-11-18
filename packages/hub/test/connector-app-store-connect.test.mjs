@@ -4,12 +4,27 @@ import { test } from "node:test";
 
 import { getAppConnectorProvider } from "../src/app-connectors.ts";
 import { connectorActionCatalog } from "../src/connectors/action-catalog.ts";
-import { APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "../src/connectors/app-store-connect-api.ts";
+import { appStoreConnect, APP_STORE_CONNECT_SUBSCRIPTIONS, verifyAppStoreConnect } from "../src/connectors/app-store-connect-api.ts";
 import { receiveAppStoreConnectDelivery } from "../src/connectors/app-store-connect-events.ts";
 import { ACTIONS, APP, apps, BUNDLE, credentials, pair, pem, run, statement, version, versions, withApple, writes } from "./support/app-store-connect-double.mjs";
 
 const SPACE = "space-1";
 const env = { HUB_URL: "https://hub.test" };
+
+test("collection continuation remains explicit at the page budget", async () => {
+  const routes = { "GET /v1/apps": call => call.query.cursor
+    ? { data: [{ ...APP, id: "second" }] }
+    : { data: [APP], links: { next: "https://api.appstoreconnect.apple.com/v1/apps?cursor=2" } } };
+  const { value } = await withApple(routes, async () => {
+    const api = appStoreConnect(credentials);
+    const first = await api.list("/v1/apps", {}, 1);
+    assert.ok(first.next);
+    const rest = await api.list(first.next, {}, 1);
+    return [first, rest];
+  });
+  assert.deepEqual(value.map(page => page.rows.map(row => row.id)), [[APP.id], ["second"]]);
+  assert.equal(value[1].next, undefined);
+});
 
 test("every call carries a short-lived ES256 token Apple can verify and goes only to Apple's API", async () => {
   const { calls } = await withApple(apps, () => verifyAppStoreConnect(credentials));

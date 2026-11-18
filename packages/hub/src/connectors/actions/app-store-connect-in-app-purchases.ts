@@ -20,10 +20,10 @@ import { cell } from "./google-report";
 const READY = "READY_TO_SUBMIT";
 
 async function inAppPurchases(api: AppStoreConnectApi, appId: string) {
-  const { rows } = await api.list(`/v1/apps/${encodeURIComponent(appId)}/inAppPurchasesV2`,
+  const { rows, next } = await api.list(`/v1/apps/${encodeURIComponent(appId)}/inAppPurchasesV2`,
     { "fields[inAppPurchases]": "productId,name,inAppPurchaseType,state", limit: "200" }, 1);
-  return rows.map(row => ({ id: row.id, productId: text(row.attributes.productId), name: text(row.attributes.name),
-    type: text(row.attributes.inAppPurchaseType), state: text(row.attributes.state) || "UNKNOWN" }));
+  return { next, rows: rows.map(row => ({ id: row.id, productId: text(row.attributes.productId), name: text(row.attributes.name),
+    type: text(row.attributes.inAppPurchaseType), state: text(row.attributes.state) || "UNKNOWN" })) };
 }
 
 const appOnly = (statement: { target: string; text: string }) =>
@@ -31,13 +31,14 @@ const appOnly = (statement: { target: string; text: string }) =>
 
 export const APP_STORE_CONNECT_IN_APP_PURCHASE_ACTIONS: Record<string, ConnectorAction> = {
   in_app_purchases: appAction("read", appOnly, async ({ api, app, input }) => {
-    const rows = await inAppPurchases(api, app.id);
+    const { rows, next } = await inAppPurchases(api, app.id);
     const lines = rows.map(row => [cell(row.productId), cell(row.name), cell(row.type), cell(row.state)].join("\t"));
     return `One-time In-App Purchases of ${input.app}:\n` + quoteRetrievedText(lines.length
-      ? ["product id\tname\ttype\tstate", ...lines].join("\n") : "(none)");
+      ? ["product id\tname\ttype\tstate", ...lines].join("\n") : "(none)") + (next ? "\nApple returned more purchases; this list is incomplete." : "");
   }),
   submit_in_app_purchases: appAction("write", productsStatement, async ({ api, app, input }) => {
-    const rows = await inAppPurchases(api, app.id);
+    const { rows, next } = await inAppPurchases(api, app.id);
+    if (next) throw new ProviderRequestError(409, "Apple returned more In-App Purchases than this action can inspect; no purchases were submitted");
     const named = input.products ? input.products.split(" ") : [];
     const missing = named.filter(id => !rows.some(row => row.productId === id));
     if (missing.length) throw new ProviderRequestError(404, `${input.app} has no In-App Purchase ${missing.join(", ")}; in_app_purchases lists them`);
