@@ -632,6 +632,7 @@ export {
 export {
   readBoundedStream,
 } from "./read-bounded-stream.js";
+export { SettledCache } from "./settled-cache.js";
 export * from "./setup-intent.js";
 export * from "./onboarding-message.js";
 export * from "./event-card.js";
