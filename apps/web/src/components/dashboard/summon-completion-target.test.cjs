@@ -93,6 +93,16 @@ test("new field syntax searches exact fields as well as ordinary @ text", () => 
   assert.deepEqual(filterLaunchCandidates(choices, "mode:persistent"), []);
 });
 
+test("a fresh @ omits auto when no Agent can take work, and brings it back when one can", () => {
+  const none = autoLaunchCandidates(targets, {}, []);
+  assert.equal(none.some(candidate => candidate.id === "launch:auto"), false);
+  assert.equal(summonStartCandidates(none).some(candidate => candidate.name === "auto"), false);
+  const disabled = autoLaunchCandidates(targets, {}, [{ ...registrations[0], state: "disabled" }]);
+  assert.equal(disabled.some(candidate => candidate.id === "launch:auto"), false);
+  const ready = summonStartCandidates(autoLaunchCandidates(targets, {}, registrations));
+  assert.equal(ready[0].name, "auto");
+});
+
 test("a fresh @ offers only runtimes; conditions wait for the summon", () => {
   const start = summonStartCandidates(autoLaunchCandidates(targets, {}, registrations));
   assert.deepEqual(start.map(candidate => candidate.name), ["auto", "@codex"]);
