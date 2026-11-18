@@ -4,7 +4,7 @@ import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
-  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaObservation, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
+  parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -23,7 +23,7 @@ import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { handoffResumeSource } from "./handoff-resume-source.js";
 import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
-  registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage,
+  registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage, registrationQuotaVerdict,
   type RegistrationUsageLimit } from "./agent-registration-quota-probe.js";
 
 interface RebornRegistration {
@@ -456,8 +456,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     const row = runtimeModel ? catalog.find(option => routingModelOptionNamed(option, runtimeModel))
       : catalog.find(option => option.isDefault);
     const now = Date.now();
-    const quota = row && routingQuotaObservation(facts.observations?.quota?.usage, now, { model: row });
-    return quota !== undefined && quota.value > 0;
+    return row !== undefined && routingQuotaVerdict(facts.observations?.quota?.usage, now, { model: row }).state === "open";
   }
 
   /**
@@ -686,19 +685,19 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       const pool = readings.get(registrationTriple(candidate));
       if (!pool) return [];
       const catalog = routingModelCatalogObservation(candidate.catalog_models, candidate.catalog_observed_at, now)?.value ?? [];
-      const readingOf = (model: string) => registrationQuotaReading(pool,
+      const readingOf = (model: string) => registrationQuotaVerdict(pool,
         model ? catalog.find(option => routingModelOptionNamed(option, model)) : catalog.find(option => option.isDefault));
       const last = readingOf(typeof candidate.model === "string" ? candidate.model : "");
       // A model a person chose for its wake that has since read as used up
       // would strand it until that model's reset: it wakes on the model it
       // last ran instead, when that one has quota.
       const chosen = typeof candidate.wake_model === "string" ? readingOf(candidate.wake_model) : undefined;
-      if (chosen && chosen.remainingPercent <= 0 && !(last && last.remainingPercent <= 0)) {
-        chosenUsedUp.set(String(candidate.instance_id), { model: String(candidate.wake_model), resetsAt: chosen.expiresAt });
+      if (chosen?.state === "usedUp" && last.state !== "usedUp") {
+        chosenUsedUp.set(String(candidate.instance_id), { model: String(candidate.wake_model), resetsAt: chosen.until });
         return [];
       }
       const reading = chosen ?? last;
-      return reading && reading.remainingPercent <= 0 ? [String(candidate.instance_id)] : [];
+      return reading.state === "usedUp" ? [String(candidate.instance_id)] : [];
     }));
     return { usedUp, chosenUsedUp };
   }

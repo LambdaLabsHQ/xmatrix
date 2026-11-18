@@ -1,5 +1,5 @@
 import { parseAgentControlCommands as parseProductAgentControlCommands, routingModelEffortOptions, routingModelOptionNamed,
-  routingQuotaObservation, type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
+  routingQuotaVerdict, type AgentControlCommand as ProductAgentControlCommand, type AgentControlOutcomeRecord,
   type AgentControlQuotaExhausted, type AgentControlUsedUpOption,
   type AgentControlKind as ProductAgentControlKind, type RoutingModelOption } from "@xmatrix/protocol";
 export { parseProductAgentControlCommands };
@@ -63,14 +63,14 @@ function utcMinute(at: string): string {
 /** When the provider quota of one catalog model is back, while a current
  * reading shows it used up; undefined while it has quota or nothing was read. */
 function usedUpUntil(target: ProductAgentSwitchTarget, row: RoutingModelOption, now: number): string | undefined {
-  const quota = routingQuotaObservation(target.usage, now, { model: row });
-  return quota !== undefined && quota.value <= 0 && Date.parse(quota.expiresAt) > now ? quota.expiresAt : undefined;
+  const verdict = routingQuotaVerdict(target.usage, now, { model: row });
+  return verdict.state === "usedUp" ? verdict.until : undefined;
 }
 
 /** The catalog models with quota left by a current reading, the runtime's
  * default first. Empty without a reading: nothing is promised unread. */
 function modelsWithQuota(target: ProductAgentSwitchTarget, now: number): string[] {
-  if (routingQuotaObservation(target.usage, now) === undefined) return [];
+  if (routingQuotaVerdict(target.usage, now).state === "unknown") return [];
   return (target.modelCatalog ?? []).filter(row => !usedUpUntil(target, row, now))
     .sort((left, right) => Number(right.isDefault === true) - Number(left.isDefault === true)).map(row => row.model);
 }
@@ -80,7 +80,7 @@ function modelsWithQuota(target: ProductAgentSwitchTarget, now: number): string[
  * not read. A complete reading that lists no window for a scope has told it:
  * the provider holds no such limit against the account now. */
 function modelQuotaUnread(target: ProductAgentSwitchTarget, row: RoutingModelOption, now: number): boolean {
-  if (routingQuotaObservation(target.usage, now, { model: row }) === undefined) return true;
+  if (routingQuotaVerdict(target.usage, now, { model: row }).state === "unknown") return true;
   if (!(row.quotaScopes ?? []).length) return false;
   return !target.usage || typeof target.usage !== "object" ||
     !Array.isArray((target.usage as { scopedQuotaUsages?: unknown }).scopedQuotaUsages);
@@ -139,7 +139,7 @@ export async function decideProductAgentSwitch(input: {
     // there, and the model can be written after `model:` as it is.
     const elsewhere = row && target!.harness && !/[\s"]/u.test(row.model) && !/"/u.test(target!.harness)
       ? (target!.elsewhere ?? []).filter(machine => !/"/u.test(machine.machineName) &&
-        (routingQuotaObservation(machine.usage, now, { model: row })?.value ?? 0) > 0)
+        routingQuotaVerdict(machine.usage, now, { model: row }).state === "open")
         .slice(0, 3).map(machine => ({ machineName: machine.machineName, harness: target!.harness! })) : [];
     return { status: "error",
       message: (resetsAt

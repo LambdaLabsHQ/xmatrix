@@ -1,6 +1,6 @@
 import {
   AGENT_QUOTA_RETRY_NOTICE_KIND,
-  routingQuotaObservation,
+  routingQuotaVerdict,
   type QuotaRetryModel,
   type QuotaRetryRegistration,
 } from "@xmatrix/protocol";
@@ -50,7 +50,7 @@ export { quotaRetryRepository };
 /** The headroom a quota retry's model has on one registration's reading: the
  * account windows and the scoped windows of the model's `quotaScopes`. */
 function retryModelQuota(usage: RegistrationQuotaUsage | undefined, model: QuotaRetryModel | undefined, now: number) {
-  return routingQuotaObservation(usage, now, model ? { model } : undefined);
+  return routingQuotaVerdict(usage, now, model ? { model } : undefined);
 }
 
 /** A stopped Instance's turn whose quota is used up, offered to resume once it is back. */
@@ -113,9 +113,9 @@ export async function offerUsageLimitRecovery(env: Env, input: UsageLimitRecover
   // A handoff that found no successor offers to wait only on quota read as
   // used up. A turn refused for its model's quota is offered the retry
   // whatever a newer reading says: its readiness settles it.
-  if (!input.model && (!quota || quota.value > 0)) return;
+  if (!input.model && quota.state !== "usedUp") return;
   // The hold or reading that stopped the Instance: only a newer reading is news.
-  const refusedThrough = quota?.observedAt ?? new Date(now).toISOString();
+  const refusedThrough = quota.state === "unknown" ? new Date(now).toISOString() : quota.observedAt;
   const id = await repository.offer({
     channelId: input.channelId,
     actorUserId: input.actorUserId,
@@ -178,10 +178,9 @@ async function quotaRetryReadiness(
   const candidates = keys.map((key) => {
     const usage = usages.get(registrationQuotaKey(key));
     const quota = retryModelQuota(usage, key.model, now);
-    const blocked = quota !== undefined && quota.value <= 0;
-    return { ready: quota !== undefined && newer(quota.observedAt) && quota.value > 0,
-      nextCheckAt: blocked ? Date.parse(quota.expiresAt) + 1_000 : null,
-      accountOpen: blocked && (routingQuotaObservation(usage, now)?.value ?? 100) > 0 };
+    return { ready: quota.state === "open" && newer(quota.observedAt),
+      nextCheckAt: quota.state === "usedUp" ? Date.parse(quota.until) + 1_000 : null,
+      accountOpen: quota.state === "usedUp" && routingQuotaVerdict(usage, now).state !== "usedUp" };
   });
   const times = candidates.flatMap((candidate) => candidate.nextCheckAt === null ? [] : [candidate.nextCheckAt]);
   return {
@@ -203,7 +202,7 @@ async function continuationModelSwitch(env: Env, channelId: string, row: QuotaRe
   if (!facts) return undefined;
   const now = Date.now();
   const own = retryModelQuota(facts.observations?.quota?.usage, key.model, now);
-  return own && own.value <= 0 ? quotaRecoveryModel(facts, now, key.model) : undefined;
+  return own.state === "usedUp" ? quotaRecoveryModel(facts, now, key.model) : undefined;
 }
 async function retryLaunch(
   env: Env,

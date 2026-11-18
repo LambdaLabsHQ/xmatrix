@@ -1,5 +1,5 @@
 import { currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount, quotaAccountBalance,
-  routingQuotaAccountPartExpiry, routingQuotaObservation, routingQuotaProbeObservations, routingQuotaRecord,
+  routingQuotaAccountPartExpiry, routingQuotaObservation, routingQuotaProbeObservations, routingQuotaVerdict, type RoutingQuotaVerdict, routingQuotaRecord,
   routingQuotaUsageWindows, type AgentRegistrationLiveState, type LlmQuotaAccount, type LlmUsage,
   type RoutingModelOption, type RoutingQuotaProbeRequest, type RoutingQuotaRecord,
   type RoutingQuotaWindow } from "@xmatrix/protocol";
@@ -80,6 +80,14 @@ export function registrationQuotaReading(row: Record<string, unknown> | undefine
 
 /** The headroom shown for a pool: the account's own, or, when no account
  * window counts, that of its least used scope (the best model it can run). */
+/** Whether the joined reading leaves one model (its catalog row), or the
+ * account without one, any quota (`routingQuotaVerdict`). */
+export function registrationQuotaVerdict(row: Record<string, unknown> | undefined,
+  model?: Pick<RoutingModelOption, "quotaScopes">): RoutingQuotaVerdict {
+  const now = Date.now();
+  return routingQuotaVerdict(registrationQuotaUsage(row, now), now, model ? { model } : undefined);
+}
+
 export function registrationShownQuotaReading(row: Record<string, unknown> | undefined):
   ReturnType<typeof registrationQuotaReading> {
   const account = registrationQuotaReading(row);
