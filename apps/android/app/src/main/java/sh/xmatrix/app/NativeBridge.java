@@ -16,12 +16,12 @@ import org.json.JSONObject;
 
 public final class NativeBridge {
   private static final String CHANNEL_ID = "xmatrix-default";
-  private final MainActivity activity;
+  private final WebAppActivity activity;
   final PlayBilling playBilling;
   /** The page waiting for an in-place sign-in to return; one at a time. */
   private Consumer<String> pendingSignIn;
 
-  NativeBridge(MainActivity activity) {
+  NativeBridge(WebAppActivity activity) {
     this.activity = activity;
     this.playBilling = new PlayBilling(activity);
     ensureNotificationChannel();
@@ -51,6 +51,14 @@ public final class NativeBridge {
           break;
         case "googlePlayManage":
           playBilling.manage(payload);
+          value = JSONObject.NULL;
+          break;
+        case "pendingAppLink":
+          String appLink = activity.pendingAppLink();
+          value = appLink == null ? JSONObject.NULL : appLink;
+          break;
+        case "appLinkHandled":
+          activity.appLinkHandled(payload.optBoolean("opened", false));
           value = JSONObject.NULL;
           break;
         case "openExternal":
@@ -171,7 +179,7 @@ public final class NativeBridge {
 
     String url = payload.optString("url", "");
     String channelId = payload.optString("channelId", "");
-    Intent intent = new Intent(activity, MainActivity.class);
+    Intent intent = new Intent(activity, WebAppActivity.class);
     intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
     if (!url.isEmpty()) {
       intent.setData(Uri.parse(url));

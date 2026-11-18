@@ -94,4 +94,57 @@ public final class AppConfigurationTest {
     assertFalse(AppConfiguration.isNativeLoginResume("xmatrix", "channel", null));
     assertFalse(AppConfiguration.isNativeLoginResume("xmatrix", "login", "auth_error=denied"));
   }
+
+  @Test
+  public void anotherAppsLinkReachesThePageOnlyAsACheckedAddress() {
+    String web = "xmatrix.sh";
+    assertEquals("https://xmatrix.sh/app?channel=channel:personal_1",
+      AppConfiguration.entryLink(web, "xmatrix", "channel", "/channel:personal_1", null));
+    assertEquals("https://xmatrix.sh/app?channel=abc",
+      AppConfiguration.entryLink(web, "xmatrix", "channel", "/abc", "next=https://evil.example"));
+    assertEquals("xmatrix://login", AppConfiguration.entryLink(web, "xmatrix", "login", null, null));
+    assertEquals("https://xmatrix.sh/login?auth_error=denied",
+      AppConfiguration.entryLink(web, "xmatrix", "login", null, "auth_error=denied"));
+    // The device approval screen cannot be opened with another app's code.
+    assertEquals("xmatrix://login",
+      AppConfiguration.entryLink(web, "xmatrix", "login", null, "device_code=d&user_code=ATTACKER"));
+    assertEquals("xmatrix://login",
+      AppConfiguration.entryLink(web, "xmatrix", "login", null, "cli_callback=http://evil.example"));
+
+    String[][] plainOpens = {
+      { "https", "xmatrix.sh", "/app", null },
+      { "https", "evil.example", "/", null },
+      { "javascript", null, null, null },
+      { "file", "", "/data/data/sh.xmatrix.app/app_webview/Default/Cookies", null },
+      { "xmatrix", "channel", "/../../login", null },
+      { "xmatrix", "channel", "/a'+alert(1)+'", null },
+      { "xmatrix", "channel", "", null },
+      { "xmatrix", "connect", "/oauth", "state=s&code=c" },
+      { "xmatrix", "other", "/", "next=https://evil.example" },
+    };
+    for (String[] link : plainOpens) {
+      assertEquals(String.join(" ", String.valueOf(link[0]), String.valueOf(link[1]), String.valueOf(link[2])),
+        null, AppConfiguration.entryLink(web, link[0], link[1], link[2], link[3]));
+    }
+  }
+
+  @Test
+  public void aSignInReturnKeepsOnlyWhatTheHubSends() {
+    assertEquals("xmatrix://auth?code=c0de&new_account=1&state=s-1",
+      AppConfiguration.entryLink("xmatrix.sh", "xmatrix", "auth", null, "code=c0de&new_account=1&state=s-1"));
+    assertEquals("error=sign_in_required&state=s", AppConfiguration.signInCallbackQuery("error=sign_in_required&state=s"));
+    assertEquals("code=c&state=s", AppConfiguration.signInCallbackQuery("code=c&next=https://evil.example&state=s"));
+    for (String refused : new String[] { null, "", "code=c", "state=a&state=b", "code=c&state=a'b", "code=&state=s" }) {
+      assertEquals(String.valueOf(refused), null, AppConfiguration.signInCallbackQuery(refused));
+    }
+  }
+
+  @Test
+  public void anAddressWhoseHostParsersCouldReadDifferentlyIsRefused() {
+    assertTrue(AppConfiguration.isUnambiguousAddress("https://xmatrix.sh/app?next=a@b.example#c@d"));
+    assertFalse(AppConfiguration.isUnambiguousAddress("https://evil.example\\@xmatrix.sh/app"));
+    assertFalse(AppConfiguration.isUnambiguousAddress("https://evil.example@xmatrix.sh/app"));
+    assertFalse(AppConfiguration.isUnambiguousAddress("https://xmatrix.sh\\.evil.example/"));
+    assertFalse(AppConfiguration.isUnambiguousAddress(null));
+  }
 }

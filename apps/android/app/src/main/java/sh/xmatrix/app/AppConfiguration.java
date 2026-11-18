@@ -20,6 +20,9 @@ final class AppConfiguration {
   static final String CLI_INSTALL_URL = "https://xmatrix.sh/api/cli/install";
   /** The one Hub that the beta and stable Webs both sign in through. */
   private static final String HUB_HOST = "xmatrix-hub.xmatrix.sh";
+  private static final Pattern LOGIN_ERROR = Pattern.compile("auth_error=[a-z0-9_]{1,64}");
+  private static final Set<String> SIGN_IN_CALLBACK_PARAMS = Set.of("code", "state", "error", "new_account");
+  private static final Pattern SIGN_IN_CALLBACK_VALUE = Pattern.compile("[A-Za-z0-9._~%+-]{1,2048}");
 
   private AppConfiguration() {}
 
@@ -52,7 +55,28 @@ final class AppConfiguration {
   }
 
   static boolean isTrustedNavigation(Uri uri) {
-    return uri != null && isTrustedNavigation(WEB_HOST, uri.getScheme(), uri.getHost(), BuildConfig.DEBUG);
+    return uri != null
+      && isUnambiguousAddress(uri.toString())
+      && isTrustedNavigation(WEB_HOST, uri.getScheme(), uri.getHost(), BuildConfig.DEBUG);
+  }
+
+  /**
+   * Android's parser and the WebView's can disagree on the host of an address
+   * with a backslash or user info (`https://evil.example\\@xmatrix.sh`).
+   */
+  static boolean isUnambiguousAddress(String address) {
+    if (address == null || address.indexOf('\\') >= 0) {
+      return false;
+    }
+    int start = address.indexOf("://");
+    if (start < 0) {
+      return false;
+    }
+    int end = start + 3;
+    while (end < address.length() && "/?#".indexOf(address.charAt(end)) < 0) {
+      end++;
+    }
+    return address.substring(start + 3, end).indexOf('@') < 0;
   }
 
   static boolean isTrustedNavigation(String webHost, String scheme, String host, boolean debug) {
@@ -139,35 +163,67 @@ final class AppConfiguration {
     if (!APP_SCHEME.equalsIgnoreCase(uri.getScheme())) {
       return uri.toString();
     }
+    return "https://" + WEB_HOST + deepLinkPath(uri.getHost(), uri.getPath(), uri.getEncodedQuery());
+  }
 
-    String host = uri.getHost() == null ? "" : uri.getHost();
-    String path = uri.getPath() == null ? "" : uri.getPath();
-    String query = uri.getEncodedQuery();
-
-    String mappedPath;
-    if ("channel".equals(host)) {
-      String channelId = path.startsWith("/") ? path.substring(1) : path;
-      Uri.Builder builder = Uri.parse(START_URL).buildUpon().path("/app");
-      if (!channelId.isEmpty()) {
-        builder.appendQueryParameter("channel", channelId);
-      }
-      if (query != null && !query.isEmpty()) {
-        builder.encodedQuery(builder.build().getEncodedQuery() == null
-          ? query
-          : builder.build().getEncodedQuery() + "&" + query);
-      }
-      return builder.build().toString();
-    } else if ("login".equals(host)) {
-      mappedPath = "/login";
-    } else {
-      mappedPath = "/app";
+  /**
+   * Where an `xmatrix://` link lands. It is built only from values checked
+   * here: whatever else a link carries came from another app and is dropped.
+   */
+  static String deepLinkPath(String host, String path, String query) {
+    if ("channel".equalsIgnoreCase(host)) {
+      String channelId = path == null ? "" : path.replaceFirst("^/", "");
+      return PushMessaging.isConversationId(channelId) ? "/app?channel=" + channelId : "/app";
     }
-
-    Uri.Builder builder = Uri.parse(START_URL).buildUpon().path(mappedPath);
-    if (query != null && !query.isEmpty()) {
-      builder.encodedQuery(query);
+    if ("login".equalsIgnoreCase(host)) {
+      String authError = loginError(query);
+      return authError == null ? "/login" : "/login?auth_error=" + authError;
     }
-    return builder.build().toString();
+    return "/app";
+  }
+
+  private static String loginError(String query) {
+    return query != null && LOGIN_ERROR.matcher(query).matches() ? query.substring("auth_error=".length()) : null;
+  }
+
+  /**
+   * What the app's door passes on from another app, or null for a plain open.
+   * A sign-in return and the bare login return stay `xmatrix://` links, which
+   * the page's activity answers without navigating; the rest become its Web.
+   */
+  static String entryLink(String webHost, String scheme, String host, String path, String query) {
+    if (!APP_SCHEME.equalsIgnoreCase(scheme) || host == null) {
+      return null;
+    }
+    if ("auth".equalsIgnoreCase(host)) {
+      String callback = signInCallbackQuery(query);
+      return callback == null ? null : SIGN_IN_CALLBACK + "?" + callback;
+    }
+    if ("login".equalsIgnoreCase(host)) {
+      return loginError(query) == null ? "xmatrix://login" : "https://" + webHost + deepLinkPath(host, path, query);
+    }
+    String target = deepLinkPath(host, path, query);
+    return target.equals("/app") ? null : "https://" + webHost + target;
+  }
+
+  /** Only what the Hub's sign-in return carries, each once; without its state it is no return. */
+  static String signInCallbackQuery(String query) {
+    if (query == null) {
+      return null;
+    }
+    LinkedHashSet<String> names = new LinkedHashSet<>();
+    StringBuilder kept = new StringBuilder();
+    for (String pair : query.split("&")) {
+      int equals = pair.indexOf('=');
+      String name = equals < 0 ? pair : pair.substring(0, equals);
+      if (!SIGN_IN_CALLBACK_PARAMS.contains(name)) continue;
+      String value = equals < 0 ? "" : pair.substring(equals + 1);
+      if (!names.add(name) || !SIGN_IN_CALLBACK_VALUE.matcher(value).matches()) {
+        return null;
+      }
+      kept.append(kept.length() == 0 ? "" : "&").append(name).append('=').append(value);
+    }
+    return names.contains("state") ? kept.toString() : null;
   }
 
   /** The address an in-place sign-in returns the app to, with its code. */

@@ -64,6 +64,8 @@ The Android WebView loads the live Web of the build's own channel, matching iOS 
 
 The Android native bridge is registered before application JavaScript runs. AndroidX WebKit exposes it only to the trusted xMatrix origins, and native calls are accepted only from the main frame. Devices with an Android System WebView too old for the document-start message bridge show an update-required screen instead of falling back to a broader JavaScript interface.
 
+The WebView lives in `WebAppActivity`, which is never exported. `MainActivity` is the only exported activity: it shows nothing, keeps the launcher component stable, and forwards only the links `AppConfiguration.entryLink` accepts. Links are never written into evaluated script; the page collects them over the bridge.
+
 `main` runs change-selected Android validation, which publishes no APK/AAB
 and uploads nothing to Play. Development testing uses local builds or a beta
 release.

@@ -3,22 +3,26 @@ package sh.xmatrix.app;
 import android.webkit.WebView;
 import java.util.function.Consumer;
 
-/** Hands a notification's or link's address to the running page, which answers whether it opened it. */
+/**
+ * Tells the running page a link is waiting. The script is constant: the page
+ * collects the address over the origin-checked bridge, so nothing an Intent
+ * carried is ever evaluated as script.
+ */
 final class WebAppLinks {
-  static void open(WebView webView, String url, Consumer<Boolean> callback) {
+  static final String ANNOUNCE_SCRIPT = "(() => {"
+    + "const bridge=window.xmatrixDesktop;"
+    + "if(!bridge||bridge.client!=='android'||typeof bridge.__openPendingAppLink!=='function')return false;"
+    + "bridge.__openPendingAppLink();"
+    + "return true;"
+    + "})()";
+
+  /** Answers whether the page can collect the link. */
+  static void announce(WebView webView, Consumer<Boolean> callback) {
     try {
-      webView.evaluateJavascript(openScript(url), result -> callback.accept(WebBackNavigation.wasHandled(result)));
+      webView.evaluateJavascript(ANNOUNCE_SCRIPT, result -> callback.accept(WebBackNavigation.wasHandled(result)));
     } catch (RuntimeException error) {
       callback.accept(false);
     }
-  }
-
-  static String openScript(String url) {
-    return "(() => {"
-      + "const bridge=window.xmatrixDesktop;"
-      + "if(!bridge||bridge.client!=='android'||typeof bridge.__openAppLink!=='function')return false;"
-      + "try{return bridge.__openAppLink(" + BridgeScript.quote(url) + ")===true;}catch(error){console.error('Android app link failed',error);return false;}"
-      + "})()";
   }
 
   private WebAppLinks() {}
