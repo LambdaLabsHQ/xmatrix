@@ -76,7 +76,7 @@ test("a notification has at most eight simultaneous device deliveries and visits
   assert.equal(new Set(started).size, 25);
 });
 
-test("concurrent FCM sends share one refresh; rejected grants retry and a rotated key gets a new grant", async (t) => {
+test("one batch's FCM sends share one refresh, later batches reuse its token; rejected grants retry and a rotated key gets a new grant", async (t) => {
   // Cryptography has independent signature tests. Here every caller reaches
   // the asynchronous token request together, without CPU timing assumptions.
   t.mock.method(crypto.subtle, "importKey", async () => ({}));
@@ -93,8 +93,14 @@ test("concurrent FCM sends share one refresh; rejected grants retry and a rotate
     return new Response(null, { status: 200 });
   };
   const config = { ...account, clientEmail: "coalesced@example.test" };
-  const send = identity => sendFcm({ config: identity, deviceToken: "token", title: "t", body: "b", data: {}, collapseKey: "c", fetch: request });
-  await Promise.all(Array.from({ length: 12 }, () => send(config)));
+  const send = (identity, grants) => sendFcm({ config: identity, deviceToken: "token", title: "t", body: "b", data: {},
+    collapseKey: "c", fetch: request, grants });
+  const batch = new Map();
+  await Promise.all(Array.from({ length: 12 }, () => send(config, batch)));
+  assert.equal(grants, 1);
+  assert.equal(batch.size, 0, "a settled grant leaves nothing in flight");
+  // Another request never awaits this one's grant in flight (HUB-DJ); once settled, it reuses the token.
+  await Promise.all([send(config), send(config)]);
   assert.equal(grants, 1);
   assert.deepEqual(new Set(authorizations), new Set(["Bearer grant-1"]));
   await send({ ...config, privateKey: generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }) });

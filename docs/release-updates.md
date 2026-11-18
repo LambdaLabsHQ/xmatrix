@@ -13,6 +13,19 @@ conversation id, the login return with an `auth_error`, and the sign-in return's
 usual. The page now collects a waiting link over the origin-checked bridge, so
 no link is evaluated as script. Android only. Recovery is a CI-validated Android
 release reverting the change.
+## Unreleased: no Hub cache shares a read in flight across requests
+
+#1785 fixed the sign-in key cache (HUB-DJ), but the same pattern lived on in
+three more places: a page's embedded GitHub files, the Android push token and
+the diagnostics hashing key each kept a promise at module level that another
+request could await. A Worker request cannot settle on a promise another
+request created, so when the first request ended early, everyone waiting on its
+read failed: an embed showed an error, or a push batch dropped its Android
+sends. These caches now go through one `SettledCache` (`@xmatrix/protocol`),
+which keeps only finished values. The sign-in key cache and the database's Space
+placement hints use it as well. One push batch's Android sends still share one
+token grant. A source scan (`no-isolate-shared-promise.test.mjs`) fails on any
+module-level variable whose type holds a promise. Hub only.
 
 ## Unreleased: a summon with no agent connected says how to bring one in
 

@@ -1,4 +1,5 @@
 import type { QueryResultRow } from "pg";
+import { SettledCache } from "@xmatrix/protocol";
 
 import type { DatabaseRequestContext } from "./context.js";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
@@ -52,37 +53,27 @@ function boundedSpaceId(value: unknown): string {
  * placements are kept, so a Space that is moving is always read afresh.
  */
 export class SpacePlacementHints {
-  private readonly entries = new Map<string, { value: SpacePlacement; expiresAt: number }>();
+  private readonly entries: SettledCache<string, SpacePlacement>;
 
   constructor(
-    private readonly maximumEntries = 4_096,
+    maximumEntries = 4_096,
     private readonly ttlMs = 5 * 60_000,
   ) {
     if (!Number.isSafeInteger(maximumEntries) || maximumEntries < 1 ||
         !Number.isSafeInteger(ttlMs) || ttlMs < 1) {
       throw new DatabaseContractError("Space placement hint bounds are invalid");
     }
+    this.entries = new SettledCache(maximumEntries);
   }
 
   get(spaceId: string): SpacePlacement | undefined {
-    const entry = this.entries.get(spaceId);
-    if (!entry) return undefined;
-    this.entries.delete(spaceId);
-    if (entry.expiresAt <= Date.now()) return undefined;
-    this.entries.set(spaceId, entry);
-    return entry.value;
+    return this.entries.get(spaceId);
   }
 
   /** Keeps a writable placement; anything else forgets the Space. */
   remember(value: SpacePlacement): void {
-    this.entries.delete(value.spaceId);
-    if (value.state !== "active" || value.targetShardId !== null) return;
-    this.entries.set(value.spaceId, { value, expiresAt: Date.now() + this.ttlMs });
-    while (this.entries.size > this.maximumEntries) {
-      const oldest = this.entries.keys().next().value as string | undefined;
-      if (oldest === undefined) break;
-      this.entries.delete(oldest);
-    }
+    if (value.state !== "active" || value.targetShardId !== null) this.entries.delete(value.spaceId);
+    else this.entries.set(value.spaceId, value, Date.now() + this.ttlMs);
   }
 
   forget(spaceId: string): void {
