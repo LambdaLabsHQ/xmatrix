@@ -56,7 +56,7 @@ test("automatic read failures retain their phase and origin once, with a content
     {phase:"message",kind:"http_status",status:"502",replies:[()=>Response.json({error:"private-upstream-error"},{status:502})]},
     {phase:"message",kind:"proxy_contract",status:"502",replies:[()=>new Response("private-invalid-json")]},
     {phase:"message",kind:"provider_status",status:"502",replies:[()=>Response.json({status:502,data:{error:{message:"private-gmail-error"}}})]},
-    {phase:"message",kind:"response_too_large",status:"502",replies:[()=>Response.json({status:200,data:{body:"x".repeat(270000)}})]},
+    {phase:"message",kind:"response_too_large",status:"502",replies:[()=>Response.json({status:200,data:{body:"x".repeat(4*1024*1024)}})]},
     {phase:"external_body",kind:"response_too_large",status:"502",replies:[()=>Response.json({status:200,data:external}),
       ()=>Response.json({status:200,data:{data:"x".repeat(3*1024*1024)}})]},
     {phase:"format",kind:"message_contract",status:"502",replies:[()=>Response.json({status:200,data:{}})]},
