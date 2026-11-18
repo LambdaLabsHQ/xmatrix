@@ -351,3 +351,24 @@ test("a message's side interpretation runs in the background, never holding its 
   assert.equal(scheduled.length, 1, "the About for a first message is handed to the background scheduler");
   await scheduled[0];
 });
+
+test("a summon from a person with no agent at all is answered with how to bring one in, not a launch error", async () => {
+  const input = { env: {}, channelId: "channel", messageId: "summon",
+    senderKind: "user", senderId: "human", actorUserId: "human", body: "@codex 帮我看看这个项目" };
+  const rejected = [{ code: "registration_not_found", sourceMention: "@codex" }];
+  const notices = [], guided = [];
+  const dispatch = (hasAgents) => ({ registration: async () => ({ selectionCount: 1, prepared: [], rejected }),
+    agentless: async (_env, value) => { guided.push(value); return !hasAgents; } });
+  assert.equal(await dispatchProductMessageLaunches(input, dispatch(false), async value => notices.push(value)), true);
+  assert.deepEqual(guided, [{ channelId: "channel", messageId: "summon", body: input.body, actorUserId: "human", summon: true }]);
+  assert.equal(notices.length, 0, "the bring-agents step answers the summon; no registration_not_found notice");
+  // Someone who has agents, none of which this summon names, still learns why nothing started.
+  assert.equal(await dispatchProductMessageLaunches(input, dispatch(true), async value => notices.push(value)), true);
+  assert.equal(notices.length, 1);
+  assert.match(notices[0].body, /registration_not_found/);
+  // An Agent's summon is not a person to guide.
+  guided.length = 0; notices.length = 0;
+  await dispatchProductMessageLaunches({ ...input, senderKind: "agent" }, dispatch(false), async value => notices.push(value));
+  assert.equal(guided.length, 0);
+  assert.equal(notices.length, 1);
+});

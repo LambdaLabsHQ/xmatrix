@@ -72,7 +72,11 @@ is how to connect one.
   page or passage discussion) that finds no agent to start
   (`registration_not_found`) is not met with silence: when the Space has no
   enabled agent at all, xMatrix replies to it with the `connect-agents` step,
-  written once per conversation (`system:connect-agents:<channel id>`). The
+  written once per conversation (`system:connect-agents:<channel id>`). A
+  summon such as `@codex …` from a person with no enabled agent gets the same
+  step in place of the `registration_not_found` launch failure, written once
+  per message (`system:connect-agents:<channel id>:<message id>`); someone who
+  has agents, none of which the summon names, still gets the failure. The
   Web draws one line saying nothing could answer it yet, then the same three
   setup steps as `bring-agents`. Its fallback text is in the person's saved
   display locale for the Space, else Chinese when the message has Han
