@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { androidDir, androidVersion, rootDir, splitTasks, walk } from "./android-common.mjs";
+import { runGradleWithRetry } from "./android-gradle-retry.mjs";
 
 const runnerTemp = process.env.RUNNER_TEMP || os.tmpdir();
 const validationTasks = [
@@ -116,28 +117,39 @@ function gradleArgs(task) {
   return args;
 }
 
-function runGradle(wrapper, task) {
-  const args = gradleArgs(task);
+function runGradleOnce(wrapper, task, { refresh }) {
+  const args = [...gradleArgs(task), ...(refresh ? ["--refresh-dependencies"] : [])];
   console.log(`Running ${path.basename(wrapper)} ${redactedArgs(args).join(" ")}`);
 
   const command = process.platform === "win32" ? "cmd.exe" : wrapper;
   const commandArgs = process.platform === "win32" ? ["/d", "/s", "/c", wrapper, ...args] : args;
-  const result = spawnSync(command, commandArgs, {
-    cwd: androidDir,
-    env: process.env,
-    stdio: "inherit",
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, {
+      cwd: androidDir,
+      env: process.env,
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+    let output = "";
+    child.stdout.on("data", (chunk) => {
+      process.stdout.write(chunk);
+      output += chunk;
+    });
+    child.stderr.on("data", (chunk) => {
+      process.stderr.write(chunk);
+      output += chunk;
+    });
+    child.on("error", (error) => reject(new Error(`Failed to start Gradle wrapper: ${error.message}`)));
+    child.on("close", (status, signal) => {
+      if (signal) reject(new Error(`Gradle wrapper terminated by signal ${signal}`));
+      else resolve({ status: status ?? 1, output });
+    });
   });
+}
 
-  if (result.error) {
-    throw new Error(`Failed to start Gradle wrapper: ${result.error.message}`);
-  }
-
-  if (result.signal) {
-    throw new Error(`Gradle wrapper terminated by signal ${result.signal}`);
-  }
-
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+async function runGradle(wrapper, task) {
+  const status = await runGradleWithRetry((options) => runGradleOnce(wrapper, task, options));
+  if (status !== 0) {
+    process.exit(status);
   }
 }
 
@@ -190,14 +202,14 @@ try {
   const wrapper = requireAndroidProject();
 
   for (const validationTask of validationTasks) {
-    runGradle(wrapper, validationTask);
+    await runGradle(wrapper, validationTask);
   }
   bundleWebAssets();
   for (const buildTask of buildTasks) {
-    runGradle(wrapper, buildTask);
+    await runGradle(wrapper, buildTask);
   }
   if (deployTask) {
-    runGradle(wrapper, deployTask);
+    await runGradle(wrapper, deployTask);
   } else {
     console.log("Android Play deployment skipped; set ANDROID_DEPLOY_TASK and leave SKIP_ANDROID_DEPLOY unset.");
   }

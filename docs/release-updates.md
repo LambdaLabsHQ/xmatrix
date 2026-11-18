@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: an Android build repeats a failed dependency download
+
+Three of the seven Android releases on 2026-11-18 failed within two minutes
+because the Gradle Plugin Portal answered badly: a plugin "was not found", or a
+POM could not be parsed. Re-running the same job passed. `android-deploy.mjs`
+now repeats a Gradle task up to three times when its output shows a dependency
+resolution failure, refreshing dependencies on each repeat. A failed test, lint
+or build still fails at once. Release tooling only. Recovery is a CI-validated
+change reverting this one.
+
 ## Unreleased: other Android apps can no longer hand the app's page an address
 
 Google Play flagged Cross-App Scripting in the Android app: its WebView lived
