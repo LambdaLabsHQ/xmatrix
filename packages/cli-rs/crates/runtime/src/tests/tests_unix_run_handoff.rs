@@ -200,6 +200,28 @@ async fn unix_handoff_candidate_exit_restores_original_without_reporting_run_exi
 }
 
 #[tokio::test]
+async fn unix_handoff_retries_when_status_restore_fails() {
+    run_with_candidate_handoff(|mut fixture| async move {
+        fixture.kill_candidate_and_mark_failed();
+        {
+            let mut guard = fixture.registry.lock().await;
+            guard.get_mut(TEST_RUN_ID).unwrap().status_file_path = Some(fixture.root.clone());
+        }
+        assert!(collect_finished_daemon_children(&fixture.registry).await.is_empty());
+        {
+            let mut guard = fixture.registry.lock().await;
+            let run = guard.get_mut(TEST_RUN_ID).unwrap();
+            assert!(run.handoff.is_some());
+            assert_eq!(daemon_run_snapshot_items_from_guard(&guard)[0].pid, Some(fixture.old_pid));
+            guard.get_mut(TEST_RUN_ID).unwrap().status_file_path = Some(fixture.status_path.clone());
+        }
+        assert!(collect_finished_daemon_children(&fixture.registry).await.is_empty());
+        fixture.assert_restored_original().await;
+        assert_eq!(read_daemon_run_status_marker(Some(&fixture.status_path)).unwrap().pid, fixture.old_pid);
+    }).await;
+}
+
+#[tokio::test]
 async fn unix_handoff_explicit_rollback_before_monitor_sweep_restores_original() {
     run_with_candidate_handoff(|mut fixture| async move {
         let old_pid = fixture.old_pid;
