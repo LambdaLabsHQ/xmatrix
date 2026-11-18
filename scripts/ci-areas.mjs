@@ -69,6 +69,8 @@ const androidPaths = [
   "scripts/android-common.mjs",
   "scripts/android-env.mjs",
   "scripts/android-deploy.mjs",
+  "scripts/android-gradle-retry.mjs",
+  "scripts/android-gradle-retry.test.mjs",
   "scripts/android-bundle-web.mjs",
   "scripts/android-publish-github-release.mjs",
   "scripts/android-release-assets.mjs",

@@ -140,6 +140,7 @@ test("Android changes run the required native partition and shared contract test
   for (const file of [
     "apps/android/app/src/main/java/sh/xmatrix/app/MainActivity.java",
     "scripts/android-deploy.mjs",
+    "scripts/android-gradle-retry.mjs",
     "scripts/android-publish-github-release.mjs",
   ]) {
     assert.deepEqual(affectedPartitions([file]), ["node-checks", "android", "duplicates"], file);
