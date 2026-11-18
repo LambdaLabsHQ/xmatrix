@@ -7,7 +7,7 @@ import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-princi
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
-  pageMediaReferences, parseGitHubFileReference, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
+  pageMediaReferences, parseGitHubFileReference, SettledCache, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
   type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
   type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
@@ -116,20 +116,7 @@ const NO_STORE = { "cache-control": "no-store" } as const;
  * busy page does not spend GitHub's rate limit. A failed read is not kept.
  */
 const GITHUB_FILE_CACHE_MS = 60_000;
-const GITHUB_FILE_CACHE_ENTRIES = 200;
-const githubFiles = new Map<string, { at: number; file: Promise<GitHubFileContent> }>();
-
-function cachedGitHubFile(key: string, read: () => Promise<GitHubFileContent>): Promise<GitHubFileContent> {
-  const now = Date.now();
-  const hit = githubFiles.get(key);
-  if (hit && now - hit.at < GITHUB_FILE_CACHE_MS) return hit.file;
-  githubFiles.delete(key);
-  const file = read();
-  githubFiles.set(key, { at: now, file });
-  file.catch(() => { if (githubFiles.get(key)?.file === file) githubFiles.delete(key); });
-  while (githubFiles.size > GITHUB_FILE_CACHE_ENTRIES) githubFiles.delete(githubFiles.keys().next().value!);
-  return file;
-}
+const githubFiles = new SettledCache<string, GitHubFileContent>(200);
 
 /** The page named by the route, read as the caller, which is also its access check. */
 /** The caller's access to the page and its head, without its text. */
@@ -749,7 +736,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       const read = () => readGitHubFile(c.env, connection, { owner, repo, path: reference.path, ref: reference.ref });
       // A changed installation/grant must not reuse the old connection's content.
       const file = Number.isSafeInteger(connection.version) && connection.version! > 0
-        ? await cachedGitHubFile(`${connection.id}\u0000${connection.version}\u0000${href}`, read)
+        ? await githubFiles.read(`${connection.id}\u0000${connection.version}\u0000${href}`, GITHUB_FILE_CACHE_MS, read)
         : await read();
       return c.json(file as unknown as Record<string, unknown>, 200, NO_STORE);
     } catch (error) {

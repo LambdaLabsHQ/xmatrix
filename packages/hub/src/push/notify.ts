@@ -7,7 +7,7 @@ import { POSTGRES_AUTHORITY_TIMEOUTS } from "../postgres-authority-http";
 import type { Env } from "../types";
 import { sendApns, type ApnsConfig } from "./apns";
 import { PUSH_DELIVERY_BUDGET, withPushBudget } from "./delivery";
-import { sendFcm, type FcmConfig } from "./fcm";
+import { sendFcm, type FcmConfig, type FcmGrants } from "./fcm";
 import type { PushOutcome } from "./outcome";
 import { sendWebPush, type VapidKeys } from "./web-push";
 
@@ -116,6 +116,8 @@ export async function pushToPeople(input: {
   const topic = (await sha256Hex(input.notification.channelId)).slice(0, 32);
   const { title, body: words, channelId, messageId } = input.notification;
   // Each device is reached on its own platform's service; one the Hub holds no identity for is skipped.
+  // This batch's Android sends share one token grant while it is in flight.
+  const fcmGrants: FcmGrants = new Map();
   const send = input.send ?? ((device, body, collapse, signal) => {
     if (device.platform === "webpush" && device.keys && vapid) return sendWebPush({
       vapid, subscription: { endpoint: device.token, keys: device.keys }, payload: body, topic: collapse, signal });
@@ -123,7 +125,8 @@ export async function pushToPeople(input: {
     if (device.platform === "apns" && apns && appleTopic) return sendApns({
       config: apns, topic: appleTopic, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseId: collapse, signal });
     if (device.platform === "fcm" && fcm) return sendFcm({
-      config: fcm, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseKey: collapse, signal });
+      config: fcm, deviceToken: device.token, title, body: words, data: { channelId, messageId }, collapseKey: collapse, signal,
+      grants: fcmGrants });
     return Promise.resolve("skipped" as const);
   });
   const gone: string[] = [];

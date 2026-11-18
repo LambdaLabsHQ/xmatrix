@@ -1,4 +1,4 @@
-import { parseNaturalRunId, lowercaseHex } from "@xmatrix/protocol";
+import { parseNaturalRunId, lowercaseHex, SettledCache } from "@xmatrix/protocol";
 export interface DiagnosticsEventInput {
   userId?: string;
   agentId?: string;
@@ -30,21 +30,17 @@ export async function diagnosticsEntityHash(
   return lowercaseHex(digest).slice(0, 16);
 }
 
-let cachedHmacKeySource: string | undefined;
-let cachedHmacKey: Promise<CryptoKey> | undefined;
+/** The imported HMAC key per secret, kept once imported (never while importing). */
+const hmacKeys = new SettledCache<string, CryptoKey>(2);
 
 function hmacKeyFor(key: string): Promise<CryptoKey> {
-  if (!cachedHmacKey || cachedHmacKeySource !== key) {
-    cachedHmacKeySource = key;
-    cachedHmacKey = crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(key),
-      { name: "HMAC", hash: "SHA-256" },
-      false,
-      ["sign"],
-    );
-  }
-  return cachedHmacKey;
+  return hmacKeys.read(key, Number.POSITIVE_INFINITY, () => crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(key),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  ));
 }
 
 function diagnosticsDimension(value: string | undefined, fallback = "unknown"): string {

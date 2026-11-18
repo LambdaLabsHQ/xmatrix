@@ -1,4 +1,4 @@
-import { isPlainRecord } from "@xmatrix/protocol";
+import { isPlainRecord, SettledCache } from "@xmatrix/protocol";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
 import { pemPrivateKeyBytes } from "./apns";
 import { pushResponseJson, withPushBudget, withPushDelivery } from "./delivery";
@@ -16,24 +16,35 @@ const encoder = new TextEncoder();
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 
-/** One access token per service account, reused until shortly before Google expires it. */
-type TokenState = { privateKey: string; token?: string; expiresAt: number; pending?: Promise<string> };
-const tokens = new Map<string, TokenState>();
+/** Access tokens per service account and key, reused until shortly before Google expires them. */
+const tokens = new SettledCache<string, string>(8);
 
-async function accessToken(config: FcmConfig, nowSeconds: number, request: typeof fetch, signal: AbortSignal): Promise<string> {
-  let state = tokens.get(config.clientEmail);
-  if (!state || state.privateKey !== config.privateKey) {
-    state = { privateKey: config.privateKey, expiresAt: 0 };
-    tokens.set(config.clientEmail, state);
+/**
+ * One push batch's token grants still in flight, keyed like `tokens`: the
+ * batch's sends share one grant. It belongs to that batch alone, since a
+ * Worker request cannot await another request's unsettled grant (HUB-DJ).
+ */
+export type FcmGrants = Map<string, Promise<string>>;
+
+async function accessToken(config: FcmConfig, nowSeconds: number, request: typeof fetch, signal: AbortSignal,
+  grants: FcmGrants): Promise<string> {
+  const key = `${config.clientEmail}\u0000${config.privateKey}`;
+  const kept = tokens.get(key, nowSeconds * 1000);
+  if (kept) return kept;
+  let grant = grants.get(key);
+  if (!grant) {
+    grant = withPushBudget(refreshSignal => grantToken(config, nowSeconds, request, refreshSignal), signal)
+      .then(({ token, expiresAt }) => { tokens.set(key, token, expiresAt); return token; })
+      .finally(() => grants.delete(key));
+    grants.set(key, grant);
   }
-  if (state.token && state.expiresAt - 60 > nowSeconds) return state.token;
-  if (state.pending) return state.pending;
-  state.pending = withPushBudget(refreshSignal => grantToken(config, nowSeconds, request, refreshSignal, state), signal);
-  try { return await state.pending; } finally { state.pending = undefined; }
+  return grant;
 }
 
-async function grantToken(config: FcmConfig, nowSeconds: number, request: typeof fetch, signal: AbortSignal,
-  state: TokenState): Promise<string> {
+/** A new grant and when to stop using it (epoch ms), a minute before Google expires it. A grant
+ * whose delivery was cancelled throws, so a late reply never replaces a newer token. */
+async function grantToken(config: FcmConfig, nowSeconds: number, request: typeof fetch,
+  signal: AbortSignal): Promise<{ token: string; expiresAt: number }> {
   const key = await crypto.subtle.importKey("pkcs8", pemPrivateKeyBytes(config.privateKey),
     { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["sign"]);
   const unsigned = `${base64UrlEncodeValue(JSON.stringify({ alg: "RS256", typ: "JWT" }))}.${
@@ -53,18 +64,19 @@ async function grantToken(config: FcmConfig, nowSeconds: number, request: typeof
   const granted = isPlainRecord(parsed) ? parsed : {};
   if (typeof granted.access_token !== "string") throw new Error(`FCM token request failed (${response.status})`);
   const lifetime = typeof granted.expires_in === "number" ? granted.expires_in : 3600;
-  state.token = granted.access_token;
-  state.expiresAt = nowSeconds + lifetime;
-  return granted.access_token;
+  return { token: granted.access_token, expiresAt: (nowSeconds + lifetime - 60) * 1000 };
 }
 
 /** Send one notification to one Android device. `collapseKey` replaces an undelivered earlier one of the same conversation. */
 export async function sendFcm(input: {
   config: FcmConfig; deviceToken: string; title: string; body: string;
   data: Record<string, string>; collapseKey: string; fetch?: typeof fetch; nowSeconds?: number; signal?: AbortSignal;
+  /** The batch's grants in flight, shared by its sends; a lone send has its own. */
+  grants?: FcmGrants;
 }): Promise<PushOutcome> {
   return withPushDelivery(input.fetch ?? fetch, async (request, signal) => {
-    const token = await accessToken(input.config, input.nowSeconds ?? Math.floor(Date.now() / 1000), request, signal);
+    const token = await accessToken(input.config, input.nowSeconds ?? Math.floor(Date.now() / 1000), request, signal,
+      input.grants ?? new Map());
     const response = await request(
       `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(input.config.projectId)}/messages:send`, {
         method: "POST",
