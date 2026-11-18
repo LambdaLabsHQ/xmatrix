@@ -45,6 +45,8 @@ const MAX_PARTS = 200;
 /* A text body Gmail stores outside the message (large HTML statements) is fetched; real attachments never are. */
 const MAX_EXTERNAL_BODIES = 4;
 const MAX_EXTERNAL_BODY = 2_000_000;
+/* Full message responses may contain an inline base64 body, unlike metadata reads. */
+const FULL_MESSAGE_RESPONSE: ComposioBound = { maxBytes: 4 * 1024 * 1024 };
 const ATTACHMENT_ID = /^[A-Za-z0-9_-]{1,2048}$/u;
 /* A 2 MB body arrives base64url-encoded (4/3) inside Composio's JSON envelope. */
 const EXTERNAL_BODY_RESPONSE_BYTES = 3 * 1024 * 1024;
@@ -339,7 +341,7 @@ export async function readGmailMessage(credentials: Readonly<Record<string, stri
   meter?: UpstreamMeter): Promise<string> {
   if (!MESSAGE_ID.test(id)) throw new ProviderRequestError(400, "name a message id from @gmail:search");
   const scoped = mailboxCredentials(credentials, mailbox);
-  const message = await gmailReadPhase("message", () => gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter));
+  const message = await gmailReadPhase("message", () => gmailGet(scoped, `/messages/${id}`, { format: "full" }, meter, FULL_MESSAGE_RESPONSE));
   const complete = await gmailReadPhase("external_body", () => withExternalBodies(scoped, id, message, meter));
   return gmailReadPhase("format", () => gmailMessageText(complete, id, mailbox.address));
 }
@@ -441,7 +443,8 @@ async function findInMailboxes({ credentials, usage }: Context, mailboxes: Gmail
   missing: string): Promise<{ mailbox: GmailMailbox; found: Record<string, unknown> }> {
   for (const mailbox of mailboxes) {
     try {
-      return { mailbox, found: await gmailGet(mailboxCredentials(credentials, mailbox), path, { format }, usage) };
+      return { mailbox, found: await gmailGet(mailboxCredentials(credentials, mailbox), path, { format }, usage,
+        format === "full" && path.startsWith("/messages/") ? FULL_MESSAGE_RESPONSE : undefined) };
     } catch (error) {
       if (!(error instanceof ProviderRequestError) || (error.status !== 404 && error.status !== 400)) throw error;
     }

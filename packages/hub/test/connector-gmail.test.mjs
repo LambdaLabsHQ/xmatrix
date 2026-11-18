@@ -1,7 +1,7 @@
 import { withProviderResponses as fetched } from "./support/fetch-responses.mjs";
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { decodeEntities, GMAIL_ACTIONS as ACTIONS, gmailPreview, verifyGmail } from "../src/connectors/actions/gmail.ts";
+import { decodeEntities, GMAIL_ACTIONS as ACTIONS, gmailPreview, readGmailMessage, verifyGmail } from "../src/connectors/actions/gmail.ts";
 import { parseActionCommand } from "../src/connectors/action-parse.ts";
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient } from "../src/connectors/oauth.ts";
 import { deleteComposioAccount } from "../src/connectors/composio.ts";
@@ -25,6 +25,18 @@ const statement = body => {
   const command = parseActionCommand("gmail", body);
   return ACTIONS[command.actionId].parse(command.statement);
 };
+
+test("read accepts a large inline message while retaining the output limit", async () => {
+  const message = { payload: { mimeType: "text/plain", body: { data: base64url("hello ".repeat(50_000)) } } };
+  const read = await fetched([gmail(message)], () => ACTIONS.read.execute(ctx, { id: "18f2a9c0d1e2b3a4" }));
+  assert.match(read.result.summary, /hello hello/u);
+  assert.match(read.result.summary, /body truncated/u);
+  assert.ok(read.result.summary.length < 10_000);
+  const automatic = await fetched([gmail(message)], () => readGmailMessage(token, mailbox, "18f2a9c0d1e2b3a4"));
+  assert.match(automatic.result, /body truncated/u);
+  const oversized = { payload: { mimeType: "text/plain", body: { data: base64url("x".repeat(3_200_000)) } } };
+  await fetched([gmail(oversized)], () => assert.rejects(readGmailMessage(token, mailbox, "18f2a9c0d1e2b3a4"), /too large/u));
+});
 
 test("Connect signs in through Composio as a per-attempt user and stores only the account it confirms", async () => {
   assert.equal(oauthClient({}, "gmail"), undefined);
