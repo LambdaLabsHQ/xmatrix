@@ -223,12 +223,12 @@ export type {
   DecisionAnswerFailure, DecisionAnswerIssue, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
 } from "./invocation-failure.js";
 export {
-  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
+  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
 } from "./agent-routing.js";
 export type {
   AgentRoutingDeclaration, AgentRoutingExclusion, AgentRoutingRequirements,
   MachineResourceObservation, PresentedRoutingDecision, RoutingBoundMachine, RoutingChoiceRow, RoutingDecisionSource,
-  RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions,
+  RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions, RoutingQuotaVerdict,
 } from "./agent-routing.js";
 export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
 export type {

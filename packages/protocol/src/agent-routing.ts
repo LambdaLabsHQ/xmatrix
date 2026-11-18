@@ -640,6 +640,26 @@ export function routingQuotaObservation(usage: unknown, now: number,
     expiresAt: new Date(expires).toISOString(), source: "provider" };
 }
 
+/**
+ * Whether a reading leaves one model (`options.model`, else the account) any
+ * quota: the one answer to "is it used up" every launch, retry, switch and
+ * resume reads. `usedUp` is a measured, never assumed, zero that holds
+ * `until` the window that ran out resets; `open` is headroom left; `unknown`
+ * is no current provider reading. Both readings carry when they were made.
+ */
+export type RoutingQuotaVerdict =
+  | { state: "open"; observedAt: string; expiresAt: string }
+  | { state: "usedUp"; observedAt: string; until: string }
+  | { state: "unknown" };
+
+export function routingQuotaVerdict(usage: unknown, now: number,
+  options?: RoutingQuotaObservationOptions): RoutingQuotaVerdict {
+  const quota = routingQuotaObservation(usage, now, options);
+  if (!quota || !(Date.parse(quota.expiresAt) > now)) return { state: "unknown" };
+  return quota.value > 0 ? { state: "open", observedAt: quota.observedAt, expiresAt: quota.expiresAt }
+    : { state: "usedUp", observedAt: quota.observedAt, until: quota.expiresAt };
+}
+
 /** When the last scoped window of a reading stops counting, whichever model
  * it constrains; undefined when none counts at `now`. */
 export function routingScopedQuotaExpiry(usage: unknown, now: number): string | undefined {

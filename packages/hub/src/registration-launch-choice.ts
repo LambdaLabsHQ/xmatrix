@@ -1,5 +1,5 @@
 import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
-  routingModelOptionNamed, routingQuotaObservation, routingQuotaPace,
+  routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace,
   machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryModel, type QuotaRetryRegistration,
   type RoutingModelOption } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser,
@@ -102,8 +102,7 @@ function catalogRow(candidate: RegistrationModelFacts, option: Pick<ModelPair, "
  * row): the account's windows and the scoped windows that constrain it.
  * Without a row, the account's alone. */
 function modelQuota(candidate: RegistrationModelFacts, model: RoutingModelOption | undefined, now: number) {
-  const usage = candidate.observations?.quota?.usage;
-  return usage ? routingQuotaObservation(usage, now, model ? { model } : undefined) : undefined;
+  return routingQuotaVerdict(candidate.observations?.quota?.usage, now, model ? { model } : undefined);
 }
 
 /** True while the provider's own reading says this environment (or one model
@@ -111,8 +110,7 @@ function modelQuota(candidate: RegistrationModelFacts, model: RoutingModelOption
  * not yet passed. */
 export function providerQuotaExhausted(candidate: RegistrationModelFacts, now: number,
   model?: RoutingModelOption): boolean {
-  const quota = modelQuota(candidate, model, now);
-  return quota !== undefined && quota.value <= 0 && Date.parse(quota.expiresAt) > now;
+  return modelQuota(candidate, model, now).state === "usedUp";
 }
 
 /**
@@ -332,8 +330,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       // when the first environment's is.
       const named = tags.model;
       const back = named ? eligible.flatMap(candidate => {
-        const until = Date.parse(modelQuota(candidate, catalogRow(candidate, { model: named }), now)?.expiresAt ?? "");
-        return Number.isFinite(until) ? [until] : [];
+        const verdict = modelQuota(candidate, catalogRow(candidate, { model: named }), now);
+        return verdict.state === "usedUp" ? [Date.parse(verdict.until)] : [];
       }) : [];
       // Its retry waits on that model, or without one on the runtime's
       // default, so it wakes when that model's quota is back.
