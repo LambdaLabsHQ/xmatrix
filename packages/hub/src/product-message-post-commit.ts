@@ -31,7 +31,7 @@ import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake"
 import { pageReferencesIn } from "@xmatrix/protocol";
 import { firstMessageSummonId, PostgresPageRepository, XMATRIX_SYSTEM_AUTHOR_ID } from "@xmatrix/db";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
-import { guideAgentlessFirstMessage } from "./index-routes-welcome";
+import { guideAgentlessMessage } from "./index-routes-welcome";
 import { attachConversationToPage } from "./product-page-attachment";
 import { CHANNEL_ACTIVITY_MESSAGE_KIND } from "@xmatrix/protocol";
 
@@ -168,7 +168,7 @@ export function unconfirmedLaunchNoticeBody(error: unknown, diagnosticId: string
  * A Human's message that found no agent at all is answered with how to bring one in. */
 export async function startNewConversation(input: Pick<ProductMessagePostCommitInput,
   "env" | "channelId" | "messageId" | "body" | "actorUserId" | "senderKind">,
-  guide: typeof guideAgentlessFirstMessage = guideAgentlessFirstMessage): Promise<void> {
+  guide: typeof guideAgentlessMessage = guideAgentlessMessage): Promise<void> {
   const { harness, refused } = await dispatchProductNewConversationStart({ env: input.env, channelId: input.channelId,
     messageId: input.messageId, body: input.body, actorUserId: input.actorUserId,
     authorKind: input.senderKind === "agent" ? "agent" : "user" });
@@ -210,6 +210,7 @@ export async function summonFirstMessageHarness(input: { env: ProductMessagePost
 export async function dispatchProductMessageLaunches(input: ProductMessagePostCommitInput,
   dispatch: { registration: typeof dispatchRegistrationLaunchesAfterMessage;
     newConversation?: (input: ProductMessagePostCommitInput) => Promise<unknown>;
+    agentless?: typeof guideAgentlessMessage;
     sleep?: (ms: number) => Promise<void> } =
     { registration: dispatchRegistrationLaunchesAfterMessage },
   notice = dispatchProductAgentSystemNotice): Promise<boolean> {
@@ -269,9 +270,16 @@ export async function dispatchProductMessageLaunches(input: ProductMessagePostCo
     // summon that asked to start and did not, including one that must name its
     // machine, tells the Channel: an Agent or CLI sender never sees the card.
     // A too-old program is named, and an offline machine's notice carries the summon to send again.
+    // A person with no agent at all cannot act on "no registered environment":
+    // xMatrix answers their summon with the step that brings one in instead.
+    const agentless = input.senderKind === "user" &&
+      (rejected ?? []).some(item => item.code === "registration_not_found") &&
+      await (dispatch.agentless ?? guideAgentlessMessage)(input.env, { channelId: input.channelId,
+        messageId: input.messageId, body: input.body, actorUserId: input.actorUserId, summon: true });
     const notices = new Map<string, Record<string, unknown> | undefined>();
     for (const item of rejected ?? []) {
       if (isMentionOnlyRejection(item.code)) continue;
+      if (agentless && item.code === "registration_not_found") continue;
       const known = REGISTRATION_PREPARATION_REJECTION_CODES.includes(item.code);
       const code = known ? item.code : "registration_launch_rejected";
       const offline = code === "registration_daemon_offline" && item.offline?.length ? item.offline : undefined;

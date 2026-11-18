@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a summon with no agent connected says how to bring one in
+
+A new person who typed `@codex …` before connecting a computer got "Agent
+launch failed: No registered environment offers an authorized model and
+workspace for this invocation (registration_not_found)", twice, and nothing
+they could act on. When the person has no enabled agent at all, the Hub now
+answers the summon with the same `connect-agents` step a first message without
+a summon gets: agents run on your own computer, open xmatrix.sh there and run
+the command, or download the desktop app. Someone who has agents still gets
+the launch failure. Hub only.
+
 ## Unreleased: the Hub deploys as a canary and rolls its code back on failure
 
 `scripts/hub-canary-deploy.mjs` now owns the production Hub deployment. It

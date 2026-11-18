@@ -85,23 +85,28 @@ async function appendWelcomeStep(env: Env, owner: { id: string; email: string },
 }
 
 /**
- * A Human's first message in a new conversation found no agent to start
- * (`registration_not_found`). When the Space has no agent of theirs at all,
- * xMatrix answers it with the step that brings one in, so the message is not
- * met with silence. Written once per conversation under a fixed id.
+ * A Human's message found no agent to start (`registration_not_found`). When
+ * the Space has no agent of theirs at all, xMatrix answers it with the step
+ * that brings one in, so the message is met neither with silence nor with a
+ * launch error a new person cannot act on. A first message that summons
+ * nobody is answered once per conversation; a summon (`@codex …`) is answered
+ * under its own id, as its failure notice would have been. Returns whether the
+ * person had no agent, so the caller knows the step answered the message.
  */
-export async function guideAgentlessFirstMessage(env: Env, input: {
-  channelId: string; messageId: string; body: string; actorUserId: string;
-}): Promise<void> {
+export async function guideAgentlessMessage(env: Env, input: {
+  channelId: string; messageId: string; body: string; actorUserId: string; summon?: boolean;
+}): Promise<boolean> {
   const spaceId = await channelSpaceId(env, input.channelId);
-  if ((await enabledAgentHandles(env, input.actorUserId, spaceId)).length > 0) return;
+  if ((await enabledAgentHandles(env, input.actorUserId, spaceId)).length > 0) return false;
   const saved = await readLocalePreference(env, { spaceId, userId: input.actorUserId })
     .then((preference) => preference.displayLocale, () => null);
   const words = WELCOME[saved ? onboardingLocale(saved) : /\p{Script=Han}/u.test(input.body) ? "zh" : "en"];
+  const key = input.summon ? `${input.channelId}:${input.messageId}` : input.channelId;
   await appendOnboardingStep(env, { ownerUserId: input.actorUserId, channelId: input.channelId,
     stage: "connect-agents", body: words.connectAgents, replyToMessageId: input.messageId,
-    messageId: `system:connect-agents:${input.channelId}`, commandId: `product:connect-agents:${input.channelId}`,
+    messageId: `system:connect-agents:${key}`, commandId: `product:connect-agents:${key}`,
     senderSnapshot: productAgentSystemNoticeSenderSnapshot(input.actorUserId) });
+  return true;
 }
 
 async function appendOnboardingStep(env: Env, step: { ownerUserId: string; channelId: string; stage: OnboardingStage;
