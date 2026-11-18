@@ -1,308 +1,48 @@
 package sh.xmatrix.app;
 
-import android.Manifest;
-import android.content.ActivityNotFoundException;
+import android.app.Activity;
 import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.graphics.Color;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.view.ViewGroup;
-import android.widget.FrameLayout;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
-import android.webkit.WebResourceResponse;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
-import androidx.activity.ComponentActivity;
-import androidx.activity.OnBackPressedCallback;
-import androidx.core.graphics.Insets;
-import androidx.core.view.ViewCompat;
-import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
-import androidx.webkit.WebViewAssetLoader;
 
-public final class MainActivity extends ComponentActivity {
-  private static final int NOTIFICATION_PERMISSION_REQUEST = 9001;
-  private WebView webView;
-  private NativeBridge bridge;
-  private WebViewAssetLoader assetLoader;
-  private boolean bridgeInstalled;
-  private boolean backRequestInFlight;
-  private volatile boolean usePackagedAssets;
-  private final OnBackPressedCallback backCallback = new OnBackPressedCallback(true) {
-    @Override
-    public void handleOnBackPressed() {
-      dispatchBackToWeb();
-    }
-  };
-
+/**
+ * The app's only door for other apps: the launcher, `xmatrix://` links and
+ * tapped pushes. It holds no WebView and passes on only what
+ * AppConfiguration.entryLink accepts. The name stays, because home-screen
+ * shortcuts point at it.
+ */
+public final class MainActivity extends Activity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
-    getOnBackPressedDispatcher().addCallback(this, backCallback);
-
-    webView = new WebView(this);
-    bridge = new NativeBridge(this);
-    assetLoader = new WebViewAssetLoader.Builder()
-      .setDomain(AppConfiguration.WEB_HOST)
-      .addPathHandler("/", new PackagedWebAssets(this))
-      .build();
-
-    bridgeInstalled = configureWebView(webView);
-    FrameLayout contentRoot = createInsetAwareContentRoot();
-    contentRoot.addView(webView, new FrameLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT,
-      ViewGroup.LayoutParams.MATCH_PARENT
-    ));
-    setContentView(contentRoot);
-    ViewCompat.requestApplyInsets(contentRoot);
-
-    if (bridgeInstalled) {
-      loadInitialUrl(getIntent());
-    } else {
-      showUnsupportedWebView();
+    Intent incoming = getIntent();
+    String link = checkedLink(incoming);
+    if (link != null || isTaskRoot() || !isLauncherTap(incoming)) {
+      Intent page = new Intent(this, WebAppActivity.class)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+      if (link != null) page.setData(Uri.parse(link));
+      startActivity(page);
     }
+    // A launcher tap on a running app just brings it back as it was left.
+    finish();
   }
 
-  private FrameLayout createInsetAwareContentRoot() {
-    FrameLayout contentRoot = new FrameLayout(this);
-    contentRoot.setBackgroundColor(Color.rgb(245, 239, 229));
-    ViewCompat.setOnApplyWindowInsetsListener(contentRoot, (view, windowInsets) -> {
-      Insets systemBars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
-      Insets displayCutout = windowInsets.getInsets(WindowInsetsCompat.Type.displayCutout());
-      SystemBarInsets padding = SystemBarInsets.resolve(
-        systemBars.left,
-        systemBars.top,
-        systemBars.right,
-        systemBars.bottom,
-        displayCutout.left,
-        displayCutout.top,
-        displayCutout.right,
-        displayCutout.bottom
-      );
-      view.setPadding(padding.left(), padding.top(), padding.right(), padding.bottom());
-      return windowInsets.inset(padding.left(), padding.top(), padding.right(), padding.bottom());
-    });
-    return contentRoot;
+  private static boolean isLauncherTap(Intent intent) {
+    return intent != null
+      && Intent.ACTION_MAIN.equals(intent.getAction())
+      && intent.hasCategory(Intent.CATEGORY_LAUNCHER);
   }
 
-  @Override
-  protected void onNewIntent(Intent intent) {
-    super.onNewIntent(intent);
-    setIntent(intent);
-    if (bridgeInstalled) {
-      Uri uri = intent == null ? null : intent.getData();
-      if (AppConfiguration.isSignInCallback(uri)) {
-        // An in-place sign-in came back: its page is still open and takes the code.
-        bridge.signInReturned(uri);
-      } else if (!AppConfiguration.isNativeLoginResume(uri)) {
-        openIntentUrl(intent);
-      }
-    } else {
-      showUnsupportedWebView();
-    }
-  }
-
-  @Override
-  protected void onResume() {
-    super.onResume();
-    if (bridge != null && bridge.signInPending() && webView != null) {
-      // A returning sign-in arrives through onNewIntent first; anything still waiting
-      // a moment later means the tab was closed.
-      webView.postDelayed(() -> {
-        if (bridge != null && bridge.signInPending()) bridge.signInClosed();
-      }, 600);
-    }
-  }
-
-  @Override
-  protected void onDestroy() {
-    backRequestInFlight = false;
-    if (webView != null) {
-      webView.destroy();
-      webView = null;
-    }
-    super.onDestroy();
-  }
-
-  private void dispatchBackToWeb() {
-    WebView currentWebView = webView;
-    if (currentWebView == null) {
-      finish();
-      return;
-    }
-    if (!bridgeInstalled || backRequestInFlight) {
-      if (!backRequestInFlight) navigateWebViewBackOrFinish(currentWebView);
-      return;
-    }
-
-    backRequestInFlight = true;
-    WebBackNavigation.dispatch(currentWebView, handled -> {
-      backRequestInFlight = false;
-      if (webView != currentWebView || handled) return;
-      navigateWebViewBackOrFinish(currentWebView);
-    });
-  }
-
-  private void navigateWebViewBackOrFinish(WebView currentWebView) {
-    if (currentWebView.canGoBack()) {
-      currentWebView.goBack();
-    } else {
-      finish();
-    }
-  }
-
-  void requestNotificationPermissionIfNeeded() {
-    if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-      requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, NOTIFICATION_PERMISSION_REQUEST);
-    }
-  }
-
-  @SuppressWarnings("deprecation")
-  private boolean configureWebView(WebView view) {
-    view.setBackgroundColor(Color.rgb(245, 239, 229));
-    view.setWebChromeClient(new WebChromeClient());
-    view.setWebViewClient(new WebViewClient() {
-      @Override
-      public WebResourceResponse shouldInterceptRequest(WebView webView, WebResourceRequest request) {
-        return usePackagedAssets ? assetLoader.shouldInterceptRequest(request.getUrl()) : null;
-      }
-
-      @Override
-      public boolean shouldOverrideUrlLoading(WebView webView, WebResourceRequest request) {
-        return handleUrl(request.getUrl());
-      }
-
-      @Override
-      public void onReceivedError(WebView webView, WebResourceRequest request, WebResourceError error) {
-        if (shouldFallbackToPackagedAssets(request)) {
-          loadPackagedFallback(request.getUrl());
-        }
-      }
-
-      // A server error page (a 5xx from the edge) is no app: open the copy the
-      // app carries, whose startup frame says it is still connecting.
-      @Override
-      public void onReceivedHttpError(WebView webView, WebResourceRequest request, WebResourceResponse response) {
-        if (response != null && response.getStatusCode() >= 500 && shouldFallbackToPackagedAssets(request)) {
-          loadPackagedFallback(request.getUrl());
-        }
-      }
-    });
-
-    WebSettings settings = view.getSettings();
-    settings.setJavaScriptEnabled(true);
-    settings.setDomStorageEnabled(true);
-    settings.setDatabaseEnabled(true);
-    settings.setMediaPlaybackRequiresUserGesture(false);
-    settings.setSupportZoom(false);
-    settings.setBuiltInZoomControls(false);
-    settings.setDisplayZoomControls(false);
-    // Packaged assets arrive through WebViewAssetLoader over https, so pages
-    // never need file:// or content:// URLs.
-    settings.setAllowFileAccess(false);
-    settings.setAllowContentAccess(false);
-    return TrustedWebBridge.install(view, bridge);
-  }
-
-  private void loadInitialUrl(Intent intent) {
-    usePackagedAssets = false;
-    String targetUrl = intentUrl(intent);
-    webView.loadUrl(targetUrl == null ? AppConfiguration.START_URL : targetUrl);
-  }
-
-  /**
-   * A notification or link reaching the running app opens in its page when the
-   * page can show it (a conversation, a page): loading the page afresh started
-   * the whole app again behind its preparation bar. With nothing to open, the
-   * page stays where it is.
-   */
-  private void openIntentUrl(Intent intent) {
-    WebView currentWebView = webView;
-    if (currentWebView == null || currentWebView.getUrl() == null) {
-      loadInitialUrl(intent);
-      return;
-    }
-    String targetUrl = intentUrl(intent);
-    if (targetUrl == null) return;
-    WebAppLinks.open(currentWebView, targetUrl, opened -> {
-      if (opened || webView != currentWebView) return;
-      usePackagedAssets = false;
-      currentWebView.loadUrl(targetUrl);
-    });
-  }
-
-  private static String intentUrl(Intent intent) {
-    Uri uri = intent == null ? null : intent.getData();
-    if (uri == null) {
-      uri = PushMessaging.conversationLink(intent);
-    }
-    if (uri != null && AppConfiguration.APP_SCHEME.equalsIgnoreCase(uri.getScheme())) {
-      return AppConfiguration.mapDeepLink(uri);
-    }
-    if (uri != null && AppConfiguration.isTrustedNavigation(uri)) {
-      return uri.toString();
-    }
-    return null;
-  }
-
-  private boolean handleUrl(Uri uri) {
-    if (AppConfiguration.APP_SCHEME.equalsIgnoreCase(uri.getScheme())) {
-      usePackagedAssets = false;
-      String targetUrl = AppConfiguration.mapDeepLink(uri);
-      webView.loadUrl(targetUrl);
-      return true;
-    }
-    if (AppConfiguration.isTrustedNavigation(uri)) {
-      return false;
-    }
-
-    if (AppConfiguration.isSafeExternalUrl(uri)) {
-      openExternal(uri);
-    }
-    return true;
-  }
-
-  boolean openExternal(Uri uri) {
+  private static String checkedLink(Intent intent) {
     try {
-      startActivity(new Intent(Intent.ACTION_VIEW, uri));
-      return true;
-    } catch (ActivityNotFoundException ignored) {
-      // The WebView keeps the current page when no browser or mail app can handle the URL.
-      return false;
+      Uri uri = intent == null ? null : intent.getData();
+      if (uri == null) uri = PushMessaging.conversationLink(intent);
+      if (uri == null || uri.isOpaque()) return null;
+      return AppConfiguration.entryLink(
+        AppConfiguration.WEB_HOST, uri.getScheme(), uri.getHost(), uri.getPath(), uri.getEncodedQuery());
+    } catch (RuntimeException malformed) {
+      // Another app's Intent can carry extras that cannot be read.
+      return null;
     }
-  }
-
-  private boolean shouldFallbackToPackagedAssets(WebResourceRequest request) {
-    if (usePackagedAssets || request == null || !request.isForMainFrame()) {
-      return false;
-    }
-
-    Uri uri = request.getUrl();
-    if (uri == null || !AppConfiguration.isTrustedNavigation(uri)) {
-      return false;
-    }
-
-    String host = uri.getHost();
-    return host != null && AppConfiguration.WEB_HOST.equalsIgnoreCase(host);
-  }
-
-  private void loadPackagedFallback(Uri uri) {
-    usePackagedAssets = true;
-    String targetUrl = uri == null ? AppConfiguration.START_URL : uri.toString();
-    webView.loadUrl(targetUrl);
-  }
-
-  private void showUnsupportedWebView() {
-    String html = "<html style=\"color-scheme:light\"><body style=\"background:#f5efe5;color:#2a1c10;font-family:sans-serif;padding:32px\">"
-      + "<h2>Android System WebView update required</h2>"
-      + "<p>Update Android System WebView or Chrome, then reopen xMatrix.</p>"
-      + "</body></html>";
-    webView.loadDataWithBaseURL(null, html, "text/html", "UTF-8", null);
   }
 }

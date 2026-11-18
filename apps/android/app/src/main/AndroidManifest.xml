@@ -17,11 +17,17 @@
     <meta-data
       android:name="com.google.firebase.messaging.default_notification_channel_id"
       android:value="xmatrix-default" />
+    <!-- The page itself: never exported, so other apps cannot hand its WebView anything. -->
+    <activity
+      android:name=".WebAppActivity"
+      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize"
+      android:exported="false"
+      android:launchMode="singleTop" />
+    <!-- The door for the launcher, links and pushes: it checks them and shows nothing. -->
     <activity
       android:name=".MainActivity"
-      android:configChanges="keyboard|keyboardHidden|orientation|screenLayout|screenSize|smallestScreenSize"
       android:exported="true"
-      android:launchMode="singleTop">
+      android:theme="@android:style/Theme.NoDisplay">
       <intent-filter>
         <action android:name="android.intent.action.MAIN" />
         <category android:name="android.intent.category.LAUNCHER" />

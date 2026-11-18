@@ -28,6 +28,13 @@ final class BridgeScript {
     "      window.xmatrixNative.postMessage(JSON.stringify({ id, method, payload: payload || {} }));\n" +
     "    } catch (error) { if (id) pending.delete(id); reject(error); }\n" +
     "  });\n" +
+    "  const openAppLink = (href) => {\n" +
+    "    for (const listener of Array.from(appLinkListeners).reverse()) {\n" +
+    "      try { if (listener(href) === true) return true; }\n" +
+    "      catch (error) { console.error('Android app link listener failed', error); }\n" +
+    "    }\n" +
+    "    return false;\n" +
+    "  };\n" +
     "  const disabledUpdateStatus = () => ({\n" +
     "    state: 'disabled', enabled: false, currentVersion: " + quotedVersion + ",\n" +
     "    message: 'Automatic updates are unavailable on Android.', updatedAt: new Date().toISOString()\n" +
@@ -61,13 +68,9 @@ final class BridgeScript {
     "      appLinkListeners.add(listener);\n" +
     "      return () => appLinkListeners.delete(listener);\n" +
     "    },\n" +
-    "    __openAppLink: (href) => {\n" +
-    "      for (const listener of Array.from(appLinkListeners).reverse()) {\n" +
-    "        try { if (listener(href) === true) return true; }\n" +
-    "        catch (error) { console.error('Android app link listener failed', error); }\n" +
-    "      }\n" +
-    "      return false;\n" +
-    "    },\n" +
+    "    __openPendingAppLink: () => invoke('pendingAppLink')\n" +
+    "      .then((href) => typeof href === 'string' ? invoke('appLinkHandled', { opened: openAppLink(href) }) : undefined)\n" +
+    "      .catch((error) => console.error('Android app link failed', error)),\n" +
     "    __dispatchBackRequested: () => {\n" +
     "      for (const listener of Array.from(backListeners).reverse()) {\n" +
     "        try { if (listener() === true) return true; }\n" +

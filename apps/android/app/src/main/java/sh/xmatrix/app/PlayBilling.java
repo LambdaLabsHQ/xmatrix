@@ -26,12 +26,12 @@ import org.json.JSONObject;
  */
 final class PlayBilling {
   private static final String PACKAGE = "sh.xmatrix.app";
-  private final MainActivity activity;
+  private final WebAppActivity activity;
   private final BillingClient client;
   /** The purchase waiting for Google Play's answer; one at a time. */
   private Consumer<String> pendingPurchase;
 
-  PlayBilling(MainActivity activity) {
+  PlayBilling(WebAppActivity activity) {
     this.activity = activity;
     this.client = BillingClient.newBuilder(activity)
       .setListener(this::purchasesUpdated)

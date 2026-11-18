@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: other Android apps can no longer hand the app's page an address
+
+Google Play flagged Cross-App Scripting in the Android app: its WebView lived
+in an exported activity, so any installed app could send it an address. Such
+an app could open any page of the trusted Web, or open the signed-in login page
+with its own `device_code`, `user_code` or `cli_callback`. The WebView now lives
+in `WebAppActivity`, which is not exported. `MainActivity` keeps its name, so
+home-screen icons still work, but holds no WebView: it passes on only a
+conversation id, the login return with an `auth_error`, and the sign-in return's
+`code`, `state`, `error` and `new_account`. Everything else opens the app as
+usual. The page now collects a waiting link over the origin-checked bridge, so
+no link is evaluated as script. Android only. Recovery is a CI-validated Android
+release reverting the change.
+
 ## Unreleased: a summon with no agent connected says how to bring one in
 
 A new person who typed `@codex …` before connecting a computer got "Agent
