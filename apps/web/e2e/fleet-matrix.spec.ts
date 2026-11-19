@@ -156,6 +156,141 @@ test("a row is added from the table's last row: another machine is connected in 
   await expect(steps).toHaveCount(0);
 });
 
+test("full-panel desktop matrix uses panel width, aligns its left axis, and keeps scoped quota bars on one line", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const harnesses = ["codex", "grok", "antigravity", "cursor", "opencode", "claude", "deepseek", "kimi", "auggie", "copilot", "gemini"];
+  const recent = new Date().toISOString();
+  const future = new Date(Date.now() + 86_400_000).toISOString();
+  const machines = [
+    { id: "d1", machineId: "m:laptop", name: "Laptop", platform: "darwin", online: true, diskFree: 7,
+      installed: ["codex", "grok", "antigravity", "cursor", "opencode", "claude", "deepseek", "kimi", "auggie", "copilot", "gemini"] },
+    { id: "d2", machineId: "m:builder", name: "Build Mac Studio", platform: "darwin", online: true, diskFree: 40,
+      installed: ["codex", "grok"] },
+    { id: "d3", machineId: "m:srv1", name: "worker-alpha", platform: "linux", online: true, diskFree: 2,
+      installed: ["codex", "antigravity", "claude", "kimi"] },
+    { id: "d4", machineId: "m:srv2", name: "worker-beta", platform: "linux", online: true, diskFree: 15,
+      installed: ["codex", "antigravity", "claude"] },
+    { id: "d5", machineId: "m:workstation", name: "Workstation", platform: "win32", online: true, diskFree: 30,
+      installed: ["codex", "grok", "cursor", "opencode", "kimi", "gemini"] },
+    { id: "d6", machineId: "m:bot", name: "Bot Runner", platform: "linux", online: false, diskFree: 50,
+      installed: ["codex", "grok", "cursor", "opencode"] },
+  ];
+  const daemons = machines.map((m) => ({
+    id: m.id, userId: "e2e-user", email: "e2e@xmatrix.test", name: m.name,
+    machineId: m.machineId, machineName: m.name, hostId: m.id, hostName: m.name,
+    status: m.online ? "online" : "offline", connectedAt: E2E_NOW, lastSeenAt: recent, daemonVersion: "0.16.600",
+    metadata: {
+      platform: m.platform,
+      capabilities: ["machine_harness_action_v1"],
+      ...(m.online ? { machineResources: { observedAt: recent, cpuUsagePercent: 25, cpuLogicalCount: 8,
+        memoryTotalBytes: 100, memoryAvailableBytes: 60, diskTotalBytes: 100, diskAvailableBytes: m.diskFree } } : {}),
+      harnesses: { schemaVersion: 1, capturedAt: E2E_NOW, items: harnesses.map((id) => ({
+        id, installed: m.installed.includes(id), probeStatus: m.installed.includes(id) ? "ok" : "missing",
+        version: m.installed.includes(id) ? "1.0.0" : undefined, autoUpdate: "disabled",
+        login: (m.id === "d3" && id === "codex") || (m.id === "d5" && id === "opencode") ? "signed_out" : "signed_in",
+      })) },
+    },
+  }));
+  const reg = (machine: (typeof machines)[number], harness: string, extra: Record<string, unknown> = {}) => ({
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: machine.machineId, harness },
+    displayName: harness, ownerName: "E2E Tester", machineName: machine.name, version: 1, state: "enabled",
+    models: [], routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true,
+    live: {
+      machine: { online: machine.online, lastSeenAt: recent, platform: machine.platform },
+      running: [],
+      ...extra,
+    },
+  });
+  const regs = [
+    reg(machines[0]!, "codex"),
+    reg(machines[0]!, "grok", { quota: { remainingPercent: 98, observedAt: recent, expiresAt: future, windows: [{ label: "1w", usedPercent: 2, resetAt: future }] } }),
+    reg(machines[0]!, "antigravity"),
+    reg(machines[0]!, "cursor", { quota: { remainingPercent: 98, observedAt: recent, expiresAt: future, windows: [{ scope: "Auto", label: "1mo", usedPercent: 2, resetAt: future }] } }),
+    reg(machines[0]!, "opencode"),
+    reg(machines[0]!, "deepseek", { balance: { amount: 0, currency: "USD", allowed: false } }),
+    reg(machines[1]!, "grok", { quota: { remainingPercent: 98, observedAt: recent, expiresAt: future, windows: [{ label: "1w", usedPercent: 2, resetAt: future }] } }),
+    reg(machines[2]!, "codex"),
+    reg(machines[2]!, "antigravity", { running: [{ instanceId: "i1", channelId: "c1", channelInstanceId: "1", since: recent }] }),
+    reg(machines[2]!, "claude", {
+      running: [{ instanceId: "i2", channelId: "c1", channelInstanceId: "2", since: recent }],
+      quota: { remainingPercent: 97, observedAt: recent, expiresAt: future, windows: [{ label: "5h", usedPercent: 3, resetAt: future }] },
+    }),
+    reg(machines[2]!, "kimi"),
+    reg(machines[3]!, "codex"),
+    reg(machines[3]!, "antigravity"),
+    reg(machines[3]!, "claude", {
+      running: [{ instanceId: "i3", channelId: "c1", channelInstanceId: "3", since: recent }],
+      quota: { remainingPercent: 33, observedAt: recent, expiresAt: future, windows: [{ scope: "Fable", label: "1w", usedPercent: 67, resetAt: future }] },
+    }),
+    reg(machines[4]!, "grok", { quota: { remainingPercent: 98, observedAt: recent, expiresAt: future, windows: [{ label: "1w", usedPercent: 2, resetAt: future }] } }),
+    reg(machines[4]!, "cursor", { quota: { remainingPercent: 98, observedAt: recent, expiresAt: future, windows: [{ scope: "Auto", label: "1mo", usedPercent: 2, resetAt: future }] } }),
+    reg(machines[4]!, "opencode", { quota: { remainingPercent: 78, observedAt: recent, expiresAt: future, windows: [{ label: "1w", usedPercent: 22, resetAt: future }] } }),
+    reg(machines[5]!, "grok"),
+    reg(machines[5]!, "cursor"),
+    reg(machines[5]!, "opencode"),
+  ];
+  await openWorkspaceWithStubs(page, {
+    spaces: [E2E_SPACE],
+    channels: [{
+      id: "c1", spaceId: E2E_SPACE.id, name: "general", title: "general", kind: "channel", visibility: "public",
+      memberPresence: {
+        a1: { kind: "agent", status: "online", label: "antigravity", instances: [{ id: "i1", channelInstanceId: "1", label: "antigravity:1", channelId: "c1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy" }] },
+        a2: { kind: "agent", status: "online", label: "claude", instances: [
+          { id: "i2", channelInstanceId: "2", label: "claude:1", channelId: "c1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy" },
+          { id: "i3", channelInstanceId: "3", label: "claude:2", channelId: "c1", connectedAt: E2E_NOW, lastSeenAt: E2E_NOW, status: "busy" },
+        ] },
+      },
+    }],
+    machineDaemons: daemons,
+  });
+  await fixtureJson(page, "full-catalog", CATALOG, {
+    registrations: regs,
+    capabilities: [...new Set(regs.map((r) => r.key.harness))].map((harness) => ({
+      harness, models: [], locations: regs.filter((r) => r.key.harness === harness),
+    })),
+  });
+  await fixtureJson(page, "harness-recent", /\/api\/xmatrix\/machine-daemons\/harness-actions\?machineId=/u, { actions: [] });
+  await page.goto("/app/personal-sspaceperso/status");
+
+  const matrix = page.getByTestId("fleet-matrix");
+  await expect(matrix.getByRole("row", { name: "Laptop" })).toBeVisible();
+  await expect(matrix.getByTestId("fleet-agent-column")).toHaveCount(11);
+
+  // Uses the panel's full width with balanced horizontal padding rather than centering inside a narrow max-w-6xl box.
+  const layout = await page.evaluate(() => {
+    const panel = document.querySelector(".app-tool-detail")?.getBoundingClientRect();
+    const h1 = document.querySelector(".app-main h1")?.getBoundingClientRect();
+    const hero = document.querySelector('[data-testid="status-working"]')?.getBoundingClientRect();
+    const machineHeader = document.querySelector('[data-testid="fleet-matrix"] thead th span')?.getBoundingClientRect();
+    const firstIcon = document.querySelector('[data-testid="machine-row"] .app-tool-state-icon')?.getBoundingClientRect();
+    const addBtn = document.querySelector('[data-testid="fleet-add-column"]')?.getBoundingClientRect();
+    const quotaLabels = [...document.querySelectorAll('[data-testid="agent-usage-glance"] .app-machine-load-glance-label')]
+      .map((el) => ({ text: el.textContent, height: el.getBoundingClientRect().height }));
+    return {
+      leftInset: panel && h1 ? h1.left - panel.left : -1,
+      rightGap: panel && addBtn ? panel.right - addBtn.right : -1,
+      h1Left: h1?.left ?? -1,
+      heroLeft: hero?.left ?? -1,
+      machineHeaderLeft: machineHeader?.left ?? -1,
+      firstIconLeft: firstIcon?.left ?? -1,
+      quotaLabels,
+    };
+  });
+  expect(layout.leftInset).toBeGreaterThanOrEqual(32);
+  expect(layout.leftInset).toBeLessThanOrEqual(56);
+  // All 11 agents and the trailing + column stay inside the 1440px desktop viewport.
+  expect(layout.rightGap).toBeGreaterThanOrEqual(24);
+  // Every major left edge aligns on one vertical axis.
+  expect(Math.abs(layout.h1Left - layout.heroLeft)).toBeLessThanOrEqual(2);
+  expect(Math.abs(layout.h1Left - layout.machineHeaderLeft)).toBeLessThanOrEqual(2);
+  expect(Math.abs(layout.h1Left - layout.firstIconLeft)).toBeLessThanOrEqual(2);
+  // Scoped quota labels ("Auto · 1mo", "Fable · 1w") stay on one line without wrapping.
+  expect(layout.quotaLabels.length).toBeGreaterThan(0);
+  for (const label of layout.quotaLabels) {
+    expect(label.height, `quota label "${label.text}" wrapped`).toBeLessThanOrEqual(16);
+  }
+});
+
 test.describe("mobile agents grid and bottom sheets", () => {
   test.use(E2E_MOBILE_CONTEXT);
 

@@ -8422,18 +8422,26 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 
 .xmatrix-app .app-machine-load-glance-item {
   display: flex;
-  width: 44px;
+  min-width: 50px;
   flex-direction: column;
   gap: 4px;
 }
 
 .xmatrix-app .app-machine-load-glance-label {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 2px;
+  gap: 6px;
   font-size: 10px;
-  line-height: 1;
+  line-height: 1.1;
+  white-space: nowrap;
   color: var(--app-panel-ink-faint, var(--muted-foreground));
+}
+
+.xmatrix-app .app-machine-load-glance-label > :first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .xmatrix-app .app-machine-load-glance-track {
@@ -8452,7 +8460,20 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
 }
 
 .xmatrix-app .app-machine-load-glance-value {
+  flex-shrink: 0;
   color: var(--foreground);
+}
+
+/* Inside the Agents matrix, a cell's quota bar stretches across its cell so
+   scoped window names ("Auto · 1mo", "Fable · 1w") read on one crisp line. */
+.xmatrix-app .app-fleet-matrix td .app-machine-load-glance {
+  width: 100%;
+  max-width: 7.5rem;
+}
+
+.xmatrix-app .app-fleet-matrix td .app-machine-load-glance-item {
+  width: 100%;
+  min-width: 0;
 }
 
 /* The Machine tag's hover card: the row's glance on the inverted hint surface,

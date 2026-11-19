@@ -83,19 +83,20 @@ export function FleetOverview({ status, attention, note, children }: {
   const { online, busy, workingCount } = status;
   return (
     <>
-      <header className="app-status-hero mb-6" data-testid="status-hero">
+      <header className="app-status-hero mb-6 flex flex-wrap items-baseline gap-x-4 gap-y-1.5" data-testid="status-hero">
         <div className="flex items-baseline gap-2.5">
-          <span className="text-6xl font-black leading-none tabular-nums" data-testid="status-working">{workingCount}</span>
-          <span className="text-lg font-semibold">{workingCount === 1 ? "agent working" : "agents working"}</span>
+          <span className="text-[2.5rem] font-extrabold leading-none tracking-[-0.03em] tabular-nums" data-testid="status-working">{workingCount}</span>
+          <span className="text-[17px] font-semibold tracking-[-0.01em] text-foreground/85">{workingCount === 1 ? "agent working" : "agents working"}</span>
         </div>
-        <p className="mt-2 text-sm text-muted-foreground" data-testid="status-summary">
+        <span aria-hidden="true" className="hidden h-3.5 w-px translate-y-[2px] bg-foreground/15 sm:inline-block" />
+        <p className="text-[13px] text-muted-foreground" data-testid="status-summary">
           {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
             : online > 0 ? "Nothing is working right now." : "No machine is online."}
           {note}
         </p>
       </header>
 
-      <div className="space-y-8">
+      <div className="space-y-6">
         {attention.length > 0 && (
           <ToolDetailSection title={`Needs attention · ${attention.length}`}>
             <ul className="app-tool-lines">
