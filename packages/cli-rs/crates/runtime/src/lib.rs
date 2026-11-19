@@ -150,6 +150,7 @@ use runtime_turn_failure::{
     report_turn_failure, report_turn_failure_with_usage_limit, resend_pending_turn_failure,
 };
 use xmatrix_harness::fields::{first_f64, first_string};
+use xmatrix_harness::quota::antigravity::read_antigravity_quota_usage;
 use xmatrix_harness::quota::claude::{
     read_claude_oauth_rate_limit_usage, record_claude_rate_limit_event,
 };

@@ -89,15 +89,26 @@ pub(crate) trait AgentPresentationAdapter {
             command_overlay,
             self.overlay_is_complete(),
         );
-        // Each Cursor model spends its pool, Auto or API. Its catalog marks
-        // no default, so the model the session started on is marked: the one
-        // a launch that names no model runs, and whose pool gates it.
-        if self.runtime() == "cursor" {
+        // Cursor (Auto / API) and Antigravity (Gemini / Claude & GPT) both
+        // meter models by pool and omit `isDefault` in their ACP catalogs, so
+        // tag each row's pool and mark the model the session started on as the
+        // default that an unpinned launch runs.
+        if matches!(self.runtime(), "cursor" | "antigravity") {
             for row in snapshot.models.iter_mut().flatten() {
-                row.quota_scopes = Some(vec![
-                    xmatrix_harness::quota::cursor::cursor_quota_scope_for_model(&row.model)
-                        .to_string(),
-                ]);
+                let scope = match self.runtime() {
+                    "cursor" => Some(xmatrix_harness::quota::cursor::cursor_quota_scope_for_model(
+                        &row.model,
+                    )),
+                    "antigravity" => {
+                        xmatrix_harness::quota::antigravity::antigravity_quota_scope_for_model(
+                            &row.model,
+                        )
+                    }
+                    _ => None,
+                };
+                if let Some(scope) = scope {
+                    row.quota_scopes = Some(vec![scope.to_string()]);
+                }
                 if facts.starting_model.as_deref().is_some_and(|model| {
                     row.id.eq_ignore_ascii_case(model) || row.model.eq_ignore_ascii_case(model)
                 }) {

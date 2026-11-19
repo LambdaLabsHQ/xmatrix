@@ -14,6 +14,7 @@ use std::path::PathBuf;
 
 use crate::usage::LlmUsage;
 
+pub mod antigravity;
 mod cache;
 pub mod claude;
 pub mod codex;
@@ -42,6 +43,8 @@ pub(crate) fn observed_provider_quotas(
 /// A provider whose account quota this crate can read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Provider {
+    /// Google Antigravity (`agy`) Gemini and Claude/GPT model pools.
+    Antigravity,
     /// Claude Code / Claude.ai subscription 5h and 1w windows.
     Claude,
     /// Codex ChatGPT subscription windows (`wham/usage`).
@@ -91,6 +94,12 @@ pub struct ReadOptions {
 pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> {
     let force = options.force;
     match (provider, options.account) {
+        (Provider::Antigravity, Account::Process) => {
+            antigravity::read_antigravity_quota_usage(force).await
+        }
+        (Provider::Antigravity, Account::DefaultLogin) => {
+            antigravity::read_antigravity_quota_usage_for_default_account(force).await
+        }
         (Provider::Claude, Account::Process) => {
             claude::read_claude_oauth_rate_limit_usage(force).await
         }
@@ -112,7 +121,8 @@ pub async fn read(provider: Provider, options: ReadOptions) -> Option<LlmUsage> 
         (Provider::OpenCode, Account::Process) => opencode::read_opencode_zen_usage(force).await,
         (Provider::Zai, Account::Process) => zai::read_zai_coding_plan_quota_usage(force).await,
         (
-            Provider::Claude
+            Provider::Antigravity
+            | Provider::Claude
             | Provider::Cursor
             | Provider::DeepSeek
             | Provider::OpenCode
@@ -208,6 +218,7 @@ mod tests {
     async fn unsupported_account_bindings_read_nothing() {
         let home = std::env::temp_dir().join("xmatrix-harness-unsupported-home");
         for provider in [
+            Provider::Antigravity,
             Provider::Claude,
             Provider::Cursor,
             Provider::OpenCode,

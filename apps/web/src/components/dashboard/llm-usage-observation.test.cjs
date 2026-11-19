@@ -90,4 +90,15 @@ test("trace usage keeps the provider read time", () => {
   assert.equal(normalizeLlmUsage({ quotaObservedAt: "not-a-time" }).quotaObservedAt, undefined);
   assert.deepEqual(normalizeLlmUsage({ quotaAccount: { allowed: true, credits: { balance: 3, extra: 1 } } }).quotaAccount,
     { allowed: true, credits: { balance: 3 } });
+  const scoped = normalizeLlmUsage({
+    quotaSource: "provider_api",
+    scopedQuotaUsages: [
+      { label: "5h", percent: 5, scope: "Gemini" },
+      { label: "5h", percent: 10 },
+    ],
+  });
+  assert.deepEqual(
+    scoped.scopedQuotaUsages.map((window) => ({ label: window.label, percent: window.percent, scope: window.scope })),
+    [{ label: "5h", percent: 5, scope: "Gemini" }]
+  );
 });
