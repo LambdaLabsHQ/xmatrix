@@ -8464,69 +8464,16 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   color: var(--foreground);
 }
 
-/* The matrix is ruled like a ledger: a firmer line under its headings, a
-   hairline under each machine. Drawn here because the reading surface it sits
-   on clears the border colour of everything inside it. */
-.xmatrix-app .app-fleet-matrix.app-fleet-matrix thead th {
-  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 14%, transparent) !important;
-}
-
-.xmatrix-app .app-fleet-matrix.app-fleet-matrix .app-fleet-matrix-row > :is(th, td) {
-  border-bottom: 1px solid color-mix(in oklab, var(--foreground) 6%, transparent) !important;
-}
-
-/* Inside the Agents matrix a reading is one line, not a label over a bar: its
-   name, a hairline track, its value. It is the row's second line, under a
-   cell's state or after a machine's facts, so a row stays two lines tall. */
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance {
-  align-items: center;
-  min-width: 0;
-}
-
+/* Inside the Agents matrix, a cell's quota bar stretches across its cell so
+   scoped window names ("Auto · 1mo", "Fable · 1w") read on one crisp line. */
 .xmatrix-app .app-fleet-matrix td .app-machine-load-glance {
   width: 100%;
   max-width: 7.5rem;
 }
 
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance-item {
-  flex-direction: row;
-  align-items: center;
-  gap: 5px;
-  min-width: 0;
-  height: 14px;
-}
-
 .xmatrix-app .app-fleet-matrix td .app-machine-load-glance-item {
   width: 100%;
-}
-
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance-label {
-  display: contents;
-  font-size: 10px;
-  line-height: 14px;
-}
-
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance-label > * {
-  font-size: 10px;
-  line-height: 14px;
-  white-space: nowrap;
-  color: var(--app-panel-ink-faint, var(--muted-foreground));
-}
-
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance-track {
-  order: 1;
-  height: 2px;
-  flex: 1 1 0;
-  min-width: 14px;
-}
-
-.xmatrix-app .app-fleet-matrix th .app-machine-load-glance-track {
-  flex: 0 0 28px;
-}
-
-.xmatrix-app .app-fleet-matrix :is(td, th) .app-machine-load-glance-value {
-  order: 2;
-  font-weight: 500;
+  min-width: 0;
 }
 
 /* The Machine tag's hover card: the row's glance on the inverted hint surface,
