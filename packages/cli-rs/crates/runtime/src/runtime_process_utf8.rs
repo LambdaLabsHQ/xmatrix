@@ -86,7 +86,8 @@ use xmatrix_cli_update::{
 };
 use xmatrix_cli_update::{InstalledCliUpdate, install_cli_update_for_daemon_restart};
 use xmatrix_cli_update::{
-    install_cli_from_seed, install_daemon_service, uninstall_daemon_service,
+    WATCHDOG_RESTART_ABSENT, install_cli_from_seed, install_daemon_service,
+    uninstall_daemon_service,
 };
 use xmatrix_cli_workspace::{
     cmd_workspace, list_machine_daemon_workspaces, observed_hostname, upsert_workspace,
@@ -873,10 +874,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                         service.definition_path.display()
                     );
                     if !service.has_watchdog() {
-                        println!(
-                            "Warning: automatic restart watchdog is not active under {}; if the daemon exits, it will restart at next login.",
-                            service.manager
-                        );
+                        println!("Warning: {WATCHDOG_RESTART_ABSENT}");
                     }
                 }
             }
@@ -894,10 +892,7 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
                 installed.definition_path.display()
             );
             if !installed.has_watchdog() {
-                println!(
-                    "Warning: automatic restart watchdog is not active under {}; if the daemon exits, it will restart at next login.",
-                    installed.manager
-                );
+                println!("Warning: {WATCHDOG_RESTART_ABSENT}");
             }
             Ok(())
         }

@@ -53,9 +53,16 @@ without a signed continuity migration.
 - Task Scheduler's restart settings only retry a task that fails to start; they never restart a daemon that exits
   later. The task therefore also has a watchdog trigger that repeats every minute; with `MultipleInstances IgnoreNew`
   it does nothing while the daemon runs and brings an exited daemon back within a minute, as `Restart=always` and
-  `KeepAlive` do on Linux and macOS. `setup daemon` re-registers a task that lacks it, and a daemon self-update adds it
-  to an existing direct task in place (without stopping the task). Before starting the task after replacing the binary,
-  the update stops any daemon the watchdog started in between, so the start is not ignored.
+  `KeepAlive` do on Linux and macOS. `setup daemon` re-registers a task that lacks it. A daemon self-update adds the
+  trigger to an existing direct task in place (without stopping the task) when that task can be modified. A task
+  registered by an administrator refuses `Set-ScheduledTask` for a standard user; the update then leaves that task
+  alone and registers a separate per-user task, `xmatrix-daemon-watchdog`, with the same `xmatrix.exe daemon` action
+  and minute trigger. If that name is already an administrator-owned task a standard user cannot replace, the same
+  registration is created as `xmatrix-daemon-user-watchdog` instead. The daemon lock makes that extra start exit while the daemon is already running. When a later
+  setup or self-update can update the original task, it removes the standalone task. If neither path can be registered,
+  the update receipt says that this computer will not restart the daemon after it exits, and the Machines page shows
+  that recorded outcome. Before starting the task after replacing the binary, the update stops any daemon the watchdog
+  started in between, so the start is not ignored.
 - Installer idempotency retains only that exact executable, argument, and working-directory tuple. Any historical
   WScript bridge, generation selector, or other task action is replaced on the next `setup daemon` run and has no
   current startup authority.

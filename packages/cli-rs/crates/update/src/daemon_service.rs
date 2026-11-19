@@ -14,25 +14,36 @@ pub const LAUNCHD_LABEL: &str = "sh.xmatrix.daemon";
 pub const SYSTEMD_UNIT: &str = "xmatrix-daemon.service";
 pub const WINDOWS_DAEMON_TASK_NAME: &str = "xmatrix-daemon";
 pub const WINDOWS_DAEMON_LEGACY_TASK_NAME: &str = "xMatrix Daemon";
-pub const WINDOWS_DAEMON_RUN_KEY_PATH: &str = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
+/// Per-user task registered when the login task cannot be modified.
+pub const WINDOWS_DAEMON_WATCHDOG_TASK_NAME: &str = "xmatrix-daemon-watchdog";
+/// Used when `xmatrix-daemon-watchdog` already exists and is owned by an
+/// administrator, so a standard user cannot replace it.
+pub const WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME: &str = "xmatrix-daemon-user-watchdog";
+pub const WINDOWS_DAEMON_RUN_KEY_PATH: &str =
+    r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
 pub const WINDOWS_DAEMON_RUN_VALUE_NAME: &str = "xMatrixDaemon";
 pub const WINDOWS_RUN_KEY_MANAGER: &str = "windows-run-key";
 pub const DAEMON_SERVICE_MANAGER_FILE: &str = "daemon-service-manager";
+pub const DAEMON_WATCHDOG_FILE: &str = "daemon-watchdog";
+/// Receipt, log, and setup warning when neither watchdog path is active.
+pub const WATCHDOG_RESTART_ABSENT: &str =
+    "This computer will not restart the daemon after it exits.";
 
 /// What `install_daemon_service` registered, for the caller's report.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonServiceInstall {
     pub manager: &'static str,
     pub definition_path: PathBuf,
+    /// Whether a daemon that exits is started again within a minute.
+    /// Independent of `manager`: an elevated login task can still have no
+    /// watchdog, and the HKCU Run fallback can still have the per-user task.
+    pub watchdog: bool,
 }
 
 impl DaemonServiceInstall {
-    /// Whether the registered service manager restarts a daemon that exits
-    /// unexpectedly (`launchd` KeepAlive, `systemd` Restart=always, or the
-    /// Windows Scheduled Task 1-minute watchdog). The HKCU Run fallback only
-    /// starts at Windows logon and has no watchdog.
+    /// Whether the registration restarts a daemon that exits unexpectedly.
     pub fn has_watchdog(&self) -> bool {
-        self.manager != WINDOWS_RUN_KEY_MANAGER
+        self.watchdog
     }
 }
 
@@ -64,6 +75,43 @@ pub fn recorded_daemon_service_manager() -> Option<String> {
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
+}
+
+pub fn daemon_watchdog_state_path() -> PathBuf {
+    xmatrix_cli_core::config::config_dir().join(DAEMON_WATCHDOG_FILE)
+}
+
+fn record_daemon_watchdog(active: bool) {
+    let path = daemon_watchdog_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let temporary = xmatrix_cli_core::config::unique_temporary_path(&path);
+    let contents = if active { "true\n" } else { "false\n" };
+    if std::fs::write(&temporary, contents).is_ok()
+        && xmatrix_cli_core::config::replace_file_atomically(&temporary, &path).is_err()
+    {
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+fn clear_daemon_watchdog() {
+    let _ = std::fs::remove_file(daemon_watchdog_state_path());
+}
+
+/// Whether this machine's daemon is actually restarted after it exits, as
+/// recorded by setup or by the Windows self-update handoff. `None` means the
+/// running install has not recorded an outcome yet.
+pub fn recorded_daemon_watchdog() -> Option<bool> {
+    match std::fs::read_to_string(daemon_watchdog_state_path())
+        .ok()
+        .map(|value| value.trim().to_string())
+        .as_deref()
+    {
+        Some("true") => Some(true),
+        Some("false") => Some(false),
+        _ => None,
+    }
 }
 
 /// The PATH a login-session daemon sees. A service manager starts the daemon
@@ -224,6 +272,7 @@ pub fn install_daemon_service(binary: Option<&Path>) -> error::Result<DaemonServ
     let binary = resolve_binary(binary)?;
     let installed = install_resolved_daemon_service(&binary)?;
     record_daemon_service_manager(installed.manager);
+    record_daemon_watchdog(installed.watchdog);
     Ok(installed)
 }
 
@@ -232,6 +281,7 @@ pub fn install_daemon_service(binary: Option<&Path>) -> error::Result<DaemonServ
 pub fn uninstall_daemon_service() -> error::Result<()> {
     uninstall_resolved_daemon_service()?;
     clear_daemon_service_manager();
+    clear_daemon_watchdog();
     Ok(())
 }
 
@@ -266,6 +316,7 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
     Ok(DaemonServiceInstall {
         manager: "launchd",
         definition_path: plist_path,
+        watchdog: true,
     })
 }
 
@@ -301,6 +352,7 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
     Ok(DaemonServiceInstall {
         manager: "systemd",
         definition_path: unit_path,
+        watchdog: true,
     })
 }
 
@@ -395,9 +447,19 @@ Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
 Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
 Stop-XMatrixDaemonProcesses
 "#,
+    );
+    script = script.replace(
+        "$watchdogUserTaskName",
+        &powershell_single_quoted(WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME),
+    );
+    script = script.replace(
+        "$watchdogTaskName",
+        &powershell_single_quoted(WINDOWS_DAEMON_WATCHDOG_TASK_NAME),
     );
     script
 }
@@ -496,8 +558,20 @@ if (-not $keepExistingTask) {
 
 # Remove any earlier HKCU Run fallback once the Scheduled Task owns logon start.
 Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
+# The login task now has the minute trigger. Drop the standalone task so the
+# two do not both start the daemon.
+Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
 
 "#,
+    );
+    script = script.replace(
+        "$watchdogUserTaskName",
+        &powershell_single_quoted(WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME),
+    );
+    script = script.replace(
+        "$watchdogTaskName",
+        &powershell_single_quoted(WINDOWS_DAEMON_WATCHDOG_TASK_NAME),
     );
     script.push_str(windows_stop_daemon_processes_snippet());
     script.push_str(
@@ -513,6 +587,141 @@ Start-ScheduledTask -TaskName $taskName
 
 fn powershell_single_quoted(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
+}
+
+/// PowerShell functions shared by setup and the self-update handoff.
+///
+/// ASCII only, including the Chinese access-denied marker built from code
+/// points: the handoff script is written without a BOM, and Windows
+/// PowerShell 5.1 would otherwise read it in the ANSI code page.
+pub(crate) fn windows_daemon_watchdog_helpers_ps() -> String {
+    format!(
+        r#"
+$watchdogTaskName = {task_name}
+$watchdogUserTaskName = {user_task_name}
+$daemonServiceManagerFileName = {manager_file}
+$daemonWatchdogFileName = {watchdog_file}
+$watchdogRestartAbsent = {absent_message}
+function Test-WindowsTaskPermissionDenied([string]$message) {{
+  if (-not $message) {{ return $false }}
+  $lower = $message.ToLowerInvariant()
+  $denied = -join @([char]0x62D2, [char]0x7EDD, [char]0x8BBF, [char]0x95EE)
+  return ($lower.Contains('access is denied') -or $lower.Contains('permissiondenied') -or $lower.Contains('0x80070005') -or $message.Contains($denied))
+}}
+function Remove-StandaloneDaemonWatchdog {{
+  Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
+}}
+function Register-StandaloneDaemonWatchdog {{
+  $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $watchdogDirectory = Split-Path -Parent $InstallPath
+  $watchdogAction = New-ScheduledTaskAction -Execute $InstallPath -Argument "daemon" -WorkingDirectory $watchdogDirectory
+  $watchdogLogon = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
+  $watchdogMinute = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
+  $watchdogSettings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
+  function Test-ReadyWatchdogTask($task) {{
+    if (-not $task -or -not $task.Settings.Enabled) {{ return $false }}
+    $action = $task.Actions | Select-Object -First 1
+    return (
+      $action -and
+      ([System.IO.Path]::GetFullPath([string]$action.Execute) -ieq [System.IO.Path]::GetFullPath($InstallPath)) -and
+      ([string]$action.Arguments).Trim() -eq 'daemon' -and
+      (@($task.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0)
+    )
+  }}
+  function Register-WatchdogTask([string]$name) {{
+    $existing = Get-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+    if (Test-ReadyWatchdogTask $existing) {{
+      $script:registeredWatchdogTaskName = $name
+      return
+    }}
+    $null = Register-ScheduledTask -TaskName $name -Action $watchdogAction -Trigger @($watchdogLogon, $watchdogMinute) -Settings $watchdogSettings -Description "Restarts the xMatrix daemon if it exits." -Force -ErrorAction Stop
+    $created = Get-ScheduledTask -TaskName $name -ErrorAction Stop
+    if (-not (Test-ReadyWatchdogTask $created)) {{
+      throw ($name + ' was registered without a PT1M trigger')
+    }}
+    $script:registeredWatchdogTaskName = $name
+  }}
+  $canonical = Get-ScheduledTask -TaskName $watchdogTaskName -ErrorAction SilentlyContinue
+  if (Test-ReadyWatchdogTask $canonical) {{
+    $script:registeredWatchdogTaskName = $watchdogTaskName
+    Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    return
+  }}
+  try {{
+    Register-WatchdogTask $watchdogTaskName
+    Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
+  }} catch {{
+    if (-not (Test-WindowsTaskPermissionDenied $_.Exception.Message)) {{ throw }}
+    Register-WatchdogTask $watchdogUserTaskName
+  }}
+}}
+function Write-DaemonWatchdogState {{
+  if ($null -eq $script:daemonWatchdogActive) {{ return }}
+  if (-not $daemonUpdateLog) {{ return }}
+  try {{
+    $watchdogStateDirectory = Split-Path -Parent $daemonUpdateLog
+    $watchdogManager = 'scheduled-task'
+    if (-not $task) {{ $watchdogManager = 'windows-run-key' }}
+    $watchdogFlag = 'false'
+    if ($script:daemonWatchdogActive) {{ $watchdogFlag = 'true' }}
+    Write-AtomicTextFile (Join-Path $watchdogStateDirectory $daemonServiceManagerFileName) ($watchdogManager + [Environment]::NewLine) $null | Out-Null
+    Write-AtomicTextFile (Join-Path $watchdogStateDirectory $daemonWatchdogFileName) ($watchdogFlag + [Environment]::NewLine) $null | Out-Null
+  }} catch {{
+    Write-DaemonUpdateLog ('daemon watchdog state was not recorded: ' + $_.Exception.Message)
+  }}
+}}
+function Add-DaemonWatchdogTrigger {{
+  $script:daemonWatchdogActive = $false
+  $updatedMainTask = $false
+  try {{
+    $current = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $hasMinuteTrigger = @($current.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0
+    if (-not $hasMinuteTrigger) {{
+      $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
+      $null = Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger) -ErrorAction Stop
+      Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
+    }}
+    Remove-StandaloneDaemonWatchdog
+    $script:daemonWatchdogActive = $true
+    $updatedMainTask = $true
+  }} catch {{
+    $watchdogDetail = $_.Exception.Message
+    if (Test-WindowsTaskPermissionDenied $watchdogDetail) {{
+      Write-DaemonUpdateLog ('scheduled task watchdog update was denied: ' + $watchdogDetail)
+    }} else {{
+      Write-DaemonUpdateLog ('daemon watchdog trigger was not added: ' + $watchdogDetail)
+    }}
+  }}
+  if (-not $updatedMainTask) {{
+    try {{
+      Register-StandaloneDaemonWatchdog
+      $script:daemonWatchdogActive = $true
+      Write-DaemonUpdateLog ('registered the per-user ' + $script:registeredWatchdogTaskName + ' task')
+    }} catch {{
+      $script:daemonWatchdogActive = $false
+      Write-DaemonUpdateLog ($watchdogRestartAbsent + ': ' + $_.Exception.Message)
+    }}
+  }}
+  Write-DaemonWatchdogState
+}}
+"#,
+        task_name = powershell_single_quoted(WINDOWS_DAEMON_WATCHDOG_TASK_NAME),
+        user_task_name = powershell_single_quoted(WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME),
+        manager_file = powershell_single_quoted(DAEMON_SERVICE_MANAGER_FILE),
+        watchdog_file = powershell_single_quoted(DAEMON_WATCHDOG_FILE),
+        absent_message = powershell_single_quoted(WATCHDOG_RESTART_ABSENT),
+    )
+}
+
+/// Registers only the per-user watchdog task. Does not stop a running daemon
+/// and does not modify `xmatrix-daemon`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn windows_daemon_watchdog_register_script(binary: &Path) -> String {
+    let mut script = windows_daemon_script_prelude(binary, 0);
+    script.push_str(&windows_daemon_watchdog_helpers_ps());
+    script.push_str("\nRegister-StandaloneDaemonWatchdog\n");
+    script
 }
 
 /// Runs a generated setup script with Windows PowerShell and returns its
@@ -638,12 +847,25 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
             }
             eprintln!(
                 "Windows denied registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME}; \
-                 installed per-user login startup under {WINDOWS_DAEMON_RUN_KEY_PATH}\\{WINDOWS_DAEMON_RUN_VALUE_NAME} and started the daemon directly.\n\
-                 Warning: without Task Scheduler, there is no automatic restart watchdog — if the daemon exits, it will not restart until your next Windows sign-in or reopening the xMatrix app."
+                 installed per-user login startup under {WINDOWS_DAEMON_RUN_KEY_PATH}\\{WINDOWS_DAEMON_RUN_VALUE_NAME} and started the daemon directly."
             );
+            let watchdog_script = windows_daemon_watchdog_register_script(binary);
+            let watchdog = match run_windows_setup_script(&watchdog_script)? {
+                Ok(()) => true,
+                Err(watchdog_detail) => {
+                    eprintln!("Warning: {WATCHDOG_RESTART_ABSENT} ({watchdog_detail})");
+                    false
+                }
+            };
+            if watchdog {
+                eprintln!(
+                    "Registered per-user Scheduled Task {WINDOWS_DAEMON_WATCHDOG_TASK_NAME} to restart the daemon if it exits."
+                );
+            }
             return Ok(DaemonServiceInstall {
                 manager: WINDOWS_RUN_KEY_MANAGER,
                 definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
+                watchdog,
             });
         }
         return Err(CliError::Launch(format!(
@@ -653,6 +875,7 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
     Ok(DaemonServiceInstall {
         manager: "scheduled-task",
         definition_path: PathBuf::from(WINDOWS_DAEMON_TASK_NAME),
+        watchdog: true,
     })
 }
 
@@ -869,6 +1092,12 @@ mod tests {
         assert!(script.contains("Arguments).Trim() -eq \"daemon\""));
         assert!(script.contains("Register-ScheduledTask"));
         assert!(script.contains("Start-ScheduledTask -TaskName $taskName"));
+        assert!(script.contains(&format!(
+            "Unregister-ScheduledTask -TaskName '{WINDOWS_DAEMON_WATCHDOG_TASK_NAME}'"
+        )));
+        assert!(script.contains(&format!(
+            "Unregister-ScheduledTask -TaskName '{WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME}'"
+        )));
         assert!(!script.to_ascii_lowercase().contains("wscript"));
         assert!(!script.to_ascii_lowercase().contains("launch-hidden"));
         assert!(!script.to_ascii_lowercase().contains("active-generation"));
@@ -969,23 +1198,79 @@ mod tests {
         assert!(script.contains(WINDOWS_DAEMON_RUN_VALUE_NAME));
         assert!(script.contains("Unregister-ScheduledTask -TaskName $taskName"));
         assert!(script.contains("Unregister-ScheduledTask -TaskName $legacyTaskName"));
+        assert!(script.contains(&format!(
+            "Unregister-ScheduledTask -TaskName '{WINDOWS_DAEMON_WATCHDOG_TASK_NAME}'"
+        )));
+        assert!(script.contains(&format!(
+            "Unregister-ScheduledTask -TaskName '{WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME}'"
+        )));
         assert!(script.contains("Remove-ItemProperty -Path $runKey -Name $runValueName"));
         assert!(script.contains("$callerPid = 4242"));
         assert!(script.contains("Stop-XMatrixDaemonProcesses"));
     }
 
     #[test]
-    fn windows_run_key_reports_no_watchdog_while_other_managers_have_one() {
-        let run_key = DaemonServiceInstall {
+    fn windows_watchdog_follows_the_recorded_outcome_not_the_manager_name() {
+        let run_key_without = DaemonServiceInstall {
             manager: WINDOWS_RUN_KEY_MANAGER,
             definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
+            watchdog: false,
         };
-        assert!(!run_key.has_watchdog());
+        assert!(!run_key_without.has_watchdog());
+
+        let run_key_with = DaemonServiceInstall {
+            manager: WINDOWS_RUN_KEY_MANAGER,
+            definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
+            watchdog: true,
+        };
+        assert!(run_key_with.has_watchdog());
 
         let scheduled = DaemonServiceInstall {
             manager: "scheduled-task",
             definition_path: PathBuf::from(WINDOWS_DAEMON_TASK_NAME),
+            watchdog: true,
         };
         assert!(scheduled.has_watchdog());
+
+        let elevated_without = DaemonServiceInstall {
+            manager: "scheduled-task",
+            definition_path: PathBuf::from(WINDOWS_DAEMON_TASK_NAME),
+            watchdog: false,
+        };
+        assert!(!elevated_without.has_watchdog());
+    }
+
+    #[test]
+    fn windows_standalone_watchdog_task_uses_the_current_user_and_minute_trigger() {
+        let script = windows_daemon_watchdog_register_script(Path::new(
+            r"C:\Users\tester\.local\bin\xmatrix.exe",
+        ));
+        assert!(script.contains(&format!(
+            "$watchdogTaskName = '{WINDOWS_DAEMON_WATCHDOG_TASK_NAME}'"
+        )));
+        assert!(script.contains(&format!(
+            "$watchdogUserTaskName = '{WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME}'"
+        )));
+        assert!(script.contains(r"$InstallPath = 'C:\Users\tester\.local\bin\xmatrix.exe'"));
+        assert!(script.contains("-Execute $InstallPath"));
+        assert!(script.contains("-Argument \"daemon\""));
+        assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
+        assert!(script.contains(
+            "New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)"
+        ));
+        assert!(script.contains("$_.Repetition.Interval -eq 'PT1M'"));
+        assert!(script.contains("Test-ReadyWatchdogTask"));
+        assert!(script.contains("Register-WatchdogTask $watchdogUserTaskName"));
+        assert!(
+            script.contains("$existingWatchdog.Settings.Enabled")
+                || script.contains("$task.Settings.Enabled")
+        );
+        assert!(script.contains("-MultipleInstances IgnoreNew"));
+        assert!(script.contains("Register-StandaloneDaemonWatchdog"));
+        assert!(!script.contains("Stop-XMatrixDaemonProcesses"));
+        assert!(!script.contains("Stop-ScheduledTask"));
+        assert!(!script.to_ascii_lowercase().contains("wscript"));
+        assert!(script.contains("[char]0x62D2"));
+        assert!(script.contains(WATCHDOG_RESTART_ABSENT));
     }
 }
