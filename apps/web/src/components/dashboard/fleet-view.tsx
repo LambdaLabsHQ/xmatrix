@@ -278,10 +278,11 @@ export function FleetView({
         ? machineGlanceReadings(machineLoadReadings(machineResourceObservation(machine.daemon.metadata?.machineResources, now)))
           .filter((reading) => meterTone(reading.percent) !== "green")
         : [];
+      const os = machineOs(local ? thisMachine!.platform : machinePlatform(machine!));
       const openThisMachine = () => { setCell(null); openMachine(machine); };
       subjects.set(key, { name, machine: machine ?? undefined, own: Boolean(items), rowOf });
       mobileRows.push({
-        key, name, own: Boolean(items), online, dimmed: !online,
+        key, name, os, own: Boolean(items), online, stalled, dimmed: !online,
         localTag: local ? <ThisMachineTag label={model.thisLabel} /> : undefined,
         exception: stalled ? "Not responding" : attentionTextOf(cells),
         loadAlerts,
@@ -296,7 +297,7 @@ export function FleetView({
             className={cn(machineHeading, "rounded hover:bg-foreground/5", host && "pl-5")}>
             <span className="app-tool-state-icon shrink-0" data-state={stalled ? "attention" : online ? "running" : "offline"}
               aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
-              <MachineGlyph os={machineOs(local ? thisMachine!.platform : machinePlatform(machine!))} /></span>
+              <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
               <span className="app-list-row-title block truncate font-semibold">{name}</span>
               <span className="block truncate text-xs text-muted-foreground">
@@ -318,9 +319,10 @@ export function FleetView({
         const row = rowOf(harness);
         return row ? agentCell(row) : { kind: "unknown" };
       });
+      const os = machineOs(section.platform);
       subjects.set(section.key, { name: section.name, own: false, rowOf });
       mobileRows.push({
-        key: section.key, name: section.name, own: false, online: up, dimmed: !up,
+        key: section.key, name: section.name, os, own: false, online: up, dimmed: !up,
         group: mine ? undefined : "Teammates' machines",
         exception: attentionTextOf(cells),
         loadAlerts: [],
@@ -332,7 +334,7 @@ export function FleetView({
         heading: (
           <span className={machineHeading}>
             <span className="app-tool-state-icon shrink-0" data-state={up ? "running" : "offline"} aria-hidden="true">
-              <MachineGlyph os={machineOs(section.platform)} /></span>
+              <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
               <span className="app-list-row-title block truncate font-semibold">{section.name}</span>
               <span className="block truncate text-xs text-muted-foreground">

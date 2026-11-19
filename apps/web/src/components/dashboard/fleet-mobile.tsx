@@ -20,15 +20,19 @@ import {
   type FleetMatrixColumn,
   type FleetMatrixEditor,
 } from "./fleet-matrix";
+import { MachineGlyph } from "./machine-glyph";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
+import type { MachineOs } from "./machine-os";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 
 export type MobileMatrixRow = {
   key: string;
   name: string;
+  os: MachineOs;
   /** Whether the reader owns this machine and can install agents on it. */
   own: boolean;
   online: boolean;
+  stalled?: boolean;
   dimmed: boolean;
   group?: string;
   /** Tag for the device currently running the app, when known. */
@@ -138,6 +142,10 @@ export function MobileAvatarMatrix({
 
         const headingCopy = (
           <>
+            <span className="app-tool-state-icon flex size-4 shrink-0 items-center justify-center"
+              data-state={row.stalled ? "attention" : row.online ? "running" : "offline"} aria-hidden="true">
+              <MachineGlyph os={row.os} className="size-4" />
+            </span>
             <span className="truncate text-[15px] font-bold tracking-tight text-foreground">{row.name}</span>
             {row.localTag}
             {row.exception && (
