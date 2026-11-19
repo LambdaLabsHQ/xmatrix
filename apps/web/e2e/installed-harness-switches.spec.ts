@@ -36,6 +36,10 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       await expect(under.getByTestId("agent-row")).toHaveCount(0);
       const off = under.getByTestId("fleet-machine-off");
       await expect(off).toHaveText("2 more installed · off in this Space");
+      // With no agent in the Space yet, the overview says the same in words and names the machine to open.
+      const empty = page.getByTestId("fleet-empty").filter({ visible: true });
+      await expect(empty).toContainText("Turn on an installed agent");
+      await expect(empty.getByRole("button", { name: "Open Remote server" })).toBeVisible();
       await off.click();
       await expect(page).toHaveURL(/\/machines\?machine=/u);
       const panel = page.getByTestId("machine-harness-panel");
