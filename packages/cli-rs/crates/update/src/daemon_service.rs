@@ -14,6 +14,8 @@ pub const LAUNCHD_LABEL: &str = "sh.xmatrix.daemon";
 pub const SYSTEMD_UNIT: &str = "xmatrix-daemon.service";
 pub const WINDOWS_DAEMON_TASK_NAME: &str = "xmatrix-daemon";
 pub const WINDOWS_DAEMON_LEGACY_TASK_NAME: &str = "xMatrix Daemon";
+pub const WINDOWS_DAEMON_RUN_KEY_PATH: &str = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
+pub const WINDOWS_DAEMON_RUN_VALUE_NAME: &str = "xMatrixDaemon";
 
 /// What `install_daemon_service` registered, for the caller's report.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -280,6 +282,67 @@ fn linux_user_linger_args() -> &'static [&'static str] {
     &["enable-linger"]
 }
 
+fn windows_stop_daemon_processes_snippet() -> &'static str {
+    r#"function Stop-XMatrixDaemonProcesses {
+  Get-CimInstance Win32_Process -Filter "Name = 'xmatrix.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+      $_.ProcessId -ne $callerPid -and
+      $_.CommandLine -match 'xmatrix\.exe"?\s+daemon(\s|$)'
+    } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}"#
+}
+
+/// Whether a Windows Scheduled Task registration failure was caused by missing
+/// Task Scheduler permissions (`Access is denied`, `PermissionDenied`,
+/// `0x80070005`, or localized `拒绝访问`).
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn is_windows_task_permission_denied(detail: &str) -> bool {
+    let lower = detail.to_ascii_lowercase();
+    lower.contains("access is denied")
+        || lower.contains("permissiondenied")
+        || lower.contains("0x80070005")
+        || detail.contains("拒绝访问")
+}
+
+fn windows_daemon_script_prelude(binary: &Path, caller_pid: u32) -> String {
+    format!(
+        "$ErrorActionPreference = 'Stop'\n\
+         $InstallPath = {install_path}\n\
+         $runKey = {run_key}\n\
+         $runValueName = {run_value}\n\
+         $callerPid = {caller_pid}\n\
+         $installDirectory = Split-Path -Parent $InstallPath\n",
+        install_path = powershell_single_quoted(&binary.display().to_string()),
+        run_key = powershell_single_quoted(WINDOWS_DAEMON_RUN_KEY_PATH),
+        run_value = powershell_single_quoted(WINDOWS_DAEMON_RUN_VALUE_NAME),
+    )
+}
+
+/// Per-user HKCU Run-key fallback when Windows policy or an elevated prior task
+/// refuses `Register-ScheduledTask` (`0x80070005`): registers login startup
+/// under the current user's hive, stops leftover daemon processes, and starts
+/// the daemon directly without requiring Task Scheduler access.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn windows_daemon_run_key_fallback_script(binary: &Path, caller_pid: u32) -> String {
+    let mut script = windows_daemon_script_prelude(binary, caller_pid);
+    script.push_str(
+        r#"if (-not (Test-Path -Path $runKey)) {
+  New-Item -Path $runKey -Force | Out-Null
+}
+New-ItemProperty -Path $runKey -Name $runValueName -Value ('"' + $InstallPath + '" daemon') -PropertyType String -Force | Out-Null
+"#,
+    );
+    script.push_str(windows_stop_daemon_processes_snippet());
+    script.push_str(
+        r#"
+Stop-XMatrixDaemonProcesses
+Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $installDirectory -WindowStyle Hidden
+"#,
+    );
+    script
+}
+
 /// Per-user login Scheduled Task that runs the stable CLI as `daemon`.
 ///
 /// Mirrors the former `Install-DaemonStartup` body from `install.ps1`: direct
@@ -292,18 +355,14 @@ fn linux_user_linger_args() -> &'static [&'static str] {
 /// ` setup daemon `, which used to match a looser `\sdaemon` pattern and kill
 /// the installer mid-run.
 pub fn windows_daemon_scheduled_task_script(binary: &Path, caller_pid: u32) -> String {
-    let mut script = String::from("$ErrorActionPreference = 'Stop'\n$InstallPath = ");
-    script.push_str(&powershell_single_quoted(&binary.display().to_string()));
-    script.push_str("\n$taskName = ");
-    script.push_str(&powershell_single_quoted(WINDOWS_DAEMON_TASK_NAME));
-    script.push_str("\n$legacyTaskName = ");
-    script.push_str(&powershell_single_quoted(WINDOWS_DAEMON_LEGACY_TASK_NAME));
-    script.push_str("\n$callerPid = ");
-    script.push_str(&caller_pid.to_string());
+    let mut script = windows_daemon_script_prelude(binary, caller_pid);
+    script.push_str(&format!(
+        "$taskName = {}\n$legacyTaskName = {}\n",
+        powershell_single_quoted(WINDOWS_DAEMON_TASK_NAME),
+        powershell_single_quoted(WINDOWS_DAEMON_LEGACY_TASK_NAME),
+    ));
     script.push_str(
-        r#"
-$installDirectory = Split-Path -Parent $InstallPath
-$action = New-ScheduledTaskAction `
+        r#"$action = New-ScheduledTaskAction `
   -Execute $InstallPath `
   -Argument "daemon" `
   -WorkingDirectory $installDirectory
@@ -352,14 +411,14 @@ if (-not $keepExistingTask) {
     -Force | Out-Null
 }
 
-function Stop-XMatrixDaemonProcesses {
-  Get-CimInstance Win32_Process -Filter "Name = 'xmatrix.exe'" -ErrorAction SilentlyContinue |
-    Where-Object {
-      $_.ProcessId -ne $callerPid -and
-      $_.CommandLine -match 'xmatrix\.exe"?\s+daemon(\s|$)'
-    } |
-    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
-}
+# Remove any earlier HKCU Run fallback once the Scheduled Task owns logon start.
+Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
+
+"#,
+    );
+    script.push_str(windows_stop_daemon_processes_snippet());
+    script.push_str(
+        r#"
 
 Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
 Stop-XMatrixDaemonProcesses
@@ -486,6 +545,23 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
     }
     let script = windows_daemon_scheduled_task_script(binary, std::process::id());
     if let Err(detail) = run_windows_setup_script(&script)? {
+        if is_windows_task_permission_denied(&detail) {
+            let fallback = windows_daemon_run_key_fallback_script(binary, std::process::id());
+            if let Err(fallback_detail) = run_windows_setup_script(&fallback)? {
+                return Err(CliError::Launch(format!(
+                    "Registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME} failed: {detail}\n\
+                     Fallback HKCU Run registration also failed: {fallback_detail}"
+                )));
+            }
+            eprintln!(
+                "Windows denied registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME}; \
+                 installed per-user login startup under {WINDOWS_DAEMON_RUN_KEY_PATH}\\{WINDOWS_DAEMON_RUN_VALUE_NAME} and started the daemon directly."
+            );
+            return Ok(DaemonServiceInstall {
+                manager: "windows-run-key",
+                definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
+            });
+        }
         return Err(CliError::Launch(format!(
             "Registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME} failed: {detail}"
         )));
@@ -703,5 +779,39 @@ mod tests {
             1,
         );
         assert!(script.contains(r"$InstallPath = 'C:\Users\O''Brien\.local\bin\xmatrix.exe'"));
+        assert!(script.contains("Remove-ItemProperty -Path $runKey -Name $runValueName"));
+    }
+
+    #[test]
+    fn windows_task_permission_denied_matches_english_hresult_and_chinese_errors() {
+        assert!(is_windows_task_permission_denied(
+            "Register-ScheduledTask : Access is denied.\n+ CategoryInfo : PermissionDenied"
+        ));
+        assert!(is_windows_task_permission_denied(
+            "FullyQualifiedErrorId : HRESULT 0x80070005,Register-ScheduledTask"
+        ));
+        assert!(is_windows_task_permission_denied(
+            "Register-ScheduledTask : 拒绝访问。"
+        ));
+        assert!(!is_windows_task_permission_denied(
+            "The system cannot find the file specified."
+        ));
+    }
+
+    #[test]
+    fn windows_run_key_fallback_registers_hkcu_logon_and_starts_daemon_directly() {
+        let script = windows_daemon_run_key_fallback_script(
+            Path::new(r"C:\Users\O'Brien\.local\bin\xmatrix.exe"),
+            4242,
+        );
+        assert!(script.contains(r"$InstallPath = 'C:\Users\O''Brien\.local\bin\xmatrix.exe'"));
+        assert!(script.contains(WINDOWS_DAEMON_RUN_KEY_PATH));
+        assert!(script.contains(WINDOWS_DAEMON_RUN_VALUE_NAME));
+        assert!(script.contains("New-ItemProperty -Path $runKey -Name $runValueName"));
+        assert!(script.contains("$_.ProcessId -ne $callerPid"));
+        assert!(script.contains(
+            "Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $installDirectory -WindowStyle Hidden"
+        ));
+        assert!(!script.contains("Register-ScheduledTask"));
     }
 }

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { readLaunchContext, relativeAge, renderLaunchContext, renderLinkedPages } from "../src/agent-launch-context.ts";
+import {
+  agentInstanceRequiredMessage,
+  channelPeerInstances,
+  readLaunchContext,
+  relativeAge,
+  renderLaunchContext,
+  renderLinkedPages,
+} from "../src/agent-launch-context.ts";
 
 const READ_AT = "2026-09-18T20:28:34Z";
 
@@ -134,4 +141,56 @@ test("a page that does not fit whole is named with its read, never cut", () => {
   assert.ok(!text.includes("zzz"));
   assert.ok(text.includes("- Huge: `xmatrix page read p2`"));
   assert.equal(renderLinkedPages([]), undefined);
+});
+
+test("launch context names other live, starting, and resting Instances in the Channel without naming the caller", async () => {
+  const peerRecord = (ordinal, agentName, harness, overrides = {}) => ({
+    id: `c1:${ordinal}`,
+    channelId: "c1",
+    channelInstanceId: String(ordinal),
+    agentName,
+    label: agentName,
+    status: "connected",
+    connectedAt: READ_AT,
+    lastSeenAt: READ_AT,
+    registration: { ownerUserId: "u1", machineId: "m1", harness },
+    revision: { version: 1, sequence: 0 },
+    ...overrides,
+  });
+  const peers = channelPeerInstances([
+    peerRecord(1, "codex", "codex"),
+    peerRecord(3, "claude", "claude", { status: "offline", rest: "sleeping" }),
+    peerRecord(2, "cursor", "cursor", { status: "offline", rest: "starting" }),
+    peerRecord(4, "stopped", "gemini", { status: "offline" }),
+  ], "c1:1");
+  assert.deepEqual(peers.map((peer) => [peer.address, peer.state]), [
+    ["@cursor:2", "starting"],
+    ["@claude:3", "sleeping"],
+  ]);
+
+  const context = await readLaunchContext({
+    channelId: "c1",
+    readAt: READ_AT,
+    startedForId: "m1",
+    history: async () => ({ messages: [message("m1", 1, "Ann", "@codex @cursor collaborate")], hasMore: false }),
+    about: async () => null,
+    peers: async () => peers,
+  });
+  assert.ok(context.text.startsWith("## Other Agents in this Channel (read at launch)\n"));
+  assert.ok(context.text.includes("- `@cursor:2` (cursor, starting)"));
+  assert.ok(context.text.includes("- `@claude:3` (claude, sleeping)"));
+  assert.ok(!context.text.includes("@codex:1"));
+
+  assert.equal(
+    agentInstanceRequiredMessage([{ text: "@cursor" }], peers),
+    "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start a new Agent. Already in this Channel: @cursor:2. Nothing was sent.",
+  );
+  assert.equal(
+    agentInstanceRequiredMessage([{ text: "@auto" }], peers),
+    "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start a new Agent. Already in this Channel: @cursor:2, @claude:3. Nothing was sent.",
+  );
+  assert.equal(
+    agentInstanceRequiredMessage([{ text: "@cursor" }], []),
+    "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.",
+  );
 });

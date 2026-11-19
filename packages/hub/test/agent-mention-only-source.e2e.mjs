@@ -86,7 +86,15 @@ test("a send without an Instance refuses summons until launch is explicitly requ
     const launched = await post({ body: message, clientMessageId, launch: true });
     assert.equal(launched.status, 200, await launched.clone().text());
     assert.equal((await launched.json()).message.messageId, clientMessageId);
-    assert.equal((await spawn).sourceMessageId, clientMessageId);
+    const spawned = await spawn;
+    assert.equal(spawned.sourceMessageId, clientMessageId);
+    // Once an Instance exists in the Channel (even while starting), a bare summon
+    // refusal names it so a caller addresses the peer instead of adding --launch.
+    const withPeer = await post({ body: "@codex follow up" });
+    assert.equal(withPeer.status, 400, await withPeer.clone().text());
+    const withPeerBody = await withPeer.json();
+    assert.equal(withPeerBody.code, "agent_instance_required");
+    assert.match(withPeerBody.error, /Already in this Channel: @.+:1\./);
   } finally {
     daemon?.ws.close();
     await worker.stop();

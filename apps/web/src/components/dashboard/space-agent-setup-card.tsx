@@ -53,7 +53,6 @@ export function SpaceAgentSetupCard({
   onBringAll,
   onManageMachines,
   daemonStatus,
-  phone = false,
 }: {
   state: SpaceAgentSetupState;
   spaceId: string | null;
@@ -71,8 +70,6 @@ export function SpaceAgentSetupCard({
   onManageMachines: () => void;
   /** The App's background service, when this is the desktop App. */
   daemonStatus?: DesktopDaemonStatus | null;
-  /** On a phone: the command is run on a computer, and only approved here. */
-  phone?: boolean;
 }) {
   const copy = useOnboardingCopy(spaceId, token, userId);
   if (fleet && ((fleet.ready && fleet.candidates.length > 0) || fleet.enablingAll)) return <SetupCardShell>
@@ -97,7 +94,7 @@ export function SpaceAgentSetupCard({
         )}
         {state.kind === "unreachable" && <UnreachablePanel copy={copy} onRetry={onRetryAgents} />}
         {/* Web and phone: the same flow xMatrix sends in a welcome conversation. */}
-        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" phone={phone} />}
+        {state.kind === "no-local-machine" && <BringAgentsIn spaceId={spaceId} token={token} userId={userId} surface="space" />}
         {state.kind === "discovering" && (
           <SetupCardHeader
             icon={Loader2}

@@ -404,7 +404,7 @@ export function FleetView({
     </div>
   ) : undefined;
   // Another machine: the same connection a first machine makes, followed for that machine alone.
-  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another phone={phone} />;
+  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another />;
   const addColumnConfig = {
     options: offered.map((preset) => ({ harness: preset.id, name: preset.displayName })),
     onAdd: (harness: string) => setAddedColumns((current) => current.includes(harness) ? current : [...current, harness]),
