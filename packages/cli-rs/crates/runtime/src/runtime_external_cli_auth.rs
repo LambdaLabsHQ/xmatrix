@@ -2965,49 +2965,34 @@ impl AcpRun<'_> {
                 )
                 .await;
             }
-            Some("agent_message_chunk") => {
+            Some("agent_message_chunk" | "agent_thought_chunk") => {
                 if let Some(delta) = update
                     .get("content")
                     .and_then(|content| content.get("text"))
                     .and_then(Value::as_str)
                 {
+                    let is_message = session_update == Some("agent_message_chunk");
                     let turn_id = {
                         let wakeup = self.ensure_reactive_wakeup(received.0).await;
-                        wakeup.saw_message_since_tool = true;
+                        if is_message {
+                            wakeup.saw_message_since_tool = true;
+                        }
                         wakeup.settle_deadline = None;
                         wakeup.safety_idle_deadline = None;
                         wakeup.turn_id.clone()
                     };
-                    self.send_background_trace(
-                        &session_id,
-                        &turn_id,
-                        "assistant_delta",
-                        None,
-                        Some(update),
-                        serde_json::json!({ "delta": delta }),
-                    )
-                    .await;
-                }
-            }
-            Some("agent_thought_chunk") => {
-                if let Some(delta) = update
-                    .get("content")
-                    .and_then(|content| content.get("text"))
-                    .and_then(Value::as_str)
-                {
-                    let turn_id = {
-                        let wakeup = self.ensure_reactive_wakeup(received.0).await;
-                        wakeup.settle_deadline = None;
-                        wakeup.safety_idle_deadline = None;
-                        wakeup.turn_id.clone()
+                    let (phase, fields) = if is_message {
+                        ("assistant_delta", serde_json::json!({ "delta": delta }))
+                    } else {
+                        ("runtime_event", acp_reasoning_payload(delta))
                     };
                     self.send_background_trace(
                         &session_id,
                         &turn_id,
-                        "runtime_event",
+                        phase,
                         None,
                         Some(update),
-                        acp_reasoning_payload(delta),
+                        fields,
                     )
                     .await;
                 }

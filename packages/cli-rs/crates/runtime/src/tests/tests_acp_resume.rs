@@ -31,6 +31,22 @@ async fn spawn_acp_resume_fixture(mode: &str) -> (String, AcpSession) {
     (key, session)
 }
 
+async fn submit_acp_resume_new_work(session: &mut AcpSession) -> super::CodexTurnResult {
+    session
+        .submit_turn(
+            "new work",
+            vec![serde_json::json!({"type":"text","text":"new work"})],
+            None,
+            None,
+            &test_serialized_agent("grok-resume"),
+            None,
+            None,
+            None,
+        )
+        .await
+        .expect("live turn after resume")
+}
+
 #[test]
 fn acp_resume_streams_history_beyond_backlog_limit() {
     run_acp_resume_fixture_test(async {
@@ -64,19 +80,7 @@ fn acp_resume_streams_history_beyond_backlog_limit() {
             assert_eq!(pending[0]["method"], "vendor/notice");
             assert_eq!(pending[1]["id"], 999);
             assert_eq!(pending[2]["params"]["sessionId"], "other-session");
-            let turn = session
-                .submit_turn(
-                    "new work",
-                    vec![serde_json::json!({"type":"text","text":"new work"})],
-                    None,
-                    None,
-                    &test_serialized_agent("grok-resume"),
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .expect("first live turn after resume");
+            let turn = submit_acp_resume_new_work(&mut session).await;
             assert!(!turn.failed, "{:?}", turn.failure_detail);
             assert_eq!(
                 turn.local_output, "live reply",
@@ -134,19 +138,7 @@ fn acp_resume_failed_load_does_not_restore_historical_goal() {
                 session.loaded_goal.is_none(),
                 "failed replay must not restore a goal"
             );
-            let turn = session
-                .submit_turn(
-                    "new work",
-                    vec![serde_json::json!({"type":"text","text":"new work"})],
-                    None,
-                    None,
-                    &test_serialized_agent("grok-resume"),
-                    None,
-                    None,
-                    None,
-                )
-                .await
-                .expect("live turn after fallback");
+            let turn = submit_acp_resume_new_work(&mut session).await;
             assert!(!turn.failed, "{:?}", turn.failure_detail);
             assert_eq!(turn.local_output, "live reply");
             assert!(turn.goal.is_none());

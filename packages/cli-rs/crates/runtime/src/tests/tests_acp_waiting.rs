@@ -68,6 +68,25 @@ async fn spawn_acp_waiting_fixture(
     (agent, Arc::new(relay), frames, app)
 }
 
+async fn submit_acp_waiting_turn(
+    app: &mut AcpSession,
+    agent: &SerializedAgent,
+    relay: &Arc<AgentInstanceConnectionClient>,
+    runtime_state: &AgentRuntimeStateTracker,
+) -> super::error::Result<super::CodexTurnResult> {
+    app.submit_turn(
+        "watch CI",
+        vec![serde_json::json!({"type":"text","text":"watch CI"})],
+        None,
+        None,
+        agent,
+        Some(relay),
+        Some("channel-1"),
+        Some(runtime_state),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() {
     tokio::time::timeout(Duration::from_secs(15), async {
@@ -101,19 +120,7 @@ async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() 
         };
 
         let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
-        let turn = run
-            .app
-            .submit_turn(
-                "watch CI",
-                vec![serde_json::json!({"type":"text","text":"watch CI"})],
-                None,
-                None,
-                &agent,
-                Some(&relay),
-                Some("channel-1"),
-                Some(&runtime_state),
-            )
-            .await;
+        let turn = submit_acp_waiting_turn(&mut run.app, &agent, &relay, &runtime_state).await;
         let cancelled = run
             .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
             .await
@@ -206,17 +213,7 @@ async fn non_antigravity_acp_reports_tool_waits_and_clears_unclosed_tools_at_end
             spawn_acp_waiting_fixture("grok-wait", "grok", "unclosed-tool", config).await;
         let runtime_state = AgentRuntimeStateTracker::new("grok_acp");
         let _turn_guard = runtime_state.begin_turn(Some("channel-1"), None);
-        let turn = app
-            .submit_turn(
-                "watch CI",
-                vec![serde_json::json!({"type":"text","text":"watch CI"})],
-                None,
-                None,
-                &agent,
-                Some(&relay),
-                Some("channel-1"),
-                Some(&runtime_state),
-            )
+        let turn = submit_acp_waiting_turn(&mut app, &agent, &relay, &runtime_state)
             .await
             .expect("grok turn");
         assert!(!turn.failed, "{:?}", turn.failure_detail);
