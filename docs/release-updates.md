@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: unlink a page from a conversation
+
+A page linked to a conversation kept reaching it (new Runs read it at launch,
+it sat in the header cards, typing on it woke a co-writing Agent) and there was
+no way to stop that: deleting a link was undone by the next read, edit or
+mention from the conversation. A page's card at the top of a conversation now
+offers **Unlink from this conversation**, and `xmatrix page unlink <page-id>`
+does the same. It removes every link between the two, stops co-writing, and
+records the unlink (expand migration 0260, `data.page_unlinks`); reads, edits
+and mentions there no longer link the page again until someone links it
+explicitly. Hub, DB, Web and CLI. Older Hubs ignore the record while they
+drain. Recovery is a CI-validated beta reverting this change; the new table is
+left unused.
+
 ## Unreleased: a page comment's @ lists every Agent the Space can start
 
 The comment box on a selected passage used the conversation composer but was
