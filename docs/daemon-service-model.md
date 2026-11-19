@@ -48,35 +48,35 @@ without a signed continuity migration.
 - The installer and Desktop App seed both run `xmatrix setup daemon`, which registers a per-user `xmatrix-daemon`
   Scheduled Task. The task definition lives once in the binary (`crates/update/src/daemon_service.rs`); `install.ps1`
   only invokes it.
-- That task runs at logon. Its action is the stable CLI, `xmatrix.exe daemon`. Starting that
-  console binary directly from Task Scheduler opens a Windows Terminal window that stays up for the
-  life of the daemon when Windows Terminal is the default terminal; `MainWindowHandle` on
-  `xmatrix.exe` stays 0 because the visible window belongs to Windows Terminal. This registration
-  does not change that action.
-- Task Scheduler's restart settings only retry a task that fails to start; they never restart a daemon that exits
-  later. The task therefore also has a watchdog trigger that repeats every minute; with `MultipleInstances IgnoreNew`
-  it does nothing while the daemon runs and brings an exited daemon back within a minute, as `Restart=always` and
-  `KeepAlive` do on Linux and macOS. `setup daemon` re-registers a task that lacks it. A daemon self-update adds the
-  trigger to an existing direct task in place (without stopping the task) when that task can be modified. A task
-  registered by an administrator refuses `Set-ScheduledTask` for a standard user; the update then leaves that task
-  alone, including its action, and registers a separate per-user task, `xmatrix-daemon-watchdog`. That standalone
-  task's action is the inbox signed `conhost.exe --headless "<stable CLI>" daemon`, so the minute start does not
-  open a console window, and `conhost.exe` stays alive for the life of the daemon. `--headless` is an undocumented
+- That task runs at logon. Its action is the inbox signed `conhost.exe --headless "<stable CLI>" daemon`,
+  so starting it does not open a console window, and `conhost.exe` stays alive for the life of the daemon.
+  Starting `xmatrix.exe daemon` directly from Task Scheduler opens a Windows Terminal window that stays up
+  for the life of the daemon when Windows Terminal is the default terminal; `MainWindowHandle` on
+  `xmatrix.exe` stays 0 because the visible window belongs to Windows Terminal. `--headless` is an undocumented
   conhost switch present since ConPTY (Windows 10 1809); a Windows 10 conhost that does not understand it treats
   the token as a program name and does not start the daemon, and Windows 11 builds above 25179 broke the switch
   until a later conhost (it was not serviced into the already-signed 22621 release). If `conhost.exe` is missing,
-  the standalone task is not registered. If the canonical watchdog name is already an administrator-owned task a
-  standard user cannot replace, the same registration is created as `xmatrix-daemon-user-watchdog` instead. The
-  daemon lock makes that extra start exit while the daemon is already running. When a later setup or self-update
-  can update the original task, it removes the standalone task. If neither path can be registered, the update
-  receipt says that this computer will not restart the daemon after it exits, and the Machines page shows that
-  recorded outcome. Before starting the task after replacing the binary, the update stops any daemon the watchdog
-  started in between, so the start is not ignored.
-- Installer idempotency retains a task whose action is the stable CLI, whose argument is `daemon`, whose working
-  directory is the CLI directory, and which already has the minute trigger. A historical WScript bridge, a
-  generation selector, or any other task action is replaced on the next `setup daemon` run and has no current
-  startup authority. A self-update that can modify the login task adds the minute trigger in place and does not
-  change the task action or stop the running task.
+  setup refuses to register a console daemon.
+- Task Scheduler's restart settings only retry a task that fails to start; they never restart a daemon that exits
+  later. The task therefore also has a watchdog trigger that repeats every minute; with `MultipleInstances IgnoreNew`
+  it does nothing while the daemon runs and brings an exited daemon back within a minute, as `Restart=always` and
+  `KeepAlive` do on Linux and macOS. `setup daemon` re-registers a task that lacks that trigger or still runs the
+  console binary directly. A daemon self-update that can modify the login task sets the `conhost.exe --headless`
+  action and adds a missing minute trigger in place, without stopping the task. A task registered by an
+  administrator refuses `Set-ScheduledTask` for a standard user; the update then leaves that task alone, including
+  its action, and registers a separate per-user task, `xmatrix-daemon-watchdog`, with the same `conhost.exe
+  --headless` action. If the canonical watchdog name is already an administrator-owned task a standard user cannot
+  replace, the same registration is created as `xmatrix-daemon-user-watchdog` instead. The daemon lock makes that
+  extra start exit while the daemon is already running. When a later setup or self-update can update the original
+  task, it removes the standalone task. If neither path can be registered, the update receipt says that this
+  computer will not restart the daemon after it exits, and the Machines page shows that recorded outcome. Before
+  starting the task after replacing the binary, the update stops any daemon the watchdog started in between, so
+  the start is not ignored.
+- Installer idempotency retains a task whose action is `conhost.exe`, whose arguments are `--headless "<stable CLI>" daemon`,
+  whose working directory is the CLI directory, and which already has the minute trigger. A direct `xmatrix.exe daemon`
+  action, a historical WScript bridge, a generation selector, or any other task action is replaced on the next
+  `setup daemon` run and has no current startup authority. A self-update that can modify the login task makes the
+  same action change in place and does not stop the running task.
 - Before replacing the stable binary, the installer stops only the daemon task and daemon process. It then atomically
   replaces the CLI, asks `setup daemon` to rewrite the exact direct task when needed, starts it, and requires the new
   executable path to appear as a live daemon before reporting success.
