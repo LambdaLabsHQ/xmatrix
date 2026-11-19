@@ -450,21 +450,6 @@ Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction 
 Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
-Get-CimInstance Win32_Process -Filter "Name = 'xmatrix-daemon-launch.exe'" | ForEach-Object {
-  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-}
-$callerProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $callerPid) -ErrorAction SilentlyContinue
-if ($callerProcess -and $callerProcess.ExecutablePath) {
-  Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $callerProcess.ExecutablePath) 'xmatrix-daemon-launch.exe') -Force -ErrorAction SilentlyContinue
-}
-foreach ($startupTaskName in @($taskName, $legacyTaskName, $watchdogTaskName, $watchdogUserTaskName)) {
-  $startupTask = Get-ScheduledTask -TaskName $startupTaskName -ErrorAction SilentlyContinue
-  if (-not $startupTask) { continue }
-  $startupAction = $startupTask.Actions | Select-Object -First 1
-  if ($startupAction -and ([System.IO.Path]::GetFileName([string]$startupAction.Execute) -ieq 'xmatrix-daemon-launch.exe')) {
-    Remove-Item -LiteralPath ([string]$startupAction.Execute) -Force -ErrorAction SilentlyContinue
-  }
-}
 Stop-XMatrixDaemonProcesses
 "#,
     );
@@ -1238,7 +1223,7 @@ mod tests {
         assert!(script.contains("Remove-ItemProperty -Path $runKey -Name $runValueName"));
         assert!(script.contains("$callerPid = 4242"));
         assert!(script.contains("Stop-XMatrixDaemonProcesses"));
-        assert!(script.contains("Name = 'xmatrix-daemon-launch.exe'"));
+        assert!(!script.contains("xmatrix-daemon-launch.exe"));
     }
 
     #[test]
