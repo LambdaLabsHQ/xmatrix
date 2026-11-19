@@ -264,6 +264,12 @@ export class PostgresNornProgramRepository {
           ELSE 'norn:'||norn_requests.request_ref||':'||EXCLUDED.epoch END,
         delivered_at=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.delivered_at END,
         instance_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.instance_id END,
+        -- Handed on, the Instance the old delivery started for it is let go like one that delegated it away.
+        -- One it was handed to by address was at work here already, and stays.
+        delegated_away_instance_id=CASE WHEN norn_requests.epoch<>EXCLUDED.epoch AND norn_requests.instance_id IS NULL
+            AND norn_requests.delivered_at IS NOT NULL AND norn_requests.holder_user_id IS NULL
+          THEN COALESCE(${requestInstance("norn_requests")},norn_requests.delegated_away_instance_id)
+          ELSE norn_requests.delegated_away_instance_id END,
         holder_user_id=CASE WHEN norn_requests.epoch=EXCLUDED.epoch THEN norn_requests.holder_user_id END,
         settled_at=COALESCE(norn_requests.settled_at,EXCLUDED.settled_at)`,
       values: [...scope, String(program.channel_id), JSON.stringify(write.requests.map(request => ({

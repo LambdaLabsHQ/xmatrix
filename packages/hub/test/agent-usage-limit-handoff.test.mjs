@@ -15,10 +15,12 @@ import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime
  * ordinary handoff's job, exactly as if somebody had typed it.
  */
 
-function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" })) {
+function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" }),
+  holdsNornRequest = async () => false) {
   const { port, commands } = recordingAgentInstancePort({
     respond: (family, input) => family === "registration-usage-limit-hold" ? hold(input) : { sequence: 7 },
     offerUsageLimitRetry: async () => undefined,
+    holdsNornRequest,
   });
   const session = {
     principal: {
@@ -63,6 +65,14 @@ test("a usage-limited turn holds its pool before its notice wakes anyone, then o
   assert.equal(handoff.input.agentRunProof, undefined);
   assert.equal(handoff.input.senderSnapshot.userId, "owner");
   assert.equal(handoff.context.actorUserId, "owner");
+});
+
+test("a Run that holds a Norn program's request is handed on by the program, not by a handoff besides", async () => {
+  const { commands, port, session } = harness(undefined, async ({ principal }) => principal.runId === "run-1");
+  await port.execute(session, limited);
+  // The pool is held and the failure told; the program sees the turn broke off and hands its request on once.
+  assert.deepEqual(commands.map(command => command.family), ["registration-usage-limit-hold", "append-message"]);
+  assert.equal(commands[1].input.residual.appMetadata.xmatrixTurnFailure, true);
 });
 
 test("a replayed usage-limit signal resolves to the same hold and handoff message", async () => {
