@@ -1,4 +1,4 @@
-import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
+import type { AgentInvocationSelection, ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
 import {
   appViewPath, pagesViewPath, pagesViewSelection, pushBrowserPath, replaceBrowserPath, type AppView,
 } from "@/components/dashboard/workspace-shell-navigation";
@@ -37,7 +37,7 @@ export function pageShellActions(input: {
    * Sends a message as the composer does: its row shows in the conversation at once and goes out as soon as the
    * conversation exists, kept there to send again if it fails. Answers its stored id, or null when it was not confirmed.
    */
-  deliver: (channel: ChannelSnapshot, body: string) => Promise<string | null>;
+  deliver: (channel: ChannelSnapshot, body: string, selections?: AgentInvocationSelection[]) => Promise<string | null>;
 }) {
   const pagesPath = (pageId: string | null, conversationId: string | null) =>
     pagesViewPath(appViewPath(null, "pages", input.currentSpaceId, input.spaces), pageId, conversationId);
@@ -119,6 +119,8 @@ export function pageShellActions(input: {
     spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean; anchor?: PageLinkAnchor;
   }, options: {
     open?: boolean; firstMessage?: string; quote?: DiscussionQuote; coWrite?: boolean;
+    /** The Agents picked in the first message, measured against it. */
+    firstSelections?: AgentInvocationSelection[];
     planned?: (conversationId: string) => void;
     /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
     sent?: (messageId: string | null) => void;
@@ -135,7 +137,7 @@ export function pageShellActions(input: {
     options.planned?.(channel.id);
     // A comment is sent the moment it is written, as in the conversation itself: its message waits only for the
     // conversation, not for the page's link to it. Co-writing waits for the Hub's instruction to be there first.
-    const delivered = options.firstMessage && !options.coWrite ? input.deliver(channel, options.firstMessage) : null;
+    const delivered = options.firstMessage && !options.coWrite ? input.deliver(channel, options.firstMessage, options.firstSelections) : null;
     if (options.quote) input.seedComposer(channel.id, { quote: options.quote });
     // A discussion opens beside the page it is about, ready to write in, before it exists.
     // Machinery attached to a page lives in its own conversation; the page stays open.
@@ -154,7 +156,7 @@ export function pageShellActions(input: {
     // in the conversation when the Agent joins it.
     if (options.coWrite) await pageApi.startCoWriting(page.spaceId, page.pageId, token, channel.id);
     if (options.firstMessage) {
-      const messageId = await (delivered ?? input.deliver(channel, options.firstMessage));
+      const messageId = await (delivered ?? input.deliver(channel, options.firstMessage, options.firstSelections));
       options.sent?.(messageId);
       if (options.open !== false) openPageConversation(channel.id, { focus: false });
     }

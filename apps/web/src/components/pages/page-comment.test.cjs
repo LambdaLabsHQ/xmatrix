@@ -49,3 +49,15 @@ test("without a live Instance the section's editing conversation keeps the comme
   assert.deepEqual(commentBody("@codex check", AGENTS, undefined, [], "editing"),
     { body: "@codex check" });
 });
+
+test("an Agent picked from the box's @ list starts in a new discussion, carrying its pick", () => {
+  const pick = { start: 0, end: 7, text: "@claude", target: { kind: "capability", harness: "claude" } };
+  assert.deepEqual(commentBody("@claude shorter", AGENTS, CLAUDE, [CLAUDE], "co-writing", [pick]),
+    { body: "@claude shorter", selections: [pick] }, "not the live claude:3, nor the editing conversation");
+});
+
+test("an @auto or condition summon asks for a new Agent rather than the one at work", () => {
+  assert.deepEqual(commentBody("@auto shorter", AGENTS, CLAUDE, [CLAUDE]), { body: "@auto shorter" });
+  assert.deepEqual(commentBody("@machine:Laptop effort:high shorter", AGENTS, CLAUDE, [CLAUDE]),
+    { body: "@machine:Laptop effort:high shorter" });
+});

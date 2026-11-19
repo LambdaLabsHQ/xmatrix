@@ -1,5 +1,6 @@
-import { isOperationalInvocationSpan, nonOperationalMentionRanges,
-  type AgentInvocationSelection } from "@xmatrix/protocol";
+import { digestCanonicalCloneCborV1, isOperationalInvocationSpan, nonOperationalMentionRanges,
+  parseAgentInvocationSelections, type AgentInvocationSelection, type AgentInvocationSelections,
+} from "@xmatrix/protocol";
 
 export type ComposerAgentBinding = AgentInvocationSelection & { label?: string };
 /** A picked channel or page shown by name in the draft; the message carries `reference` in its place. */
@@ -94,4 +95,13 @@ export function composerSendDraft(draft: ComposerInvocationDraft | undefined,
   }
   const sentBody = sent + body.slice(cursor);
   return { body: sentBody, selections: operationalBindings(sentBody, selections) };
+}
+
+/** The envelope a message carries for its picked Agents, bound to the exact text sent; none without picks. */
+export async function invocationSelectionsEnvelope(body: string, selections: readonly AgentInvocationSelection[],
+  spaceId: string): Promise<AgentInvocationSelections | undefined> {
+  if (!selections.length) return undefined;
+  const sourceBodyHash = await digestCanonicalCloneCborV1(body);
+  return parseAgentInvocationSelections({ schemaVersion: 1, sourceRevision: 1, sourceBodyHash,
+    selections: [...selections] }, { spaceId, body, bodyHash: sourceBodyHash, revision: 1 });
 }
