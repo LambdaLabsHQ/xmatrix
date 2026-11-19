@@ -246,10 +246,11 @@ export function FleetView({
   const attentionTextOf = (cells: Record<string, FleetMatrixCell>): string | null => {
     const items = harnesses.flatMap((harness) => {
       const entry = cells[harness];
-      return entry?.kind === "agent" && entry.state === "attention" ? [mobileAttentionPhrase(harness, entry.label)] : [];
+      return entry?.kind === "agent" && entry.state === "attention" ? [{ harness, phrase: mobileAttentionPhrase(harness, entry.label) }] : [];
     });
     if (!items.length) return null;
-    return items.length === 1 ? items[0]! : `${items[0]} · +${items.length - 1}`;
+    // One is said whole; several are named together, so each is still told apart from its ringed face below.
+    return items.length === 1 ? items[0]!.phrase : `${items.map((item) => item.harness).join(", ")} need you`;
   };
   const mobileRows: MobileMatrixRow[] = [];
   const matrixRows: FleetMatrixRow[] = [

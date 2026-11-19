@@ -22,6 +22,7 @@ import {
 } from "./fleet-matrix";
 import { MachineGlyph } from "./machine-glyph";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
+import { MachineLoadGlanceBars } from "./machine-load-panel";
 import type { MachineOs } from "./machine-os";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 
@@ -98,14 +99,13 @@ export function MobileAvatarMatrix({
   const gridStyle = scrollable
     ? { gridTemplateColumns: `repeat(${slotCount}, 2.75rem)` }
     : { gridTemplateColumns: `repeat(${Math.max(slotCount, 1)}, min(2.75rem, calc(100% / ${Math.max(slotCount, 1)})))` };
-  // Harnesses present on at least one machine: absent cells on other online own machines draw a dashed ghost avatar.
-  const peerPresent = new Set<string>();
-  for (const row of rows) {
-    for (const column of columns) {
-      const cell = row.cells[column.harness];
-      if (cell && (cell.kind === "agent" || cell.kind === "off")) peerPresent.add(column.harness);
-    }
-  }
+  // A missing agent is a quiet dot. It is drawn as the agent's outline only where most of the reader's own machines
+  // have it (two at least): there it reads as the one that is missing, and the grid is not filled with outlines.
+  const ownRows = rows.filter((row) => row.own);
+  const peerPresent = new Set(columns.map((column) => column.harness).filter((harness) => {
+    const have = ownRows.filter((row) => ["agent", "off"].includes(row.cells[harness]?.kind ?? "")).length;
+    return have >= 2 && have * 2 > ownRows.length;
+  }));
   let inlineAddAssigned = false;
 
   return (
@@ -146,24 +146,16 @@ export function MobileAvatarMatrix({
               data-state={row.stalled ? "attention" : row.online ? "running" : "offline"} aria-hidden="true">
               <MachineGlyph os={row.os} className="size-4" />
             </span>
-            <span className="truncate text-[15px] font-bold tracking-tight text-foreground">{row.name}</span>
+            {/* The name keeps its room: what is said after it gives way first. */}
+            <span className="max-w-[62%] shrink-0 truncate text-[15px] font-bold tracking-tight text-foreground">{row.name}</span>
             {row.localTag}
             {row.exception && (
-              <span className={cn("min-w-0 truncate text-xs font-semibold", statusInkClass("attention"))}>
+              <span data-testid="fleet-machine-exception" className={cn("min-w-0 truncate text-xs font-semibold", statusInkClass("attention"))}>
                 {row.exception}
               </span>
             )}
-            {row.loadAlerts.length > 0 && (
-              <span className="flex shrink-0 items-center gap-1.5 text-xs font-bold tabular-nums"
-                data-testid="machine-load-glance"
-                aria-label={row.loadAlerts.map((reading) => `${reading.label} ${reading.percent}%`).join(", ")}>
-                {row.loadAlerts.map((reading) => (
-                  <span key={reading.key} className={statusInkClass(meterTone(reading.percent) === "red" ? "alert" : "attention")}>
-                    {reading.label} {reading.percent}%
-                  </span>
-                ))}
-              </span>
-            )}
+            {/* A reading under strain, with its bar: the same glance a desktop's row draws. */}
+            {row.loadAlerts.length > 0 && <span className="shrink-0"><MachineLoadGlanceBars glance={row.loadAlerts} /></span>}
             {!row.exception && row.quietNote && (
               <span className="shrink-0 text-xs text-muted-foreground">{row.quietNote}</span>
             )}
@@ -302,7 +294,7 @@ function MobileAvatarCell({ cell, harness, machine, id, selected, offline, ghost
 
   if (cell.kind === "absent") {
     return (
-      <button {...edits} data-testid="fleet-cell" data-state="absent"
+      <button {...edits} data-testid="fleet-cell" data-state="absent" data-outline={ghostHint ? "" : undefined}
         aria-label={`${harness} is not installed on ${machine}`} className={buttonClass}>
         <span className="flex size-8 items-center justify-center">
           {ghostHint ? (

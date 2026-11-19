@@ -80,7 +80,7 @@ test.describe("on a phone", () => {
 
     const machine = (name: string) => matrix.getByRole("region", { name });
     await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
-    await expect(machine("busy-box").getByTestId("machine-load-glance")).toHaveText("CPU 95%");
+    await expect(machine("busy-box").getByTestId("machine-load-glance")).toHaveAccessibleName("CPU 95%");
     // Healthy idle machines stay quiet (no "Idle" or "Ready" prose), while each avatar carries its full accessible state.
     await expect(machine("idle-box").getByTestId("machine-row")).not.toContainText("Idle");
     await expect(machine("idle-box").getByTestId("agent-row")).toHaveAttribute("aria-label", /Ready/u);
@@ -99,6 +99,34 @@ test.describe("on a phone", () => {
     await expect(page.locator(".app-topbar")).not.toContainText("Machines");
     await paper.getByRole("button", { name: "Agents" }).tap();
     await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
+  });
+  test("several agents waiting on one machine are named together, and its name keeps its room", async ({ page }) => {
+    const spent = { remainingPercent: 0, observedAt: recent(), expiresAt: new Date(Date.now() + 600_000).toISOString(),
+      windows: [{ label: "1w", usedPercent: 100, resetAt: new Date(Date.now() + 86_400_000).toISOString() }] };
+    await openStatus(page, registrations.map((item) => item.key.machineId === "machine:wide" && ["claude", "codex"].includes(item.key.harness)
+      ? { ...item, live: { ...item.live, quota: spent } } : item));
+    const machine = page.getByTestId("fleet-matrix").getByRole("region", { name: "wide-box" });
+    await expect(machine.getByTestId("fleet-machine-exception")).toHaveText("claude, codex need you");
+    await expect(machine.locator('[data-testid="agent-row"][data-state="attention"]')).toHaveCount(2);
+    expect(await machine.getByText("wide-box", { exact: true }).evaluate((name) => name.scrollWidth <= name.clientWidth)).toBe(true);
+  });
+
+  test("an agent a machine lacks is a quiet dot, and its outline only where most of the reader's machines have it", async ({ page }) => {
+    // codex is on two of three machines, claude on one: only codex is drawn as missing from the third.
+    const has: Record<string, string[]> = { "machine:busy": ["codex", "claude"], "machine:wide": ["codex"], "machine:idle": [] };
+    const own = daemons.filter((daemon) => daemon.machineId in has).map((daemon) => ({ ...daemon, status: "online",
+      metadata: { ...daemon.metadata, capabilities: ["machine_harness_action_v1"], harnesses: { schemaVersion: 1, capturedAt: E2E_NOW,
+        items: ["codex", "claude"].map((id) => has[daemon.machineId]!.includes(id)
+          ? { id, installed: true, probeStatus: "ok", version: "1.0.0", autoUpdate: "disabled" }
+          : { id, installed: false, probeStatus: "missing", autoUpdate: "unknown" }) } } }));
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel], machineDaemons: own });
+    await fixtureJson(page, "harness-recent", /\/api\/xmatrix\/machine-daemons\/harness-actions\?machineId=/u, { actions: [] });
+    await page.goto("/app/personal-sspaceperso/status");
+    const machine = (name: string) => page.getByTestId("fleet-matrix").getByRole("region", { name });
+    const missing = (name: string, harness: string) => machine(name).getByRole("button", { name: `${harness} is not installed on ${name}` });
+    await expect(missing("idle-box", "codex")).toHaveAttribute("data-outline", "");
+    await expect(missing("idle-box", "claude")).not.toHaveAttribute("data-outline");
+    await expect(missing("wide-box", "claude")).not.toHaveAttribute("data-outline");
   });
 });
 
