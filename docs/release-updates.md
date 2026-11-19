@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Default model is picked from a menu
+
+**Default model** on an Agent's page, and on the Space's registered locations,
+was a free-text box: you had to know and type the exact model name. It is now a
+menu: Harness default, the models the harness's own catalog and its declared
+list name, and **Other model…**, which opens a field for a name the menu does
+not list. A saved model stays selected even when the catalog no longer lists
+it. Web only. Recovery is a CI-validated beta Web reverting this change.
+
 ## Unreleased: a pull request whose CI passed has a green tick
 
 On GitHub's pull request slip a CI failure was red, but a pass wore the same
