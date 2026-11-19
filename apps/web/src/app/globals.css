@@ -8525,6 +8525,12 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar.app-sidebar, .app-mobi
   color: oklch(0.696 0.17 162.48);
 }
 
+/* A pull request whose CI passed wears the same green tick on GitHub's slip,
+   so a pass reads at a glance beside a red failure. */
+.xmatrix-app .app-connector-receipt-head svg[data-ci="passed"] {
+  color: oklch(0.696 0.17 162.48);
+}
+
 .xmatrix-app .app-tool-detail-section-title {
   border-bottom: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent);
 }

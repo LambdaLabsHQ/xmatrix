@@ -1,5 +1,13 @@
 # Release Updates
 
+## Unreleased: a pull request whose CI passed has a green tick
+
+On GitHub's pull request slip a CI failure was red, but a pass wore the same
+plain ink as an open pull request, so the two states the slip exists to tell
+apart did not read at a glance. A pull request whose latest CI passed now
+wears a green tick, the same green as a connected App's tick and a free
+presence dot. Web only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: ACP and Antigravity runtimes report waiting state
 
 ACP runtimes previously stayed `busy` during long tool calls and `idle` while
