@@ -49,6 +49,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { NO_BUSY_INSTANCES } from "./agent-work-view";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { usePathname, useRouter } from "next/navigation";
 import { AUTH_TOKEN_REJECTED_EVENT, useAuth } from "@/lib/auth-context";
@@ -536,10 +537,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   const [hasOlderMessages, setHasOlderMessages] = useState(false);
 
-  const [stoppingAgentInstanceId, setStoppingAgentInstanceId] = useState<string | null>(null);
+  // Lifecycle requests still being sent, by Instance: each Instance waits only
+  // on its own request, so several can be stopped one after another.
+  const [stoppingAgentInstanceIds, setStoppingAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
 
-  const [reborningAgentInstanceId, setReborningAgentInstanceId] = useState<string | null>(null);
-  const [handingOffAgentInstanceId, setHandingOffAgentInstanceId] = useState<string | null>(null);
+  const [reborningAgentInstanceIds, setReborningAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
+  const [handingOffAgentInstanceIds, setHandingOffAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
 
   const [renamingChannelId, setRenamingChannelId] = useState<string | null>(null);
 
@@ -3128,12 +3131,12 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     olderLoading,
     setOlderLoading,
     hasOlderMessages,
-    stoppingAgentInstanceId,
-    setStoppingAgentInstanceId,
-    reborningAgentInstanceId,
-    setReborningAgentInstanceId,
-    handingOffAgentInstanceId,
-    setHandingOffAgentInstanceId,
+    stoppingAgentInstanceIds,
+    setStoppingAgentInstanceIds,
+    reborningAgentInstanceIds,
+    setReborningAgentInstanceIds,
+    handingOffAgentInstanceIds,
+    setHandingOffAgentInstanceIds,
     renamingChannelId,
     setRenamingChannelId,
     updatingChannelVisibilityId,

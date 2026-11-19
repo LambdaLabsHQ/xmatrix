@@ -33,7 +33,7 @@ export async function installRenderCounter(page: Page) {
               if ("model" in props) counts.workspaceViews += 1;
               if ("isPinnedRoot" in props && "onSelect" in props) counts.navRows += 1;
               if ("message" in props && "onRetryAgentLaunch" in props) counts.messageRows += 1;
-              if ("stoppingAgentInstanceId" in props && "onStopAgentInstance" in props) counts.workDocks += 1;
+              if ("stoppingAgentInstanceIds" in props && "onStopAgentInstance" in props) counts.workDocks += 1;
               if ("intentSince" in props && "stopDisabled" in props) counts.workAvatars += 1;
             }
             if (!node.alternate || node.child !== node.alternate.child) visit(node.child);

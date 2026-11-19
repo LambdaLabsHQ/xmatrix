@@ -78,3 +78,23 @@ export function createAgentWorkSelection(build: (channel: LiveChannel | null) =>
     return views;
   };
 }
+
+/** No Instance has a lifecycle request (stop, reborn, handoff) being sent. */
+export const NO_BUSY_INSTANCES: ReadonlySet<string> = new Set();
+
+/**
+ * The Instances whose lifecycle request is being sent, with one added or
+ * removed. Each request is tracked by its own Instance, so sending one never
+ * holds back another Instance's controls. Unchanged membership keeps the set.
+ */
+export function withBusyInstance(
+  busy: ReadonlySet<string>,
+  instanceId: string,
+  sending: boolean,
+): ReadonlySet<string> {
+  if (busy.has(instanceId) === sending) return busy;
+  const next = new Set(busy);
+  if (sending) next.add(instanceId);
+  else next.delete(instanceId);
+  return next.size === 0 ? NO_BUSY_INSTANCES : next;
+}

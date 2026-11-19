@@ -21,6 +21,7 @@ import { useAuth } from "@/lib/auth-context";
    is never mounted, so focus and reconnect never refetch it. */
 
 const noop = () => {};
+const NO_REBORNING_SENDERS: ReadonlySet<string> = new Set();
 const MINUTE = 60_000;
 
 const viewer = { id: "preview-alex", name: "Alex Rivera" };
@@ -258,7 +259,7 @@ export function AppWindowPreview() {
                 onOpenThread={noop}
                 onMentionSender={noop}
                 onRebornSender={noop}
-                reborningSenderKey={null}
+                reborningSenderKeys={NO_REBORNING_SENDERS}
                 onQuestionnaireAnswer={async () => false}
                 onOpenInternalAppLink={() => false}
                 onOpenPage={noop}

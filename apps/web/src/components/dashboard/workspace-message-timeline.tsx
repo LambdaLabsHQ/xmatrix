@@ -488,7 +488,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onQuotePassage,
   onMentionSender,
   onRebornSender,
-  reborningSenderKey,
+  reborningSenderKeys,
   onQuestionnaireAnswer,
   onOpenInternalAppLink,
   onOpenPage,
@@ -529,7 +529,7 @@ export const MessageTimeline = memo(function MessageTimeline({
   onDiscussPassage?: (message: TimelineItem, quote: string) => void;
   /** Quotes a passage selected in a message's text in this conversation's composer. */
   onQuotePassage?: (message: TimelineItem, quote: string) => void;
-  reborningSenderKey: string | null;
+  reborningSenderKeys: ReadonlySet<string>;
   /** Opens a `page:<id>` chip from a message, at its section when it names one (pages-and-conversations.md §4.3). */
   onOpenPage: PageReferenceScope["onOpenPage"];
   onMessageExposed: (channelId: string, sequence: number) => void;
@@ -1234,11 +1234,9 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onMentionSender={stableOnMentionSender}
                   onRebornSender={stableOnRebornSender}
                   reborningSender={
-                    Boolean(reborningSenderKey) &&
-                    (message.senderInstanceId === reborningSenderKey ||
-                      message.senderMention === reborningSenderKey ||
-                      message.messageId === reborningSenderKey ||
-                      message.author === reborningSenderKey)
+                    reborningSenderKeys.size > 0 &&
+                    [message.senderInstanceId, message.senderMention, message.messageId, message.author]
+                      .some((key) => !!key && reborningSenderKeys.has(key))
                   }
                   onQuestionnaireAnswer={stableOnQuestionnaireAnswer}
                   onOpenAgentTrace={stableOnOpenAgentTrace}
@@ -3494,9 +3492,9 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   token,
   timeline,
   events,
-  stoppingAgentInstanceId,
-  reborningAgentInstanceId,
-  handingOffAgentInstanceId,
+  stoppingAgentInstanceIds,
+  reborningAgentInstanceIds,
+  handingOffAgentInstanceIds,
   onStopAgentInstance,
   onRebornAgentInstance,
   onHandoffAgentInstance,
@@ -3511,9 +3509,9 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   token: string | null;
   timeline: TimelineItem[];
   events: ObservabilityEvent[];
-  stoppingAgentInstanceId: string | null;
-  reborningAgentInstanceId: string | null;
-  handingOffAgentInstanceId: string | null;
+  stoppingAgentInstanceIds: ReadonlySet<string>;
+  reborningAgentInstanceIds: ReadonlySet<string>;
+  handingOffAgentInstanceIds: ReadonlySet<string>;
   onStopAgentInstance: (
     agentId: string,
     instance: SerializedAgentInstance,
@@ -3663,8 +3661,10 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
 
   if (workItems.length === 0 && !approvals) return null;
 
-  const controlsBusy =
-    !!stoppingAgentInstanceId || !!reborningAgentInstanceId || !!handingOffAgentInstanceId;
+  // An Instance's controls wait only on its own request; the others stay usable.
+  const controlsBusy = (instanceId: string) =>
+    stoppingAgentInstanceIds.has(instanceId) || reborningAgentInstanceIds.has(instanceId) ||
+    handingOffAgentInstanceIds.has(instanceId);
 
   return (
     <div
@@ -3682,11 +3682,11 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
             item={item}
             intentSince={intentSince.get(item.key)}
             now={now}
-            stopping={stoppingAgentInstanceId === item.instanceId}
-            stopDisabled={controlsBusy}
-            reborning={reborningAgentInstanceId === item.instanceId}
-            rebornDisabled={controlsBusy}
-            handingOff={handingOffAgentInstanceId === item.instanceId}
+            stopping={stoppingAgentInstanceIds.has(item.instanceId)}
+            stopDisabled={controlsBusy(item.instanceId)}
+            reborning={reborningAgentInstanceIds.has(item.instanceId)}
+            rebornDisabled={controlsBusy(item.instanceId)}
+            handingOff={handingOffAgentInstanceIds.has(item.instanceId)}
             handoffSuccessors={handoffSuccessors}
             onStop={stopInstance}
             onReborn={rebornInstance}
