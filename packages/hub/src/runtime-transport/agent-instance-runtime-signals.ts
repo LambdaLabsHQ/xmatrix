@@ -175,17 +175,28 @@ export class AgentInstanceRuntimeSignalRouter {
     if ((!value || !value.trim()) && (!error || !error.trim())) {
       throw new Error(`${kind} switch result requires a value or error`);
     }
-    this.controlWaiters.complete({
-      kind,
-      ownerUserId: session.principal.ownerUserId,
-      agentId: session.principal.agentId,
-      runId: session.principal.runId,
-      instanceId: session.run.instanceId,
-      requestId,
-      ...(value ? { value } : {}),
-      ...(error ? { error } : {}),
-      ...(interruptedTurn ? { interruptedTurn } : {}),
-    });
+    try {
+      this.controlWaiters.complete({
+        kind,
+        ownerUserId: session.principal.ownerUserId,
+        agentId: session.principal.agentId,
+        runId: session.principal.runId,
+        instanceId: session.run.instanceId,
+        requestId,
+        ...(value ? { value } : {}),
+        ...(error ? { error } : {}),
+        ...(interruptedTurn ? { interruptedTurn } : {}),
+      });
+    } catch (caught) {
+      if (caught instanceof AgentInstanceControlWaiterError && caught.code === "unknown_or_expired") {
+        // The switch waiter already timed out or its Runtime cell restarted
+        // before the Instance answered (XMATRIX-HUB-7P). Only a live waiter
+        // belonging to another binding (`binding_mismatch`) fails closed.
+        console.warn("Ignoring late or expired Agent Instance control switch result", { kind });
+        return;
+      }
+      throw caught;
+    }
   }
 }
 
