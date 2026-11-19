@@ -2,7 +2,9 @@ import type { Context, Hono } from "hono";
 import { runtimeRepository } from "./runtime";
 import { AGENT_RUN_PERMISSION_CHANNEL_ATTACHMENTS_WRITE, agentSendSubmissionCanonical, callerMessageMetadata, messagePublicationEvidence, sha256Hex, summonMentions } from "@xmatrix/protocol";
 import { ChannelActivityInvalid } from "@xmatrix/protocol";
-import type { ChannelAppMention, ChannelAttachment } from "@xmatrix/protocol";
+import type { ChannelAppMention, ChannelAttachment, InstanceRecord } from "@xmatrix/protocol";
+import { agentInstanceRequiredMessage, channelPeerInstances } from "./agent-launch-context";
+import { getChannel } from "./spaces";
 import { subscribeRunToPullRequest } from "./github-pull-request-subscription";
 import type { Env } from "./types";
 import { LIVE_RUN_LAUNCH_FIELDS, liveRunIsAdmitted, snapshotLiveRunFromProductGateway } from "./live-run-admission";
@@ -137,10 +139,19 @@ export function registerChannelMessageRoutes(app: Hono<{ Bindings: Env }>): void
       // publication rather than report success for a message that cannot route;
       // No text in the body (such as the retired `launch:force`) replaces an explicit launch request.
       const unaddressed = launch || typeof body.body !== "string" ? [] : summonMentions(body.body);
-      if (unaddressed.length) return c.json({
-        error: "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.",
-        code: "agent_instance_required",
-      }, 400);
+      if (unaddressed.length) {
+        const readPrincipal = principal
+          ? { kind: "agent" as const, id: principal.agentId, agentSpaceId: principal.spaceId }
+          : { kind: "user" as const, id: authUser.id };
+        const channel = await getChannel(c.env, { channelId, principal: readPrincipal, purpose: "send-refusal" })
+          .then((result) => result.channel as { instanceRecords?: InstanceRecord[] })
+          .catch(() => null);
+        const peers = channelPeerInstances(channel?.instanceRecords, principal?.instanceId ?? undefined);
+        return c.json({
+          error: agentInstanceRequiredMessage(unaddressed, peers),
+          code: "agent_instance_required",
+        }, 400);
+      }
       if (body.awaitsResponse !== undefined && typeof body.awaitsResponse !== "boolean") {
         return c.json({ error: "awaitsResponse must be a boolean" }, 400);
       }

@@ -7,11 +7,54 @@ import {
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 
-/** What the person is looking at the step on, when it happens. A phone is the
- * shell's own breakpoint (useIsMobileViewport). */
+export interface OnboardingDeviceEnvironment {
+  bridge?: { client?: string; platform?: string } | null;
+  userAgent?: string;
+  platform?: string;
+  maxTouchPoints?: number;
+  narrowViewport?: boolean;
+  coarsePointer?: boolean;
+}
+
+/**
+ * What the person is looking at the step on, when it happens.
+ * iOS and Android native shells inject `window.xmatrixDesktop` too, so check
+ * their bridge identity before calling it `desktop_app`. A narrow desktop
+ * browser window (split screen on macOS/Windows/Linux with a fine pointer)
+ * stays `desktop_web` so it still offers the desktop App and setup command.
+ */
+export function classifyOnboardingDevice(env: OnboardingDeviceEnvironment): OnboardingDevice {
+  const bridge = env.bridge;
+  if (bridge) {
+    const client = String(bridge.client ?? "").toLowerCase();
+    const platform = String(bridge.platform ?? "").toLowerCase();
+    if (client === "ios" || client === "android" || platform === "ios" || platform === "android") {
+      return "phone";
+    }
+    return "desktop_app";
+  }
+  const ua = env.userAgent ?? "";
+  const maxTouchPoints = env.maxTouchPoints ?? 0;
+  if (/iPhone|iPad|iPod|Android/iu.test(ua) || (env.platform === "MacIntel" && maxTouchPoints > 1)) {
+    return "phone";
+  }
+  if (env.narrowViewport && (env.coarsePointer || maxTouchPoints > 0)) {
+    return "phone";
+  }
+  return "desktop_web";
+}
+
 export function onboardingDevice(): OnboardingDevice {
-  if (getDesktopBridge()) return "desktop_app";
-  return typeof window !== "undefined" && window.matchMedia("(max-width: 767px)").matches ? "phone" : "desktop_web";
+  const win = typeof window === "undefined" ? undefined : window;
+  const nav = typeof navigator === "undefined" ? undefined : navigator;
+  return classifyOnboardingDevice({
+    bridge: getDesktopBridge(),
+    userAgent: nav?.userAgent,
+    platform: nav?.platform,
+    maxTouchPoints: nav?.maxTouchPoints,
+    narrowViewport: win?.matchMedia?.("(max-width: 767px)").matches ?? false,
+    coarsePointer: win?.matchMedia?.("(pointer: coarse)").matches ?? false,
+  });
 }
 
 /** Counts one step of bringing agents in (docs/architecture/first-space.md).

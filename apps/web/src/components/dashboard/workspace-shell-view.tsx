@@ -1073,10 +1073,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const showMobileAgentSetup = isMobileViewport && showSpaceAgentSetup && (
     (installedFleet.ready && installedFleet.candidates.length > 0) ||
     (spaceAgentSetup.kind === "no-local-machine" && spaceChannelCount === 0));
-  const renderSpaceAgentSetup = (phone: boolean) => (
+  const renderSpaceAgentSetup = () => (
         <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceAgentSetupCard
-            phone={phone}
             state={spaceAgentSetup}
             spaceId={currentSpaceId ?? null}
             token={token ?? undefined}
@@ -1108,7 +1107,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
        is — otherwise "the channel list" and "Follow-ups" are the same
        selector now that both stay mounted. */
     <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-      {showMobileAgentSetup ? renderSpaceAgentSetup(true) : <MobileChannelChatList
+      {showMobileAgentSetup ? renderSpaceAgentSetup() : <MobileChannelChatList
             currentSpaceId={currentSpaceId}
             catalogPaging={currentSpaceCatalog}
             fallbackChannels={cachedCatalogChannels}
@@ -1205,7 +1204,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           conversationName={selectedChannel.name ?? null} onOpenPage={openPage}
           excludePageId={placement === "beside-page" ? selectedPageId : null} />
       )}
-      {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup(false)}
+      {showSpaceAgentSetup && !showMobileAgentSetup && renderSpaceAgentSetup()}
       {showSpaceFirstTask && (
         <div className="app-tool-paper app-tool-detail app-below-band min-h-0 flex-1 overflow-y-auto">
           <SpaceFirstTaskCard

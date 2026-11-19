@@ -115,8 +115,9 @@ the person's screen sees are counted on their own (`onboarding-funnel.ts`):
 - Each step names where it was shown (`welcome`, `space`, `agents`,
   `conversation` for the reply to an unanswered first message, or `shell`
   for the app before any of them) and what
-  on: `phone` at the shell's phone width, `desktop_app` in the desktop app,
-  otherwise `desktop_web`.
+  on: `phone` on iOS/Android native apps, mobile browsers, or narrow touch
+  viewports; `desktop_app` in the Electron desktop app; otherwise `desktop_web`
+  (including a narrow desktop browser window with a fine pointer).
 - The Web reports each step once per showing. `POST
   /api/observable/onboarding-step` takes only those three values (and a first
   task's id), and writes one point to the diagnostics dataset. That point

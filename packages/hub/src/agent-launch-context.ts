@@ -1,5 +1,5 @@
-import { channelActivityOf, channelActivityLine, type ChannelMessage, type ChannelSummarySource,
-  type PageDocument } from "@xmatrix/protocol";
+import { channelActivityOf, channelActivityLine, isLiveAgentStatus, type ChannelMessage, type ChannelSummarySource,
+  type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
 import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
 /**
@@ -199,6 +199,84 @@ export function renderLaunchContext(input: {
   return result;
 }
 
+/** Maximum peer Instances named in a launch context or refusal hint. */
+const LAUNCH_PEERS_MAX = 20;
+
+export interface ChannelPeerInstance {
+  instanceId: string;
+  name: string;
+  address: string;
+  harness: string;
+  state: string;
+}
+
+/**
+ * Other live, starting, or resting Instances already in the Channel, derived
+ * from the authoritative Channel read. Excludes the caller itself and orders
+ * by numeric Channel instance ordinal.
+ */
+export function channelPeerInstances(
+  records: readonly InstanceRecord[] | undefined,
+  excludeInstanceId?: string,
+  maxPeers = LAUNCH_PEERS_MAX,
+): ChannelPeerInstance[] {
+  if (!Array.isArray(records) || !records.length) return [];
+  return records
+    .filter((record) => record.id !== excludeInstanceId && (isLiveAgentStatus(record.status) || record.rest !== undefined))
+    .sort((left, right) => {
+      const diff = Number(left.channelInstanceId) - Number(right.channelInstanceId);
+      if (Number.isFinite(diff) && diff !== 0) return diff;
+      return left.id < right.id ? -1 : left.id > right.id ? 1 : 0;
+    })
+    .slice(0, maxPeers)
+    .map((record) => {
+      const name = (record.registrationPresentation?.displayName || record.agentName).trim();
+      return {
+        instanceId: record.id,
+        name,
+        address: `@${name}:${record.channelInstanceId}`,
+        harness: record.registration.harness,
+        state: record.rest ?? record.status,
+      };
+    });
+}
+
+/**
+ * Peer roster placed in a launch context so a newly started Agent knows which
+ * sibling Instances are already live, starting, or sleeping in this Channel
+ * before any of them has posted a message.
+ */
+export function renderPeerInstances(peers: readonly ChannelPeerInstance[]): string | undefined {
+  if (!peers.length) return undefined;
+  const lines = peers.map((peer) => `- \`${peer.address}\` (${peer.harness}, ${peer.state})`);
+  return "## Other Agents in this Channel (read at launch)\n\n" +
+    "Address an existing Instance with `@<name>:<instance>`; pass `--launch` only when you intentionally need another Instance.\n" +
+    `${lines.join("\n")}\n`;
+}
+
+/**
+ * Error copy when a send carries an unaddressed `@<agent>` without `--launch`.
+ * Names matching live/starting/resting Instances already in the Channel so an
+ * Agent addresses the peer instead of reflexively adding `--launch`.
+ */
+export function agentInstanceRequiredMessage(
+  unaddressed: ReadonlyArray<{ text: string }>,
+  peers: readonly ChannelPeerInstance[],
+): string {
+  const names = new Set(unaddressed.map((mention) => {
+    const token = mention.text.trim().replace(/^@/u, "").split(/\s+/u)[0] ?? "";
+    return token.split(":")[0]?.toLowerCase() ?? "";
+  }).filter(Boolean));
+  const matched = names.has("auto")
+    ? peers
+    : peers.filter((peer) => names.has(peer.name.toLowerCase()) || names.has(peer.harness.toLowerCase()));
+  const shown = (matched.length ? matched : peers).slice(0, 6).map((peer) => peer.address);
+  if (!shown.length) {
+    return "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.";
+  }
+  return `Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start a new Agent. Already in this Channel: ${shown.join(", ")}. Nothing was sent.`;
+}
+
 /**
  * Reads the newest part of the Channel that fits the transcript budget, as `principal`, and renders
  * it. Pages run newest first and stop once the budget is spent, so a long conversation is no longer
@@ -213,8 +291,11 @@ export async function readLaunchContext(input: {
   about: () => Promise<{ summary?: string; summarySource?: ChannelSummarySource } | null>;
   /** The conversation's linked pages as the reader may open them; a failed read leaves them out. */
   pages?: () => Promise<PageDocument[]>;
+  /** Other live/starting/resting Instances already in the Channel; a failed read leaves them out. */
+  peers?: () => Promise<ChannelPeerInstance[]>;
 }): Promise<LaunchContext> {
   const pages = input.pages?.().catch(() => [] as PageDocument[]);
+  const peers = input.peers?.().catch(() => [] as ChannelPeerInstance[]);
   const messages: ChannelMessage[] = [];
   let beforeSequence: number | undefined;
   let complete = false;
@@ -240,8 +321,12 @@ export async function readLaunchContext(input: {
   const rendered = render();
   // The About is derived from the transcript; it is worth its read only when part of it was left out.
   const context = rendered.cut ? render(await input.about().catch(() => null)).context : rendered.context;
-  const linked = renderLinkedPages(await pages ?? []);
-  if (linked) context.text = context.text ? `${linked}\n${context.text}` : linked;
+  const sections = [
+    renderPeerInstances(await peers ?? []),
+    renderLinkedPages(await pages ?? []),
+    context.text,
+  ].filter((part): part is string => Boolean(part));
+  if (sections.length) context.text = sections.join("\n");
   return context;
 }
 

@@ -43,10 +43,10 @@ function connectStage(step: ConnectStep | null): Stage {
   return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
 }
 
-export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShell = false, another = false }: {
+export function BringAgentsIn({ spaceId, token, userId, surface, another = false }: {
   spaceId: string | null; token: string | null | undefined; userId: string | undefined;
   /** Where it is shown, for counting who gets through (onboarding-funnel.ts). */
-  surface: OnboardingSurface; phone?: boolean;
+  surface: OnboardingSurface;
   /**
    * One more computer for a Space that already has agents: only this
    * computer's own connection is followed (what the Space already has says
@@ -56,7 +56,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
   another?: boolean;
 }) {
   // Read once, before a setup command would be prepared for this screen.
-  const [phone] = useState(() => phoneShell || onboardingDevice() === "phone");
+  const [phone] = useState(() => onboardingDevice() === "phone");
   // Inside the desktop App the App connects its own computer; on a Mac or PC
   // browser the App is the way in and the terminal is the alternative.
   const [inApp] = useState(() => !phone && onboardingDevice() === "desktop_app");

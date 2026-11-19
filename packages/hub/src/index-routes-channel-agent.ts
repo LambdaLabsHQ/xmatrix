@@ -17,10 +17,11 @@ import {
   sha256Hex,
   type ChannelMessage,
   type ChannelSummarySource,
+  type InstanceRecord,
 } from "@xmatrix/protocol";
 import type { Env } from "./types";
 import { NORN_DELIVERY_PREFIX } from "@xmatrix/db";
-import { readLaunchContext } from "./agent-launch-context";
+import { channelPeerInstances, readLaunchContext } from "./agent-launch-context";
 import { linkedPages } from "./index-routes-pages";
 import { runPrincipalOf } from "./run-principal";
 import { authorizeMachineDaemonAgentRun } from "./machine-daemon-agent-run-authorization";
@@ -522,8 +523,10 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
     const channelId = c.req.param("channelId");
     const run = authUser.agentRun;
     const startedForId = c.req.query("startedFor")?.trim() || undefined;
-    const read = (principal: { kind: "user" | "agent"; id: string; agentSpaceId?: string }) =>
-      channelMessageResponse(async () => ({ ...await readLaunchContext({
+    const read = (principal: { kind: "user" | "agent"; id: string; agentSpaceId?: string }) => {
+      let channelRead: Promise<Awaited<ReturnType<typeof getChannel>>> | undefined;
+      const loadChannel = () => (channelRead ??= getChannel(c.env, { channelId, principal, purpose: "launch-context" }));
+      return channelMessageResponse(async () => ({ ...await readLaunchContext({
         channelId, startedForId, readAt: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
         reader: run ? { agentId: run.agentId, instanceId: run.instanceId ?? undefined } : undefined,
         history: async (page) => {
@@ -537,13 +540,19 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
           return { messages: result.messages as ChannelMessage[], hasMore: result.hasMore === true };
         },
         about: async () => {
-          const { channel } = await getChannel(c.env, { channelId, principal, purpose: "launch-context" });
+          const { channel } = await loadChannel();
           return channel as { summary?: string; summarySource?: ChannelSummarySource };
         },
         // As the caller itself; a Run's read through its owner's cross-Space grant goes without pages.
         pages: async () => run && principal.kind !== "agent" ? []
           : (await linkedPages(c.env, channelId, runPrincipalOf(authUser))).pages,
+        peers: async () => {
+          const { channel } = await loadChannel();
+          const records = (channel as { instanceRecords?: InstanceRecord[] }).instanceRecords;
+          return channelPeerInstances(records, run?.instanceId ?? undefined);
+        },
       }) }));
+    };
     let response = await read(run
       ? { kind: "agent", id: run.agentId, agentSpaceId: run.spaceId }
       : { kind: "user", id: authUser.id });
