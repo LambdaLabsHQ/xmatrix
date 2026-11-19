@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Agents no longer report a plan; conversations show talk and pull requests
+
+Grok and Codex Runs showed their runtime's plan (completed steps, the step in
+progress) as a collapsible line in the conversation and as the work dock's
+intent line; Claude Runs showed none, because Claude Code no longer offers its
+todo tools to current models (v2.1.233: newer models keep track of multi-step
+work without a written checklist). Rather than force the checklist back onto
+Claude (#1836, reverted here), the plan is retired for every runtime: no
+runtime reports it, the Hub refuses a report of one from an older CLI, the
+conversation leaves out plan entries already stored, and history folds each
+to its stored line. Progress is the Agent's own status message plus pull
+request, CI and merge facts. The channel contract no longer asks Agents to
+keep a plan current. Hub, Web and CLI. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a summon naming a billing-refused harness runs its model
 
 `@cursor machine:Workstation` with the Default model gemini-4-neon failed at

@@ -1,26 +1,24 @@
 "use client";
 
-import { Fragment, memo, type ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import {
-  ChevronRight, CircleCheck, CircleDashed, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, LoaderCircle,
-  MessageSquare,
+  CircleCheck, CircleX, Eye, GitMerge, GitPullRequest, GitPullRequestClosed, MessageSquare,
   type LucideIcon,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { statusInkClass, type StatusTone } from "@/components/ui/status-tone";
 import { formatMessageDateTime, formatMessageTimestamp } from "./channel-history";
-import { MESSAGE_HEADER_TIMESTAMP_CLASS_NAME } from "./row-frames";
 import { RichMessageContent } from "./workspace-shell-rich-message";
-import { foldSummary, timelineItemActivity, timelineItemGitHubFact } from "./conversation-activity-rows";
+import { timelineItemActivity, timelineItemGitHubFact } from "./conversation-activity-rows";
 import type { TimelineItem } from "./workspace-shell-message-model";
 import type { GitHubPullRequestFact } from "@xmatrix/protocol";
 
 /*
- * What is not talk (docs/design/conversation-activity.md §4.1): a run of an
- * Instance's plan as one line. GitHub's pull request facts and people's
- * reviews are GitHub's messages whose bodies are the same tinted slip as
- * every other App's receipt (PullRequestSlip, GitHubWordsSlip).
+ * What is not talk (docs/design/conversation-activity.md §4.1): GitHub's pull
+ * request facts and people's reviews are GitHub's messages whose bodies are
+ * the same tinted slip as every other App's receipt (PullRequestSlip,
+ * GitHubWordsSlip).
  */
 
 function Time({ value, className }: { value: string; className?: string }) {
@@ -48,144 +46,6 @@ function ExternalLink({ url, label, children }: { url: string; label?: string; c
 function PullRef({ repository, number, url }: { repository: string; number: number; url: string }) {
   return <ExternalLink url={url} label={`${repository}#${number}`}>#{number}</ExternalLink>;
 }
-
-const AVATAR_COLUMN = "flex h-[1lh] w-(--app-message-avatar-size) shrink-0 items-center justify-center";
-const ENTRY_LIST = "mt-1 mb-1 ml-[calc(var(--app-message-avatar-size)+var(--app-message-avatar-gap))] space-y-1 border-l border-border pl-3";
-
-/**
- * The shared shape. A line that opens: a link inside opens itself; anywhere
- * else on the line opens or closes it.
- */
-function ActivityLine({ mark, time, onToggle, anchorId, attributes, children, below }: {
-  mark: ReactNode;
-  time: string;
-  onToggle?: () => void;
-  anchorId?: string;
-  attributes?: Record<string, string>;
-  children: ReactNode;
-  below?: ReactNode;
-}) {
-  return (
-    <div className="app-activity-row group px-5 py-1 text-[13px] text-muted-foreground"
-      data-activity-row="" id={anchorId} {...attributes}>
-      <div
-        onClick={onToggle ? (event) => {
-          if (!(event.target as Element).closest("a, button")) onToggle();
-        } : undefined}
-        className={cn("flex w-full min-w-0 items-start gap-(--app-message-avatar-gap)",
-          onToggle && "cursor-pointer transition hover:text-foreground")}
-      >
-        {mark}
-        <span className="min-w-0 flex-1">{children}</span>
-        <Time value={time} className={cn(MESSAGE_HEADER_TIMESTAMP_CLASS_NAME, "whitespace-nowrap pl-3 leading-[inherit]")} />
-      </div>
-      {below}
-    </div>
-  );
-}
-
-function Disclosure({ expanded, onToggle, label }: { expanded: boolean; onToggle: () => void; label: string }) {
-  return (
-    <button type="button" onClick={onToggle} aria-expanded={expanded}
-      aria-label={expanded ? `Hide ${label}` : `Show ${label}`} className={cn(AVATAR_COLUMN, "rounded")}>
-      <ChevronRight className={cn("size-3.5 shrink-0 transition-transform", expanded && "rotate-90")} aria-hidden="true" />
-    </button>
-  );
-}
-
-function PlanEntry({ item }: { item: TimelineItem }) {
-  const activity = timelineItemActivity(item);
-  if (activity?.kind !== "plan") return null;
-  return (
-    <div className="min-w-0 space-y-0.5">
-      {activity.completed.map((step, index) => (
-        <div key={`${index}:${step}`} className="flex min-w-0 items-center gap-1.5">
-          <CircleCheck className={statusInkClass("settled", "size-3.5 shrink-0")} aria-hidden="true" />
-          <span className="truncate">{step}</span>
-        </div>
-      ))}
-      {activity.completed.length === 0 && activity.steps.length > 0 && (
-        <ol className="space-y-0.5">
-          {activity.steps.map((step, index) => (
-            <li key={`${index}:${step.text}`} className="flex min-w-0 items-center gap-1.5">
-              {step.status === "completed" ? (
-                <CircleCheck className={statusInkClass("settled", "size-3.5 shrink-0")} aria-hidden="true" />
-              ) : step.status === "in_progress" ? (
-                <LoaderCircle className="size-3.5 shrink-0" aria-hidden="true" />
-              ) : (
-                <CircleDashed className="size-3.5 shrink-0" aria-hidden="true" />
-              )}
-              <span className="truncate">{step.text}</span>
-            </li>
-          ))}
-        </ol>
-      )}
-      {activity.inProgress && activity.completed.length > 0 && (
-        <div className="flex min-w-0 items-center gap-1.5">
-          <LoaderCircle className="size-3.5 shrink-0" aria-hidden="true" />
-          <span className="truncate">{activity.inProgress}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The newest steps of a run, oldest first, then the step in progress: one line that truncates as a whole. */
-function PlanFacts({ items, inProgress }: { items: readonly TimelineItem[]; inProgress?: string }) {
-  const facts: ReactNode[] = [];
-  items.forEach((item) => {
-    const activity = timelineItemActivity(item);
-    if (activity?.kind !== "plan") return;
-    activity.completed.forEach((step, index) => facts.push(<span key={`${item.id}:${index}`}>✓ {step}</span>));
-    if (activity.completed.length === 0 && !activity.inProgress) {
-      facts.push(<span key={item.id}>
-        Plan · {activity.steps.length} step{activity.steps.length === 1 ? "" : "s"}
-      </span>);
-    }
-  });
-  return (
-    <>
-      {facts.slice(-4).map((fact, index) => <Fragment key={index}>{index > 0 && " · "}{fact}</Fragment>)}
-      {inProgress && ` → ${inProgress}`}
-    </>
-  );
-}
-
-/** One run of an Instance's plan entries: a single line where the run began, opening in place. */
-export const FoldedActivityRow = memo(function FoldedActivityRow({
-  row,
-  expanded,
-  onToggle,
-}: {
-  row: TimelineItem;
-  expanded: boolean;
-  onToggle: (rowId: string) => void;
-}) {
-  const items = row.folded ?? [];
-  const last = items[items.length - 1];
-  if (!last) return null;
-  const toggle = () => onToggle(row.id);
-  return (
-    <ActivityLine time={last.sentAt} onToggle={toggle}
-      mark={<Disclosure expanded={expanded} onToggle={toggle} label="activity" />}
-      below={expanded && (
-        <ol className={ENTRY_LIST}>
-          {items.map((item) => (
-            <li key={item.id} id={entryAnchorId(item)} className="flex min-w-0 items-start gap-2">
-              <Time value={item.sentAt} className="min-w-16 whitespace-nowrap pt-px text-[11px]" />
-              <PlanEntry item={item} />
-            </li>
-          ))}
-        </ol>
-      )}>
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="shrink-0 font-bold text-foreground/80">{row.author}</span>
-        <span className="min-w-0 truncate"><PlanFacts items={items} inProgress={foldSummary(items).inProgress} /></span>
-        {items.length > 1 && <span className="shrink-0 text-xs">· {items.length} updates</span>}
-      </span>
-    </ActivityLine>
-  );
-});
 
 /**
  * Whether an entry is a step a person reads. The subscription is how the steps

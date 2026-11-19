@@ -3004,9 +3004,6 @@ impl AcpRun<'_> {
                     wakeup.safety_idle_deadline = None;
                     wakeup.turn_id.clone()
                 };
-                if let Some(channel_id) = channel_id.as_deref() {
-                    observe_acp_plan(&mut self.app.activity, self.relay, channel_id, update);
-                }
                 self.send_background_trace(
                     &session_id,
                     &turn_id,
@@ -3057,9 +3054,6 @@ impl AcpRun<'_> {
                 &mut self.app.background_tasks,
             );
             self.app.publish_background_tasks();
-        }
-        if let Some(channel_id) = self.last_channel_id.as_deref() {
-            finish_acp_turn(&mut self.app.activity, self.relay, channel_id);
         }
         if let Some(session_id) = self.app.session_id.clone() {
             self.send_background_trace(
@@ -3633,8 +3627,6 @@ struct AcpSession {
     prompt_images: bool,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
-    /// The plan outlives a turn, so what it already reported does too.
-    activity: ChannelActivityReporter,
     /// elicitation/create requests parked until their card is answered: the
     /// JSON-RPC id and params, by request key.
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,

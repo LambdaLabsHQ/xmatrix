@@ -47,10 +47,14 @@ test("a reply names its parent, activity folds to one line, a recall hides its b
       xmatrixActivity: { kind: "pull_request", url: "https://github.com/o/r/pull/7", repository: "o/r", number: 7 } } }),
     message("m4", 4, "Ann", "secret", { recalledAt: "2026-09-18T20:05:00Z" }),
     message("m5", 5, "Ann", "", { attachments: [{ id: "a", kind: "image", name: "shot.png", mimeType: "image/png", size: 12 }] }),
+    message("m6", 6, "grok", "✓ Run e2e\n· → Open PR", { from: { kind: "agent", label: "grok" }, metadata: {
+      xmatrixProvenance: "activity", xmatrixActivity: { kind: "plan", completed: ["Run e2e"], steps: [] } } }),
   ] });
   assert.ok(context.text.includes("[messageId=m2] [replyToMessageId=m1]:\n  answer"));
   assert.ok(context.text.includes("claude [agent] [messageId=m3]: ▸ ↗ Opened pull request o/r#7\n"));
   assert.ok(context.text.includes("[messageId=m4]:\n  (recalled)\n"));
+  // A retired plan entry still folds, as the line the Hub stored.
+  assert.ok(context.text.includes("grok [agent] [messageId=m6]: ▸ ✓ Run e2e · → Open PR\n"));
   assert.ok(!context.text.includes("secret"));
   assert.ok(context.text.includes("[attachment] shot.png (image/png, 12 bytes) — run `xmatrix channel history c1`"));
 });
