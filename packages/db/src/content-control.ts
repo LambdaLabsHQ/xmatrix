@@ -924,15 +924,19 @@ export class PostgresContentRepository {
   async nextDecisionMaintenance(input: { requestId: string; spaceId: string }): Promise<number | null> {
     const { requestId, spaceId } = spaceRequest(input);
     return this.spaces.transaction(requestId, "content.decisions.next", spaceId, async tx => {
-      const rows = await tx.query<QueryResultRow>({ name: "content_decision_next_maintenance_v1",
+      const rows = await tx.query<QueryResultRow>({ name: "content_decision_next_maintenance_v2",
         text: `SELECT MIN(due_at) AS due_at FROM (
           SELECT MIN(created_at)+interval '30 days' AS due_at FROM data.content_refs
-            WHERE space_id=$1 AND generation=0 AND owner_kind IN ('summon_decision','connector_result')
+            WHERE space_id=$1 AND generation=0 AND owner_kind='summon_decision'
+          UNION ALL SELECT MIN(created_at)+interval '30 days' AS due_at FROM data.content_refs
+            WHERE space_id=$1 AND generation=0 AND owner_kind='connector_result'
           UNION ALL SELECT MIN(GREATEST(not_before,COALESCE(lease_until,not_before))) AS due_at
             FROM data.content_gc_candidates WHERE space_id=$1 AND reason IN ('decision-expired','decision-upload-expired')
               AND status IN ('pending','leased') AND attempts < 100
           UNION ALL SELECT MIN(expires_at)+interval '31 days' AS due_at FROM data.blob_upload_intents
-            WHERE space_id=$1 AND purpose IN ('summon_decision','connector_result')
+            WHERE space_id=$1 AND purpose='summon_decision'
+          UNION ALL SELECT MIN(expires_at)+interval '31 days' AS due_at FROM data.blob_upload_intents
+            WHERE space_id=$1 AND purpose='connector_result'
         ) due`, values: [spaceId], maxRows: 1 });
       return rows[0]?.due_at ? new Date(rows[0].due_at as string | Date).getTime() : null;
     });
@@ -942,11 +946,14 @@ export class PostgresContentRepository {
     const { requestId, spaceId } = spaceRequest(input);
     const limit = positive(input.limit ?? 10, "limit", 100);
     return this.spaces.transaction(requestId, "content.decisions.due", spaceId, async tx => (await tx.query<QueryResultRow>({
-      name: "content_decision_gc_due_v1",
+      name: "content_decision_gc_due_v2",
       text: `SELECT storage_key FROM data.content_gc_candidates WHERE space_id=$1
-        AND reason IN ('decision-expired','decision-upload-expired') AND not_before <= clock_timestamp() AND attempts < 100
-        AND (status='pending' OR (status='leased' AND lease_until <= clock_timestamp()))
-        ORDER BY not_before,object_id LIMIT $2`, values: [spaceId, limit], maxRows: limit,
+        AND reason IN ('decision-expired','decision-upload-expired')
+        AND status IN ('pending','leased') AND attempts < 100
+        AND GREATEST(not_before,COALESCE(lease_until,not_before)) <= now()
+        AND (status='pending' OR (status='leased' AND lease_until <= now()))
+        ORDER BY GREATEST(not_before,COALESCE(lease_until,not_before)),object_id LIMIT $2`,
+      values: [spaceId, limit], maxRows: limit,
     })).map(row => String(row.storage_key)));
   }
 
