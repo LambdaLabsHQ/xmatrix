@@ -92,7 +92,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
 
   return (
     <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid={another ? "add-machine" : "connect-machine"}>
-      {another ? <p>{copy.addMachineIntro}</p> : <>
+      {another ? (!phone && <p>{copy.addMachineIntro}</p>) : <>
         <p>{copy.bringAgents}</p>
         <AgentsLine className="mt-2" copy={copy} />
       </>}

@@ -1,13 +1,5 @@
 "use client";
 
-import type { ReactNode } from "react";
-
-import { cn } from "@/lib/utils";
-
-import { MachineGlyph } from "./machine-glyph";
-import { MachineLoadGlance } from "./machine-load-panel";
-import { machineOs } from "./machine-os";
-import { ToolListRow } from "./tool-split";
 import type { MachineSummary } from "./workspace-shell-helpers";
 import { relativeTime } from "./workspace-shell-recovered";
 
@@ -41,32 +33,4 @@ export function machineStateLine(machine: MachineSummary, working: number | unde
       : working === undefined ? null
       : working === 0 ? "Idle" : `${working} working`
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
-}
-
-/** A Machine as the list shows it: its OS mark toned by state, its name, what it does, and its load when under strain. */
-export function MachineListRow({ machine, name, platform, online, hosted, subtitle, now, selected, shownBeside, onSelect }: {
-  /** The Hub's record; the desktop's own machine has none until the Hub lists it. */
-  machine: MachineSummary | null;
-  name: string;
-  platform: string | undefined;
-  online: boolean;
-  /** A WSL guest, indented under its host. */
-  hosted?: boolean;
-  subtitle: ReactNode;
-  now: number;
-  selected: boolean;
-  shownBeside?: boolean;
-  onSelect: () => void;
-}) {
-  const stalled = Boolean(machine && machineUnresponsive(machine));
-  return (
-    <ToolListRow testId="machine-row" selected={selected} shownBeside={shownBeside} onSelect={onSelect}
-      leading={<span className={cn("app-tool-state-icon", hosted && "pl-4")}
-        data-state={stalled ? "attention" : online ? "running" : "offline"}
-        aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
-        <MachineGlyph os={machineOs(platform)} /></span>}
-      trailing={machine && <MachineLoadGlance machine={machine} now={now} />}
-      title={name}
-      subtitle={subtitle} />
-  );
 }

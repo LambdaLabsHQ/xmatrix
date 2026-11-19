@@ -41,9 +41,14 @@ the phone dock now have one entry, **Agents**, and every fact has one place.
   computer in place and it becomes a row. A row's heading still opens the
   machine and a column's heading what the Space set on that agent; a page
   opened that way takes the matrix's place and has a way back to it.
-- **A list on a phone,** too narrow for the matrix: each machine with its
-  agents under it, below the count, what waits on a person, and each agent
-  across its machines.
+- **An avatar matrix on a phone.** Each machine heading (with its OS icon and
+  inline exceptions such as sign-in, quota limit, or strained CPU/disk) sits
+  above a full-width strip of vertically aligned agent avatars—no horizontal
+  scroll up to 8 columns and no working-count noise. Working avatars pulse
+  quietly; attention items show an amber ring and semantic badge; strained
+  quota bars appear below the avatar; tapping any cell opens an unblurred
+  bottom-sheet editor, and a ghost **Add a machine** row at the bottom guides
+  adding another computer.
 - **One count says who works:** an Instance with work in hand. A live process
   waiting for its next message is "Ready", and its agent's page lists it as
   waiting. A program its machine reports signed out, or too old for xMatrix,

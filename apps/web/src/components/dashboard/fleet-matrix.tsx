@@ -59,11 +59,39 @@ export type FleetMatrixCellKey = { row: string; harness: string };
 /** A cell's editor, kept alive while its cell is chosen or while what it started still runs. */
 export type FleetMatrixEditor = FleetMatrixCellKey & { label: string; node: ReactNode };
 
-const cellId = (cell: FleetMatrixCellKey) => `${cell.row}|${cell.harness}`;
+export const cellId = (cell: FleetMatrixCellKey) => `${cell.row}|${cell.harness}`;
 
 /** The window closest to its limit: the one that decides whether this agent can take more work. */
-function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usage"]) {
+export function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usage"]) {
   return usage.length ? [usage.reduce((worst, reading) => reading.percent > worst.percent ? reading : worst)] : [];
+}
+
+/** Shared status readout + tightest quota bar for one Space-registered cell (matrix or mobile grid). */
+export function FleetCellBusyReadout({ busy }: { busy: string }) {
+  return (
+    <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
+      <AnimatedIcon icon={Loader2} className="size-3 shrink-0 animate-spin" />
+      <span className="min-w-0 truncate">{busy}</span>
+    </span>
+  );
+}
+
+/** Shared state line and tightest usage bar for an active agent cell. */
+export function FleetCellAgentReadout({ cell }: { cell: Extract<FleetMatrixCell, { kind: "agent" }> }) {
+  const meter = tightest(cell.usage);
+  return (
+    <>
+      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs",
+        cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
+          : cell.working > 0 ? "font-semibold text-foreground" : "text-muted-foreground")}>
+        {/* On, though its machine is away: the row is dimmed, and the mark stays the one of an agent that is on. */}
+        <ToolStateDot state={cell.state === "offline" ? "running" : cell.state} />
+        <span className="min-w-0 truncate">{cell.label}</span>
+      </span>
+      {meter.length > 0 && <MachineLoadGlanceBars glance={meter} testId="agent-usage-glance"
+        label={cell.usage.map((reading) => reading.detail).join(", ")} />}
+    </>
+  );
 }
 
 /**
@@ -99,24 +127,31 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
             <th scope="col" className={cn(sticky, "w-56 min-w-44 border-b border-foreground/10 pb-2 text-left align-bottom")}>
               <span className="text-xs font-bold text-muted-foreground">Machine</span>
             </th>
-            {columns.map((column) => (
-              <th key={column.harness} scope="col" className="min-w-[5.25rem] border-b border-foreground/10 px-1 pb-1 text-left align-bottom font-normal">
-                {column.onOpen ? (
-                  <button type="button" onClick={column.onOpen} data-testid="fleet-agent-column" title={column.summary}
-                    aria-label={`${column.harness}: ${column.summary}`}
-                    className="flex w-full min-w-0 flex-col items-start gap-1 rounded px-1.5 py-1 text-left hover:bg-foreground/5">
-                    <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm" showKindBadge={false} className="shrink-0" />
-                    <span className="block w-full truncate text-[13px] font-semibold">{column.harness}</span>
-                  </button>
-                ) : (
-                  <span data-testid="fleet-agent-column" title={column.summary}
-                    className="flex w-full min-w-0 flex-col items-start gap-1 px-1.5 py-1 text-muted-foreground">
-                    <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm" showKindBadge={false} className="shrink-0 opacity-60" />
-                    <span className="block w-full truncate text-[13px] font-semibold">{column.harness}</span>
-                  </span>
-                )}
-              </th>
-            ))}
+            {columns.map((column) => {
+              const heading = (
+                <>
+                  <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm"
+                    showKindBadge={false} className={cn("shrink-0", !column.onOpen && "opacity-60")} />
+                  <span className="block w-full truncate text-[13px] font-semibold">{column.harness}</span>
+                </>
+              );
+              const headingClass = "flex w-full min-w-0 flex-col items-start gap-1 px-1.5 py-1";
+              return (
+                <th key={column.harness} scope="col" className="min-w-[5.25rem] border-b border-foreground/10 px-1 pb-1 text-left align-bottom font-normal">
+                  {column.onOpen ? (
+                    <button type="button" onClick={column.onOpen} data-testid="fleet-agent-column" title={column.summary}
+                      aria-label={`${column.harness}: ${column.summary}`}
+                      className={cn(headingClass, "rounded text-left hover:bg-foreground/5")}>
+                      {heading}
+                    </button>
+                  ) : (
+                    <span data-testid="fleet-agent-column" title={column.summary} className={cn(headingClass, "text-muted-foreground")}>
+                      {heading}
+                    </span>
+                  )}
+                </th>
+              );
+            })}
             {addColumn && (
               <th scope="col" className="w-10 border-b border-foreground/10 pb-2 align-bottom font-normal">
                 <button type="button" onClick={() => setChoosingColumn(!choosingColumn)} aria-expanded={choosingColumn}
@@ -225,10 +260,7 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
     return (
       <button {...edits} data-testid={cell.kind === "agent" ? "agent-row" : "fleet-cell"} data-state="busy"
         aria-label={`${harness} on ${machine}: ${cell.busy}`} className={cn(CELL, "hover:bg-foreground/5", selected && CHOSEN)}>
-        <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
-          <AnimatedIcon icon={Loader2} className="size-3 shrink-0 animate-spin" />
-          <span className="min-w-0 truncate">{cell.busy}</span>
-        </span>
+        <FleetCellBusyReadout busy={cell.busy} />
       </button>
     );
   }
@@ -252,22 +284,13 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
       </button>
     );
   }
-  const meter = tightest(cell.usage);
   return (
     <button {...edits} data-testid="agent-row" data-state={cell.state}
       title={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       aria-label={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       className={cn(CELL, "hover:bg-foreground/5", selected && CHOSEN)}>
       {cell.name && <span className="block w-full truncate text-xs text-muted-foreground">{cell.name}</span>}
-      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs",
-        cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
-          : cell.working > 0 ? "font-semibold text-foreground" : "text-muted-foreground")}>
-        {/* On, though its machine is away: the row is dimmed, and the mark stays the one of an agent that is on. */}
-        <ToolStateDot state={cell.state === "offline" ? "running" : cell.state} />
-        <span className="min-w-0 truncate">{cell.label}</span>
-      </span>
-      {meter.length > 0 && <MachineLoadGlanceBars glance={meter} testId="agent-usage-glance"
-        label={cell.usage.map((reading) => reading.detail).join(", ")} />}
+      <FleetCellAgentReadout cell={cell} />
     </button>
   );
 }
