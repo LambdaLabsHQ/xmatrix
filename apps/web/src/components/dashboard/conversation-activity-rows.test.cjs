@@ -36,7 +36,6 @@ function pullRequest(sender, number, minute) {
 
 const claude1 = { author: "claude:1", kind: "agent", id: "agent-claude", instance: "i-1" };
 const claude2 = { author: "claude:2", kind: "agent", id: "agent-claude", instance: "i-2" };
-const codex = { author: "codex:2", kind: "agent", id: "agent-codex", instance: "i-9" };
 const yiming = { author: "Yiming Hu", kind: "user", id: "user:yiming" };
 
 test("a retired plan entry is left out; talk and pull requests keep their place", () => {
@@ -58,7 +57,9 @@ test("a retired plan entry is left out; talk and pull requests keep their place"
 
 const github = { author: "GitHub", kind: "app", id: "app:github" };
 function githubFact(number, minute, fact) {
-  return said(github, fact.event, minute, { metadata: { xmatrixGitHubPullRequest: {
+  // GitHub's following is an activity entry, as the Hub writes it; it is no retired plan.
+  const provenance = fact.event === "subscribed" ? { xmatrixProvenance: "activity" } : {};
+  return said(github, fact.event, minute, { metadata: { ...provenance, xmatrixGitHubPullRequest: {
     repository: "a/b", number, url: `https://github.com/a/b/pull/${number}`, ...fact } } });
 }
 

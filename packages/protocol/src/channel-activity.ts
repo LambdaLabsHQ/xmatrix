@@ -153,6 +153,16 @@ export function channelActivityLine(activity: ChannelActivity): string {
   return `↗ Opened pull request ${activity.repository}#${activity.number}`.replace(/[@＠]/gu, "");
 }
 
+/**
+ * Whether an entry is a runtime plan stored before plans were retired: still
+ * activity (context, never unread), but no fact a reader is shown.
+ */
+export function isRetiredPlanActivity(metadata: unknown): boolean {
+  if (!isChannelActivity(metadata)) return false;
+  const activity = (metadata as Record<string, unknown>).xmatrixActivity;
+  return Boolean(activity) && typeof activity === "object" && (activity as Record<string, unknown>).kind === "plan";
+}
+
 /** The activity an entry carries, when its metadata is a well-formed activity entry. */
 export function channelActivityOf(metadata: unknown): ChannelActivity | undefined {
   if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return undefined;

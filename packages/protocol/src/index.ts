@@ -62,7 +62,7 @@ export type {
 } from "./channel-message.js";
 export {
   callerMessageMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
-  activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isReservedAnnotationNamespace,
+  activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isRetiredPlanActivity, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity,
   SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult, mergeCommandResults,

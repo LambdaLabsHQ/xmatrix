@@ -842,6 +842,16 @@ fn is_channel_activity(metadata: Option<&serde_json::Value>) -> bool {
         == Some(CHANNEL_ACTIVITY_PROVENANCE)
 }
 
+/// A runtime plan entry stored before plans were retired.
+fn is_retired_plan(metadata: Option<&serde_json::Value>) -> bool {
+    is_channel_activity(metadata)
+        && metadata
+            .and_then(|metadata| metadata.get("xmatrixActivity"))
+            .and_then(|activity| activity.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            == Some("plan")
+}
+
 /// How history prints an entry nobody needs to read in full
 /// (docs/design/conversation-activity.md §4.3): an activity entry as its line.
 /// Order and the message id stay on the entry, so it can still be quoted or
@@ -853,9 +863,8 @@ pub fn folded_history_line(message: &ChannelMessage) -> Option<String> {
     if let Some(activity) = channel_activity_of(message.metadata.as_ref()) {
         return Some(format!("▸ {}", channel_activity_line(&activity)));
     }
-    // An entry of a kind no longer reported (a retired `plan`) still folds,
-    // as the line the Hub stored for it.
-    is_channel_activity(message.metadata.as_ref()).then(|| {
+    // A retired runtime plan entry still folds, as the line the Hub stored.
+    is_retired_plan(message.metadata.as_ref()).then(|| {
         format!(
             "▸ {}",
             message
@@ -1878,6 +1887,12 @@ mod tests {
             folded_history_line(&history_entry(serde_json::json!({}))),
             None
         );
+        // An App's activity that is no plan (GitHub following a pull request) stays whole.
+        let following = history_entry(serde_json::json!({
+            "metadata": { "xmatrixProvenance": "activity",
+                "xmatrixGitHubPullRequest": { "event": "subscribed" } },
+        }));
+        assert_eq!(folded_history_line(&following), None);
         // A Hub that still sends a supersession leaves the message whole.
         assert_eq!(
             folded_history_line(&history_entry(serde_json::json!({ "supersededBy": "m-9" }))),

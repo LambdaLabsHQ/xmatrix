@@ -1,5 +1,5 @@
 import {
-  channelActivityOf, githubPullRequestFactOf, isChannelActivity, messageExternalAppSource, type ChannelActivity,
+  channelActivityOf, githubPullRequestFactOf, isRetiredPlanActivity, messageExternalAppSource, type ChannelActivity,
   type GitHubPullRequestFact,
 } from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
@@ -60,11 +60,11 @@ function actorKey(item: TimelineItem): string | undefined {
 }
 
 /**
- * An activity entry of a retired kind (a runtime's plan): stale progress the
+ * A runtime plan entry stored before plans were retired: stale progress the
  * Agent's own messages already say, so the timeline leaves it out.
  */
 function retiredActivity(item: TimelineItem): boolean {
-  return Boolean(item.messageId) && isChannelActivity(item.metadata) && !timelineItemActivity(item);
+  return Boolean(item.messageId) && isRetiredPlanActivity(item.metadata);
 }
 
 /** The header tags a message carries, by the key its tag is drawn with. */
