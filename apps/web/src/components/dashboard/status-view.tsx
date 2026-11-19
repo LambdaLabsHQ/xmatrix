@@ -72,7 +72,8 @@ export type FleetOverviewLine = {
  * matrix on a desktop, the agents across their machines above the list on a
  * phone.
  */
-export function FleetOverview({ status, attention, note, children }: {
+export function FleetOverview({ title = "Agents", status, attention, note, children }: {
+  title?: string;
   status: FleetStatus;
   /** Said after the count's own line: what waits on a person, where no list of it follows. */
   note?: ReactNode;
@@ -83,16 +84,20 @@ export function FleetOverview({ status, attention, note, children }: {
   const { online, busy, workingCount } = status;
   return (
     <>
-      <header className="app-status-hero mb-6 flex flex-wrap items-baseline gap-x-4 gap-y-1.5" data-testid="status-hero">
-        <div className="flex items-baseline gap-2.5">
-          <span className="text-[2.5rem] font-extrabold leading-none tracking-[-0.03em] tabular-nums" data-testid="status-working">{workingCount}</span>
-          <span className="text-[17px] font-semibold tracking-[-0.01em] text-foreground/85">{workingCount === 1 ? "agent working" : "agents working"}</span>
-        </div>
-        <span aria-hidden="true" className="hidden h-3.5 w-px translate-y-[2px] bg-foreground/15 sm:inline-block" />
-        <p className="text-[13px] text-muted-foreground" data-testid="status-summary">
-          {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
-            : online > 0 ? "Nothing is working right now." : "No machine is online."}
-          {note}
+      <header className="app-status-hero mb-7" data-testid="status-hero">
+        <h1 className="text-2xl font-black tracking-[-0.02em] text-foreground">{title}</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          <span className={cn("tabular-nums", workingCount > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80")}
+            data-testid="status-working">{workingCount}</span>{" "}
+          <span className={workingCount > 0 ? "font-medium text-foreground" : undefined}>
+            {workingCount === 1 ? "agent working" : "agents working"}
+          </span>
+          {workingCount > 0 && " "}
+          <span data-testid="status-summary">
+            {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
+              : online > 0 ? null : " · No machine online"}
+            {note}
+          </span>
         </p>
       </header>
 

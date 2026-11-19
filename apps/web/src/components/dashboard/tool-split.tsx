@@ -261,20 +261,18 @@ export function ToolDetail({ onBack, backLabel, backAlways, context, title, titl
 }
 
 /** The paper's scroll and text column; a view that draws its own header (Profile) uses it directly. */
-export function ToolPaperScroll({ wide, full, belowBand = true, children }: {
+export function ToolPaperScroll({ wide, full, children }: {
   wide?: boolean;
   /** Occupies the whole panel (no sidebar list beside it): uses the full panel width with balanced horizontal padding. */
   full?: boolean;
-  /** Reserves the fixed 52px desktop top band; set false when the view places its own `app-band-header` above the scroll area. */
-  belowBand?: boolean;
   children: ReactNode;
 }) {
   return (
-    <div className={cn("app-tool-detail-scroll min-h-0 flex-1 overflow-y-auto", belowBand && "app-below-band")}>
+    <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">
       {/* On a phone the paper's text keeps to the plank's content line. */}
       <article className={cn(
-        "px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2.5rem)]",
-        full ? "w-full md:px-8 md:pt-1 lg:px-10 2xl:px-12" : cn("mx-auto md:px-8 md:pt-0", wide ? "max-w-6xl" : "max-w-3xl"),
+        "px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2.5rem)] md:pt-0",
+        full ? "w-full md:px-8 lg:px-10 2xl:px-12" : cn("mx-auto md:px-8", wide ? "max-w-6xl" : "max-w-3xl"),
       )}>
         {children}
       </article>
