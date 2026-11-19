@@ -103,7 +103,7 @@ import { SpaceAllowanceNotice, useSpaceAllowance } from "./space-allowance-notic
 import { startConversation } from "./start-conversation";
 import type { WorkspaceShellModel } from "./use-workspace-shell-actions";
 import { ListColumnResizeHandle, ListColumnResizeProvider } from "./list-column-resize";
-import { mobileBackState, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
+import { mobileBackState, dockTabOf, isFleetView, DOCK_TAB_VIEWS, MORE_TAB_VIEWS, SPLIT_TOOL_VIEWS, viewForRouteSegment, type AppView } from "./workspace-shell-navigation";
 import { PageTreePanel, PagesView, usePageTree } from "@/components/pages/pages-view";
 import type { PageEditOpening } from "@/components/dashboard/page-edit-cards";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, usePageCreation } from "@/components/pages/page-creation";
@@ -136,9 +136,6 @@ const AgentInstanceDetailWindow = dynamic(() => import("./agent-trace-window").t
  * dock tab, chosen with this, so the panes stay orthogonal to one another
  * instead of sharing a single screen and swapping their contents.
  */
-function dockTabOf(view: AppView): AppView {
-  return view === "pages" || view === "messages" || view === "status" ? view : "more";
-}
 
 /** The search dialog's pages while the tree has not been read: one array, so the dialog keeps its memo. */
 const NO_PAGES: NonNullable<ReturnType<typeof usePageTree>["data"]> = [];
@@ -832,17 +829,13 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       openNewConversation();
     }));
   const createNewPage = useStableCallback(() => void pageCreation.create(null));
-  const manageMachines = useStableCallback(() => changeAppView("machines"));
   // One object while what it offers is the same: the list column that shows it is memoized.
   const listCreate = useMemo<CreateAction | null>(() => view === "messages" && canCreateChannel
     ? { label: "New conversation", onCreate: startNewConversation, active: composingConversation, shortcut: true }
     : view === "pages"
       ? { label: "New page", onCreate: createNewPage, disabled: !currentSpaceId, shortcut: true }
-      : view === "agents" && user
-        ? { label: "Manage machines", onCreate: manageMachines, shortcut: true }
-        : null,
-  [canCreateChannel, composingConversation, createNewPage, currentSpaceId, manageMachines,
-    startNewConversation, user, view]);
+      : null,
+  [canCreateChannel, composingConversation, createNewPage, currentSpaceId, startNewConversation, view]);
   const mobileCreate = !nativeMobileTabVisible || agentConfigDialog ? null : listCreate;
   // The bar a dock tab's own screen shows, for the copies drawn while screens change.
   const tabRootBar = { spaces, currentSpaceId, onOpenSearch: openWorkspaceSearch, onSelectSpace: selectSpace,
@@ -872,7 +865,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       .setMobileTabState({
         visible: nativeMobileTabVisible,
         // The tab a slide is going to, before it lands: an older one would take the tab bar back.
-        activeView: DOCK_TAB_VIEWS[dockTabSlide.pending.get() ?? -1] ?? view,
+        activeView: DOCK_TAB_VIEWS[dockTabSlide.pending.get() ?? -1] ?? (isFleetView(view) ? "status" : view),
         spaceId: currentSpaceId,
         statusLive,
         // Omit identity while auth is unresolved; null explicitly means signed out.
@@ -1485,7 +1478,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     />
   );
   const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages">);
-  const statusSurface = dockTabMounted("status") ? renderToolSurface("status") : null;
+  // The Agents tab's pane is whichever of its addresses is open, so a machine or an agent opens over its list in place.
+  const statusSurface = dockTabMounted("status")
+    ? renderToolSurface(isFleetView(view) ? view as Exclude<AppView, "messages"> : "status") : null;
   const moreSurface = dockTabMounted("more")
     ? renderToolSurface(dockTabOf(view) === "more" && view !== "pages" && view !== "messages" ? view : "more")
     : null;

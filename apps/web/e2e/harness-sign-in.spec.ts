@@ -40,8 +40,10 @@ async function openAgent(page: Parameters<typeof installWorkspaceStubs>[0], name
     responder: { kind: "sequence", responses: [{ status: 202, json: { controlId: START, status: "queued" } },
       { status: 202, json: { controlId: FINISH, status: "queued" } }] } });
   await page.goto("/app/personal-sspaceperso/agents");
+  // Its cell opens its editor; its own page, with the sign-in in full, is one step further.
   await page.locator('[data-testid="agent-row"]').filter({ hasText: name }).click();
-  return page.getByTestId("harness-sign-in");
+  await page.getByTestId("fleet-cell-open-agent").click();
+  return page.locator(".app-tool-detail").getByTestId("harness-sign-in");
 }
 
 test("a device-code sign-in shows its link and code, then waits for the browser on its own", async ({ page }) => {

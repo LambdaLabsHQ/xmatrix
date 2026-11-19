@@ -6646,10 +6646,6 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .app-share
     to { opacity: 1; transform: translate3d(0, 0, 0); }
   }
 
-  .xmatrix-app.app-tool-layout.xmatrix-app-shell .app-agents-view > * + * {
-    margin-top: 0.75rem;
-  }
-
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-agent-work-dock,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-agent-work-scroller,
   html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app-shell .app-agent-work-dock > div {

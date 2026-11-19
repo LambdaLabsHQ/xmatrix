@@ -51,11 +51,3 @@ export function preferredMachineDaemon<T extends MachineDaemonPresence>(
   const nextSeen = Date.parse(next.lastSeenAt || next.connectedAt || "") || 0;
   return nextSeen >= currentSeen ? next : current;
 }
-
-export function daemonPresenceLabel(daemon: MachineDaemonPresence | undefined): string {
-  if (!daemon) return "offline";
-  if (isLiveMachineDaemon(daemon)) return "online";
-  const status = daemon.status?.trim().toLowerCase() || "";
-  if (status === "enrolled") return "enrolled";
-  return status || "offline";
-}

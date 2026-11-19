@@ -184,8 +184,8 @@ test("tapping Channels once opens the mobile channel list", async ({ page }) => 
   await openMoreChildWorkspace(page);
 
   const primaryNav = page.getByRole("navigation", { name: "Primary" });
-  // Pages, Channels, Status and More; Agents lives behind More with Machines.
-  await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Status", "More"]);
+  // Pages, Channels, Agents and More; Agents holds the machines too.
+  await expect(primaryNav.getByRole("button")).toHaveText(["Pages", "Channels", "Agents", "More"]);
   await expect(primaryNav.getByRole("button", { name: "Follow-ups", exact: true })).toHaveCount(0);
   // Direct messages live on the Channels page.
   await expect(primaryNav.getByRole("button", { name: "Direct", exact: true })).toHaveCount(0);
@@ -518,7 +518,7 @@ test("a tab not shown yet renders first, then the page and its bar slide to it",
     const track = document.querySelector<HTMLElement>(".app-mobile-dock-track");
     const slot = () => track?.style.getPropertyValue("--app-mobile-dock-slot");
     const channels = slot();
-    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Status"]')?.click();
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Agents"]')?.click();
     // The bar starts with the track, on the frame that moves it to the Status screen.
     for (let frame = 0; frame < 60 && slot() === channels; frame++) await new Promise(requestAnimationFrame);
     const bar = document.querySelector(".app-mobile-tab-root-bar:not(.app-dock-tab-slide-outgoing)");
@@ -541,8 +541,8 @@ test("a tab already shown slides there at once and renders once it lands", async
   await expect(generalChannelRow(page)).toBeVisible();
   const dock = page.getByRole("navigation", { name: "Primary" });
   // Status's screen goes on the track the first time it is shown.
-  await dock.getByRole("button", { name: "Status" }).click();
-  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+  await dock.getByRole("button", { name: "Agents" }).click();
+  await expect(dock.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
   await screenChangeLanded(page);
   await dock.getByRole("button", { name: "Channels" }).click();
   await expect(generalChannelRow(page)).toBeVisible();
@@ -552,7 +552,7 @@ test("a tab already shown slides there at once and renders once it lands", async
   const atTap = await page.evaluate(() => {
     const track = document.querySelector<HTMLElement>(".app-mobile-dock-track")!;
     const slot = track.style.getPropertyValue("--app-mobile-dock-slot");
-    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Status"]')?.click();
+    document.querySelector<HTMLButtonElement>('nav[aria-label="Primary"] button[aria-label="Agents"]')?.click();
     return {
       // Moving in the same task as the tap, before anything renders.
       track: track.getAnimations().length,
@@ -567,7 +567,7 @@ test("a tab already shown slides there at once and renders once it lands", async
   expect(atTap.copies).toBe(1);
   expect(atTap.bars).toBeGreaterThan(0);
   // The dock marks where the page is going from the start.
-  await expect(dock.getByRole("button", { name: "Status" })).toHaveAttribute("aria-current", "page");
+  await expect(dock.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
 
   // Once it lands the shell is on Status, and nothing is left moving or copied.
   await expect(page).toHaveURL(/\/status$/);
@@ -585,7 +585,7 @@ test("a second tap while the page slides takes it on from where it is to the new
   await openGeneralChannelList(page);
   await expect(generalChannelRow(page)).toBeVisible();
   const dock = page.getByRole("navigation", { name: "Primary" });
-  for (const name of ["Status", "More", "Channels"]) {
+  for (const name of ["Agents", "More", "Channels"]) {
     await dock.getByRole("button", { name }).click();
     await expect(dock.getByRole("button", { name })).toHaveAttribute("aria-current", "page");
     await screenChangeLanded(page);
@@ -594,7 +594,7 @@ test("a second tap while the page slides takes it on from where it is to the new
   }
   await page.evaluate(async () => {
     const tap = (name: string) => document.querySelector<HTMLButtonElement>(`nav[aria-label="Primary"] button[aria-label="${name}"]`)?.click();
-    tap("Status");
+    tap("Agents");
     await new Promise((resolve) => setTimeout(resolve, 120));
     tap("More");
   });
@@ -1198,33 +1198,30 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(usageGlance.locator("[data-tone=green]")).toHaveCount(1);
   await expect(usageGlance.locator("[data-tone=yellow]")).toHaveCount(1);
   await expect(row("research-agent").getByTestId("agent-usage-glance")).toHaveCount(0);
-  /* The runtime is the group the locations belong to, so its icon and name
-     match the location row instead of reading as a caption above it. */
-  const agentHeading = page.getByRole("region", { name: "codex" }).locator(".app-tool-list-group-title");
-  const agentFace = agentHeading.locator(".identity-avatar-face");
-  const machineTitle = row("mobile-actions-agent").locator(".font-semibold").first();
-  await expect(agentFace.locator("img")).toBeVisible();
+  /* An agent is listed under its machine, starting where the machine's name
+     does, so the two read as a machine and what runs on it. */
+  const machineHeading = page.getByRole("region", { name: "Mobile test machine" }).locator(".app-tool-list-group-title");
+  // The reader's own machine is with the machines, not under the teammates' heading, even before the list carries it.
+  await expect(page.getByRole("heading", { name: "Teammates' machines" }).locator("xpath=following::section[1]"))
+    .toHaveAccessibleName("Research Mac");
+  await expect(page.getByRole("region", { name: "Mobile test machine" }).getByTestId("agent-row")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("agents-list-phone.png") });
-  const [agentSize, machineSize, faceWidth] = await Promise.all([
-    agentHeading.evaluate((element) => parseFloat(getComputedStyle(element).fontSize)),
-    machineTitle.evaluate((element) => parseFloat(getComputedStyle(element).fontSize)),
-    agentFace.evaluate((element) => parseFloat(getComputedStyle(element).width)),
-  ]);
-  expect(agentSize).toBeGreaterThanOrEqual(machineSize);
-  expect(faceWidth).toBeGreaterThanOrEqual(32);
-  /* A location is indented under its runtime: its mark starts where the
-     runtime's name does, so the group reads as a parent and its children. */
-  const agentName = agentHeading.locator("span.truncate").first();
-  const machineIcon = row("mobile-actions-agent").locator(".app-tool-state-icon");
-  const [nameBox, iconBox] = await Promise.all([agentName, machineIcon].map((locator) => locator.boundingBox()));
+  const machineName = machineHeading.locator("span.truncate").first();
+  const agentFace = row("mobile-actions-agent").locator(".app-tool-state-icon");
+  await expect(agentFace.locator("img")).toBeVisible();
+  const [nameBox, iconBox] = await Promise.all([machineName, agentFace].map((locator) => locator.boundingBox()));
   expect(Math.abs(iconBox!.x - nameBox!.x)).toBeLessThanOrEqual(1);
-  await expect(row("mobile-actions-agent")).toContainText("Mobile test machine · Running in #general");
+  // Its one live process waits for a message: that is ready, not working.
+  await expect(row("mobile-actions-agent")).toContainText("codex · Ready");
   await expect(row("mobile-actions-agent")).not.toContainText("E2E Tester");
-  await expect(row("research-agent")).toContainText(/Research Mac · Offline · seen \d+d ago/);
-  await expect(row("research-agent")).toContainText("Research Owner");
+  await expect(row("research-agent")).toContainText(/codex · Offline · seen \d+d ago/);
+  await expect(page.getByRole("region", { name: "Research Mac" }).getByTestId("agent-row")).toHaveCount(1);
+  // A teammate's machine names its owner once, on the machine.
+  await expect(page.getByRole("region", { name: "Research Mac" }).locator(".app-tool-list-group-title")).toContainText("Research Owner");
+  await expect(row("research-agent")).not.toContainText("Research Owner");
   await expect(row("research-agent")).toHaveAttribute("data-state", "offline");
   await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);
-  await expect(page.locator(".app-mobile-create-fab")).toHaveAccessibleName("Manage machines");
+  await expect(page.locator(".app-mobile-create-fab")).toHaveCount(0);
 
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect(usageGlance).toBeVisible();
@@ -1268,8 +1265,9 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(usage).toContainText(/5-hour window\s*resets in 2h \d+m\s*40% used/);
   await expect(usage).toContainText(/Weekly\s*resets in [23]d \d+h\s*86% used/);
   await expect(usage).toContainText("checked just now");
-  const running = detail.getByRole("region", { name: "Running now · 1" });
+  const running = detail.getByRole("region", { name: "In conversations · 1" });
   await expect(running).toContainText("mobile-actions-agent:2");
+  await expect(running).toContainText("Waiting for a message");
   const agentUrl = page.url();
   await running.getByRole("button", { name: "#general" }).tap();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels\/general--channel-general$/);

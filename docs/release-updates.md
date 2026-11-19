@@ -1,5 +1,58 @@
 # Release Updates
 
+## Unreleased: Status, Machines and Agents are one matrix
+
+Adding an agent to a machine was spread over three rail entries: it was
+installed under Machines, signed in under Agents, and its state read under
+Status, whose list only repeated the other two and sent each row away. The
+same machines and agents were drawn up to four times, and the pages disagreed:
+a row said "3 running" where the total said none were working. The rail and
+the phone dock now have one entry, **Agents**, and every fact has one place.
+
+- **A matrix on a desktop.** A machine to a row, an agent to a column, and a
+  cell for that agent on that machine: `Ready`, `3 working`, what it waits on
+  (`Sign in`, `1w limit`, `Update`), `Off` when installed and not turned on in
+  this Space, `+` where it is not installed, `—` where it cannot run. A cell
+  with a quota shows the window closest to its limit. A machine's row shows a
+  load reading only when it is under strain; teammates' machines follow the
+  reader's own. There is no list beside the matrix: it is the list of both.
+- **The matrix is edited where it is read.** Choosing a cell opens its editor
+  under it: `+` installs the agent on that machine, `Off` turns it on in this
+  Space, `Sign in` signs it in, and an agent's cell shows where it works, its
+  usage, its switch, its version and updates. While a machine installs or
+  updates, its cell says so, also after its editor is closed, so several can
+  run at once. The `+` after the last agent adds a column for an agent no
+  machine has yet; the table's last row, **Add a machine**, connects another
+  computer in place and it becomes a row. A row's heading still opens the
+  machine and a column's heading what the Space set on that agent; a page
+  opened that way takes the matrix's place and has a way back to it.
+- **A list on a phone,** too narrow for the matrix: each machine with its
+  agents under it, below the count, what waits on a person, and each agent
+  across its machines.
+- **One count says who works:** an Instance with work in hand. A live process
+  waiting for its next message is "Ready", and its agent's page lists it as
+  waiting. A program its machine reports signed out, or too old for xMatrix,
+  reads as that everywhere, not as ready.
+- **A machine's page** starts with its agents. Each installed one is a line:
+  what it does in this Space, **Sign in** where it waits on that, and its
+  switch. Version, updates and uninstall open under the line. What is not
+  installed is under **Add an agent**; one installed from there joins the lines
+  above, is turned on, and is signed in on the same line. Load, settings and
+  the xMatrix version follow; a daemon and CLI of one build are one line.
+- **An agent's page** shows where it works and waits, its usage, sign-in,
+  access and settings. Its header links to its machine and to the agent
+  across machines. The "Where it runs" facts its header already said are gone.
+
+The addresses `/status`, `/agents`, `/machines` and `/local` are unchanged, so
+links, bookmarks and installed iOS builds keep working; on a desktop a bare
+`/agents` or `/machines` is the matrix. A phone's More no longer lists Agents
+and Machines, the Agents list no longer leads with "Manage machines" or ends
+with "Installed on your machines", and the page of an agent no longer carries
+install controls. iOS shows the third tab as Agents after its next release.
+The desktop app's own machine page keeps its "Agents" and "Found on this
+machine" sections for now. Web and iOS. Recovery is a CI-validated change
+reverting this one.
+
 ## Unreleased: App Store Connect collections traverse pages explicitly and fail closed on truncation
 
 `AppStoreConnectApi.list` previously returned `{ rows, included, next? }` for both

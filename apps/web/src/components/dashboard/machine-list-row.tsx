@@ -30,16 +30,20 @@ export function machineUnresponsive(machine: MachineSummary): boolean {
   return machine.status === "online" && Boolean(machine.daemon?.unansweredSince);
 }
 
-/** What a Machine is doing now: Agents running on it while online, when it was last seen once offline. */
-export function machineStateLine(machine: MachineSummary): string | null {
+/**
+ * What a Machine is doing now: how many agents on it have work in hand while
+ * online, when it was last seen once offline. `working` is that count where
+ * the agent list is known; a live process waiting for a message is not work.
+ */
+export function machineStateLine(machine: MachineSummary, working: number | undefined): string | null {
   return machine.status === "online"
     ? machineUnresponsive(machine) ? "Not responding"
-      : machine.activeRuns === undefined ? null
-      : machine.activeRuns === 0 ? "Idle" : `${machine.activeRuns} ${machine.activeRuns === 1 ? "agent" : "agents"} running`
+      : working === undefined ? null
+      : working === 0 ? "Idle" : `${working} working`
     : machine.lastSeenAt ? `Offline · seen ${relativeTime(machine.lastSeenAt)}` : "Offline";
 }
 
-/** A Machine as the Machines list shows it: its OS mark toned by state, its name, what it does, its load. */
+/** A Machine as the list shows it: its OS mark toned by state, its name, what it does, and its load when under strain. */
 export function MachineListRow({ machine, name, platform, online, hosted, subtitle, now, selected, shownBeside, onSelect }: {
   /** The Hub's record; the desktop's own machine has none until the Hub lists it. */
   machine: MachineSummary | null;

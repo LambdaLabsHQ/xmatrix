@@ -61,7 +61,7 @@ export function harnessSignInView(input: {
     daemon,
     blocker: !daemon ? "Connect this machine to sign in from here."
       : !capable ? "Update this machine's xMatrix daemon to sign in from here."
-        : item && !item.installed ? "Install this harness on the machine first." : undefined,
+        : item && !item.installed ? "Install it on the machine first." : undefined,
   };
 }
 
@@ -173,7 +173,7 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
         <div className="flex flex-wrap items-center justify-between gap-2">
           {!bare && <p>
             {view.state ? LOGIN_STATE_LABEL[view.state] : "Not checked yet"}
-            <span className="text-muted-foreground"> · the harness&apos;s own account on {registration.machineName}</span>
+            <span className="text-muted-foreground"> · its own account on {registration.machineName}</span>
           </p>}
           {!prompt && <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" disabled={busy || Boolean(view.blocker)}

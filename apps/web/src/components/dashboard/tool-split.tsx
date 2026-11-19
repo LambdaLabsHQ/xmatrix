@@ -47,6 +47,18 @@ export function ToolSplit({ list, detail, open, label }: {
   );
 }
 
+/**
+ * A destination whose list is its paper: a table read at the panel's full
+ * width, with whatever is opened from it shown in its place and a way back.
+ */
+export function ToolSheet({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="app-tool-split flex min-h-0 min-w-0 flex-1" data-open="true" aria-label={label} role="region">
+      <section className="app-tool-detail flex min-h-0 min-w-0 flex-1 flex-col">{children}</section>
+    </div>
+  );
+}
+
 /** The list column: its name, its + as the first row, one optional control, then the rows. */
 export function ToolList({ title, action, create, toolbar, children }: {
   title: string;
@@ -151,10 +163,14 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, selected
 }
 
 /** One row: a leading mark, the name with something at its end, and one line under it. */
-export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, trailing, subtitle, testId, state, phoneOnly }: {
+export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, meter, trailing, subtitle, testId, state, phoneOnly, desktopOnly, child }: {
   selected: boolean;
   /** A row only a phone lists, where a desktop shows it as the list's +. */
   phoneOnly?: boolean;
+  /** A row only a desktop lists: a phone shows what it opens above its list. */
+  desktopOnly?: boolean;
+  /** A row that belongs to the row above it, indented to start where that row's name does. */
+  child?: boolean;
   /** Shown on the paper beside the list without being chosen: marked on a desktop only. */
   shownBeside?: boolean;
   onSelect: () => void;
@@ -163,23 +179,27 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
   end?: ReactNode;
   /** Live state beside the text, centred on the row; the name gives way to it. */
   trailing?: ReactNode;
+  /** Live state on the name's own line, centred on it, so the line under the name keeps the row's whole width. */
+  meter?: ReactNode;
   subtitle?: ReactNode;
   testId?: string;
   state?: string;
 }) {
   const indented = useContext(IdentityIndent);
   return (
-    <li className={phoneOnly ? "md:hidden" : undefined}>
+    <li className={phoneOnly ? "md:hidden" : desktopOnly ? "max-md:hidden" : undefined}>
       <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} data-testid={testId}
         data-state={state}
         className={cn("app-tool-list-row", LIST_ROW_CLASS_NAME,
           indented && "pl-[calc(var(--app-list-row-start)+2.625rem)]",
+          child && !indented && "pl-[calc(var(--app-list-row-start)+1.875rem)]",
           selected && "app-tool-list-row-selected", shownBeside && "app-tool-list-row-beside")}>
         {leading && <span className={cn(LIST_ROW_LEADING_CLASS_NAME, subtitle && LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>{leading}</span>}
         <span className={LIST_ROW_COPY_CLASS_NAME}>
           <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}>
             <span className={LIST_ROW_TITLE_CLASS_NAME}>{title}</span>
             {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
+            {meter && <span className="-my-1 flex shrink-0 items-center self-center">{meter}</span>}
           </span>
           {subtitle && <span className={LIST_ROW_META_CLASS_NAME}>{subtitle}</span>}
         </span>
@@ -197,10 +217,12 @@ export function ToolStateDot({ state }: { state: ToolState }) {
 }
 
 /** The chosen item, on paper: where it sits, its name, one line of state, what to do; then its sections. */
-export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, status, actions, wide, children }: {
+export function ToolDetail({ onBack, backLabel, backAlways, context, title, titleAccessory, status, actions, wide, children }: {
   /** A phone's way back to the list; the overview shown beside the list has none. */
   onBack?: () => void;
   backLabel?: string;
+  /** No list stays beside this page on a desktop either, so its way back shows there too. */
+  backAlways?: boolean;
   context?: ReactNode;
   title: ReactNode;
   /** Sits on the title. Hidden until the title is hovered, and always shown where there is no hover. */
@@ -215,7 +237,8 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
     <ToolPaperScroll wide={wide}>
       {onBack && (
         <button type="button" onClick={onBack}
-          className="-ml-1 mb-2 flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground md:hidden">
+          className={cn("-ml-1 mb-2 flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+            !backAlways && "md:hidden")}>
           <ChevronLeft className="size-4" /> {backLabel}
         </button>
       )}

@@ -206,6 +206,7 @@ import {
   writeChannelReadCounts,
   writeWorkingSpaceCache,
 } from "./workspace-shell-modules";
+import { isFleetView } from "./workspace-shell-navigation";
 
 import { useDesktopSidebarLayout } from "./use-desktop-sidebar-layout";
 import { useShellDialogs } from "./use-shell-dialogs";
@@ -2477,7 +2478,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     token,
     backgroundReady: startupBackgroundReady,
     relayPushConnectedRef,
-    machinesViewOpen: view === "machines",
+    machinesViewOpen: isFleetView(view),
     setMachineDaemons,
   });
 

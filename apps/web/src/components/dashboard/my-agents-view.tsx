@@ -4,9 +4,7 @@ import { AnimatedIcon } from "@/components/ui/animated-icon";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  Bot,
   Loader2,
-  Plus,
   RotateCcw,
   Settings,
   type LucideIcon,
@@ -18,16 +16,15 @@ import {
   type AgentRegistrationDetails,
   type AgentRegistrationSummary,
   type AgentWorkingMode,
-  type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
-import { useInstalledHarnesses } from "./use-installed-harnesses";
-import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
-import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
+import type { useInstalledHarnesses } from "./use-installed-harnesses";
+import { ContentSkeleton } from "./content-skeleton";
+import type { MachineSummary } from "./workspace-shell-helpers";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
-import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
+import { noticeClass } from "@/components/ui/status-tone";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
@@ -35,31 +32,24 @@ import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { cn } from "@/lib/utils";
 
-import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { ASK_ACCESS_EFFECT, AgentAccessLines, FULL_ACCESS_EFFECT, chooseHeldAccess } from "./agent-access";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
-import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
-import { AGENT_USAGE_REFRESH_MS, agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
-import { useNow } from "./agent-work-intent";
-import { channelTitle } from "./channel-links";
+import { agentHarnessSelectionId, type AgentListGroup } from "./agent-list-groups";
+import { agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
 import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
 import { Face } from "./face";
 import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
-  registrationStatus,
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
-import { BringAgentsIn } from "./bring-agents-in";
-import { SetupCardShell } from "./space-setup-card-chrome";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolSplit,
-  ToolStateDot,
+  ToolDetail, ToolDetailSection, ToolStateDot,
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
@@ -84,44 +74,59 @@ const INPUT_CLASS =
   "h-9 w-full border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60";
 
 /**
- * Agents: the Space's registrations under their runtime, one row per location
- * (owner and machine). A row is named by what differs between a runtime's
- * locations and says what that location is doing now. The runtime's heading
- * opens what is set on the agent itself, whichever machine it runs on.
+ * An agent's page. One location (an agent on one machine) reads what the
+ * Space has of it: what it works on now, what it has used, its sign-in, its
+ * access and its settings; the program itself (version, updates) is on its
+ * machine's page, one click away. A runtime's page is what is set on the
+ * agent itself, whichever machine it runs on.
  */
-export function MyAgentsView({
+export function AgentPaper({
   spaceId,
   token,
   currentUserId,
-  channels,
-  error,
-  addsOnThisMachine,
-  onOpenMachines,
+  chosen,
+  group,
+  now,
+  working,
+  fleet,
+  conversationTitle,
+  machineOf,
+  backAlways,
+  onBack,
+  onRefetch,
+  onOpenMachine,
   onOpenConversation,
 }: {
   spaceId: string | null;
   token: string | undefined;
   currentUserId: string;
-  /** The Space's conversations the reader has, to name where an agent runs. */
-  channels: readonly ChannelSnapshot[];
-  error: string | null;
-  /** The desktop app reports this machine's harnesses itself; a browser cannot. */
-  addsOnThisMachine: boolean;
-  onOpenMachines: () => void;
+  /** The location the address names, */
+  chosen: AgentListGroup["rows"][number] | undefined;
+  /** or the runtime it names. */
+  group: AgentListGroup | undefined;
+  now: number;
+  /** The Instances with work in hand; the rest wait for their next message. */
+  working: ReadonlySet<string>;
+  /** The owner's installed harnesses, whose switch turns a preset on or off in this Space. */
+  fleet: ReturnType<typeof useInstalledHarnesses>;
+  conversationTitle: (channelId: string) => string | undefined;
+  /** The Machine an agent runs on, when this reader's list carries it. */
+  machineOf: (registration: AgentRegistrationSummary) => MachineSummary | undefined;
+  /** Shown without a list beside it, so its way back shows on a desktop too. */
+  backAlways?: boolean;
+  /** Back to what the agent was opened from. */
+  onBack: () => void;
+  onRefetch: () => Promise<unknown>;
+  onOpenMachine: (machine: MachineSummary) => void;
   onOpenConversation: (channelId: string) => void;
 }) {
-  const ready = Boolean(spaceId && token);
-  const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
-  const command = useRegistrationCommand(spaceId ?? "", token ?? "", () => void catalog.refetch());
+  const command = useRegistrationCommand(spaceId ?? "", token ?? "", () => void onRefetch());
   const [editingId, setEditingId] = useState<string | null>(null);
   /* A switch shows its new position at once and holds it until the agent list
      confirms it; waiting for the list's reload made a flip look ignored. */
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
-  const [selectedAgentId, select] = useViewSelection("agents");
-
-  const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
+  const [, select] = useViewSelection("agents");
   const copy = useOnboardingCopy(spaceId, token, currentUserId);
-  const newCandidates = fleet.candidates.filter((candidate) => !candidate.registration);
 
   function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
     const id = registrationTupleId(registration.key);
@@ -132,226 +137,166 @@ export function MyAgentsView({
     void command.run(registration.key, { kind: action });
   }
 
-  const conversationTitle = (channelId: string) => {
-    const channel = channels.find((candidate) => candidate.id === channelId);
-    return channel ? channelTitle(channel) : undefined;
-  };
-  // Ticks with the catalog refresh, so ages and reset countdowns keep moving.
-  const now = useNow(AGENT_USAGE_REFRESH_MS);
-  const groups = agentListGroups(catalog.data, { conversationTitle, now });
-  const rows = groups.flatMap((group) => group.rows);
-  const chosen = rows.find((row) => row.id === selectedAgentId);
-  // A desktop shows the first harness beside the list until another is chosen.
-  const shownGroup = chosen ? undefined
-    : groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) ?? (selectedAgentId ? undefined : groups[0]);
-
-  const list = (
-    <ToolList title="Agents" create={{ label: "Manage machines", onCreate: onOpenMachines, shortcut: true }}>
-      {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
-      {!ready ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
-      ) : catalog.isError ? (
-        <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
-          className={statusInkClass("alert", "px-4 text-sm md:px-5")} />
-      ) : !catalog.data ? (
-        <ListSkeleton label="Loading agents" rows={4} />
-      ) : rows.length === 0 ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
-      ) : (
-        <AgentListGroups groups={groups} selectedId={selectedAgentId} currentUserId={currentUserId} headingsOpen
-          shownId={shownGroup ? agentHarnessSelectionId(shownGroup.harness) : undefined}
-          onSelect={(id) => { select(id); setEditingId(null); }} />
-      )}
-      {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
-        <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
-      </ToolListGroup>}
-    </ToolList>
-  );
-
-  let detail: React.ReactNode = null;
-  if (shownGroup) {
-    detail = <AgentHarnessDetail key={shownGroup.harness} group={shownGroup} token={token}
-      onBack={() => select(null)} onOpenLocation={select} onSaved={() => catalog.refetch()} />;
-  } else if (chosen) {
-    const { registration, id, activity, harness, title, machineInLine } = chosen;
-    const status = registrationStatus(registration);
-    const harnessName = AGENT_PRESETS.find((preset) => preset.id === harness)?.displayName ?? harness;
-    const ownerPreset = registration.key.ownerUserId === currentUserId
-      ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
-    const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
-    const allActions = registrationActions(registration).filter((action) => action !== "restore" || !ownerPreset);
-    const busy = command.pendingId === id || Boolean(fleet.pending) || fleet.enablingAll;
-    const live = registration.live;
-    const seen = formatRelativeAge(live?.machine.lastSeenAt, now);
-    const machineState = !live ? null : live.machine.online ? "online" : seen ? `offline, seen ${seen}` : "offline";
-    const running = live?.running ?? [];
-    const usage = [...agentUsageReadings(live?.quota, now), ...agentBalanceReadings(live?.balance)];
-    const checked = formatRelativeAge(live?.quota?.observedAt ?? live?.balance?.observedAt, now);
-    detail = (
-      <ToolDetail
-        key={id}
-        onBack={() => select(null)}
-        backLabel="Agents"
-        context={<span className="flex items-center gap-1.5">
-          <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
-          <span>{machineInLine ? `${harness} · ${registration.machineName}` : harness}</span>
-        </span>}
-        title={title}
-        status={<span className="flex items-center gap-2">
-          <ToolStateDot state={activity.state} />
-          <span className="text-foreground">{activity.line}</span>
-        </span>}
-        actions={<>
-          {allActions.map((action) => {
-            const Icon = busy && action !== "configure" ? Loader2 : ACTION_ICON[action];
-            return (
-              <Button key={action} size="sm" variant="outline" disabled={busy}
-                onClick={() => act(registration, action)}
-                aria-label={`${MY_AGENT_ACTION_LABEL[action]}: ${registration.displayName}`}
-                aria-expanded={action === "configure" ? editingId === id : undefined}
-                title={ACTION_CONSEQUENCE[action]}>
-                <AnimatedIcon icon={Icon} className={cn(busy && action !== "configure" && "animate-spin")} />
-                {MY_AGENT_ACTION_LABEL[action]}
-              </Button>
-            );
-          })}
-          {toggle && (() => {
-            const pending = switching?.id === id ? switching : null;
-            const on = pending ? pending.on : toggle.on;
-            return (
-              <label className="flex items-center gap-2 text-sm font-semibold"
-                title={on ? "Turning it off stops its running work" : "Let it take work"}>
-                <Switch checked={on} disabled={busy || Boolean(pending)} label={`Enabled: ${registration.displayName}`}
-                  onChange={() => void (async () => {
-                    setSwitching({ id, on: !toggle.on });
-                    try {
-                      if (ownerPreset) {
-                        if (!(await fleet.set(registration.key, ownerPreset, !toggle.on))) return;
-                      } else {
-                        for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
-                      }
-                      await catalog.refetch();
-                    } finally {
-                      setSwitching(null);
+  if (group) {
+    return <AgentHarnessDetail key={group.harness} group={group} token={token} backAlways={backAlways}
+      onBack={onBack} onOpenLocation={select} onSaved={onRefetch} />;
+  }
+  if (!chosen) return null;
+  const { registration, id, activity, harness, title, machineInLine } = chosen;
+  const harnessName = AGENT_PRESETS.find((preset) => preset.id === harness)?.displayName ?? harness;
+  const mine = registration.key.ownerUserId === currentUserId;
+  const ownerPreset = mine ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
+  const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
+  const allActions = registrationActions(registration).filter((action) => action !== "restore" || !ownerPreset);
+  const busy = command.pendingId === id || Boolean(fleet.pending) || fleet.enablingAll;
+  const live = registration.live;
+  const running = live?.running ?? [];
+  const usage = [...agentUsageReadings(live?.quota, now), ...agentBalanceReadings(live?.balance)];
+  const checked = formatRelativeAge(live?.quota?.observedAt ?? live?.balance?.observedAt, now);
+  const machine = machineOf(registration);
+  return (
+    <ToolDetail
+      key={id}
+      onBack={onBack}
+      backLabel="Agents"
+      backAlways={backAlways}
+      context={<span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
+        <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
+        <button type="button" data-testid="agent-open-harness" title={`What this Space has set on ${harness}, on every machine`}
+          className="underline-offset-2 hover:text-foreground hover:underline"
+          onClick={() => select(agentHarnessSelectionId(harness))}>{harnessName}</button>
+        <span>on</span>
+        {machine ? <button type="button" data-testid="agent-open-machine" title="Its machine: what is installed there, and its load"
+          className="underline-offset-2 hover:text-foreground hover:underline"
+          onClick={() => onOpenMachine(machine)}>{registration.machineName}</button> : <span>{registration.machineName}</span>}
+        {!mine && <span>· {registration.ownerName}</span>}
+      </span>}
+      title={machineInLine ? title : harness}
+      status={<span className="flex items-center gap-2">
+        <ToolStateDot state={activity.state} />
+        <span className="text-foreground">{activity.line}</span>
+      </span>}
+      actions={<>
+        {allActions.map((action) => {
+          const Icon = busy && action !== "configure" ? Loader2 : ACTION_ICON[action];
+          return (
+            <Button key={action} size="sm" variant="outline" disabled={busy}
+              onClick={() => act(registration, action)}
+              aria-label={`${MY_AGENT_ACTION_LABEL[action]}: ${registration.displayName}`}
+              aria-expanded={action === "configure" ? editingId === id : undefined}
+              title={ACTION_CONSEQUENCE[action]}>
+              <AnimatedIcon icon={Icon} className={cn(busy && action !== "configure" && "animate-spin")} />
+              {MY_AGENT_ACTION_LABEL[action]}
+            </Button>
+          );
+        })}
+        {toggle && (() => {
+          const pending = switching?.id === id ? switching : null;
+          const on = pending ? pending.on : toggle.on;
+          return (
+            <label className="flex items-center gap-2 text-sm font-semibold"
+              title={on ? "Turning it off stops its running work" : "Let it take work"}>
+              <Switch checked={on} disabled={busy || Boolean(pending)} label={`Enabled: ${registration.displayName}`}
+                onChange={() => void (async () => {
+                  setSwitching({ id, on: !toggle.on });
+                  try {
+                    if (ownerPreset) {
+                      if (!(await fleet.set(registration.key, ownerPreset, !toggle.on))) return;
+                    } else {
+                      for (const kind of toggle.changes) if (!(await command.run(registration.key, { kind }))) return;
                     }
-                  })()} />
-                {pending ? (pending.on ? "Enabling…" : "Disabling…") : on ? "Enabled" : "Disabled"}
-              </label>
-            );
-          })()}
-        </>}
-      >
-        {fleet.error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{fleet.error}</p>}
-        {command.notice && (
-          <p role="status" className={noticeClass(command.notice.error ? "alert" : "settled", "rounded-lg p-3")}>{command.notice.text}</p>
-        )}
-        {editingId === id && token && (
-          <ToolDetailSection title="Settings">
-            <RegistrationEditor
-              registration={registration}
-              token={token}
-              busy={busy}
-              onCancel={() => setEditingId(null)}
-              onSave={async (change) => {
-                if (await command.run(registration.key, { kind: "configure", ...change })) setEditingId(null);
-              }}
-            />
-          </ToolDetailSection>
-        )}
-        {running.length > 0 && (
-          <ToolDetailSection title={`Running now · ${running.length}`}>
-            <ul className="app-tool-lines">
-              {running.map((instance) => {
-                const conversation = conversationTitle(instance.channelId);
-                const started = formatRelativeAge(instance.since, now);
-                return (
-                  <li key={instance.instanceId} className="flex min-w-0 items-baseline gap-2 py-1.5 text-sm">
-                    {conversation ? (
-                      <button type="button" onClick={() => onOpenConversation(instance.channelId)}
-                        className="min-w-0 truncate text-left font-semibold hover:underline">
-                        #{conversation}
-                      </button>
-                    ) : <span className="min-w-0 truncate font-semibold">A conversation</span>}
-                    <span className="shrink-0 text-muted-foreground">{registration.displayName}:{instance.channelInstanceId}</span>
-                    {started && <span className="ml-auto shrink-0 text-xs text-muted-foreground tabular-nums">started {started}</span>}
-                  </li>
-                );
-              })}
-            </ul>
-          </ToolDetailSection>
-        )}
-        {usage.length > 0 && (
-          <ToolDetailSection title="Usage">
-            <MeterReadingList label={`${registration.displayName} usage`} readings={usage} />
-            {checked && (
-              <p className="mt-3 text-xs text-muted-foreground" data-testid="agent-usage-checked">
-                From the provider, checked {checked}. Updates while this page is open.
-              </p>
-            )}
-          </ToolDetailSection>
-        )}
-        {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
-        {token && <HarnessSetUpSection registration={registration} token={token} userId={currentUserId} copy={copy} />}
-        <ToolDetailSection title="Where it runs">
-          <ToolFacts>
-            <ToolFact label="Runtime">{harness}</ToolFact>
-            <ToolFact label="Machine">{machineState ? `${registration.machineName} · ${machineState}` : registration.machineName}</ToolFact>
-            <ToolFact label="Owner">{registration.ownerName}</ToolFact>
-            <ToolFact label="In this Space">{status?.label ?? "Ready for new work"}</ToolFact>
-          </ToolFacts>
-          {running.length === 0 && activity.state === "running" && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              Not running in any conversation now. Summon it in one with @ and its name.
+                    await onRefetch();
+                  } finally {
+                    setSwitching(null);
+                  }
+                })()} />
+              {pending ? (pending.on ? "Enabling…" : "Disabling…") : on ? "Enabled" : "Disabled"}
+            </label>
+          );
+        })()}
+      </>}
+    >
+      {fleet.error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{fleet.error}</p>}
+      {command.notice && (
+        <p role="status" className={noticeClass(command.notice.error ? "alert" : "settled", "rounded-lg p-3")}>{command.notice.text}</p>
+      )}
+      {editingId === id && token && (
+        <ToolDetailSection title="Settings">
+          <RegistrationEditor
+            registration={registration}
+            token={token}
+            busy={busy}
+            onCancel={() => setEditingId(null)}
+            onSave={async (change) => {
+              if (await command.run(registration.key, { kind: "configure", ...change })) setEditingId(null);
+            }}
+          />
+        </ToolDetailSection>
+      )}
+      {running.length > 0 ? (
+        <ToolDetailSection title={`In conversations · ${running.length}`}>
+          <ul className="app-tool-lines">
+            {running.map((instance) => {
+              const conversation = conversationTitle(instance.channelId);
+              const started = formatRelativeAge(instance.since, now);
+              const atWork = working.has(instance.instanceId);
+              return (
+                <li key={instance.instanceId} className="flex min-w-0 flex-wrap items-baseline gap-x-2 py-1.5 text-sm" data-testid="agent-instance">
+                  {conversation ? (
+                    <button type="button" onClick={() => onOpenConversation(instance.channelId)}
+                      className="max-w-full truncate text-left font-semibold hover:underline">
+                      #{conversation}
+                    </button>
+                  ) : <span className="max-w-full truncate font-semibold">A conversation</span>}
+                  <span className="shrink-0 text-muted-foreground">{registration.displayName}:{instance.channelInstanceId}</span>
+                  <span className={cn("ml-auto shrink-0 text-xs tabular-nums", atWork ? "font-semibold text-foreground" : "text-muted-foreground")}>
+                    {atWork ? "Working" : "Waiting for a message"}{started ? ` · started ${started}` : ""}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </ToolDetailSection>
+      ) : activity.state === "running" && (
+        <p className="text-sm text-muted-foreground">
+          In no conversation now. Summon it in one with @ and its name.
+        </p>
+      )}
+      {usage.length > 0 && (
+        <ToolDetailSection title="Usage">
+          <MeterReadingList label={`${registration.displayName} usage`} readings={usage} />
+          {checked && (
+            <p className="mt-3 text-xs text-muted-foreground" data-testid="agent-usage-checked">
+              From the provider, checked {checked}. Updates while this page is open.
             </p>
           )}
         </ToolDetailSection>
-        {registration.access && (
-          <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
-            <div className="space-y-2 text-sm" data-testid="agent-access">
-              {registration.access.mode === "full" ? <>
-                <p>xMatrix starts {harnessName} like this:</p>
-                <AgentAccessLines grant={registration.access} name={harnessName} />
-                <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>
-              </> : <p>{ASK_ACCESS_EFFECT}</p>}
-              {/* Added before its owner was asked, it runs as it always did until they read this
-                  and confirm; once confirmed, its owner changes the mode here. */}
-              {registration.canManageOwnerGrant && token
-                ? (!registration.access.confirmed || agentAccessModes(AGENT_PRESETS.find((preset) => preset.id === harness)).length > 1) && (
-                  <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
-                    const mode = await chooseHeldAccess(token, registration.key, harnessName);
-                    if (mode && (mode !== registration.access?.mode || !registration.access.confirmed)) {
-                      void command.run(registration.key, { kind: "access", mode });
-                    }
-                  }}>{registration.access.confirmed ? "Change" : "Review and confirm"}</Button>
-                ) : !registration.access.confirmed && <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>}
-            </div>
-          </ToolDetailSection>
-        )}
-      </ToolDetail>
-    );
-  } else if (catalog.data && rows.length === 0 && newCandidates.length === 0 && !addsOnThisMachine) {
-    /* A browser cannot find anything on a machine, so with nothing installed
-       anywhere yet this shows where agents come from. */
-    detail = (
-      <div className="app-below-band min-h-0 flex-1 overflow-y-auto">
-        <SetupCardShell>
-          <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
-        </SetupCardShell>
-      </div>
-    );
-  } else if (catalog.data && rows.length === 0) {
-    detail = (
-      <ToolDetailEmpty icon={<Bot />} title={newCandidates.length ? copy.enableInstalledTitle : copy.connectAgentsTitle}>
-        <p>{copy.enableOrInstall}</p>
-        <Button size="sm" variant="outline" onClick={onOpenMachines}><Plus /> {copy.manageMachines}</Button>
-      </ToolDetailEmpty>
-    );
-  }
-
-  return (
-    <div className="app-agents-view flex min-h-0 min-w-0 flex-1">
-      <ToolSplit label="Agents" open={Boolean(selectedAgentId)} list={list} detail={detail} />
-    </div>
+      )}
+      {token && <HarnessSignInSection registration={registration} token={token} userId={currentUserId} />}
+      {token && <HarnessSetUpSection registration={registration} token={token} userId={currentUserId} copy={copy} />}
+      {registration.access && (
+        <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
+          <div className="space-y-2 text-sm" data-testid="agent-access">
+            {registration.access.mode === "full" ? <>
+              <p>xMatrix starts {harnessName} like this:</p>
+              <AgentAccessLines grant={registration.access} name={harnessName} />
+              <p className="text-xs text-muted-foreground">{FULL_ACCESS_EFFECT}</p>
+            </> : <p>{ASK_ACCESS_EFFECT}</p>}
+            {/* Added before its owner was asked, it runs as it always did until they read this
+                and confirm; once confirmed, its owner changes the mode here. */}
+            {registration.canManageOwnerGrant && token
+              ? (!registration.access.confirmed || agentAccessModes(AGENT_PRESETS.find((preset) => preset.id === harness)).length > 1) && (
+                <Button size="sm" variant="outline" disabled={busy} onClick={async () => {
+                  const mode = await chooseHeldAccess(token, registration.key, harnessName);
+                  if (mode && (mode !== registration.access?.mode || !registration.access.confirmed)) {
+                    void command.run(registration.key, { kind: "access", mode });
+                  }
+                }}>{registration.access.confirmed ? "Change" : "Review and confirm"}</Button>
+              ) : !registration.access.confirmed && <p className="text-xs text-muted-foreground">Its owner has not confirmed this yet.</p>}
+          </div>
+        </ToolDetailSection>
+      )}
+    </ToolDetail>
   );
 }
 

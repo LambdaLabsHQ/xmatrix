@@ -100,7 +100,7 @@ test("an open draft gives way to every other rail destination and does not come 
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const composer = page.getByTestId("new-conversation");
   const rail = page.locator(".app-rail");
-  for (const label of ["Machines", "Settings"]) {
+  for (const label of ["Agents", "Settings"]) {
     // A destination with a list of its own shows it in the conversation list's place.
     await rail.getByRole("button", { name: "Channels", exact: true }).click();
     await page.locator(".app-sidebar .app-list-create").click();

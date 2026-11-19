@@ -1,10 +1,12 @@
 import { expect, test } from "./fixtures";
 import { E2E_CHANNEL, E2E_NOW, E2E_SPACE, fixtureJson, openWorkspaceWithStubs } from "./workspace-fixtures";
 
-/* Status is the Space at work. The paper is the overview: how many agents are
-   working, what each runtime does, and every machine with who works on it.
-   The list is the Agents and Machines lists one after another, each folded to its first rows, each row opening in its own
-   destination. */
+/* Agents is one destination. On a desktop it is a matrix, a machine to a row
+   and an agent to a column, and whatever is opened from it takes its place
+   with a way back; on a phone, too narrow for it, the same machines are a
+   list with their agents under them. One count says who works, everywhere:
+   an Instance with work in hand. A live process waiting for its next message
+   is ready. */
 
 const recent = () => new Date().toISOString();
 const machines = [
@@ -18,8 +20,9 @@ const daemons = machines.map((machine, index) => ({
   status: machine.online ? "online" : "offline", machineId: machine.machineId, machineName: machine.name,
   hostId: machine.name, hostName: machine.name, daemonVersion: "0.16.600", cliVersion: "0.16.600",
   connectedAt: E2E_NOW, lastSeenAt: recent(),
+  // Only busy-box is under strain: its processor is the one reading a list row draws.
   metadata: { platform: machine.platform, ...(machine.online ? { machineResources: { observedAt: recent(),
-    cpuUsagePercent: 40, cpuLogicalCount: 8, memoryTotalBytes: 100, memoryAvailableBytes: 50,
+    cpuUsagePercent: machine.name === "busy-box" ? 95 : 40, cpuLogicalCount: 8, memoryTotalBytes: 100, memoryAvailableBytes: 50,
     diskTotalBytes: 100, diskAvailableBytes: 80 } } : {}) },
 }));
 let nextChannelSlot = 0;
@@ -53,12 +56,12 @@ const channel = {
       channelId: E2E_CHANNEL.id, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
       status: item.idle > slot ? "idle" : "busy" })) }])),
 };
-async function openStatus(page: import("@playwright/test").Page) {
+async function openStatus(page: import("@playwright/test").Page, listed: Array<(typeof registrations)[number]> = registrations) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel], machineDaemons: daemons });
   await fixtureJson(page, "status-catalog", /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?.*)?$/u, {
-    registrations,
-    capabilities: [...new Set(registrations.map((item) => item.key.harness))].sort().map((harness) => ({
-      harness, models: [], locations: registrations.filter((item) => item.key.harness === harness) })),
+    registrations: listed,
+    capabilities: [...new Set(listed.map((item) => item.key.harness))].sort().map((harness) => ({
+      harness, models: [], locations: listed.filter((item) => item.key.harness === harness) })),
   });
   await page.goto("/app/personal-sspaceperso/status");
 }
@@ -66,63 +69,150 @@ async function openStatus(page: import("@playwright/test").Page) {
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } });
 
-  test("Status is a dock tab that counts the Space at work and opens a machine", async ({ page }) => {
+  test("Agents is a dock tab: the Space at work, then every machine with its agents, each opening in place", async ({ page }) => {
     await openStatus(page);
     const dock = page.getByRole("navigation", { name: "Primary" });
-    await expect(dock.getByRole("button", { name: "Status" })).toBeVisible();
+    await expect(dock.getByRole("button", { name: "Agents" })).toBeVisible();
     await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
-    await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("2/3 machines busy");
+    await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("on 2 machines");
 
-    // Each runtime once, busiest first; one with nobody working is faint, not hidden.
+    // Each agent once across its machines, busiest first.
     const runtimes = page.getByTestId("status-runtime").filter({ visible: true });
     await expect(runtimes).toHaveCount(4);
-    await expect(runtimes.first()).toHaveAccessibleName(/^codex: 6 working/u);
+    await expect(runtimes.first()).toHaveAccessibleName(/^codex: 6 working, on 2 machines · 1 ready/u);
 
-    // Machines: busiest first, offline last; a row names at most three runtimes and counts the rest.
-    const rows = page.getByTestId("status-machine-row").filter({ visible: true });
-    await expect(rows).toHaveCount(4);
-    await expect(rows.nth(0)).toContainText("busy-box");
-    await expect(rows.nth(0)).toContainText("7 working");
-    await expect(rows.nth(1)).toContainText("+1");
-    await expect(rows.nth(2)).toContainText("Idle");
-    await expect(rows.nth(3)).toContainText("Offline");
+    // The machines are the list's to say, once: the overview does not repeat them.
+    await expect(page.getByTestId("status-machine-row")).toHaveCount(0);
+    await expect(page.getByText("Machines · 3/4 online").filter({ visible: true })).toBeVisible();
+    const machine = (name: string) => page.getByRole("region", { name });
+    await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
+    await expect(machine("busy-box").getByTestId("machine-row")).toContainText("7 working");
+    await expect(machine("wide-box").getByTestId("machine-row")).toContainText("4 working");
+    // Three live processes wait for a message on idle-box: none of them works, so it is idle and its agent ready.
+    await expect(machine("idle-box").getByTestId("machine-row")).toContainText("Idle");
+    await expect(machine("idle-box").getByTestId("agent-row")).toContainText("Ready");
+    await expect(machine("idle-box").getByTestId("agent-row")).not.toContainText("running");
+    // A machine says it is offline; the agent under it does not say it again.
+    await expect(machine("gone-box").getByTestId("machine-row")).toContainText("Offline");
+    await expect(machine("gone-box").getByTestId("agent-row")).not.toContainText("Offline");
 
-    await rows.nth(0).tap();
+    await machine("busy-box").getByTestId("machine-row").tap();
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=/u);
-    await expect(page.locator(".app-tool-detail:visible").getByRole("heading", { level: 2, name: "busy-box" })).toBeVisible();
+    const paper = page.locator(".app-tool-detail:visible");
+    await expect(paper.getByRole("heading", { level: 2, name: "busy-box" })).toBeVisible();
+    // A machine is an address of the same tab: the dock still says Agents, the bar is still the Space's,
+    // and its own way back returns to the list.
+    await expect(dock.getByRole("button", { name: "Agents" })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);
+    await expect(page.locator(".app-topbar")).not.toContainText("Machines");
+    await paper.getByRole("button", { name: "Agents" }).tap();
+    await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
   });
 });
 
-test("the desktop rail opens Status, where each machine row shows its load", async ({ page }) => {
+test("on a desktop Agents is a matrix of machines and agents, which says each of them once", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
-  await expect(page.locator(".app-rail").getByRole("button", { name: "Status", exact: true })).toBeVisible();
-  const busy = page.getByTestId("status-machine-row").filter({ visible: true, hasText: "busy-box" });
-  await expect(busy.getByTestId("machine-load-glance")).toBeVisible();
-  await page.getByRole("button", { name: "All agents" }).click();
-  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents$/u);
+  const rail = page.locator(".app-rail");
+  await expect(rail.getByRole("button", { name: "Agents", exact: true })).toBeVisible();
+  await expect(rail.getByRole("button", { name: "Status", exact: true })).toHaveCount(0);
+  await expect(rail.getByRole("button", { name: "Machines", exact: true })).toHaveCount(0);
+  // The matrix is the list: no column of machines stands beside it, and the conversation list gives way to it.
+  await expect(page.locator(".app-sidebar")).toBeHidden();
+  await expect(page.getByRole("navigation", { name: "Agents list" })).toHaveCount(0);
+  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  await expect(page.getByTestId("status-working")).toHaveText("11");
+  await expect(page.getByTestId("status-summary")).toHaveText("on 2 machines");
+
+  const matrix = page.getByTestId("fleet-matrix");
+  // A machine to a row, an agent to a column: each is named once.
+  await expect(matrix.getByTestId("machine-row")).toHaveCount(machines.length);
+  await expect(matrix.getByTestId("fleet-agent-column")).toHaveText(["claude", "codex", "cursor", "gemini"]);
+  await expect(matrix.getByTestId("agent-row")).toHaveCount(registrations.length);
+  const row = (name: string) => matrix.getByRole("row", { name });
+  await expect(row("busy-box").getByTestId("machine-row")).toContainText("7 working");
+  await expect(row("busy-box").getByRole("button", { name: /^codex on busy-box/u })).toContainText("5 working");
+  // Three live processes wait for a message on idle-box: none of them works, so it is idle and its agent ready.
+  await expect(row("idle-box").getByTestId("machine-row")).toContainText("Idle");
+  await expect(row("idle-box").getByRole("button", { name: /^codex on idle-box/u })).toHaveText("Ready");
+  // A machine says it is offline once, on its row; the agent on it says only that it is on.
+  await expect(row("gone-box").getByTestId("machine-row")).toContainText("Offline");
+  await expect(row("gone-box").getByTestId("agent-row")).toHaveText("On");
+  // A row is quiet until a reading is under strain, and then draws only that reading.
+  await expect(row("busy-box").getByTestId("machine-load-glance")).toHaveAccessibleName("CPU 95%");
+  await expect(row("wide-box").getByTestId("machine-load-glance")).toHaveCount(0);
+  // Nothing waits on a person here; when something does, it is its own cell, not a second list.
+  await expect(page.getByTestId("fleet-attention-count")).toHaveCount(0);
+  await expect(page.getByTestId("status-attention")).toHaveCount(0);
+  // A machine that has not reported what it holds offers nothing to turn on or install: an empty cell, not a guess.
+  await expect(matrix.getByTestId("fleet-cell")).toHaveCount(0);
 });
 
-test("on a desktop Status lists agents and machines folded to one screen", async ({ page }) => {
+test("what waits on a person is counted once, as its own cell", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The weekly window of claude on wide-box is used up; its access on busy-box was never confirmed, which stops no work.
+  const spent = { remainingPercent: 0, observedAt: recent(), expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    windows: [{ label: "1w", usedPercent: 100, resetAt: new Date(Date.now() + 86_400_000).toISOString() }] };
+  await openStatus(page, registrations.map((item) => item.key.harness !== "claude" ? item
+    : item.key.machineId === "machine:wide" ? { ...item, live: { ...item.live, quota: spent } }
+      : item.key.machineId === "machine:busy" ? { ...item, canManageOwnerGrant: true,
+        access: { mode: "full", confirmed: false, args: [], env: {}, session: {}, approvesRequests: false } } : item));
+  const matrix = page.getByTestId("fleet-matrix");
+  const spentCell = matrix.getByRole("button", { name: /^claude on wide-box/u });
+  await expect(spentCell).toHaveAttribute("data-state", "attention");
+  await expect(spentCell).toContainText("1w limit");
+  // The count beside the total is exactly the cells in that ink: nothing is listed a second time, and an
+  // agent that can still take work is not among them.
+  await expect(page.getByTestId("fleet-attention-count")).toHaveText(" · 1 needs attention");
+  await expect(matrix.locator('[data-testid="agent-row"][data-state="attention"]')).toHaveCount(1);
+  await expect(page.getByTestId("status-attention")).toHaveCount(0);
+  await expect(matrix.getByRole("button", { name: /^claude on busy-box/u })).toHaveAttribute("data-state", "running");
+});
+
+test("a heading or a cell of the matrix opens in its place, with a way back", async ({ page }) => {
   await page.setViewportSize({ width: 1400, height: 900 });
   await openStatus(page);
-  // Its own list takes the conversation list's place.
-  await expect(page.locator(".app-sidebar")).toBeHidden();
-  const list = page.getByRole("navigation", { name: "Status list" });
-  await expect(list.getByRole("heading", { name: "Status", level: 1 })).toBeVisible();
+  const matrix = page.getByTestId("fleet-matrix");
+  const paper = page.locator(".app-tool-detail");
+  const back = paper.getByRole("button", { name: "Agents", exact: true });
 
-  // Each runtime is folded to its heading; opening it lists its machines.
-  await expect(list.getByTestId("agent-row")).toHaveCount(0);
-  await list.getByRole("button", { name: /^codex/u }).click();
-  await expect(list.getByTestId("agent-row")).toHaveCount(3);
+  // A column's heading: the agent across its machines, counted as the matrix counts it.
+  await matrix.getByTestId("fleet-agent-column").filter({ hasText: "codex" }).click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents\?agent=agent(%3A|:)codex$/u);
+  await expect(paper.getByRole("heading", { level: 2, name: "codex" })).toBeVisible();
+  await expect(paper).toContainText("On 3 machines · 6 working");
+  await expect(matrix).toHaveCount(0);
+  await back.click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);
 
-  // Machines show their first rows and the rest on request.
-  const machinesGroup = list.getByRole("region", { name: "Machines" });
-  await expect(machinesGroup.getByTestId("machine-row")).toHaveCount(3);
-  await machinesGroup.getByTestId("tool-list-more").click();
-  await expect(machinesGroup.getByTestId("machine-row")).toHaveCount(machines.length);
+  // A cell is edited in place: its editor opens under it, and what is set on the agent is one step further.
+  await matrix.getByRole("button", { name: /^codex on busy-box/u }).click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);
+  await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toContainText("Codex on busy-box");
+  await page.getByTestId("fleet-cell-open-agent").click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents\?agent=/u);
+  await expect(paper.getByTestId("agent-instance")).toHaveCount(5);
+  await expect(paper.getByTestId("agent-instance").first()).toContainText("Working");
+  await expect(paper.getByText("Where it runs")).toHaveCount(0);
+  // Its header names its machine, which opens that machine: its agents first.
+  await page.getByTestId("agent-open-machine").click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=/u);
+  await expect(paper.getByRole("heading", { level: 2, name: "busy-box" })).toBeVisible();
+  await expect(paper.getByRole("heading", { level: 3 }).first()).toHaveText("Agents on this machine");
+  await back.click();
+  await expect(matrix).toBeVisible();
 
-  // Nothing chosen here: the overview stays beside the list.
-  await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
-  await expect(page.getByTestId("status-machine-row").filter({ visible: true })).toHaveCount(machines.length);
+  // An Instance waiting for its next message is listed as waiting, and counted nowhere as work.
+  await matrix.getByRole("button", { name: /^codex on idle-box/u }).click();
+  await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toContainText("Waiting");
+  await page.getByTestId("fleet-cell-open-agent").click();
+  await expect(paper.getByTestId("agent-instance")).toHaveCount(3);
+  await expect(paper.getByTestId("agent-instance").first()).toContainText("Waiting for a message");
+  await back.click();
+
+  // A row's heading: the machine. Its bare address is the matrix too, with no list to pick from.
+  await matrix.getByRole("row", { name: "wide-box" }).getByTestId("machine-row").click();
+  await expect(paper.getByRole("heading", { level: 2, name: "wide-box" })).toBeVisible();
+  await page.goto("/app/personal-sspaceperso/machines");
+  await expect(page.getByTestId("fleet-matrix")).toBeVisible();
 });

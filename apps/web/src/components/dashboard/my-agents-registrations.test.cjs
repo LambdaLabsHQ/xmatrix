@@ -28,37 +28,46 @@ test("a row is named by what differs between a runtime's locations", () => {
 test("a row says what the location is doing, or why it cannot take work", () => {
   const now = Date.parse("2026-09-28T12:00:00Z");
   const titles = { c1: "ux", c2: "hub" };
-  const activity = (overrides) => registrationActivity(registration(overrides),
-    { conversationTitle: (id) => titles[id], now });
+  // The Instances with work in hand; every other live one waits for its next message.
+  const atWork = new Set(["i1", "i2", "i3"]);
+  const activity = (overrides, working = atWork) => registrationActivity(registration(overrides),
+    { conversationTitle: (id) => titles[id], now, working });
   const live = (overrides = {}) => ({ machine: { online: true }, running: [], ...overrides });
   const running = (channelId, instanceId) => ({ instanceId, channelId, channelInstanceId: "1", since: "2026-09-28T11:00:00Z" });
+  const says = (state, line, rank, extra = {}) => ({ state, line, brief: line, rank, working: 0, ...extra });
 
   assert.deepEqual(activity({ live: live({ running: [running("c1", "i1")] }) }),
-    { state: "running", line: "Running in #ux", rank: 0 });
+    says("running", "Working in #ux", 0, { working: 1 }));
   assert.equal(activity({ live: live({ running: [running("c1", "i1"), running("c2", "i2"), running("c1", "i3")] }) }).line,
-    "3 running in #ux, #hub");
-  assert.equal(activity({ live: live({ running: [running("private", "i1")] }) }).line, "Running in a conversation");
-  assert.deepEqual(activity({ live: live() }), { state: "running", line: "Ready", rank: 1 });
-  assert.equal(activity({ live: live({ quota: { remainingPercent: 14.2, observedAt: "", expiresAt: "" } }) }).line,
-    "Ready · 14% quota left");
+    "3 working in #ux, #hub");
+  assert.equal(activity({ live: live({ running: [running("private", "i1")] }) }).line, "Working in a conversation");
+  // A live process waiting for a message is not work: it is neither counted nor named.
+  assert.deepEqual(activity({ live: live({ running: [running("c1", "waiting")] }) }), says("running", "Ready", 1));
+  assert.deepEqual(activity({ live: live({ running: [running("c1", "i1"), running("c2", "waiting")] }) }),
+    says("running", "Working in #ux", 0, { working: 1 }));
+  assert.deepEqual(activity({ live: live() }), says("running", "Ready", 1));
+  // The line notes a quota running low; a row that draws the quota itself reads the brief line.
+  assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 14.2, observedAt: "", expiresAt: "" } }) }),
+    says("running", "Ready · 14% quota left", 1, { brief: "Ready" }));
+  assert.deepEqual(activity({ live: live({ running: [running("c1", "i1")], quota: { remainingPercent: 14.2, observedAt: "", expiresAt: "" } }) }),
+    says("running", "Working in #ux · 14% quota left", 0, { brief: "Working in #ux", working: 1 }));
   assert.equal(activity({ live: live({ quota: { remainingPercent: 60, observedAt: "", expiresAt: "" } }) }).line, "Ready");
   // A prepaid account reads as money: fine while the provider serves it, attention once it cannot pay.
   const balance = (amount, allowed) => ({ amount, currency: "CNY", allowed, observedAt: "", expiresAt: "" });
   assert.equal(activity({ live: live({ balance: balance(6.57, true) }) }).line, "Ready");
-  assert.deepEqual(activity({ live: live({ balance: balance(0, false) }) }),
-    { state: "attention", line: "Out of balance", rank: 2 });
+  assert.deepEqual(activity({ live: live({ balance: balance(0, false) }) }), says("attention", "Out of balance", 2));
   assert.deepEqual(activity({ live: live({ quota: { remainingPercent: 0, observedAt: "", expiresAt: "" } }) }),
-    { state: "attention", line: "Out of quota · window unavailable", rank: 2 });
+    says("attention", "Out of quota · window unavailable", 2));
   assert.deepEqual(activity({ live: live(), routingReady: false, routingBlocker: "owner_environment_missing" }),
-    { state: "attention", line: "Not set up on its machine", rank: 2 });
+    says("attention", "Not set up on its machine", 2));
   assert.deepEqual(activity({ live: { machine: { online: false, lastSeenAt: "2026-09-07T12:00:00Z" }, running: [] } }),
-    { state: "offline", line: "Offline · seen 21d ago", rank: 3 });
+    says("offline", "Offline · seen 21d ago", 3));
   assert.equal(activity({ live: { machine: { online: false }, running: [] } }).line, "Offline");
   assert.deepEqual(activity({ live: live(), routingReady: false, routingBlocker: "owner_environment_disabled" }),
-    { state: "paused", line: "Disabled", rank: 4 });
+    says("paused", "Disabled", 4));
   assert.equal(activity({ state: "revoked" }).line, "Removed");
-  assert.deepEqual(activity({ state: "disabled", live: live() }), { state: "paused", line: "Disabled", rank: 4 });
-  assert.deepEqual(activity({}), { state: "running", line: "Ready", rank: 1 },
+  assert.deepEqual(activity({ state: "disabled", live: live() }), says("paused", "Disabled", 4));
+  assert.deepEqual(activity({}), says("running", "Ready", 1),
     "a Hub that reports nothing live still shows whether it can take work");
 });
 

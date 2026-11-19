@@ -213,8 +213,10 @@ final class WebContainerTests: XCTestCase {
     func testReportedViewPicksTheActiveTab() {
         let (coordinator, container) = makeCoordinator()
         defer { withExtendedLifetime(container) {} }
+        // Agents owns every address of its one destination; a retired or unknown segment falls to More.
         for (view, tab) in [("pages", MobileTabView.pages), ("messages", .messages), ("status", .status),
-                            ("agents", .more), ("roles", .more), ("machines", .more), ("security", .more)] {
+                            ("agents", .status), ("machines", .status), ("local", .status),
+                            ("roles", .more), ("security", .more)] {
             coordinator.update(MobileTabState(visible: true, activeView: view))
             XCTAssertEqual(coordinator.activeTab, tab, view)
         }
@@ -362,7 +364,7 @@ final class WebContainerTests: XCTestCase {
 
     func testStatusTabNamesTheCanonicalWebView() {
         XCTAssertEqual(MobileTabView.status.rawValue, "status")
-        XCTAssertEqual(MobileTabView.status.label, "Status")
+        XCTAssertEqual(MobileTabView.status.label, "Agents")
         XCTAssertEqual(AppConfiguration.mobileTabURL(.status).query?.contains("view=status"), true)
         XCTAssertNotNil(UIImage(systemName: MobileTabView.status.icon))
     }

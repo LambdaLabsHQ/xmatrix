@@ -163,16 +163,17 @@ test.describe("a phone's list rows", () => {
     expect((await edges(pageRow.locator(":scope > button svg").first())).right).toBeLessThanOrEqual(line.start);
     expect((await edges(pageRow.locator(".app-channel-row-time"), { text: true })).right).toBeCloseTo(line.end, 0);
 
-    await dock.getByRole("button", { name: "More" }).tap();
-    await page.getByRole("button", { name: /^Agents/u }).first().tap();
+    // Agents lists each machine with the agents on it under it.
+    await dock.getByRole("button", { name: "Agents" }).tap();
     const heading = page.locator(".app-tool-list-group-title").first();
-    const machine = page.locator(".app-tool-list-row").first();
-    await expect(machine).toBeVisible();
+    const agent = page.locator(".app-tool-list-row").first();
+    await expect(agent).toBeVisible();
     await settled(page);
-    expect((await measure(machine)).height).toBe(56);
-    expect((await edges(heading)).left).toBeCloseTo(line.plank.left, 0);
+    expect((await measure(agent)).height).toBe(56);
+    // A machine starts on the content line, and the agent on it starts where the machine's name does.
     expect((await edges(heading.locator(":scope > *").first())).left).toBeCloseTo(line.start, 0);
-    expect((await edges(heading.locator(":scope > span").last(), { text: true })).right).toBeCloseTo(line.end, 0);
+    expect((await edges(agent.locator(".app-tool-state-icon"))).left)
+      .toBeCloseTo((await edges(heading.locator(".app-list-row-title"), { text: true })).left, 0);
 
     // The same row a desktop draws. A phone never shows its list beside a
     // conversation, so the list is the conversation's paper, not the column's tone.

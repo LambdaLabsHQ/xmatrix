@@ -22,9 +22,8 @@ import type {
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { humanProfileFromSpaceMember } from "./human-profile-summary";
 import { ProfileView } from "./human-profile-view";
-import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
-import { MyAgentsView } from "./my-agents-view";
+import { FleetView, type FleetAddress } from "./fleet-view";
 import {
   channelsInSpace,
   eventsInSpace,
@@ -33,20 +32,17 @@ import {
   spaceChannelIdSet,
   workspacesInSpace,
 } from "./space-scoped-tool-content";
-import { StatusView } from "./status-view";
 import { ToolPaper } from "./tool-split";
 import { SettingsView, TeamView, type SpaceMemberActions } from "./workspace-settings-team-views";
 import {
   ActivityView,
   AppsView,
   LocalMacView,
-  MachinesView,
   MoreView,
-  THIS_MACHINE_SELECTION,
 } from "./workspace-fleet-views";
 import { PlatformAdminTabs } from "./workspace-platform-admin-tabs";
 import type { LocalManagedAgent, MachineSummary } from "./workspace-shell-helpers";
-import type { AppView } from "./workspace-shell-navigation";
+import { isFleetView, type AppView } from "./workspace-shell-navigation";
 
 // The views behind every destination other than Messages and Pages. The shell
 // loads this module when one of them is first shown, so none of these views,
@@ -226,58 +222,24 @@ export function ToolSurface({
       />
     );
   }
-  // Status: the Space at work, opening into Agents and Machines.
-  if (view === "status") {
+  // Agents: the Space's machines and the agents on them in one list; the overview, a
+  // machine and an agent are its three addresses. On the desktop app this machine is
+  // a tagged row of that list, not a destination of its own.
+  if (isFleetView(view)) {
+    const localDirectories = currentSpaceLocalWorkspaces.length;
     return (
-      <StatusView
+      <FleetView
+        view={view as FleetAddress}
         spaceId={currentSpace?.id ?? null}
         token={token}
         currentUserId={user.id}
         machines={currentSpaceMachines}
         channels={currentSpaceChannels}
         events={currentSpaceEvents}
-        onOpenAgent={(registrationId) => onChangeView("agents", registrationId)}
-        onOpenAgents={() => onChangeView("agents")}
-        onOpenMachine={(machineId) => onChangeView("machines", machineId)}
-        onOpenMachines={() => onChangeView("machines")}
-      />
-    );
-  }
-  // Agents: the Space's registered agents, each opened beside the list.
-  if (view === "agents") {
-    return (
-      <MyAgentsView
-        spaceId={currentSpace?.id ?? null}
-        token={token}
-        currentUserId={user.id}
         error={agentsError}
         addsOnThisMachine={Boolean(desktopContext?.machineId)}
-        channels={currentSpaceChannels}
+        onChangeView={onChangeView}
         onOpenConversation={onOpenConversation}
-        onOpenMachines={() => onChangeView("machines")}
-      />
-    );
-  }
-  if (view === "apps") {
-    return (
-      <AppsView
-        connectors={APP_CONNECTORS}
-        currentSpace={currentSpace}
-        token={token}
-      />
-    );
-  }
-  // On the desktop app this machine is a tagged row of Machines, not a destination of its own.
-  if (view === "machines" || view === "local") {
-    const localDirectories = currentSpaceLocalWorkspaces.length;
-    return (
-      <MachinesView
-        machines={currentSpaceMachines}
-        loading={false}
-        error={agentsError}
-        token={token}
-        spaceId={currentSpace?.id}
-        defaultMachineId={view === "local" ? THIS_MACHINE_SELECTION : undefined}
         thisMachine={desktopAvailable && desktopContext
           && !["ios", "android"].includes(desktopContext.platform) ? {
           machineId: desktopContext?.machineId,
@@ -305,8 +267,6 @@ export function ToolSurface({
           setupReady={localSetupReady}
           machineName={localMachineName}
           onNameMachine={onNameLocalMachine}
-          harnesses={<MachineHarnessPanel key={currentSpace?.id} token={token} spaceId={currentSpace?.id}
-            daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           worktrees={<MachineWorktreesPanel token={token}
             daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           onStartDaemon={onStartDesktopDaemon}
@@ -326,6 +286,15 @@ export function ToolSurface({
         />
           ),
         } : null}
+      />
+    );
+  }
+  if (view === "apps") {
+    return (
+      <AppsView
+        connectors={APP_CONNECTORS}
+        currentSpace={currentSpace}
+        token={token}
       />
     );
   }

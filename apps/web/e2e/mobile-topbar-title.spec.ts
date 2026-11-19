@@ -31,7 +31,7 @@ test("every dock tab's topbar names only the Space, and the tab's + sits just ab
 
   const bar = topbar(page);
   const dock = page.getByRole("navigation", { name: "Primary" });
-  for (const [tab, create] of [["Channels", "New conversation"], ["Pages", "New page"], ["Status", null],
+  for (const [tab, create] of [["Channels", "New conversation"], ["Pages", "New page"], ["Agents", null],
     ["More", null]] as const) {
     await dock.getByRole("button", { name: tab }).tap();
     await screenChangeLanded(page);

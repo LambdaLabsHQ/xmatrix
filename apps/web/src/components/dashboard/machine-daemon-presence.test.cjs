@@ -3,7 +3,6 @@ const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
 
 const {
-  daemonPresenceLabel,
   isLiveMachineDaemon,
   machineIdentityKeys,
   normalizedMachineKeys,
@@ -57,10 +56,6 @@ test("catalog online is live presence regardless of lastSeen age", () => {
   assert.equal(isLiveMachineDaemon(agedOnline), true);
   assert.equal(isLiveMachineDaemon(enrolled), false);
   assert.equal(isLiveMachineDaemon(live), true);
-  assert.equal(daemonPresenceLabel(agedOnline), "online");
-  assert.equal(daemonPresenceLabel(enrolled), "enrolled");
-  assert.equal(daemonPresenceLabel(live), "online");
-  assert.equal(daemonPresenceLabel({ status: "offline", lastSeenAt: isoAgo(1_000) }), "offline");
 });
 
 test("preferred daemon keeps an online row over a recent enrolled row", () => {

@@ -19,7 +19,7 @@ test.describe("Phone startup navigation", () => {
     await expect.poll(async () => (await fixtureRequests(page, "held-startup-session")).length).toBeGreaterThan(0);
     const loading = page.locator(".xmatrix-app-shell[aria-busy=true]");
     await expect(loading).toBeVisible();
-    for (const name of ["Pages", "Channels", "Status", "More"]) {
+    for (const name of ["Pages", "Channels", "Agents", "More"]) {
       await expect(loading.getByRole("button", { name, exact: true })).toBeDisabled();
     }
     await releaseFixture(page, "held-startup-session");

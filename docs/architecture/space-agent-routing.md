@@ -468,7 +468,8 @@ average (not on Windows, where none exists), and total/available space on the
 filesystem holding the daemon user's home directory. The Hub keeps the newest
 valid sample in the daemon's `metadata.machineResources`; the shared protocol
 parser drops samples older than 90 seconds, future samples and incoherent values.
-The Web Machines page shows the same parsed sample as the Machine's load and polls
+A Machine's page in Web shows the same parsed sample as the Machine's load, its list row draws only a reading under
+strain (70% or more), and Web polls
 the owner's daemon list every 30 seconds while it is open, because relay push does
 not carry resource samples. An online Machine without a current sample is shown as
 having no recent sample, never as idle.
@@ -1221,10 +1222,17 @@ and access never read it back. It has three parts, each taken from the source th
   used, reset time), without any window that has reset since the reading. A reading written before windows were kept
   has none.
 
-The web Agents list groups locations under their runtime. A row is named by what differs between them: the machine, or
-the name the Space gave the agent. Its second line says what the location is doing: running in which conversations,
-ready, offline since when, or why it cannot take work. Low quota is added to that line. Rows are ordered by that same
-state, with working locations first and absent ones last.
+The web Agents destination shows the Space's Machines and registrations once. On a desktop that is a matrix: a Machine
+to a row, a harness to a column, and a cell for that registration; a teammate's Machine the reader's own list does not
+carry follows the reader's Machines, named with its owner. On a phone the same Machines are a list with their
+registrations under them. A cell or row says what the location is doing: working (and how many), ready, or why it
+cannot take work. "Working" counts only the Instances with work in hand, read from the live Channels as the conversation
+list reads them; a live Instance waiting for its next message is ready, and the agent's own page lists it as waiting. A
+Machine's row counts the same work, not `activeRuns`. Quota is drawn as a bar (in a cell, the window closest to its
+limit), so the line leaves low quota to it; under a Machine that is offline nothing repeats it. A harness its Machine
+reports signed out, or too old for xMatrix, reads as that instead of ready. On the reader's own Machines the harness
+inventory fills the rest of a row: installed and not in this Space, not installed, or not supported there; another
+member's Machine reports no inventory to this reader, so its other cells are empty.
 
 The chosen agent's Usage section shows each window as a meter with its reset countdown. While the Agents page is open
 it reads the catalog every 15 seconds with `?quota=refresh`; after answering, the Hub issues the
