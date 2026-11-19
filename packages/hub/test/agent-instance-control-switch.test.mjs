@@ -10,6 +10,7 @@ import {
   FakeSocket,
   productionAgentInstanceTransport,
 } from "./support/runtime-transport.mjs";
+import { capturingConsole } from "./support/capturing-console.mjs";
 
 const MODELS = [
   { id: "fable", model: "fable", isDefault: true, supportedReasoningEfforts: [
@@ -103,6 +104,68 @@ test("the production waiter preserves a cancelled turn for continuation", async 
     selected: "high",
     continuation: { instanceId: "instance-1", requestId: request.requestId },
   });
+});
+
+test("XMATRIX-HUB-7P: a late or expired switch result is ignored without failing the session, while a binding mismatch still fails closed", async () => {
+  const { transport } = productionAgentInstanceTransport();
+  const socket = new FakeSocket();
+  const foreign = new FakeSocket();
+  assert.equal(transport.rehydrate(socket, attachment({
+    presentation: { model: "fable", effort: "medium", models: MODELS },
+  })), true);
+  assert.equal(transport.rehydrate(foreign, agentInstanceAttachment({
+    principal: { agentName: "claude", runId: "run-2", executionKey: "execution-2" },
+    run: { instanceId: "instance-2", channelInstanceId: "2", instanceStatus: "idle" },
+    session: { presentation: { model: "fable", models: MODELS } },
+  })), true);
+
+  const lateLogged = await capturingConsole(async () => {
+    await transport.handleFrame(socket, JSON.stringify({
+      type: "agent_model_switch_result",
+      requestId: "expired-req-1",
+      model: "opus",
+    }));
+    await transport.handleFrame(socket, JSON.stringify({
+      type: "agent_effort_switch_result",
+      requestId: "expired-req-2",
+      effort: "high",
+    }));
+  });
+  assert.deepEqual(socket.sent, []);
+  assert.equal(lateLogged.error.length, 0);
+  assert.deepEqual(
+    lateLogged.warn.map(([, detail]) => detail),
+    [{ kind: "model" }, { kind: "effort" }],
+  );
+
+  // A foreign Instance answering a live pending requestId still fails closed
+  // and leaves the rightful Instance's switch intact.
+  const switching = transport.switchInstanceControl({
+    channelId: "channel-1",
+    target: "claude:1",
+    kind: "model",
+    value: "opus",
+  });
+  const request = socket.sent[0];
+  assert.equal(request.type, "agent_model_switch_requested");
+
+  const mismatchLogged = await capturingConsole(async () => {
+    await transport.handleFrame(foreign, JSON.stringify({
+      type: "agent_model_switch_result",
+      requestId: request.requestId,
+      model: "opus",
+    }));
+  });
+  assert.equal(foreign.sent.length, 1);
+  assert.equal(foreign.sent[0].type, "error");
+  assert.equal(mismatchLogged.error.length, 1);
+
+  await transport.handleFrame(socket, JSON.stringify({
+    type: "agent_model_switch_result",
+    requestId: request.requestId,
+    model: "opus",
+  }));
+  assert.deepEqual(await switching, { status: "switched", selected: "opus" });
 });
 
 test("the channel-instance ordinal selects which instance is addressed", async () => {
