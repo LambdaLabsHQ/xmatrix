@@ -1763,6 +1763,9 @@ export function normalizeLlmUsage(value: unknown): LlmUsage | null {
         record.quotas ??
         record.quota
     ),
+    scopedQuotaUsages: normalizeLlmQuotaUsages(
+      record.scopedQuotaUsages ?? record.scoped_quota_usages
+    )?.filter((quota) => Boolean(quota.scope)),
     quotaAccount: parseLlmQuotaAccount(record.quotaAccount),
     cachedInputTokens: numericUsage(
       record.cachedInputTokens ??
@@ -1818,13 +1821,14 @@ export function normalizeLlmQuotaUsage(record: Record<string, unknown>): LlmQuot
       record.used_percent
   );
   const resetAt = temporalUsage(record.resetAt ?? record.reset_at ?? record.resetsAt ?? record.resets_at ?? record.reset);
+  const scope = stringUsage(record.scope);
   const hasWindow = Boolean(label || windowLabel || resetAt);
   const hasUsage =
     percent !== undefined ||
     (used !== undefined && limit !== undefined) ||
     (remaining !== undefined && limit !== undefined);
   return hasWindow && hasUsage
-    ? { label, window: windowLabel, used, limit, remaining, percent, resetAt }
+    ? { label, window: windowLabel, used, limit, remaining, percent, resetAt, ...(scope ? { scope } : {}) }
     : null;
 }
 

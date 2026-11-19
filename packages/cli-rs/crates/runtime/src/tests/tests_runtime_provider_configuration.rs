@@ -91,6 +91,37 @@ fn cursor_model_rows_carry_the_pool_they_spend() {
 }
 
 #[test]
+fn antigravity_model_rows_carry_their_pool_and_starting_default() {
+    let adapter = agent_presentation_adapter_for_acp_runtime("antigravity");
+    let mut facts = AgentPresentationFacts::default();
+    adapter.observe_acp(
+        &serde_json::json!({
+            "models": {
+                "currentModelId": "gemini-4-neon-high",
+                "availableModels": [
+                    { "modelId": "gemini-4-neon-high", "name": "Gemini 4 Neon (High)" },
+                    { "modelId": "claude-opus-5-5-high", "name": "Claude Opus 5.5 (High)" },
+                    { "modelId": "gpt-oss-120b-medium", "name": "GPT-OSS 120B (Medium)" }
+                ]
+            }
+        }),
+        &mut facts,
+    );
+    let rows = adapter.present(&facts, &[]).models.expect("models");
+    let pool = |name: &str| Some(vec![name.to_string()]);
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.id.as_str(), row.is_default, row.quota_scopes.clone()))
+            .collect::<Vec<_>>(),
+        vec![
+            ("gemini-4-neon-high", Some(true), pool("Gemini")),
+            ("claude-opus-5-5-high", None, pool("Claude & GPT")),
+            ("gpt-oss-120b-medium", None, pool("Claude & GPT")),
+        ]
+    );
+}
+
+#[test]
 fn cursor_marks_the_model_its_session_started_on_as_the_default() {
     let adapter = agent_presentation_adapter_for_acp_runtime("cursor");
     let mut facts = AgentPresentationFacts::default();

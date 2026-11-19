@@ -113,6 +113,8 @@ enum QuotaAccount {
     OpenCodeDefault,
     /// Prepaid balance of the API key DeepSeek Harness holds.
     DeepSeekDefault,
+    /// Google Antigravity (`agy`) default OAuth login.
+    AntigravityDefault,
 }
 
 impl QuotaAccount {
@@ -124,6 +126,7 @@ impl QuotaAccount {
             Self::CursorDefault => ("cursor", "default-login".to_string()),
             Self::OpenCodeDefault => ("opencode", "default-login".to_string()),
             Self::DeepSeekDefault => ("deepseek", "default-login".to_string()),
+            Self::AntigravityDefault => ("antigravity", "default-login".to_string()),
         }
     }
 }
@@ -246,6 +249,14 @@ fn resolve_target_on(target_id: &str, host: &HostView<'_>) -> Resolution {
         // file first, then the environment the spawn inherits from this daemon.
         "opencode" => QuotaAccount::OpenCodeDefault,
         "deepseek" => QuotaAccount::DeepSeekDefault,
+        "antigravity" => {
+            if spawn.any_effective(quota::antigravity::ANTIGRAVITY_LOGIN_OVERRIDE_KEYS)
+                || host.home.is_none()
+            {
+                return Resolution::ConfigurationUnavailable;
+            }
+            QuotaAccount::AntigravityDefault
+        }
         _ => return Resolution::Unsupported,
     };
     let (provider_tag, location) = account.digest_parts();
@@ -272,6 +283,7 @@ async fn read_account(account: QuotaAccount, fresh: bool) -> Option<LlmUsage> {
         QuotaAccount::CursorDefault => (Provider::Cursor, Account::DefaultLogin),
         QuotaAccount::OpenCodeDefault => (Provider::OpenCode, Account::Process),
         QuotaAccount::DeepSeekDefault => (Provider::DeepSeek, Account::Process),
+        QuotaAccount::AntigravityDefault => (Provider::Antigravity, Account::DefaultLogin),
     };
     quota::read(
         provider,
@@ -947,6 +959,26 @@ mod tests {
             )),
             QuotaAccount::CursorDefault
         );
+    }
+
+    #[test]
+    fn antigravity_resolves_the_default_login_only_when_nothing_overrides_it() {
+        assert_eq!(
+            account_of(resolve_fixture("registration:antigravity", &[])),
+            QuotaAccount::AntigravityDefault
+        );
+        for inherited in [
+            ("JETSKI_OAUTH_TOKEN", "fixture-token"),
+            ("ANTIGRAVITY_APP_DATA_DIR", "/fixture/antigravity"),
+            ("GEMINI_API_KEY", "fixture-key"),
+            ("GOOGLE_API_KEY", "fixture-key"),
+        ] {
+            assert_eq!(
+                resolve_fixture("registration:antigravity", &[inherited]),
+                Resolution::ConfigurationUnavailable,
+                "{inherited:?}"
+            );
+        }
     }
 
     #[test]
