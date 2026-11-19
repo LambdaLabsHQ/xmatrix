@@ -162,7 +162,11 @@ export function autoLaunchCandidates(targets: SpaceLaunchTargetsResponse | undef
       for (const effort of model.efforts) add("effort", effort.value);
     }
   }
-  return interleaveLaunchFields(result);
+  const listed = interleaveLaunchFields(result);
+  // `@auto` chooses among Agents that can take work. With none registered,
+  // the row only writes a summon that cannot start.
+  if (listed.some(candidate => candidate.launchTags?.harness !== undefined)) return listed;
+  return listed.filter(candidate => candidate.id !== "launch:auto");
 }
 
 /**
@@ -186,8 +190,8 @@ function interleaveLaunchFields(candidates: MentionCandidate[]): MentionCandidat
 }
 
 /**
- * A fresh `@` names who to summon, so it offers only runtimes (and auto), listed
- * with the other Agents. Repository, directory, machine, model and effort are
+ * A fresh `@` names who to summon, so it offers only runtimes, plus `@auto`
+ * when one of them can take work. Repository, directory, machine, model and effort are
  * conditions on a summon: they are offered once the summon exists, typed after it.
  */
 export function summonStartCandidates(candidates: MentionCandidate[]): MentionCandidate[] {
