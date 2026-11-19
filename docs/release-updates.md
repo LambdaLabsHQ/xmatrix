@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: ACP and Antigravity runtimes report waiting state
+
+ACP runtimes previously stayed `busy` during long tool calls and `idle` while
+Antigravity waited on background `run_command`, `schedule`, or `run_workflow`
+tasks across `end_turn`, so xMatrix could not show them as `waiting` or keep
+them from idle-sleeping. ACP sessions now track in-turn tool calls (and parked
+questions/permissions, excluding subagent calls) through `ToolWaits` to report
+`runtimeState.waiting (kind: "tool")` past the 15-second threshold. For
+Antigravity (`agy acp`), non-daemon tool calls still open at `end_turn` become
+cross-turn background waits (`kind: "background"`) with `background_tasks`
+written for the idle-sleep check, and the between-turns run loop listens to the
+ACP stream so task completions transition cleanly into `busy` reactive wakeups
+and back to `idle` or remaining waits. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
 ## Unreleased: Status, Machines and Agents are one matrix
 
 Adding an agent to a machine was spread over three rail entries: it was

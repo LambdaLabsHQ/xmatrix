@@ -73,6 +73,7 @@ fn acp_resume_streams_history_beyond_backlog_limit() {
                     &test_serialized_agent("grok-resume"),
                     None,
                     None,
+                    None,
                 )
                 .await
                 .expect("first live turn after resume");
@@ -140,6 +141,7 @@ fn acp_resume_failed_load_does_not_restore_historical_goal() {
                     None,
                     None,
                     &test_serialized_agent("grok-resume"),
+                    None,
                     None,
                     None,
                 )
@@ -216,6 +218,7 @@ fn acp_trace_retains_upstream_message_ids_and_receipt_order() {
                     &agent,
                     Some(&relay),
                     Some("channel-1"),
+                    None,
                 )
                 .await
                 .unwrap();
