@@ -702,8 +702,18 @@ fn acp_generic_vendor_config_is_hook_free_and_tool_scoped() {
             expected_args,
             "{tool}"
         );
-        // DeepSeek Harness bills a prepaid balance its API can state.
-        assert_eq!(config.quota_usage.is_some(), id == "deepseek", "{tool}");
+        // Antigravity (model pool quotas) and DeepSeek Harness (prepaid
+        // balance) expose account quota hooks here.
+        assert_eq!(
+            config.quota_usage.is_some(),
+            matches!(id, "antigravity" | "deepseek"),
+            "{tool}"
+        );
+        assert_eq!(
+            config.supports_background_tasks,
+            id == "antigravity",
+            "{tool}"
+        );
         assert_eq!(agent_type_for_preset_or_runtime(None, tool), id, "{tool}");
     }
 

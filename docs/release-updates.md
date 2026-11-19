@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: ACP and Antigravity runtimes report waiting state
+
+ACP runtimes previously stayed `busy` during long tool calls and `idle` while
+Antigravity waited on background `run_command`, `schedule`, or `run_workflow`
+tasks across `end_turn`, so xMatrix could not show them as `waiting` or keep
+them from idle-sleeping. ACP sessions now track in-turn tool calls (and parked
+questions/permissions, excluding subagent calls) through `ToolWaits` to report
+`runtimeState.waiting (kind: "tool")` past the 15-second threshold. For
+Antigravity (`agy acp`), non-daemon tool calls still open at `end_turn` become
+cross-turn background waits (`kind: "background"`) with `background_tasks`
+written for the idle-sleep check, and the between-turns run loop listens to the
+ACP stream so task completions transition cleanly into `busy` reactive wakeups
+and back to `idle` or remaining waits. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
 ## Unreleased: Status, Machines and Agents are one matrix
 
 Adding an agent to a machine was spread over three rail entries: it was
@@ -26,9 +41,14 @@ the phone dock now have one entry, **Agents**, and every fact has one place.
   computer in place and it becomes a row. A row's heading still opens the
   machine and a column's heading what the Space set on that agent; a page
   opened that way takes the matrix's place and has a way back to it.
-- **A list on a phone,** too narrow for the matrix: each machine with its
-  agents under it, below the count, what waits on a person, and each agent
-  across its machines.
+- **An avatar matrix on a phone.** Each machine heading (with its OS icon and
+  inline exceptions such as sign-in, quota limit, or strained CPU/disk) sits
+  above a full-width strip of vertically aligned agent avatars—no horizontal
+  scroll up to 8 columns and no working-count noise. Working avatars pulse
+  quietly; attention items show an amber ring and semantic badge; strained
+  quota bars appear below the avatar; tapping any cell opens an unblurred
+  bottom-sheet editor, and a ghost **Add a machine** row at the bottom guides
+  adding another computer.
 - **One count says who works:** an Instance with work in hand. A live process
   waiting for its next message is "Ready", and its agent's page lists it as
   waiting. A program its machine reports signed out, or too old for xMatrix,

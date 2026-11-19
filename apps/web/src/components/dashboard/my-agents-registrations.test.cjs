@@ -3,7 +3,7 @@ const test = require("node:test");
 const { compileTsModules } = require("./compile-ts-modules.cjs");
 
 const compiled = compileTsModules(__dirname, ["my-agents-registrations", "time-display"]);
-const { machineSwitch, registrationActions, registrationActivity, registrationSwitch,
+const { machineSwitch, registrationActions, registrationActivity, registrationSettingsMode, registrationSwitch,
   registrationListed, registrationRowTitle, registrationStatus } = compiled.exports;
 
 test.after(compiled.dispose);
@@ -87,9 +87,14 @@ test("a plain member sees an agent they do not own without any actions", () => {
   assert.deepEqual(registrationActions(registration()), []);
 });
 
-test("a Space admin configures an agent", () => {
-  assert.deepEqual(registrationActions(registration({ canConfigureSpace: true })), ["configure"]);
-  assert.deepEqual(registrationActions(registration({ canConfigureSpace: true, state: "disabled" })), ["configure"]);
+test("settings are edited in place by Space admins, read-only for the owner or once removed, and absent for plain members", () => {
+  assert.equal(registrationSettingsMode(registration({ canConfigureSpace: true })), "edit");
+  assert.equal(registrationSettingsMode(registration({ canConfigureSpace: true, state: "disabled" })), "edit");
+  assert.equal(registrationSettingsMode(registration({ canConfigureSpace: true, state: "revoked" })), "read");
+  assert.equal(registrationSettingsMode(registration({ canManageOwnerGrant: true })), "read");
+  assert.equal(registrationSettingsMode(registration()), "none");
+  assert.deepEqual(registrationActions(registration({ canConfigureSpace: true })), []);
+  assert.deepEqual(registrationActions(registration({ canConfigureSpace: true, state: "disabled" })), []);
 });
 
 test("one switch per agent in the Space, for its owner and for Space owners/admins", () => {

@@ -3,12 +3,21 @@ import type { StatusTone } from "@/components/ui/status-tone";
 import { formatRelativeAge } from "./time-display";
 
 /** What a viewer may do to one registration on My Agents. */
-export type MyAgentAction = "configure" | "restore";
+export type MyAgentAction = "restore";
 
 export const MY_AGENT_ACTION_LABEL: Record<MyAgentAction, string> = {
-  configure: "Configure",
   restore: "Add back to Space",
 };
+
+/** How this viewer reads one registration's Space settings: edited in place by
+ * Space owners and admins while the agent is in the Space, read-only for its
+ * owner or once removed, and absent for ordinary members (the Hub omits them). */
+export function registrationSettingsMode(registration: AgentRegistrationSummary): "edit" | "read" | "none" {
+  const granted = registration.state === "enabled" || registration.state === "disabled";
+  if (registration.canConfigureSpace && granted) return "edit";
+  if (registration.canConfigureSpace || registration.canManageOwnerGrant) return "read";
+  return "none";
+}
 
 /** A registration removed from the Space is gone from its list. Only the
  * owner, who alone can add it back, still sees it, with that action. */
@@ -106,16 +115,9 @@ export function registrationRowTitle(registration: AgentRegistrationSummary): { 
     : { title: registration.machineName, machineInLine: false };
 }
 
-/** Why the registration catalog could not be read: the server's message plus
- * its error code, so a failure is diagnosable instead of an empty list. */
-/** Space owners/admins configure an agent; an agent removed from the Space
- * before switches existed is added back by its owner. */
+/** An agent removed from the Space before switches existed is added back by its owner. */
 export function registrationActions(registration: AgentRegistrationSummary): MyAgentAction[] {
-  const granted = registration.state === "enabled" || registration.state === "disabled";
-  const actions: MyAgentAction[] = [];
-  if (registration.canConfigureSpace && granted) actions.push("configure");
-  if (registration.canManageOwnerGrant && registration.state === "revoked") actions.push("restore");
-  return actions;
+  return registration.canManageOwnerGrant && registration.state === "revoked" ? ["restore"] : [];
 }
 
 /** The agent's one on/off switch in this Space, for a Space owner/admin and

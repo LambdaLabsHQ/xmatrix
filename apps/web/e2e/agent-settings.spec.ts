@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, test, type Page } from "./fixtures";
 import { AGENT_ENVIRONMENT_QUERY, E2E_DESKTOP_CONTEXT, E2E_SPACE, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs,
   unconfirmedAccess } from "./workspace-fixtures";
 
@@ -7,33 +7,53 @@ const registration = { key, displayName: "codex", machineName: "Remote server", 
   version: 3, models: [], routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true };
 const CATALOG = /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?[^#]*)?$/u;
 
-test.use(E2E_DESKTOP_CONTEXT);
-test("a Space admin sets an Agent's working mode and instructions", async ({ page }) => {
+async function openAgentPage(page: Page, entry: Record<string, unknown>, configuration?: Record<string, unknown>) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
-  await fixtureJson(page, "catalog", CATALOG, { registrations: [registration],
-    capabilities: [{ harness: "codex", models: [], locations: [registration] }] });
-  await fixtureJson(page, "details", "**/api/xmatrix/spaces/*/agent-registrations/query", {
-    ...registration, configuration: { model: "gpt-5.5", instructions: "Review only.", workspaceReferences: ["/repo"] },
-  }, { method: "POST" });
-  await fixtureJson(page, "command", "**/api/xmatrix/spaces/*/agent-registrations/commands", { key, version: 4 },
-    { method: "POST" });
-  const errors: string[] = [];
-  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await fixtureJson(page, "catalog", CATALOG, { registrations: [entry],
+    capabilities: [{ harness: "codex", models: [], locations: [entry] }] });
+  if (configuration) {
+    await fixtureJson(page, "details", "**/api/xmatrix/spaces/*/agent-registrations/query",
+      { ...entry, configuration }, { method: "POST" });
+  }
   await page.goto("/app/personal-sspaceperso/agents");
   await page.getByRole("row", { name: "Remote server" }).getByTestId("agent-row").click();
   await page.getByTestId("fleet-cell-open-agent").click();
-  await page.getByRole("button", { name: "Configure: codex" }).click();
-  const mode = page.getByLabel("Working mode");
+}
+
+test.use(E2E_DESKTOP_CONTEXT);
+test("a Space admin reads and edits an Agent's settings directly on its page", async ({ page }) => {
+  const errors: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
+  await openAgentPage(page, registration, { model: "gpt-5.5", instructions: "Review only.", workspaceReferences: ["/repo"] });
+  await fixtureJson(page, "command", "**/api/xmatrix/spaces/*/agent-registrations/commands", { key, version: 4 },
+    { method: "POST" });
+  const settings = page.getByRole("region", { name: "Settings" });
+  await expect(settings.getByLabel("Name")).toHaveValue("codex");
+  await expect(settings.getByLabel("Default model")).toHaveValue("gpt-5.5");
+  const mode = settings.getByLabel("Working mode");
   await expect(mode).toHaveValue("autonomous");
-  await expect(page.getByLabel("Instructions")).toHaveValue("Review only.");
+  await expect(settings.getByLabel("Instructions")).toHaveValue("Review only.");
+  await expect(settings.getByRole("button", { name: "Save" })).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("agent-settings-resting.png") });
   await mode.selectOption("cautious");
-  await page.getByLabel("Instructions").fill("Review only. Ask before merging.");
+  await settings.getByLabel("Instructions").fill("Review only. Ask before merging.");
   await page.screenshot({ path: test.info().outputPath("agent-settings.png") });
-  await page.getByRole("button", { name: "Save" }).click();
+  await settings.getByRole("button", { name: "Save" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "command")).toEqual([expect.objectContaining({
     action: "configure", key, expectedVersion: 3, configuration: { model: "gpt-5.5", workingMode: "cautious",
       instructions: "Review only. Ask before merging.", workspaceReferences: ["/repo"] } })]);
   expect(errors).toEqual([]);
+});
+
+test("an Agent's owner who cannot administer the Space still sees its settings read-only", async ({ page }) => {
+  const owned = { ...registration, canConfigureSpace: false, canManageOwnerGrant: true };
+  await openAgentPage(page, owned, { model: "gpt-5.5", workingMode: "cautious", instructions: "Review only.", workspaceReferences: [] });
+  const settings = page.getByRole("region", { name: "Settings" });
+  await expect(settings.getByTestId("agent-settings-readonly")).toContainText("gpt-5.5");
+  await expect(settings.getByTestId("agent-settings-readonly")).toContainText("Cautious");
+  await expect(settings.getByTestId("agent-settings-readonly")).toContainText("Review only.");
+  await expect(settings.getByRole("textbox")).toHaveCount(0);
+  await page.screenshot({ path: test.info().outputPath("agent-settings-readonly.png") });
 });
 
 test("whoever may describe a harness writes what it is for in place, as free text", async ({ page }) => {

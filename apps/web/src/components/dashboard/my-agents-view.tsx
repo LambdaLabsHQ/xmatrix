@@ -6,7 +6,6 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Loader2,
   RotateCcw,
-  Settings,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -43,23 +42,22 @@ import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
+  registrationSettingsMode,
   registrationSwitch,
   type MyAgentAction,
 } from "./my-agents-registrations";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
-  ToolDetail, ToolDetailSection, ToolStateDot,
+  ToolDetail, ToolDetailSection, ToolFact, ToolFacts, ToolStateDot,
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
 const ACTION_ICON: Record<MyAgentAction, LucideIcon> = {
-  configure: Settings,
   restore: RotateCcw,
 };
 
 const ACTION_CONSEQUENCE: Record<MyAgentAction, string> = {
-  configure: "Name, default model, working mode and instructions",
   restore: "Offer this agent to the Space again",
 };
 
@@ -121,21 +119,11 @@ export function AgentPaper({
   onOpenConversation: (channelId: string) => void;
 }) {
   const command = useRegistrationCommand(spaceId ?? "", token ?? "", () => void onRefetch());
-  const [editingId, setEditingId] = useState<string | null>(null);
   /* A switch shows its new position at once and holds it until the agent list
      confirms it; waiting for the list's reload made a flip look ignored. */
   const [switching, setSwitching] = useState<{ id: string; on: boolean } | null>(null);
   const [, select] = useViewSelection("agents");
   const copy = useOnboardingCopy(spaceId, token, currentUserId);
-
-  function act(registration: AgentRegistrationSummary, action: MyAgentAction) {
-    const id = registrationTupleId(registration.key);
-    if (action === "configure") {
-      setEditingId((current) => (current === id ? null : id));
-      return;
-    }
-    void command.run(registration.key, { kind: action });
-  }
 
   if (group) {
     return <AgentHarnessDetail key={group.harness} group={group} token={token} backAlways={backAlways}
@@ -148,6 +136,7 @@ export function AgentPaper({
   const ownerPreset = mine ? AGENT_PRESETS.find((preset) => preset.id === harness) : undefined;
   const toggle = ownerPreset ? harnessSpaceSwitch(registration) : registrationSwitch(registration);
   const allActions = registrationActions(registration).filter((action) => action !== "restore" || !ownerPreset);
+  const settingsMode = registrationSettingsMode(registration);
   const busy = command.pendingId === id || Boolean(fleet.pending) || fleet.enablingAll;
   const live = registration.live;
   const running = live?.running ?? [];
@@ -176,16 +165,15 @@ export function AgentPaper({
         <ToolStateDot state={activity.state} />
         <span className="text-foreground">{activity.line}</span>
       </span>}
-      actions={<>
+      actions={allActions.length > 0 || toggle ? <>
         {allActions.map((action) => {
-          const Icon = busy && action !== "configure" ? Loader2 : ACTION_ICON[action];
+          const Icon = busy ? Loader2 : ACTION_ICON[action];
           return (
             <Button key={action} size="sm" variant="outline" disabled={busy}
-              onClick={() => act(registration, action)}
+              onClick={() => void command.run(registration.key, { kind: action })}
               aria-label={`${MY_AGENT_ACTION_LABEL[action]}: ${registration.displayName}`}
-              aria-expanded={action === "configure" ? editingId === id : undefined}
               title={ACTION_CONSEQUENCE[action]}>
-              <AnimatedIcon icon={Icon} className={cn(busy && action !== "configure" && "animate-spin")} />
+              <AnimatedIcon icon={Icon} className={cn(busy && "animate-spin")} />
               {MY_AGENT_ACTION_LABEL[action]}
             </Button>
           );
@@ -214,22 +202,21 @@ export function AgentPaper({
             </label>
           );
         })()}
-      </>}
+      </> : undefined}
     >
       {fleet.error && <p role="alert" className={noticeClass("alert", "rounded-lg p-3")}>{fleet.error}</p>}
       {command.notice && (
         <p role="status" className={noticeClass(command.notice.error ? "alert" : "settled", "rounded-lg p-3")}>{command.notice.text}</p>
       )}
-      {editingId === id && token && (
+      {settingsMode !== "none" && token && (
         <ToolDetailSection title="Settings">
-          <RegistrationEditor
+          <RegistrationSettings
+            key={id}
             registration={registration}
             token={token}
+            editable={settingsMode === "edit"}
             busy={busy}
-            onCancel={() => setEditingId(null)}
-            onSave={async (change) => {
-              if (await command.run(registration.key, { kind: "configure", ...change })) setEditingId(null);
-            }}
+            onSave={(change) => command.run(registration.key, { kind: "configure", ...change })}
           />
         </ToolDetailSection>
       )}
@@ -300,18 +287,28 @@ export function AgentPaper({
   );
 }
 
-/** Edits the Space's own name and default model for one registration, starting
- * from the server's current configuration rather than the catalog summary. */
-function RegistrationEditor({
+type RegistrationSettingsValues = {
+  displayName: string;
+  model: string;
+  workingMode: AgentWorkingMode;
+  instructions: string;
+};
+
+/** Space settings for one registration, read directly from the server and
+ * edited in place by Space owners and admins. */
+function RegistrationSettings({
   registration,
   token,
+  editable,
   busy,
-  onCancel,
   onSave,
 }: {
   registration: AgentRegistrationSummary;
   token: string;
-} & RegistrationEditorActions) {
+  editable: boolean;
+  busy: boolean;
+  onSave: (change: RegistrationSettingsValues) => Promise<boolean>;
+}) {
   const { user } = useAuth();
   const details = useQuery({
     queryKey: xmatrixQueryKeys.domain({ userId: user?.id ?? "anonymous" }, "agent-registration-details",
@@ -332,79 +329,105 @@ function RegistrationEditor({
       <ContentSkeleton label="Loading settings" lines={3} className="mt-2" />
     );
   }
+  const server: RegistrationSettingsValues = {
+    displayName: details.data.displayName,
+    model: details.data.configuration?.model ?? "",
+    workingMode: details.data.configuration?.workingMode ?? "autonomous",
+    instructions: details.data.configuration?.instructions ?? "",
+  };
+  if (!editable) {
+    return (
+      <div className="mt-3 space-y-3" data-testid="agent-settings-readonly">
+        <ToolFacts>
+          <ToolFact label="Name">{server.displayName}</ToolFact>
+          <ToolFact label="Default model">
+            {server.model || <span className="text-muted-foreground">Harness default</span>}
+          </ToolFact>
+          <ToolFact label="Working mode">
+            {server.workingMode === "cautious" ? "Cautious" : "Autonomous"}
+          </ToolFact>
+        </ToolFacts>
+        <div className="space-y-1 text-sm">
+          <p className="text-muted-foreground">Instructions</p>
+          {server.instructions ? (
+            <p className="whitespace-pre-wrap break-words">{server.instructions}</p>
+          ) : (
+            <p className="text-muted-foreground">None</p>
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
-    <RegistrationEditorForm
-      initialName={details.data.displayName}
-      initialModel={details.data.configuration?.model ?? ""}
-      initialWorkingMode={details.data.configuration?.workingMode ?? "autonomous"}
-      initialInstructions={details.data.configuration?.instructions ?? ""}
+    <RegistrationSettingsForm
+      server={server}
       busy={busy}
-      onCancel={onCancel}
-      onSave={onSave}
+      onSave={async (change) => {
+        if (!(await onSave(change))) return false;
+        await details.refetch();
+        return true;
+      }}
     />
   );
 }
 
-/** Save and cancel controls shared by the registration editor and its loader. */
-type RegistrationEditorActions = {
-  busy: boolean;
-  onCancel: () => void;
-  onSave: (change: { displayName: string; model: string; workingMode: AgentWorkingMode; instructions: string }) => void;
-};
-
-function RegistrationEditorForm({
-  initialName,
-  initialModel,
-  initialWorkingMode,
-  initialInstructions,
+function RegistrationSettingsForm({
+  server,
   busy,
-  onCancel,
   onSave,
 }: {
-  initialName: string;
-  initialModel: string;
-  initialWorkingMode: AgentWorkingMode;
-  initialInstructions: string;
-} & RegistrationEditorActions) {
-  const [displayName, setDisplayName] = useState(initialName);
-  const [model, setModel] = useState(initialModel);
-  const [workingMode, setWorkingMode] = useState(initialWorkingMode);
-  const [instructions, setInstructions] = useState(initialInstructions);
+  server: RegistrationSettingsValues;
+  busy: boolean;
+  onSave: (change: RegistrationSettingsValues) => Promise<boolean>;
+}) {
+  const [draft, setDraft] = useState<RegistrationSettingsValues | null>(null);
+  const value = draft ?? server;
+  const update = (patch: Partial<RegistrationSettingsValues>) =>
+    setDraft((current) => ({ ...(current ?? server), ...patch }));
+  const changed = draft !== null && (
+    draft.displayName.trim() !== server.displayName.trim()
+    || draft.model.trim() !== server.model.trim()
+    || draft.workingMode !== server.workingMode
+    || draft.instructions.trim() !== server.instructions.trim()
+  );
   return (
     <form
-      className="mt-3 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
+      className="mt-3 grid gap-3 sm:grid-cols-3"
       onSubmit={(event) => {
         event.preventDefault();
-        onSave({ displayName, model, workingMode, instructions });
+        if (!changed || busy || !value.displayName.trim()) return;
+        void (async () => {
+          if (await onSave(value)) setDraft(null);
+        })();
       }}
     >
       <label className="grid gap-1.5 text-[13px] font-semibold">
         Name
         <input
-          value={displayName}
+          value={value.displayName}
           maxLength={80}
           disabled={busy}
-          onChange={(event) => setDisplayName(event.target.value)}
+          onChange={(event) => update({ displayName: event.target.value })}
           className={INPUT_CLASS}
         />
       </label>
       <label className="grid gap-1.5 text-[13px] font-semibold">
         Default model
         <input
-          value={model}
+          value={value.model}
           disabled={busy}
           placeholder="Harness default"
-          onChange={(event) => setModel(event.target.value)}
+          onChange={(event) => update({ model: event.target.value })}
           className={INPUT_CLASS}
         />
       </label>
       <label className="grid gap-1.5 text-[13px] font-semibold">
         Working mode
         <select
-          value={workingMode}
+          value={value.workingMode}
           disabled={busy}
-          title={WORKING_MODE_HINT[workingMode]}
-          onChange={(event) => setWorkingMode(event.target.value as AgentWorkingMode)}
+          title={WORKING_MODE_HINT[value.workingMode]}
+          onChange={(event) => update({ workingMode: event.target.value as AgentWorkingMode })}
           className={INPUT_CLASS}
         >
           <option value="autonomous">Autonomous</option>
@@ -414,22 +437,29 @@ function RegistrationEditorForm({
       <label className="grid gap-1.5 text-[13px] font-semibold sm:col-span-3">
         Instructions
         <textarea
-          value={instructions}
+          value={value.instructions}
           disabled={busy}
           rows={4}
           placeholder="What this Agent should always do, in this Space"
-          onChange={(event) => setInstructions(event.target.value)}
+          onChange={(event) => update({ instructions: event.target.value })}
           className={`${INPUT_CLASS} h-auto py-2 normal-case tracking-normal font-normal`}
         />
       </label>
-      <div className="flex gap-2">
-        <button type="button" disabled={busy} onClick={onCancel} className={actionClass({ variant: "secondary", size: "md" })}>
-          Cancel
-        </button>
-        <button type="submit" disabled={busy || !displayName.trim()} className={actionClass({ variant: "primary", size: "md" })}>
-          {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
-          Save
-        </button>
+      <div className="flex flex-wrap items-center gap-2 sm:col-span-3">
+        <p className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {WORKING_MODE_HINT[value.workingMode]}
+        </p>
+        {changed && (
+          <>
+            <button type="button" disabled={busy} onClick={() => setDraft(null)} className={actionClass({ variant: "secondary", size: "sm" })}>
+              Cancel
+            </button>
+            <button type="submit" disabled={busy || !value.displayName.trim()} className={actionClass({ variant: "primary", size: "sm" })}>
+              {busy ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : null}
+              Save
+            </button>
+          </>
+        )}
       </div>
     </form>
   );

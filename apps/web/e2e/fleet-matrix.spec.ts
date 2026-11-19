@@ -233,6 +233,7 @@ test.describe("mobile agents grid and bottom sheets", () => {
     await add.scrollIntoViewIfNeeded();
     await add.click();
     await expect(matrix.getByTestId("add-machine")).toBeVisible();
+    await expect(matrix.getByTestId("add-machine")).not.toContainText("Run this");
     await expect(matrix.getByTestId("add-machine")).not.toContainText("bash -s --");
     await expect(add).toHaveAttribute("aria-expanded", "true");
   });

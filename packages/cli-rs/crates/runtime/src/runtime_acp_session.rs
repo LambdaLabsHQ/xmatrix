@@ -54,7 +54,30 @@ impl AcpSession {
             config,
             activity: ChannelActivityReporter::default(),
             questions: Default::default(),
+            background_tasks: crate::runtime_waiting::AcpBackgroundTasks::default(),
+            tool_wait_threshold: crate::runtime_waiting::TOOL_WAIT_THRESHOLD,
+            reactive_wakeup_settle: ACP_REACTIVE_WAKEUP_SETTLE,
+            inbox_closed: false,
         })
+    }
+
+    fn publish_background_tasks(&self) {
+        if self.config.supports_background_tasks {
+            write_current_run_background_tasks(Some(self.background_tasks.count()));
+        }
+    }
+
+    fn clear_background_tasks(&mut self) {
+        if !self.background_tasks.is_empty() {
+            self.background_tasks.clear();
+            self.publish_background_tasks();
+        }
+    }
+
+    #[cfg(test)]
+    fn set_wait_timings(&mut self, tool_wait: Duration, reactive_settle: Duration) {
+        self.tool_wait_threshold = tool_wait;
+        self.reactive_wakeup_settle = reactive_settle;
     }
 
     fn current_model(&self) -> Option<&str> {
@@ -467,12 +490,14 @@ impl AcpSession {
 
     /// Show a form elicitation as a card and park it for the answer; with no
     /// channel to show it in, or no question in it, cancel it at once.
+    /// Returns `(request_key, prompt)` when parked so the turn can track it as
+    /// a wait until answered.
     async fn park_acp_question(
         &mut self,
         message: &Value,
         relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
         channel_id: Option<&str>,
-    ) -> error::Result<()> {
+    ) -> error::Result<Option<(String, String)>> {
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         let params = message.get("params").cloned().unwrap_or(Value::Null);
         let questions = crate::runtime_harness_questions::acp_questions(&params);
@@ -483,6 +508,7 @@ impl AcpSession {
                     .and_then(Value::as_str)
                     .map(ToString::to_string)
                     .unwrap_or_else(|| format!("acp-{}", uuid::Uuid::new_v4()));
+                let prompt = questions[0].prompt.clone();
                 let card = crate::runtime_harness_questions::publish_questionnaire(
                     relay,
                     channel_id,
@@ -493,12 +519,13 @@ impl AcpSession {
                         &questions,
                     ),
                 );
-                self.questions.park(key, (id, params), card);
-                Ok(())
+                self.questions.park(key.clone(), (id, params), card);
+                Ok(Some((key, prompt)))
             }
             _ => {
                 self.write_message(&acp_result(id, serde_json::json!({ "action": "cancel" })))
-                    .await
+                    .await?;
+                Ok(None)
             }
         }
     }
@@ -507,12 +534,14 @@ impl AcpSession {
     /// card with the answers the agent offers and park it. A plain `xmatrix`
     /// command is allowed at once, and with no channel to ask in, or no
     /// answer to offer, the request is cancelled.
+    /// Returns `(request_key, prompt)` when parked so the turn can track it as
+    /// a wait until answered.
     async fn park_acp_permission(
         &mut self,
         message: &Value,
         relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
         channel_id: Option<&str>,
-    ) -> error::Result<()> {
+    ) -> error::Result<Option<(String, String)>> {
         use crate::runtime_harness_questions as questions;
         let id = message.get("id").cloned().unwrap_or(Value::Null);
         let params = message.get("params").cloned().unwrap_or(Value::Null);
@@ -521,11 +550,13 @@ impl AcpSession {
             && let Some(option_id) = acp_select_permission_option_id(options)
         {
             let allowed = serde_json::json!({ "outcome": { "outcome": "selected", "optionId": option_id } });
-            return self.write_message(&acp_result(id, allowed)).await;
+            self.write_message(&acp_result(id, allowed)).await?;
+            return Ok(None);
         }
         match (relay, channel_id, questions::acp_permission_question(&params)) {
             (Some(relay), Some(channel_id), Some(question)) => {
                 let key = format!("acp-permission-{}", uuid::Uuid::new_v4());
+                let prompt = question.prompt.clone();
                 let card = questions::publish_questionnaire(
                     relay,
                     channel_id,
@@ -536,17 +567,55 @@ impl AcpSession {
                         &[question],
                     ),
                 );
-                self.questions.park(key, (id, params), card);
-                Ok(())
+                self.questions.park(key.clone(), (id, params), card);
+                Ok(Some((key, prompt)))
             }
             _ => {
                 let cancelled = questions::acp_permission_outcome(&params, None)
                     .unwrap_or_else(|| serde_json::json!({ "outcome": { "outcome": "cancelled" } }));
-                self.write_message(&acp_result(id, cancelled)).await
+                self.write_message(&acp_result(id, cancelled)).await?;
+                Ok(None)
             }
         }
     }
 
+    async fn handle_turn_server_request(
+        &mut self,
+        message: &Value,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+        channel_id: Option<&str>,
+    ) -> error::Result<AcpTurnServerRequest> {
+        if message.get("method").and_then(Value::as_str) == Some("elicitation/create")
+            && message.get("id").is_some()
+        {
+            return Ok(match self.park_acp_question(message, relay, channel_id).await? {
+                Some((key, prompt)) => AcpTurnServerRequest::ParkedQuestion { key, prompt },
+                None => AcpTurnServerRequest::Handled,
+            });
+        }
+        if message
+            .get("method")
+            .and_then(Value::as_str)
+            .is_some_and(|method| method.contains("permission"))
+            && message.get("id").is_some()
+            && message.get("result").is_none()
+            && message.get("error").is_none()
+            && !launch_access().approves_requests
+        {
+            return Ok(
+                match self.park_acp_permission(message, relay, channel_id).await? {
+                    Some((key, prompt)) => AcpTurnServerRequest::ParkedQuestion { key, prompt },
+                    None => AcpTurnServerRequest::Handled,
+                },
+            );
+        }
+        if acp_handle_server_request(self, message).await?.is_some() {
+            return Ok(AcpTurnServerRequest::Handled);
+        }
+        Ok(AcpTurnServerRequest::NotHandled)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     async fn submit_turn(
         &mut self,
         text: &str,
@@ -556,6 +625,7 @@ impl AcpSession {
         agent: &protocol::SerializedAgent,
         trace_relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
         trace_channel_id: Option<&str>,
+        runtime_state: Option<&AgentRuntimeStateTracker>,
     ) -> error::Result<CodexTurnResult> {
         let session_id = self.session_id.clone().ok_or_else(|| {
             CliError::Launch(format!(
@@ -590,6 +660,10 @@ impl AcpSession {
             session_id: &session_id,
             turn_id: &turn_id,
         };
+        // A new turn is running: clear any between-turns background wait while
+        // the model works; still-open background tasks stay tracked in
+        // `self.background_tasks` so their completion updates the count.
+        report_runtime_waiting(trace_relay, runtime_state, None);
         trace
             .send(
                 "turn_started",
@@ -616,10 +690,40 @@ impl AcpSession {
         let mut latest_model = self.presentation.model.clone();
         let mut latest_goal: Option<protocol::AgentGoalStatus> = None;
         let turn_timeout = acp_turn_timeout(self.config.turn_timeout_env);
+        let mut tool_waits = crate::runtime_waiting::ToolWaits::new(self.tool_wait_threshold);
+        let mut daemon_tool_ids: HashSet<String> = HashSet::new();
+        let mut parked_question_keys: Vec<String> = Vec::new();
+        let mut last_event_at = Instant::now();
         loop {
-            let message = match tokio::time::timeout(turn_timeout, self.next_message()).await {
-                Ok(Some(message)) => message,
+            prune_answered_acp_question_waits(
+                &self.questions,
+                &mut parked_question_keys,
+                &mut tool_waits,
+            );
+            let now = Instant::now();
+            report_runtime_waiting(trace_relay, runtime_state, tool_waits.waiting(now));
+            let turn_deadline = last_event_at + turn_timeout;
+            let wake_at = match tool_waits.deadline(now) {
+                Some(wait_deadline) if wait_deadline < turn_deadline => wait_deadline,
+                _ => turn_deadline,
+            };
+            let questions = self.questions.clone();
+            let next = tokio::select! {
+                result = tokio::time::timeout_at(wake_at.into(), self.next_message()) => Some(result),
+                () = questions.changed(), if !parked_question_keys.is_empty() => None,
+            };
+            let Some(result) = next else {
+                continue;
+            };
+            let message = match result {
+                Ok(Some(message)) => {
+                    last_event_at = Instant::now();
+                    message
+                }
                 Ok(None) => {
+                    self.inbox_closed = true;
+                    self.clear_background_tasks();
+                    report_runtime_waiting(trace_relay, runtime_state, None);
                     if self.inbox.has_failure() {
                         return Ok(CodexTurnResult {
                             failure_reported_by_hub: false,
@@ -634,13 +738,25 @@ impl AcpSession {
                     }
                     break;
                 }
+                Err(_) if Instant::now() < turn_deadline => {
+                    // Woke up solely because the oldest open tool call crossed the wait threshold.
+                    continue;
+                }
                 // The agent is silent because it waits on its person.
-                Err(_) if self.questions.any() => continue,
+                Err(_) if self.questions.any() => {
+                    last_event_at = Instant::now();
+                    continue;
+                }
                 Err(_) => {
                     let error = format!(
                         "{} ACP turn timed out after {}s without agent events",
                         display_name,
                         turn_timeout.as_secs()
+                    );
+                    report_runtime_waiting(
+                        trace_relay,
+                        runtime_state,
+                        self.background_tasks.waiting(),
                     );
                     return Ok(CodexTurnResult {
                         failure_reported_by_hub: false,
@@ -654,6 +770,7 @@ impl AcpSession {
                     });
                 }
             };
+            let received = (Instant::now(), unix_millis_now());
 
             self.config
                 .presentation_adapter
@@ -661,30 +778,33 @@ impl AcpSession {
             latest_usage = merge_llm_usage(latest_usage, self.presentation.usage.clone());
             latest_model = self.presentation.model.clone().or(latest_model);
 
-            if message.get("method").and_then(Value::as_str) == Some("elicitation/create")
-                && message.get("id").is_some()
+            match self
+                .handle_turn_server_request(&message, trace_relay, trace_channel_id)
+                .await?
             {
-                self.park_acp_question(&message, trace_relay, trace_channel_id)
-                    .await?;
-                continue;
-            }
-            if message.get("method").and_then(Value::as_str).is_some_and(|method| method.contains("permission"))
-                && message.get("id").is_some()
-                && message.get("result").is_none()
-                && message.get("error").is_none()
-                && !launch_access().approves_requests
-            {
-                self.park_acp_permission(&message, trace_relay, trace_channel_id)
-                    .await?;
-                continue;
-            }
-            if acp_handle_server_request(self, &message).await?.is_some() {
-                continue;
+                AcpTurnServerRequest::ParkedQuestion { key, prompt } => {
+                    open_acp_question_wait(
+                        &mut tool_waits,
+                        &mut parked_question_keys,
+                        key,
+                        prompt,
+                        received,
+                    );
+                    continue;
+                }
+                AcpTurnServerRequest::Handled => continue,
+                AcpTurnServerRequest::NotHandled => {}
             }
 
             if acp_message_id_matches(message.get("id"), id) {
                 if let Some(error) = message.get("error") {
                     let detail = acp_error_message(error);
+                    tool_waits.clear();
+                    report_runtime_waiting(
+                        trace_relay,
+                        runtime_state,
+                        self.background_tasks.waiting(),
+                    );
                     trace
                         .send(
                             "turn_failed",
@@ -775,6 +895,27 @@ impl AcpSession {
                         Some(GoalCommand::Get) | None => None,
                     };
                 }
+                if cancellation_detail.is_none()
+                    && incomplete_detail.is_none()
+                    && self.config.supports_background_tasks
+                {
+                    promote_acp_background_tasks(
+                        &mut tool_waits,
+                        &daemon_tool_ids,
+                        &mut self.background_tasks,
+                    );
+                    self.publish_background_tasks();
+                } else {
+                    tool_waits.clear();
+                }
+                match self.background_tasks.waiting() {
+                    Some(background) => {
+                        if let Some(runtime_state) = runtime_state {
+                            runtime_state.set_waiting(Some(background));
+                        }
+                    }
+                    None => report_runtime_waiting(trace_relay, runtime_state, None),
+                }
                 if let Some((relay, channel_id)) = trace.target() {
                     finish_acp_turn(&mut self.activity, relay, channel_id);
                 }
@@ -845,6 +986,16 @@ impl AcpSession {
                     }
                 }
                 Some("tool_call") | Some("tool_call_update") => {
+                    if observe_acp_tool_wait(
+                        session_update,
+                        update,
+                        &mut tool_waits,
+                        &mut daemon_tool_ids,
+                        &mut self.background_tasks,
+                        received,
+                    ) {
+                        self.publish_background_tasks();
+                    }
                     if let Some(goal) = self
                         .config
                         .goal_status_from_update
@@ -884,11 +1035,7 @@ impl AcpSession {
                                 "runtime_event",
                                 None,
                                 latest_model.clone(),
-                                turn_ids.chunk_payload(update, serde_json::json!({
-                                    "category": "reasoning",
-                                    "status": "delta",
-                                    "delta": redact_data_urls(delta),
-                                })),
+                                turn_ids.chunk_payload(update, acp_reasoning_payload(delta)),
                             )
                             .await;
                     }
@@ -902,16 +1049,7 @@ impl AcpSession {
                             "runtime_event",
                             None,
                             latest_model.clone(),
-                            turn_ids.payload(serde_json::json!({
-                                "category": "plan",
-                                "status": "info",
-                                "summary": "Plan updated",
-                                "details": {
-                                    "entries": redact_data_urls_value(
-                                        &update.get("entries").cloned().unwrap_or(Value::Null)
-                                    ),
-                                },
-                            })),
+                            turn_ids.payload(acp_plan_payload(update)),
                         )
                         .await;
                 }
@@ -932,7 +1070,140 @@ impl AcpSession {
     }
 
     async fn shutdown(&mut self) {
+        self.clear_background_tasks();
         terminate_app_server(&mut self.process_tree, &mut self.child).await;
+    }
+}
+
+const ACP_QUESTION_WAIT_PREFIX: &str = "acp-question:";
+
+enum AcpTurnServerRequest {
+    NotHandled,
+    Handled,
+    ParkedQuestion { key: String, prompt: String },
+}
+
+fn acp_reasoning_payload(delta: &str) -> Value {
+    serde_json::json!({
+        "category": "reasoning",
+        "status": "delta",
+        "delta": redact_data_urls(delta),
+    })
+}
+
+fn acp_plan_payload(update: &Value) -> Value {
+    serde_json::json!({
+        "category": "plan",
+        "status": "info",
+        "summary": "Plan updated",
+        "details": {
+            "entries": redact_data_urls_value(
+                &update.get("entries").cloned().unwrap_or(Value::Null)
+            ),
+        },
+    })
+}
+
+/// Quiet window after a reactive wakeup's final `usage_update` before settling
+/// back to `idle` (or remaining background waits). Tool calls arrive within
+/// ~10ms of `usage_update`; a completed wakeup emits nothing further.
+const ACP_REACTIVE_WAKEUP_SETTLE: Duration = Duration::from_millis(2_500);
+
+/// Maximum quiet wait after a background task finishes if the ACP agent does
+/// not emit any reactive wakeup events (for example, a cancelled task).
+const ACP_REACTIVE_WAKEUP_START_GRACE: Duration = Duration::from_secs(90);
+
+fn open_acp_question_wait(
+    tool_waits: &mut crate::runtime_waiting::ToolWaits,
+    parked_question_keys: &mut Vec<String>,
+    key: String,
+    prompt: String,
+    received: (Instant, u64),
+) {
+    let wait_id = format!("{ACP_QUESTION_WAIT_PREFIX}{key}");
+    let label = prompt.trim();
+    let label = if label.is_empty() {
+        "Waiting for answer".to_string()
+    } else {
+        label.chars().take(160).collect()
+    };
+    tool_waits.open(
+        wait_id,
+        crate::runtime_waiting::ToolWait {
+            label,
+            details: Vec::new(),
+        },
+        received.0,
+        received.1,
+    );
+    if !parked_question_keys.contains(&key) {
+        parked_question_keys.push(key);
+    }
+}
+
+fn prune_answered_acp_question_waits(
+    questions: &crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
+    parked_question_keys: &mut Vec<String>,
+    tool_waits: &mut crate::runtime_waiting::ToolWaits,
+) {
+    parked_question_keys.retain(|key| {
+        if questions.contains(key) {
+            true
+        } else {
+            tool_waits.close(&format!("{ACP_QUESTION_WAIT_PREFIX}{key}"));
+            false
+        }
+    });
+}
+
+/// Observe an ACP `tool_call` / `tool_call_update` into in-turn tool waits,
+/// daemon markers, and cross-turn background tasks. Returns `true` when a
+/// previously tracked cross-turn background task just reached a terminal state.
+fn observe_acp_tool_wait(
+    session_update: Option<&str>,
+    update: &Value,
+    tool_waits: &mut crate::runtime_waiting::ToolWaits,
+    daemon_tool_ids: &mut HashSet<String>,
+    background_tasks: &mut crate::runtime_waiting::AcpBackgroundTasks,
+    received: (Instant, u64),
+) -> bool {
+    let Some(id) = update.get("toolCallId").and_then(Value::as_str) else {
+        return false;
+    };
+    let status = update.get("status").and_then(Value::as_str);
+    if crate::runtime_waiting::acp_tool_is_terminal(status) {
+        tool_waits.close(id);
+        daemon_tool_ids.remove(id);
+        return background_tasks.remove(id);
+    }
+    if crate::runtime_waiting::acp_tool_is_daemon(update) {
+        daemon_tool_ids.insert(id.to_string());
+    }
+    if let Some(wait) = crate::runtime_waiting::acp_tool_wait(update) {
+        let (now, now_millis) = received;
+        if session_update == Some("tool_call")
+            || !crate::runtime_waiting::acp_tool_has_wait_metadata(update)
+        {
+            tool_waits.open(id.to_string(), wait, now, now_millis);
+        } else {
+            tool_waits.update(id.to_string(), wait, now, now_millis);
+        }
+    }
+    false
+}
+
+/// Promote non-daemon tool calls still open at the end of a turn into
+/// cross-turn background tasks.
+fn promote_acp_background_tasks(
+    tool_waits: &mut crate::runtime_waiting::ToolWaits,
+    daemon_tool_ids: &HashSet<String>,
+    background_tasks: &mut crate::runtime_waiting::AcpBackgroundTasks,
+) {
+    for (id, wait, opened_millis) in tool_waits.drain_open() {
+        if id.starts_with(ACP_QUESTION_WAIT_PREFIX) || daemon_tool_ids.contains(&id) {
+            continue;
+        }
+        background_tasks.insert(id, wait.label, opened_millis);
     }
 }
 

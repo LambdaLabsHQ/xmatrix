@@ -2246,6 +2246,7 @@ async fn provider_goal_adapters_round_trip_offline() {
                 &grok_agent,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Grok goal set");
@@ -2260,6 +2261,7 @@ async fn provider_goal_adapters_round_trip_offline() {
                 None,
                 Some(&GoalCommand::Get),
                 &grok_agent,
+                None,
                 None,
                 None,
             )
@@ -2279,6 +2281,7 @@ async fn provider_goal_adapters_round_trip_offline() {
                 &grok_agent,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Grok goal pause");
@@ -2295,6 +2298,7 @@ async fn provider_goal_adapters_round_trip_offline() {
                 &grok_agent,
                 None,
                 None,
+                None,
             )
             .await
             .expect("Grok goal resume");
@@ -2309,6 +2313,7 @@ async fn provider_goal_adapters_round_trip_offline() {
                 None,
                 Some(&GoalCommand::Clear),
                 &grok_agent,
+                None,
                 None,
                 None,
             )
@@ -2367,6 +2372,7 @@ async fn generic_acp_session_streams_and_auto_approves_permission() {
                 None,
                 None,
                 &agent,
+                None,
                 None,
                 None,
             )
