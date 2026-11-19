@@ -20,11 +20,17 @@ export type MeterReading = {
   high: boolean;
 };
 
-/** A Machine's load at a glance in its list row: processor, memory and disk, each a toned bar. */
+/**
+ * A Machine's load at a glance in its list row. A healthy Machine shows
+ * nothing: only a reading under strain (the meter's yellow or red) is drawn,
+ * so a list of Machines stays quiet until one needs a look. Its page shows
+ * every reading.
+ */
 export function MachineLoadGlance({ machine, now }: { machine: MachineSummary; now: number }) {
   if (machine.status !== "online" || !machine.daemon) return null;
   return <MachineLoadGlanceBars glance={machineGlanceReadings(machineLoadReadings(
-    machineResourceObservation(machine.daemon.metadata?.machineResources, now)))} />;
+    machineResourceObservation(machine.daemon.metadata?.machineResources, now)))
+    .filter((reading) => meterTone(reading.percent) !== "green")} />;
 }
 
 /** The glance bars themselves; the Machine tag's hover card shows the same ones. */

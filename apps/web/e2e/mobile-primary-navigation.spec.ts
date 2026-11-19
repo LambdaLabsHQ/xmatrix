@@ -1201,6 +1201,9 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   /* An agent is listed under its machine, starting where the machine's name
      does, so the two read as a machine and what runs on it. */
   const machineHeading = page.getByRole("region", { name: "Mobile test machine" }).locator(".app-tool-list-group-title");
+  // The reader's own machine is with the machines, not under the teammates' heading, even before the list carries it.
+  await expect(page.getByRole("heading", { name: "Teammates' machines" }).locator("xpath=following::section[1]"))
+    .toHaveAccessibleName("Research Mac");
   await expect(page.getByRole("region", { name: "Mobile test machine" }).getByTestId("agent-row")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("agents-list-phone.png") });
   const machineName = machineHeading.locator("span.truncate").first();
@@ -1208,11 +1211,14 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(agentFace.locator("img")).toBeVisible();
   const [nameBox, iconBox] = await Promise.all([machineName, agentFace].map((locator) => locator.boundingBox()));
   expect(Math.abs(iconBox!.x - nameBox!.x)).toBeLessThanOrEqual(1);
-  await expect(row("mobile-actions-agent")).toContainText("codex · Running in #general");
+  // Its one live process waits for a message: that is ready, not working.
+  await expect(row("mobile-actions-agent")).toContainText("codex · Ready");
   await expect(row("mobile-actions-agent")).not.toContainText("E2E Tester");
   await expect(row("research-agent")).toContainText(/codex · Offline · seen \d+d ago/);
   await expect(page.getByRole("region", { name: "Research Mac" }).getByTestId("agent-row")).toHaveCount(1);
-  await expect(row("research-agent")).toContainText("Research Owner");
+  // A teammate's machine names its owner once, on the machine.
+  await expect(page.getByRole("region", { name: "Research Mac" }).locator(".app-tool-list-group-title")).toContainText("Research Owner");
+  await expect(row("research-agent")).not.toContainText("Research Owner");
   await expect(row("research-agent")).toHaveAttribute("data-state", "offline");
   await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);
   await expect(page.locator(".app-mobile-create-fab")).toHaveCount(0);
@@ -1259,8 +1265,9 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(usage).toContainText(/5-hour window\s*resets in 2h \d+m\s*40% used/);
   await expect(usage).toContainText(/Weekly\s*resets in [23]d \d+h\s*86% used/);
   await expect(usage).toContainText("checked just now");
-  const running = detail.getByRole("region", { name: "Running now · 1" });
+  const running = detail.getByRole("region", { name: "In conversations · 1" });
   await expect(running).toContainText("mobile-actions-agent:2");
+  await expect(running).toContainText("Waiting for a message");
   const agentUrl = page.url();
   await running.getByRole("button", { name: "#general" }).tap();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/channels\/general--channel-general$/);

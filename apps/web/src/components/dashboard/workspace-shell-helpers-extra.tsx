@@ -41,7 +41,6 @@ import {
 } from "./machine-daemon-presence";
 
 export {
-  daemonPresenceLabel,
   isLiveMachineDaemon,
   machineIdentityKeys,
   preferredMachineDaemon,

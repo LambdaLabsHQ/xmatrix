@@ -4,22 +4,40 @@
 
 Adding an agent to a machine was spread over three rail entries: it was
 installed under Machines, signed in under Agents, and its state read under
-Status, whose list only repeated the other two and sent each row away. The rail
-and the phone dock now have one entry, **Agents**, with one list: every machine
-of the Space and the agents on it. The paper beside it shows what is chosen
-there. The overview says how many agents are working, which ones need their
-owner (signed out, out of quota, access not confirmed, a machine not answering)
-and where each working agent is. A machine's page installs an agent and signs
-it in on the same row, and the row opens that agent. An agent's page shows its
-work, usage and settings, and carries its own install and update row and a link
-to its machine. What is set on an agent across machines opens from the
-overview or from the agent's name on its page.
+Status, whose list only repeated the other two and sent each row away. The
+same machines and agents were drawn up to four times, and the pages disagreed:
+a row said "3 running" where the total said none were working. The rail and
+the phone dock now have one entry, **Agents**, and every fact has one place.
+
+- **One list.** Every machine of the Space with the agents on it under it;
+  teammates' machines after the reader's own. One count says who works: an
+  Instance with work in hand. A live process waiting for its next message is
+  "Ready", and its agent's page lists it as waiting. A machine's row shows a
+  load reading only when it is under strain. An agent's row shows its quota as
+  bars and no longer repeats it in words, nor that its machine is offline.
+  Agents installed on a machine and not in this Space are one line under it.
+- **Overview.** How many agents are working, what waits on a person (signed
+  out, out of quota, too old, access not confirmed, a machine not answering),
+  and each agent across its machines, which opens what the Space set on it.
+  It no longer repeats the machines.
+- **A machine's page** starts with its agents. Each installed one is a line:
+  what it does in this Space, **Sign in** where it waits on that, and its
+  switch. Version, updates and uninstall open under the line. What is not
+  installed is under **Add an agent**; one installed from there joins the lines
+  above, is turned on, and is signed in on the same line. Load, settings and
+  the xMatrix version follow; a daemon and CLI of one build are one line.
+- **An agent's page** shows where it works and waits, its usage, sign-in,
+  access and settings. Its header links to its machine and to the agent
+  across machines. The "Where it runs" facts its header already said are gone.
 
 The addresses `/status`, `/agents`, `/machines` and `/local` are unchanged, so
 links, bookmarks and installed iOS builds keep working. A phone's More no
-longer lists Agents and Machines, and the Agents list no longer leads with
-"Manage machines". iOS shows the third tab as Agents after its next release.
-Web and iOS. Recovery is a CI-validated change reverting this one.
+longer lists Agents and Machines, the Agents list no longer leads with
+"Manage machines" or ends with "Installed on your machines", and the page of
+an agent no longer carries install controls. iOS shows the third tab as Agents
+after its next release. The desktop app's own machine page keeps its "Agents"
+and "Found on this machine" sections for now. Web and iOS. Recovery is a
+CI-validated change reverting this one.
 
 ## Unreleased: an Android build repeats a failed dependency download
 

@@ -49,7 +49,8 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   const machine = page.getByRole("region", { name: "Remote server" }).getByTestId("agent-row");
   await machine.click();
   await expect(machine).toHaveAttribute("aria-current", "true");
-  await expect(page.getByText("Runtime", { exact: true })).toBeVisible();
+  await expect(page.getByTestId("agent-open-machine")).toHaveCount(0);
+  await expect(page.locator(".app-tool-detail").getByRole("heading", { level: 2, name: "codex" })).toBeVisible();
   await expect(text).toHaveCount(0);
   // Its page names the agent, which opens what is set on it everywhere.
   await page.getByTestId("agent-open-harness").click();

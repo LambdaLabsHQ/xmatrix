@@ -42,16 +42,15 @@ import {
   relativeTime,
 } from "./workspace-shell-recovered";
 
-import { daemonPresenceLabel } from "./machine-daemon-presence";
 import { MachineLoadPanel } from "./machine-load-details";
-import { MachineHarnessPanel } from "./machine-harness-panel";
+import { MachineHarnessPanel, type MachineAgentGlance } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import {
   machineUnresponsive, machinesWithHostsFirst,
 } from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSplit,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolListRow, ToolSettingRow, ToolSplit,
   ToolStateDot,
 } from "./tool-split";
 import { Button } from "@/components/ui/button";
@@ -389,7 +388,6 @@ export function LocalMacView({
   setupReady,
   machineName,
   onNameMachine,
-  harnesses,
   worktrees,
   hubRecord,
   onStartDaemon,
@@ -421,12 +419,10 @@ export function LocalMacView({
   setupReady: boolean;
   machineName: string | null | undefined;
   onNameMachine: (name: string) => void;
-  /** The machine's harness inventory, shown after its daemon as on every Machine's page. */
-  harnesses?: React.ReactNode;
   /** The Machine's git worktrees; renders its own section. */
   worktrees?: React.ReactNode;
-  /** The Hub's record of this machine: more daemon facts and its load. */
-  hubRecord?: { facts: React.ReactNode; load: React.ReactNode } | null;
+  /** The Hub's record of this machine: its agents, more daemon facts, its load and its settings. */
+  hubRecord?: MachineHubRecord | null;
   onStartDaemon: () => void;
   onRestartDaemon: () => void;
   onOpenCliInstall: () => void;
@@ -508,6 +504,8 @@ export function LocalMacView({
         </ToolDetailSection>
       )}
 
+      {hubRecord?.agents && <ToolDetailSection title="Agents on this machine">{hubRecord.agents}</ToolDetailSection>}
+
       <ToolDetailSection
         title="Daemon"
         action={daemonState === "missing" ? (
@@ -539,7 +537,7 @@ export function LocalMacView({
         {hubRecord?.load}
       </ToolDetailSection>
 
-      {harnesses && <ToolDetailSection title="Agents on this machine">{harnesses}</ToolDetailSection>}
+      {hubRecord?.settings}
       {worktrees}
 
       <ToolDetailSection
@@ -740,9 +738,12 @@ export type ThisMachine = {
   platform?: string;
   /** The desktop App running here, behind its channel: what its updater is doing. */
   appBehind?: (latestVersion: string) => React.ReactNode;
-  /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
-  content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
+  /** Its page, given what the Hub's record of it adds: its agents, its versions and load beside the daemon, its settings. */
+  content: (hubRecord: MachineHubRecord | null) => React.ReactNode;
 };
+
+/** What a Machine the Hub lists adds to the desktop's own page of it. */
+export type MachineHubRecord = { agents: React.ReactNode; facts: React.ReactNode; load: React.ReactNode; settings: React.ReactNode };
 
 /** What a Machine's page changed, shown at once in the list beside it; the next Machine refresh carries it too. */
 export function useMachineEdits() {
@@ -816,6 +817,7 @@ export function MachinePaper({
   token,
   spaceId,
   thisMachine,
+  agentOn,
   onOpenAgent,
 }: {
   model: MachineListModel;
@@ -827,6 +829,8 @@ export function MachinePaper({
   /** The Space being viewed: an owner turns each installed harness on or off for it. */
   spaceId?: string;
   thisMachine?: ThisMachine | null;
+  /** What an agent on a Machine does in this Space, by its harness, when the Space lists it. */
+  agentOn?: (machine: MachineSummary, harness: string) => MachineAgentGlance | undefined;
   /** Opens an agent that runs on this Machine, by its harness. */
   onOpenAgent?: (machine: MachineSummary, harness: string) => void;
 }) {
@@ -920,12 +924,26 @@ export function MachinePaper({
     const online = machine ? machine.status === "online" : thisMachine!.online;
     const stalled = Boolean(machine && machineUnresponsive(machine));
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
+    // The agents installed here come first on every Machine's page: installing one, signing it in and turning it on happen there.
+    const agents = machine && <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId}
+      agentOn={agentOn ? (harness) => agentOn(machine, harness) : undefined}
+      onOpenAgent={onOpenAgent ? (harness) => onOpenAgent(machine, harness) : undefined} />;
+    const settings = token && machine?.machineId && (
+      <ToolDetailSection title="Settings">
+        <ToolSettingRow title="Automatic assignment"
+          description={autoAssigned(machine) ? "Agents may start here whenever it suits the work."
+            : `Agents start here only when named, e.g. machine:${name}`}
+          control={<Switch checked={autoAssigned(machine)} disabled={assignBusy === machine.machineId}
+            label={`Automatic assignment: ${name}`} onChange={(on) => void assign(machine, on)} />} />
+        {assignError && <p role="alert" className="text-sm text-destructive">{assignError}</p>}
+      </ToolDetailSection>
+    );
     detail = (
       <ToolDetail
         key={machine?.id ?? THIS_MACHINE_SELECTION}
         onBack={() => select(null)}
         backLabel="Agents"
-        context="Machines"
+        context="Machine"
         title={renaming && editing ? (
           <form className="w-full" onSubmit={(event) => { event.preventDefault(); void saveName(); }}>
             <input
@@ -970,7 +988,8 @@ export function MachinePaper({
           <span className="flex flex-wrap items-center gap-x-2">
             <ToolStateDot state={stalled ? "attention" : online ? "running" : "offline"} />
             <span className="capitalize text-foreground">{stalled ? "not responding" : online ? "online" : "offline"}</span>
-            <span>· {local ? thisTag : null}{local && host ? " · " : null}{host ? `WSL on ${nameOf(host)}` : local ? null : "machine"}</span>
+            {local && <span>· {thisTag}</span>}
+            {host && <span>· WSL on {nameOf(host)}</span>}
             {/* While online, the stored time is its last connection, not a heartbeat. */}
             {machine?.lastSeenAt && <span>· {online ? "connected" : "seen"} {relativeTime(machine.lastSeenAt)}</span>}
             {stalled && machine?.daemon?.unansweredSince && <span>· work waiting since {relativeTime(machine.daemon.unansweredSince)}</span>}
@@ -979,41 +998,18 @@ export function MachinePaper({
       >
         {renaming && renameError && <p className="text-sm text-destructive">{renameError}</p>}
         {removeError && <p role="alert" className="text-sm text-destructive">{removeError}</p>}
-        {token && machine?.machineId && (
-          <ToolDetailSection title="Assignment">
-            <ToolFacts>
-              <ToolFact label="Automatic assignment">
-                <span className="inline-flex items-center gap-2">
-                  <Switch checked={autoAssigned(machine)} disabled={assignBusy === machine.machineId}
-                    label={`Automatic assignment: ${name}`} onChange={(on) => void assign(machine, on)} />
-                  <span className="text-muted-foreground">{autoAssigned(machine)
-                    ? "Agents may start here whenever it suits the work"
-                    : `Agents start here only when named, e.g. machine:${name}`}</span>
-                </span>
-              </ToolFact>
-            </ToolFacts>
-            {assignError && <p role="alert" className="text-sm text-destructive">{assignError}</p>}
-          </ToolDetailSection>
-        )}
-        {local ? thisMachine!.content(machine ? {
-          facts: (
-            <>
-              <MachineVersionFacts machine={machine} token={token} appBehind={thisMachine!.appBehind} />
-            </>
-          ),
+        {local ? thisMachine!.content(machine ? { agents, settings,
+          facts: <MachineVersionFacts machine={machine} token={token} appBehind={thisMachine!.appBehind} />,
           load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
-            <ToolDetailSection title="Agents on this machine">
-              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId}
-                onOpenAgent={onOpenAgent ? (harness) => onOpenAgent(machine, harness) : undefined} />
+            <ToolDetailSection title="Agents on this machine">{agents}</ToolDetailSection>
+            <ToolDetailSection title="Load">
+              <MachineLoadPanel machine={machine} now={now} token={token} lead />
             </ToolDetailSection>
-            <ToolDetailSection title="Daemon">
-              <ToolFacts>
-                <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
-                <MachineVersionFacts machine={machine} token={token} />
-              </ToolFacts>
-              <MachineLoadPanel machine={machine} now={now} token={token} />
+            {settings}
+            <ToolDetailSection title="xMatrix on this machine">
+              <ToolFacts><MachineVersionFacts machine={machine} token={token} /></ToolFacts>
             </ToolDetailSection>
             <MachineWorktreesPanel key={`worktrees:${machine.id}`} daemon={machine.daemon} token={token} />
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
@@ -1523,12 +1519,17 @@ function MachineVersionFacts({ machine, token, appBehind }: {
 }) {
   const cliBehind = (latestVersion: string, publishedAt?: string) => <CliBehind token={token}
     machineId={machine.machineId} daemon={machine.daemon} latestVersion={latestVersion} publishedAt={publishedAt} />;
+  // The daemon is the CLI running: two lines only when a machine really runs two builds.
+  const oneBuild = Boolean(machine.daemonVersion) && machine.daemonVersion === machine.cliVersion;
   return <>
-    <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" behind={cliBehind} /></ToolFact>
-    <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" behind={cliBehind} /></ToolFact>
-    <ToolFact label="App version">
+    {oneBuild
+      ? <ToolFact label="CLI and daemon"><MachineVersionValue version={machine.cliVersion} component="cli" behind={cliBehind} /></ToolFact>
+      : <>
+        <ToolFact label="Daemon version"><MachineVersionValue version={machine.daemonVersion} component="cli" behind={cliBehind} /></ToolFact>
+        <ToolFact label="CLI version"><MachineVersionValue version={machine.cliVersion} component="cli" behind={cliBehind} /></ToolFact>
+      </>}
+    {(machine.appVersion || appBehind) && <ToolFact label="App version">
       <MachineVersionValue version={machine.appVersion} component="desktop" behind={appBehind} />
-    </ToolFact>
-    <ToolFact label="Last seen">{machine.lastSeenAt ? relativeTime(machine.lastSeenAt) : "-"}</ToolFact>
+    </ToolFact>}
   </>;
 }

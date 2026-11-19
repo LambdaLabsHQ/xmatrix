@@ -63,19 +63,22 @@ test("the desktop's Machine id makes the Hub's renamed record its one tagged row
   const own = rows.filter({ has: page.getByTestId("this-machine-tag") });
   await expect(own).toContainText("Laptop");
   await expect(own).toContainText("This Mac");
-  // A row says what the Machine is doing, not what is registered on it.
-  await expect(own).toContainText("2 agents running");
+  // A row says what works on the Machine, not what is registered or merely alive on it:
+  // its two live processes have no work in hand.
+  await expect(own).toContainText("Idle");
+  await expect(own).not.toContainText("running");
   await expect(own).not.toContainText("director");
   await expect(rows.filter({ hasText: "grok-bot" })).toContainText("Idle");
 });
 
-test("a Machine row shows its live load as toned bars and its presence on its OS mark", async ({ page }) => {
+test("a Machine row shows only the load reading under strain, toned, and its presence on its OS mark", async ({ page }) => {
   await openAsDesktop(page, MACHINE_ID);
   const own = page.getByTestId("machine-row").filter({ has: page.getByTestId("this-machine-tag") });
+  // Memory at 50% and disk at 20% are healthy and are not drawn; the page of the Machine shows all three.
   const glance = own.getByTestId("machine-load-glance");
-  await expect(glance).toHaveAttribute("aria-label", "CPU 95%, Mem 50%, Disk 20%");
+  await expect(glance).toHaveAttribute("aria-label", "CPU 95%");
   await expect(glance.locator('[data-tone="red"]')).toHaveCount(1);
-  await expect(glance.locator('[data-tone="green"]')).toHaveCount(2);
+  await expect(glance.locator('[data-tone="green"]')).toHaveCount(0);
   await expect(own.locator('.app-tool-state-icon[data-state="running"]')).toHaveCount(1);
   // A Machine with no load sample says only what it is doing.
   await expect(page.getByTestId("machine-row").filter({ hasText: "grok-bot" }).getByTestId("machine-load-glance"))
@@ -190,8 +193,9 @@ async function openThisMachine(page: Page, release: object, updateStatus: Record
 
 test("a version behind a fresh release shows only what its update is really doing", async ({ page }) => {
   await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" });
-  // Seeing the CLI behind asks its daemon once, however many rows show it; they show what it reports.
-  await expect(page.getByText("Updating to v0.16.700")).toHaveCount(2);
+  // The daemon is the CLI running: one build is one line, and seeing it behind asks its daemon once.
+  await expect(page.getByText("CLI and daemon", { exact: true })).toBeVisible();
+  await expect(page.getByText("Updating to v0.16.700")).toHaveCount(1);
   expect(await fixtureRequestBodies(page, "cli-check")).toEqual([{ machineId: MACHINE_ID }]);
   await expect(page.getByText("v0.16.700 downloaded")).toBeVisible();
   await expect(page.getByRole("button", { name: /^(Update|Not updated)$/u })).toHaveCount(0);
@@ -205,11 +209,11 @@ test("a version still behind long after its release says it did not update, and 
     { state: "error", enabled: true, message: "The update server could not be reached." },
     { outcome: "checking", cliUpdate: { state: "failed", error: "Release feed https://xmatrix.sh/api/cli/releases/latest timed out", at: new Date().toISOString() } });
   const late = page.getByRole("button", { name: "Not updated", exact: true });
-  await expect(late).toHaveCount(3);
+  await expect(late).toHaveCount(2);
   await late.first().click();
   await expect(page.getByText("Release feed https://xmatrix.sh/api/cli/releases/latest timed out")).toBeVisible();
   await expect(page.getByRole("button", { name: "xmatrix update" })).toBeVisible();
-  await late.nth(2).click();
+  await late.nth(1).click();
   await expect(page.getByText("The update server could not be reached.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Check for updates" })).toBeVisible();
 });
@@ -223,7 +227,7 @@ test("a Machine that cannot be asked says why, with the fix", async ({ page }) =
   await openThisMachine(page, releasedAt(60_000), { state: "downloaded", enabled: true, version: "0.16.700" },
     { outcome: "unsupported", daemonVersion: "0.16.600" });
   const late = page.getByRole("button", { name: "Not updated", exact: true });
-  await expect(late).toHaveCount(2);
+  await expect(late).toHaveCount(1);
   await late.first().click();
   await expect(page.getByText("v0.16.600 cannot be asked to update from here.")).toBeVisible();
 });

@@ -149,7 +149,8 @@ takes many seconds and is not for that.
 - **Recent.** `GET /api/machine-daemons/harness-actions?machineId=` returns
   the owner's latest action per preset on that Machine from the last day
   (owner-requested actions only; Hub's `release` notices and sign-ins are not
-  listed), so the Machines page shows how an action ended after a reload.
+  listed), so a Machine's page shows how an action ended after a reload: under
+  that agent's upkeep, or on its line when the action went wrong.
 - **Not responding.** `status` and `lastSeenAt` follow connection events only
   (`lastSeenAt` of an online daemon is its last connect). The daemon list adds
   `unansweredSince` to an online daemon that has a command available but
@@ -251,8 +252,9 @@ human terminal or an Agent Run alike.
 ## Remote sign-in
 
 A preset with `management.login` has an official sign-in the daemon can run
-without a terminal, so its owner can sign the harness in from the Agents page
-instead of opening a shell on that Machine. The owner of a registration sees a
+without a terminal, so its owner can sign the harness in from its line on the
+Machine's page, or from the agent's own page, instead of opening a shell on
+that Machine. The owner of a registration sees a
 Sign-in section with the harness's state on that Machine and a Sign in button.
 
 - **Waiting and recovery.** A request that has not returned a sign-in result

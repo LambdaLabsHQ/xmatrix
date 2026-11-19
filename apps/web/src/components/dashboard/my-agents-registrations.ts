@@ -41,46 +41,57 @@ const QUOTA_NOTICE_PERCENT = 20;
 export interface RegistrationActivity {
   state: "running" | "paused" | "attention" | "offline";
   line: string;
+  /** The line without its quota note, for a row that draws the quota itself. */
+  brief: string;
   rank: number;
+  /** How many of its Instances have work in hand. */
+  working: number;
 }
 
 export function registrationActivity(registration: AgentRegistrationSummary, options: {
-  /** A Channel's title, for the ones the reader has; running elsewhere reads as "a conversation". */
+  /** A Channel's title, for the ones the reader has; work elsewhere reads as "a conversation". */
   conversationTitle: (channelId: string) => string | undefined;
   now?: number;
+  /**
+   * The Instances with work in hand. A live process waiting for its next
+   * message runs but does not work: only the ones at work are counted and
+   * named, and a location with none reads as ready.
+   */
+  working: ReadonlySet<string>;
 }): RegistrationActivity {
+  const say = (state: RegistrationActivity["state"], line: string, rank: number): RegistrationActivity =>
+    ({ state, line, brief: line, rank, working: 0 });
   const status = registrationStatus(registration);
   const live = registration.live;
   if (registration.state !== "enabled" || registration.routingBlocker === "owner_environment_disabled") {
-    return { state: "paused", line: status?.label ?? "Unavailable", rank: 4 };
+    return say("paused", status?.label ?? "Unavailable", 4);
   }
   if (live && !live.machine.online) {
     const seen = formatRelativeAge(live.machine.lastSeenAt, options.now);
-    return { state: "offline", line: seen ? `Offline · seen ${seen}` : "Offline", rank: 3 };
+    return say("offline", seen ? `Offline · seen ${seen}` : "Offline", 3);
   }
-  if (status) return { state: "attention", line: status.label, rank: 2 };
+  if (status) return say("attention", status.label, 2);
   // A prepaid account the provider refuses, or with no money left, cannot take work.
-  if (live?.balance && (live.balance.allowed === false || live.balance.amount <= 0)) return { state: "attention", line: "Out of balance", rank: 2 };
+  if (live?.balance && (live.balance.allowed === false || live.balance.amount <= 0)) return say("attention", "Out of balance", 2);
   const quota = live?.quota;
   if (quota && quota.remainingPercent < 1) {
     const windows = currentRoutingQuotaWindows(quota.windows, options.now ?? Date.now());
     const labels = [...new Set(windows.filter(window => window.usedPercent > 99)
       .flatMap(window => window.label ? [window.label] : []))];
-    const line = labels.length ? `${labels.join(" + ")} limit reached` : "Out of quota · window unavailable";
-    return { state: "attention", line, rank: 2 };
+    return say("attention", labels.length ? `${labels.join(" + ")} limit reached` : "Out of quota · window unavailable", 2);
   }
   const quotaNote = quota && quota.remainingPercent <= QUOTA_NOTICE_PERCENT
     ? ` · ${Math.round(quota.remainingPercent)}% quota left` : "";
-  const running = live?.running ?? [];
-  if (running.length) {
-    const places = [...new Set(running.map((instance) => {
+  const working = (live?.running ?? []).filter((instance) => options.working.has(instance.instanceId));
+  if (working.length) {
+    const places = [...new Set(working.map((instance) => {
       const title = options.conversationTitle(instance.channelId);
       return title ? `#${title}` : "a conversation";
     }))];
-    const lead = running.length === 1 ? "Running" : `${running.length} running`;
-    return { state: "running", line: `${lead} in ${places.join(", ")}${quotaNote}`, rank: 0 };
+    const brief = `${working.length === 1 ? "Working" : `${working.length} working`} in ${places.join(", ")}`;
+    return { state: "running", line: `${brief}${quotaNote}`, brief, rank: 0, working: working.length };
   }
-  return { state: "running", line: `Ready${quotaNote}`, rank: 1 };
+  return { state: "running", line: `Ready${quotaNote}`, brief: "Ready", rank: 1, working: 0 };
 }
 
 /**

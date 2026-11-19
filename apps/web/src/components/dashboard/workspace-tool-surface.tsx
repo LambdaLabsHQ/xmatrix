@@ -22,7 +22,6 @@ import type {
 import type { SpaceJoinRequest } from "@/components/dashboard/space-join-requests";
 import { humanProfileFromSpaceMember } from "./human-profile-summary";
 import { ProfileView } from "./human-profile-view";
-import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import { FleetView, type FleetAddress } from "./fleet-view";
 import {
@@ -268,8 +267,6 @@ export function ToolSurface({
           setupReady={localSetupReady}
           machineName={localMachineName}
           onNameMachine={onNameLocalMachine}
-          harnesses={<MachineHarnessPanel key={currentSpace?.id} token={token} spaceId={currentSpace?.id}
-            daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           worktrees={<MachineWorktreesPanel token={token}
             daemon={machines.find(machine => machine.machineId === desktopContext?.machineId)?.daemon} />}
           onStartDaemon={onStartDesktopDaemon}

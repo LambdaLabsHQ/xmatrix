@@ -602,7 +602,8 @@ export function TopWorkspaceBar({
   // A dock tab's own screen is named by the dock, which is right there, so the
   // bar names only the Space. A screen pushed from More still needs the bar
   // as its title (a paper destination hides its own heading under md).
-  const tabRoot = !showBack && DOCK_TAB_VIEWS.includes(view);
+  // A machine or an agent opened in the Agents tab has its own way back on its paper, so the bar stays the Space's.
+  const tabRoot = !showBack && (DOCK_TAB_VIEWS.includes(view) || isFleetView(view));
   const mobileTitle =
     conversationOpen && channel
       ? channelTitle(channel)

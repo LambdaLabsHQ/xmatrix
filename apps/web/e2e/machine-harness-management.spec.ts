@@ -31,6 +31,23 @@ async function openMachine(page: Parameters<typeof openWorkspaceWithStubs>[0], s
   await expect(page.getByTestId("machine-harness-panel")).toBeVisible();
 }
 
+type Panel = ReturnType<import("@playwright/test").Page["getByTestId"]>;
+/** An agent's line on its machine's page: what it does here, the step it waits on, its switch for this Space. */
+const agentRow = (panel: Panel, name: string) => panel.getByTestId("harness-row").filter({ hasText: name });
+/** The same line with its upkeep open: version, updates, uninstall. */
+async function upkeep(panel: Panel, name: string) {
+  const row = agentRow(panel, name);
+  const toggle = row.getByRole("button", { name: /^Manage / });
+  if (await toggle.getAttribute("aria-expanded") !== "true") await toggle.click();
+  return row;
+}
+/** What is not installed yet is offered under "Add an agent". */
+async function offered(panel: Panel, name: string) {
+  const add = panel.getByTestId("harness-add");
+  if (await add.getAttribute("aria-expanded") !== "true") await add.click();
+  return agentRow(panel, name);
+}
+
 test("update runs from its row at once and shows its outcome on that row", async ({ page }) => {
   await openMachine(page);
   await fixtureJson(page, "harness-action", "**/api/xmatrix/machine-daemons/harness-actions",
@@ -39,8 +56,10 @@ test("update runs from its row at once and shows its outcome on that row", async
     { controlId: CONTROL, presetId: "codex", action: "update", status: "succeeded",
       result: { presetId: "codex", action: "update", status: "succeeded", outputTail: "Updated successfully" } });
   const panel = page.getByTestId("machine-harness-panel");
-  const row = panel.getByRole("row").filter({ hasText: "Codex" });
-  await expect(row).toContainText("1.1.0");
+  // Behind its latest release and not updating itself, its line says so before it is opened.
+  await expect(agentRow(panel, "Codex").getByTestId("harness-state")).toHaveText("Off in this Space · 1.1.0 available");
+  const row = await upkeep(panel, "Codex");
+  await expect(row).toContainText("1.0.0");
   await expect(row.getByRole("switch", { name: "Automatic updates: Codex" })).toHaveAttribute("aria-checked", "false");
   const update = row.getByRole("button", { name: "Update", exact: true });
   await expect(update).toHaveAttribute("title", /@openai\/codex@latest/);
@@ -61,15 +80,15 @@ test("a running action holds only its own row", async ({ page }) => {
   await fixtureJson(page, "harness-status", "**/api/xmatrix/machine-daemons/harness-actions/*",
     { controlId: CONTROL, presetId: "codex", action: "update", status: "running" });
   const panel = page.getByTestId("machine-harness-panel");
-  const codex = panel.getByRole("row").filter({ hasText: "Codex" });
+  const codex = await upkeep(panel, "Codex");
   await codex.getByRole("button", { name: "Update", exact: true }).click();
   await expect(codex.getByText("Update · Codex: Running on the machine…")).toBeVisible();
   await expect(codex.getByRole("button", { name: "Update", exact: true })).toBeDisabled();
   await expect(codex.getByRole("switch", { name: "Automatic updates: Codex" })).toBeDisabled();
-  const copilot = panel.getByRole("row").filter({ hasText: "Copilot" });
+  const copilot = await upkeep(panel, "Copilot");
   await expect(copilot.getByRole("button", { name: "Update", exact: true })).toBeEnabled();
   await expect(copilot.getByRole("switch", { name: "Automatic updates: GitHub Copilot CLI" })).toBeEnabled();
-  await expect(panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
+  await expect((await offered(panel, "Claude")).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
   await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
   await copilot.getByRole("button", { name: "Update", exact: true }).click();
   await expect.poll(() => fixtureRequestBodies(page, "harness-action")).toEqual([
@@ -83,7 +102,9 @@ test("installation uses the Windows recipe and a server refusal remains visible"
   await fixtureRule(page, { id: "harness-denied", pattern: "**/api/xmatrix/machine-daemons/harness-actions", method: "POST",
     responder: { kind: "static", status: 409, json: { error: "Machine is offline" } } });
   const panel = page.getByTestId("machine-harness-panel");
-  const install = panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true });
+  // Nothing not installed is listed until it is asked for.
+  await expect(agentRow(panel, "Claude")).toHaveCount(0);
+  const install = (await offered(panel, "Claude")).getByRole("button", { name: "Install", exact: true });
   await expect(install).toHaveAttribute("title", /powershell.*install\.ps1/);
   await install.click();
   await expect(panel.getByRole("alert")).toHaveText("Couldn't send that to the machine. Machine is offline.");
@@ -96,7 +117,7 @@ test("automatic update control and inventory refresh send closed actions", async
     controlId: CONTROL, presetId: "copilot", action: "auto_update_off", status: "succeeded",
   });
   const panel = page.getByTestId("machine-harness-panel");
-  const copilot = panel.getByRole("row").filter({ hasText: "Copilot" });
+  const copilot = await upkeep(panel, "Copilot");
   const copilotUpdates = copilot.getByRole("switch", { name: "Automatic updates: GitHub Copilot CLI" });
   await expect(copilotUpdates).toHaveAttribute("aria-checked", "true");
   await copilotUpdates.click();
@@ -114,9 +135,14 @@ test("automatic update control and inventory refresh send closed actions", async
 test("offline machines retain observations and disable management", async ({ page }) => {
   await openMachine(page, "offline");
   const panel = page.getByTestId("machine-harness-panel");
-  await expect(panel.getByText("Connect this machine to refresh or manage harnesses.")).toBeVisible();
-  await expect(panel.getByRole("row").filter({ hasText: "Codex" })).toContainText("1.0.0");
-  for (const button of await panel.getByRole("button").all()) await expect(button).toBeDisabled();
+  await expect(panel.getByText("Connect this machine to manage its agents.")).toBeVisible();
+  await expect(await upkeep(panel, "Codex")).toContainText("1.0.0");
+  await offered(panel, "Claude");
+  // Nothing that needs the machine can be asked of it; its lines still open and close.
+  for (const name of ["Refresh", "Update", "Install", "Uninstall"]) {
+    for (const button of await panel.getByRole("button", { name, exact: true }).all()) await expect(button).toBeDisabled();
+  }
+  await expect(panel.getByRole("switch", { name: "Automatic updates: Codex" })).toBeDisabled();
 });
 
 
@@ -127,7 +153,7 @@ test("an unknown state reads as unknown and the switch turns it on", async ({ pa
     controlId: CONTROL, presetId: "junie", action: "auto_update_on", status: "succeeded",
   });
   const panel = page.getByTestId("machine-harness-panel");
-  const row = panel.getByRole("row").filter({ hasText: "Junie" });
+  const row = await upkeep(panel, "Junie");
   await expect(row.getByText("Unknown", { exact: true })).toBeVisible();
   const updates = row.getByRole("switch", { name: "Automatic updates: Junie" });
   await expect(updates).toHaveAttribute("aria-checked", "false");
@@ -141,10 +167,10 @@ test("an unknown state reads as unknown and the switch turns it on", async ({ pa
 test("old daemons cannot update Cursor while other harness updates remain available", async ({ page }) => {
   await openMachine(page);
   const panel = page.getByTestId("machine-harness-panel");
-  const cursor = panel.getByRole("row").filter({ hasText: "Cursor" });
+  const cursor = await upkeep(panel, "Cursor");
   await expect(cursor.getByRole("button", { name: "Update", exact: true })).toBeDisabled();
   await expect(cursor).toContainText("Update this machine's daemon before updating Cursor.");
-  await expect(panel.getByRole("row").filter({ hasText: "Codex" }).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
+  await expect((await upkeep(panel, "Codex")).getByRole("button", { name: "Update", exact: true })).toBeEnabled();
 });
 
 test("uninstall takes a second tap on its row and is offered only where one exists", async ({ page }) => {
@@ -155,9 +181,9 @@ test("uninstall takes a second tap on its row and is offered only where one exis
   });
   const panel = page.getByTestId("machine-harness-panel");
   // No verified uninstaller upstream, and nothing to remove where it is not installed.
-  await expect(panel.getByRole("row").filter({ hasText: "Junie" }).getByRole("button", { name: "Uninstall" })).toHaveCount(0);
-  await expect(panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Uninstall" })).toHaveCount(0);
-  const codex = panel.getByRole("row").filter({ hasText: "Codex" });
+  await expect((await upkeep(panel, "Junie")).getByRole("button", { name: "Uninstall" })).toHaveCount(0);
+  await expect((await offered(panel, "Claude")).getByRole("button", { name: "Uninstall" })).toHaveCount(0);
+  const codex = await upkeep(panel, "Codex");
   await expect(codex.getByRole("button", { name: "Uninstall", exact: true })).toHaveAttribute("title", "npm uninstall -g @openai/codex");
   await codex.getByRole("button", { name: "Uninstall", exact: true }).click();
   await expect(codex).toContainText("Settings and sessions are kept.");
@@ -176,7 +202,9 @@ test("a reload still shows how an earlier install ended, and says when it found 
       item: { id: "claude", installed: false, probeStatus: "missing" } } };
   await fixtureJson(page, "harness-status", "**/api/xmatrix/machine-daemons/harness-actions/*", recorded);
   await openMachine(page, "online", daemon.metadata.capabilities, { recorded: [recorded] });
-  const claude = page.getByTestId("machine-harness-panel").getByRole("row").filter({ hasText: "Claude Code" });
+  // An install that found nothing keeps its line, though nothing else not installed is listed.
+  const claude = agentRow(page.getByTestId("machine-harness-panel"), "Claude Code");
+  await expect(agentRow(page.getByTestId("machine-harness-panel"), "Gemini")).toHaveCount(0);
   await expect(claude).toContainText("Install · Claude Code: Install finished, but Claude Code was not found on this machine's PATH");
   await expect(claude).not.toContainText("succeeded");
 });
@@ -187,12 +215,12 @@ test("a machine that left work unanswered is not responding, and its actions sta
   await expect(panel).toContainText("This machine is not responding");
   await expect(panel).toContainText("a new action may not reach it");
   await expect(panel.getByRole("button", { name: "Refresh", exact: true })).toBeEnabled();
-  await expect(panel.getByRole("row").filter({ hasText: "Claude Code" }).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
+  await expect((await offered(panel, "Claude Code")).getByRole("button", { name: "Install", exact: true })).toBeEnabled();
 });
 
 test("old daemons cannot uninstall", async ({ page }) => {
   await openMachine(page);
-  const codex = page.getByTestId("machine-harness-panel").getByRole("row").filter({ hasText: "Codex" });
+  const codex = await upkeep(page.getByTestId("machine-harness-panel"), "Codex");
   await expect(codex.getByRole("button", { name: "Uninstall", exact: true })).toBeDisabled();
   await expect(codex).toContainText("Update this machine's daemon to uninstall.");
 });
@@ -200,25 +228,28 @@ test("old daemons cannot uninstall", async ({ page }) => {
 test.describe("desktop automatic update status", () => {
   test.use({ viewport: { width: 1440, height: 1000 }, isMobile: false, hasTouch: false });
 
-  test("reported states remain distinct and the table carries no placeholder text", async ({ page }) => {
+  test("reported states remain distinct and the list carries no placeholder text", async ({ page }) => {
     await openMachine(page);
     const panel = page.getByTestId("machine-harness-panel");
-    const row = (harness: string) => panel.getByRole("row").filter({ hasText: harness });
+    for (const harness of ["Codex", "Copilot", "Junie"]) await upkeep(panel, harness);
+    const row = (harness: string) => agentRow(panel, harness);
     await expect(row("Codex").getByRole("switch", { name: "Automatic updates: Codex" })).toHaveAttribute("aria-checked", "false");
     await expect(row("Copilot").getByRole("switch", { name: "Automatic updates: GitHub Copilot CLI" })).toHaveAttribute("aria-checked", "true");
     await expect(row("Junie").getByText("Unknown", { exact: true })).toBeVisible();
     await expect(row("Codex").getByText("Unknown", { exact: true })).toHaveCount(0);
+    await expect((await offered(panel, "Claude")).getByRole("switch")).toHaveCount(0);
     for (const placeholder of ["Not checked", "Not installed", "Not available", "Update available", "\u2014"]) {
       await expect(panel.getByText(placeholder, { exact: true })).toHaveCount(0);
     }
-    await expect(panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("switch")).toHaveCount(0);
-    const order = await panel.locator("tbody > tr").evaluateAll((rows) => rows.map((row) =>
-      row.getAttribute("data-testid") === "harness-install-divider" ? "divider" : (row.querySelector("th")?.textContent ?? "").trim()));
-    expect(order.indexOf("Codex")).toBeLessThan(order.indexOf("divider"));
-    expect(order.indexOf("divider")).toBeLessThan(order.indexOf("Claude Code"));
+    // What is installed comes first, then "Add an agent", then what it offers.
+    const order = await panel.locator("ul.app-tool-lines > li").evaluateAll((items) => items.map((item) =>
+      item.querySelector("[data-testid=harness-add]") ? "add" : (item.querySelector(".font-semibold")?.textContent ?? "").trim()));
+    expect(order.indexOf("Codex")).toBeLessThan(order.indexOf("add"));
+    expect(order.indexOf("add")).toBeLessThan(order.indexOf("Claude Code"));
     expect(order.indexOf("Cursor")).toBeLessThan(order.indexOf("GitHub Copilot CLI"));
     expect(await panel.evaluate((element) => element.scrollWidth > element.clientWidth + 1)).toBe(false);
     await expect(row("Codex").getByRole("switch", { name: "Enabled: Codex" })).toHaveAttribute("aria-checked", "false");
+    await expect(row("Codex").getByTestId("harness-state")).toContainText("Off in this Space");
     await panel.screenshot({ path: test.info().outputPath("auto-update-status.png") });
   });
 });
@@ -277,7 +308,7 @@ test("a harness installed from here is turned on in this Space", async ({ page }
   await fixtureJson(page, "registration-catalog-on", CATALOG, catalogOf([spaceRegistration("claude")]));
   await fixtureUnconfirmedAccess(page, "claude");
   const panel = page.getByTestId("machine-harness-panel");
-  await panel.getByRole("row").filter({ hasText: "Claude" }).getByRole("button", { name: "Install", exact: true }).click();
+  await (await offered(panel, "Claude")).getByRole("button", { name: "Install", exact: true }).click();
   // Installed, it is added once its owner read what full access adds.
   const confirmation = page.getByRole("dialog", { name: "Claude Code: access on this machine" });
   await expect(confirmation.getByTestId("agent-access-lines")).toContainText("Adds the argument --dangerously-skip-permissions");
@@ -296,6 +327,9 @@ test("restoring a successful install from machine history does not enable it in 
   await fixtureJson(page, "space-command", COMMANDS, { version: 1 }, { method: "POST" });
   const panel = page.getByTestId("machine-harness-panel");
   await expect(panel.getByRole("switch", { name: "Enabled: Codex" })).toHaveAttribute("aria-checked", "false");
+  // How an earlier action ended is read under its line's upkeep, not on every visit.
+  await expect(panel.getByText("Install · Codex: Done")).toHaveCount(0);
+  await upkeep(panel, "Codex");
   await expect(panel.getByText("Install · Codex: Done")).toBeVisible();
   expect(await fixtureRequestBodies(page, "space-command")).toEqual([]);
 });

@@ -20,7 +20,8 @@ export function AgentHarnessDetail({ group, token, onBack, onOpenLocation, onSav
   onSaved: () => Promise<unknown>;
 }) {
   const { harness, rows } = group;
-  const running = rows.filter((row) => row.activity.state === "running").length;
+  // Work in hand, as the list counts it: a location that is only ready is not working.
+  const working = rows.reduce((sum, row) => sum + row.activity.working, 0);
   // The description is the runtime's, so every location reports the same one.
   const described = rows.find((row) => row.registration.canDescribe) ?? rows[0];
   return (
@@ -29,11 +30,11 @@ export function AgentHarnessDetail({ group, token, onBack, onOpenLocation, onSav
       backLabel="Agents"
       context={<span className="flex items-center gap-1.5">
         <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
-        <span>Agent</span>
+        <span>Agent · on every machine it runs on</span>
       </span>}
       title={harness}
       status={<span className="text-foreground">
-        {rows.length === 1 ? "On 1 machine" : `On ${rows.length} machines`}{running ? ` · ${running} running` : ""}
+        {rows.length === 1 ? "On 1 machine" : `On ${rows.length} machines`}{working ? ` · ${working} working` : ""}
       </span>}
     >
       {described && <HarnessProfileSection registration={described.registration} token={token} onSaved={onSaved} />}

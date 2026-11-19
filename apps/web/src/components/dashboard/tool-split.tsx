@@ -151,7 +151,7 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, selected
 }
 
 /** One row: a leading mark, the name with something at its end, and one line under it. */
-export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, trailing, subtitle, testId, state, phoneOnly, desktopOnly, child }: {
+export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, meter, trailing, subtitle, testId, state, phoneOnly, desktopOnly, child }: {
   selected: boolean;
   /** A row only a phone lists, where a desktop shows it as the list's +. */
   phoneOnly?: boolean;
@@ -167,6 +167,8 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
   end?: ReactNode;
   /** Live state beside the text, centred on the row; the name gives way to it. */
   trailing?: ReactNode;
+  /** Live state on the name's own line, centred on it, so the line under the name keeps the row's whole width. */
+  meter?: ReactNode;
   subtitle?: ReactNode;
   testId?: string;
   state?: string;
@@ -185,6 +187,7 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
           <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}>
             <span className={LIST_ROW_TITLE_CLASS_NAME}>{title}</span>
             {end && <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{end}</span>}
+            {meter && <span className="-my-1 flex shrink-0 items-center self-center">{meter}</span>}
           </span>
           {subtitle && <span className={LIST_ROW_META_CLASS_NAME}>{subtitle}</span>}
         </span>
