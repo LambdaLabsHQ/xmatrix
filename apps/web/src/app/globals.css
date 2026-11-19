@@ -9212,6 +9212,22 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   font-variant-numeric: tabular-nums;
 }
 
+.xmatrix-app .app-page-reference-popup-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.xmatrix-app .app-page-reference-popup-unlink {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.xmatrix-app .app-page-reference-popup-unlink:hover:not(:disabled) {
+  color: var(--foreground);
+  text-decoration: underline;
+}
+
 .xmatrix-app .app-page-reference-popup-body {
   display: -webkit-box;
   margin: 0;

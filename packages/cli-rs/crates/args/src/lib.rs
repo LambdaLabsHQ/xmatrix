@@ -2276,6 +2276,17 @@ pub enum PageCommand {
         #[arg(long)]
         conversation: Option<String>,
     },
+    /// Unlink a page from a conversation; its changes stop reaching it until it is linked again
+    Unlink {
+        /// Page ID
+        page: String,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
+        /// Conversation (defaults to this Run's conversation)
+        #[arg(long)]
+        conversation: Option<String>,
+    },
     /// Resolve a discussion once its outcome is written into the page (or reopen it)
     Resolve {
         /// Page ID

@@ -109,7 +109,7 @@ A message sent from the CLI is read with the same [syntax](syntax.md) as one typ
 | `xmatrix page create <title> [--under <page-id>]` | Create a page |
 | `xmatrix page rename` · `move` · `delete` | Arrange the tree |
 | `xmatrix page history <page-id>` | List revisions |
-| `xmatrix page linked` · `link` | Pages linked to a conversation |
+| `xmatrix page linked` · `link` · `unlink` | Pages linked to a conversation |
 | `xmatrix page resolve <page-id> <link-id>` | Resolve a discussion |
 
 For local images and videos, run `xmatrix page upload <page-id> ./screenshot.png`,

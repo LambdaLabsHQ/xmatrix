@@ -207,6 +207,20 @@ fn run_conversation() -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+/// The Space and conversation a link or unlink names: by default this Run's.
+async fn link_target(
+    hub_url: &str,
+    token: &str,
+    space: Option<String>,
+    conversation: Option<String>,
+) -> error::Result<(String, String)> {
+    let space = resolve_space(hub_url, token, space).await?;
+    let conversation = conversation
+        .or_else(run_conversation)
+        .ok_or_else(|| CliError::Launch("pass --conversation <channel-id>".into()))?;
+    Ok((space, conversation))
+}
+
 pub(crate) async fn resolve_space(
     hub_url: &str,
     token: &str,
@@ -1003,10 +1017,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             space,
             conversation,
         } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let conversation = conversation
-                .or_else(run_conversation)
-                .ok_or_else(|| CliError::Launch("pass --conversation <channel-id>".into()))?;
+            let (space, conversation) = link_target(hub_url, token, space, conversation).await?;
             let url = with_route(hub_url, &format!("/api/spaces/{}/page-links", enc(&space)));
             let _: serde_json::Value = http::request_json(
                 &url,
@@ -1024,6 +1035,31 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 "{} Linked {} to this conversation",
                 "✓".green().bold(),
                 page
+            );
+            Ok(())
+        }
+        PageCommand::Unlink {
+            page,
+            space,
+            conversation,
+        } => {
+            let (space, conversation) = link_target(hub_url, token, space, conversation).await?;
+            let url = with_route(
+                hub_url,
+                &format!(
+                    "/api/spaces/{}/page-links?pageId={}&conversationId={}",
+                    enc(&space),
+                    enc(&page),
+                    enc(&conversation)
+                ),
+            );
+            let _: serde_json::Value =
+                http::request_json(&url, "DELETE", Some(token), None).await?;
+            println!(
+                "{} Unlinked {} from conversation {}; reading or editing it there does not link it again",
+                "✓".green().bold(),
+                page,
+                conversation
             );
             Ok(())
         }

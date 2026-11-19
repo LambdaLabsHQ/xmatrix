@@ -92,7 +92,8 @@ async function addSleepingInstance(client, ids) {
 }
 
 async function cleanup(client, ids) {
-  for (const table of ["page_reads", "page_co_writing", "page_links", "page_access", "page_revisions", "pages"]) {
+  for (const table of ["page_reads", "page_co_writing", "page_links", "page_unlinks", "page_access", "page_revisions",
+    "pages"]) {
     await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]).catch(() => {});
   }
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -308,6 +309,51 @@ integration("co-writing: a person starts it from a linked conversation, and the 
     await call("remove", { principal: owner, pageId });
     const { rows } = await client.query("SELECT 1 FROM data.page_co_writing WHERE space_id=$1", [ids.space]);
     assert.equal(rows.length, 0, "removing the page removes its co-writing");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
+// An Agent reading or editing a page from a conversation links it there, so deleting the links alone was undone by the
+// next read: the page came back into every new Run's launch context.
+integration("unlinking a page from a conversation keeps it out until someone links it again", async () => {
+  const { client, ids, pages, owner, member, agent } = await pageTest("page-unlink");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const linked = async () => (await pages.conversationPages({ requestId: crypto.randomUUID(),
+      conversationId: ids.open, principal: member })).pages.map((page) => page.pageId);
+    const { page } = await call("create", { principal: owner, title: "Plan", body: "# Plan\n\n## Status\n\nOne\n" });
+    const pageId = page.pageId;
+    await call("read", { principal: agent, pageId, conversationId: ids.open, blockId: "status" });
+    await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
+    await call("startCoWriting", { principal: member, pageId, conversationId: ids.open });
+    assert.deepEqual(await linked(), [pageId]);
+
+    assert.deepEqual(await call("unlinkPage", { principal: member, pageId, conversationId: ids.open }), { removed: 2 },
+      "every link between the page and the conversation goes, section links included");
+    assert.deepEqual(await linked(), []);
+    assert.deepEqual(await call("coWritersToWake", { pageId }), [], "typing on the page no longer wakes its Agent");
+
+    await call("read", { principal: agent, pageId, conversationId: ids.open });
+    await call("edit", { principal: agent, pageId, baseRevision: 1, body: "# Plan\n\n## Status\n\nTwo\n",
+      conversationIds: [ids.open], blockIds: ["status"] });
+    assert.deepEqual(await pages.linkReferences({ requestId: crypto.randomUUID(), conversationId: ids.open,
+      principal: agent, pageIds: [pageId] }), { linked: [] });
+    assert.deepEqual(await linked(), [], "reading, editing or mentioning it there does not link it again");
+
+    await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
+    assert.deepEqual(await linked(), [pageId], "an explicit link brings it back");
+    await call("read", { principal: agent, pageId, conversationId: ids.open, blockId: "status" });
+    assert.equal((await call("links", { principal: member, conversationId: ids.open })).links.length, 2,
+      "and reads link it as before");
+
+    await assert.rejects(call("unlinkPage", { principal: member, pageId, conversationId: ids.closed }),
+      code("channel_not_found"), "only someone in the conversation unlinks a page from it");
+    await call("unlinkPage", { principal: agent, pageId, conversationId: ids.open });
+    await call("remove", { principal: owner, pageId });
+    assert.equal((await client.query("SELECT 1 FROM data.page_unlinks WHERE space_id=$1", [ids.space])).rows.length, 0,
+      "removing the page removes its unlinks");
   } finally {
     await cleanup(client, ids);
     await client.end();
