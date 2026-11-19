@@ -289,6 +289,7 @@ test("full-panel desktop matrix uses panel width, aligns its left axis, and keep
   for (const label of layout.quotaLabels) {
     expect(label.height, `quota label "${label.text}" wrapped`).toBeLessThanOrEqual(16);
   }
+  await expect(page.getByTestId("status-hero")).not.toContainText("Nothing is working right now");
 });
 
 test.describe("mobile agents grid and bottom sheets", () => {

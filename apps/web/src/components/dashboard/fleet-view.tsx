@@ -378,7 +378,7 @@ export function FleetView({
   // Each agent waiting on a person (and each unresponsive machine) already renders in amber ink inside its grid cell / row.
   const attentionCount = model.listed.filter(machineUnresponsive).length + rows.filter((row) => row.activity.state === "attention").length;
   const attentionNote = attentionCount > 0 && (
-    <span className={statusInkClass("attention")} data-testid="fleet-attention-count">
+    <span className={statusInkClass("attention", "font-medium")} data-testid="fleet-attention-count">
       {" · "}{attentionCount} {attentionCount === 1 ? "needs" : "need"} attention</span>
   );
 
@@ -483,11 +483,13 @@ export function FleetView({
   if (!showsOverview) return <ToolSheet label="Agents">{page}</ToolSheet>;
   return (
     <ToolSheet label="Agents">
-      <div className="app-band-header flex shrink-0 items-center justify-between gap-4 px-4 md:pl-8 md:pr-14 lg:pl-10 2xl:pl-12">
-        <h1 className="text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
-      </div>
-      <ToolPaperScroll full belowBand={false}>
-        {setup ? <div className="mx-auto max-w-3xl pt-4">{bringIn}</div> : <>
+      <ToolPaperScroll full>
+        {setup ? (
+          <div className="mx-auto max-w-3xl">
+            <h1 className="mb-6 text-2xl font-black tracking-[-0.02em] text-foreground">Agents</h1>
+            {bringIn}
+          </div>
+        ) : <>
           {notices}
           {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
           <FleetOverview status={status} attention={[]} note={attentionNote}>
