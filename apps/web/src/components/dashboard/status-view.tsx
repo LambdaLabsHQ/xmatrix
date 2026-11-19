@@ -10,10 +10,8 @@ import {
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
-import { ErrorNotice } from "@/components/ui/error-notice";
 import { statusInkClass } from "@/components/ui/status-tone";
 
-import { ListSkeleton } from "./content-skeleton";
 import { Face } from "./face";
 import { MachineGlyph } from "./machine-glyph";
 import { registrationListed } from "./my-agents-registrations";
@@ -123,54 +121,6 @@ export function FleetOverview({ status, attention, note, children }: {
         {children}
       </div>
     </>
-  );
-}
-
-/**
- * Each agent across the machines it runs on, where no matrix shows it: a
- * line opens what the Space set on that agent, whichever machine runs it.
- */
-export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHarness, empty }: {
-  /** Counted from the same rows the list shows. */
-  runtimes: FleetRuntime[];
-  loading: boolean;
-  error: unknown;
-  onRetry: () => void;
-  onOpenHarness: (harness: string) => void;
-  /** What the Space reads in place of its agents while it has none. */
-  empty?: ReactNode;
-}) {
-  return (
-    <ToolDetailSection title="Agents in this Space">
-      {error ? (
-        <ErrorNotice error={error} action="Couldn't load the agent list" onRetry={onRetry} />
-      ) : loading ? (
-        <ListSkeleton label="Loading agents" rows={1} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
-      ) : runtimes.length === 0 ? (
-        empty ?? <p className="text-sm text-muted-foreground">No agents yet.</p>
-      ) : (
-        <ul className="app-tool-lines">
-          {runtimes.map((runtime) => (
-            <li key={runtime.harness}>
-              <button type="button" onClick={() => onOpenHarness(runtime.harness)} data-testid="status-runtime"
-                aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
-                className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
-                <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
-                  showKindBadge={false} className="shrink-0" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-semibold">{runtime.harness}</span>
-                  <span className="block truncate text-xs text-muted-foreground">
-                    {runtime.working > 0 && <span className="font-semibold text-foreground">{runtime.working} working · </span>}
-                    {runtimeLine(runtime)}
-                  </span>
-                </span>
-                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-    </ToolDetailSection>
   );
 }
 
