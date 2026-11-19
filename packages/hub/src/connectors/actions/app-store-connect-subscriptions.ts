@@ -94,26 +94,30 @@ export function productsStatement(statement: { target: string; text: string }): 
 }
 
 async function subscriptions(api: AppStoreConnectApi, appId: string) {
-  const groups = (await api.list(`/v1/apps/${encodeURIComponent(appId)}/subscriptionGroups`,
-    { "fields[subscriptionGroups]": "referenceName", limit: "50" }, 1)).rows;
+  const groupList = await api.list(`/v1/apps/${encodeURIComponent(appId)}/subscriptionGroups`,
+    { "fields[subscriptionGroups]": "referenceName", limit: "50" }, 1);
+  const groups = groupList.rows;
   const lists = await Promise.all(groups.map(group => api.list(`/v1/subscriptionGroups/${encodeURIComponent(group.id)}/subscriptions`,
     { "fields[subscriptions]": "productId,name,state,groupLevel,subscriptionPeriod", limit: "200" }, 1)));
-  return groups.flatMap((group, index) => lists[index]!.rows.map(row => ({ id: row.id, groupId: group.id, group: text(group.attributes.referenceName),
+  const rows = groups.flatMap((group, index) => lists[index]!.rows.map(row => ({ id: row.id, groupId: group.id, group: text(group.attributes.referenceName),
     productId: text(row.attributes.productId), name: text(row.attributes.name), state: text(row.attributes.state) || "UNKNOWN",
     level: text(row.attributes.groupLevel), period: text(row.attributes.subscriptionPeriod) })));
+  return { rows, incomplete: Boolean(groupList.next || lists.some(list => list.next)) };
 }
 
 export const APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS: Record<string, ConnectorAction> = {
   subscriptions: appAction("read",
     statement => bundleId(statement.target) && !statement.text.trim() ? { app: statement.target } : "name an app by its bundle ID: <com.example.app>",
     async ({ api, app, input }) => {
-      const rows = await subscriptions(api, app.id);
+      const { rows, incomplete } = await subscriptions(api, app.id);
       const lines = rows.map(row => [cell(row.group), cell(row.productId), cell(row.name), cell(row.period), cell(row.level), cell(row.state)].join("\t"));
       return `Subscriptions of ${input.app}:\n` + quoteRetrievedText(lines.length
-        ? ["group\tproduct id\tname\tperiod\tlevel\tstate", ...lines].join("\n") : "(none)");
+        ? ["group\tproduct id\tname\tperiod\tlevel\tstate", ...lines].join("\n") : "(none)") +
+        (incomplete ? "\nApple returned more subscription groups or products; this list is incomplete." : "");
     }),
   submit_subscriptions: appAction("write", productsStatement, async ({ api, app, input }) => {
-    const rows = await subscriptions(api, app.id);
+    const { rows, incomplete } = await subscriptions(api, app.id);
+    if (incomplete) throw new ProviderRequestError(409, "Apple returned more subscriptions than this action can inspect; no subscriptions were submitted");
     const named = input.products ? input.products.split(" ") : [];
     const missing = named.filter(id => !rows.some(row => row.productId === id));
     if (missing.length) throw new ProviderRequestError(404, `${input.app} has no subscription ${missing.join(", ")}; subscriptions lists them`);

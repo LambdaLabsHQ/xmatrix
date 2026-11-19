@@ -89,3 +89,18 @@ test("named subscriptions must exist and be ready, or nothing is sent", async ()
   const one = await run(routes, `@appstoreconnect:submit_subscriptions:${BUNDLE} app.pro.monthly`);
   assert.deepEqual(itemsOf(one.calls), ["subscriptionGroupVersion:gv-1", "subscriptionVersion:sv-s-month"]);
 });
+
+test("partial subscription groups or products are disclosed and cannot authorize a submission", async () => {
+  for (const path of ["/v1/apps/6760000001/subscriptionGroups", "/v1/subscriptionGroups/g-1/subscriptions"]) {
+    const routes = catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT"));
+    const key = `GET ${path}`;
+    routes[key] = { ...routes[key], links: { next: `https://api.appstoreconnect.apple.com${path}?cursor=2` } };
+    const shown = await run(routes, `@appstoreconnect:subscriptions:${BUNDLE}`);
+    assert.match(shown.value.summary, /list is incomplete/u);
+    for (const products of ["", "app.pro.monthly", "app.pro.later"]) {
+      const refused = await withApple(routes, () => assert.rejects(ACTIONS.submit_subscriptions.execute({ credentials },
+        { app: BUNDLE, products }), /no subscriptions were submitted/u));
+      assert.deepEqual(writes(refused.calls), []);
+    }
+  }
+});
