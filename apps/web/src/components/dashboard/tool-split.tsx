@@ -47,6 +47,18 @@ export function ToolSplit({ list, detail, open, label }: {
   );
 }
 
+/**
+ * A destination whose list is its paper: a table read at the panel's full
+ * width, with whatever is opened from it shown in its place and a way back.
+ */
+export function ToolSheet({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="app-tool-split flex min-h-0 min-w-0 flex-1" data-open="true" aria-label={label} role="region">
+      <section className="app-tool-detail flex min-h-0 min-w-0 flex-1 flex-col">{children}</section>
+    </div>
+  );
+}
+
 /** The list column: its name, its + as the first row, one optional control, then the rows. */
 export function ToolList({ title, action, create, toolbar, children }: {
   title: string;
@@ -205,10 +217,12 @@ export function ToolStateDot({ state }: { state: ToolState }) {
 }
 
 /** The chosen item, on paper: where it sits, its name, one line of state, what to do; then its sections. */
-export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, status, actions, wide, children }: {
+export function ToolDetail({ onBack, backLabel, backAlways, context, title, titleAccessory, status, actions, wide, children }: {
   /** A phone's way back to the list; the overview shown beside the list has none. */
   onBack?: () => void;
   backLabel?: string;
+  /** No list stays beside this page on a desktop either, so its way back shows there too. */
+  backAlways?: boolean;
   context?: ReactNode;
   title: ReactNode;
   /** Sits on the title. Hidden until the title is hovered, and always shown where there is no hover. */
@@ -223,7 +237,8 @@ export function ToolDetail({ onBack, backLabel, context, title, titleAccessory, 
     <ToolPaperScroll wide={wide}>
       {onBack && (
         <button type="button" onClick={onBack}
-          className="-ml-1 mb-2 flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground md:hidden">
+          className={cn("-ml-1 mb-2 flex items-center gap-0.5 text-sm font-medium text-muted-foreground hover:text-foreground",
+            !backAlways && "md:hidden")}>
           <ChevronLeft className="size-4" /> {backLabel}
         </button>
       )}

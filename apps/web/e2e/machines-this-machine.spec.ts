@@ -173,6 +173,8 @@ test("an owner keeps a Machine out of automatic assignment from its page", async
   await assignment.click();
   await expect(assignment).toHaveAttribute("aria-checked", "false");
   await expect(page.getByText("Agents start here only when named, e.g. machine:grok-bot")).toBeVisible();
+  // Back on the matrix, its row says so at once.
+  await page.locator(".app-tool-detail").getByRole("button", { name: "Agents", exact: true }).click();
   await expect(other).toContainText("Named only");
   expect(await fixtureRequestBodies(page, "machine-auto-assign")).toEqual([{ autoAssign: false }]);
 });

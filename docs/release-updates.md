@@ -1,6 +1,6 @@
 # Release Updates
 
-## Unreleased: Status, Machines and Agents are one destination
+## Unreleased: Status, Machines and Agents are one matrix
 
 Adding an agent to a machine was spread over three rail entries: it was
 installed under Machines, signed in under Agents, and its state read under
@@ -9,17 +9,24 @@ same machines and agents were drawn up to four times, and the pages disagreed:
 a row said "3 running" where the total said none were working. The rail and
 the phone dock now have one entry, **Agents**, and every fact has one place.
 
-- **One list.** Every machine of the Space with the agents on it under it;
-  teammates' machines after the reader's own. One count says who works: an
-  Instance with work in hand. A live process waiting for its next message is
-  "Ready", and its agent's page lists it as waiting. A machine's row shows a
-  load reading only when it is under strain. An agent's row shows its quota as
-  bars and no longer repeats it in words, nor that its machine is offline.
-  Agents installed on a machine and not in this Space are one line under it.
-- **Overview.** How many agents are working, what waits on a person (signed
-  out, out of quota, too old, access not confirmed, a machine not answering),
-  and each agent across its machines, which opens what the Space set on it.
-  It no longer repeats the machines.
+- **A matrix on a desktop.** A machine to a row, an agent to a column, and a
+  cell for that agent on that machine: `Ready`, `3 working`, what it waits on
+  (`Sign in`, `1w limit`, `Update`), `Off` when installed and not turned on in
+  this Space, `+` where it is not installed, `—` where it cannot run. A cell
+  with a quota shows the window closest to its limit. A machine's row shows a
+  load reading only when it is under strain; teammates' machines follow the
+  reader's own. There is no list beside the matrix: it is the list of both. A
+  row's heading opens the machine, a column's heading what the Space set on
+  that agent, a cell the agent on that machine, and `Off` or `+` the machine
+  with that agent's line in view. What opens takes the matrix's place and has
+  a way back to it.
+- **A list on a phone,** too narrow for the matrix: each machine with its
+  agents under it, below the count, what waits on a person, and each agent
+  across its machines.
+- **One count says who works:** an Instance with work in hand. A live process
+  waiting for its next message is "Ready", and its agent's page lists it as
+  waiting. A program its machine reports signed out, or too old for xMatrix,
+  reads as that everywhere, not as ready.
 - **A machine's page** starts with its agents. Each installed one is a line:
   what it does in this Space, **Sign in** where it waits on that, and its
   switch. Version, updates and uninstall open under the line. What is not
@@ -31,13 +38,15 @@ the phone dock now have one entry, **Agents**, and every fact has one place.
   across machines. The "Where it runs" facts its header already said are gone.
 
 The addresses `/status`, `/agents`, `/machines` and `/local` are unchanged, so
-links, bookmarks and installed iOS builds keep working. A phone's More no
-longer lists Agents and Machines, the Agents list no longer leads with
-"Manage machines" or ends with "Installed on your machines", and the page of
-an agent no longer carries install controls. iOS shows the third tab as Agents
-after its next release. The desktop app's own machine page keeps its "Agents"
-and "Found on this machine" sections for now. Web and iOS. Recovery is a
-CI-validated change reverting this one.
+links, bookmarks and installed iOS builds keep working; on a desktop a bare
+`/agents` or `/machines` is the matrix. A phone's More no longer lists Agents
+and Machines, the Agents list no longer leads with "Manage machines" or ends
+with "Installed on your machines", and the page of an agent no longer carries
+install controls. iOS shows the third tab as Agents after its next release.
+The desktop app's own machine page keeps its "Agents" and "Found on this
+machine" sections for now. Web and iOS. Recovery is a CI-validated change
+reverting this one.
+
 ## Unreleased: App Store Connect collections traverse pages explicitly and fail closed on truncation
 
 `AppStoreConnectApi.list` previously returned `{ rows, included, next? }` for both

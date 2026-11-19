@@ -30,17 +30,20 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
     test("a machine's installed agents are offered under it, and turned on from its page without registering them first", async ({ page }) => {
       await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
       await page.goto("/app/personal-sspaceperso/status");
-      // Installed and not in this Space: one quiet line under their machine, which opens its page.
+      // Installed and not in this Space. A desktop's matrix has a cell for each, which says Off; a phone's list
+      // has one quiet line under their machine. Either opens the machine's page.
       // By test id: a phone hides the list while the machine's page is open, and it is still read below.
       const under = page.getByTestId("fleet-machine").filter({ hasText: "Remote server" });
       await expect(under.getByTestId("agent-row")).toHaveCount(0);
-      const off = under.getByTestId("fleet-machine-off");
-      await expect(off).toHaveText("2 more installed · off in this Space");
+      const phone = name === "mobile";
+      const off = phone ? under.getByTestId("fleet-machine-off") : under.locator('[data-testid="fleet-cell"][data-state="off"]');
+      if (phone) await expect(off).toHaveText("2 more installed · off in this Space");
+      else await expect(off).toHaveCount(2);
       // With no agent in the Space yet, the overview says the same in words and names the machine to open.
       const empty = page.getByTestId("fleet-empty").filter({ visible: true });
       await expect(empty).toContainText("Turn on an installed agent");
       await expect(empty.getByRole("button", { name: "Open Remote server" })).toBeVisible();
-      await off.click();
+      await off.first().click();
       await expect(page).toHaveURL(/\/machines\?machine=/u);
       const panel = page.getByTestId("machine-harness-panel");
       await expect(panel.getByRole("switch", { name: /^Enabled: /u })).toHaveCount(2);
@@ -65,8 +68,14 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       ]);
       // On, it is an agent of the Space: a row under its machine, and one fewer left to turn on.
       await expect(codex).toHaveAttribute("aria-checked", "true");
-      await expect(under.getByTestId("agent-row")).toHaveCount(1);
-      await expect(off).toHaveText("1 more installed · off in this Space");
+      if (phone) {
+        await expect(under.getByTestId("agent-row")).toHaveCount(1);
+        await expect(off).toHaveText("1 more installed · off in this Space");
+      } else {
+        await page.locator(".app-tool-detail").getByRole("button", { name: "Agents", exact: true }).click();
+        await expect(under.getByTestId("agent-row")).toHaveCount(1);
+        await expect(off).toHaveCount(1);
+      }
       await page.screenshot({ path: test.info().outputPath(`installed-agents-${name}.png`) });
     });
 
@@ -116,8 +125,10 @@ test("a refused owner switch stays off and reports the server failure", async ({
 test("another owner's inventory is never offered as an owner switch", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [{ ...machine, userId: "another-owner" }] });
   await page.goto("/app/personal-sspaceperso/status");
-  await expect(page.getByRole("navigation", { name: "Agents list" })).toBeVisible();
-  await expect(page.getByTestId("fleet-machine-off")).toHaveCount(0);
+  // Nothing of theirs is the reader's to turn on or install: with no machine of their own, the Space
+  // reads how one is connected, and no cell offers another member's.
+  await expect(page.getByTestId("connect-machine")).toBeVisible();
+  await expect(page.getByTestId("fleet-cell")).toHaveCount(0);
   // Where the reader's list does carry that machine, its page offers them no switch either.
   if (await page.getByTestId("machine-row").filter({ hasText: "Remote server" }).count()) {
     const panel = await openRemote(page);

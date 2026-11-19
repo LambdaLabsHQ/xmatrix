@@ -91,6 +91,8 @@ export function AgentPaper({
   fleet,
   conversationTitle,
   machineOf,
+  backAlways,
+  onBack,
   onRefetch,
   onOpenMachine,
   onOpenConversation,
@@ -110,6 +112,10 @@ export function AgentPaper({
   conversationTitle: (channelId: string) => string | undefined;
   /** The Machine an agent runs on, when this reader's list carries it. */
   machineOf: (registration: AgentRegistrationSummary) => MachineSummary | undefined;
+  /** Shown without a list beside it, so its way back shows on a desktop too. */
+  backAlways?: boolean;
+  /** Back to what the agent was opened from. */
+  onBack: () => void;
   onRefetch: () => Promise<unknown>;
   onOpenMachine: (machine: MachineSummary) => void;
   onOpenConversation: (channelId: string) => void;
@@ -132,8 +138,8 @@ export function AgentPaper({
   }
 
   if (group) {
-    return <AgentHarnessDetail key={group.harness} group={group} token={token}
-      onBack={() => select(null)} onOpenLocation={select} onSaved={onRefetch} />;
+    return <AgentHarnessDetail key={group.harness} group={group} token={token} backAlways={backAlways}
+      onBack={onBack} onOpenLocation={select} onSaved={onRefetch} />;
   }
   if (!chosen) return null;
   const { registration, id, activity, harness, title, machineInLine } = chosen;
@@ -151,8 +157,9 @@ export function AgentPaper({
   return (
     <ToolDetail
       key={id}
-      onBack={() => select(null)}
+      onBack={onBack}
       backLabel="Agents"
+      backAlways={backAlways}
       context={<span className="flex min-w-0 flex-wrap items-center gap-x-1.5">
         <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
         <button type="button" data-testid="agent-open-harness" title={`What this Space has set on ${harness}, on every machine`}

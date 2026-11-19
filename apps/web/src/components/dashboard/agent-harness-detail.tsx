@@ -12,8 +12,10 @@ import { ToolDetail, ToolDetailSection } from "./tool-split";
  * every machine it runs on, then those machines. What differs per machine
  * (its switch, model, sign-in, usage) is on the machine's own row.
  */
-export function AgentHarnessDetail({ group, token, onBack, onOpenLocation, onSaved }: {
+export function AgentHarnessDetail({ group, token, backAlways, onBack, onOpenLocation, onSaved }: {
   group: AgentListGroup;
+  /** Shown without a list beside it, so its way back shows on a desktop too. */
+  backAlways?: boolean;
   token: string | undefined;
   onBack: () => void;
   onOpenLocation: (id: string) => void;
@@ -28,6 +30,7 @@ export function AgentHarnessDetail({ group, token, onBack, onOpenLocation, onSav
     <ToolDetail
       onBack={onBack}
       backLabel="Agents"
+      backAlways={backAlways}
       context={<span className="flex items-center gap-1.5">
         <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
         <span>Agent · on every machine it runs on</span>

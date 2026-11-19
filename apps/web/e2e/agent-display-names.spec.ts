@@ -266,7 +266,6 @@ test("a Machine tag and its hover card open that Machine's page, only for a Mach
   await expect(tip).toContainText("Grok");
   await tip.click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=machine%3Agrok$/);
-  await expect(page.locator('[data-testid="machine-row"]').filter({ hasText: "Grok" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Grok" })).toBeVisible();
 
   // The tag itself opens the same page.

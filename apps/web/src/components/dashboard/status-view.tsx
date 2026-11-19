@@ -69,28 +69,23 @@ export type FleetOverviewLine = {
 };
 
 /**
- * The overview: what the list beside it cannot say at a glance. How many
- * agents are working, what waits on a person, and each agent across the
- * machines it runs on, which opens what the Space has set on that agent.
- * Each machine and what runs on it is the list's to say, not repeated here.
+ * The head of the Agents destination: how many agents are working and what
+ * waits on a person. What follows it says each machine and agent once: the
+ * matrix on a desktop, the agents across their machines above the list on a
+ * phone.
  */
-export function FleetOverview({ status, runtimes, attention, loading, error, onRetry, onOpenHarness, empty }: {
+export function FleetOverview({ status, attention, note, children }: {
   status: FleetStatus;
-  /** Each agent across the machines it runs on, read from the same rows the list shows. */
-  runtimes: FleetRuntime[];
+  /** Said after the count's own line: what waits on a person, where no list of it follows. */
+  note?: ReactNode;
   /** What cannot take work until someone acts: signed out, out of quota, unconfirmed access, a machine not answering. */
   attention: FleetOverviewLine[];
-  loading: boolean;
-  error: unknown;
-  onRetry: () => void;
-  onOpenHarness: (harness: string) => void;
-  /** What the Space reads in place of its agents while it has none. */
-  empty?: ReactNode;
+  children?: ReactNode;
 }) {
   const { online, busy, workingCount } = status;
   return (
     <>
-      <header className="app-status-hero mb-8" data-testid="status-hero">
+      <header className="app-status-hero mb-6" data-testid="status-hero">
         <div className="flex items-baseline gap-2.5">
           <span className="text-6xl font-black leading-none tabular-nums" data-testid="status-working">{workingCount}</span>
           <span className="text-lg font-semibold">{workingCount === 1 ? "agent working" : "agents working"}</span>
@@ -98,6 +93,7 @@ export function FleetOverview({ status, runtimes, attention, loading, error, onR
         <p className="mt-2 text-sm text-muted-foreground" data-testid="status-summary">
           {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
             : online > 0 ? "Nothing is working right now." : "No machine is online."}
+          {note}
         </p>
       </header>
 
@@ -122,40 +118,57 @@ export function FleetOverview({ status, runtimes, attention, loading, error, onR
             </ul>
           </ToolDetailSection>
         )}
-
-        <ToolDetailSection title="Agents in this Space">
-          {error ? (
-            <ErrorNotice error={error} action="Couldn't load the agent list" onRetry={onRetry} />
-          ) : loading ? (
-            <ListSkeleton label="Loading agents" rows={1} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
-          ) : runtimes.length === 0 ? (
-            empty ?? <p className="text-sm text-muted-foreground">No agents yet.</p>
-          ) : (
-            <ul className="app-tool-lines">
-              {runtimes.map((runtime) => (
-                <li key={runtime.harness}>
-                  {/* Across its machines: what the Space set on this agent is one page, whichever machine runs it. */}
-                  <button type="button" onClick={() => onOpenHarness(runtime.harness)} data-testid="status-runtime"
-                    aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
-                    className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
-                    <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
-                      showKindBadge={false} className="shrink-0" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{runtime.harness}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {runtime.working > 0 && <span className="font-semibold text-foreground">{runtime.working} working · </span>}
-                        {runtimeLine(runtime)}
-                      </span>
-                    </span>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </ToolDetailSection>
+        {children}
       </div>
     </>
+  );
+}
+
+/**
+ * Each agent across the machines it runs on, where no matrix shows it: a
+ * line opens what the Space set on that agent, whichever machine runs it.
+ */
+export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHarness, empty }: {
+  /** Counted from the same rows the list shows. */
+  runtimes: FleetRuntime[];
+  loading: boolean;
+  error: unknown;
+  onRetry: () => void;
+  onOpenHarness: (harness: string) => void;
+  /** What the Space reads in place of its agents while it has none. */
+  empty?: ReactNode;
+}) {
+  return (
+    <ToolDetailSection title="Agents in this Space">
+      {error ? (
+        <ErrorNotice error={error} action="Couldn't load the agent list" onRetry={onRetry} />
+      ) : loading ? (
+        <ListSkeleton label="Loading agents" rows={1} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
+      ) : runtimes.length === 0 ? (
+        empty ?? <p className="text-sm text-muted-foreground">No agents yet.</p>
+      ) : (
+        <ul className="app-tool-lines">
+          {runtimes.map((runtime) => (
+            <li key={runtime.harness}>
+              <button type="button" onClick={() => onOpenHarness(runtime.harness)} data-testid="status-runtime"
+                aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
+                className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
+                <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
+                  showKindBadge={false} className="shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">{runtime.harness}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {runtime.working > 0 && <span className="font-semibold text-foreground">{runtime.working} working · </span>}
+                    {runtimeLine(runtime)}
+                  </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </ToolDetailSection>
   );
 }
 
@@ -163,7 +176,7 @@ export function FleetOverview({ status, runtimes, attention, loading, error, onR
 export type FleetRuntime = { harness: string; working: number; busyMachines: number; ready: number; blocked: number; offline: number; total: number };
 
 /** What a runtime's locations are doing, beyond the count of its working agents. */
-function runtimeLine(runtime: FleetRuntime): string {
+export function runtimeLine(runtime: FleetRuntime): string {
   return [
     runtime.working > 0 ? `on ${runtime.busyMachines} ${runtime.busyMachines === 1 ? "machine" : "machines"}` : null,
     runtime.ready > 0 ? `${runtime.ready} ready` : null,

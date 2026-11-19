@@ -128,7 +128,7 @@ export type MachineAgentGlance = {
  * installed yet is offered under "Add an agent" and joins the lines above
  * once installed, so installing, signing in and turning on happen in one place.
  */
-export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAgent }: {
+export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAgent, focus }: {
   daemon?: SerializedMachineDaemon; token?: string | null;
   /** The Space being viewed, whose switches the owner sees beside each installed agent. */
   spaceId?: string;
@@ -136,9 +136,12 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   agentOn?: (harness: string) => MachineAgentGlance | undefined;
   /** Opens that agent: its work, usage and settings. */
   onOpenAgent?: (harness: string) => void;
+  /** The agent this Machine was opened for: its line is brought into view, and offered if it is not installed yet. */
+  focus?: string;
 }) {
   const { user } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
+  const panel = useRef<HTMLDivElement | null>(null);
   const userId = user?.id ?? "anonymous";
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
   const daemons = useQuery({ queryKey: daemonKey,
@@ -165,12 +168,18 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
   const touch = (presetId: string) => setTouched((seen) => seen.has(presetId) ? seen : new Set(seen).add(presetId));
   // An install that ended without the program being found still has something to say.
-  const offered = installable.filter((row) => addOpen || touched.has(row.preset.id) || recorded(row.preset.id)?.action === "install");
+  const offered = installable.filter((row) => addOpen || touched.has(row.preset.id) || row.preset.id === focus
+    || recorded(row.preset.id)?.action === "install");
+  const focusListed = Boolean(focus) && [...installed, ...offered].some((row) => row.preset.id === focus);
+  useEffect(() => {
+    if (!focus || !focusListed) return;
+    panel.current?.querySelector(`[data-harness="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: "nearest" });
+  }, [focus, focusListed]);
   const row = (entry: HarnessRowState) => <HarnessRow key={entry.preset.id} row={entry} state={state} context={context}
     spaceSwitches={spaceSwitches} recorded={recorded(entry.preset.id)} agent={agentOn?.(entry.preset.id)}
-    onOpenAgent={onOpenAgent} onTouched={touch} />;
+    onOpenAgent={onOpenAgent} onTouched={touch} focused={entry.preset.id === focus} />;
 
-  return <div className="space-y-2" data-testid="machine-harness-panel">
+  return <div className="space-y-2" data-testid="machine-harness-panel" ref={panel}>
     {state.canManage && !state.responding && <p className={statusInkClass("attention", "text-xs")}>
       {`This machine is not responding: work sent to it at ${new Date(current!.unansweredSince!).toLocaleString()} `
         + "is still waiting. Its connection to xMatrix may be unstable, so a new action may not reach it."}</p>}
@@ -206,10 +215,12 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   </div>;
 }
 
-function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, agent, onOpenAgent, onTouched }: {
+function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, agent, onOpenAgent, onTouched, focused }: {
   row: HarnessRowState; state: ReturnType<typeof machineHarnessState>;
   context: Parameters<typeof useHarnessOperation>[0]; spaceSwitches: SpaceSwitches; recorded?: HarnessActionStatus;
   agent?: MachineAgentGlance; onOpenAgent?: (harness: string) => void; onTouched: (presetId: string) => void;
+  /** The line this page was opened for. */
+  focused?: boolean;
 }) {
   const [armed, setArmed] = useState(false);
   const [open, setOpen] = useState(false);
@@ -260,7 +271,8 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
           : spaceSwitches.owner && spaceSwitches.ready && !spaceSwitch ? "Sharing request pending" : "Installed";
   const attention = Boolean(tooOld) || signedOut || (installed && (spaceSwitch ? Boolean(on) : true) && agent?.state === "attention");
   const name = <span className="truncate font-semibold">{preset.displayName}</span>;
-  return <li data-testid="harness-row" data-harness={preset.id} className="py-2.5 text-sm">
+  return <li data-testid="harness-row" data-harness={preset.id} data-focused={focused || undefined}
+    className={cn("py-2.5 text-sm", focused && "-mx-2 rounded bg-foreground/5 px-2")}>
     <div className="flex min-w-0 items-center gap-3">
       <span className={cn("shrink-0", installed && spaceSwitch && !on && "opacity-50")}>
         <Face of={{ kind: "agent", name: preset.id, harness: preset.id }} size="sm" showKindBadge={false} /></span>

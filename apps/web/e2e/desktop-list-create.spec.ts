@@ -131,20 +131,15 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("the Agents list has no + of its own, and a machine and the agent on it are one height", async ({ page }) => {
+test("Agents is a matrix with no + of its own: an agent is added on its machine", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
     registrations: [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
       displayName: "codex", machineName: "My Mac", models: [] }] });
   await page.locator(".app-rail").getByRole("button", { name: "Agents", exact: true }).click();
 
-  // An agent is added on a machine's page, so the list makes nothing itself.
-  await expect(page.locator(".app-tool-list .app-list-create")).toHaveCount(0);
-  const machine = page.getByRole("region", { name: "My Mac" });
-  const heading = machine.locator(".app-tool-list-group-title");
-  const agent = machine.getByTestId("agent-row");
-  await expect(agent).toBeVisible();
-  const [headingBox, agentBox] = await Promise.all([heading.boundingBox(), agent.boundingBox()]);
-  expect(headingBox!.height).toBeCloseTo(agentBox!.height, 0);
+  const matrix = page.getByTestId("fleet-matrix");
+  await expect(matrix.getByRole("row", { name: "My Mac" }).getByTestId("agent-row")).toBeVisible();
+  await expect(page.locator(".app-list-create")).toHaveCount(0);
 });
 
 test("a page row makes a page under it from its own +, shown while the row is hovered", async ({ page }) => {
