@@ -23,11 +23,12 @@ import {
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
-import { InstalledHarnessSwitchList } from "./installed-harness-switch-list";
-import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
+import { ContentSkeleton } from "./content-skeleton";
+import { MachineHarnessPanel } from "./machine-harness-panel";
+import type { MachineSummary } from "./workspace-shell-helpers";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
-import { noticeClass, statusInkClass } from "@/components/ui/status-tone";
+import { noticeClass } from "@/components/ui/status-tone";
 import { Switch } from "@/components/ui/switch";
 import { useAuth } from "@/lib/auth-context";
 import { useOnboardingCopy } from "@/lib/onboarding-locale";
@@ -39,7 +40,7 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { ASK_ACCESS_EFFECT, AgentAccessLines, FULL_ACCESS_EFFECT, chooseHeldAccess } from "./agent-access";
 import { AgentHarnessDetail } from "./agent-harness-detail";
 import { useViewSelection } from "./url-query-state";
-import { AgentListGroups, agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
+import { agentHarnessSelectionId, agentListGroups } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS, agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { channelTitle } from "./channel-links";
@@ -58,8 +59,7 @@ import { SetupCardShell } from "./space-setup-card-chrome";
 import { formatRelativeAge } from "./time-display";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import {
-  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolList, ToolListGroup, ToolSplit,
-  ToolStateDot,
+  ToolDetail, ToolDetailEmpty, ToolDetailSection, ToolFact, ToolFacts, ToolStateDot,
 } from "./tool-split";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
@@ -84,19 +84,20 @@ const INPUT_CLASS =
   "h-9 w-full border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring disabled:opacity-60";
 
 /**
- * Agents: the Space's registrations under their runtime, one row per location
- * (owner and machine). A row is named by what differs between a runtime's
- * locations and says what that location is doing now. The runtime's heading
- * opens what is set on the agent itself, whichever machine it runs on.
+ * An agent's page. One location (an agent on one machine) reads as the whole
+ * path to working there: installed, signed in, on in this Space, what it runs
+ * now and what it has used. A runtime's page is what is set on the agent
+ * itself, whichever machine it runs on.
  */
-export function MyAgentsView({
+export function AgentPaper({
   spaceId,
   token,
   currentUserId,
   channels,
-  error,
+  machines,
   addsOnThisMachine,
   onOpenMachines,
+  onOpenMachine,
   onOpenConversation,
 }: {
   spaceId: string | null;
@@ -104,10 +105,12 @@ export function MyAgentsView({
   currentUserId: string;
   /** The Space's conversations the reader has, to name where an agent runs. */
   channels: readonly ChannelSnapshot[];
-  error: string | null;
+  /** The Space's Machines, to open the one an agent runs on and manage its program there. */
+  machines: MachineSummary[];
   /** The desktop app reports this machine's harnesses itself; a browser cannot. */
   addsOnThisMachine: boolean;
   onOpenMachines: () => void;
+  onOpenMachine: (machine: MachineSummary) => void;
   onOpenConversation: (channelId: string) => void;
 }) {
   const ready = Boolean(spaceId && token);
@@ -145,29 +148,6 @@ export function MyAgentsView({
   const shownGroup = chosen ? undefined
     : groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) ?? (selectedAgentId ? undefined : groups[0]);
 
-  const list = (
-    <ToolList title="Agents" create={{ label: "Manage machines", onCreate: onOpenMachines, shortcut: true }}>
-      {error && <p role="alert" className="px-4 pb-2 text-xs font-medium text-destructive md:px-5">{error}</p>}
-      {!ready ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">Choose a Space to see its agents and installed harnesses.</p>
-      ) : catalog.isError ? (
-        <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
-          className={statusInkClass("alert", "px-4 text-sm md:px-5")} />
-      ) : !catalog.data ? (
-        <ListSkeleton label="Loading agents" rows={4} />
-      ) : rows.length === 0 ? (
-        <p className="px-4 text-sm text-muted-foreground md:px-5">{newCandidates.length ? "Turn on a harness below to summon it here." : "No installed harnesses reported yet."}</p>
-      ) : (
-        <AgentListGroups groups={groups} selectedId={selectedAgentId} currentUserId={currentUserId} headingsOpen
-          shownId={shownGroup ? agentHarnessSelectionId(shownGroup.harness) : undefined}
-          onSelect={(id) => { select(id); setEditingId(null); }} />
-      )}
-      {ready && (newCandidates.length > 0 || fleet.daemons.isError) && <ToolListGroup title="Installed on your machines" count={newCandidates.length}>
-        <div className="px-4 md:px-5"><InstalledHarnessSwitchList fleet={fleet} onlyNew /></div>
-      </ToolListGroup>}
-    </ToolList>
-  );
-
   let detail: React.ReactNode = null;
   if (shownGroup) {
     detail = <AgentHarnessDetail key={shownGroup.harness} group={shownGroup} token={token}
@@ -187,6 +167,7 @@ export function MyAgentsView({
     const running = live?.running ?? [];
     const usage = [...agentUsageReadings(live?.quota, now), ...agentBalanceReadings(live?.balance)];
     const checked = formatRelativeAge(live?.quota?.observedAt ?? live?.balance?.observedAt, now);
+    const machine = machines.find((candidate) => candidate.machineId === registration.key.machineId);
     detail = (
       <ToolDetail
         key={id}
@@ -194,9 +175,12 @@ export function MyAgentsView({
         backLabel="Agents"
         context={<span className="flex items-center gap-1.5">
           <Face of={{ kind: "agent", name: harness, harness }} size="xs" />
-          <span>{machineInLine ? `${harness} · ${registration.machineName}` : harness}</span>
+          <button type="button" data-testid="agent-open-harness" title={`What is set on ${harness} on every machine`}
+            className="underline-offset-2 hover:text-foreground hover:underline"
+            onClick={() => select(agentHarnessSelectionId(harness))}>{harness}</button>
+          <span>· on {registration.machineName}</span>
         </span>}
-        title={title}
+        title={machineInLine ? title : harnessName}
         status={<span className="flex items-center gap-2">
           <ToolStateDot state={activity.state} />
           <span className="text-foreground">{activity.line}</span>
@@ -295,7 +279,11 @@ export function MyAgentsView({
         <ToolDetailSection title="Where it runs">
           <ToolFacts>
             <ToolFact label="Runtime">{harness}</ToolFact>
-            <ToolFact label="Machine">{machineState ? `${registration.machineName} · ${machineState}` : registration.machineName}</ToolFact>
+            <ToolFact label="Machine">
+              {machine ? <button type="button" data-testid="agent-open-machine" className="font-semibold underline-offset-2 hover:underline"
+                onClick={() => onOpenMachine(machine)}>{registration.machineName}</button> : registration.machineName}
+              {machineState ? ` · ${machineState}` : null}
+            </ToolFact>
             <ToolFact label="Owner">{registration.ownerName}</ToolFact>
             <ToolFact label="In this Space">{status?.label ?? "Ready for new work"}</ToolFact>
           </ToolFacts>
@@ -305,6 +293,11 @@ export function MyAgentsView({
             </p>
           )}
         </ToolDetailSection>
+        {machine?.daemon && registration.key.ownerUserId === currentUserId && (
+          <ToolDetailSection title={`Installed on ${registration.machineName}`}>
+            <MachineHarnessPanel key={`${spaceId}:${id}`} daemon={machine.daemon} token={token} only={harness} />
+          </ToolDetailSection>
+        )}
         {registration.access && (
           <ToolDetailSection title={registration.access.mode === "full" ? "Full access on its machine" : "Asks before it acts on its machine"}>
             <div className="space-y-2 text-sm" data-testid="agent-access">
@@ -348,11 +341,7 @@ export function MyAgentsView({
     );
   }
 
-  return (
-    <div className="app-agents-view flex min-h-0 min-w-0 flex-1">
-      <ToolSplit label="Agents" open={Boolean(selectedAgentId)} list={list} detail={detail} />
-    </div>
-  );
+  return detail;
 }
 
 /** Edits the Space's own name and default model for one registration, starting

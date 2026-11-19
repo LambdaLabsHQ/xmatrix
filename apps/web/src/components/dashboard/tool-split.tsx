@@ -151,10 +151,14 @@ export function ToolListGroup({ title, icon, count, onTitle, titleHint, selected
 }
 
 /** One row: a leading mark, the name with something at its end, and one line under it. */
-export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, trailing, subtitle, testId, state, phoneOnly }: {
+export function ToolListRow({ selected, shownBeside, onSelect, leading, title, end, trailing, subtitle, testId, state, phoneOnly, desktopOnly, child }: {
   selected: boolean;
   /** A row only a phone lists, where a desktop shows it as the list's +. */
   phoneOnly?: boolean;
+  /** A row only a desktop lists: a phone shows what it opens above its list. */
+  desktopOnly?: boolean;
+  /** A row that belongs to the row above it, indented to start where that row's name does. */
+  child?: boolean;
   /** Shown on the paper beside the list without being chosen: marked on a desktop only. */
   shownBeside?: boolean;
   onSelect: () => void;
@@ -169,11 +173,12 @@ export function ToolListRow({ selected, shownBeside, onSelect, leading, title, e
 }) {
   const indented = useContext(IdentityIndent);
   return (
-    <li className={phoneOnly ? "md:hidden" : undefined}>
+    <li className={phoneOnly ? "md:hidden" : desktopOnly ? "max-md:hidden" : undefined}>
       <button type="button" onClick={onSelect} aria-current={selected ? "true" : undefined} data-testid={testId}
         data-state={state}
         className={cn("app-tool-list-row", LIST_ROW_CLASS_NAME,
           indented && "pl-[calc(var(--app-list-row-start)+2.625rem)]",
+          child && !indented && "pl-[calc(var(--app-list-row-start)+1.875rem)]",
           selected && "app-tool-list-row-selected", shownBeside && "app-tool-list-row-beside")}>
         {leading && <span className={cn(LIST_ROW_LEADING_CLASS_NAME, subtitle && LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>{leading}</span>}
         <span className={LIST_ROW_COPY_CLASS_NAME}>

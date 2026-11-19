@@ -20,7 +20,7 @@ test("a Space admin sets an Agent's working mode and instructions", async ({ pag
   const errors: string[] = [];
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto("/app/personal-sspaceperso/agents");
-  await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).click();
+  await page.getByRole("region", { name: "Remote server" }).getByTestId("agent-row").click();
   await page.getByRole("button", { name: "Configure: codex" }).click();
   const mode = page.getByLabel("Working mode");
   await expect(mode).toHaveValue("autonomous");
@@ -46,14 +46,14 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   await page.goto("/app/personal-sspaceperso/agents");
   /* The text is the agent's, whichever machine runs it: a machine's page does not carry it. */
   const text = page.getByLabel("What codex is good at");
-  const machine = page.getByTestId("agent-row").filter({ hasText: "Remote server" });
+  const machine = page.getByRole("region", { name: "Remote server" }).getByTestId("agent-row");
   await machine.click();
   await expect(machine).toHaveAttribute("aria-current", "true");
   await expect(page.getByText("Runtime", { exact: true })).toBeVisible();
   await expect(text).toHaveCount(0);
-  const agent = page.getByRole("region", { name: "codex" }).locator(".app-tool-list-group-title");
-  await agent.click();
-  await expect(agent).toHaveAttribute("aria-current", "true");
+  // Its page names the agent, which opens what is set on it everywhere.
+  await page.getByTestId("agent-open-harness").click();
+  await expect(machine).not.toHaveAttribute("aria-current", "true");
   await expect(page.getByTestId("agent-location")).toHaveText("Remote server");
   await expect(text).toHaveValue("Careful code review.");
   await expect(page.getByRole("button", { name: "Save" })).toHaveCount(0);
@@ -81,7 +81,8 @@ test("an Agent's page lists exactly what its launch adds, and its owner confirms
   for (const location of [...held].reverse()) {
     const grant = location.access;
     await page.goto(`/app/personal-sspaceperso/agents`);
-    await page.getByTestId("agent-row").filter({ hasText: "Remote server" }).nth(held.indexOf(location)).click();
+    await page.getByRole("region", { name: "Remote server" }).getByTestId("agent-row")
+      .filter({ hasText: new RegExp(`^${location.key.harness}`, "u") }).click();
     const lines = page.getByTestId("agent-access").getByTestId("agent-access-lines").getByRole("listitem");
     // One line for each thing the grant adds, written as the grant writes it:
     // none missing, none borrowed from another harness.

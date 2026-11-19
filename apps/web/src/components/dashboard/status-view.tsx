@@ -1,76 +1,45 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 import {
+  type AgentCapabilitySummary,
   type AgentRegistrationSummary,
   type ObservabilityEvent,
   type ChannelSnapshot,
 } from "@xmatrix/protocol";
 
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 import { ErrorNotice } from "@/components/ui/error-notice";
+import { statusInkClass } from "@/components/ui/status-tone";
 
-import { useAgentRegistrationCatalog } from "./agent-capability-select";
-import { AgentListGroups, agentListGroups } from "./agent-list-groups";
-import { useNow } from "./agent-work-intent";
-import { channelTitle } from "./channel-links";
 import { ListSkeleton } from "./content-skeleton";
 import { Face } from "./face";
 import { MachineGlyph } from "./machine-glyph";
 import { MachineLoadGlance } from "./machine-load-panel";
-import { MachineListRow, machinePlatform, machineStateLine, machinesWithHostsFirst } from "./machine-list-row";
+import { machinePlatform } from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import { registrationActivity, registrationListed } from "./my-agents-registrations";
 import { formatRelativeAge } from "./time-display";
-import { ToolDetailSection, ToolList, ToolListGroup, ToolPaperScroll, ToolSplit } from "./tool-split";
+import { ToolDetailSection } from "./tool-split";
 import { channelWorkInHand } from "./workspace-shell-chrome";
 import { useLiveChannels } from "./realtime-channels";
 import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** Machine rows show at most this many runtimes; the rest are counted. */
 const MACHINE_RUNTIMES_SHOWN = 3;
-/** Rows the list shows before "Show more", so the whole list fits on one screen. */
-const MACHINES_SHOWN = 3;
 
 type RuntimeCount = { harness: string; working: number };
 
-/**
- * Status: the Space at work. Its list is the Agents and Machines lists one
- * after another, each showing its first few rows with the rest a
- * click away, so the whole Space fits on one screen; a row opens in its own
- * destination. The paper beside it is the overview at a glance; on a phone
- * the overview leads the list.
- */
-export function StatusView({
-  spaceId,
-  token,
-  currentUserId,
-  machines,
-  channels,
-  events,
-  onOpenAgent,
-  onOpenAgents,
-  onOpenMachine,
-  onOpenMachines,
-}: {
-  spaceId: string | null;
-  token: string | undefined;
-  currentUserId: string;
+/** What the Space is doing now, counted once for the list and the overview beside it. */
+export function useFleetStatus({ catalog, machines, channels, events, now }: {
+  catalog: { capabilities: AgentCapabilitySummary[] } | undefined;
   machines: MachineSummary[];
   channels: readonly ChannelSnapshot[];
   events: ObservabilityEvent[];
-  onOpenAgent: (registrationId: string) => void;
-  onOpenAgents: () => void;
-  onOpenMachine: (machineId: string) => void;
-  onOpenMachines: () => void;
+  now: number;
 }) {
-  const ready = Boolean(spaceId && token);
-  const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
-  // Load samples and "seen" ages expire; re-read them between refreshes.
-  const now = useNow(15_000);
-
-  const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog.data?.capabilities ?? [])
+  const registrations: Array<AgentRegistrationSummary & { harness: string }> = (catalog?.capabilities ?? [])
     .flatMap((group) => group.locations.filter(registrationListed).map((registration) => ({ ...registration, harness: group.harness })));
   // Working is an Instance with work in hand in some conversation: a live
   // process waiting for its next message runs but does not work.
@@ -84,7 +53,7 @@ export function StatusView({
   const workingOf = (registration: AgentRegistrationSummary) =>
     registration.live?.running.filter((instance) => working.has(instance.instanceId)).length ?? 0;
 
-  const runtimes = (catalog.data?.capabilities ?? []).map((group) => {
+  const runtimes = (catalog?.capabilities ?? []).map((group) => {
     const locations = group.locations.filter(registrationListed);
     const states = locations.map((registration) => ({
       registration,
@@ -116,18 +85,48 @@ export function StatusView({
   const machineRows = machines.map((machine) => {
     const counts = runtimesOn(machine);
     // Active Runs count idle processes too; read them only until the catalog says who works.
-    const working = catalog.data ? counts.reduce((sum, count) => sum + count.working, 0) : machine.activeRuns || 0;
+    const working = catalog ? counts.reduce((sum, count) => sum + count.working, 0) : machine.activeRuns || 0;
     return { machine, counts, working, online: machine.status === "online" };
   }).sort((left, right) => Number(right.online) - Number(left.online) || right.working - left.working
     || left.machine.name.localeCompare(right.machine.name));
   const online = machineRows.filter((row) => row.online).length;
   const busy = machineRows.filter((row) => row.online && row.working > 0).length;
 
-  const workingCount = catalog.data
+  const workingCount = catalog
     ? registrations.reduce((sum, registration) => sum + workingOf(registration), 0)
     : machineRows.reduce((sum, row) => sum + row.working, 0);
+  return { runtimes, machineRows, online, busy, workingCount, workingInstanceIds: working };
+}
 
-  const overview = (
+export type FleetStatus = ReturnType<typeof useFleetStatus>;
+
+/**
+ * The overview: the Space at work at a glance. How many agents are working,
+ * what each runtime does, and every machine with who works on it. A runtime
+ * opens what is set on that agent, a machine opens its page.
+ */
+/** One line of the overview that opens what it names: an agent at work, or something waiting on its owner. */
+export type FleetOverviewLine = { key: string; harness: string; title: string; line: string; onOpen: () => void };
+
+export function FleetOverview({ status, attention, workingNow, unresponsive, loading, error, onRetry, now, onOpenHarness, onOpenMachine, onSetUpAgents }: {
+  status: FleetStatus;
+  /** What cannot take work until someone acts: signed out, out of quota, unconfirmed access, a machine not answering. */
+  attention: FleetOverviewLine[];
+  /** Each agent with work in hand and the conversation it is in. */
+  workingNow: FleetOverviewLine[];
+  /** Machines that read online but leave work unanswered. */
+  unresponsive: Array<{ id: string; name: string }>;
+  loading: boolean;
+  error: unknown;
+  onRetry: () => void;
+  now: number;
+  onOpenHarness: (harness: string) => void;
+  onOpenMachine: (machineId: string) => void;
+  /** Where agents come from, offered while the Space has none. */
+  onSetUpAgents: () => void;
+}) {
+  const { runtimes, machineRows, online, busy, workingCount } = status;
+  return (
     <>
       <header className="app-status-hero mb-8" data-testid="status-hero">
         <div className="flex items-baseline gap-2.5">
@@ -140,18 +139,42 @@ export function StatusView({
       </header>
 
       <div className="space-y-8">
-        <ToolDetailSection title="Agents" action={<SeeAll label="All agents" onClick={onOpenAgents} />}>
-          {catalog.isError ? (
-            <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()} />
-          ) : !catalog.data && ready ? (
+        {attention.length + unresponsive.length > 0 && (
+          <ToolDetailSection title={`Needs attention · ${attention.length + unresponsive.length}`}>
+            <ul className="app-tool-lines">
+              {unresponsive.map((machine) => (
+                <li key={machine.id}>
+                  <button type="button" onClick={() => onOpenMachine(machine.id)} data-testid="status-attention"
+                    className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
+                    <span className="min-w-0 truncate font-semibold">{machine.name}</span>
+                    <span className={cn("ml-auto shrink-0 text-xs", statusInkClass("attention"))}>Not responding</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <OverviewLines lines={attention} testId="status-attention" tone="attention" />
+          </ToolDetailSection>
+        )}
+        {workingNow.length > 0 && (
+          <ToolDetailSection title="Working now">
+            <OverviewLines lines={workingNow} testId="status-working-now" tone="running" />
+          </ToolDetailSection>
+        )}
+        <ToolDetailSection title="Agents">
+          {error ? (
+            <ErrorNotice error={error} action="Couldn't load the agent list" onRetry={onRetry} />
+          ) : loading ? (
             <ListSkeleton label="Loading agents" rows={1} className="[--app-list-row-end:0px] [--app-list-row-start:0px]" />
           ) : runtimes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No agents yet.</p>
+            <div className="space-y-3 text-sm text-muted-foreground">
+              <p>No agents yet.</p>
+              <Button size="sm" variant="outline" onClick={onSetUpAgents}>Bring agents in</Button>
+            </div>
           ) : (
             <ul className="flex flex-wrap gap-x-6 gap-y-3 pt-1">
               {runtimes.map((runtime) => (
                 <li key={runtime.harness}>
-                  <button type="button" onClick={onOpenAgents} data-testid="status-runtime"
+                  <button type="button" onClick={() => onOpenHarness(runtime.harness)} data-testid="status-runtime"
                     title={runtimeLine(runtime)} aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
                     className={cn("flex items-center gap-2", runtime.working === 0 && "opacity-50")}>
                     <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
@@ -164,8 +187,7 @@ export function StatusView({
           )}
         </ToolDetailSection>
 
-        <ToolDetailSection title={`Machines · ${online}/${machineRows.length} online`}
-          action={<SeeAll label="All machines" onClick={onOpenMachines} />}>
+        <ToolDetailSection title={`Machines · ${online}/${machineRows.length} online`}>
           {machineRows.length === 0 ? (
             <p className="text-sm text-muted-foreground">No machines registered.</p>
           ) : (
@@ -199,41 +221,23 @@ export function StatusView({
       </div>
     </>
   );
-
-  const conversationTitle = (channelId: string) => {
-    const channel = channels.find((candidate) => candidate.id === channelId);
-    return channel ? channelTitle(channel) : undefined;
-  };
-  const list = (
-    <ToolList title="Status">
-      <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-6 md:hidden">{overview}</div>
-      <AgentListGroups groups={agentListGroups(catalog.data, { conversationTitle, now })} selectedId={null}
-        currentUserId={currentUserId} limit={0} onSelect={onOpenAgent} />
-      {machines.length > 0 && (
-        <ToolListGroup title="Machines" count={machines.length} limit={MACHINES_SHOWN}>
-          {machinesWithHostsFirst(machines).map((machine) => {
-            const host = machines.find((candidate) => candidate.machineId && candidate.machineId === machine.parentMachineId);
-            return (
-              <MachineListRow key={machine.id} machine={machine} name={machine.name}
-                platform={machinePlatform(machine)} online={machine.status === "online"} hosted={Boolean(host)}
-                subtitle={[host ? `WSL on ${host.name}` : null, machineStateLine(machine)].filter(Boolean).join(" · ")}
-                now={now} selected={false} onSelect={() => onOpenMachine(machine.id)} />
-            );
-          })}
-        </ToolListGroup>
-      )}
-    </ToolList>
-  );
-
-  return <ToolSplit label="Status" open={false} list={list} detail={<ToolPaperScroll>{overview}</ToolPaperScroll>} />;
 }
 
-function SeeAll({ label, onClick }: { label: string; onClick: () => void }) {
+function OverviewLines({ lines, testId, tone }: { lines: FleetOverviewLine[]; testId: string; tone: "attention" | "running" }) {
   return (
-    <button type="button" onClick={onClick} aria-label={label}
-      className="flex items-center gap-0.5 text-xs font-semibold text-muted-foreground hover:text-foreground">
-      See all <ChevronRight className="size-3.5" />
-    </button>
+    <ul className="app-tool-lines">
+      {lines.map((item) => (
+        <li key={item.key}>
+          <button type="button" onClick={item.onOpen} data-testid={testId}
+            className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
+            <Face of={{ kind: "agent", name: item.harness, harness: item.harness }} size="xs" showKindBadge={false} className="shrink-0" />
+            <span className="min-w-0 shrink-0 truncate font-semibold">{item.title}</span>
+            <span className={cn("ml-auto min-w-0 truncate text-xs", tone === "attention" ? statusInkClass("attention") : "text-muted-foreground")}>
+              {item.line}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }
 

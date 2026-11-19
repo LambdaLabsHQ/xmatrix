@@ -197,14 +197,24 @@ export const SPLIT_TOOL_VIEWS: readonly AppView[] = ["status", "settings", "admi
 
 export const DOCK_TAB_VIEWS: readonly AppView[] = ["pages", "messages", "status", "more"];
 
+/** The addresses of the one Agents destination: its overview, an agent, a machine, this machine. */
+export const FLEET_VIEWS: readonly AppView[] = ["status", "agents", "machines", "local"];
+
+export function isFleetView(view: AppView): boolean {
+  return FLEET_VIEWS.includes(view);
+}
+
+/** The dock tab a view belongs to: Agents holds all of its addresses, More everything without a tab. */
+export function dockTabOf(view: AppView): AppView {
+  return view === "pages" || view === "messages" ? view : isFleetView(view) ? "status" : "more";
+}
+
 // Views that live behind the mobile "More" dock tab: the hub screen itself plus
 // every root view without a dedicated dock tab. The dock highlights "More" for
 // all of them, and the mobile topbar shows a back-to-More chevron on children.
 export const MORE_TAB_VIEWS: readonly AppView[] = [
   "more",
   "activity",
-  "agents",
-  "machines",
   "apps",
   "team",
   "profile",
@@ -219,7 +229,7 @@ export const viewLabels: Record<AppView, string> = {
   messages: "Channels",
   local: "This Machine",
   machines: "Machines",
-  status: "Status",
+  status: "Agents",
   agents: "Agents",
   apps: "App",
   activity: "Activity",

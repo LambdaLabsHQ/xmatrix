@@ -362,7 +362,7 @@ final class WebContainerTests: XCTestCase {
 
     func testStatusTabNamesTheCanonicalWebView() {
         XCTAssertEqual(MobileTabView.status.rawValue, "status")
-        XCTAssertEqual(MobileTabView.status.label, "Status")
+        XCTAssertEqual(MobileTabView.status.label, "Agents")
         XCTAssertEqual(AppConfiguration.mobileTabURL(.status).query?.contains("view=status"), true)
         XCTAssertNotNil(UIImage(systemName: MobileTabView.status.icon))
     }

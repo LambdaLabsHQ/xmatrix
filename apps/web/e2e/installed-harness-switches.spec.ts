@@ -43,7 +43,7 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
           environment: expect.objectContaining({ launch: expect.objectContaining({ access: "full" }) }) }),
       ]);
       await expect(list.getByRole("switch")).toHaveCount(1);
-      await expect(page.getByTestId("agent-row").filter({ hasText: "Remote server" })).toBeVisible();
+      await expect(page.getByRole("region", { name: "Remote server" }).getByTestId("agent-row")).toBeVisible();
       await page.screenshot({ path: test.info().outputPath(`installed-agents-${name}.png`) });
     });
 

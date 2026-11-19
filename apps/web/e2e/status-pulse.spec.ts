@@ -8,7 +8,7 @@ import { channelHistory, openWorkingAgentsSpace, workingAgentsSpace } from "./wo
 test.use(E2E_DESKTOP_CONTEXT);
 
 const pulse = (page: import("@playwright/test").Page) =>
-  page.locator('.app-rail button[aria-label="Status"] .app-status-pulse');
+  page.locator('.app-rail button[aria-label="Agents"] .app-status-pulse');
 
 /** Compare two painted positions, without making the SVG/CSS implementation
  * or its animation property the contract. The icon must visibly keep moving. */

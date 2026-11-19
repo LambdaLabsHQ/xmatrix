@@ -131,23 +131,20 @@ test("the page tree leads with New page, and Ctrl+N there makes a page", async (
   await expect(page).toHaveURL(/page=p-new/u);
 });
 
-test("the agent list leads with Manage machines, and an agent, its machines and the + are one height", async ({ page }) => {
+test("the Agents list has no + of its own, and a machine and the agent on it are one height", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL],
     registrations: [{ key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness: "codex" },
       displayName: "codex", machineName: "My Mac", models: [] }] });
   await page.locator(".app-rail").getByRole("button", { name: "Agents", exact: true }).click();
 
-  const create = page.locator(".app-tool-list .app-list-create");
-  await expect(create).toHaveAccessibleName("Manage machines");
-  const heading = page.locator(".app-tool-list-group-title").first();
-  const machine = page.locator(".app-tool-list-row").first();
-  await expect(machine).toBeVisible();
-  const [createBox, headingBox, machineBox] = await Promise.all([create.boundingBox(), heading.boundingBox(),
-    machine.boundingBox()]);
-  expect(headingBox!.height).toBeCloseTo(machineBox!.height, 0);
-  expect(headingBox!.y - (createBox!.y + createBox!.height)).toBeCloseTo(0, 0);
-  expect(createBox!.height).toBeCloseTo(headingBox!.height, 0);
-  await expectCentredWithShortcut(create);
+  // An agent is added on a machine's page, so the list makes nothing itself.
+  await expect(page.locator(".app-tool-list .app-list-create")).toHaveCount(0);
+  const machine = page.getByRole("region", { name: "My Mac" });
+  const heading = machine.locator(".app-tool-list-group-title");
+  const agent = machine.getByTestId("agent-row");
+  await expect(agent).toBeVisible();
+  const [headingBox, agentBox] = await Promise.all([heading.boundingBox(), agent.boundingBox()]);
+  expect(headingBox!.height).toBeCloseTo(agentBox!.height, 0);
 });
 
 test("a page row makes a page under it from its own +, shown while the row is hovered", async ({ page }) => {

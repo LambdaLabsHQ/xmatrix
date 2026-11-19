@@ -1,5 +1,26 @@
 # Release Updates
 
+## Unreleased: Status, Machines and Agents are one destination
+
+Adding an agent to a machine was spread over three rail entries: it was
+installed under Machines, signed in under Agents, and its state read under
+Status, whose list only repeated the other two and sent each row away. The rail
+and the phone dock now have one entry, **Agents**, with one list: every machine
+of the Space and the agents on it. The paper beside it shows what is chosen
+there. The overview says how many agents are working, which ones need their
+owner (signed out, out of quota, access not confirmed, a machine not answering)
+and where each working agent is. A machine's page installs an agent and signs
+it in on the same row, and the row opens that agent. An agent's page shows its
+work, usage and settings, and carries its own install and update row and a link
+to its machine. What is set on an agent across machines opens from the
+overview or from the agent's name on its page.
+
+The addresses `/status`, `/agents`, `/machines` and `/local` are unchanged, so
+links, bookmarks and installed iOS builds keep working. A phone's More no
+longer lists Agents and Machines, and the Agents list no longer leads with
+"Manage machines". iOS shows the third tab as Agents after its next release.
+Web and iOS. Recovery is a CI-validated change reverting this one.
+
 ## Unreleased: an Android build repeats a failed dependency download
 
 Three of the seven Android releases on 2026-11-18 failed within two minutes

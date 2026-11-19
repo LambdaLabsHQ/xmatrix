@@ -47,7 +47,7 @@ import { MachineLoadPanel } from "./machine-load-details";
 import { MachineHarnessPanel } from "./machine-harness-panel";
 import { MachineWorktreesPanel } from "./machine-worktrees-panel";
 import {
-  MachineListRow, machinePlatform, machineStateLine, machineUnresponsive, machinesWithHostsFirst,
+  machineUnresponsive, machinesWithHostsFirst,
 } from "./machine-list-row";
 import { machineOs } from "./machine-os";
 import {
@@ -86,14 +86,12 @@ import {
   Shield,
   Star,
   Terminal,
-  Bot,
   Trash2,
   PowerOff,
   Users,
   Wrench,
 } from "lucide-react";
 
-import { ListSkeleton } from "./content-skeleton";
 
 import { Input } from "@/components/ui/input";
 
@@ -198,13 +196,6 @@ export function MoreView({
         viewItem("activity", "Activity", "Recent events across this workspace", Radio),
         viewItem("team", "Team", "Workspaces, invitations, and roles", Users),
         viewItem("apps", "Apps", "Connected tools and scoped permissions", PlugZap),
-      ],
-    },
-    {
-      label: "Operations",
-      items: [
-        viewItem("agents", "Agents", "Registered agents and where they run", Bot),
-        viewItem("machines", "Machines", "Registered machines and daemons", Terminal),
       ],
     },
   );
@@ -548,7 +539,7 @@ export function LocalMacView({
         {hubRecord?.load}
       </ToolDetailSection>
 
-      {harnesses && <ToolDetailSection title="Harnesses">{harnesses}</ToolDetailSection>}
+      {harnesses && <ToolDetailSection title="Agents on this machine">{harnesses}</ToolDetailSection>}
       {worktrees}
 
       <ToolDetailSection
@@ -738,70 +729,124 @@ export function LocalMacView({
   );
 }
 
+/** The desktop app's own machine: its row's state and its page. */
+export type ThisMachine = {
+  machineId?: string;
+  /** Its name until the Hub's record of it is listed. */
+  name: string;
+  summary: string;
+  online: boolean;
+  /** The desktop app's platform (`win32` / `darwin` / `linux`) for its OS mark. */
+  platform?: string;
+  /** The desktop App running here, behind its channel: what its updater is doing. */
+  appBehind?: (latestVersion: string) => React.ReactNode;
+  /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
+  content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
+};
+
+/** What a Machine's page changed, shown at once in the list beside it; the next Machine refresh carries it too. */
+export function useMachineEdits() {
+  const [renamed, setRenamed] = useState<Record<string, string>>({});
+  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
+  const [assigned, setAssigned] = useState<Record<string, boolean>>({});
+  return { renamed, setRenamed, removed, setRemoved, assigned, setAssigned };
+}
+
+export type MachineEdits = ReturnType<typeof useMachineEdits>;
+
 /**
- * The Space's Machines, read like every rail destination: the list names
- * each host (its WSL guests under it) and the paper shows the one chosen.
- * On the desktop app its own machine is listed like any other, only tagged
- * "This machine": its local setup — daemon, directories, local agents — is
- * that row's page.
+ * The Space's Machines as the list and a Machine's page both read them: each
+ * host with its WSL guests under it, the desktop app's own machine a row like
+ * any other, only tagged, and which one the address names.
  */
-export function MachinesView({
-  machines,
-  loading,
-  error,
-  token,
-  spaceId,
-  thisMachine,
-  defaultMachineId,
-}: {
+export function machineListModel({ machines, thisMachine, edits, selectedMachineId, defaultMachineId }: {
   machines: MachineSummary[];
-  loading: boolean;
-  error: string | null;
-  token?: string | null;
-  /** The Space being viewed: an owner turns each installed harness on or off for it. */
-  spaceId?: string;
-  /** The desktop app's own machine: its row's state and its page. */
-  thisMachine?: {
-    machineId?: string;
-    /** Its name until the Hub's record of it is listed. */
-    name: string;
-    summary: string;
-    online: boolean;
-    /** The desktop app's platform (`win32` / `darwin` / `linux`) for its OS mark. */
-    platform?: string;
-    /** The desktop App running here, behind its channel: what its updater is doing. */
-    appBehind?: (latestVersion: string) => React.ReactNode;
-    /** Its page, given the Hub's record of it (versions, last seen, load) to show beside the daemon. */
-    content: (hubRecord: { facts: React.ReactNode; load: React.ReactNode } | null) => React.ReactNode;
-  } | null;
+  thisMachine?: ThisMachine | null;
+  edits: MachineEdits;
+  selectedMachineId: string | null;
   /** The Machine shown when the address names none (this machine, opened from setup). */
   defaultMachineId?: string;
 }) {
-  // A saved name shows at once; the next Machine refresh carries it too.
-  const [renamed, setRenamed] = useState<Record<string, string>>({});
+  const { renamed, removed, assigned } = edits;
+  const nameOf = (machine: MachineSummary) => (machine.machineId && renamed[machine.machineId]) || machine.name;
+  const hostOf = (machine: MachineSummary) => machines.find((host) =>
+    host.machineId && host.machineId === machine.parentMachineId);
+  const autoAssigned = (machine: MachineSummary): boolean => machine.machineId !== undefined && machine.machineId in assigned
+    ? assigned[machine.machineId]! : machine.autoAssign !== false;
+  const identityUnavailable = Boolean(thisMachine) && (!thisMachine?.machineId ||
+    /^machine:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(thisMachine.machineId));
+  // The desktop's own record is exactly the one with its Machine id; nothing else stands in for it.
+  const isThis = (machine: MachineSummary) => Boolean(thisMachine?.machineId)
+    && machine.machineId === thisMachine?.machineId;
+  const listed = machinesWithHostsFirst(machines.filter((machine) =>
+    !(machine.machineId && removed.has(machine.machineId))));
+  const thisRecord = listed.find(isThis);
+  // This machine is a row like any other; until the Hub lists it, it leads the list under its own name.
+  const ordered: Array<MachineSummary | null> = thisMachine && !identityUnavailable && !thisRecord ? [null, ...listed] : listed;
+  const chosenKey = selectedMachineId ?? defaultMachineId ?? null;
+  const showingThis = Boolean(thisMachine) && (chosenKey === THIS_MACHINE_SELECTION
+    || Boolean(thisRecord && chosenKey === thisRecord.id));
+  const chosen = showingThis ? null : listed.find((machine) => machine.id === chosenKey);
+  const shown = showingThis ? null : chosen ?? (thisMachine ? null : listed[0]);
+  const showThisBeside = Boolean(thisMachine) && !showingThis && !chosen;
+  // Called what its OS calls it: This Mac, This PC; any other OS is "This Machine", capitalised alike.
+  const thisOs = thisMachine ? machineOs(thisMachine.platform) : "unknown";
+  const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
+  return { nameOf, hostOf, autoAssigned, identityUnavailable, isThis, listed, thisRecord, ordered, showingThis, chosen, shown,
+    showThisBeside, thisLabel };
+}
+
+export type MachineListModel = ReturnType<typeof machineListModel>;
+
+/** This machine is said, not boxed: in ink at the head of its quiet line, where every other Machine says less. */
+export function ThisMachineTag({ label }: { label: string }) {
+  return <span className="font-semibold text-foreground" data-testid="this-machine-tag">{label}</span>;
+}
+
+/**
+ * A Machine's page: what is set on it, its daemon and load, the agents
+ * installed on it and its directories. On the desktop app its own machine's
+ * page carries its local setup too: daemon, directories, local agents.
+ */
+export function MachinePaper({
+  model,
+  edits,
+  select,
+  loading,
+  token,
+  spaceId,
+  thisMachine,
+  onOpenAgent,
+}: {
+  model: MachineListModel;
+  edits: MachineEdits;
+  /** Writes the Machine the address names. */
+  select: (machineId: string | null) => void;
+  loading: boolean;
+  token?: string | null;
+  /** The Space being viewed: an owner turns each installed harness on or off for it. */
+  spaceId?: string;
+  thisMachine?: ThisMachine | null;
+  /** Opens an agent that runs on this Machine, by its harness. */
+  onOpenAgent?: (machine: MachineSummary, harness: string) => void;
+}) {
+  const { setRenamed, setRemoved, setAssigned } = edits;
+  const { nameOf, hostOf, autoAssigned, thisRecord, showingThis, shown, showThisBeside, listed: machines } = model;
   const [editing, setEditing] = useState<{ machineId: string; draft: string; create?: boolean } | null>(null);
   const [renameBusy, setRenameBusy] = useState(false);
   const [renameError, setRenameError] = useState<string | null>(null);
   const skipSave = useRef(false);
   const savingName = useRef(false);
-  // A removed Machine leaves the list at once; the next Machine refresh omits it too.
-  const [removed, setRemoved] = useState<ReadonlySet<string>>(() => new Set());
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
-  // A saved assignment choice shows at once; the next Machine refresh carries it too.
-  const [assigned, setAssigned] = useState<Record<string, boolean>>({});
   const [assignBusy, setAssignBusy] = useState<string | null>(null);
   const [assignError, setAssignError] = useState<string | null>(null);
-  const [selectedMachineId, select] = useViewSelection("machines");
   // Load samples expire after 90 seconds; re-judge freshness between refreshes.
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 15_000);
     return () => window.clearInterval(timer);
   }, []);
-  const nameOf = (machine: MachineSummary) => (machine.machineId && renamed[machine.machineId]) || machine.name;
-  const hostOf = (machine: MachineSummary) => machines.find((host) =>
-    host.machineId && host.machineId === machine.parentMachineId);
   const saveName = async () => {
     if (skipSave.current) {
       skipSave.current = false;
@@ -828,8 +873,6 @@ export function MachinesView({
       setRenameBusy(false);
     }
   };
-  const autoAssigned = (machine: MachineSummary): boolean => machine.machineId !== undefined && machine.machineId in assigned
-    ? assigned[machine.machineId]! : machine.autoAssign !== false;
   const assign = async (machine: MachineSummary, on: boolean) => {
     const machineId = machine.machineId;
     if (!token || !machineId || assignBusy) return;
@@ -862,62 +905,7 @@ export function MachinesView({
       setRemovingId(null);
     }
   };
-  const identityUnavailable = Boolean(thisMachine) && (!thisMachine?.machineId ||
-    /^machine:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(thisMachine.machineId));
-  // The desktop's own record is exactly the one with its Machine id; nothing else stands in for it.
-  const isThis = (machine: MachineSummary) => Boolean(thisMachine?.machineId)
-    && machine.machineId === thisMachine?.machineId;
-  const listed = machinesWithHostsFirst(machines.filter((machine) =>
-    !(machine.machineId && removed.has(machine.machineId))));
-  const thisRecord = listed.find(isThis);
-  // This machine is a row like any other; until the Hub lists it, it leads the list under its own name.
-  const ordered = thisMachine && !identityUnavailable && !thisRecord ? [null, ...listed] : listed;
-  const chosenKey = selectedMachineId ?? defaultMachineId ?? null;
-  const showingThis = Boolean(thisMachine) && (chosenKey === THIS_MACHINE_SELECTION
-    || Boolean(thisRecord && chosenKey === thisRecord.id));
-  const chosen = showingThis ? null : listed.find((machine) => machine.id === chosenKey);
-  const shown = showingThis ? null : chosen ?? (thisMachine ? null : listed[0]);
-  const showThisBeside = Boolean(thisMachine) && !showingThis && !chosen;
-  // This machine is said, not boxed: in ink at the head of its quiet line, where every other Machine says less.
-  // Called what its OS calls it: This Mac, This PC; any other OS is "This Machine", capitalised alike.
-  const thisOs = thisMachine ? machineOs(thisMachine.platform) : "unknown";
-  const thisLabel = thisOs === "macos" ? "This Mac" : thisOs === "windows" ? "This PC" : "This Machine";
-  const thisTag = <span className="font-semibold text-foreground" data-testid="this-machine-tag">{thisLabel}</span>;
-
-  const list = (
-    <ToolList title="Machines">
-      {error && <p role="alert" className="px-5 pb-2 text-xs font-medium text-destructive md:px-6">{error}</p>}
-      {identityUnavailable && <p role="status" className="px-5 pb-2 text-xs text-muted-foreground md:px-6">
-        Update xMatrix to identify this computer and show its controls on the registered Machine.
-      </p>}
-      <ul>
-        {loading && ordered.length === 0 ? (
-          <li className="list-none"><ListSkeleton label="Loading machines" rows={4} /></li>
-        ) : ordered.length === 0 ? (
-          <li className="px-5 py-2 text-sm text-muted-foreground md:px-6">No machines registered.</li>
-        ) : ordered.map((machine) => {
-          // This machine is a row like any other, only tagged; before the Hub lists it, the desktop says its state.
-          const local = !machine || isThis(machine);
-          const name = machine ? nameOf(machine) : thisMachine!.name;
-          const host = machine ? hostOf(machine) : undefined;
-          const online = machine ? machine.status === "online" : thisMachine!.online;
-          const facts = [host ? `WSL on ${nameOf(host)}` : null,
-            machine ? machineStateLine(machine) : thisMachine!.summary,
-            machine && !autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
-          return (
-            <MachineListRow key={machine?.id ?? THIS_MACHINE_SELECTION} machine={machine} name={name}
-              platform={local ? thisMachine!.platform : machinePlatform(machine!)} online={online} hosted={Boolean(host)}
-              selected={local ? showingThis : machine!.id === chosen?.id}
-              shownBeside={local ? showThisBeside && !selectedMachineId
-                : !chosen && !showingThis && !showThisBeside && machine!.id === shown?.id}
-              onSelect={() => select(local ? THIS_MACHINE_SELECTION : machine!.id)}
-              now={now}
-              subtitle={local ? <>{thisTag}{facts ? <> · {facts}</> : null}</> : facts} />
-          );
-        })}
-      </ul>
-    </ToolList>
-  );
+  const thisTag = <ThisMachineTag label={model.thisLabel} />;
 
   // This machine's page is a Machine's page with its local controls: the Hub's record when listed, the desktop's own otherwise.
   const pageMachine = showingThis || showThisBeside ? thisRecord ?? null : shown;
@@ -936,7 +924,7 @@ export function MachinesView({
       <ToolDetail
         key={machine?.id ?? THIS_MACHINE_SELECTION}
         onBack={() => select(null)}
-        backLabel="Machines"
+        backLabel="Agents"
         context="Machines"
         title={renaming && editing ? (
           <form className="w-full" onSubmit={(event) => { event.preventDefault(); void saveName(); }}>
@@ -1016,15 +1004,16 @@ export function MachinesView({
           load: <MachineLoadPanel machine={machine} now={now} token={token} />,
         } : null) : machine && (
           <>
+            <ToolDetailSection title="Agents on this machine">
+              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId}
+                onOpenAgent={onOpenAgent ? (harness) => onOpenAgent(machine, harness) : undefined} />
+            </ToolDetailSection>
             <ToolDetailSection title="Daemon">
               <ToolFacts>
                 <ToolFact label="Daemon">{daemonPresenceLabel(machine.daemon)}</ToolFact>
                 <MachineVersionFacts machine={machine} token={token} />
               </ToolFacts>
               <MachineLoadPanel machine={machine} now={now} token={token} />
-            </ToolDetailSection>
-            <ToolDetailSection title="Harnesses">
-              <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId} />
             </ToolDetailSection>
             <MachineWorktreesPanel key={`worktrees:${machine.id}`} daemon={machine.daemon} token={token} />
             <ToolDetailSection title={`Directories · ${machine.workspaces.length}`}>
@@ -1053,7 +1042,7 @@ export function MachinesView({
     );
   }
 
-  return <ToolSplit label="Machines" open={Boolean(selectedMachineId)} list={list} detail={detail} />;
+  return detail;
 }
 
 /** The address key of the desktop app's own machine in the Machines list. */

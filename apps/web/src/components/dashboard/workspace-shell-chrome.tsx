@@ -34,6 +34,7 @@ import {
   DOCK_TAB_VIEWS,
   mobileBackState,
   MORE_TAB_VIEWS,
+  isFleetView,
   viewLabels,
 } from "./workspace-shell-navigation";
 
@@ -73,8 +74,6 @@ import {
   ChevronRight,
   CircleArrowUp,
   CircleHelp,
-  Bot,
-  HardDrive,
   Hash,
   MessagesSquare,
   Lock,
@@ -195,10 +194,9 @@ export const WorkspaceRail = memo(function WorkspaceRail({
           label="Channels"
           onClick={() => onChangeView("messages")}
         />
-        <RailButton active={activeView === "status"} icon={statusLive ? StatusPulseIconLive : StatusPulseIcon} label="Status"
+        {/* One destination for the Space's machines and the agents on them; its pulse runs while one works. */}
+        <RailButton active={isFleetView(activeView)} icon={statusLive ? StatusPulseIconLive : StatusPulseIcon} label="Agents"
           onClick={() => onChangeView("status")} />
-        <RailButton active={activeView === "machines" || activeView === "local"} icon={HardDrive} label="Machines" onClick={() => onChangeView("machines")} />
-        <RailButton active={activeView === "agents"} icon={Bot} label="Agents" onClick={() => onChangeView("agents")} />
         <RailButton active={activeView === "apps"} icon={PlugZap} label="App" onClick={() => onChangeView("apps")} />
         <RailButton
           active={activeView === "team"}
@@ -393,7 +391,7 @@ export const MobileTabDock = memo(function MobileTabDock({
   const items: Array<{ view: AppView; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { view: "pages", label: "Pages", icon: BookOpen },
     { view: "messages", label: "Channels", icon: MessagesSquare },
-    { view: "status", label: "Status", icon: statusLive ? StatusPulseIconLive : StatusPulseIcon },
+    { view: "status", label: "Agents", icon: statusLive ? StatusPulseIconLive : StatusPulseIcon },
     { view: "more", label: "More", icon: MoreHorizontal },
   ];
 
@@ -412,7 +410,7 @@ export const MobileTabDock = memo(function MobileTabDock({
         const Icon = item.icon;
         const active = item.view === "more"
           ? MORE_TAB_VIEWS.includes(activeView)
-          : activeView === item.view;
+          : item.view === "status" ? isFleetView(activeView) : activeView === item.view;
         return (
           <button
             key={item.view}

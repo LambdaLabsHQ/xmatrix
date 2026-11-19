@@ -16,6 +16,7 @@ import { queueHarnessAction, readHarnessAction, readRecentHarnessActions, refres
 import { HARNESS_ACTION_LABELS, describeHarnessAction } from "./machine-harness-action-status";
 import { harnessAutoUpdateSupported, harnessUpdateAvailable, machineHarnessState } from "./machine-harness-state";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
+import { HarnessSignInSection } from "./harness-sign-in";
 
 type HarnessRowState = ReturnType<typeof machineHarnessState>["rows"][number];
 type Operation = { controlId: string; action: HarnessAction; requestedHere?: boolean; label: string; startedAt: number };
@@ -108,10 +109,14 @@ function OperationStatus({ operation, status, displayName, responding }: {
   </div>;
 }
 
-export function MachineHarnessPanel({ daemon, token, spaceId }: {
+export function MachineHarnessPanel({ daemon, token, spaceId, only, onOpenAgent }: {
   daemon?: SerializedMachineDaemon; token?: string | null;
   /** The Space being viewed, whose switches the owner sees beside each installed harness. */
   spaceId?: string;
+  /** Just this harness's row, on the page of the agent it runs: no inventory refresh, no other rows. */
+  only?: string;
+  /** Opens the agent a harness runs as in this Space: its work, usage and settings. */
+  onOpenAgent?: (harness: string) => void;
 }) {
   const { user } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
@@ -132,13 +137,16 @@ export function MachineHarnessPanel({ daemon, token, spaceId }: {
   const refresh = useHarnessOperation(context, recorded("custom"));
   const spaceSwitches = useHarnessSpaceSwitches({ token, spaceId, current, userId: user?.id });
 
+  const rows = only ? state.rows.filter((row) => row.preset.id === only) : state.rows;
+  // An agent's page says nothing about its install until its machine has reported one.
+  if (only && (rows.length === 0 || !state.inventory)) return null;
   return <div className="space-y-3" data-testid="machine-harness-panel">
-    <div className="flex flex-wrap items-center justify-between gap-2">
+    {!only && <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-xs text-muted-foreground">{state.inventory
         ? `Last checked ${new Date(state.inventory.capturedAt).toLocaleString()}` : "No harness inventory reported yet."}</p>
       <Button size="sm" variant="outline" disabled={!state.canManage || refresh.busy}
         onClick={() => refresh.run({ presetId: "custom", action: "refresh" })}>Refresh</Button>
-    </div>
+    </div>}
     {state.canManage && !state.responding && <p className={statusInkClass("attention", "text-xs")}>
       {`This machine is not responding: work sent to it at ${new Date(current!.unansweredSince!).toLocaleString()} `
         + "is still waiting. Its connection to xMatrix may be unstable, so a new action may not reach it."}</p>}
@@ -155,10 +163,11 @@ export function MachineHarnessPanel({ daemon, token, spaceId }: {
       <thead className="hidden sm:table-header-group"><tr className="border-b text-muted-foreground"><th className="py-2 pr-3">Harness</th><th className="pr-3">Installed version</th>
         <th className="pr-3">Latest</th><th className="pr-3">Automatic updates</th>
         {spaceSwitches.owner && <th className="pr-3">Enabled</th>}<th>Actions</th></tr></thead>
-      <tbody className="block sm:table-row-group">{state.rows.map((row, index) => {
-        const beforeDivider = Boolean(row.item?.installed) && index + 1 < state.rows.length && !state.rows[index + 1]?.item?.installed;
+      <tbody className="block sm:table-row-group">{rows.map((row, index) => {
+        const beforeDivider = Boolean(row.item?.installed) && index + 1 < rows.length && !rows[index + 1]?.item?.installed;
         return <Fragment key={row.preset.id}>
-          <HarnessRow row={row} state={state} context={context} spaceSwitches={spaceSwitches} recorded={recorded(row.preset.id)} beforeDivider={beforeDivider} />
+          <HarnessRow row={row} state={state} context={context} spaceSwitches={spaceSwitches} recorded={recorded(row.preset.id)} beforeDivider={beforeDivider}
+            onOpenAgent={onOpenAgent} />
           {beforeDivider && <HarnessInstallDivider columns={spaceSwitches.owner ? 6 : 5} />}
         </Fragment>;
       })}</tbody>
@@ -172,9 +181,10 @@ function HarnessInstallDivider({ columns }: { columns: number }) {
   </tr>;
 }
 
-function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, beforeDivider = false }: {
+function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, beforeDivider = false, onOpenAgent }: {
   row: HarnessRowState; state: ReturnType<typeof machineHarnessState>;
   context: Parameters<typeof useHarnessOperation>[0]; spaceSwitches: SpaceSwitches; recorded?: HarnessActionStatus; beforeDivider?: boolean;
+  onOpenAgent?: (harness: string) => void;
 }) {
   const [armed, setArmed] = useState(false);
   const { operation, status, busy, run } = useHarnessOperation(context, recorded, preset.displayName);
@@ -198,8 +208,19 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
   const cursorUpdateBlocked = preset.id === "cursor" && item?.installed && !state.cursorUpdateReady;
   const updateAvailable = harnessUpdateAvailable(item?.version, item?.latestVersion);
   const act = (action: HarnessAction) => { setArmed(false); run({ presetId: preset.id, action }); };
+  // Installed is not yet able to work: its owner signs the program in on this Machine, from this row.
+  const machine = context.current;
+  const signIn = spaceSwitches.owner && context.token && machine?.machineId && item?.installed && item.login === "signed_out"
+    && preset.management?.login
+    ? { machineName: machine.machineName ?? machine.name, key: { ownerUserId: context.userId, machineId: machine.machineId, harness: preset.id } }
+    : null;
+  // Listed in this Space, it is an agent with a page of its own: what it works on, its usage, its settings.
+  const opens = onOpenAgent && registration && registration.state !== "revoked";
   return <tr className={`grid grid-cols-2 gap-2 py-3 sm:table-row sm:py-0${beforeDivider ? "" : " border-b last:border-0"}`}>
-    <th scope="row" className="col-span-2 min-w-0 pr-3 font-medium sm:py-3">{preset.displayName}</th>
+    <th scope="row" className="col-span-2 min-w-0 pr-3 font-medium sm:py-3">{opens
+      ? <button type="button" data-testid="harness-open-agent" title={`Open ${preset.displayName} on this machine`}
+        className="text-left font-medium underline-offset-2 hover:underline" onClick={() => onOpenAgent(preset.id)}>{preset.displayName}</button>
+      : preset.displayName}</th>
     <td className="min-w-0 pr-3 [overflow-wrap:anywhere]"><span className="block text-muted-foreground sm:hidden">Installed version</span>{item?.installed ? item.version ?? "Installed"
       : item?.probeStatus === "unsupported" ? <span className="text-muted-foreground">Unsupported</span> : null}</td>
     <td className="min-w-0 pr-3 [overflow-wrap:anywhere]"><span className="block text-muted-foreground sm:hidden">Latest</span>{updateAvailable && item?.latestVersion}</td>
@@ -231,6 +252,10 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
     </div>{armed && <p className="text-muted-foreground">Settings and sessions are kept. Running instances may stop working.</p>}
       {operation && <OperationStatus operation={operation} status={status} displayName={preset.displayName}
         responding={state.responding} />}{cursorUpdateBlocked && <p className="text-muted-foreground">Update this machine&apos;s daemon before updating Cursor.</p>}
-      {uninstall && state.canManage && !state.uninstallReady && <p className="text-muted-foreground">Update this machine&apos;s daemon to uninstall.</p>}</td>
+      {uninstall && state.canManage && !state.uninstallReady && <p className="text-muted-foreground">Update this machine&apos;s daemon to uninstall.</p>}
+      {signIn && <div className="mt-2 space-y-1.5" data-testid="harness-row-sign-in">
+        <p className={statusInkClass("attention")}>Not signed in, so it cannot take work yet.</p>
+        <HarnessSignInSection bare registration={signIn} token={context.token!} userId={context.userId} />
+      </div>}</td>
   </tr>;
 }
