@@ -61,9 +61,17 @@ interface Scope { requestId: string; channelId: string; programId: string }
 const instanceTakesMessages = (instance: string) => `((${instance}.status IN ('online','busy','idle') AND EXISTS (SELECT 1
       FROM data.runs live WHERE live.run_id=${instance}.run_id AND live.status IN ('starting','running')))
     OR ${instance}.rest_state IN ('sleeping','interrupted'))`;
-/** The Instance that holds request `r`: the one it was handed to, or the one its delivery started. */
+/**
+ * The Instance that holds request `r`: the one it was handed to, or the one
+ * its delivery started. One delivery may start several Runs, each launch that
+ * failed to start making way for the next: the holder is the one whose Run
+ * took the delivery, else the latest launched.
+ */
 const requestInstance = (r: string) => `COALESCE(${r}.instance_id,(SELECT launch.instance_id FROM data.agent_launches launch
-    WHERE launch.channel_id=${r}.channel_id AND launch.trigger_id=${r}.delivery_message_id LIMIT 1))`;
+    WHERE launch.channel_id=${r}.channel_id AND launch.trigger_id=${r}.delivery_message_id
+    ORDER BY EXISTS (SELECT 1 FROM data.agent_message_executions took WHERE took.channel_id=launch.channel_id
+        AND took.source_message_id=launch.trigger_id AND took.run_id=launch.run_id) DESC,launch.created_at DESC,launch.launch_id DESC
+    LIMIT 1))`;
 /**
  * The Instance that request `r` was delegated to by its address (`@claude:2`):
  * one in the request's conversation, under that name and number, whose Run
@@ -446,10 +454,11 @@ export class PostgresNornProgramRepository {
       // The Instance a request started exists for that request alone. Once the request has ended, its Run is
       // stopped if still live, and the Instance is retired if it rests: an Instance at rest outlives its Run.
       const started = (instance: string) => `LEFT JOIN LATERAL (SELECT CASE WHEN run.status IN ('starting','running') THEN run.run_id END
-              AS run_id,lower(registration.display_name||':'||instance.channel_instance_id::text) AS mention
+              AS run_id,lower(COALESCE(registration.display_name,binding.harness)||':'||instance.channel_instance_id::text) AS mention
             FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
               JOIN data.run_agent_registrations binding ON binding.run_id=instance.run_id
-              JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
+              -- A registration removed since does not keep its Instance here.
+              LEFT JOIN data.space_agent_registrations registration ON registration.space_id=binding.space_id
                 AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
                 AND registration.harness=binding.harness
             WHERE instance.instance_id=${instance} LIMIT 1) started ON TRUE`;
