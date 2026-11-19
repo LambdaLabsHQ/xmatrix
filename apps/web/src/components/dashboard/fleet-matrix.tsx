@@ -3,6 +3,7 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { actionClass } from "@/components/ui/action-tone";
 import { cn } from "@/lib/utils";
 
 import { Face } from "./face";
@@ -95,7 +96,7 @@ export function FleetMatrix({ columns, rows, more }: {
                 <button type="button" onClick={more.onToggle} aria-expanded={more.open} data-testid="fleet-more-agents"
                   title={more.open ? "Hide the agents installed nowhere yet" : `Show ${more.count} more agents that can be installed`}
                   aria-label={more.open ? "Hide the agents installed nowhere yet" : `Show ${more.count} more agents that can be installed`}
-                  className="flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-foreground/5 hover:text-foreground">
+                  className={actionClass({ variant: "quiet", size: "icon-sm" })}>
                   <Plus className={cn("size-4 transition-transform", more.open && "rotate-45")} aria-hidden="true" />
                 </button>
               </th>
