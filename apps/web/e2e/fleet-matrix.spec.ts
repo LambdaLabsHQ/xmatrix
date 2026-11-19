@@ -200,10 +200,10 @@ test.describe("mobile agents grid and bottom sheets", () => {
     const chip = page.getByTestId("status-runtime").filter({ hasText: "codex" });
     await expect(chip).toBeVisible();
 
-    // Tapping a Needs attention item on a phone opens the in-place Bottom Sheet editor without navigating away.
-    const attention = page.getByTestId("status-attention");
-    await expect(attention).toContainText("codex on Workbench");
-    await attention.first().click();
+    // Attention is summarized inline and drawn in amber ink on the cell itself; tapping the cell opens its Bottom Sheet.
+    await expect(page.getByTestId("status-attention")).toHaveCount(0);
+    await expect(page.getByTestId("fleet-attention-count")).toHaveText(" · 1 needs attention");
+    await machine.locator('[data-testid="agent-row"][data-state="attention"]').click();
     const sheet = page.getByTestId("fleet-cell-editor").filter({ visible: true });
     await expect(sheet).toContainText("Codex on Workbench");
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);

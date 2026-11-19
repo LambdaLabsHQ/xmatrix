@@ -109,8 +109,10 @@ export function FleetOverview({ status, attention, note, children }: {
                       ? <Face of={{ kind: "agent", name: item.harness, harness: item.harness }} size="xs" showKindBadge={false} className="shrink-0" />
                       : <span className="app-tool-state-icon flex size-5 shrink-0 items-center justify-center" data-state="attention" aria-hidden="true">
                         <MachineGlyph os="unknown" className="size-4" /></span>}
-                    <span className="min-w-0 truncate font-semibold">{item.title}</span>
-                    <span className={cn("ml-auto shrink-0 text-xs", statusInkClass("attention"))}>{item.line}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-semibold">{item.title}</span>
+                      <span className={cn("block truncate text-xs", statusInkClass("attention"))}>{item.line}</span>
+                    </span>
                     <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
                   </button>
                 </li>

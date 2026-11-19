@@ -28,7 +28,7 @@ import { MachineLoadGlance } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
 import { AgentPaper } from "./my-agents-view";
 import { SetupCardShell } from "./space-setup-card-chrome";
-import { FleetOverview, FleetRuntimeLines, runtimeLine, useFleetStatus, type FleetOverviewLine, type FleetRuntime } from "./status-view";
+import { FleetOverview, FleetRuntimeLines, runtimeLine, useFleetStatus, type FleetRuntime } from "./status-view";
 import {
   LIST_ROW_CLASS_NAME, LIST_ROW_COPY_CLASS_NAME, LIST_ROW_LEADING_CLASS_NAME, LIST_ROW_LEADING_TWO_LINE_CLASS_NAME,
   LIST_ROW_META_CLASS_NAME, LIST_ROW_TITLE_CLASS_NAME, LIST_ROW_TITLE_LINE_CLASS_NAME,
@@ -357,26 +357,12 @@ export function FleetView({
     }];
   });
 
-  // What waits on a person, each line opening where it is dealt with (on a phone, the cell sheet edits in place).
-  const placeOf = (row: AgentRow) => `${agentRowName(row)} on ${row.registration.machineName}`;
-  const attention: FleetOverviewLine[] = [
-    ...model.listed.filter(machineUnresponsive).map((machine) => ({ key: `machine:${machine.id}`,
-      title: model.nameOf(machine), line: "Not responding", onOpen: () => onChangeView("machines", machine.id) })),
-    ...rows.flatMap((row) => {
-      // Only what cannot take work until someone acts: exactly the cells the matrix draws in that ink.
-      if (row.activity.state !== "attention") return [];
-      const { registration } = row;
-      const machine = machineOf(registration);
-      const outdated = tooOld.has(candidateId(registration));
-      const rowKey = machine?.id ?? registration.key.machineId;
-      const line = row.activity.brief;
-      // A program is updated on its machine's page; everything else is on the agent's own.
-      return [{ key: row.id, harness: row.harness, title: placeOf(row), line,
-        onOpen: () => phone && subjects.has(rowKey)
-          ? setCell({ row: rowKey, harness: row.harness })
-          : outdated && machine ? onChangeView("machines", machine.id) : onChangeView("agents", row.id) }];
-    }),
-  ];
+  // Each agent waiting on a person (and each unresponsive machine) already renders in amber ink inside its grid cell / row.
+  const attentionCount = model.listed.filter(machineUnresponsive).length + rows.filter((row) => row.activity.state === "attention").length;
+  const attentionNote = attentionCount > 0 && (
+    <span className={statusInkClass("attention")} data-testid="fleet-attention-count">
+      {" · "}{attentionCount} {attentionCount === 1 ? "needs" : "need"} attention</span>
+  );
 
   // An empty Space has nothing to overview: it shows where agents come from.
   const empty = Boolean(catalog.data) && rows.length === 0;
@@ -446,7 +432,7 @@ export function FleetView({
     <ToolList title="Agents">
       {/* On a phone the overview leads the list: it is the first thing the tab shows. */}
       <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-4">{setup ? bringIn : (
-        <FleetOverview status={status} attention={attention}>
+        <FleetOverview status={status} attention={[]} note={attentionNote}>
           <FleetRuntimeLines compact runtimes={runtimes} loading={loading} error={catalog.isError ? catalog.error : null}
             onRetry={() => void catalog.refetch()} empty={turnOn}
             onOpenHarness={(harness) => onChangeView("agents", agentHarnessSelectionId(harness))} />
@@ -556,10 +542,7 @@ export function FleetView({
             Update xMatrix to identify this computer and show its controls on the registered Machine.
           </p>}
           {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
-          <FleetOverview status={status} attention={[]} note={attention.length > 0 && (
-            <span className={statusInkClass("attention")} data-testid="fleet-attention-count">
-              {" · "}{attention.length} {attention.length === 1 ? "needs" : "need"} attention</span>
-          )}>
+          <FleetOverview status={status} attention={[]} note={attentionNote}>
             {catalogError}
             {turnOn}
             <section aria-label="Machines and agents" className="space-y-3">
