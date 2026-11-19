@@ -14,6 +14,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentProps, type CSSProperties,
 } from "react";
 import { useStableCallback } from "./workspace-shell-helpers";
+import type { AgentTraceTarget } from "./workspace-composer-dialogs";
 import { channelRecentActivityMs } from "./workspace-shell-helpers-extra";
 import { CrossSpaceReadCard, useChannelPendingCrossSpaceReads } from "./cross-space-read-card";
 import { useQueries } from "@tanstack/react-query";
@@ -347,6 +348,24 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     desktopFrameClass,
     cachedCatalogChannels,
   } = model;
+  // Opened from the work dock, the trace grows up out of that Instance's
+  // dock item; from anywhere else it is the centered window. Pressing the same
+  // item again folds it back.
+  const [agentTraceAnchor, setAgentTraceAnchor] = useState<Element | null>(null);
+  const openAgentTraceAt = useStableCallback((target: AgentTraceTarget, anchor?: Element) => {
+    if (anchor && anchor === agentTraceAnchor && agentTraceTarget &&
+      agentTraceTarget.instanceId === target.instanceId) {
+      setAgentTraceAnchor(null);
+      closeAgentTrace();
+      return;
+    }
+    setAgentTraceAnchor(anchor ?? null);
+    openAgentTrace(target);
+  });
+  const closeAgentTraceAt = useStableCallback(() => {
+    setAgentTraceAnchor(null);
+    closeAgentTrace();
+  });
   // A downloaded update restarts the app, so it is confirmed first; an
   // "available" one from older shells only starts a download.
   const requestDesktopUpdateInstall = () => {
@@ -1259,7 +1278,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onScrollPositionChange={handleTimelineScrollPositionChange}
         onScrollGesture={handleTimelineScrollGesture}
         onNearTop={handleTimelineNearTop}
-        onOpenAgentTrace={openAgentTrace}
+        onOpenAgentTrace={openAgentTraceAt}
         onOpenHumanProfile={openTimelineHumanProfile}
         currentUserIdentityId={`user:${user.id}`}
         onReact={handleTimelineReact}
@@ -1310,7 +1329,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onStopAgentInstance={stopDockInstance}
         onRebornAgentInstance={rebornDockInstance}
         onHandoffAgentInstance={handoffDockInstance}
-        onOpenAgentTrace={openAgentTrace}
+        onOpenAgentTrace={openAgentTraceAt}
+        traceAnchor={agentTraceTarget ? agentTraceAnchor : null}
         inPageMargin={placement === "page-margin"}
       />
       {/* The composer sits in the reserved bottom gutter; the work dock stays
@@ -1356,7 +1376,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       token={token}
       connectorRevision={latestChannelConnectorStateMessageId(renderableHistory)}
       currentUserMemberId={humanMemberId}
-      onOpenAgentTrace={openAgentTrace}
+      onOpenAgentTrace={openAgentTraceAt}
       onRunChannelCommand={canUseSelectedChannel ? runSelectedChannelCommand : undefined}
       onManageApps={manageSelectedApps}
       onDeleteChannel={canDeleteSelectedChannel ? openSelectedChannelDeletion : undefined}
@@ -1775,7 +1795,8 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
           history={renderableHistory}
           channelId={selectedChannelId}
           onLoadOlder={loadOlderAgentTrace}
-          onClose={closeAgentTrace}
+          anchor={agentTraceAnchor}
+          onClose={closeAgentTraceAt}
         />
       )}
       <DesktopUpdateRestartDialog

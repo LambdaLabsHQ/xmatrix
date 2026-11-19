@@ -45,7 +45,10 @@ import {
 } from "./agent-trace-stream";
 import { visibleAgentTraceReplicasForHistoryReads, type AgentTraceReplica } from "./agent-trace-replica";
 import { agentTraceHistoryStatusCopy, type AgentTraceHistoryReadState } from "./agent-trace-on-demand";
+import { createPortal } from "react-dom";
 import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
+import { listenForOverlayDismissal } from "./use-overlay-dismiss";
+import { useSystemBackDismiss } from "./use-system-back";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
@@ -75,9 +78,12 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
   history,
   channelId,
   onLoadOlder,
+  anchor,
   onClose,
 }: {
   target: AgentTraceTarget;
+  /** The work-dock item to grow up out of; without one it is a centered window. */
+  anchor?: Element | null;
   traceReplicas: AgentTraceReplica[];
   traceHistoryState: AgentTraceHistoryPanelState | null;
   history: ChannelMessage[];
@@ -172,6 +178,7 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
       target={target}
       busy={false}
       labelledBy="agent-instance-detail-title"
+      anchor={anchor}
       onClose={onClose}
       scrollRef={scroll.scrollerRef}
       onScroll={scroll.onScroll}
@@ -853,10 +860,12 @@ export function AgentInstanceWindowShell({
   scrollRef,
   onScroll,
   overlay,
+  anchor,
 }: {
   target: AgentTraceTarget;
   busy: boolean;
   labelledBy: string;
+  anchor?: Element | null;
   children: ReactNode;
   onClose: () => void;
   scrollRef?: Ref<HTMLDivElement>;
@@ -866,15 +875,7 @@ export function AgentInstanceWindowShell({
 }) {
   const headerContext = [target.activity || target.status || "offline", target.gitBranch].filter(Boolean).join(" | ");
 
-  return (
-    <CenteredDialogShell
-      open
-      busy={busy}
-      labelledBy={labelledBy}
-      overlayClassName="app-agent-instance-overlay"
-      panelClassName="app-agent-instance-window flex max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0"
-      onCancel={onClose}
-    >
+  const content = (<>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           {/* Opened from where its face is known, it keeps it; else the exact Instance it traces names it. */}
@@ -906,6 +907,99 @@ export function AgentInstanceWindowShell({
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">{overlay}</div>
         ) : null}
       </div>
+  </>);
+
+  const centered = (
+    <CenteredDialogShell
+      open
+      busy={busy}
+      labelledBy={labelledBy}
+      overlayClassName="app-agent-instance-overlay"
+      panelClassName="app-agent-instance-window flex max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0"
+      onCancel={onClose}
+    >
+      {content}
     </CenteredDialogShell>
   );
+  if (!anchor) return centered;
+  // In the dock the capsule below already names the Instance; the panel keeps
+  // only what it is doing.
+  return (
+    <DockTraceSlot anchor={anchor} busy={busy} onClose={onClose} fallback={centered}>
+      <div role="dialog" aria-modal="false" aria-labelledby={labelledBy}
+        className="app-agent-instance-docked flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 border-b border-border py-1.5 pl-3.5 pr-1.5">
+          <p id={labelledBy} className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={headerContext}>
+            {headerContext}
+          </p>
+          <button
+            type="button"
+            title="Close"
+            aria-label="Close trace"
+            disabled={busy}
+            onClick={onClose}
+            className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={scrollRef} onScroll={onScroll} data-agent-instance-scroll
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div>{children}</div>
+          </div>
+          {overlay ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">{overlay}</div>
+          ) : null}
+        </div>
+      </div>
+    </DockTraceSlot>
+  );
+}
+
+/** The open Trace as the inside of its dock item's morph: the item's capsule
+ * grows up and right into this panel (workspace-message-timeline.tsx), and the
+ * Trace renders into the slot it leaves above the capsule. Escape, system Back,
+ * a press outside the item, or the item again folds it away. Should the item
+ * leave the dock, the Trace stays readable as the centered window. */
+function DockTraceSlot({
+  anchor,
+  busy,
+  onClose,
+  fallback,
+  children,
+}: {
+  anchor: Element;
+  busy: boolean;
+  onClose: () => void;
+  fallback: ReactNode;
+  children: ReactNode;
+}) {
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useSystemBackDismiss(slot !== null, onClose, busy);
+
+  useLayoutEffect(() => {
+    const find = () => setSlot(anchor.isConnected
+      ? anchor.querySelector<HTMLElement>(".app-agent-work-trace-slot")
+      : null);
+    find();
+    // The slot comes and goes with the item's own renders and the dock's roster.
+    const observer = new MutationObserver(find);
+    observer.observe(anchor, { childList: true, subtree: true });
+    if (anchor.parentNode) observer.observe(anchor.parentNode, { childList: true });
+    return () => observer.disconnect();
+  }, [anchor]);
+
+  useEffect(() => {
+    if (busy || !slot) return;
+    return listenForOverlayDismissal((event) => {
+      const target = event.target as Node | null;
+      // A press on the item itself toggles through its own click.
+      if (!target || anchor.contains(target)) return;
+      onClose();
+    }, onClose);
+  }, [anchor, busy, onClose, slot]);
+
+  if (!slot) return <>{fallback}</>;
+  return createPortal(children, slot);
 }

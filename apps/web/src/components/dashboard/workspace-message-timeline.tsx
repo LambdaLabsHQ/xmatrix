@@ -3499,9 +3499,12 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
   onRebornAgentInstance,
   onHandoffAgentInstance,
   onOpenAgentTrace,
+  traceAnchor = null,
   inPageMargin = false,
 }: {
   approvals?: ReactNode;
+  /** The dock item whose trace panel is open, if one is. */
+  traceAnchor?: Element | null;
   /** A comment thread in a page's margin: the dock stands in flow above its reply box instead of floating over
    * the thread's last lines, so it covers nothing and the timeline keeps no room for it. */
   inPageMargin?: boolean;
@@ -3528,7 +3531,8 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     agentLabel: string,
     successor: string
   ) => void;
-  onOpenAgentTrace: (target: AgentTraceTarget) => void;
+  /** The anchor is the dock item the trace panel grows up out of. */
+  onOpenAgentTrace: (target: AgentTraceTarget, anchor?: Element) => void;
 }) {
   const realtimeChannels = useContext(RealtimeChannelsContext);
   const realtimeEvents = useContext(RealtimeEventsContext);
@@ -3549,9 +3553,9 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
     const liveEvents = realtimeEvents?.get(channelId)?.events;
     return buildAgentWorkItems(channel, liveEvents ? [...liveEvents] : events, launches).find(item => item.key === key);
   }, [realtimeChannels, realtimeEvents, channelId, events, launches]);
-  const openTrace = useStableCallback((key: string) => {
+  const openTrace = useStableCallback((key: string, anchor: Element) => {
     const item = readLatest(key);
-    if (item) onOpenAgentTrace(item.target);
+    if (item) onOpenAgentTrace(item.target, anchor);
   });
   const stopInstance = useStableCallback((key: string) => {
     const item = readLatest(key);
@@ -3692,6 +3696,7 @@ export const AgentWorkDetailsDock = memo(function AgentWorkDetailsDock({
             onReborn={rebornInstance}
             onHandoff={handoffInstance}
             onOpenAgentTrace={openTrace}
+            traceAnchor={traceAnchor}
           />
         ))}
       </div>}
@@ -3715,8 +3720,10 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   onReborn,
   onHandoff,
   onOpenAgentTrace,
+  traceAnchor = null,
 }: {
   item: AgentWorkView;
+  traceAnchor?: Element | null;
   /** When this client first saw the current intent (agent-work-intent.tsx). */
   intentSince?: number;
   now?: number;
@@ -3730,8 +3737,16 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   onStop: (key: string) => void;
   onReborn: (key: string) => void;
   onHandoff?: (key: string, successor: string) => void;
-  onOpenAgentTrace: (key: string) => void;
+  /** Opens the trace panel growing up out of this item. */
+  onOpenAgentTrace: (key: string, anchor: Element) => void;
 }) {
+  const [itemElement, setItemElement] = useState<HTMLDivElement | null>(null);
+  // Pressed, the capsule morphs into its Trace: the hover panel's one glass
+  // grows up and right, the Trace above the capsule and its controls.
+  const traceOpen = itemElement !== null && traceAnchor === itemElement;
+  const openTraceHere = () => {
+    if (itemElement) onOpenAgentTrace(item.key, itemElement);
+  };
   const longPressTimerRef = useRef<number | null>(null);
   const longPressTriggeredRef = useRef(false);
   const touchHandledRef = useRef(false);
@@ -3832,6 +3847,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     // The panel grows up out of the capsule the pointer is on: the island,
     // or the bare disc when there is none.
     const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    // The Trace takes what the conversation column allows, up to a reading width.
+    const traceSlot = content.querySelector<HTMLElement>(":scope > .app-agent-work-trace-slot");
+    if (traceSlot) {
+      const boundary = capsule.closest(".app-main")?.getBoundingClientRect().width ?? window.innerWidth;
+      traceSlot.style.width = `${Math.max(240, Math.min(560, boundary - 24))}px`;
+    }
     // The content keeps its final layout whatever size the glass is at, so
     // it measures the panel the glass grows into.
     const contentRect = content.getBoundingClientRect();
@@ -3871,7 +3892,8 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       <span className="app-agent-work-hover-line">{usageLimit.title}</span>
     </div>
   );
-  const hoverCards = hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const hoverCards = traceOpen ? instanceCards : hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const morphShape = traceOpen ? (island ? "trace-panel" : "trace-row") : island ? "panel" : "row";
   const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
   const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
@@ -3889,12 +3911,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
     capsuleObserver.observe(capsule);
     const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
-      () => workItem.matches(":hover, :focus-within"));
+      () => workItem.matches(":hover, :focus-within, [data-trace-open]"));
     return () => {
       capsuleObserver.disconnect();
       stopFollowingLayout();
     };
-  }, [positionActionToolbar, hasHoverCards, island]);
+  }, [positionActionToolbar, hasHoverCards, island, traceOpen]);
 
   useLayoutEffect(() => {
     positionActionToolbar();
@@ -3925,7 +3947,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           event.preventDefault();
           return;
         }
-        onOpenAgentTrace(item.key);
+        openTraceHere();
       }}
       onContextMenu={(event) => {
         if (item.canStop === false) return;
@@ -3936,7 +3958,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
-          onOpenAgentTrace(item.key);
+          openTraceHere();
         } else if (item.canStop !== false && (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10"))) {
           event.preventDefault();
           requestStopFromGesture();
@@ -4000,8 +4022,10 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
 
   return (
     <div
+      ref={setItemElement}
+      data-trace-open={traceOpen || undefined}
       className="app-agent-work-item group relative flex shrink-0 items-center"
-      data-morph={hoverCards ? (island ? "panel" : "row") : undefined}
+      data-morph={hoverCards || traceOpen ? (traceOpen ? "trace" : morphShape) : undefined}
       // The capsule's geometry rides on the item, so a stretching disc can
       // push the items after it aside by exactly the width it grows.
       style={morphGeometry}
@@ -4029,24 +4053,26 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
           data-status={displayStatus}
           onClick={(event) => {
             // The disc handles its own click; the rest of the island opens the same trace.
-            if (!avatarButtonRef.current?.contains(event.target as Node)) onOpenAgentTrace(item.key);
+            if (!avatarButtonRef.current?.contains(event.target as Node)) openTraceHere();
           }}>
           {avatarButton}
           <AgentRuntimeNotice issue={issue} notice={notice} now={now ?? Date.now()}
-            onOpenTrace={() => onOpenAgentTrace(item.key)} />
+            onOpenTrace={openTraceHere} />
           {(item.intent || waiting) && <AgentWorkIntent intent={item.intent} since={intentSince} now={now ?? Date.now()}
             busy={displayStatus === "busy"} waiting={waiting} />}
         </LiquidGlassPill>
       ) : avatarButton}
-      {hoverCards ? (
+      {hoverCards || traceOpen ? (
         // The island grows up into a panel, as the composer does for its
         // completions: one glass whose bottom row is the island itself (the
         // seat), with the card the pointer asked for above it. A bare disc
         // has no words to sit under, so it just stretches right into a
         // capsule with its controls beside the face.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
-          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={morphShape}>
             <div ref={morphContentRef} className="app-agent-work-morph-content">
+              {/* The open Trace renders here (AgentInstanceWindowShell's anchor). */}
+              {traceOpen && <div className="app-agent-work-trace-slot" />}
               <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
               <span className="app-agent-work-morph-seat" aria-hidden="true" />
             </div>

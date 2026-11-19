@@ -3638,7 +3638,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   font-weight: 600;
 }
 
-.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions {
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-actions {
   opacity: 1;
   pointer-events: auto;
   transform: translateY(-100%);
@@ -3665,7 +3665,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   transition: visibility 0s linear 240ms;
 }
 
-.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions {
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-actions {
   transform: translateY(-100%);
   visibility: visible;
   transition: none;
@@ -3675,7 +3675,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   pointer-events: none;
 }
 
-.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions .app-agent-work-hover-stack {
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-actions .app-agent-work-hover-stack {
   pointer-events: auto;
 }
 
@@ -3696,7 +3696,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
     margin-left 240ms cubic-bezier(0.4, 0, 0.2, 1) !important;
 }
 
-.xmatrix-app .app-agent-work-item:is(:hover, :focus-within) > .app-agent-work-actions > .app-agent-work-morph.app-agent-work-morph {
+.xmatrix-app .app-agent-work-item:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-actions > .app-agent-work-morph.app-agent-work-morph {
   width: var(--app-agent-work-panel-w, max-content);
   height: var(--app-agent-work-panel-h, auto);
   margin-left: 0;
@@ -3754,6 +3754,46 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   width: var(--app-agent-work-capsule-w, 2.75rem);
 }
 
+/* Pressed, the item's capsule morphs into its Trace: the same one glass grows
+   up and right into a panel whose bottom row is the capsule with its controls
+   beside it, and the Trace above. It stays out while the trace is open, not
+   only while hovered, and pushes no neighbours aside (they lie under it). */
+.xmatrix-app .app-agent-work-morph[data-shape^="trace"] > .app-agent-work-morph-content {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas: "trace trace" "seat stack";
+  align-items: center;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="trace-panel"] > .app-agent-work-morph-content {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "trace" "stack" "seat";
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape^="trace"] .app-agent-work-trace-slot {
+  grid-area: trace;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(60dvh, 34rem);
+  overflow: hidden;
+  pointer-events: auto;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape^="trace"] .app-agent-work-hover-stack {
+  grid-area: stack;
+  padding: 0 0.375rem 0 0;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape="trace-panel"] .app-agent-work-hover-stack {
+  padding: 0 0.375rem;
+}
+
+.xmatrix-app .app-agent-work-morph[data-shape^="trace"] .app-agent-work-morph-seat {
+  grid-area: seat;
+  width: var(--app-agent-work-capsule-w, 2.75rem);
+}
+
 /* Inside the panel a card is a section of the one glass, not a glass of its own. */
 .xmatrix-app .app-agent-work-morph .app-agent-work-action-menu.app-agent-work-action-menu.app-agent-work-action-menu {
   width: auto;
@@ -3801,19 +3841,19 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
     transform 160ms ease !important;
 }
 
-.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > :is(.app-agent-work-island, .app-agent-work-avatar),
-.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island::before,
-.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island::after {
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > :is(.app-agent-work-island, .app-agent-work-avatar),
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-island::before,
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-island::after {
   transition: none !important;
 }
 
-.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > :is(.app-agent-work-island, .app-agent-work-avatar) {
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > :is(.app-agent-work-island, .app-agent-work-avatar) {
   position: relative;
   z-index: 21;
 }
 
 /* A bare disc is its own capsule: it stays put and lends its glass to the panel too. */
-.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-avatar {
+.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-avatar {
   transform: none;
   background: transparent !important;
   box-shadow: none !important;
@@ -3822,7 +3862,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
 }
 
 /* Repeated classes outrank the shared glass fill rule (html[data-app-theme] … :is(.app-liquid-glass-fill, …)). */
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill {
   background: transparent !important;
   background-color: transparent !important;
   box-shadow: none !important;
@@ -3830,8 +3870,8 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[d
   backdrop-filter: none !important;
 }
 
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::before,
-html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::after {
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::before,
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app .app-agent-work-item[data-morph]:is(:hover, :focus-within, [data-trace-open]) > .app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-agent-work-island.app-liquid-glass-surface.app-liquid-glass-fill::after {
   opacity: 0 !important;
 }
 
@@ -4430,6 +4470,11 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 .xmatrix-app .app-agent-instance-window {
   --app-agent-instance-window-radius: 1.5rem;
   border-radius: var(--app-agent-instance-window-radius) var(--app-agent-instance-window-radius) 0 0;
+}
+
+/* The Trace inside its dock item's morph is a section of that one glass. */
+.xmatrix-app .app-agent-instance-docked {
+  --app-agent-instance-window-radius: 1.25rem;
 }
 
 .xmatrix-app.app-agent-instance-overlay {

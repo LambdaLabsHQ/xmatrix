@@ -171,6 +171,47 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeFocused();
 });
 
+test("pressing the avatar morphs its capsule up and right into the trace", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openActiveAgentWorkspace(page);
+  const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const morph = page.locator(".app-agent-work-morph");
+  const panel = page.getByRole("dialog");
+
+  await avatar.click();
+  // The Trace is inside the capsule's own glass, not a window of its own,
+  // and the conversation keeps no overlay.
+  await expect(morph.getByRole("dialog")).toBeVisible();
+  await expect(page.locator(".app-agent-instance-overlay")).toHaveCount(0);
+  // The glass grew up and right out of the capsule: its bottom-left corner is
+  // the capsule's, and the capsule's controls sit beside the face on its row.
+  await page.mouse.move(5, 5);
+  await expect.poll(async () => {
+    const [avatarBox, morphBox, panelBox] = await Promise.all([avatar.boundingBox(), morph.boundingBox(), panel.boundingBox()]);
+    if (!avatarBox || !morphBox || !panelBox) return null;
+    return {
+      left: Math.round(morphBox.x - avatarBox.x),
+      bottom: Math.round(morphBox.y + morphBox.height - (avatarBox.y + avatarBox.height)),
+      grewUp: panelBox.y + panelBox.height <= avatarBox.y + 1,
+      grewRight: morphBox.width > avatarBox.width * 4,
+    };
+  }).toEqual({ left: 0, bottom: 0, grewUp: true, grewRight: true });
+  await expect(page.getByRole("toolbar", { name: "Controls for codex:1" })).toBeVisible();
+  await page.screenshot({ path: testInfo.outputPath("dock-trace-morph.png") });
+
+  // The same item folds it back, as does a press outside or Escape.
+  await avatar.click();
+  await expect(panel).toHaveCount(0);
+  await avatar.click();
+  await expect(panel).toBeVisible();
+  await page.locator(".composer-textarea").first().click();
+  await expect(panel).toHaveCount(0);
+  await avatar.click();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
 test("Stop asks in place and posts the card's address on the second press", async ({ page }) => {
   await openActiveAgentWorkspace(page);
   const { avatar, toolbar } = await hoverCodexControlsWithSend(page, "stop-send");
