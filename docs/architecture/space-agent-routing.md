@@ -316,7 +316,9 @@ Explicit summons (`@<harness>` or `@auto harness:...`) are never blocked on
 cached sign-in state or account-level billing refusals: only the program knows
 whether its provider accepts it now, so a named summon is always given to its
 machine (and a stale copy never refuses a summon when the user signed in outside
-xMatrix). Unnamed `@auto` routing, however, excludes candidates whose harness
+xMatrix). For a named summon the billing refusal's usage-limit hold, which reads as
+one used-up account window, also takes none of its models away; scoped windows
+the provider measured used up still refuse their models. Unnamed `@auto` routing, however, excludes candidates whose harness
 is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
 or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
 under an account-level billing/payment refusal (such as missing payment method or

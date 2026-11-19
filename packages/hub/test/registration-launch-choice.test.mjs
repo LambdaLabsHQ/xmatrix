@@ -1039,3 +1039,30 @@ test('unnamed @auto excludes uninstalled, signed-out, and billing-refused candid
   });
   assert.equal(directBilling.key.harness, 'cursor');
 });
+
+test("a summon naming a billing-refused harness runs its Space's model; the refusal's hold refuses no model", async () => {
+  // 2026-11-19: `@cursor machine:Workstation` with the Space's model gemini-4-neon failed
+  // registration_selection_invalid: the hold read as a used-up account window took every model away.
+  const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const held = reading({ account: [{ percent: 100, resetAt: back }],
+    scoped: [{ label: '1mo', percent: 4, resetAt: back, scope: 'Auto' }] });
+  const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
+    catalogModels: ['gemini-4-neon'], supportsNativeModel: true, accountBillingRefusal: true, observations: held,
+    modelCatalog: [{ model: 'gemini-4-neon', description: '', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] }] };
+  const choose = registrationLaunchChooser(async input => answer(input));
+  const chosen = await choose({ message: '@cursor machine:Workstation test', tags: { harness: 'cursor' },
+    automaticHarness: false, candidates: [cursor] });
+  assert.deepEqual([chosen.key.harness, chosen.useRuntimeDefaultModel, chosen.preferredModel], ['cursor', true, 'gemini-4-neon']);
+  // Declared by the machine itself, the model runs as declared.
+  const declared = await choose({ message: '@cursor test', tags: { harness: 'cursor' }, automaticHarness: false,
+    candidates: [{ ...cursor, models: ['gemini-4-neon'], catalogModels: undefined }] });
+  assert.equal(declared.model, 'gemini-4-neon');
+  // A scoped window the provider measured used up still refuses the model, with its quota retry.
+  const apiUsed = reading({ account: [{ percent: 100, resetAt: back }],
+    scoped: [{ label: '1mo', percent: 100, resetAt: back, scope: 'API' }] });
+  await assert.rejects(choose({ message: '@cursor test', tags: { harness: 'cursor' }, automaticHarness: false,
+    candidates: [{ ...cursor, observations: apiUsed }] }), error => error.code === 'registration_quota_exhausted');
+  // Unnamed @auto still leaves the refused account out.
+  await assert.rejects(choose({ message: '@auto test', tags: {}, automaticHarness: true, candidates: [cursor] }),
+    error => error.code === 'registration_quota_exhausted');
+});
