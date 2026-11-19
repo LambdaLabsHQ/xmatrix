@@ -85,7 +85,10 @@ without a signed continuity migration.
 - Windows runs the same daemon self-update loop as macOS and Linux. `xmatrix update` and daemon
   self-update download the reviewed CLI release, stop only the daemon process (not Agent wrappers),
   replace the stable `xmatrix.exe` using rename-aside when the running image is locked, and start
-  the existing `xmatrix-daemon` Scheduled Task. They do not stop that Task and do not use generation
+  the existing `xmatrix-daemon` Scheduled Task. The handoff reads the daemon path from the task
+  action: a historical `wscript.exe` action uses that action's working directory, a
+  `conhost.exe --headless "<path>" daemon` action uses the quoted path, and any other action uses
+  the executable itself. A rollback waits for that resolved CLI. They do not stop that Task and do not use generation
   pointer activation on the official direct-task install. Historical WScript/generation tasks still
   switch the launcher pointer without rewriting the Task action. `install.ps1` remains a bootstrap
   and recovery path, not the only Windows update entry.

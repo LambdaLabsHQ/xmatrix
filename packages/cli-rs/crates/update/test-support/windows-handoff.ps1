@@ -2,6 +2,7 @@
 # restart decisions, and receipt writes execute the generated production script.
 $script:starts = 0
 $script:healthChecks = 0
+$script:healthPaths = @()
 $script:stopped = @()
 $script:processes = @(
   [pscustomobject]@{ProcessId=101;ExecutablePath=$installPath;CommandLine=('"' + $installPath + '" codex --task "inspect logs"')},
@@ -17,7 +18,13 @@ function Wait-Process { param($Id,$ErrorAction) }
 function Get-ScheduledTask {
   param($TaskName,$ErrorAction)
   if ($script:hasTask) {
-    [pscustomobject]@{State='Ready';Actions=[pscustomobject]@{Execute=$installPath;Arguments='daemon';WorkingDirectory=(Split-Path -Parent $installPath)}}
+    if ($script:conhostTask) {
+      $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+      $argument = '--headless "' + $installPath + '" daemon'
+      [pscustomobject]@{State='Ready';Actions=[pscustomobject]@{Execute=$conhost;Arguments=$argument;WorkingDirectory=(Split-Path -Parent $installPath)}}
+    } else {
+      [pscustomobject]@{State='Ready';Actions=[pscustomobject]@{Execute=$installPath;Arguments='daemon';WorkingDirectory=(Split-Path -Parent $installPath)}}
+    }
   }
 }
 function Start-FakeDaemon {
@@ -34,6 +41,7 @@ function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$De
 function Wait-UpdatedDaemonHealthy {
   param($expectedPath,$expectedVersion,$startedAtUtc,$timeoutSeconds)
   $script:healthChecks += 1
+  $script:healthPaths += [string]$expectedPath
   if ($script:healthChecks -eq 1) { return -not $script:failCandidate }
   return -not $script:failRollback
 }

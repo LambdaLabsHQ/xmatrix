@@ -964,6 +964,13 @@ const WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS: &str = "\
              $daemonPath = $taskAction.Execute\n\
              if ($taskAction -and $taskAction.WorkingDirectory -and ([System.IO.Path]::GetFileName($daemonPath) -ieq 'wscript.exe')) {\n\
                $daemonPath = Join-Path $taskAction.WorkingDirectory 'xmatrix.exe'\n\
+             } elseif ($taskAction -and ([System.IO.Path]::GetFileName([string]$daemonPath) -ieq 'conhost.exe')) {\n\
+               $conhostArguments = [string]$taskAction.Arguments\n\
+               if ($conhostArguments -match '^--headless\\s+\"(?<cli>[^\"]+)\"\\s+daemon\\s*$') {\n\
+                 $daemonPath = $Matches['cli']\n\
+               } else {\n\
+                 $daemonPath = $installPath\n\
+               }\n\
              }\n\
              if (-not $daemonPath) { $daemonPath = $installPath }\n";
 
@@ -3391,6 +3398,12 @@ mod tests {
         assert!(WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS.contains("WorkingDirectory"));
         assert!(WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS.contains("wscript.exe"));
         assert!(WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS.contains("xmatrix.exe"));
+        assert!(WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS.contains("conhost.exe"));
+        assert!(WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS.contains("(?<cli>"));
+        assert!(
+            WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS
+                .contains("--headless\\s+\"(?<cli>[^\"]+)\"\\s+daemon")
+        );
         let reconciliation = windows_daemon_launcher_reconciliation_ps();
         assert!(reconciliation.contains("launch-hidden.vbs"));
         assert!(reconciliation.contains("[System.IO.File]::Replace"));
