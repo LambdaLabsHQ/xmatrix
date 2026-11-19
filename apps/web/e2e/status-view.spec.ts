@@ -56,12 +56,12 @@ const channel = {
       channelId: E2E_CHANNEL.id, connectedAt: E2E_NOW, lastSeenAt: E2E_NOW,
       status: item.idle > slot ? "idle" : "busy" })) }])),
 };
-async function openStatus(page: import("@playwright/test").Page) {
+async function openStatus(page: import("@playwright/test").Page, listed: Array<(typeof registrations)[number]> = registrations) {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [channel], machineDaemons: daemons });
   await fixtureJson(page, "status-catalog", /\/api\/xmatrix\/spaces\/[^/]+\/agent-registrations(?:\?.*)?$/u, {
-    registrations,
-    capabilities: [...new Set(registrations.map((item) => item.key.harness))].sort().map((harness) => ({
-      harness, models: [], locations: registrations.filter((item) => item.key.harness === harness) })),
+    registrations: listed,
+    capabilities: [...new Set(listed.map((item) => item.key.harness))].sort().map((harness) => ({
+      harness, models: [], locations: listed.filter((item) => item.key.harness === harness) })),
   });
   await page.goto("/app/personal-sspaceperso/status");
 }
@@ -135,9 +135,9 @@ test("on a desktop Agents is a matrix of machines and agents, which says each of
   // Three live processes wait for a message on idle-box: none of them works, so it is idle and its agent ready.
   await expect(row("idle-box").getByTestId("machine-row")).toContainText("Idle");
   await expect(row("idle-box").getByRole("button", { name: /^codex on idle-box/u })).toHaveText("Ready");
-  // A machine says it is offline once, on its row; the agent on it keeps only its mark.
+  // A machine says it is offline once, on its row; the agent on it says only that it is on.
   await expect(row("gone-box").getByTestId("machine-row")).toContainText("Offline");
-  await expect(row("gone-box").getByTestId("agent-row")).toHaveText("");
+  await expect(row("gone-box").getByTestId("agent-row")).toHaveText("On");
   // A row is quiet until a reading is under strain, and then draws only that reading.
   await expect(row("busy-box").getByTestId("machine-load-glance")).toHaveAccessibleName("CPU 95%");
   await expect(row("wide-box").getByTestId("machine-load-glance")).toHaveCount(0);
@@ -146,6 +146,27 @@ test("on a desktop Agents is a matrix of machines and agents, which says each of
   await expect(page.getByTestId("status-attention")).toHaveCount(0);
   // A machine that has not reported what it holds offers nothing to turn on or install: an empty cell, not a guess.
   await expect(matrix.getByTestId("fleet-cell")).toHaveCount(0);
+});
+
+test("what waits on a person is counted once, as its own cell", async ({ page }) => {
+  await page.setViewportSize({ width: 1400, height: 900 });
+  // The weekly window of claude on wide-box is used up; its access on busy-box was never confirmed, which stops no work.
+  const spent = { remainingPercent: 0, observedAt: recent(), expiresAt: new Date(Date.now() + 600_000).toISOString(),
+    windows: [{ label: "1w", usedPercent: 100, resetAt: new Date(Date.now() + 86_400_000).toISOString() }] };
+  await openStatus(page, registrations.map((item) => item.key.harness !== "claude" ? item
+    : item.key.machineId === "machine:wide" ? { ...item, live: { ...item.live, quota: spent } }
+      : item.key.machineId === "machine:busy" ? { ...item, canManageOwnerGrant: true,
+        access: { mode: "full", confirmed: false, args: [], env: {}, session: {}, approvesRequests: false } } : item));
+  const matrix = page.getByTestId("fleet-matrix");
+  const spentCell = matrix.getByRole("button", { name: /^claude on wide-box/u });
+  await expect(spentCell).toHaveAttribute("data-state", "attention");
+  await expect(spentCell).toContainText("1w limit");
+  // The count beside the total is exactly the cells in that ink: nothing is listed a second time, and an
+  // agent that can still take work is not among them.
+  await expect(page.getByTestId("fleet-attention-count")).toHaveText(" · 1 needs attention");
+  await expect(matrix.locator('[data-testid="agent-row"][data-state="attention"]')).toHaveCount(1);
+  await expect(page.getByTestId("status-attention")).toHaveCount(0);
+  await expect(matrix.getByRole("button", { name: /^claude on busy-box/u })).toHaveAttribute("data-state", "running");
 });
 
 test("a heading or a cell of the matrix opens in its place, with a way back", async ({ page }) => {

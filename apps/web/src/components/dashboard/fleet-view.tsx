@@ -218,14 +218,12 @@ export function FleetView({
     ...model.listed.filter(machineUnresponsive).map((machine) => ({ key: `machine:${machine.id}`,
       title: model.nameOf(machine), line: "Not responding", onOpen: () => onChangeView("machines", machine.id) })),
     ...rows.flatMap((row) => {
+      // Only what cannot take work until someone acts: exactly the cells the matrix draws in that ink.
+      if (row.activity.state !== "attention") return [];
       const { registration } = row;
-      const mine = registration.key.ownerUserId === currentUserId;
       const machine = machineOf(registration);
       const outdated = tooOld.has(candidateId(registration));
-      const line = row.activity.state === "attention" ? row.activity.brief
-        : mine && registration.state === "enabled" && registration.access && !registration.access.confirmed
-          ? "Access on its machine not confirmed" : null;
-      if (!line) return [];
+      const line = row.activity.brief;
       // A program is updated on its machine's page; everything else is on the agent's own.
       return [{ key: row.id, harness: row.harness, title: placeOf(row), line,
         onOpen: () => outdated && machine ? onChangeView("machines", machine.id) : onChangeView("agents", row.id) }];
@@ -370,9 +368,9 @@ export function FleetView({
   const agentCell = (row: AgentRow): FleetMatrixCell => ({
     kind: "agent", id: row.id, state: row.activity.state, working: row.activity.working, usage: row.usage,
     detail: rowLine(row), name: row.machineInLine ? row.title : undefined,
-    // Its row already says its machine is offline.
+    // Its row already says its machine is offline: the cell says only that the agent is on, beside those that are off.
     label: row.activity.state === "running" ? (row.activity.working > 0 ? `${row.activity.working} working` : "Ready")
-      : row.activity.state === "offline" ? "" : row.activity.state === "paused" ? "Off" : cellAttention(row.activity.brief),
+      : row.activity.state === "offline" ? "On" : row.activity.state === "paused" ? "Off" : cellAttention(row.activity.brief),
     onOpen: () => onChangeView("agents", row.id),
   });
   const present = new Set(groups.map((group) => group.harness));
