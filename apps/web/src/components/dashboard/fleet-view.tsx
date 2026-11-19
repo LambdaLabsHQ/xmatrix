@@ -239,7 +239,7 @@ export function FleetView({
     return [harness, busy && found.kind !== "unknown" && found.kind !== "unsupported" ? { ...found, busy } : found];
   }));
   // No `rounded` on what is not a button: a rounded span is drawn as a chip everywhere in the app.
-  const machineHeading = "flex w-full min-w-0 items-center gap-2.5 px-1.5 py-1.5 text-left";
+  const machineHeading = "flex w-full min-w-0 items-center gap-2.5 px-2 py-1.5 text-left";
   /** What a row is for its cells' editors: the machine it is, and the agents on it. */
   type RowSubject = { name: string; machine?: MachineSummary; own: boolean; rowOf: (harness: string) => AgentRow | undefined };
   const subjects = new Map<string, RowSubject>();
@@ -295,15 +295,15 @@ export function FleetView({
         key, name, dimmed: !online,
         heading: (
           <button type="button" data-testid="machine-row" onClick={openThisMachine}
-            className={cn(machineHeading, "rounded hover:bg-foreground/5", host && "pl-5")}>
+            className={cn(machineHeading, "rounded-md transition-colors hover:bg-foreground/5", host && "pl-5")}>
             <span className="app-tool-state-icon shrink-0" data-state={stalled ? "attention" : online ? "running" : "offline"}
               aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
               <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
-              <span className="app-list-row-title block truncate font-semibold">{name}</span>
-              <span className="block truncate text-xs text-muted-foreground">
+              <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.01em] text-foreground">{name}</span>
+              <span className="mt-0.5 block truncate text-xs leading-tight text-muted-foreground">
                 {local && <ThisMachineTag label={model.thisLabel} />}{local && facts ? " · " : null}{facts}</span>
-              {machine && <span className="mt-1 block empty:hidden"><MachineLoadGlance machine={machine} now={now} /></span>}
+              {machine && <span className="mt-1.5 block empty:hidden"><MachineLoadGlance machine={machine} now={now} /></span>}
             </span>
           </button>
         ),
@@ -337,8 +337,8 @@ export function FleetView({
             <span className="app-tool-state-icon shrink-0" data-state={up ? "running" : "offline"} aria-hidden="true">
               <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
-              <span className="app-list-row-title block truncate font-semibold">{section.name}</span>
-              <span className="block truncate text-xs text-muted-foreground">
+              <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.01em] text-foreground">{section.name}</span>
+              <span className="mt-0.5 block truncate text-xs leading-tight text-muted-foreground">
                 {[mine ? null : owners, up ? null : "Offline"].filter(Boolean).join(" · ")}</span>
             </span>
           </span>
@@ -483,26 +483,40 @@ export function FleetView({
   if (!showsOverview) return <ToolSheet label="Agents">{page}</ToolSheet>;
   return (
     <ToolSheet label="Agents">
-      <ToolPaperScroll wide>
-        <h1 className="mb-6 text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
-        {setup ? bringIn : <>
+      <div className="app-band-header flex shrink-0 items-center justify-between gap-4 px-4 md:pl-8 md:pr-14 lg:pl-10 2xl:pl-12">
+        <h1 className="text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
+      </div>
+      <ToolPaperScroll full belowBand={false}>
+        {setup ? <div className="mx-auto max-w-3xl pt-4">{bringIn}</div> : <>
           {notices}
           {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
           <FleetOverview status={status} attention={[]} note={attentionNote}>
             {catalogError}
             {turnOn}
-            <section aria-label="Machines and agents" className="space-y-3">
+            <section aria-label="Machines and agents" className="space-y-4">
               {matrixRows.length === 0 ? (loading
                 ? <ContentSkeleton label="Loading machines and agents" lines={4} />
                 : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
                 : <FleetMatrix columns={columns} rows={matrixRows} selected={cell} onSelect={setCell} editors={editors}
                   addColumn={addColumnConfig} addRow={addRowConfig} />}
               {matrixRows.length > 0 && columns.length > 0 && (
-                <p className="text-xs text-muted-foreground">
-                  Choose a cell to change that agent on that machine. <span className="font-semibold">Off</span>: installed, not turned on in this Space.{" "}
-                  <span className="font-semibold">+</span>: not installed. <span className="font-semibold">—</span>: cannot run there.{" "}
-                  The + after the last agent adds one; the last row adds a machine.
-                </p>
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground/80">
+                  <span>Choose a cell to edit.</span>
+                  <span className="inline-flex items-center gap-1.5">
+                    <span className="size-2 shrink-0 rounded-full border border-current" aria-hidden="true" />
+                    <span className="font-medium text-foreground/70">Off</span>
+                    <span>installed, off in this Space</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <Plus className="size-3 shrink-0" aria-hidden="true" />
+                    <span>not installed</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <span className="font-medium text-foreground/70" aria-hidden="true">—</span>
+                    <span>cannot run there</span>
+                  </span>
+                  <span className="text-muted-foreground/65">Use + after the last column to add an agent.</span>
+                </div>
               )}
             </section>
           </FleetOverview>
