@@ -152,3 +152,19 @@ export function machineSwitch(registration: AgentRegistrationSummary | undefined
   const off = registration.routingBlocker === "owner_environment_disabled";
   return { off, canTurnOff: !off && registration.state === "enabled" && registration.routingBlocker !== "owner_environment_missing" };
 }
+
+/** The models the Default model menu offers: what the runtime's catalog lists,
+ * then any declared model it does not, then the saved value when neither names
+ * it, so a saved choice is never dropped from its own menu. */
+export function registrationModelChoices(registration: AgentRegistrationSummary,
+  saved: string): Array<{ model: string; description?: string }> {
+  const choices = new Map<string, { model: string; description?: string }>();
+  for (const option of registration.modelCatalog ?? []) {
+    const model = option.model.trim();
+    if (model && !choices.has(model)) choices.set(model, { model, ...(option.description ? { description: option.description } : {}) });
+  }
+  for (const model of [...registration.models, saved].map(name => name.trim())) {
+    if (model && !choices.has(model)) choices.set(model, { model });
+  }
+  return [...choices.values()];
+}

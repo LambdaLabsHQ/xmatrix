@@ -45,6 +45,26 @@ test("a Space admin reads and edits an Agent's settings directly on its page", a
   expect(errors).toEqual([]);
 });
 
+test("a Space admin picks the Default model from the harness's models, or names another", async ({ page }) => {
+  const listed = { ...registration, modelCatalog: [
+    { model: "gpt-5.5", description: "Frontier", efforts: [] }, { model: "gpt-5.5-mini", description: "", efforts: [] }] };
+  await openAgentPage(page, listed, { instructions: "", workspaceReferences: [] });
+  await fixtureJson(page, "command", "**/api/xmatrix/spaces/*/agent-registrations/commands", { key, version: 4 },
+    { method: "POST" });
+  const settings = page.getByRole("region", { name: "Settings" });
+  const model = settings.getByRole("combobox", { name: "Default model" });
+  await expect(model).toHaveValue("");
+  await expect(model.locator("option")).toHaveText(["Harness default", "gpt-5.5", "gpt-5.5-mini", "Other model…"]);
+  await model.selectOption("gpt-5.5-mini");
+  await expect(settings.getByLabel("Model name")).toHaveCount(0);
+  await model.selectOption({ label: "Other model…" });
+  await settings.getByLabel("Model name").fill("o9-preview");
+  await page.screenshot({ path: test.info().outputPath("agent-settings-model-menu.png") });
+  await settings.getByRole("button", { name: "Save" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "command")).toEqual([expect.objectContaining({
+    action: "configure", configuration: expect.objectContaining({ model: "o9-preview" }) })]);
+});
+
 test("an Agent's owner who cannot administer the Space still sees its settings read-only", async ({ page }) => {
   const owned = { ...registration, canConfigureSpace: false, canManageOwnerGrant: true };
   await openAgentPage(page, owned, { model: "gpt-5.5", workingMode: "cautious", instructions: "Review only.", workspaceReferences: [] });

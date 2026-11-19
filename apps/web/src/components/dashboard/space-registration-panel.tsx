@@ -11,6 +11,8 @@ import { userErrorMessage } from "@/lib/user-facing-error";
 import { registrationTupleId, useRegistrationCommand } from "./use-registration-command";
 import { ErrorPanel } from "./workspace-admin-views";
 import { agentAddCommand } from "./space-agent-setup-card";
+import { DefaultModelSelect } from "./default-model-select";
+import { registrationModelChoices } from "./my-agents-registrations";
 
 export function SpaceRegistrationPanel({ spaceId, token }: { spaceId: string; token: string }) {
   const catalog = useAgentRegistrationCatalog(spaceId, token, Boolean(spaceId && token));
@@ -66,9 +68,9 @@ function RegistrationRow({ location, busy, onModel }: {
       <p className="mt-1 text-xs">{location.routingReady ? "Ready for new work" : location.state}</p>
       {location.canConfigureSpace && (
         <div className="mt-2 flex flex-wrap items-end gap-2">
-          <label className="text-xs">Default model
-            <input className="mt-1 w-40 border border-border bg-background px-2 py-1" value={model}
-              onChange={(event) => setModel(event.target.value)} />
+          <label className="grid gap-1 text-xs">Default model
+            <DefaultModelSelect value={model} choices={registrationModelChoices(location, location.models[0] ?? "")}
+              disabled={busy} onChange={setModel} className="w-40 border border-border bg-background px-2 py-1" />
           </label>
           <button type="button" disabled={busy} className={actionClass({ variant: "secondary", size: "sm" })}
             onClick={() => onModel(model)}>
