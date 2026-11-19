@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { OnboardingSurface } from "@xmatrix/protocol";
 import { Check, Loader2 } from "lucide-react";
 import { AnimatedIcon } from "@/components/ui/animated-icon";
@@ -43,10 +43,17 @@ function connectStage(step: ConnectStep | null): Stage {
   return step.kind === "approval" || step.kind === "connecting" ? 2 : 3;
 }
 
-export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShell = false }: {
+export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShell = false, another = false }: {
   spaceId: string | null; token: string | null | undefined; userId: string | undefined;
   /** Where it is shown, for counting who gets through (onboarding-funnel.ts). */
   surface: OnboardingSurface; phone?: boolean;
+  /**
+   * One more computer for a Space that already has agents: only this
+   * computer's own connection is followed (what the Space already has says
+   * nothing about it), the command is shown at once since it is run
+   * elsewhere, and nobody is counted through onboarding a second time.
+   */
+  another?: boolean;
 }) {
   // Read once, before a setup command would be prepared for this screen.
   const [phone] = useState(() => phoneShell || onboardingDevice() === "phone");
@@ -72,20 +79,23 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
   const step = intent.status ? connectStep(intent.status, now - intent.shownAt) : null;
   const enabled = (fleet.catalog.data?.registrations ?? []).filter((registration) => registration.state === "enabled");
   const found = fleet.ready && fleet.candidates.length > 0;
-  const stage: Stage = enabled.length > 0 ? 4 : found ? 3 : connectStage(step);
+  const stage: Stage = another ? connectStage(step) : enabled.length > 0 ? 4 : found ? 3 : connectStage(step);
   const state = (n: number): StepState => stage > n ? "done" : stage === n ? "active" : "pending";
   const spinner = <AnimatedIcon icon={Loader2} className="size-3.5 shrink-0 animate-spin" />;
   const machines = listNames([...new Set([...enabled, ...fleet.candidates].map((item) => item.machineName))]);
-  const count = useOnboardingSteps(token, surface);
+  const counted = useOnboardingSteps(token, surface);
+  const count = useMemo<typeof counted>(() => another ? () => undefined : counted, [another, counted]);
   const app = os === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"] : os === "Windows" ? downloads(copy).Windows : null;
-  const appFirst = !phone && !useTerminal && (inApp || Boolean(app));
+  const appFirst = !another && !phone && !useTerminal && (inApp || Boolean(app));
   useEffect(() => { if (stage === 1 && command && !appFirst) count("command_shown"); }, [stage, command, count, appFirst]);
   useEffect(() => { if (step?.kind === "approval") count("terminal_seen"); }, [step?.kind, count]);
 
   return (
-    <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid="connect-machine">
-      <p>{copy.bringAgents}</p>
-      <AgentsLine className="mt-2" copy={copy} />
+    <div className="app-paper-card max-w-[34rem] text-[15px] leading-6" data-testid={another ? "add-machine" : "connect-machine"}>
+      {another ? <p>{copy.addMachineIntro}</p> : <>
+        <p>{copy.bringAgents}</p>
+        <AgentsLine className="mt-2" copy={copy} />
+      </>}
 
       <ol className="m-0 mt-3 list-none p-0">
         {phone && (
@@ -110,7 +120,7 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
               {copy.useTerminal}</button>
           </>}
         </SetupRow>}
-        {!phone && !appFirst && <SetupRow n={1} state={state(1)} title={copy.runCommand}
+        {!phone && !appFirst && <SetupRow n={1} state={state(1)} title={another ? copy.addMachineRun : copy.runCommand}
           aside={stage === 1 ? (
             <button type="button" onClick={() => setPlatform(platform === "windows" ? "unix" : "windows")}
               className="underline-offset-2 hover:text-foreground hover:underline">
@@ -145,7 +155,10 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
           )}
         </SetupRow>}
 
-        <SetupRow n={phone || appFirst ? 2 : 3} state={state(3)} title={copy.turnOnFound}
+        {another && <SetupRow n={phone ? 2 : 3} state={state(3)} title={copy.addMachineJoins}>
+          {stage === 3 && <p role="status">{copy.addMachineJoined}</p>}
+        </SetupRow>}
+        {!another && <SetupRow n={phone || appFirst ? 2 : 3} state={state(3)} title={copy.turnOnFound}
           aside={stage === 4 ? listNames(enabled.map((registration) => registration.displayName))
             : stage === 3 && step?.kind === "looking" ? <span className="flex items-center gap-1.5">{spinner} {copy.looking}</span> : null}>
           {stage === 3 && found && (
@@ -176,11 +189,11 @@ export function BringAgentsIn({ spaceId, token, userId, surface, phone: phoneShe
                 platform={terminalInstallPlatform(intent.status?.terminal?.platform) ?? platform} />
             </div>
           )}
-        </SetupRow>
+        </SetupRow>}
       </ol>
 
-      <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
-        token={token} userId={userId} copy={copy} />
+      {!another && <SignedOutAgents registrations={signedOutRegistrations(enabled, userId, fleet.daemons.data)}
+        token={token} userId={userId} copy={copy} />}
 
       {intent.error && <p role="alert" className="mt-2 text-[13px] leading-5 text-destructive">{intent.error}{" "}
         <button type="button" disabled={intent.busy || intent.retrying} onClick={intent.retry}

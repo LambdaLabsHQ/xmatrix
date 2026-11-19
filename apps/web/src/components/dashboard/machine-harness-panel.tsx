@@ -128,7 +128,7 @@ export type MachineAgentGlance = {
  * installed yet is offered under "Add an agent" and joins the lines above
  * once installed, so installing, signing in and turning on happen in one place.
  */
-export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAgent, focus }: {
+export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAgent, only, onOperation }: {
   daemon?: SerializedMachineDaemon; token?: string | null;
   /** The Space being viewed, whose switches the owner sees beside each installed agent. */
   spaceId?: string;
@@ -136,12 +136,13 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   agentOn?: (harness: string) => MachineAgentGlance | undefined;
   /** Opens that agent: its work, usage and settings. */
   onOpenAgent?: (harness: string) => void;
-  /** The agent this Machine was opened for: its line is brought into view, and offered if it is not installed yet. */
-  focus?: string;
+  /** Just this agent's line, with its upkeep open: one cell of the matrix, edited in place. */
+  only?: string;
+  /** What is being done to that agent on the Machine now, or null once nothing is: its cell says it meanwhile. */
+  onOperation?: (action: HarnessAction | null) => void;
 }) {
   const { user } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
-  const panel = useRef<HTMLDivElement | null>(null);
   const userId = user?.id ?? "anonymous";
   const daemonKey = useMemo(() => xmatrixQueryKeys.domain({ userId }, "machine-daemons", []), [userId]);
   const daemons = useQuery({ queryKey: daemonKey,
@@ -168,18 +169,13 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
   const touch = (presetId: string) => setTouched((seen) => seen.has(presetId) ? seen : new Set(seen).add(presetId));
   // An install that ended without the program being found still has something to say.
-  const offered = installable.filter((row) => addOpen || touched.has(row.preset.id) || row.preset.id === focus
-    || recorded(row.preset.id)?.action === "install");
-  const focusListed = Boolean(focus) && [...installed, ...offered].some((row) => row.preset.id === focus);
-  useEffect(() => {
-    if (!focus || !focusListed) return;
-    panel.current?.querySelector(`[data-harness="${CSS.escape(focus)}"]`)?.scrollIntoView({ block: "nearest" });
-  }, [focus, focusListed]);
+  const offered = installable.filter((row) => addOpen || touched.has(row.preset.id) || recorded(row.preset.id)?.action === "install");
   const row = (entry: HarnessRowState) => <HarnessRow key={entry.preset.id} row={entry} state={state} context={context}
     spaceSwitches={spaceSwitches} recorded={recorded(entry.preset.id)} agent={agentOn?.(entry.preset.id)}
-    onOpenAgent={onOpenAgent} onTouched={touch} focused={entry.preset.id === focus} />;
+    onOpenAgent={onOpenAgent} onTouched={touch} single={Boolean(only)} onOperation={only ? onOperation : undefined} />;
+  const one = only ? state.rows.find((entry) => entry.preset.id === only) : undefined;
 
-  return <div className="space-y-2" data-testid="machine-harness-panel" ref={panel}>
+  return <div className="space-y-2" data-testid="machine-harness-panel">
     {state.canManage && !state.responding && <p className={statusInkClass("attention", "text-xs")}>
       {`This machine is not responding: work sent to it at ${new Date(current!.unansweredSince!).toLocaleString()} `
         + "is still waiting. Its connection to xMatrix may be unstable, so a new action may not reach it."}</p>}
@@ -190,9 +186,10 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
     {notice && <p role="alert" className="text-sm text-destructive">{notice}</p>}
     {spaceSwitches.error && <p role="alert" className="text-sm text-destructive">{spaceSwitches.error}</p>}
     {daemons.isError && <p role="alert" className="text-xs text-destructive">This machine&apos;s agents could not be read again. Showing what it last reported.</p>}
-    {installed.length === 0 && state.inventory && <p className="text-sm text-muted-foreground">No agent is installed on this machine yet.</p>}
+    {only && <ul>{one && row(one)}</ul>}
+    {!only && installed.length === 0 && state.inventory && <p className="text-sm text-muted-foreground">No agent is installed on this machine yet.</p>}
     {/* One list, so a program keeps its row, and what its row is doing, as it goes from offered to installed. */}
-    <ul className="app-tool-lines">
+    {!only && <ul className="app-tool-lines">
       {installed.map(row)}
       {installable.length > 0 && <li>
         <button type="button" aria-expanded={addOpen} data-testid="harness-add"
@@ -203,28 +200,37 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
         </button>
       </li>}
       {offered.map(row)}
-    </ul>
-    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+    </ul>}
+    {!only && <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
       <p className="text-xs text-muted-foreground">{state.inventory
         ? `Checked ${new Date(state.inventory.capturedAt).toLocaleString()}` : "This machine has not reported its agents yet."}</p>
       <Button size="xs" variant="ghost" disabled={!state.canManage || refresh.busy}
         onClick={() => refresh.run({ presetId: "custom", action: "refresh" })}>Refresh</Button>
-    </div>
-    {refresh.operation && (refresh.operation.requestedHere || refresh.busy) && <div className="text-sm">
+    </div>}
+    {!only && refresh.operation && (refresh.operation.requestedHere || refresh.busy) && <div className="text-sm">
       <OperationStatus operation={refresh.operation} status={refresh.status} displayName="" responding={state.responding} /></div>}
   </div>;
 }
 
-function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, agent, onOpenAgent, onTouched, focused }: {
+function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, recorded, agent, onOpenAgent, onTouched, single, onOperation }: {
   row: HarnessRowState; state: ReturnType<typeof machineHarnessState>;
   context: Parameters<typeof useHarnessOperation>[0]; spaceSwitches: SpaceSwitches; recorded?: HarnessActionStatus;
   agent?: MachineAgentGlance; onOpenAgent?: (harness: string) => void; onTouched: (presetId: string) => void;
-  /** The line this page was opened for. */
-  focused?: boolean;
+  /** The only line shown: its upkeep is open and stays open. */
+  single?: boolean;
+  onOperation?: (action: HarnessAction | null) => void;
 }) {
   const [armed, setArmed] = useState(false);
-  const [open, setOpen] = useState(false);
+  const [unfolded, setOpen] = useState(false);
+  const open = unfolded || Boolean(single);
   const { operation, status, busy, run } = useHarnessOperation(context, recorded, preset.displayName);
+  const doing = busy && operation ? operation.action : null;
+  const report = useRef(onOperation);
+  useEffect(() => { report.current = onOperation; });
+  useEffect(() => {
+    report.current?.(doing);
+    return () => { if (doing) report.current?.(null); };
+  }, [doing]);
   const registration = spaceSwitches.registrationFor(preset.id);
   const installed = Boolean(item?.installed);
   const spaceSwitch = spaceSwitches.ready && installed ? harnessSpaceSwitch(registration) : null;
@@ -271,8 +277,7 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
           : spaceSwitches.owner && spaceSwitches.ready && !spaceSwitch ? "Sharing request pending" : "Installed";
   const attention = Boolean(tooOld) || signedOut || (installed && (spaceSwitch ? Boolean(on) : true) && agent?.state === "attention");
   const name = <span className="truncate font-semibold">{preset.displayName}</span>;
-  return <li data-testid="harness-row" data-harness={preset.id} data-focused={focused || undefined}
-    className={cn("py-2.5 text-sm", focused && "-mx-2 rounded bg-foreground/5 px-2")}>
+  return <li data-testid="harness-row" data-harness={preset.id} className={cn("text-sm", single ? "py-0.5" : "py-2.5")}>
     <div className="flex min-w-0 items-center gap-3">
       <span className={cn("shrink-0", installed && spaceSwitch && !on && "opacity-50")}>
         <Face of={{ kind: "agent", name: preset.id, harness: preset.id }} size="sm" showKindBadge={false} /></span>
@@ -295,7 +300,7 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
         <Switch checked={Boolean(on)} disabled={Boolean(spaceSwitches.pending)}
           label={`Enabled: ${preset.displayName}`} onChange={(next) => void spaceSwitches.set(preset, next)} />
       </span>}
-      {installed && <button type="button" aria-expanded={open} aria-label={`Manage ${preset.displayName}`} title="Version, updates, uninstall"
+      {installed && !single && <button type="button" aria-expanded={open} aria-label={`Manage ${preset.displayName}`} title="Version, updates, uninstall"
         className="flex size-7 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
         onClick={() => { setOpen(!open); setArmed(false); }}>
         <ChevronDown aria-hidden="true" className={cn("size-4 transition-transform", !open && "-rotate-90")} />

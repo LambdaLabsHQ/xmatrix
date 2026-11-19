@@ -821,7 +821,6 @@ export function MachinePaper({
   onOpenAgent,
   backAlways,
   onBack,
-  focusAgent,
 }: {
   model: MachineListModel;
   edits: MachineEdits;
@@ -840,8 +839,6 @@ export function MachinePaper({
   backAlways?: boolean;
   /** Back to what the Machine was opened from; closing the selection where nothing else is said. */
   onBack?: () => void;
-  /** The agent this page was opened for: its line is brought into view, offered if it is not installed yet. */
-  focusAgent?: string;
 }) {
   const { setRenamed, setRemoved, setAssigned } = edits;
   const { nameOf, hostOf, autoAssigned, thisRecord, showingThis, shown, showThisBeside, listed: machines } = model;
@@ -935,7 +932,6 @@ export function MachinePaper({
     const titleControl = "flex size-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50";
     // The agents installed here come first on every Machine's page: installing one, signing it in and turning it on happen there.
     const agents = machine && <MachineHarnessPanel key={`${spaceId}:${machine.id}`} daemon={machine.daemon} token={token} spaceId={spaceId}
-      focus={focusAgent}
       agentOn={agentOn ? (harness) => agentOn(machine, harness) : undefined}
       onOpenAgent={onOpenAgent ? (harness) => onOpenAgent(machine, harness) : undefined} />;
     const settings = token && machine?.machineId && (

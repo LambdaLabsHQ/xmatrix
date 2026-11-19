@@ -21,6 +21,7 @@ test("a Space admin sets an Agent's working mode and instructions", async ({ pag
   page.on("console", (message) => { if (message.type() === "error") errors.push(message.text()); });
   await page.goto("/app/personal-sspaceperso/agents");
   await page.getByRole("row", { name: "Remote server" }).getByTestId("agent-row").click();
+  await page.getByTestId("fleet-cell-open-agent").click();
   await page.getByRole("button", { name: "Configure: codex" }).click();
   const mode = page.getByLabel("Working mode");
   await expect(mode).toHaveValue("autonomous");
@@ -47,6 +48,7 @@ test("whoever may describe a harness writes what it is for in place, as free tex
   /* The text is the agent's, whichever machine runs it: a machine's page does not carry it. */
   const text = page.getByLabel("What codex is good at");
   await page.getByRole("row", { name: "Remote server" }).getByTestId("agent-row").click();
+  await page.getByTestId("fleet-cell-open-agent").click();
   await expect(page.getByTestId("agent-open-machine")).toHaveCount(0);
   await expect(page.locator(".app-tool-detail").getByRole("heading", { level: 2, name: "codex" })).toBeVisible();
   await expect(text).toHaveCount(0);
@@ -81,6 +83,7 @@ test("an Agent's page lists exactly what its launch adds, and its owner confirms
     await page.goto(`/app/personal-sspaceperso/agents`);
     await page.getByRole("row", { name: "Remote server" })
       .getByRole("button", { name: new RegExp(`^${location.key.harness} on Remote server`, "u") }).click();
+    await page.getByTestId("fleet-cell-open-agent").click();
     const lines = page.getByTestId("agent-access").getByTestId("agent-access-lines").getByRole("listitem");
     // One line for each thing the grant adds, written as the grant writes it:
     // none missing, none borrowed from another harness.

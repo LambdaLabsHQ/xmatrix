@@ -15,11 +15,17 @@ the phone dock now have one entry, **Agents**, and every fact has one place.
   this Space, `+` where it is not installed, `—` where it cannot run. A cell
   with a quota shows the window closest to its limit. A machine's row shows a
   load reading only when it is under strain; teammates' machines follow the
-  reader's own. There is no list beside the matrix: it is the list of both. A
-  row's heading opens the machine, a column's heading what the Space set on
-  that agent, a cell the agent on that machine, and `Off` or `+` the machine
-  with that agent's line in view. What opens takes the matrix's place and has
-  a way back to it.
+  reader's own. There is no list beside the matrix: it is the list of both.
+- **The matrix is edited where it is read.** Choosing a cell opens its editor
+  under it: `+` installs the agent on that machine, `Off` turns it on in this
+  Space, `Sign in` signs it in, and an agent's cell shows where it works, its
+  usage, its switch, its version and updates. While a machine installs or
+  updates, its cell says so, also after its editor is closed, so several can
+  run at once. The `+` after the last agent adds a column for an agent no
+  machine has yet; the table's last row, **Add a machine**, connects another
+  computer in place and it becomes a row. A row's heading still opens the
+  machine and a column's heading what the Space set on that agent; a page
+  opened that way takes the matrix's place and has a way back to it.
 - **A list on a phone,** too narrow for the matrix: each machine with its
   agents under it, below the count, what waits on a person, and each agent
   across its machines.

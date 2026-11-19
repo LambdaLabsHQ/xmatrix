@@ -39,14 +39,17 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
       const off = phone ? under.getByTestId("fleet-machine-off") : under.locator('[data-testid="fleet-cell"][data-state="off"]');
       if (phone) await expect(off).toHaveText("2 more installed · off in this Space");
       else await expect(off).toHaveCount(2);
+      // A phone opens the machine's page; a desktop edits the cell where it is.
+      const codexCell = phone ? off : under.getByRole("button", { name: "codex on Remote server: off in this Space" });
       // With no agent in the Space yet, the overview says the same in words and names the machine to open.
       const empty = page.getByTestId("fleet-empty").filter({ visible: true });
       await expect(empty).toContainText("Turn on an installed agent");
       await expect(empty.getByRole("button", { name: "Open Remote server" })).toBeVisible();
-      await off.first().click();
-      await expect(page).toHaveURL(/\/machines\?machine=/u);
-      const panel = page.getByTestId("machine-harness-panel");
-      await expect(panel.getByRole("switch", { name: /^Enabled: /u })).toHaveCount(2);
+      await codexCell.click();
+      if (phone) await expect(page).toHaveURL(/\/machines\?machine=/u);
+      else await expect(page).toHaveURL(/\/status$/u);
+      const panel = page.getByTestId("machine-harness-panel").filter({ visible: true });
+      await expect(panel.getByRole("switch", { name: /^Enabled: /u })).toHaveCount(phone ? 2 : 1);
       const codex = panel.getByRole("switch", { name: "Enabled: Codex" });
       await expect(codex).toHaveAttribute("aria-checked", "false");
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
@@ -72,7 +75,6 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
         await expect(under.getByTestId("agent-row")).toHaveCount(1);
         await expect(off).toHaveText("1 more installed · off in this Space");
       } else {
-        await page.locator(".app-tool-detail").getByRole("button", { name: "Agents", exact: true }).click();
         await expect(under.getByTestId("agent-row")).toHaveCount(1);
         await expect(off).toHaveCount(1);
       }

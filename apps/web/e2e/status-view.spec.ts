@@ -185,8 +185,11 @@ test("a heading or a cell of the matrix opens in its place, with a way back", as
   await back.click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);
 
-  // A cell: that agent on that machine, each of its Instances where it is and whether it works.
+  // A cell is edited in place: its editor opens under it, and what is set on the agent is one step further.
   await matrix.getByRole("button", { name: /^codex on busy-box/u }).click();
+  await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);
+  await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toContainText("Codex on busy-box");
+  await page.getByTestId("fleet-cell-open-agent").click();
   await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/agents\?agent=/u);
   await expect(paper.getByTestId("agent-instance")).toHaveCount(5);
   await expect(paper.getByTestId("agent-instance").first()).toContainText("Working");
@@ -201,6 +204,8 @@ test("a heading or a cell of the matrix opens in its place, with a way back", as
 
   // An Instance waiting for its next message is listed as waiting, and counted nowhere as work.
   await matrix.getByRole("button", { name: /^codex on idle-box/u }).click();
+  await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toContainText("Waiting");
+  await page.getByTestId("fleet-cell-open-agent").click();
   await expect(paper.getByTestId("agent-instance")).toHaveCount(3);
   await expect(paper.getByTestId("agent-instance").first()).toContainText("Waiting for a message");
   await back.click();
