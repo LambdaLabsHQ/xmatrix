@@ -74,6 +74,13 @@ test("Billing says who used the month's credits and how they are counted", async
   await expect(breakdown).toContainText("claude · your Agent");
   await expect(breakdown).toContainText("3,100 messages · 400 page edits");
   await expect(breakdown).toContainText("github · app");
+  // Every itemized row shows its vendor or connector mark without nesting glass inside the Pro card.
+  await expect(breakdown.locator('img[src="/agent-vendors/claude.svg"]')).toBeVisible();
+  await expect(breakdown.locator('img[src="/app-connectors/github.svg"]')).toBeVisible();
+  await expect(breakdown.locator('img[src="/app-connectors/x.svg"]')).toBeVisible();
+  const faceFilters = await breakdown.locator(".app-usage-face .identity-avatar-face")
+    .evaluateAll((nodes) => nodes.map((node) => getComputedStyle(node).backdropFilter));
+  expect(faceFilters).toEqual(["none", "none", "none"]);
   // 5,000 were used and 4,800 itemized: the rest predates the ledger.
   await expect(breakdown.getByText("Counted before itemizing began")).toBeVisible();
   await breakdown.getByText("How credits are counted").click();
@@ -82,10 +89,13 @@ test("Billing says who used the month's credits and how they are counted", async
 
 test("the operator's own Space shows its real use, not charged", async ({ page }) => {
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE] });
+  const renamed = { kind: "agent", ownerUserId: "e2e-user", ownerName: "E2E Tester", name: "reviewer", harness: "codex",
+    messages: 100, pageRevisions: 0, units: 100 };
   await fixtureJson(page, "waived-billing", /\/billing$/u, { billing: { ...billing,
-    credits: { ...billing.credits, includedUsed: 0 }, usage: { ...usage, waived: true } } });
+    credits: { ...billing.credits, includedUsed: 0 }, usage: { ...usage, waived: true, items: [...usage.items, renamed] } } });
   await page.goto("/app/personal-sspaceperso/settings?section=billing");
-  await expect(page.getByRole("meter", { name: "Agent credits" })).toHaveAttribute("aria-valuenow", "4800");
+  await expect(page.getByRole("meter", { name: "Agent credits" })).toHaveAttribute("aria-valuenow", "4900");
   await expect(page.getByTestId("space-billing")).toContainText("not charged");
   await expect(page.getByTestId("space-usage")).not.toContainText("Counted before itemizing began");
+  await expect(page.getByTestId("space-usage").locator('img[src="/agent-vendors/openai.svg"]')).toBeVisible();
 });

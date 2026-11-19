@@ -39,6 +39,8 @@ export type SpaceUsageItem = {
   ownerName: string;
   /** An Agent's or app's name; empty for a person. */
   name: string;
+  /** The Agent's harness, so a renamed Agent still draws its vendor mark. */
+  harness?: string;
   messages: number;
   pageRevisions: number;
   units: number;

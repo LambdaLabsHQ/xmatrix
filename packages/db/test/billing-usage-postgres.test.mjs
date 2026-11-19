@@ -43,9 +43,14 @@ integration("Billing itemizes who used the allowance: this month's credits, ever
       (space_id,billing_owner_user_id,provider_customer_id,provider_subscription_id,provider_price_id,plan,status,
        seat_quantity,provider_event_created_at,version,created_at,updated_at)
       VALUES ($1,'ada','cus_usage',$1,'price_test','pro','active',2,now(),1,now(),now())`, [space]);
-    await row(lastMonth, "credit", "agent", "ada", "claude", "message", 50);
-    await row(month, "credit", "agent", "ada", "claude", "message", 7);
-    await row(month, "credit", "agent", "ada", "claude", "page_revision", 3);
+    await f.run(`INSERT INTO data.agent_registrations (owner_user_id,machine_id,harness,version,created_at,updated_at)
+      VALUES ('ada','m1','claude',1,now(),now())`);
+    await f.run(`INSERT INTO data.space_agent_registrations
+      (space_id,owner_user_id,machine_id,harness,display_name,configuration_json,version,created_at,updated_at)
+      VALUES ($1,'ada','m1','claude','reviewer','{}',1,now(),now())`, [space]);
+    await row(lastMonth, "credit", "agent", "ada", "reviewer", "message", 50);
+    await row(month, "credit", "agent", "ada", "reviewer", "message", 7);
+    await row(month, "credit", "agent", "ada", "reviewer", "page_revision", 3);
     await row(month, "credit", "app", "", "github", "message", 2);
     await f.run(`INSERT INTO data.paid_call_receipts (space_id,call_id,actor_user_id,request_digest,attempt_token,kind,
       reserved_units,reserved_credits,allocation_json,status,actual_units,actual_credits,outcome,created_at,updated_at)
@@ -55,9 +60,9 @@ integration("Billing itemizes who used the allowance: this month's credits, ever
     assert.equal(pro.billing.plan, "pro");
     assert.equal(pro.billing.usage.meter, "credit");
     assert.equal(pro.billing.usage.waived, true);
-    assert.deepEqual(pro.billing.usage.items.map((item) => [item.kind, item.ownerUserId, item.name, item.messages,
-      item.pageRevisions, item.units]), [
-      ["x", "bo", "", 0, 0, 130], ["agent", "ada", "claude", 7, 3, 10], ["app", "", "github", 2, 0, 2]]);
+    assert.deepEqual(pro.billing.usage.items.map((item) => [item.kind, item.ownerUserId, item.name, item.harness ?? null,
+      item.messages, item.pageRevisions, item.units]), [
+      ["x", "bo", "", null, 0, 0, 130], ["agent", "ada", "reviewer", "claude", 7, 3, 10], ["app", "", "github", null, 2, 0, 2]]);
     assert.ok(pro.billing.usage.since);
   } finally { await f.close(); }
 });

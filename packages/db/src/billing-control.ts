@@ -183,6 +183,8 @@ export interface UsageItem {
   ownerName: string;
   /** An Agent's registration name or an app's id; empty for a person. */
   name: string;
+  /** The Agent's harness, so a renamed Agent still draws its vendor mark. */
+  harness?: string;
   messages: number;
   pageRevisions: number;
   units: number;
@@ -199,7 +201,7 @@ async function itemizedUsage(tx: DatabaseTransaction, spaceId: string, meter: "c
   const today = new Date();
   const periodStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)).toISOString().slice(0, 10);
   const rows = await tx.query<QueryResultRow>({
-    name: "billing_itemized_usage_v1",
+    name: "billing_itemized_usage_v2",
     text: `WITH ledger AS (
         SELECT author_kind AS kind,owner_user_id,author_name AS name,
           SUM(units) FILTER (WHERE write_kind='message') AS messages,
@@ -215,7 +217,11 @@ async function itemizedUsage(tx: DatabaseTransaction, spaceId: string, meter: "c
         WHERE space_id=$1 AND $2='credit' AND created_at>=$3::date
         GROUP BY actor_user_id HAVING SUM(COALESCE(actual_credits,reserved_credits))>0
       ), items AS (SELECT * FROM ledger UNION ALL SELECT * FROM x)
-      SELECT items.*,COALESCE(NULLIF(member.display_name,''),member.email,'') AS owner_name
+      SELECT items.*,COALESCE(NULLIF(member.display_name,''),member.email,'') AS owner_name,
+        (SELECT r.harness FROM data.space_agent_registrations r
+          WHERE items.kind='agent' AND r.space_id=$1 AND r.owner_user_id=items.owner_user_id
+            AND (lower(r.display_name)=lower(items.name) OR lower(r.harness)=lower(items.name))
+          ORDER BY (lower(r.display_name)=lower(items.name)) DESC,r.updated_at DESC LIMIT 1) AS harness
       FROM items LEFT JOIN data.space_members member
         ON member.space_id=$1 AND member.user_id=items.owner_user_id
       ORDER BY items.units DESC,items.kind,items.name LIMIT 200`,
@@ -228,6 +234,7 @@ async function itemizedUsage(tx: DatabaseTransaction, spaceId: string, meter: "c
     items: rows.map((row) => ({
       kind: String(row.kind) as UsageItem["kind"], ownerUserId: String(row.owner_user_id ?? ""),
       ownerName: String(row.owner_name ?? ""), name: String(row.name ?? ""),
+      ...(row.harness ? { harness: String(row.harness) } : {}),
       messages: Number(row.messages ?? 0), pageRevisions: Number(row.page_revisions ?? 0), units: Number(row.units ?? 0),
     })),
   };
