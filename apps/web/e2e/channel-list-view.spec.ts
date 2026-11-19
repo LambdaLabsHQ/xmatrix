@@ -32,7 +32,7 @@ test("rail destinations reuse the chat list resize handle", async ({ page }) => 
   await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
   const handle = page.getByRole("separator", { name: "Resize sidebar" });
 
-  for (const view of ["machines", "agents", "apps", "team", "settings", "pages"]) {
+  for (const view of ["apps", "team", "settings", "pages"]) {
     await page.goto(`/app/personal-sspaceperso/${view}`);
     await expect(handle).toHaveCount(1);
     await expect(handle).toBeVisible();
@@ -43,8 +43,15 @@ test("rail destinations reuse the chat list resize handle", async ({ page }) => 
     expect(Math.abs((grip!.x + grip!.width / 2) - (list!.x + list!.width))).toBeLessThan(12);
   }
 
-  await page.goto("/app/personal-sspaceperso/machines");
+  // Agents is a matrix with no list beside it, so it has no column to resize.
+  await page.goto("/app/personal-sspaceperso/status");
+  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  await expect(handle).toHaveCount(0);
+  await expect(page.locator(".app-tool-list")).toHaveCount(0);
+
+  await page.goto("/app/personal-sspaceperso/settings");
   const list = page.locator(".app-tool-list");
+  await expect(list).toBeVisible();
   const before = (await list.boundingBox())!.width;
   const grip = (await handle.boundingBox())!;
   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2);
