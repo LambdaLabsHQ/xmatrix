@@ -219,6 +219,8 @@ export type MachineSummary = {
   appVersion?: string;
   /** Daemon startup manager reported by the CLI (e.g. `scheduled-task` or `windows-run-key`). */
   daemonServiceManager?: string;
+  /** Whether that daemon is restarted after it exits. Absent when the daemon did not report it. */
+  watchdog?: boolean;
   workspaces: SerializedWorkspace[];
   lastSeenAt?: string;
   /** Agent Runs starting or running on it, when its daemon list reports them. */

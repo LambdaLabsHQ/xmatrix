@@ -27,6 +27,10 @@ function Start-FakeDaemon {
 function Start-ScheduledTask { param($TaskName) Start-FakeDaemon }
 function Start-Process { param($FilePath,$ArgumentList,$WindowStyle) Start-FakeDaemon }
 function Unregister-ScheduledTask { param($TaskName,$Confirm,$ErrorAction) }
+# The watchdog path schedules a real task when these stay unbound. Keep the
+# fixture off the machine's Task Scheduler.
+function Set-ScheduledTask { param($TaskName,$Action,$Trigger,$ErrorAction) }
+function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$Description,[switch]$Force,$ErrorAction) }
 function Wait-UpdatedDaemonHealthy {
   param($expectedPath,$expectedVersion,$startedAtUtc,$timeoutSeconds)
   $script:healthChecks += 1

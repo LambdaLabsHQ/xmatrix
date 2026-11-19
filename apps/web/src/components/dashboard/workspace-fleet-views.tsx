@@ -1538,7 +1538,13 @@ function MachineVersionFacts({ machine, token, appBehind }: {
     {(machine.appVersion || appBehind) && <ToolFact label="App version">
       <MachineVersionValue version={machine.appVersion} component="desktop" behind={appBehind} />
     </ToolFact>}
-    {machine.daemonServiceManager === "windows-run-key" && <ToolFact label="Startup">
+    {machine.watchdog === true && <ToolFact label="Startup">
+      <span className="text-muted-foreground">Automatic restart watchdog (every minute)</span>
+    </ToolFact>}
+    {machine.watchdog === false && <ToolFact label="Startup">
+      <span className="text-muted-foreground">This computer will not restart the daemon after it exits.</span>
+    </ToolFact>}
+    {machine.watchdog === undefined && machine.daemonServiceManager === "windows-run-key" && <ToolFact label="Startup">
       <span className="text-muted-foreground">Windows logon only (no automatic restart watchdog; Task Scheduler access was denied)</span>
     </ToolFact>}
   </>;

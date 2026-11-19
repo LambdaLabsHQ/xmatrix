@@ -14,11 +14,13 @@ pub use cli_install::{
     CLI_BINARY_NAME, InstalledCliSeed, default_install_dir, install_cli_from_seed,
 };
 pub use daemon_service::{
-    DaemonServiceInstall, LAUNCHD_LABEL, SYSTEMD_UNIT, WINDOWS_DAEMON_LEGACY_TASK_NAME,
-    WINDOWS_DAEMON_RUN_KEY_PATH, WINDOWS_DAEMON_RUN_VALUE_NAME, WINDOWS_DAEMON_TASK_NAME,
-    WINDOWS_RUN_KEY_MANAGER, daemon_path_unix, install_daemon_service, launchd_plist,
-    launchd_plist_path, recorded_daemon_service_manager, systemd_unit, systemd_unit_path,
-    uninstall_daemon_service, windows_daemon_scheduled_task_script, windows_daemon_uninstall_script,
+    DaemonServiceInstall, LAUNCHD_LABEL, SYSTEMD_UNIT, WATCHDOG_RESTART_ABSENT,
+    WINDOWS_DAEMON_LEGACY_TASK_NAME, WINDOWS_DAEMON_RUN_KEY_PATH, WINDOWS_DAEMON_RUN_VALUE_NAME,
+    WINDOWS_DAEMON_TASK_NAME, WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME,
+    WINDOWS_DAEMON_WATCHDOG_TASK_NAME, WINDOWS_RUN_KEY_MANAGER, daemon_path_unix,
+    install_daemon_service, launchd_plist, launchd_plist_path, recorded_daemon_service_manager,
+    recorded_daemon_watchdog, systemd_unit, systemd_unit_path, uninstall_daemon_service,
+    windows_daemon_scheduled_task_script, windows_daemon_uninstall_script,
 };
 
 pub const STABLE_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";
@@ -2070,19 +2072,11 @@ function Clear-WatchdogStartedDaemon {
     Start-Sleep -Milliseconds 200
   }
 }
-# Tasks registered before the watchdog trigger existed get it here, without
-# stopping the task: Task Scheduler restarts only a task that failed to start,
-# never a daemon that exited later (#1750). Failure only loses the watchdog.
+# The handoff appends windows_daemon_watchdog_helpers_ps, which defines this
+# function again. PowerShell uses the later definition. Kept short here so the
+# launcher-pointer fixtures can still pass the helper text as -Command.
 function Add-DaemonWatchdogTrigger {
-  try {
-    $current = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
-    if (@($current.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }).Count -gt 0) { return }
-    $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
-    Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger) | Out-Null
-    Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
-  } catch {
-    Write-DaemonUpdateLog "daemon watchdog trigger was not added: $($_.Exception.Message)"
-  }
+  throw 'Add-DaemonWatchdogTrigger helpers were not loaded'
 }
 function Test-ManagedLauncherTask($taskAction) {
   if (-not $taskAction) { return $false }
@@ -2143,7 +2137,9 @@ function Write-DaemonUpdateReceipt([string]$status, [string]$version, [string]$e
     executablePath = $executablePath
     updatedAt = [DateTime]::UtcNow.ToString('o')
   }
+  if ($null -ne $script:daemonWatchdogActive) { $receipt.watchdog = [bool]$script:daemonWatchdogActive }
   if ($errorMessage) { $receipt.error = $errorMessage }
+  elseif ($status -eq 'committed' -and $script:daemonWatchdogActive -eq $false) { $receipt.error = $watchdogRestartAbsent }
   New-Item -ItemType Directory -Force -Path (Split-Path -Parent $daemonUpdateReceipt) | Out-Null
   $receiptTemporary = $daemonUpdateReceipt + '.tmp-' + [System.Guid]::NewGuid().ToString('N')
   $receiptBackup = $daemonUpdateReceipt + '.bak-' + [System.Guid]::NewGuid().ToString('N')
@@ -2178,6 +2174,13 @@ function Stop-ExactDaemonGeneration([string]$executablePath) {
   }
 }
 "#;
+
+fn windows_atomic_update_helpers_ps() -> String {
+    format!(
+        "{WINDOWS_ATOMIC_UPDATE_HELPERS_PS}\n{}",
+        daemon_service::windows_daemon_watchdog_helpers_ps()
+    )
+}
 
 #[cfg_attr(not(windows), allow(dead_code))]
 struct WindowsUpdateHandoff {
@@ -2250,6 +2253,7 @@ fn windows_update_handoff_script(
          $pendingGenerationWritten = $false\n\
          $taskWasRunning = $false\n\
          $newDaemonHealthy = $false\n\
+         $daemonWatchdogActive = $null\n\
          $daemonWasRunning = {restart_daemon} -or @(Get-DaemonCommandProcesses).Count -gt 0\n\
          $stoppedForRestart = $false\n\
          try {{\n\
@@ -2289,6 +2293,7 @@ fn windows_update_handoff_script(
              $expectedDaemonPath = $installPath\n\
              Write-DaemonUpdateLog \"replaced stable CLI at $installPath without generation pointer activation\"\n\
            }}\n\
+           if ($task -and -not $managedLauncher) {{ Add-DaemonWatchdogTrigger }}\n\
            if ($task -and ($taskWasRunning -or $daemonWasRunning)) {{\n\
              if (-not $managedLauncher) {{ Clear-WatchdogStartedDaemon }}\n\
              Start-ScheduledTask -TaskName $taskName\n\
@@ -2301,7 +2306,6 @@ fn windows_update_handoff_script(
              Write-DaemonUpdateLog ({commit_log})\n\
            }}\n\
            if ($pendingGenerationPath -and (Test-Path -LiteralPath $pendingGenerationPath)) {{ Remove-Item -LiteralPath $pendingGenerationPath -Force -ErrorAction Stop }}\n\
-           if ($task -and -not $managedLauncher) {{ Add-DaemonWatchdogTrigger }}\n\
            Write-DaemonUpdateReceipt 'committed' {latest_version} $installPath $null\n\
            Remove-Item -LiteralPath $installBackupPath -Force -ErrorAction SilentlyContinue\n\
            if ($generationPointerBackupPath) {{ Remove-Item -LiteralPath $generationPointerBackupPath -Force -ErrorAction SilentlyContinue }}\n\
@@ -2379,7 +2383,7 @@ fn windows_update_handoff_script(
         commit_log = handoff.commit_log,
         failure_log = handoff.failure_log,
         unmanaged_start = unmanaged_start,
-        atomic_update_helpers = WINDOWS_ATOMIC_UPDATE_HELPERS_PS,
+        atomic_update_helpers = windows_atomic_update_helpers_ps(),
         task_path_resolution = WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS,
         launcher_reconciliation = windows_daemon_launcher_reconciliation_ps(),
         generation_activation = WINDOWS_DAEMON_GENERATION_ACTIVATION_PS,
@@ -2697,19 +2701,20 @@ mod tests {
         assert!(staging[verification..probe].contains("?;"));
     }
     use super::{
-        CliReleaseManifest, UpdateHintTarget, WINDOWS_ATOMIC_UPDATE_HELPERS_PS,
-        WINDOWS_DAEMON_LAUNCHER, WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS, WindowsUpdateHandoff,
-        cli_release_api_url_for, is_safe_windows_daemon_generation_name,
-        latest_release_manifest_version, observe_update_handoff_child,
-        reconcile_windows_daemon_generations, reconcile_windows_daemon_launcher_if_installed,
-        release_version_cmp, release_version_is_newer, update_hint_lines, update_installs,
-        windows_cli_ping_path, windows_cli_pong_path, windows_daemon_generation_path,
-        windows_daemon_launcher_matches, windows_daemon_launcher_path,
-        windows_daemon_launcher_reconciliation_ps, windows_daemon_ping_path,
-        windows_daemon_pong_path, windows_host_cli_path, windows_host_cli_path_with_default,
-        windows_next_cli_slot_path, windows_next_daemon_slot_path,
-        windows_update_handoff_creation_flags, windows_update_handoff_schedule_ps,
-        windows_update_handoff_script,
+        CliReleaseManifest, UpdateHintTarget, WATCHDOG_RESTART_ABSENT,
+        WINDOWS_ATOMIC_UPDATE_HELPERS_PS, WINDOWS_DAEMON_LAUNCHER,
+        WINDOWS_DAEMON_TASK_PATH_RESOLUTION_PS, WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME,
+        WINDOWS_DAEMON_WATCHDOG_TASK_NAME, WindowsUpdateHandoff, cli_release_api_url_for,
+        is_safe_windows_daemon_generation_name, latest_release_manifest_version,
+        observe_update_handoff_child, reconcile_windows_daemon_generations,
+        reconcile_windows_daemon_launcher_if_installed, release_version_cmp,
+        release_version_is_newer, update_hint_lines, update_installs, windows_cli_ping_path,
+        windows_cli_pong_path, windows_daemon_generation_path, windows_daemon_launcher_matches,
+        windows_daemon_launcher_path, windows_daemon_launcher_reconciliation_ps,
+        windows_daemon_ping_path, windows_daemon_pong_path, windows_host_cli_path,
+        windows_host_cli_path_with_default, windows_next_cli_slot_path,
+        windows_next_daemon_slot_path, windows_update_handoff_creation_flags,
+        windows_update_handoff_schedule_ps, windows_update_handoff_script,
     };
     use std::path::PathBuf;
 
@@ -3510,6 +3515,8 @@ mod tests {
         assert!(script.contains("Move-ReplacingLockedFile"));
         // A daemon the watchdog trigger started mid-update is cleared before
         // the task is started, and older tasks gain the watchdog (#1750).
+        // The attempt happens before the task starts and before the committed
+        // receipt, so a denied watchdog is not reported as all-clear.
         let clear = script
             .find("if (-not $managedLauncher) { Clear-WatchdogStartedDaemon }")
             .expect("direct task clears a watchdog-started daemon");
@@ -3520,12 +3527,18 @@ mod tests {
         let watchdog = script
             .find("if ($task -and -not $managedLauncher) { Add-DaemonWatchdogTrigger }")
             .expect("direct task gains the watchdog trigger");
-        assert!(
-            watchdog
-                < script
-                    .find("Write-DaemonUpdateReceipt 'committed'")
-                    .unwrap()
-        );
+        let committed = script
+            .find("Write-DaemonUpdateReceipt 'committed'")
+            .unwrap();
+        assert!(watchdog < clear);
+        assert!(watchdog < committed);
+        assert!(script.contains("Register-StandaloneDaemonWatchdog"));
+        assert!(script.contains(WINDOWS_DAEMON_WATCHDOG_TASK_NAME));
+        assert!(script.contains(WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME));
+        assert!(script.contains("Remove-StandaloneDaemonWatchdog"));
+        assert!(script.contains("$receipt.watchdog = [bool]$script:daemonWatchdogActive"));
+        assert!(script.contains(WATCHDOG_RESTART_ABSENT));
+        assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
     }
 
     #[test]

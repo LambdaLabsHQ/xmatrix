@@ -31,7 +31,7 @@ import {
   WORKING_SPACE_STORAGE_PREFIX,
 } from "./workspace-shell-constants";
 
-import { metadataString } from "./workspace-shell-formatters";
+import { metadataBoolean, metadataString } from "./workspace-shell-formatters";
 
 import {
   isLiveMachineDaemon,
@@ -249,6 +249,8 @@ export function buildMachineSummaries(
     machine.daemonServiceManager =
       metadataString(daemon.metadata, "daemonServiceManager") ||
       machine.daemonServiceManager;
+    const watchdog = metadataBoolean(daemon.metadata, "watchdog");
+    if (watchdog !== undefined) machine.watchdog = watchdog;
     machine.lastSeenAt = latestIso(machine.lastSeenAt, daemon.lastSeenAt || daemon.connectedAt);
     if (isLiveMachineDaemon(daemon)) {
       machine.status = "online";

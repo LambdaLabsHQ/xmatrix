@@ -955,6 +955,11 @@ export function metadataString(metadata: Record<string, unknown> | undefined, ke
   return typeof value === "string" ? value : "";
 }
 
+export function metadataBoolean(metadata: Record<string, unknown> | undefined, key: string): boolean | undefined {
+  const value = metadata?.[key];
+  return typeof value === "boolean" ? value : undefined;
+}
+
 export function attentionSummaryFromEvent(event: ObservabilityEvent): ChannelSnapshot["attention"] | undefined {
   const value = event.metadata?.attention;
   return isChannelAttentionSummary(value) ? value : undefined;

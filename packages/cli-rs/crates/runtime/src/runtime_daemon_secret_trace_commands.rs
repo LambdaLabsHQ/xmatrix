@@ -1344,6 +1344,9 @@ fn print_daemon_update_doctor() {
                     .and_then(Value::as_str)
                     .unwrap_or("?")
             );
+            if let Some(watchdog) = receipt.get("watchdog").and_then(Value::as_bool) {
+                println!("  watchdog: {watchdog}");
+            }
             if let Some(error) = receipt.get("error").and_then(Value::as_str) {
                 println!("  error: {error}");
             }
