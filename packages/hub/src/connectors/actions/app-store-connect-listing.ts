@@ -49,10 +49,10 @@ const AGE_FIELDS = [...AGE_FLAGS, ...AGE_LEVELS, ...Object.keys(AGE_CHOICES), "d
 const infoState = (row: AppleResource) => text(row.attributes.state) || text(row.attributes.appStoreState) || "UNKNOWN";
 
 async function appInfos(api: AppStoreConnectApi, app: AppleResource) {
-  const { rows, included } = await api.list(`/v1/apps/${encodeURIComponent(app.id)}/appInfos`, {
+  const { rows, included } = await api.listComplete(`/v1/apps/${encodeURIComponent(app.id)}/appInfos`, {
     include: "primaryCategory,secondaryCategory,appInfoLocalizations,ageRatingDeclaration", limit: "10", "limit[appInfoLocalizations]": "50",
     "fields[appInfos]": "state,appStoreState,appStoreAgeRating,primaryCategory,secondaryCategory,appInfoLocalizations,ageRatingDeclaration",
-    "fields[appInfoLocalizations]": "locale,name,subtitle,privacyPolicyUrl,privacyChoicesUrl" }, 1);
+    "fields[appInfoLocalizations]": "locale,name,subtitle,privacyPolicyUrl,privacyChoicesUrl" });
   if (!rows.length) throw new ProviderRequestError(404, "App Store Connect returned no app info for this app");
   const byId = new Map(included.map(row => [`${row.type}:${row.id}`, row]));
   return { rows, localizations: (info: AppleResource) => relatedIds(info, "appInfoLocalizations").flatMap(id => byId.get(`appInfoLocalizations:${id}`) ?? []),
@@ -76,11 +76,12 @@ async function priceLines(api: AppStoreConnectApi, app: AppleResource): Promise<
   const schedule = appleResource((await optional(api.request(`/v1/apps/${encodeURIComponent(app.id)}/appPriceSchedule`,
     { query: { include: "baseTerritory", "fields[appPriceSchedules]": "baseTerritory" } })))?.data);
   if (!schedule) return ["price: not set"];
-  const { rows, included } = await api.list(`/v1/appPriceSchedules/${encodeURIComponent(schedule.id)}/manualPrices`, { include: "appPricePoint,territory",
+  const { rows, included, incomplete } = await api.listPreview(`/v1/appPriceSchedules/${encodeURIComponent(schedule.id)}/manualPrices`, { include: "appPricePoint,territory",
     "fields[appPrices]": "startDate,endDate,appPricePoint,territory", "fields[appPricePoints]": "customerPrice", limit: "20" }, 1);
   const points = new Map(included.filter(row => row.type === "appPricePoints").map(row => [row.id, text(row.attributes.customerPrice)]));
   return [`price (base territory ${relatedId(schedule, "baseTerritory") ?? "?"}):`, ...rows.map(price => `  ${relatedId(price, "territory") ?? "?"} ` +
-    `${points.get(relatedId(price, "appPricePoint") ?? "") ?? "?"} from ${cell(price.attributes.startDate) || "now"} to ${cell(price.attributes.endDate) || "open"}`)];
+    `${points.get(relatedId(price, "appPricePoint") ?? "") ?? "?"} from ${cell(price.attributes.startDate) || "now"} to ${cell(price.attributes.endDate) || "open"}`),
+  ...(incomplete ? ["  (more prices not shown)"] : [])];
 }
 
 /** Why one questionnaire answer is refused, if it is: every answer is checked against Apple's own vocabulary. */
@@ -184,7 +185,7 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
     return app && price && TERRITORY.test(territory) && !rest.length ? { app, price, territory }
       : "name an app and its price in the base territory: <com.example.app> free, or <com.example.app> 4.99 [USA]";
   }, async ({ api, app, input }) => {
-    const { rows } = await api.list(`/v1/apps/${encodeURIComponent(app.id)}/appPricePoints`, { "filter[territory]": input.territory!,
+    const { rows } = await api.listComplete(`/v1/apps/${encodeURIComponent(app.id)}/appPricePoints`, { "filter[territory]": input.territory!,
       "fields[appPricePoints]": "customerPrice", limit: "200" });
     const point = rows.find(row => text(row.attributes.customerPrice) !== "" && Number(row.attributes.customerPrice) === Number(input.price));
     if (!point) throw new ProviderRequestError(404, `Apple has no ${input.price} price point in ${input.territory}; choose one of its price points`);
@@ -207,7 +208,7 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
         territories.some(code => !TERRITORY.test(code))) return usage;
     return { app, territories: territories.join(","), future };
   }, async ({ api, app, input }) => {
-    const known = (await api.list("/v1/territories", { limit: "200" })).rows.map(row => row.id);
+    const known = (await api.listComplete("/v1/territories", { limit: "200" })).rows.map(row => row.id);
     const chosen = input.territories ? input.territories.split(",") : known;
     const unknown = chosen.filter(code => !known.includes(code));
     if (unknown.length) throw new ProviderRequestError(400, `Apple has no territory ${unknown.slice(0, 10).join(", ")}; use its three-letter codes, such as USA`);
@@ -222,7 +223,7 @@ export const APP_STORE_CONNECT_LISTING_ACTIONS: Record<string, ConnectorAction> 
           relationships: { territory: relation("territories", code) } })) });
       return `Made ${input.app} available in ${chosen.length} of ${known.length} territories; new territories are ${input.future === "true" ? "" : "not "}added automatically.`;
     }
-    const current = (await api.list(`/v2/appAvailabilities/${encodeURIComponent(existing.id)}/territoryAvailabilities`,
+    const current = (await api.listComplete(`/v2/appAvailabilities/${encodeURIComponent(existing.id)}/territoryAvailabilities`,
       { include: "territory", "fields[territoryAvailabilities]": "available,territory", limit: "200" })).rows;
     const changes = current.filter(row => relatedId(row, "territory") && (row.attributes.available === true) !== chosen.includes(relatedId(row, "territory")!));
     if (changes.length > MAX_TERRITORY_CHANGES) {

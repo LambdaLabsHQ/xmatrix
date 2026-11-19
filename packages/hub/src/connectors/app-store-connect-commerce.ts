@@ -3,10 +3,10 @@ import { linkDatabaseFailures } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { connectorEventArrived } from "../outside-events";
-import { appStoreConnect, appleApp, appleResource, type AppStoreConnectApi, type AppleResource } from "./app-store-connect-api";
+import { appStoreConnect, appleApp, type AppStoreConnectApi, type AppleResource } from "./app-store-connect-api";
 import { appleCommerceRepository, connectorCredentialRepository } from "./credentials";
 import { appendToRoutes } from "./event-ingress";
-import { connectorEvent, record, text } from "./event-format";
+import { connectorEvent, text } from "./event-format";
 import { appOnly } from "./app-store-connect-web";
 import type { ConnectorAction } from "./provider";
 import { ProviderRequestError } from "./http";
@@ -15,31 +15,11 @@ import { appleCommerceWatchPhase, classifyAppleCommerceWatchFailure, markAppleCo
 
 /** A complete bounded collection, never the truncated result of a page cap. */
 async function collection(api: AppStoreConnectApi, path: string, type: string) {
-  const rows: AppleResource[] = [], visited = new Set<string>();
-  let next = path;
-  const original = new URL(path,"https://api.appstoreconnect.apple.com");
-  for (let page = 0; page < 3; page++) {
-    if (visited.has(next)) throw new ProviderRequestError(502, "Apple repeated a commerce page");
-    visited.add(next);
-    const response = await api.request(next);
-    if (!Array.isArray(response.data) || response.data.length > 200) throw new ProviderRequestError(502, "Invalid Apple commerce collection");
-    for (const data of response.data) {
-      const row = appleResource(data);
-      if (!row || row.type !== type || !/^[A-Za-z0-9-]{1,100}$/u.test(row.id)) throw new ProviderRequestError(502, "Apple omitted commerce resource identity");
-      rows.push(row);
-    }
-    const link = record(response.links).next;
-    if (link == null) return rows;
-    if (typeof link !== "string" || !link) throw new ProviderRequestError(502, "Invalid Apple commerce pagination");
-    const destination = new URL(link,"https://api.appstoreconnect.apple.com");
-    if (destination.origin !== original.origin || destination.pathname !== original.pathname || destination.username || destination.password || destination.hash ||
-      [...original.searchParams].some(([key,value]) => destination.searchParams.get(key) !== value) ||
-      [...destination.searchParams.keys()].some(key => key !== "cursor" && !original.searchParams.has(key))) {
-      throw new ProviderRequestError(502,"Apple returned a commerce page outside its scoped collection");
-    }
-    next = destination.href;
+  const { rows } = await api.listComplete(path, {}, { pages: 3, incompleteMessage: "Apple commerce history exceeds its page bound; snapshot unchanged" });
+  if (rows.length > 600 || rows.some(row => row.type !== type || !/^[A-Za-z0-9-]{1,100}$/u.test(row.id))) {
+    throw new ProviderRequestError(502, "Apple omitted commerce resource identity");
   }
-  throw new ProviderRequestError(502, "Apple commerce history exceeds its page bound; snapshot unchanged");
+  return rows;
 }
 
 /** Public product states are the account's current commerce review state. */

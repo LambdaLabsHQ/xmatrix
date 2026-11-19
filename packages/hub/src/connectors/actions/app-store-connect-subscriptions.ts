@@ -41,7 +41,7 @@ export type VersionedKind = keyof typeof VERSIONED;
  */
 async function pendingVersion(api: AppStoreConnectApi, kind: VersionedKind, id: string): Promise<AppleResource | undefined> {
   const { list, versionType, parent } = VERSIONED[kind];
-  const { rows } = await api.list(`${list}/${encodeURIComponent(id)}/versions`, { [`fields[${versionType}]`]: "state", limit: "50" }, 1);
+  const { rows } = await api.listComplete(`${list}/${encodeURIComponent(id)}/versions`, { [`fields[${versionType}]`]: "state", limit: "50" });
   const pending = rows.find(row => !FINISHED.has(text(row.attributes.state)));
   if (pending) return pending;
   if (kind === "subscriptionGroups" && rows.some(row => text(row.attributes.state) === "APPROVED")) return undefined;
@@ -63,8 +63,8 @@ async function pendingVersion(api: AppStoreConnectApi, kind: VersionedKind, id: 
 export async function addVersionsToDraft(api: AppStoreConnectApi, appId: string, products: ReadonlyArray<{ kind: VersionedKind; id: string }>) {
   const draft = await draftSubmission(api, appId);
   const keys = Object.values(VERSIONED).map(entry => entry.item);
-  const items = (await api.list(`/v1/reviewSubmissions/${encodeURIComponent(draft.id)}/items`,
-    { "fields[reviewSubmissionItems]": keys.join(","), limit: "200" }, 1)).rows;
+  const items = (await api.listComplete(`/v1/reviewSubmissions/${encodeURIComponent(draft.id)}/items`,
+    { "fields[reviewSubmissionItems]": keys.join(","), limit: "200" })).rows;
   const present = new Set(items.flatMap(item => keys.map(key => relatedId(item, key))).filter((id): id is string => Boolean(id)));
   const versions = await Promise.all(products.map(async ({ kind, id }) => ({ ...VERSIONED[kind], version: await pendingVersion(api, kind, id) })));
   for (const { item, versionType, version } of versions) {
@@ -93,44 +93,64 @@ export function productsStatement(statement: { target: string; text: string }): 
     : "name an app and, optionally, the product ids to submit (default: every one ready to submit): <com.example.app> [<product id> …]";
 }
 
-async function subscriptions(api: AppStoreConnectApi, appId: string) {
-  const groupList = await api.list(`/v1/apps/${encodeURIComponent(appId)}/subscriptionGroups`,
-    { "fields[subscriptionGroups]": "referenceName", limit: "50" }, 1);
+export interface CatalogProduct { id: string; productId: string; state: string }
+
+/** Validates named or ready products from a complete catalog and adds their pending versions to the draft review submission. */
+export async function submitReadyProducts<T extends CatalogProduct>(api: AppStoreConnectApi, appId: string, input: Record<string, string>, options: {
+  singular: string;
+  plural: string;
+  listAction: string;
+  load: () => Promise<T[]>;
+  draftItems: (chosen: T[]) => ReadonlyArray<{ kind: VersionedKind; id: string }>;
+}): Promise<string> {
+  const rows = await options.load();
+  const named = input.products ? input.products.split(" ") : [];
+  const missing = named.filter(id => !rows.some(row => row.productId === id));
+  if (missing.length) throw new ProviderRequestError(404, `${input.app} has no ${options.singular} ${missing.join(", ")}; ${options.listAction} lists them`);
+  const chosen = named.length ? rows.filter(row => named.includes(row.productId)) : rows.filter(row => row.state === READY);
+  const blocked = chosen.filter(row => row.state !== READY);
+  if (blocked.length) {
+    throw new ProviderRequestError(409, `Only ${READY} ${options.plural} can be submitted; ` +
+      blocked.map(row => `${row.productId} is ${row.state}`).join(", "));
+  }
+  if (!chosen.length) return `No ${options.singular} of ${input.app} is ${READY}; nothing was submitted.`;
+  await addVersionsToDraft(api, appId, options.draftItems(chosen));
+  return `Added ${chosen.map(row => row.productId).join(", ")} of ${input.app} to the draft review submission. ` +
+    "Run submit for the app version to send them to App Review with it.";
+}
+
+async function subscriptions(api: AppStoreConnectApi, appId: string, complete: boolean) {
+  const fetchList = (path: string, query: Record<string, string>) => complete
+    ? api.listComplete(path, query, { incompleteMessage: "Apple returned more subscriptions than this action can inspect; no subscriptions were submitted" })
+      .then(result => ({ ...result, incomplete: false }))
+    : api.listPreview(path, query);
+  const groupList = await fetchList(`/v1/apps/${encodeURIComponent(appId)}/subscriptionGroups`,
+    { "fields[subscriptionGroups]": "referenceName", limit: "50" });
   const groups = groupList.rows;
-  const lists = await Promise.all(groups.map(group => api.list(`/v1/subscriptionGroups/${encodeURIComponent(group.id)}/subscriptions`,
-    { "fields[subscriptions]": "productId,name,state,groupLevel,subscriptionPeriod", limit: "200" }, 1)));
+  const lists = await Promise.all(groups.map(group => fetchList(`/v1/subscriptionGroups/${encodeURIComponent(group.id)}/subscriptions`,
+    { "fields[subscriptions]": "productId,name,state,groupLevel,subscriptionPeriod", limit: "200" })));
   const rows = groups.flatMap((group, index) => lists[index]!.rows.map(row => ({ id: row.id, groupId: group.id, group: text(group.attributes.referenceName),
     productId: text(row.attributes.productId), name: text(row.attributes.name), state: text(row.attributes.state) || "UNKNOWN",
     level: text(row.attributes.groupLevel), period: text(row.attributes.subscriptionPeriod) })));
-  return { rows, incomplete: Boolean(groupList.next || lists.some(list => list.next)) };
+  return { rows, incomplete: Boolean(groupList.incomplete || lists.some(list => list.incomplete)) };
 }
 
 export const APP_STORE_CONNECT_SUBSCRIPTION_ACTIONS: Record<string, ConnectorAction> = {
   subscriptions: appAction("read",
     statement => bundleId(statement.target) && !statement.text.trim() ? { app: statement.target } : "name an app by its bundle ID: <com.example.app>",
     async ({ api, app, input }) => {
-      const { rows, incomplete } = await subscriptions(api, app.id);
+      const { rows, incomplete } = await subscriptions(api, app.id, false);
       const lines = rows.map(row => [cell(row.group), cell(row.productId), cell(row.name), cell(row.period), cell(row.level), cell(row.state)].join("\t"));
       return `Subscriptions of ${input.app}:\n` + quoteRetrievedText(lines.length
         ? ["group\tproduct id\tname\tperiod\tlevel\tstate", ...lines].join("\n") : "(none)") +
         (incomplete ? "\nApple returned more subscription groups or products; this list is incomplete." : "");
     }),
-  submit_subscriptions: appAction("write", productsStatement, async ({ api, app, input }) => {
-    const { rows, incomplete } = await subscriptions(api, app.id);
-    if (incomplete) throw new ProviderRequestError(409, "Apple returned more subscriptions than this action can inspect; no subscriptions were submitted");
-    const named = input.products ? input.products.split(" ") : [];
-    const missing = named.filter(id => !rows.some(row => row.productId === id));
-    if (missing.length) throw new ProviderRequestError(404, `${input.app} has no subscription ${missing.join(", ")}; subscriptions lists them`);
-    const chosen = named.length ? rows.filter(row => named.includes(row.productId)) : rows.filter(row => row.state === READY);
-    const blocked = chosen.filter(row => row.state !== READY);
-    if (blocked.length) {
-      throw new ProviderRequestError(409, `Only ${READY} subscriptions can be submitted; ` +
-        blocked.map(row => `${row.productId} is ${row.state}`).join(", "));
-    }
-    if (!chosen.length) return `No subscription of ${input.app} is ${READY}; nothing was submitted.`;
-    await addVersionsToDraft(api, app.id, [...[...new Set(chosen.map(row => row.groupId))].map(id => ({ kind: "subscriptionGroups" as const, id })),
-      ...chosen.map(row => ({ kind: "subscriptions" as const, id: row.id }))]);
-    return `Added ${chosen.map(row => row.productId).join(", ")} of ${input.app} to the draft review submission. ` +
-      "Run submit for the app version to send them to App Review with it.";
-  }),
+  submit_subscriptions: appAction("write", productsStatement, async ({ api, app, input }) => submitReadyProducts(api, app.id, input, {
+    singular: "subscription",
+    plural: "subscriptions",
+    listAction: "subscriptions",
+    load: async () => (await subscriptions(api, app.id, true)).rows,
+    draftItems: chosen => [...[...new Set(chosen.map(row => row.groupId))].map(id => ({ kind: "subscriptionGroups" as const, id })),
+      ...chosen.map(row => ({ kind: "subscriptions" as const, id: row.id }))],
+  })),
 };

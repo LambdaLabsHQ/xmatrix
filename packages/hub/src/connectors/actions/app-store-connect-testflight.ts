@@ -24,14 +24,14 @@ const buildInput = (parsed: NonNullable<ReturnType<typeof appVersionBuild>>) =>
   ({ app: parsed.app, platform: parsed.platform, version: parsed.version, build: parsed.build });
 
 async function groups(api: AppStoreConnectApi, appId: string) {
-  return (await api.list(`/v1/apps/${encodeURIComponent(appId)}/betaGroups`, { "fields[betaGroups]": "name,isInternalGroup,publicLinkEnabled,publicLink", limit: "50" }, 1)).rows;
+  return (await api.listComplete(`/v1/apps/${encodeURIComponent(appId)}/betaGroups`, { "fields[betaGroups]": "name,isInternalGroup,publicLinkEnabled,publicLink", limit: "50" })).rows;
 }
 
 export const APP_STORE_CONNECT_TESTFLIGHT_ACTIONS: Record<string, ConnectorAction> = {
   testflight: appAction("read",
     statement => bundleId(statement.target) && !statement.text.trim() ? { app: statement.target } : "name an app by its bundle ID: <com.example.app>",
     async ({ api, app, input }) => {
-      const [testers, builds] = await Promise.all([groups(api, app.id), api.list("/v1/builds", { "filter[app]": app.id, sort: "-uploadedDate", limit: "8",
+      const [testers, builds] = await Promise.all([groups(api, app.id), api.listPreview("/v1/builds", { "filter[app]": app.id, sort: "-uploadedDate", limit: "8",
         include: "buildBetaDetail,preReleaseVersion", "fields[builds]": "version,processingState,expired,buildBetaDetail,preReleaseVersion",
         "fields[buildBetaDetails]": "internalBuildState,externalBuildState", "fields[preReleaseVersions]": "version,platform" }, 1)]);
       const included = new Map(builds.included.map(row => [`${row.type}:${row.id}`, row.attributes]));
@@ -49,7 +49,7 @@ export const APP_STORE_CONNECT_TESTFLIGHT_ACTIONS: Record<string, ConnectorActio
     return app && (!word || word === "crashes") ? { app, kind: word ? "Crash" : "Screenshot" } : "name an app, and crashes for crash reports instead of screenshots: <com.example.app> [crashes]";
   }, async ({ api, app, input }) => {
     const type = `betaFeedback${input.kind}Submissions`;
-    const { rows, included } = await api.list(`/v1/apps/${encodeURIComponent(app.id)}/${type}`, { sort: "-createdDate", limit: "10", include: "build",
+    const { rows, included } = await api.listPreview(`/v1/apps/${encodeURIComponent(app.id)}/${type}`, { sort: "-createdDate", limit: "10", include: "build",
       [`fields[${type}]`]: `createdDate,comment,deviceModel,osVersion,appPlatform,build${input.kind === "Screenshot" ? ",screenshots" : ""}`, "fields[builds]": "version" }, 1);
     const builds = new Map(included.filter(row => row.type === "builds").map(row => [row.id, cell(row.attributes.version)]));
     const lines = rows.flatMap(item => [`${item.id}\t${day(item.attributes.createdDate)}\tbuild ${builds.get(relatedId(item, "build") ?? "") ?? "?"}` +
@@ -99,7 +99,7 @@ export const APP_STORE_CONNECT_TESTFLIGHT_ACTIONS: Record<string, ConnectorActio
       : "name an app, a version, a build number, a language and what testers should try: <com.example.app> <1.2.0> <412> <en-US> <notes>";
   }, async ({ api, app, input }) => {
     const build = await namedBuild(api, app.id, input);
-    const existing = (await api.list(`/v1/builds/${encodeURIComponent(build.id)}/betaBuildLocalizations`, { "fields[betaBuildLocalizations]": "locale", limit: "50" }, 1))
+    const existing = (await api.listComplete(`/v1/builds/${encodeURIComponent(build.id)}/betaBuildLocalizations`, { "fields[betaBuildLocalizations]": "locale", limit: "50" }))
       .rows.find(row => text(row.attributes.locale).toLowerCase() === input.locale!.toLowerCase());
     if (existing) {
       await api.request(`/v1/betaBuildLocalizations/${encodeURIComponent(existing.id)}`, { method: "PATCH",

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: App Store Connect collections traverse pages explicitly and fail closed on truncation
+
+`AppStoreConnectApi.list` previously returned `{ rows, included, next? }` for both
+complete-collection lookups and bounded previews, so callers reading `.rows`
+could silently treat a first page as the entire catalog, version list, or draft
+submission. `AppStoreConnectApi` now separates `listComplete` (bounded
+multi-page traversal with loop and path-scope checks, refusing if more pages
+remain) from `listPreview` (disclosing `incomplete` previews). One-time
+in-app purchases and auto-renewable subscriptions now traverse multi-page
+catalogs, check pending versions and draft items completely, and share one
+catalog submission helper; commerce polling shares `listComplete`. Hub only.
+Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: an Android build repeats a failed dependency download
 
 Three of the seven Android releases on 2026-11-18 failed within two minutes

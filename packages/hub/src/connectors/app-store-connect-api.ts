@@ -44,13 +44,25 @@ export interface AppleResource {
   relationships: Record<string, unknown>;
 }
 
+export interface AppleCollection {
+  rows: AppleResource[];
+  included: AppleResource[];
+}
+
+export interface ApplePreviewCollection extends AppleCollection {
+  incomplete: boolean;
+  next?: string;
+}
+
 export interface AppStoreConnectApi {
   /** One JSON:API call; `data` and `included` (resources created inline) become the request's members. A 204 answers `{}`. */
   request(path: string, init?: { method?: "GET" | "POST" | "PATCH" | "DELETE"; query?: Record<string, string>; data?: unknown; included?: unknown[];
     /** Keep Apple's error text out of the receipt: the call carries review contact or sign-in details. */
     quiet?: boolean; accept?: string }): Promise<Record<string, unknown>>;
-  /** A collection and what it includes, following Apple's own next links for at most `pages` pages. */
-  list(path: string, query?: Record<string, string>, pages?: number): Promise<{ rows: AppleResource[]; included: AppleResource[]; next?: string }>;
+  /** Every page of a scoped collection up to `options.pages` (default 5); fails closed if truncated, repeated, or out of scope. */
+  listComplete(path: string, query?: Record<string, string>, options?: { pages?: number; incompleteMessage?: string }): Promise<AppleCollection>;
+  /** A bounded preview of a collection up to `pages` pages (default 5), reporting whether more pages remain. */
+  listPreview(path: string, query?: Record<string, string>, pages?: number): Promise<ApplePreviewCollection>;
   /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
   report(path: string, query: Record<string, string>, accept?: string): Promise<string | undefined>;
 }
@@ -169,6 +181,32 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
         ? `App Store Connect returned ${error.status}: ${problem}${hint}` : `${error.message}${hint}`);
     }
   };
+  async function paginate(path: string, query: Record<string, string> = {}, pages = MAX_PAGES): Promise<ApplePreviewCollection> {
+    const rows: AppleResource[] = [], included: AppleResource[] = [], visited = new Set<string>();
+    const initial = apiUrl(path, query);
+    const limit = Math.max(1, Math.min(pages, MAX_PAGES));
+    let next: string | undefined = initial.toString();
+    for (let page = 0; next && page < limit; page += 1) {
+      visited.add(next);
+      const response = await request(next);
+      if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return a list");
+      rows.push(...response.data.flatMap((row) => appleResource(row) ?? []));
+      included.push(...(Array.isArray(response.included) ? response.included : []).flatMap((row) => appleResource(row) ?? []));
+      const rawLink = record(response.links).next;
+      if (rawLink !== undefined && rawLink !== null && typeof rawLink !== "string") {
+        throw new ProviderRequestError(502, "App Store Connect returned an invalid page link");
+      }
+      const link = text(rawLink);
+      if (!link) { next = undefined; break; }
+      const target = apiUrl(link);
+      if (target.pathname !== initial.pathname) {
+        throw new ProviderRequestError(502, "App Store Connect returned a page outside this collection");
+      }
+      next = target.toString();
+      if (visited.has(next)) throw new ProviderRequestError(502, "App Store Connect repeated a page");
+    }
+    return { rows, included, incomplete: Boolean(next), ...(next ? { next } : {}) };
+  }
   return {
     request,
     async report(path, query, accept = "application/a-gzip") {
@@ -192,19 +230,14 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
       return new TextDecoder().decode(await readBoundedStream(inflated.body, MAX_REPORT_BYTES * 8,
         () => new ProviderRequestError(502, "App Store Connect report is too large"), signal));
     },
-    async list(path, query = {}, pages = MAX_PAGES) {
-      const rows: AppleResource[] = [], included: AppleResource[] = [];
-      let next: string | undefined = apiUrl(path, query).toString();
-      for (let page = 0; next && page < Math.min(pages, MAX_PAGES); page += 1) {
-        const response = await request(next);
-        if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return a list");
-        rows.push(...response.data.flatMap((row) => appleResource(row) ?? []));
-        included.push(...(Array.isArray(response.included) ? response.included : []).flatMap((row) => appleResource(row) ?? []));
-        const link = text(record(response.links).next);
-        next = link ? apiUrl(link).toString() : undefined;
+    async listComplete(path, query = {}, options = {}) {
+      const result = await paginate(path, query, options.pages ?? MAX_PAGES);
+      if (result.incomplete) {
+        throw new ProviderRequestError(409, options.incompleteMessage ?? "Apple returned more items than this action can inspect; nothing was changed");
       }
-      return { rows, included, ...(next ? { next } : {}) };
+      return { rows: result.rows, included: result.included };
     },
+    listPreview: paginate,
   };
 }
 
@@ -216,8 +249,8 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
 export async function appleApp(api: AppStoreConnectApi, bundleId: string): Promise<AppleResource> {
   const query = { "fields[apps]": "name,bundleId,sku,primaryLocale,contentRightsDeclaration", limit: "200" };
   const named = (rows: AppleResource[]) => rows.filter((app) => text(app.attributes.bundleId).toLowerCase() === bundleId.toLowerCase());
-  let apps = named((await api.list("/v1/apps", { ...query, "filter[bundleId]": bundleId })).rows);
-  if (!apps.length) apps = named((await api.list("/v1/apps", query)).rows);
+  let apps = named((await api.listComplete("/v1/apps", { ...query, "filter[bundleId]": bundleId })).rows);
+  if (!apps.length) apps = named((await api.listComplete("/v1/apps", query)).rows);
   if (apps.length !== 1) {
     throw new ProviderRequestError(404, `${bundleId} is not an app this API key can see; create the app record in App Store Connect first`);
   }
@@ -238,7 +271,7 @@ export const APP_STORE_CONNECT_SUBSCRIPTIONS: ConnectorSubscriptionSync = {
     if (!origin || !credentials.ingressKey) throw new ProviderRequestError(503, "App Store Connect ingress is not configured");
     const api = appStoreConnect(credentials);
     const app = await appleApp(api, source);
-    const hooks = (await api.list(`/v1/apps/${encodeURIComponent(app.id)}/webhooks`,
+    const hooks = (await api.listComplete(`/v1/apps/${encodeURIComponent(app.id)}/webhooks`,
       { "fields[webhooks]": "enabled,eventTypes,name,url", limit: "50" })).rows.filter((hook) => text(hook.attributes.name) === webhookName(spaceId));
     const remove = (hook: AppleResource) => api.request(`/v1/webhooks/${encodeURIComponent(hook.id)}`, { method: "DELETE" });
     if (!subscribed) {

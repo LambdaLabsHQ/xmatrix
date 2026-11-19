@@ -87,8 +87,8 @@ export const BUILD_NUMBER = /^\d[\d.]{0,17}$/u;
 
 /** The one uploaded build with this build number in a version's train, whatever its processing state. */
 export async function namedBuild(api: AppStoreConnectApi, appId: string, input: Record<string, string>): Promise<AppleResource> {
-  const builds = (await api.list("/v1/builds", { "filter[app]": appId, "filter[version]": input.build!, "filter[preReleaseVersion.version]": input.version!,
-    "filter[preReleaseVersion.platform]": input.platform!, "fields[builds]": "version,processingState,expired,usesNonExemptEncryption", limit: "10" }, 1))
+  const builds = (await api.listComplete("/v1/builds", { "filter[app]": appId, "filter[version]": input.build!, "filter[preReleaseVersion.version]": input.version!,
+    "filter[preReleaseVersion.platform]": input.platform!, "fields[builds]": "version,processingState,expired,usesNonExemptEncryption", limit: "10" }))
     .rows.filter(row => text(row.attributes.version) === input.build);
   if (!builds.length) throw new ProviderRequestError(404, `Build ${input.build} of ${input.version} is not in App Store Connect; upload it, then wait for processing`);
   if (builds.length > 1) throw new ProviderRequestError(409, `More than one build ${input.build} of ${input.version} exists`);
@@ -115,7 +115,7 @@ export function compareVersions(left: string, right: string): number {
 
 /** Every App Store version of an app on one platform, or on all of them, with the build each carries. */
 export async function appVersions(api: AppStoreConnectApi, appId: string, platform?: string) {
-  const response = await api.list(`/v1/apps/${encodeURIComponent(appId)}/appStoreVersions`, {
+  const response = await api.listComplete(`/v1/apps/${encodeURIComponent(appId)}/appStoreVersions`, {
     ...(platform ? { "filter[platform]": platform } : {}), include: "build", limit: "200",
     "fields[appStoreVersions]": "platform,versionString,appVersionState,appStoreState,releaseType,copyright,createdDate,build",
     "fields[builds]": "version,processingState,expired" });
@@ -133,8 +133,8 @@ export async function namedVersion(api: AppStoreConnectApi, appId: string, input
 
 /** The review submissions of an app that are not finished, on one platform or on all. */
 export async function openSubmissions(api: AppStoreConnectApi, appId: string, platform?: string): Promise<AppleResource[]> {
-  return (await api.list("/v1/reviewSubmissions", { "filter[app]": appId, ...(platform ? { "filter[platform]": platform } : {}),
-    "filter[state]": OPEN_SUBMISSION_STATES, "fields[reviewSubmissions]": "platform,state,submittedDate", limit: "20" }, 1)).rows;
+  return (await api.listComplete("/v1/reviewSubmissions", { "filter[app]": appId, ...(platform ? { "filter[platform]": platform } : {}),
+    "filter[state]": OPEN_SUBMISSION_STATES, "fields[reviewSubmissions]": "platform,state,submittedDate", limit: "20" })).rows;
 }
 
 interface AppStep { api: AppStoreConnectApi; app: AppleResource; input: Record<string, string> }
@@ -164,7 +164,7 @@ function table(header: string, lines: string[], empty: string): string {
 }
 
 async function recentBuilds(api: AppStoreConnectApi, appId: string, limit: number, ref?: { platform: string; version: string }) {
-  const { rows, included } = await api.list("/v1/builds", { "filter[app]": appId, sort: "-uploadedDate", limit: String(limit),
+  const { rows, included } = await api.listPreview("/v1/builds", { "filter[app]": appId, sort: "-uploadedDate", limit: String(limit),
     include: "preReleaseVersion", "fields[builds]": "version,uploadedDate,processingState,expired,usesNonExemptEncryption,preReleaseVersion",
     "fields[preReleaseVersions]": "version,platform",
     ...(ref ? { "filter[preReleaseVersion.version]": ref.version, "filter[preReleaseVersion.platform]": ref.platform } : {}) }, 1);
@@ -183,10 +183,12 @@ export const APP_STORE_CONNECT_READ_ACTIONS: Record<string, ConnectorAction> = {
     effect: "read", requires: ["keyId", "privateKey"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @appstoreconnect:list_apps:*",
     async execute({ credentials }) {
-      const { rows } = await appStoreConnect(credentials).list("/v1/apps", { "fields[apps]": "name,bundleId,sku,primaryLocale", sort: "name", limit: "200" });
+      const { rows, incomplete } = await appStoreConnect(credentials).listPreview("/v1/apps",
+        { "fields[apps]": "name,bundleId,sku,primaryLocale", sort: "name", limit: "200" });
       const lines = rows.slice(0, 250).map(app => [cell(app.attributes.bundleId), cell(app.attributes.name), cell(app.attributes.sku),
         cell(app.attributes.primaryLocale)].join("\t"));
-      return { summary: "App Store Connect apps:\n" + quoteRetrievedText(table("bundle id\tname\tsku\tprimary locale", lines, "(no apps for this API key)")) };
+      return { summary: "App Store Connect apps:\n" + quoteRetrievedText(table("bundle id\tname\tsku\tprimary locale", lines, "(no apps for this API key)")) +
+        (incomplete || rows.length > 250 ? "\nApple returned more apps; this list is incomplete." : "") };
     },
   },
   status: appAction("read",
@@ -211,7 +213,7 @@ export const APP_STORE_CONNECT_READ_ACTIONS: Record<string, ConnectorAction> = {
   read_version: versionAction("read", appVersion, async ({ api, input, version, buildNumber }) => {
     const path = `/v1/appStoreVersions/${encodeURIComponent(version.id)}`;
     const [localizations, review] = await Promise.all([
-      api.list(`${path}/appStoreVersionLocalizations`, { "fields[appStoreVersionLocalizations]": `locale,${LOCALIZED.join(",")}`, limit: "50" }, 1),
+      api.listComplete(`${path}/appStoreVersionLocalizations`, { "fields[appStoreVersionLocalizations]": `locale,${LOCALIZED.join(",")}`, limit: "50" }),
       api.request(`${path}/appStoreReviewDetail`, { quiet: true, query: {
         "fields[appStoreReviewDetails]": "contactFirstName,contactLastName,contactEmail,contactPhone,demoAccountRequired,demoAccountName" } })
         .catch((error: unknown) => {
@@ -235,7 +237,7 @@ export const APP_STORE_CONNECT_READ_ACTIONS: Record<string, ConnectorAction> = {
     const app = bundleId(statement.target), word = statement.text.trim().toLowerCase();
     return app && (!word || word === "unanswered") ? { app, only: word } : "name an app, and optionally only its unanswered reviews: <com.example.app> [unanswered]";
   }, async ({ api, app, input }) => {
-    const { rows } = await api.list(`/v1/apps/${encodeURIComponent(app.id)}/customerReviews`, { sort: "-createdDate", limit: "20", include: "response",
+    const { rows } = await api.listPreview(`/v1/apps/${encodeURIComponent(app.id)}/customerReviews`, { sort: "-createdDate", limit: "20", include: "response",
       "fields[customerReviews]": "rating,title,body,reviewerNickname,createdDate,territory,response", "fields[customerReviewResponses]": "state",
       ...(input.only ? { "exists[publishedResponse]": "false" } : {}) }, 1);
     const lines = rows.map(review => [`${review.id}\t${cell(review.attributes.rating)}★\t${cell(review.attributes.territory)}\t${day(review.attributes.createdDate)}` +
