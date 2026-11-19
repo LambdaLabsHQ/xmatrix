@@ -426,10 +426,14 @@ async fn fetch_current_channel(
         .find(|channel| channel.id == channel_id)
 }
 
+/// Mirrors `ADDRESSABLE_AGENT_INSTANCE_RESTS` in
+/// `packages/protocol/src/authority-foundation.ts` (`wake_failed` and stopped
+/// require `:reborn` and are excluded).
 fn is_addressable_rest(rest: Option<&str>) -> bool {
     matches!(rest, Some("sleeping" | "interrupted" | "waking"))
 }
 
+/// Mirrors `LIVE_AGENT_STATUSES` in `packages/protocol/src/authority-foundation.ts`.
 fn is_live_status(status: &str) -> bool {
     matches!(status, "online" | "busy" | "idle")
 }

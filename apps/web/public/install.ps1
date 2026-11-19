@@ -1,4 +1,4 @@
-﻿param([switch]$BinaryOnly)
+param([switch]$BinaryOnly)
 
 $ErrorActionPreference = "Stop"
 
