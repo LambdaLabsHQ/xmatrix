@@ -28,6 +28,99 @@ pub const DAEMON_WATCHDOG_FILE: &str = "daemon-watchdog";
 /// Receipt, log, and setup warning when neither watchdog path is active.
 pub const WATCHDOG_RESTART_ABSENT: &str =
     "This computer will not restart the daemon after it exits.";
+/// Windows-subsystem helper placed beside the stable CLI. Task Scheduler runs
+/// this instead of `xmatrix.exe daemon`.
+pub const WINDOWS_DAEMON_LAUNCH_EXE: &str = "xmatrix-daemon-launch.exe";
+
+/// No-console parent for the scheduled daemon. `xmatrix.exe` is a console
+/// subsystem binary; Task Scheduler starting it in the interactive session
+/// opens a Windows Terminal window that stays up for the life of the daemon
+/// when Windows Terminal is the default terminal. `MainWindowHandle` stays 0
+/// because the visible window belongs to Windows Terminal. This helper is
+/// subsystem windows, starts the daemon with CREATE_NO_WINDOW, and waits so
+/// the task instance stays running and `IgnoreNew` skips the next minute.
+const WINDOWS_DAEMON_LAUNCH_SOURCE: &str = r#"using System;
+using System.Diagnostics;
+
+static class DaemonLaunch
+{
+    static int Main(string[] args)
+    {
+        if (args.Length < 1 || string.IsNullOrEmpty(args[0])) return 2;
+        var start = new ProcessStartInfo();
+        start.FileName = args[0];
+        start.Arguments = "daemon";
+        string directory = System.IO.Path.GetDirectoryName(args[0]);
+        if (!string.IsNullOrEmpty(directory)) start.WorkingDirectory = directory;
+        start.UseShellExecute = false;
+        start.CreateNoWindow = true;
+        start.WindowStyle = ProcessWindowStyle.Hidden;
+        Process child = Process.Start(start);
+        if (child == null) return 1;
+        child.WaitForExit();
+        return child.ExitCode;
+    }
+}
+"#;
+
+/// ASCII PowerShell that compiles the helper with the in-box C# compiler.
+/// Requires `$InstallPath`. If `csc.exe` is missing, or the compile fails and
+/// no helper is already on disk, the caller must not schedule `xmatrix.exe`.
+fn windows_daemon_launch_helper_ps() -> String {
+    let mut script = format!(
+        "function Get-DaemonLauncherPath {{\n  \
+         return (Join-Path (Split-Path -Parent $InstallPath) '{name}')\n}}\n\
+         function Install-DaemonLaunchHelper {{\n  \
+         $launcherPath = Get-DaemonLauncherPath\n  \
+         $csc = Join-Path $env:WINDIR 'Microsoft.NET\\Framework64\\v4.0.30319\\csc.exe'\n  \
+         if (-not (Test-Path -LiteralPath $csc)) {{\n    \
+         $csc = Join-Path $env:WINDIR 'Microsoft.NET\\Framework\\v4.0.30319\\csc.exe'\n  }}\n  \
+         if (-not (Test-Path -LiteralPath $csc)) {{\n    \
+         if (Test-Path -LiteralPath $launcherPath) {{ return $launcherPath }}\n    \
+         throw 'csc.exe was not found; refusing to schedule a console daemon'\n  }}\n  \
+         $sourcePath = Join-Path $env:TEMP ('xmatrix-daemon-launch-' + [guid]::NewGuid().ToString('n') + '.cs')\n  \
+         $stagedPath = Join-Path $env:TEMP ('xmatrix-daemon-launch-' + [guid]::NewGuid().ToString('n') + '.exe')\n  \
+         $daemonLaunchSource = @'\n",
+        name = WINDOWS_DAEMON_LAUNCH_EXE,
+    );
+    script.push_str(WINDOWS_DAEMON_LAUNCH_SOURCE);
+    script.push_str(
+        r#"'@
+  Set-Content -LiteralPath $sourcePath -Value $daemonLaunchSource -Encoding ASCII
+  & $csc /nologo /target:winexe ('/out:' + $stagedPath) $sourcePath
+  $compileExit = $LASTEXITCODE
+  Remove-Item -LiteralPath $sourcePath -Force -ErrorAction SilentlyContinue
+  if ($compileExit -ne 0 -or -not (Test-Path -LiteralPath $stagedPath)) {
+    Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
+    if (Test-Path -LiteralPath $launcherPath) { return $launcherPath }
+    throw 'the no-console daemon launcher was not built; refusing to schedule a console daemon'
+  }
+  try {
+    Move-Item -LiteralPath $stagedPath -Destination $launcherPath -Force
+  } catch {
+    Remove-Item -LiteralPath $stagedPath -Force -ErrorAction SilentlyContinue
+    if (-not (Test-Path -LiteralPath $launcherPath)) { throw }
+  }
+  if (-not (Test-Path -LiteralPath $launcherPath)) {
+    throw 'the no-console daemon launcher was not installed'
+  }
+  return $launcherPath
+}
+function Test-DaemonLauncherAction($action) {
+  if (-not $action) { return $false }
+  $execute = ''
+  try { $execute = [System.IO.Path]::GetFullPath([string]$action.Execute) } catch { return $false }
+  if ($execute -ine [System.IO.Path]::GetFullPath((Get-DaemonLauncherPath))) { return $false }
+  $arg = ([string]$action.Arguments).Trim().Trim([char]34)
+  if (-not $arg) { return $false }
+  try {
+    return ([System.IO.Path]::GetFullPath($arg) -ieq [System.IO.Path]::GetFullPath($InstallPath))
+  } catch { return $false }
+}
+"#,
+    );
+    script
+}
 
 /// What `install_daemon_service` registered, for the caller's report.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -450,6 +543,21 @@ Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction 
 Unregister-ScheduledTask -TaskName $watchdogTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Unregister-ScheduledTask -TaskName $watchdogUserTaskName -Confirm:$false -ErrorAction SilentlyContinue
 Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
+Get-CimInstance Win32_Process -Filter "Name = 'xmatrix-daemon-launch.exe'" | ForEach-Object {
+  Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+}
+$callerProcess = Get-CimInstance Win32_Process -Filter ("ProcessId = " + $callerPid) -ErrorAction SilentlyContinue
+if ($callerProcess -and $callerProcess.ExecutablePath) {
+  Remove-Item -LiteralPath (Join-Path (Split-Path -Parent $callerProcess.ExecutablePath) 'xmatrix-daemon-launch.exe') -Force -ErrorAction SilentlyContinue
+}
+foreach ($startupTaskName in @($taskName, $legacyTaskName, $watchdogTaskName, $watchdogUserTaskName)) {
+  $startupTask = Get-ScheduledTask -TaskName $startupTaskName -ErrorAction SilentlyContinue
+  if (-not $startupTask) { continue }
+  $startupAction = $startupTask.Actions | Select-Object -First 1
+  if ($startupAction -and ([System.IO.Path]::GetFileName([string]$startupAction.Execute) -ieq 'xmatrix-daemon-launch.exe')) {
+    Remove-Item -LiteralPath ([string]$startupAction.Execute) -Force -ErrorAction SilentlyContinue
+  }
+}
 Stop-XMatrixDaemonProcesses
 "#,
     );
@@ -488,12 +596,13 @@ Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $i
     script
 }
 
-/// Per-user login Scheduled Task that runs the stable CLI as `daemon`.
+/// Per-user login Scheduled Task that starts the stable CLI as `daemon`.
 ///
-/// Mirrors the former `Install-DaemonStartup` body from `install.ps1`: direct
-/// execute of the binary (no WScript bridge), keep an already-correct task,
-/// replace anything else, then stop leftover daemon processes and start the
-/// task. Pure so every host can assert the shape; only Windows runs it.
+/// The task action is the no-console helper, not `xmatrix.exe` itself. Keep an
+/// already-correct task, replace anything else (including a direct console
+/// action or a historical WScript bridge), then stop leftover daemon processes
+/// and start the task. Pure so every host can assert the shape; only Windows
+/// runs it.
 ///
 /// `caller_pid` is the `xmatrix setup daemon` process that spawned this
 /// script. The stop filter must skip it: its command line contains
@@ -501,15 +610,17 @@ Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $i
 /// the installer mid-run.
 pub fn windows_daemon_scheduled_task_script(binary: &Path, caller_pid: u32) -> String {
     let mut script = windows_daemon_script_prelude(binary, caller_pid);
+    script.push_str(&windows_daemon_launch_helper_ps());
     script.push_str(&format!(
         "$taskName = {}\n$legacyTaskName = {}\n",
         powershell_single_quoted(WINDOWS_DAEMON_TASK_NAME),
         powershell_single_quoted(WINDOWS_DAEMON_LEGACY_TASK_NAME),
     ));
     script.push_str(
-        r#"$action = New-ScheduledTaskAction `
-  -Execute $InstallPath `
-  -Argument "daemon" `
+        r#"$launcherPath = Install-DaemonLaunchHelper
+$action = New-ScheduledTaskAction `
+  -Execute $launcherPath `
+  -Argument ('"' + $InstallPath + '"') `
   -WorkingDirectory $installDirectory
 # A logon trigger without -User fires for every user, and registering one
 # needs an elevated shell; a standard user gets "Access is denied".
@@ -538,10 +649,7 @@ $keepExistingTask = $false
 if ($existingTask) {
   $existingAction = $existingTask.Actions | Select-Object -First 1
   $keepExistingTask = (
-    $existingAction -and
-    ([System.IO.Path]::GetFullPath([string]$existingAction.Execute) -ieq [System.IO.Path]::GetFullPath($InstallPath)) -and
-    ([string]$existingAction.Arguments).Trim() -eq "daemon" -and
-    ([System.IO.Path]::GetFullPath([string]$existingAction.WorkingDirectory) -ieq [System.IO.Path]::GetFullPath($installDirectory)) -and
+    (Test-DaemonLauncherAction $existingAction) -and
     (@($existingTask.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }).Count -gt 0)
   )
 }
@@ -595,7 +703,8 @@ fn powershell_single_quoted(value: &str) -> String {
 /// points: the handoff script is written without a BOM, and Windows
 /// PowerShell 5.1 would otherwise read it in the ANSI code page.
 pub(crate) fn windows_daemon_watchdog_helpers_ps() -> String {
-    format!(
+    let mut script = windows_daemon_launch_helper_ps();
+    script.push_str(&format!(
         r#"
 $watchdogTaskName = {task_name}
 $watchdogUserTaskName = {user_task_name}
@@ -614,8 +723,9 @@ function Remove-StandaloneDaemonWatchdog {{
 }}
 function Register-StandaloneDaemonWatchdog {{
   $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+  $launcherPath = Install-DaemonLaunchHelper
   $watchdogDirectory = Split-Path -Parent $InstallPath
-  $watchdogAction = New-ScheduledTaskAction -Execute $InstallPath -Argument "daemon" -WorkingDirectory $watchdogDirectory
+  $watchdogAction = New-ScheduledTaskAction -Execute $launcherPath -Argument ('"' + $InstallPath + '"') -WorkingDirectory $watchdogDirectory
   $watchdogLogon = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
   $watchdogMinute = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
   $watchdogSettings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
@@ -623,9 +733,7 @@ function Register-StandaloneDaemonWatchdog {{
     if (-not $task -or -not $task.Settings.Enabled) {{ return $false }}
     $action = $task.Actions | Select-Object -First 1
     return (
-      $action -and
-      ([System.IO.Path]::GetFullPath([string]$action.Execute) -ieq [System.IO.Path]::GetFullPath($InstallPath)) -and
-      ([string]$action.Arguments).Trim() -eq 'daemon' -and
+      (Test-DaemonLauncherAction $action) -and
       (@($task.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0)
     )
   }}
@@ -677,10 +785,16 @@ function Add-DaemonWatchdogTrigger {{
   try {{
     $current = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
     $hasMinuteTrigger = @($current.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0
-    if (-not $hasMinuteTrigger) {{
-      $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
-      $null = Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger) -ErrorAction Stop
-      Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
+    $currentAction = $current.Actions | Select-Object -First 1
+    if ((-not $hasMinuteTrigger) -or (-not (Test-DaemonLauncherAction $currentAction))) {{
+      $launcherPath = Install-DaemonLaunchHelper
+      $launcherAction = New-ScheduledTaskAction -Execute $launcherPath -Argument ('"' + $InstallPath + '"') -WorkingDirectory (Split-Path -Parent $InstallPath)
+      $triggers = @($current.Triggers)
+      if (-not $hasMinuteTrigger) {{
+        $triggers += New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
+      }}
+      $null = Set-ScheduledTask -TaskName $taskName -Action $launcherAction -Trigger $triggers -ErrorAction Stop
+      Write-DaemonUpdateLog 'set the no-console daemon launcher on the scheduled task'
     }}
     Remove-StandaloneDaemonWatchdog
     $script:daemonWatchdogActive = $true
@@ -711,7 +825,8 @@ function Add-DaemonWatchdogTrigger {{
         manager_file = powershell_single_quoted(DAEMON_SERVICE_MANAGER_FILE),
         watchdog_file = powershell_single_quoted(DAEMON_WATCHDOG_FILE),
         absent_message = powershell_single_quoted(WATCHDOG_RESTART_ABSENT),
-    )
+    ));
+    script
 }
 
 /// Registers only the per-user watchdog task. Does not stop a running daemon
@@ -1063,7 +1178,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_scheduled_task_runs_the_stable_binary_directly_at_logon() {
+    fn windows_scheduled_task_starts_the_daemon_through_a_windowless_launcher() {
         let script = windows_daemon_scheduled_task_script(
             Path::new(r"C:\Users\tester\.local\bin\xmatrix.exe"),
             4242,
@@ -1074,8 +1189,15 @@ mod tests {
             "$legacyTaskName = '{WINDOWS_DAEMON_LEGACY_TASK_NAME}'"
         )));
         assert!(script.contains("New-ScheduledTaskAction"));
-        assert!(script.contains("-Execute $InstallPath"));
-        assert!(script.contains("-Argument \"daemon\""));
+        assert!(script.contains("Install-DaemonLaunchHelper"));
+        assert!(script.contains("Test-DaemonLauncherAction"));
+        assert!(script.contains(WINDOWS_DAEMON_LAUNCH_EXE));
+        assert!(script.contains("CreateNoWindow = true"));
+        assert!(script.contains("child.WaitForExit()"));
+        assert!(script.contains("-Execute $launcherPath"));
+        assert!(script.contains("-Argument ('\"' + $InstallPath + '\"')"));
+        assert!(!script.contains("-Execute $InstallPath"));
+        assert!(!script.contains("-Argument \"daemon\""));
         assert!(script.contains("-WorkingDirectory $installDirectory"));
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
         assert!(script.contains("-RestartCount 999"));
@@ -1088,8 +1210,6 @@ mod tests {
         assert!(script.contains("$_.Repetition.Interval -eq 'PT1M'"));
         assert!(script.contains("$keepExistingTask = ("));
         assert!(script.contains("if (-not $keepExistingTask)"));
-        assert!(script.contains("GetFullPath([string]$existingAction.Execute)"));
-        assert!(script.contains("Arguments).Trim() -eq \"daemon\""));
         assert!(script.contains("Register-ScheduledTask"));
         assert!(script.contains("Start-ScheduledTask -TaskName $taskName"));
         assert!(script.contains(&format!(
@@ -1207,6 +1327,8 @@ mod tests {
         assert!(script.contains("Remove-ItemProperty -Path $runKey -Name $runValueName"));
         assert!(script.contains("$callerPid = 4242"));
         assert!(script.contains("Stop-XMatrixDaemonProcesses"));
+        assert!(script.contains(WINDOWS_DAEMON_LAUNCH_EXE));
+        assert!(script.contains("Name = 'xmatrix-daemon-launch.exe'"));
     }
 
     #[test]
@@ -1252,8 +1374,15 @@ mod tests {
             "$watchdogUserTaskName = '{WINDOWS_DAEMON_USER_WATCHDOG_TASK_NAME}'"
         )));
         assert!(script.contains(r"$InstallPath = 'C:\Users\tester\.local\bin\xmatrix.exe'"));
-        assert!(script.contains("-Execute $InstallPath"));
-        assert!(script.contains("-Argument \"daemon\""));
+        assert!(script.contains("Install-DaemonLaunchHelper"));
+        assert!(script.contains("Test-DaemonLauncherAction"));
+        assert!(script.contains(WINDOWS_DAEMON_LAUNCH_EXE));
+        assert!(script.contains("CreateNoWindow = true"));
+        assert!(script.contains("-Execute $launcherPath"));
+        assert!(script.contains("-Argument ('\"' + $InstallPath + '\"')"));
+        assert!(!script.contains("-Execute $InstallPath"));
+        assert!(!script.contains("-Argument \"daemon\""));
+        assert!(script.contains("set the no-console daemon launcher on the scheduled task"));
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
         assert!(script.contains(
             "New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)"
