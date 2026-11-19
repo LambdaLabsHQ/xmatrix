@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a summon naming a billing-refused harness runs its model
+
+`@cursor machine:Workstation` with the Default model gemini-4-neon failed at
+once with "xMatrix's selection no longer matches authorized launch resources"
+(`registration_selection_invalid`). The account carried a billing refusal,
+whose hold reads as one used-up account window. A named summon is let past
+that refusal (#1814), but its models were still filtered by the hold, so none
+was left to run. A named summon's hold now takes none of its models away; a
+scoped window the provider measured used up still refuses its model, with the
+usual quota wait. Unnamed `@auto` still leaves the refused account out. Hub
+only. Recovery is a CI-validated Hub beta reverting this change.
+
 ## Unreleased: Default model is picked from a menu
 
 **Default model** on an Agent's page, and on the Space's registered locations,
