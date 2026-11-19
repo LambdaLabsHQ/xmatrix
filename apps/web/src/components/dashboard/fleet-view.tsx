@@ -2,7 +2,10 @@
 
 import { Plus } from "lucide-react";
 import { useState } from "react";
-import { AGENT_PRESETS, parseHarnessInventory, type AgentRegistrationSummary, type ChannelSnapshot, type ObservabilityEvent } from "@xmatrix/protocol";
+import {
+  AGENT_PRESETS, machineResourceObservation, parseHarnessInventory,
+  type AgentRegistrationSummary, type ChannelSnapshot, type ObservabilityEvent,
+} from "@xmatrix/protocol";
 
 import { Button } from "@/components/ui/button";
 import { ErrorNotice } from "@/components/ui/error-notice";
@@ -20,8 +23,10 @@ import { ContentSkeleton } from "./content-skeleton";
 import { signedOutRegistrations } from "./harness-sign-in";
 import { FleetCellEditor } from "./fleet-cell-editor";
 import { FleetMatrix, type FleetMatrixCell, type FleetMatrixCellKey, type FleetMatrixEditor, type FleetMatrixRow } from "./fleet-matrix";
+import { MobileAvatarMatrix, mobileAttentionPhrase, type MobileMatrixRow } from "./fleet-mobile";
 import { MachineGlyph } from "./machine-glyph";
 import { machinePlatform, machineStateLine, machineUnresponsive } from "./machine-list-row";
+import { machineGlanceReadings, machineLoadReadings, meterTone } from "./machine-load";
 import { MachineLoadGlance } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
 import { AgentPaper } from "./my-agents-view";
@@ -234,12 +239,19 @@ export function FleetView({
     return [harness, busy && found.kind !== "unknown" && found.kind !== "unsupported" ? { ...found, busy } : found];
   }));
   // No `rounded` on what is not a button: a rounded span is drawn as a chip everywhere in the app.
-  const machineHeading = phone
-    ? "flex w-full min-w-0 items-center gap-1.5 px-0 py-1 text-left"
-    : "flex w-full min-w-0 items-center gap-2.5 px-1.5 py-1.5 text-left";
+  const machineHeading = "flex w-full min-w-0 items-center gap-2.5 px-1.5 py-1.5 text-left";
   /** What a row is for its cells' editors: the machine it is, and the agents on it. */
   type RowSubject = { name: string; machine?: MachineSummary; own: boolean; rowOf: (harness: string) => AgentRow | undefined };
   const subjects = new Map<string, RowSubject>();
+  const attentionTextOf = (cells: Record<string, FleetMatrixCell>): string | null => {
+    const items = harnesses.flatMap((harness) => {
+      const entry = cells[harness];
+      return entry?.kind === "agent" && entry.state === "attention" ? [mobileAttentionPhrase(harness, entry.label)] : [];
+    });
+    if (!items.length) return null;
+    return items.length === 1 ? items[0]! : `${items[0]} · +${items.length - 1}`;
+  };
+  const mobileRows: MobileMatrixRow[] = [];
   const matrixRows: FleetMatrixRow[] = [
     ...model.ordered.map((machine): FleetMatrixRow => {
       const local = !machine || model.isThis(machine);
@@ -255,30 +267,45 @@ export function FleetView({
       const machineId = machine ? machine.machineId : thisMachine?.machineId;
       const rowOf = (harness: string) => rows.find((candidate) => candidate.harness === harness && Boolean(machineId)
         && candidate.registration.key.machineId === machineId);
+      const cells = cellsOf(key, (harness) => {
+        const row = rowOf(harness);
+        if (row) return agentCell(row);
+        const item = items?.find((entry) => entry.id === harness);
+        if (!machine || !item) return { kind: "unknown" };
+        return item.installed ? { kind: "off" } : item.probeStatus === "unsupported" ? { kind: "unsupported" } : { kind: "absent" };
+      });
+      const loadAlerts = machine && online && machine.daemon
+        ? machineGlanceReadings(machineLoadReadings(machineResourceObservation(machine.daemon.metadata?.machineResources, now)))
+          .filter((reading) => meterTone(reading.percent) !== "green")
+        : [];
+      const openThisMachine = () => { setCell(null); openMachine(machine); };
       subjects.set(key, { name, machine: machine ?? undefined, own: Boolean(items), rowOf });
+      mobileRows.push({
+        key, name, own: Boolean(items), online, dimmed: !online,
+        localTag: local ? <ThisMachineTag label={model.thisLabel} /> : undefined,
+        exception: stalled ? "Not responding" : attentionTextOf(cells),
+        loadAlerts,
+        quietNote: !online ? (machine ? machineStateLine(machine, 0) : "Offline") : host ? `WSL on ${model.nameOf(host)}` : null,
+        onOpenMachine: openThisMachine,
+        cells,
+      });
       return {
         key, name, dimmed: !online,
         heading: (
-          <button type="button" data-testid="machine-row" onClick={() => { setCell(null); openMachine(machine); }}
-            className={cn(machineHeading, "rounded hover:bg-foreground/5", host && (phone ? "pl-2" : "pl-5"))}>
+          <button type="button" data-testid="machine-row" onClick={openThisMachine}
+            className={cn(machineHeading, "rounded hover:bg-foreground/5", host && "pl-5")}>
             <span className="app-tool-state-icon shrink-0" data-state={stalled ? "attention" : online ? "running" : "offline"}
               aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
               <MachineGlyph os={machineOs(local ? thisMachine!.platform : machinePlatform(machine!))} /></span>
             <span className="min-w-0 flex-1">
-              <span className={cn("app-list-row-title block truncate font-semibold", phone && "text-[13px] leading-tight")}>{name}</span>
-              <span className={cn("block truncate text-muted-foreground", phone ? "text-[11px]" : "text-xs")}>
+              <span className="app-list-row-title block truncate font-semibold">{name}</span>
+              <span className="block truncate text-xs text-muted-foreground">
                 {local && <ThisMachineTag label={model.thisLabel} />}{local && facts ? " · " : null}{facts}</span>
               {machine && <span className="mt-1 block empty:hidden"><MachineLoadGlance machine={machine} now={now} /></span>}
             </span>
           </button>
         ),
-        cells: cellsOf(key, (harness) => {
-          const row = rowOf(harness);
-          if (row) return agentCell(row);
-          const item = items?.find((entry) => entry.id === harness);
-          if (!machine || !item) return { kind: "unknown" };
-          return item.installed ? { kind: "off" } : item.probeStatus === "unsupported" ? { kind: "unsupported" } : { kind: "absent" };
-        }),
+        cells,
       };
     }),
     // A machine the reader's list has no record of: named for what runs on it, with no page of its own to open.
@@ -287,7 +314,19 @@ export function FleetView({
       const up = section.agents.some((row) => row.registration.live?.machine.online);
       const owners = [...new Set(section.agents.map((row) => row.registration.ownerName))].join(", ");
       const rowOf = (harness: string) => section.agents.find((candidate) => candidate.harness === harness);
+      const cells = cellsOf(section.key, (harness) => {
+        const row = rowOf(harness);
+        return row ? agentCell(row) : { kind: "unknown" };
+      });
       subjects.set(section.key, { name: section.name, own: false, rowOf });
+      mobileRows.push({
+        key: section.key, name: section.name, own: false, online: up, dimmed: !up,
+        group: mine ? undefined : "Teammates' machines",
+        exception: attentionTextOf(cells),
+        loadAlerts: [],
+        quietNote: [mine ? null : owners, up ? null : "Offline"].filter(Boolean).join(" · ") || null,
+        cells,
+      });
       return {
         key: section.key, name: section.name, dimmed: !up, group: mine ? undefined : "Teammates' machines",
         heading: (
@@ -295,16 +334,13 @@ export function FleetView({
             <span className="app-tool-state-icon shrink-0" data-state={up ? "running" : "offline"} aria-hidden="true">
               <MachineGlyph os={machineOs(section.platform)} /></span>
             <span className="min-w-0 flex-1">
-              <span className={cn("app-list-row-title block truncate font-semibold", phone && "text-[13px] leading-tight")}>{section.name}</span>
-              <span className={cn("block truncate text-muted-foreground", phone ? "text-[11px]" : "text-xs")}>
+              <span className="app-list-row-title block truncate font-semibold">{section.name}</span>
+              <span className="block truncate text-xs text-muted-foreground">
                 {[mine ? null : owners, up ? null : "Offline"].filter(Boolean).join(" · ")}</span>
             </span>
           </span>
         ),
-        cells: cellsOf(section.key, (harness) => {
-          const row = rowOf(harness);
-          return row ? agentCell(row) : { kind: "unknown" };
-        }),
+        cells,
       };
     }),
   ];
@@ -365,7 +401,12 @@ export function FleetView({
     </div>
   ) : undefined;
   // Another machine: the same connection a first machine makes, followed for that machine alone.
-  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another />;
+  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another phone={phone} />;
+  const addColumnConfig = {
+    options: offered.map((preset) => ({ harness: preset.id, name: preset.displayName })),
+    onAdd: (harness: string) => setAddedColumns((current) => current.includes(harness) ? current : [...current, harness]),
+  };
+  const addRowConfig = { open: addingMachine, onToggle: () => setAddingMachine(!addingMachine), content: addMachine };
   const catalogError = catalog.isError && (
     <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
       className={statusInkClass("alert", "text-sm")} />
@@ -382,39 +423,33 @@ export function FleetView({
   // A desktop's page goes back to the matrix; a phone's closes over its list.
   const back = phone ? undefined : () => onChangeView("status");
 
-  const overviewContent = setup ? bringIn : (
+  const notices = (
     <>
       {error && <p role="alert" className="mb-4 text-xs font-medium text-destructive">{error}</p>}
       {model.identityUnavailable && <p role="status" className="mb-4 text-xs text-muted-foreground">
         Update xMatrix to identify this computer and show its controls on the registered Machine.
       </p>}
-      {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
-      <FleetOverview status={status} attention={[]} note={attentionNote}>
-        {catalogError}
-        {turnOn}
-        <section aria-label="Machines and agents" className="space-y-3">
-          {matrixRows.length === 0 ? (loading
-            ? <ContentSkeleton label="Loading machines and agents" lines={4} />
-            : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
-            : <FleetMatrix columns={columns} rows={matrixRows} selected={cell} onSelect={setCell} editors={editors} compact={phone}
-              addColumn={{ options: offered.map((preset) => ({ harness: preset.id, name: preset.displayName })),
-                onAdd: (harness) => setAddedColumns((current) => current.includes(harness) ? current : [...current, harness]) }}
-              addRow={{ open: addingMachine, onToggle: () => setAddingMachine(!addingMachine), content: addMachine }} />}
-          {matrixRows.length > 0 && columns.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Choose a cell to change that agent on that machine. <span className="font-semibold">Off</span>: installed, not turned on in this Space.{" "}
-              <span className="font-semibold">+</span>: not installed. <span className="font-semibold">—</span>: cannot run there.{" "}
-              The + after the last agent adds one; the last row adds a machine.
-            </p>
-          )}
-        </section>
-      </FleetOverview>
     </>
   );
 
   const list = (
     <ToolList title="Agents">
-      <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(6.5rem+var(--app-safe-area-bottom))]">{overviewContent}</div>
+      <div className="px-[var(--mobile-content-inset,1rem)] pt-2 pb-[calc(6.5rem+var(--app-safe-area-bottom))]">
+        {setup ? bringIn : (
+          <div className="space-y-4">
+            {notices}
+            {catalogError}
+            {turnOn}
+            {mobileRows.length === 0 ? (loading
+              ? <ContentSkeleton label="Loading machines and agents" lines={4} />
+              : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
+              : <MobileAvatarMatrix columns={columns} rows={mobileRows} ownMachineCount={model.ordered.length}
+                attentionCount={attentionCount} workingCount={status.workingCount}
+                selected={cell} onSelect={setCell} editors={editors}
+                addColumn={addColumnConfig} addRow={addRowConfig} />}
+          </div>
+        )}
+      </div>
     </ToolList>
   );
 
@@ -447,7 +482,28 @@ export function FleetView({
     <ToolSheet label="Agents">
       <ToolPaperScroll wide>
         <h1 className="mb-6 text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
-        {overviewContent}
+        {setup ? bringIn : <>
+          {notices}
+          {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
+          <FleetOverview status={status} attention={[]} note={attentionNote}>
+            {catalogError}
+            {turnOn}
+            <section aria-label="Machines and agents" className="space-y-3">
+              {matrixRows.length === 0 ? (loading
+                ? <ContentSkeleton label="Loading machines and agents" lines={4} />
+                : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
+                : <FleetMatrix columns={columns} rows={matrixRows} selected={cell} onSelect={setCell} editors={editors}
+                  addColumn={addColumnConfig} addRow={addRowConfig} />}
+              {matrixRows.length > 0 && columns.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  Choose a cell to change that agent on that machine. <span className="font-semibold">Off</span>: installed, not turned on in this Space.{" "}
+                  <span className="font-semibold">+</span>: not installed. <span className="font-semibold">—</span>: cannot run there.{" "}
+                  The + after the last agent adds one; the last row adds a machine.
+                </p>
+              )}
+            </section>
+          </FleetOverview>
+        </>}
       </ToolPaperScroll>
     </ToolSheet>
   );

@@ -194,15 +194,13 @@ test.describe("mobile agents grid and bottom sheets", () => {
 
     await page.goto("/app/personal-sspaceperso/status");
     const matrix = page.getByTestId("fleet-matrix");
-    const machine = matrix.getByRole("row", { name: "Workbench" });
+    const machine = matrix.getByRole("region", { name: "Workbench" });
     await expect(machine).toBeVisible();
 
-    // Matrix column header shows the Space's agent without a separate chip strip.
-    await expect(matrix.getByTestId("fleet-agent-column")).toHaveText(["codex"]);
-
-    // Attention is summarized inline and drawn in amber ink on the cell itself; tapping the cell opens its Bottom Sheet.
+    // Attention is summarized in the compact header and explained inline beside the machine name; tapping the avatar opens its Bottom Sheet.
     await expect(page.getByTestId("status-attention")).toHaveCount(0);
-    await expect(page.getByTestId("fleet-attention-count")).toHaveText(" · 1 needs attention");
+    await expect(page.getByTestId("fleet-attention-count")).toHaveText("1 needs attention");
+    await expect(machine.getByTestId("machine-row")).toContainText("codex needs sign-in");
     await machine.locator('[data-testid="agent-row"][data-state="attention"]').click();
     const sheet = page.getByTestId("fleet-cell-editor").filter({ visible: true });
     await expect(sheet).toContainText("Codex on Workbench");
@@ -210,12 +208,11 @@ test.describe("mobile agents grid and bottom sheets", () => {
     await sheet.getByRole("button", { name: "Close" }).click();
     await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toHaveCount(0);
 
-    // + adds a column via Bottom Sheet picker, then tapping its + cell opens the install Bottom Sheet.
+    // Trailing dashed + slot adds a column via Bottom Sheet picker, then tapping its absent cell opens the install Bottom Sheet.
     await matrix.getByTestId("fleet-add-column").click();
     const picker = page.getByRole("menu", { name: "Agents no machine has yet" });
     await expect(picker).toBeVisible();
     await picker.getByRole("menuitem", { name: "Claude Code" }).click();
-    await expect(matrix.getByTestId("fleet-agent-column")).toHaveText(["codex", "claude"]);
 
     await fixtureJson(page, "harness-action", "**/api/xmatrix/machine-daemons/harness-actions", { controlId: CONTROL, status: "queued" });
     await fixtureJson(page, "harness-status", "**/api/xmatrix/machine-daemons/harness-actions/*",
@@ -224,16 +221,19 @@ test.describe("mobile agents grid and bottom sheets", () => {
     const installEditor = page.getByTestId("fleet-cell-editor").filter({ visible: true });
     await expect(installEditor).toContainText("Claude Code on Workbench");
     await installEditor.getByRole("button", { name: "Install", exact: true }).click();
-    await expect(machine.getByRole("button", { name: "claude on Workbench: Installing…" })).toContainText("Installing…");
+    const busyCell = machine.getByRole("button", { name: "claude on Workbench: Installing…" });
+    await expect(busyCell).toHaveAttribute("data-state", "busy");
 
     await installEditor.getByRole("button", { name: "Close" }).click();
-    await expect(machine.getByRole("button", { name: "claude on Workbench: Installing…" })).toContainText("Installing…");
+    await expect(busyCell).toHaveAttribute("data-state", "busy");
 
-    // Interactive Add a machine row works below the matrix on phone without scrolling sideways.
+    // Ghost machine row nudges adding a second computer and expands phone-safe setup (no shell command).
     const add = matrix.getByTestId("fleet-add-row");
+    await expect(add).toContainText("Keep agents running when this computer sleeps");
     await add.scrollIntoViewIfNeeded();
     await add.click();
     await expect(matrix.getByTestId("add-machine")).toBeVisible();
+    await expect(matrix.getByTestId("add-machine")).not.toContainText("bash -s --");
     await expect(add).toHaveAttribute("aria-expanded", "true");
   });
 });

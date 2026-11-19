@@ -10,7 +10,6 @@ import { PaperPopover } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
 import { Face } from "./face";
-import { MobileAddColumnSheet, MobileEditorSheet } from "./fleet-mobile";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { ToolStateDot, type ToolState } from "./tool-split";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
@@ -63,7 +62,7 @@ export type FleetMatrixEditor = FleetMatrixCellKey & { label: string; node: Reac
 export const cellId = (cell: FleetMatrixCellKey) => `${cell.row}|${cell.harness}`;
 
 /** The window closest to its limit: the one that decides whether this agent can take more work. */
-function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usage"]) {
+export function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usage"]) {
   return usage.length ? [usage.reduce((worst, reading) => reading.percent > worst.percent ? reading : worst)] : [];
 }
 
@@ -104,7 +103,7 @@ export function FleetCellAgentReadout({ cell }: { cell: Extract<FleetMatrixCell,
  * headings adds a column (an agent no machine has yet); the last row adds a
  * row (a machine). A heading still opens its machine or its agent.
  */
-export function FleetMatrix({ columns, rows, selected, onSelect, editors, addColumn, addRow, compact = false }: {
+export function FleetMatrix({ columns, rows, selected, onSelect, editors, addColumn, addRow }: {
   columns: FleetMatrixColumn[];
   rows: FleetMatrixRow[];
   selected: FleetMatrixCellKey | null;
@@ -114,112 +113,84 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
   addColumn?: { options: Array<{ harness: string; name: string }>; onAdd: (harness: string) => void };
   /** How another machine joins: the table's last row, opened in place. */
   addRow?: { open: boolean; onToggle: () => void; content: ReactNode };
-  /** Compact mobile matrix: narrow sticky Machine column, horizontal scroll, and Bottom Sheet editors. */
-  compact?: boolean;
 }) {
   const table = useRef<HTMLDivElement | null>(null);
   const [choosingColumn, setChoosingColumn] = useState(false);
-  const sticky = cn("sticky left-0 z-10 bg-[var(--app-panel-paper,var(--background))]",
-    compact && "w-[calc(7.25rem+var(--mobile-content-inset,1rem))] min-w-[calc(7.25rem+var(--mobile-content-inset,1rem))] max-w-[calc(7.25rem+var(--mobile-content-inset,1rem))] pl-[var(--mobile-content-inset,1rem)] border-r border-foreground/10");
+  const sticky = "sticky left-0 z-10 bg-[var(--app-panel-paper,var(--background))]";
   const span = columns.length + 1 + (addColumn ? 1 : 0);
   const selectedId = selected ? cellId(selected) : null;
-  const addRowButton = addRow && (
-    <button type="button" onClick={addRow.onToggle} aria-expanded={addRow.open} data-testid="fleet-add-row"
-      className={cn("flex items-center gap-2.5 rounded py-2 text-left text-sm font-semibold text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
-        compact ? "w-full px-0" : "px-1.5")}>
-      <Plus className={cn(compact ? "size-4" : "size-5", "shrink-0 transition-transform", addRow.open && "rotate-45")} aria-hidden="true" />
-      Add a machine
-    </button>
-  );
   return (
-    <div data-testid="fleet-matrix" ref={table}>
-      <div className={cn("app-fleet-matrix overflow-x-auto",
-        compact ? "-mx-[var(--mobile-content-inset,1rem)]" : "-mx-2 px-2")}>
-        <table className={cn("border-separate border-spacing-0 text-sm", compact ? "w-max min-w-full" : "w-full")}>
-          <thead>
-            <tr>
-              <th scope="col" className={cn(sticky, "border-b border-foreground/10 text-left align-bottom",
-                compact ? "pb-1.5 pr-2" : "w-56 min-w-44 pb-2")}>
-                <span className="text-xs font-bold text-muted-foreground">Machine</span>
+    <div className="app-fleet-matrix -mx-2 overflow-x-auto px-2" data-testid="fleet-matrix" ref={table}>
+      <table className="w-full border-separate border-spacing-0 text-sm">
+        <thead>
+          <tr>
+            <th scope="col" className={cn(sticky, "w-56 min-w-44 border-b border-foreground/10 pb-2 text-left align-bottom")}>
+              <span className="text-xs font-bold text-muted-foreground">Machine</span>
+            </th>
+            {columns.map((column) => {
+              const heading = (
+                <>
+                  <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm"
+                    showKindBadge={false} className={cn("shrink-0", !column.onOpen && "opacity-60")} />
+                  <span className="block w-full truncate text-[13px] font-semibold">{column.harness}</span>
+                </>
+              );
+              const headingClass = "flex w-full min-w-0 flex-col items-start gap-1 px-1.5 py-1";
+              return (
+                <th key={column.harness} scope="col" className="min-w-[5.25rem] border-b border-foreground/10 px-1 pb-1 text-left align-bottom font-normal">
+                  {column.onOpen ? (
+                    <button type="button" onClick={column.onOpen} data-testid="fleet-agent-column" title={column.summary}
+                      aria-label={`${column.harness}: ${column.summary}`}
+                      className={cn(headingClass, "rounded text-left hover:bg-foreground/5")}>
+                      {heading}
+                    </button>
+                  ) : (
+                    <span data-testid="fleet-agent-column" title={column.summary} className={cn(headingClass, "text-muted-foreground")}>
+                      {heading}
+                    </span>
+                  )}
+                </th>
+              );
+            })}
+            {addColumn && (
+              <th scope="col" className="w-10 border-b border-foreground/10 pb-2 align-bottom font-normal">
+                <button type="button" onClick={() => setChoosingColumn(!choosingColumn)} aria-expanded={choosingColumn}
+                  aria-haspopup="menu" data-testid="fleet-add-column" data-cell="+" disabled={addColumn.options.length === 0}
+                  title={addColumn.options.length ? "Add an agent: a column for one no machine has yet" : "Every agent xMatrix knows is already a column"}
+                  aria-label="Add an agent"
+                  className={actionClass({ variant: "quiet", size: "icon-sm" })}>
+                  <Plus className="size-4" aria-hidden="true" />
+                </button>
               </th>
-              {columns.map((column) => {
-                const heading = (
-                  <>
-                    <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size={compact ? "xs" : "sm"}
-                      showKindBadge={false} className={cn("shrink-0", !column.onOpen && "opacity-60")} />
-                    <span className={cn("block w-full truncate font-semibold", compact ? "text-xs" : "text-[13px]")}>{column.harness}</span>
-                  </>
-                );
-                const headingClass = cn("flex w-full min-w-0 flex-col items-start gap-1 py-1", compact ? "px-1" : "px-1.5");
-                return (
-                  <th key={column.harness} scope="col"
-                    className={cn("border-b border-foreground/10 pb-1 text-left align-bottom font-normal",
-                      compact ? "min-w-[4.75rem] px-0.5" : "min-w-[5.25rem] px-1")}>
-                    {column.onOpen ? (
-                      <button type="button" onClick={column.onOpen} data-testid="fleet-agent-column" title={column.summary}
-                        aria-label={`${column.harness}: ${column.summary}`}
-                        className={cn(headingClass, "rounded text-left hover:bg-foreground/5")}>
-                        {heading}
-                      </button>
-                    ) : (
-                      <span data-testid="fleet-agent-column" title={column.summary} className={cn(headingClass, "text-muted-foreground")}>
-                        {heading}
-                      </span>
-                    )}
-                  </th>
-                );
-              })}
-              {addColumn && (
-                <th scope="col" className={cn("w-10 border-b border-foreground/10 pb-2 align-bottom font-normal",
-                  compact && "pr-[var(--mobile-content-inset,1rem)]")}>
-                  <button type="button" onClick={() => setChoosingColumn(!choosingColumn)} aria-expanded={choosingColumn}
-                    aria-haspopup="menu" data-testid="fleet-add-column" data-cell="+" disabled={addColumn.options.length === 0}
-                    title={addColumn.options.length ? "Add an agent: a column for one no machine has yet" : "Every agent xMatrix knows is already a column"}
-                    aria-label="Add an agent"
-                    className={actionClass({ variant: "quiet", size: "icon-sm" })}>
-                    <Plus className="size-4" aria-hidden="true" />
+            )}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, index) => (
+            <FleetMatrixRowLines key={row.key} row={row} columns={columns} sticky={sticky} span={span} selectedId={selectedId}
+              onSelect={onSelect} label={row.group && row.group !== rows[index - 1]?.group ? row.group : null} />
+          ))}
+          {addRow && (
+            <>
+              <tr>
+                <th scope="row" colSpan={span} className="py-1 text-left font-normal">
+                  <button type="button" onClick={addRow.onToggle} aria-expanded={addRow.open} data-testid="fleet-add-row"
+                    className="flex items-center gap-2.5 rounded px-1.5 py-2 text-left text-sm font-semibold text-muted-foreground hover:bg-foreground/5 hover:text-foreground">
+                    <Plus className={cn("size-5 shrink-0 transition-transform", addRow.open && "rotate-45")} aria-hidden="true" />
+                    Add a machine
                   </button>
                 </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, index) => (
-              <FleetMatrixRowLines key={row.key} row={row} columns={columns} sticky={sticky} span={span} selectedId={selectedId}
-                compact={compact} onSelect={onSelect} label={row.group && row.group !== rows[index - 1]?.group ? row.group : null} />
-            ))}
-            {addRow && !compact && (
-              <>
-                <tr>
-                  <th scope="row" colSpan={span} className="py-1 text-left font-normal">{addRowButton}</th>
-                </tr>
-                {addRow.open && <tr><td colSpan={span} className="pb-4 pl-9" data-testid="fleet-add-row-steps">{addRow.content}</td></tr>}
-              </>
-            )}
-          </tbody>
-        </table>
-      </div>
-      {addRow && compact && (
-        <div className="pt-2">
-          {addRowButton}
-          {addRow.open && <div className="pt-2" data-testid="fleet-add-row-steps">{addRow.content}</div>}
-        </div>
-      )}
-      {editors.map((editor) => {
-        const id = cellId(editor);
-        return compact ? (
-          <MobileEditorSheet key={id} visible={id === selectedId} label={editor.label} onClose={() => onSelect(null)}>
-            {editor.node}
-          </MobileEditorSheet>
-        ) : (
-          <AnchoredPaper key={id} root={table} cell={id} visible={id === selectedId}
-            label={editor.label} onClose={() => onSelect(null)}>{editor.node}</AnchoredPaper>
-        );
-      })}
-      {addColumn && (compact ? (
-        <MobileAddColumnSheet open={choosingColumn} options={addColumn.options}
-          onAdd={addColumn.onAdd} onClose={() => setChoosingColumn(false)} />
-      ) : (
+              </tr>
+              {addRow.open && <tr><td colSpan={span} className="pb-4 pl-9" data-testid="fleet-add-row-steps">{addRow.content}</td></tr>}
+            </>
+          )}
+        </tbody>
+      </table>
+      {editors.map((editor) => (
+        <AnchoredPaper key={cellId(editor)} root={table} cell={cellId(editor)} visible={cellId(editor) === selectedId}
+          label={editor.label} onClose={() => onSelect(null)}>{editor.node}</AnchoredPaper>
+      ))}
+      {addColumn && (
         <AnchoredPaper root={table} cell="+" visible={choosingColumn} label="Add an agent" onClose={() => setChoosingColumn(false)} narrow>
           <p className="px-1 pb-1.5 text-xs font-bold text-muted-foreground">Add an agent</p>
           <ul role="menu" aria-label="Agents no machine has yet">
@@ -235,34 +206,30 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
             ))}
           </ul>
         </AnchoredPaper>
-      ))}
+      )}
     </div>
   );
 }
 
-function FleetMatrixRowLines({ row, columns, sticky, span, label, selectedId, compact, onSelect }: {
+function FleetMatrixRowLines({ row, columns, sticky, span, label, selectedId, onSelect }: {
   row: FleetMatrixRow; columns: FleetMatrixColumn[]; sticky: string; span: number; label: string | null;
-  selectedId: string | null; compact: boolean; onSelect: (cell: FleetMatrixCellKey | null) => void;
+  selectedId: string | null; onSelect: (cell: FleetMatrixCellKey | null) => void;
 }) {
   return (
     <>
       {label && (
         <tr>
-          <th scope="rowgroup" colSpan={span} className="pt-5 pb-1 text-left text-xs font-bold text-muted-foreground">
-            <span className={cn("sticky left-0", compact && "pl-[var(--mobile-content-inset,1rem)]")}>{label}</span>
-          </th>
+          <th scope="rowgroup" colSpan={span} className="pt-5 pb-1 text-left text-xs font-bold text-muted-foreground">{label}</th>
         </tr>
       )}
       <tr aria-label={row.name} data-testid="fleet-machine" className="group/row">
-        <th scope="row" className={cn(sticky, "border-b border-foreground/10 py-1 text-left align-middle font-normal",
-          compact ? "pr-1.5" : "pr-2")}>
+        <th scope="row" className={cn(sticky, "border-b border-foreground/10 py-1 pr-2 text-left align-middle font-normal")}>
           {row.heading}
         </th>
         {columns.map((column) => {
           const id = cellId({ row: row.key, harness: column.harness });
           return (
-            <td key={column.harness} className={cn("border-b border-foreground/10 py-1 align-middle",
-              compact ? "px-0.5" : "px-1", row.dimmed && "opacity-55")}>
+            <td key={column.harness} className={cn("border-b border-foreground/10 px-1 py-1 align-middle", row.dimmed && "opacity-55")}>
               <FleetMatrixCellView cell={row.cells[column.harness] ?? { kind: "unknown" }} harness={column.harness} machine={row.name}
                 id={id} selected={id === selectedId}
                 onSelect={() => onSelect(id === selectedId ? null : { row: row.key, harness: column.harness })} />

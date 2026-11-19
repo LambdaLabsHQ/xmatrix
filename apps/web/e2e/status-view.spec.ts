@@ -73,27 +73,20 @@ test.describe("on a phone", () => {
     await openStatus(page);
     const dock = page.getByRole("navigation", { name: "Primary" });
     await expect(dock.getByRole("button", { name: "Agents" })).toBeVisible();
-    await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
-    await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("on 2 machines");
-
-    // Each agent once as a matrix column, and each machine once as a sticky row.
+    // On a phone the avatar matrix leads directly without a giant count hero; active work shows quietly.
     const matrix = page.getByTestId("fleet-matrix");
-    const columns = matrix.getByTestId("fleet-agent-column");
-    await expect(columns).toHaveCount(4);
-    await expect(columns.filter({ hasText: "codex" })).toHaveAccessibleName(/^codex: 6 working · on 2 machines · 1 ready/u);
-
+    await expect(matrix).toContainText("Working");
     await expect(page.getByTestId("status-machine-row")).toHaveCount(0);
-    const machine = (name: string) => matrix.getByRole("row", { name });
+
+    const machine = (name: string) => matrix.getByRole("region", { name });
     await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
-    await expect(machine("busy-box").getByTestId("machine-row")).toContainText("7 working");
-    await expect(machine("wide-box").getByTestId("machine-row")).toContainText("4 working");
-    // Three live processes wait for a message on idle-box: none of them works, so it is idle and its agent ready.
-    await expect(machine("idle-box").getByTestId("machine-row")).toContainText("Idle");
-    await expect(machine("idle-box").getByTestId("agent-row")).toContainText("Ready");
-    await expect(machine("idle-box").getByTestId("agent-row")).not.toContainText("running");
-    // A machine says it is offline; the agent under it does not say it again.
+    await expect(machine("busy-box").getByTestId("machine-load-glance")).toHaveText("CPU 95%");
+    // Healthy idle machines stay quiet (no "Idle" or "Ready" prose), while each avatar carries its full accessible state.
+    await expect(machine("idle-box").getByTestId("machine-row")).not.toContainText("Idle");
+    await expect(machine("idle-box").getByTestId("agent-row")).toHaveAttribute("aria-label", /Ready/u);
+    // Offline machines note their offline state once on the machine row.
     await expect(machine("gone-box").getByTestId("machine-row")).toContainText("Offline");
-    await expect(machine("gone-box").getByTestId("agent-row")).not.toContainText("Offline");
+    await expect(machine("gone-box").getByTestId("agent-row")).toHaveAttribute("data-state", "offline");
 
     await machine("busy-box").getByTestId("machine-row").tap();
     await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/machines\?machine=/u);
