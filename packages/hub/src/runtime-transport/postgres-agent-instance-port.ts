@@ -90,6 +90,7 @@ import { recordInstancePresentation, runtimeRepository } from "../runtime";
 import { deliverQuotaWakes } from "../quota-waits";
 import { holdRegistrationUsageLimit } from "../registration-launch-dispatch";
 import { offerUsageLimitRecovery, type UsageLimitRecovery } from "../agent-quota-retry";
+import { openNornRequests } from "../norn-programs";
 import type { RegistrationUsageLimit } from "@xmatrix/db";
 
 type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
@@ -173,6 +174,8 @@ export interface PostgresAgentInstancePortDependencies {
   instanceRecords?: InstanceRecordCache;
   /** Offer to retry a turn refused for a quota narrower than the account (offerUsageLimitRecovery). */
   offerUsageLimitRetry?(input: UsageLimitRecovery): Promise<void>;
+  /** The Run holds an open request of a Norn program (openNornRequests): the program hands that work on itself. */
+  holdsNornRequest?(session: Readonly<AgentInstanceRuntimeSession>): Promise<boolean>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -229,6 +232,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
       offerUsageLimitRetry: (recovery) => offerUsageLimitRecovery(input.env, recovery),
+      holdsNornRequest: async (session) => (await openNornRequests(input.env, { channelId: session.run.channelId,
+        runId: session.principal.runId, instanceId: session.run.instanceId })).some(request => request.held),
       signedOutTurn: (session) => signedOutTurn(input.env, { runId: session.principal.runId,
         channelId: session.run.channelId, ownerUserId: session.principal.ownerUserId }),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
@@ -849,6 +854,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // explains, waits on this one for a quota retry its owner chooses.
     if (limit?.usedUp === "scope" || limit?.usedUp === "unresolved") {
       await this.offerUsageLimitRetry(session, command.messageId, limit);
+    } else if (await this.holdsNornRequest(session)) {
+      // A Norn program's request this Run holds: the program hands it to a new
+      // Instance and lets this one go. A handoff besides would start a second
+      // successor that cannot answer the request and that nothing lets go.
+      return;
     } else await this.handOffUsageLimitedInstance(session, command.messageId);
   }
 
@@ -881,6 +891,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       console.error("Agent usage limit could not be recorded", error);
       return undefined;
     }
+  }
+
+  private async holdsNornRequest(session: Readonly<AgentInstanceRuntimeSession>): Promise<boolean> {
+    return await this.dependencies.holdsNornRequest?.(session).catch((error: unknown) => {
+      console.error("Norn requests of a usage-limited Run could not be read", error);
+      return false;
+    }) ?? false;
   }
 
   /** The turn used up a quota narrower than the account: offer to retry it on

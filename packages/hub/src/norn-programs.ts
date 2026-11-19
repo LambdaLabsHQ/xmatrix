@@ -193,13 +193,13 @@ export async function reconcileNornPrograms(env: Env, channelId: string, postCom
     await programs.reported({ requestId, channelId, programId: report.programId });
   }
   // An Instance started for a request has nothing left to do in the conversation once the request has ended,
-  // or once its Agent delegated the request to someone else.
+  // once its Agent delegated the request to someone else, or once the request was handed on past it.
   for (const release of work.releases) {
     await letGo(env, channelId, release, "Its request has ended");
     await programs.released({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
   for (const release of work.delegatedAway) {
-    await letGo(env, channelId, release, "It delegated its request");
+    await letGo(env, channelId, release, "Its request went on to another Instance");
     await programs.letGoDelegatedAway({ requestId, channelId, programId: release.programId, ledgerRequestId: release.requestId });
   }
 }
