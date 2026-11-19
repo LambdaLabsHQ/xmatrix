@@ -1538,5 +1538,8 @@ function MachineVersionFacts({ machine, token, appBehind }: {
     {(machine.appVersion || appBehind) && <ToolFact label="App version">
       <MachineVersionValue version={machine.appVersion} component="desktop" behind={appBehind} />
     </ToolFact>}
+    {machine.daemonServiceManager === "windows-run-key" && <ToolFact label="Startup">
+      <span className="text-muted-foreground">Windows logon only (no automatic restart watchdog; Task Scheduler access was denied)</span>
+    </ToolFact>}
   </>;
 }

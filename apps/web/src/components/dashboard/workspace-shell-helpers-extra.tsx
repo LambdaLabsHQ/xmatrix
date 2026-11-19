@@ -246,6 +246,9 @@ export function buildMachineSummaries(
       daemon.appVersion ||
       metadataString(daemon.metadata, "xmatrixAppVersion") ||
       machine.appVersion;
+    machine.daemonServiceManager =
+      metadataString(daemon.metadata, "daemonServiceManager") ||
+      machine.daemonServiceManager;
     machine.lastSeenAt = latestIso(machine.lastSeenAt, daemon.lastSeenAt || daemon.connectedAt);
     if (isLiveMachineDaemon(daemon)) {
       machine.status = "online";

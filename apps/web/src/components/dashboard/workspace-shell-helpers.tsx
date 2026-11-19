@@ -217,6 +217,8 @@ export type MachineSummary = {
   daemonVersion?: string;
   cliVersion?: string;
   appVersion?: string;
+  /** Daemon startup manager reported by the CLI (e.g. `scheduled-task` or `windows-run-key`). */
+  daemonServiceManager?: string;
   workspaces: SerializedWorkspace[];
   lastSeenAt?: string;
   /** Agent Runs starting or running on it, when its daemon list reports them. */

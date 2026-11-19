@@ -15,8 +15,10 @@ pub use cli_install::{
 };
 pub use daemon_service::{
     DaemonServiceInstall, LAUNCHD_LABEL, SYSTEMD_UNIT, WINDOWS_DAEMON_LEGACY_TASK_NAME,
-    WINDOWS_DAEMON_TASK_NAME, daemon_path_unix, install_daemon_service, launchd_plist,
-    launchd_plist_path, systemd_unit, systemd_unit_path, windows_daemon_scheduled_task_script,
+    WINDOWS_DAEMON_RUN_KEY_PATH, WINDOWS_DAEMON_RUN_VALUE_NAME, WINDOWS_DAEMON_TASK_NAME,
+    WINDOWS_RUN_KEY_MANAGER, daemon_path_unix, install_daemon_service, launchd_plist,
+    launchd_plist_path, recorded_daemon_service_manager, systemd_unit, systemd_unit_path,
+    uninstall_daemon_service, windows_daemon_scheduled_task_script, windows_daemon_uninstall_script,
 };
 
 pub const STABLE_CLI_RELEASE_API_URL: &str = "https://xmatrix.sh/api/cli/releases/latest";

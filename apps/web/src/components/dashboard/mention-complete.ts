@@ -15,7 +15,10 @@ import type {
   SerializedSpace,
   FaceOf,
 } from "@xmatrix/protocol";
-import { agentModelEntry, channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel, isLiveAgentStatus } from "@xmatrix/protocol";
+import {
+  agentModelEntry, channelPresenceInstances, presenceInstanceId, harnessParameterValueLabel,
+  isAddressableAgentInstance, isLiveAgentStatus,
+} from "@xmatrix/protocol";
 import {
   agentInteractionTarget,
   connectorInteractionTarget,
@@ -59,6 +62,7 @@ export type MentionCandidate = {
   name: string;
   kind: "agent" | "user" | "app" | "service" | "launch";
   status: SerializedAgent["status"];
+  rest?: SerializedAgentInstance["rest"];
   email?: string;
   /** Whose face the row shows (protocol faces.ts): set on every row that is a person or an Agent, none on a
    *  command, an App or a launch condition. */
@@ -591,7 +595,8 @@ export function resolveMentionCompletion(
       ...agents.flatMap(agent => agentReferenceCandidates(
         channel, agent, [agent], localContext, instanceTargetScope,
       ).filter(candidate => candidate.schemaNodeId === "agent-reference:instance" &&
-        isLiveAgentStatus(candidate.status)).map(candidate => ({ ...candidate, name: candidate.mention! }))),
+        isAddressableAgentInstance({ status: candidate.status, rest: candidate.rest }))
+        .map(candidate => ({ ...candidate, name: candidate.mention! }))),
       ...rootCandidates,
     ], active.query),
     stage: "target",
@@ -1098,6 +1103,7 @@ function agentReferenceCandidates(
     const instanceIdentity = {
       kind: "agent" as const,
       status: instance.status,
+      ...(instance.rest ? { rest: instance.rest } : {}),
       email: member.email,
       face: agentFace(member, instance.id),
     };

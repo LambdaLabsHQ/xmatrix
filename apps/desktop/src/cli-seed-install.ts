@@ -69,6 +69,12 @@ export function installCliFromSeed(options: {
   });
 }
 
+export const WINDOWS_RUN_KEY_MANAGER = "windows-run-key";
+
+export function seedInstallUsedWindowsRunKey(result: DesktopCliInstallResult): boolean {
+  return result.ok && result.daemon?.manager === WINDOWS_RUN_KEY_MANAGER;
+}
+
 function parseInstallReport(stdout: string): DesktopCliInstallResult {
   const lines = stdout.trim().split(/\r?\n/).reverse();
   for (const line of lines) {
@@ -77,14 +83,18 @@ function parseInstallReport(stdout: string): DesktopCliInstallResult {
       const report = JSON.parse(line) as Record<string, unknown>;
       if (typeof report.installedPath === "string" && typeof report.version === "string") {
         const daemon = report.daemon && typeof report.daemon === "object"
-          ? report.daemon as { manager?: unknown; definitionPath?: unknown }
+          ? report.daemon as { manager?: unknown; definitionPath?: unknown; watchdog?: unknown }
           : null;
         return {
           ok: true,
           installedPath: report.installedPath,
           version: report.version,
           daemon: daemon && typeof daemon.manager === "string" && typeof daemon.definitionPath === "string"
-            ? { manager: daemon.manager, definitionPath: daemon.definitionPath }
+            ? {
+                manager: daemon.manager,
+                definitionPath: daemon.definitionPath,
+                ...(typeof daemon.watchdog === "boolean" ? { watchdog: daemon.watchdog } : {}),
+              }
             : null,
         };
       }

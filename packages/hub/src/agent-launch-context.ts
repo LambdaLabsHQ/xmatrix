@@ -1,5 +1,5 @@
-import { channelActivityOf, channelActivityLine, isLiveAgentStatus, type ChannelMessage, type ChannelSummarySource,
-  type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
+import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, type ChannelMessage,
+  type ChannelSummarySource, type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
 import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
 /**
@@ -211,9 +211,10 @@ export interface ChannelPeerInstance {
 }
 
 /**
- * Other live, starting, or resting Instances already in the Channel, derived
- * from the authoritative Channel read. Excludes the caller itself and orders
- * by numeric Channel instance ordinal.
+ * Other addressable Instances already in the Channel (live, waking/starting,
+ * sleeping, or interrupted), derived from the authoritative Channel read.
+ * Excludes the caller itself, `wake_failed`, and stopped Instances (which
+ * ordinary messages cannot wake), and orders by numeric Channel ordinal.
  */
 export function channelPeerInstances(
   records: readonly InstanceRecord[] | undefined,
@@ -222,7 +223,7 @@ export function channelPeerInstances(
 ): ChannelPeerInstance[] {
   if (!Array.isArray(records) || !records.length) return [];
   return records
-    .filter((record) => record.id !== excludeInstanceId && (isLiveAgentStatus(record.status) || record.rest !== undefined))
+    .filter((record) => record.id !== excludeInstanceId && isAddressableAgentInstance(record))
     .sort((left, right) => {
       const diff = Number(left.channelInstanceId) - Number(right.channelInstanceId);
       if (Number.isFinite(diff) && diff !== 0) return diff;
@@ -243,7 +244,7 @@ export function channelPeerInstances(
 
 /**
  * Peer roster placed in a launch context so a newly started Agent knows which
- * sibling Instances are already live, starting, or sleeping in this Channel
+ * sibling Instances are already live, waking, or sleeping in this Channel
  * before any of them has posted a message.
  */
 export function renderPeerInstances(peers: readonly ChannelPeerInstance[]): string | undefined {
@@ -256,22 +257,31 @@ export function renderPeerInstances(peers: readonly ChannelPeerInstance[]): stri
 
 /**
  * Error copy when a send carries an unaddressed `@<agent>` without `--launch`.
- * Names matching live/starting/resting Instances already in the Channel so an
- * Agent addresses the peer instead of reflexively adding `--launch`.
+ * Names only matching addressable Instances already in the Channel so an Agent
+ * addresses the right peer instead of reflexively adding `--launch` (or being
+ * pointed at an unrelated Agent).
  */
 export function agentInstanceRequiredMessage(
   unaddressed: ReadonlyArray<{ text: string }>,
   peers: readonly ChannelPeerInstance[],
 ): string {
-  const names = new Set(unaddressed.map((mention) => {
+  const names = [...new Set(unaddressed.map((mention) => {
     const token = mention.text.trim().replace(/^@/u, "").split(/\s+/u)[0] ?? "";
     return token.split(":")[0]?.toLowerCase() ?? "";
-  }).filter(Boolean));
-  const matched = names.has("auto")
+  }).filter(Boolean))];
+  const nameSet = new Set(names);
+  const matched = nameSet.has("auto")
     ? peers
-    : peers.filter((peer) => names.has(peer.name.toLowerCase()) || names.has(peer.harness.toLowerCase()));
-  const shown = (matched.length ? matched : peers).slice(0, 6).map((peer) => peer.address);
+    : peers.filter((peer) => nameSet.has(peer.name.toLowerCase()) || nameSet.has(peer.harness.toLowerCase()));
+  const shown = matched.slice(0, 6).map((peer) => peer.address);
   if (!shown.length) {
+    const requested = names.filter((name) => name !== "auto");
+    if (requested.length === 1) {
+      return `Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. No @${requested[0]} Instance is in this Channel. Nothing was sent.`;
+    }
+    if (requested.length > 1) {
+      return "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. No matching Instance is in this Channel. Nothing was sent.";
+    }
     return "Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start an Agent. Nothing was sent.";
   }
   return `Agent mentions require an Instance number (use @<agent>:<instance>), or --launch to start a new Agent. Already in this Channel: ${shown.join(", ")}. Nothing was sent.`;

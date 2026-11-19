@@ -95,7 +95,7 @@ export type DesktopCliInstallResult =
       ok: true;
       installedPath: string;
       version: string;
-      daemon: { manager: string; definitionPath: string } | null;
+      daemon: { manager: string; definitionPath: string; watchdog?: boolean } | null;
     }
   | { ok: false; reason: "no-seed" | "install-failed"; message: string; exitCode?: number };
 

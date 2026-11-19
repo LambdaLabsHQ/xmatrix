@@ -352,15 +352,23 @@ pub async fn cmd_list(hub_url: &str, token: &str, json_output: bool) -> error::R
 
     let url = with_route(hub_url, HubRoutes::AGENT_INSTANCES);
     let response: AgentsResponse = http::request_json(&url, "GET", Some(token), None).await?;
-    let agents = response.instances;
+    let current_channel = current_channel_id();
+    let mut agents = response.instances;
+    if let Some(channel_id) = current_channel.as_deref() {
+        // Best-effort read of the current Channel's presence so resting peers
+        // (`sleeping`, `interrupted`, `waking`) appear alongside live ones.
+        if let Some(channel) = fetch_current_channel(hub_url, token, channel_id).await {
+            merge_addressable_channel_peers(&mut agents, &channel);
+        }
+    }
 
     let now = time::OffsetDateTime::now_utc();
+    let views = agent_usage_views_in_channel(&agents, now, current_channel.as_deref());
 
     if json_output {
         // Narrow, read-only view of the same authorized /api/agent-instances
-        // response. This is the live presence view, not the persisted routing
-        // candidate snapshot. Metadata, email, and tokens are omitted.
-        let views = agent_usage_views(&agents, now);
+        // response (plus addressable resting peers in the current Channel).
+        // Metadata, email, and tokens are omitted.
         println!(
             "{}",
             serde_json::to_string_pretty(&views).map_err(|err| CliError::Launch(format!(
@@ -375,33 +383,8 @@ pub async fn cmd_list(hub_url: &str, token: &str, json_output: bool) -> error::R
         return Ok(());
     }
 
-    println!(
-        "{:<20} {:<12} {:<8} {:<24} {}",
-        "NAME".bold(),
-        "TYPE".bold(),
-        "STATUS".bold(),
-        "QUOTA".bold(),
-        "ID".bold()
-    );
-
-    for a in &agents {
-        // The Hub reports `offline` for an Instance whose machine is unreachable:
-        // its socket is open, but nothing sent to it will be acted on. Yellow is
-        // work in hand, green is free (docs/design/agent-status.md).
-        let status = display_status(a);
-        let status_colored = match status {
-            "online" | "idle" => status.green().to_string(),
-            "offline" => status.red().to_string(),
-            _ => status.yellow().to_string(),
-        };
-        println!(
-            "{:<20} {:<12} {:<8} {:<24} {}",
-            a.name,
-            a.agent_type,
-            status_colored,
-            quota_summary(a.usage.as_ref(), now),
-            a.id.dimmed()
-        );
+    for line in format_agent_list_lines(&agents, now, current_channel.as_deref()) {
+        println!("{line}");
     }
     // Who is live is not where work can start: that is per Machine.
     println!(
@@ -412,10 +395,265 @@ pub async fn cmd_list(hub_url: &str, token: &str, json_output: bool) -> error::R
     Ok(())
 }
 
+fn current_channel_id() -> Option<String> {
+    std::env::var("XMATRIX_AUTO_JOIN_CHANNEL_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+async fn fetch_current_channel(
+    hub_url: &str,
+    token: &str,
+    channel_id: &str,
+) -> Option<protocol::SerializedChannel> {
+    #[derive(Deserialize)]
+    struct ChannelsResponse {
+        channels: Vec<protocol::SerializedChannel>,
+    }
+
+    let url = format!(
+        "{}?familyOfChannelId={}",
+        with_route(hub_url, HubRoutes::CHANNELS),
+        urlencoding::encode(channel_id),
+    );
+    let response: ChannelsResponse = http::request_json(&url, "GET", Some(token), None)
+        .await
+        .ok()?;
+    response
+        .channels
+        .into_iter()
+        .find(|channel| channel.id == channel_id)
+}
+
+/// Mirrors `ADDRESSABLE_AGENT_INSTANCE_RESTS` in
+/// `packages/protocol/src/authority-foundation.ts` (`wake_failed` and stopped
+/// require `:reborn` and are excluded).
+fn is_addressable_rest(rest: Option<&str>) -> bool {
+    matches!(rest, Some("sleeping" | "interrupted" | "waking"))
+}
+
+/// Mirrors `LIVE_AGENT_STATUSES` in `packages/protocol/src/authority-foundation.ts`.
+fn is_live_status(status: &str) -> bool {
+    matches!(status, "online" | "busy" | "idle")
+}
+
+/// Merge addressable resting Instances (`sleeping`, `interrupted`, `waking`)
+/// from the current Channel's presence into the live `/api/agent-instances`
+/// list so an Agent can discover peers that a message will wake without
+/// showing `wake_failed` or stopped Instances.
+fn merge_addressable_channel_peers(
+    agents: &mut Vec<protocol::SerializedAgent>,
+    channel: &protocol::SerializedChannel,
+) {
+    let mut existing: std::collections::HashSet<String> = agents
+        .iter()
+        .map(|agent| agent.instance_id.as_deref().unwrap_or(&agent.id).to_string())
+        .collect();
+    let Some(presence) = channel.member_presence.as_ref() else {
+        return;
+    };
+    for member in presence.values() {
+        if member.kind != "agent" {
+            continue;
+        }
+        let Some(instances) = member.instances.as_ref() else {
+            continue;
+        };
+        for instance in instances {
+            if existing.contains(&instance.id) {
+                continue;
+            }
+            if !is_live_status(&instance.status) && !is_addressable_rest(instance.rest.as_deref()) {
+                continue;
+            }
+            let name = member
+                .label
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| instance.label.split(':').next().unwrap_or(&instance.label))
+                .to_string();
+            let status = instance
+                .rest
+                .as_deref()
+                .filter(|rest| !is_live_status(&instance.status) && !rest.is_empty())
+                .unwrap_or(&instance.status)
+                .to_string();
+            existing.insert(instance.id.clone());
+            agents.push(protocol::SerializedAgent {
+                id: instance.id.clone(),
+                instance_id: Some(instance.id.clone()),
+                user_id: String::new(),
+                name,
+                agent_type: "agent".into(),
+                lifetime: Some("short".into()),
+                email: String::new(),
+                metadata: serde_json::json!({ "channelId": channel.id }),
+                connected_at: instance.connected_at.clone(),
+                last_seen_at: instance.last_seen_at.clone(),
+                status,
+                avatar_url: member.avatar_url.clone(),
+                runtime_state: instance.runtime_state.clone(),
+                model: instance.model.clone(),
+                usage: instance.usage.clone(),
+                instances: Some(vec![instance.clone()]),
+            });
+        }
+    }
+}
+
+fn split_instance_id(raw: &str) -> Option<(&str, &str)> {
+    let (channel_id, ordinal) = raw.rsplit_once(':')?;
+    if channel_id.is_empty()
+        || ordinal.is_empty()
+        || ordinal.starts_with('0')
+        || !ordinal.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some((channel_id, ordinal))
+}
+
+fn agent_channel_and_ordinal(agent: &protocol::SerializedAgent) -> (Option<String>, Option<String>) {
+    let raw_id = agent.instance_id.as_deref().unwrap_or(&agent.id);
+    let parsed = split_instance_id(raw_id);
+    let channel_id = agent
+        .metadata
+        .get("channelId")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| parsed.map(|(channel, _)| channel.to_string()));
+    let ordinal = agent
+        .instances
+        .as_ref()
+        .and_then(|list| list.first())
+        .and_then(|instance| instance.channel_instance_id.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| parsed.map(|(_, ordinal)| ordinal.to_string()));
+    (channel_id, ordinal)
+}
+
+fn agent_address(agent: &protocol::SerializedAgent) -> Option<String> {
+    let (_, ordinal) = agent_channel_and_ordinal(agent);
+    ordinal.map(|ordinal| format!("@{}:{ordinal}", agent.name.trim()))
+}
+
+fn agent_rest_state(agent: &protocol::SerializedAgent) -> Option<String> {
+    agent
+        .instances
+        .as_ref()
+        .and_then(|list| list.first())
+        .and_then(|instance| instance.rest.as_deref())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+        .or_else(|| is_addressable_rest(Some(agent.status.as_str())).then(|| agent.status.clone()))
+}
+
+fn sort_agents_for_display<'a>(
+    agents: &'a [protocol::SerializedAgent],
+    current_channel: Option<&str>,
+) -> Vec<&'a protocol::SerializedAgent> {
+    let mut ordered: Vec<&protocol::SerializedAgent> = agents.iter().collect();
+    ordered.sort_by(|left, right| {
+        let (left_ch, left_ord) = agent_channel_and_ordinal(left);
+        let (right_ch, right_ord) = agent_channel_and_ordinal(right);
+        let left_here = current_channel.is_some_and(|ch| left_ch.as_deref() == Some(ch));
+        let right_here = current_channel.is_some_and(|ch| right_ch.as_deref() == Some(ch));
+        right_here
+            .cmp(&left_here)
+            .then_with(|| {
+                if left_here && right_here {
+                    let left_num = left_ord.as_deref().and_then(|v| v.parse::<u64>().ok());
+                    let right_num = right_ord.as_deref().and_then(|v| v.parse::<u64>().ok());
+                    left_num.cmp(&right_num)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            })
+            .then_with(|| left.name.cmp(&right.name))
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    ordered
+}
+
+fn format_agent_row(agent: &protocol::SerializedAgent, now: time::OffsetDateTime) -> String {
+    // The Hub reports `offline` for an Instance whose machine is unreachable:
+    // its socket is open, but nothing sent to it will be acted on. Yellow is
+    // work in hand, green is free (docs/design/agent-status.md).
+    let status = display_status(agent);
+    let status_colored = match status {
+        "online" | "idle" => status.green().to_string(),
+        "offline" => status.red().to_string(),
+        _ => status.yellow().to_string(),
+    };
+    let (channel_id, _) = agent_channel_and_ordinal(agent);
+    let address = agent_address(agent).unwrap_or_else(|| agent.name.clone());
+    let channel_display = channel_id.unwrap_or_else(|| "-".into());
+    format!(
+        "{:<24} {:<11} {:<24} {}",
+        address,
+        status_colored,
+        quota_summary(agent.usage.as_ref(), now),
+        channel_display.dimmed()
+    )
+}
+
+fn format_agent_list_lines(
+    agents: &[protocol::SerializedAgent],
+    now: time::OffsetDateTime,
+    current_channel: Option<&str>,
+) -> Vec<String> {
+    let ordered = sort_agents_for_display(agents, current_channel);
+    let header = format!(
+        "{:<24} {:<11} {:<24} {}",
+        "ADDRESS".bold(),
+        "STATUS".bold(),
+        "QUOTA".bold(),
+        "CHANNEL".bold()
+    );
+    let Some(channel_id) = current_channel else {
+        let mut lines = Vec::with_capacity(ordered.len() + 1);
+        lines.push(header);
+        for agent in ordered {
+            lines.push(format_agent_row(agent, now));
+        }
+        return lines;
+    };
+
+    let (here, elsewhere): (Vec<_>, Vec<_>) = ordered.into_iter().partition(|agent| {
+        agent_channel_and_ordinal(agent).0.as_deref() == Some(channel_id)
+    });
+    let mut lines = Vec::new();
+    lines.push(format!("In this channel ({channel_id}):").bold().to_string());
+    if here.is_empty() {
+        lines.push("  (none)".dimmed().to_string());
+    } else {
+        lines.push(header.clone());
+        for agent in here {
+            lines.push(format_agent_row(agent, now));
+        }
+    }
+    if !elsewhere.is_empty() {
+        lines.push(String::new());
+        lines.push("Other channels:".bold().to_string());
+        lines.push(header);
+        for agent in elsewhere {
+            lines.push(format_agent_row(agent, now));
+        }
+    }
+    lines
+}
+
 /// `waiting` for a live Instance whose runtime reports a wait, else the status
 /// the Hub projected.
 fn display_status(agent: &protocol::SerializedAgent) -> &str {
-    let live = matches!(agent.status.as_str(), "online" | "busy" | "idle");
+    let live = is_live_status(&agent.status);
     let waiting = agent
         .runtime_state
         .as_ref()
@@ -436,10 +674,20 @@ struct AgentUsageView {
     id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    address: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    channel_instance_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    in_current_channel: Option<bool>,
     name: String,
     #[serde(rename = "type")]
     agent_type: String,
     status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rest: Option<String>,
     /// What a live Instance waits on, when its runtime reports a wait.
     #[serde(skip_serializing_if = "Option::is_none")]
     waiting: Option<protocol::AgentRuntimeWaiting>,
@@ -475,23 +723,45 @@ struct ProviderQuotaWindowView {
 const QUOTA_MAX_AGE_SECONDS: i64 = 15 * 60;
 const QUOTA_EXHAUSTED_MAX_AGE_SECONDS: i64 = 31 * 24 * 60 * 60;
 
+#[cfg(test)]
 fn agent_usage_views(
     agents: &[protocol::SerializedAgent],
     now: time::OffsetDateTime,
 ) -> Vec<AgentUsageView> {
-    agents
-        .iter()
-        .map(|agent| AgentUsageView {
-            id: agent.id.clone(),
-            instance_id: agent.instance_id.clone(),
-            name: agent.name.clone(),
-            agent_type: agent.agent_type.clone(),
-            status: agent.status.clone(),
-            waiting: (display_status(agent) == "waiting")
-                .then(|| agent.runtime_state.as_ref()?.waiting.clone())
-                .flatten(),
-            model: agent.model.clone(),
-            quota: provider_quota_view(agent.usage.as_ref(), now),
+    agent_usage_views_in_channel(agents, now, None)
+}
+
+fn agent_usage_views_in_channel(
+    agents: &[protocol::SerializedAgent],
+    now: time::OffsetDateTime,
+    current_channel: Option<&str>,
+) -> Vec<AgentUsageView> {
+    sort_agents_for_display(agents, current_channel)
+        .into_iter()
+        .map(|agent| {
+            let (channel_id, channel_instance_id) = agent_channel_and_ordinal(agent);
+            let address = channel_instance_id
+                .as_deref()
+                .map(|ordinal| format!("@{}:{ordinal}", agent.name.trim()));
+            let in_current_channel =
+                current_channel.map(|ch| channel_id.as_deref() == Some(ch));
+            AgentUsageView {
+                id: agent.id.clone(),
+                instance_id: agent.instance_id.clone(),
+                address,
+                channel_id,
+                channel_instance_id,
+                in_current_channel,
+                name: agent.name.clone(),
+                agent_type: agent.agent_type.clone(),
+                status: agent.status.clone(),
+                rest: agent_rest_state(agent),
+                waiting: (display_status(agent) == "waiting")
+                    .then(|| agent.runtime_state.as_ref()?.waiting.clone())
+                    .flatten(),
+                model: agent.model.clone(),
+                quota: provider_quota_view(agent.usage.as_ref(), now),
+            }
         })
         .collect()
 }
@@ -857,5 +1127,114 @@ mod tests {
         let summary = quota_summary(usage.as_ref(), now());
         assert!(summary.contains("5h used 40% (reset passed)"), "{summary}");
         assert!(!summary.contains("(stale)"), "{summary}");
+    }
+
+    #[test]
+    fn list_shows_channel_addresses_and_merges_only_addressable_current_channel_peers() {
+        let mut agents = vec![
+            agent_fixture(json!({
+                "id": "ch-other:1",
+                "instanceId": "ch-other:1",
+                "name": "codex",
+                "status": "idle",
+                "metadata": { "channelId": "ch-other" }
+            })),
+            agent_fixture(json!({
+                "id": "ch-here:1",
+                "instanceId": "ch-here:1",
+                "name": "codex",
+                "status": "busy",
+                "metadata": { "channelId": "ch-here" }
+            })),
+        ];
+        let channel: protocol::SerializedChannel = serde_json::from_value(json!({
+            "id": "ch-here",
+            "mode": "open",
+            "createdBy": "user-1",
+            "createdAt": "2026-09-21T18:00:00Z",
+            "memberPresence": {
+                "ch-here:1": {
+                    "kind": "agent",
+                    "label": "codex",
+                    "instances": [{
+                        "id": "ch-here:1",
+                        "channelInstanceId": "1",
+                        "label": "codex:1",
+                        "status": "busy",
+                        "connectedAt": "2026-09-21T18:00:00Z",
+                        "lastSeenAt": "2026-09-21T18:01:00Z"
+                    }]
+                },
+                "ch-here:2": {
+                    "kind": "agent",
+                    "label": "cursor",
+                    "instances": [{
+                        "id": "ch-here:2",
+                        "channelInstanceId": "2",
+                        "label": "cursor:2",
+                        "status": "offline",
+                        "rest": "sleeping",
+                        "connectedAt": "2026-09-21T18:00:00Z",
+                        "lastSeenAt": "2026-09-21T18:01:00Z"
+                    }]
+                },
+                "ch-here:3": {
+                    "kind": "agent",
+                    "label": "claude",
+                    "instances": [{
+                        "id": "ch-here:3",
+                        "channelInstanceId": "3",
+                        "label": "claude:3",
+                        "status": "offline",
+                        "rest": "wake_failed",
+                        "connectedAt": "2026-09-21T18:00:00Z",
+                        "lastSeenAt": "2026-09-21T18:01:00Z"
+                    }]
+                },
+                "ch-here:4": {
+                    "kind": "agent",
+                    "label": "gemini",
+                    "instances": [{
+                        "id": "ch-here:4",
+                        "channelInstanceId": "4",
+                        "label": "gemini:4",
+                        "status": "offline",
+                        "connectedAt": "2026-09-21T18:00:00Z",
+                        "lastSeenAt": "2026-09-21T18:01:00Z"
+                    }]
+                }
+            }
+        }))
+        .expect("channel fixture");
+
+        merge_addressable_channel_peers(&mut agents, &channel);
+
+        let views = serde_json::to_value(agent_usage_views_in_channel(
+            &agents,
+            now(),
+            Some("ch-here"),
+        ))
+        .expect("json");
+        let entries = views.as_array().expect("array");
+        assert_eq!(entries.len(), 3);
+        assert_eq!(entries[0]["address"], "@codex:1");
+        assert_eq!(entries[0]["channelId"], "ch-here");
+        assert_eq!(entries[0]["inCurrentChannel"], true);
+        assert_eq!(entries[1]["address"], "@cursor:2");
+        assert_eq!(entries[1]["status"], "sleeping");
+        assert_eq!(entries[1]["rest"], "sleeping");
+        assert_eq!(entries[1]["inCurrentChannel"], true);
+        assert_eq!(entries[2]["address"], "@codex:1");
+        assert_eq!(entries[2]["channelId"], "ch-other");
+        assert_eq!(entries[2]["inCurrentChannel"], false);
+
+        let rendered = format_agent_list_lines(&agents, now(), Some("ch-here")).join("\n");
+        assert!(rendered.contains("In this channel (ch-here):"), "{rendered}");
+        assert!(rendered.contains("@codex:1"), "{rendered}");
+        assert!(rendered.contains("@cursor:2"), "{rendered}");
+        assert!(rendered.contains("sleeping"), "{rendered}");
+        assert!(rendered.contains("Other channels:"), "{rendered}");
+        assert!(!rendered.contains("@claude:3"), "{rendered}");
+        assert!(!rendered.contains("@gemini:4"), "{rendered}");
     }
 }

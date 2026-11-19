@@ -191,12 +191,16 @@ pub struct SerializedAgent {
 #[serde(rename_all = "camelCase")]
 pub struct SerializedAgentInstance {
     pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub channel_instance_id: Option<String>,
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub client_version: Option<String>,
     pub connected_at: String,
     pub last_seen_at: String,
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rest: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub machine_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]

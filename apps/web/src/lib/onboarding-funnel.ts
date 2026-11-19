@@ -38,7 +38,12 @@ export function classifyOnboardingDevice(env: OnboardingDeviceEnvironment): Onbo
   if (/iPhone|iPad|iPod|Android/iu.test(ua) || (env.platform === "MacIntel" && maxTouchPoints > 1)) {
     return "phone";
   }
-  if (env.narrowViewport && (env.coarsePointer || maxTouchPoints > 0)) {
+  // Touch-screen Windows laptops (e.g. Surface) report maxTouchPoints > 0 even
+  // in desktop mode; desktop OS UAs stay desktop_web in narrow windows too.
+  if (/Windows|Macintosh|Mac OS X/iu.test(ua)) {
+    return "desktop_web";
+  }
+  if (env.narrowViewport && env.coarsePointer) {
     return "phone";
   }
   return "desktop_web";

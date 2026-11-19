@@ -16,12 +16,54 @@ pub const WINDOWS_DAEMON_TASK_NAME: &str = "xmatrix-daemon";
 pub const WINDOWS_DAEMON_LEGACY_TASK_NAME: &str = "xMatrix Daemon";
 pub const WINDOWS_DAEMON_RUN_KEY_PATH: &str = r"HKCU:\Software\Microsoft\Windows\CurrentVersion\Run";
 pub const WINDOWS_DAEMON_RUN_VALUE_NAME: &str = "xMatrixDaemon";
+pub const WINDOWS_RUN_KEY_MANAGER: &str = "windows-run-key";
+pub const DAEMON_SERVICE_MANAGER_FILE: &str = "daemon-service-manager";
 
 /// What `install_daemon_service` registered, for the caller's report.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DaemonServiceInstall {
     pub manager: &'static str,
     pub definition_path: PathBuf,
+}
+
+impl DaemonServiceInstall {
+    /// Whether the registered service manager restarts a daemon that exits
+    /// unexpectedly (`launchd` KeepAlive, `systemd` Restart=always, or the
+    /// Windows Scheduled Task 1-minute watchdog). The HKCU Run fallback only
+    /// starts at Windows logon and has no watchdog.
+    pub fn has_watchdog(&self) -> bool {
+        self.manager != WINDOWS_RUN_KEY_MANAGER
+    }
+}
+
+pub fn daemon_service_manager_state_path() -> PathBuf {
+    xmatrix_cli_core::config::config_dir().join(DAEMON_SERVICE_MANAGER_FILE)
+}
+
+fn record_daemon_service_manager(manager: &str) {
+    let path = daemon_service_manager_state_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let temporary = xmatrix_cli_core::config::unique_temporary_path(&path);
+    if std::fs::write(&temporary, format!("{manager}\n")).is_ok()
+        && xmatrix_cli_core::config::replace_file_atomically(&temporary, &path).is_err()
+    {
+        let _ = std::fs::remove_file(&temporary);
+    }
+}
+
+fn clear_daemon_service_manager() {
+    let _ = std::fs::remove_file(daemon_service_manager_state_path());
+}
+
+/// Last daemon service manager recorded on this machine (for example
+/// `"scheduled-task"` or `"windows-run-key"`), if any.
+pub fn recorded_daemon_service_manager() -> Option<String> {
+    std::fs::read_to_string(daemon_service_manager_state_path())
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 /// The PATH a login-session daemon sees. A service manager starts the daemon
@@ -180,7 +222,17 @@ fn write_definition(path: &Path, contents: &str) -> error::Result<()> {
 /// definition is rewritten and the service is re-bootstrapped in place.
 pub fn install_daemon_service(binary: Option<&Path>) -> error::Result<DaemonServiceInstall> {
     let binary = resolve_binary(binary)?;
-    install_resolved_daemon_service(&binary)
+    let installed = install_resolved_daemon_service(&binary)?;
+    record_daemon_service_manager(installed.manager);
+    Ok(installed)
+}
+
+/// Removes the daemon startup registration (including any Windows HKCU Run
+/// fallback value) and stops the managed daemon.
+pub fn uninstall_daemon_service() -> error::Result<()> {
+    uninstall_resolved_daemon_service()?;
+    clear_daemon_service_manager();
+    Ok(())
 }
 
 #[cfg(target_os = "macos")]
@@ -305,18 +357,49 @@ pub fn is_windows_task_permission_denied(detail: &str) -> bool {
         || detail.contains("拒绝访问")
 }
 
-fn windows_daemon_script_prelude(binary: &Path, caller_pid: u32) -> String {
+fn windows_run_key_prelude(caller_pid: u32) -> String {
     format!(
         "$ErrorActionPreference = 'Stop'\n\
-         $InstallPath = {install_path}\n\
          $runKey = {run_key}\n\
          $runValueName = {run_value}\n\
-         $callerPid = {caller_pid}\n\
-         $installDirectory = Split-Path -Parent $InstallPath\n",
-        install_path = powershell_single_quoted(&binary.display().to_string()),
+         $callerPid = {caller_pid}\n",
         run_key = powershell_single_quoted(WINDOWS_DAEMON_RUN_KEY_PATH),
         run_value = powershell_single_quoted(WINDOWS_DAEMON_RUN_VALUE_NAME),
     )
+}
+
+fn windows_daemon_script_prelude(binary: &Path, caller_pid: u32) -> String {
+    let mut script = windows_run_key_prelude(caller_pid);
+    script.push_str(&format!(
+        "$InstallPath = {install_path}\n\
+         $installDirectory = Split-Path -Parent $InstallPath\n",
+        install_path = powershell_single_quoted(&binary.display().to_string()),
+    ));
+    script
+}
+
+/// Removes every Windows daemon startup entry (both Scheduled Tasks and any
+/// HKCU Run fallback value) and stops running daemon processes.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn windows_daemon_uninstall_script(caller_pid: u32) -> String {
+    let mut script = windows_run_key_prelude(caller_pid);
+    script.push_str(&format!(
+        "$taskName = {}\n$legacyTaskName = {}\n",
+        powershell_single_quoted(WINDOWS_DAEMON_TASK_NAME),
+        powershell_single_quoted(WINDOWS_DAEMON_LEGACY_TASK_NAME),
+    ));
+    script.push_str(windows_stop_daemon_processes_snippet());
+    script.push_str(
+        r#"
+Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName $legacyTaskName -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName $legacyTaskName -Confirm:$false -ErrorAction SilentlyContinue
+Remove-ItemProperty -Path $runKey -Name $runValueName -ErrorAction SilentlyContinue
+Stop-XMatrixDaemonProcesses
+"#,
+    );
+    script
 }
 
 /// Per-user HKCU Run-key fallback when Windows policy or an elevated prior task
@@ -555,10 +638,11 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
             }
             eprintln!(
                 "Windows denied registering Scheduled Task {WINDOWS_DAEMON_TASK_NAME}; \
-                 installed per-user login startup under {WINDOWS_DAEMON_RUN_KEY_PATH}\\{WINDOWS_DAEMON_RUN_VALUE_NAME} and started the daemon directly."
+                 installed per-user login startup under {WINDOWS_DAEMON_RUN_KEY_PATH}\\{WINDOWS_DAEMON_RUN_VALUE_NAME} and started the daemon directly.\n\
+                 Warning: without Task Scheduler, there is no automatic restart watchdog — if the daemon exits, it will not restart until your next Windows sign-in or reopening the xMatrix app."
             );
             return Ok(DaemonServiceInstall {
-                manager: "windows-run-key",
+                manager: WINDOWS_RUN_KEY_MANAGER,
                 definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
             });
         }
@@ -570,6 +654,65 @@ fn install_resolved_daemon_service(binary: &Path) -> error::Result<DaemonService
         manager: "scheduled-task",
         definition_path: PathBuf::from(WINDOWS_DAEMON_TASK_NAME),
     })
+}
+
+#[cfg(target_os = "macos")]
+fn uninstall_resolved_daemon_service() -> error::Result<()> {
+    use std::process::{Command, Stdio};
+
+    let home = home_dir()?;
+    let plist_path = launchd_plist_path(&home);
+    let uid = unsafe { libc::getuid() };
+    let domain = format!("gui/{uid}");
+    let plist = plist_path.to_string_lossy().to_string();
+    let _ = Command::new("launchctl")
+        .args(["bootout", &domain, &plist])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    if plist_path.exists() {
+        std::fs::remove_file(&plist_path)?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn uninstall_resolved_daemon_service() -> error::Result<()> {
+    use std::process::{Command, Stdio};
+
+    let home = home_dir()?;
+    let unit_path = systemd_unit_path(&home);
+    let _ = Command::new("systemctl")
+        .args(["--user", "disable", "--now", SYSTEMD_UNIT])
+        .stdin(Stdio::null())
+        .status();
+    if unit_path.exists() {
+        std::fs::remove_file(&unit_path)?;
+    }
+    let _ = Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .stdin(Stdio::null())
+        .status();
+    Ok(())
+}
+
+#[cfg(windows)]
+fn uninstall_resolved_daemon_service() -> error::Result<()> {
+    let script = windows_daemon_uninstall_script(std::process::id());
+    if let Err(detail) = run_windows_setup_script(&script)? {
+        return Err(CliError::Launch(format!(
+            "Removing Windows daemon startup entries failed: {detail}"
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn uninstall_resolved_daemon_service() -> error::Result<()> {
+    Err(CliError::Launch(
+        "`xmatrix setup uninstall` supports launchd, systemd --user, and Windows only".into(),
+    ))
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
@@ -813,5 +956,36 @@ mod tests {
             "Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $installDirectory -WindowStyle Hidden"
         ));
         assert!(!script.contains("Register-ScheduledTask"));
+    }
+
+    #[test]
+    fn windows_daemon_uninstall_removes_scheduled_tasks_hkcu_run_and_stops_processes() {
+        let script = windows_daemon_uninstall_script(4242);
+        assert!(script.contains(&format!("$taskName = '{WINDOWS_DAEMON_TASK_NAME}'")));
+        assert!(script.contains(&format!(
+            "$legacyTaskName = '{WINDOWS_DAEMON_LEGACY_TASK_NAME}'"
+        )));
+        assert!(script.contains(WINDOWS_DAEMON_RUN_KEY_PATH));
+        assert!(script.contains(WINDOWS_DAEMON_RUN_VALUE_NAME));
+        assert!(script.contains("Unregister-ScheduledTask -TaskName $taskName"));
+        assert!(script.contains("Unregister-ScheduledTask -TaskName $legacyTaskName"));
+        assert!(script.contains("Remove-ItemProperty -Path $runKey -Name $runValueName"));
+        assert!(script.contains("$callerPid = 4242"));
+        assert!(script.contains("Stop-XMatrixDaemonProcesses"));
+    }
+
+    #[test]
+    fn windows_run_key_reports_no_watchdog_while_other_managers_have_one() {
+        let run_key = DaemonServiceInstall {
+            manager: WINDOWS_RUN_KEY_MANAGER,
+            definition_path: PathBuf::from(WINDOWS_DAEMON_RUN_KEY_PATH),
+        };
+        assert!(!run_key.has_watchdog());
+
+        let scheduled = DaemonServiceInstall {
+            manager: "scheduled-task",
+            definition_path: PathBuf::from(WINDOWS_DAEMON_TASK_NAME),
+        };
+        assert!(scheduled.has_watchdog());
     }
 }

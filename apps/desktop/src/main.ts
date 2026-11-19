@@ -38,6 +38,7 @@ import {
 import {
   desktopCliSeedPath,
   installCliFromSeed,
+  seedInstallUsedWindowsRunKey,
   type DesktopCliInstallResult,
 } from "./cli-seed-install";
 import {
@@ -114,6 +115,8 @@ const DAEMON_LOCK_FILE_NAME = "daemon.lock";
 const DESKTOP_SETUP_VERSION = 1;
 const MAC_DAEMON_LAUNCH_AGENT_LABEL = "sh.xmatrix.daemon";
 const WINDOWS_DAEMON_TASK_NAME = "xmatrix-daemon";
+const WINDOWS_DAEMON_RUN_KEY_PATH = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run";
+const WINDOWS_DAEMON_RUN_VALUE_NAME = "xMatrixDaemon";
 /** The page lays its window frame out around these (apps/web globals.css,
  * "The window frame"): the lights are centred on the rail and on the 52px
  * band across the top. The page owns all frame CSS; the shell injects none. */
@@ -1996,6 +1999,12 @@ function windowsDaemonTaskIsInstalled(): Promise<boolean> {
   );
 }
 
+function windowsDaemonRunKeyIsInstalled(): Promise<boolean> {
+  return runWindowsDaemonTaskCommand(
+    `$ErrorActionPreference='Stop'; Get-ItemProperty -Path ${powershellSingleQuoted(WINDOWS_DAEMON_RUN_KEY_PATH)} -Name ${powershellSingleQuoted(WINDOWS_DAEMON_RUN_VALUE_NAME)} | Out-Null`
+  );
+}
+
 function startWindowsDaemonTaskIfInstalled(): Promise<ManagedStart> {
   return runWindowsDaemonTaskCommandOutcome(
     [
@@ -2043,6 +2052,12 @@ async function windowsDaemonTaskResult(): Promise<{ detail: string; lastResult?:
 }
 
 async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = {}) {
+  // When Task Scheduler denied registration and setup fell back to the per-user
+  // HKCU Run key, do not judge startup or `service_not_up` against an
+  // inaccessible or stale Scheduled Task; let direct daemon supervision handle it.
+  if (await windowsDaemonRunKeyIsInstalled()) {
+    return null;
+  }
   if (!(await windowsDaemonTaskIsInstalled())) {
     return null;
   }
@@ -2215,6 +2230,12 @@ async function installSeedCliForDaemon(): Promise<DesktopDaemonStatus | null> {
     return setDaemonStatus("error", seedInstallFailure);
   }
   machineNameRequired = false;
+  if (seedInstallUsedWindowsRunKey(result)) {
+    // HKCU Run fallback already launched the daemon directly without Task
+    // Scheduler; wait for it rather than probing a denied Scheduled Task.
+    const existing = await waitForExistingDaemonProcess();
+    return existing ? runningLocalDaemonStatus(existing.pid, true) : spawnDaemon(result.installedPath);
+  }
   return (await startMacDaemonLaunchAgentIfAvailable())
     ?? (await startWindowsDaemonTaskIfAvailable())
     ?? (await findExistingDaemonProcess().then((found) => found ? runningLocalDaemonStatus(found.pid, true) : null))
@@ -2357,7 +2378,7 @@ async function restartDaemon() {
   enableDaemonKeepAlive();
   clearDaemonRestartTimer();
 
-  if (await windowsDaemonTaskIsInstalled()) {
+  if (!(await windowsDaemonRunKeyIsInstalled()) && (await windowsDaemonTaskIsInstalled())) {
     if (isDaemonProcessAlive(daemonProcess)) {
       daemonProcess.kill();
     }
