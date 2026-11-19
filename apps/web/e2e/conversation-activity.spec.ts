@@ -517,6 +517,8 @@ test("GitHub's pull request facts are its messages: one slip per stretch, a revi
   // plumbing and says nothing on the line, which reads from opening to what GitHub reported.
   await expect(opened).toHaveText(/#121 Reload when the network returns.*opened by claude:1 · CI passed$/u);
   await expect(opened).not.toContainText("following");
+  // A pass is green, the same tick as a connected App; a failure is red.
+  await expect(opened.locator("svg[data-ci='passed']")).toHaveCSS("color", /oklch\(0\.696 0\.17 162\.48\)|rgb\(0, 188, 125\)/u);
   await expect(opened.getByRole("link", { name: "LambdaLabsHQ/NomadCafe#121" })).toHaveAttribute("href", pullUrl);
   const later = slips.nth(1).locator("[data-pull-request]");
   await expect(later).toHaveCount(2);

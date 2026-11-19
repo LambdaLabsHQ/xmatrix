@@ -243,12 +243,14 @@ function pullRequestState(items: readonly TimelineItem[]): PullRequestState {
   return state;
 }
 
-function SlipHead({ icon: Icon, tone, children, time }: {
+function SlipHead({ icon: Icon, tone, children, time, passed }: {
   icon: LucideIcon; tone: StatusTone; children: ReactNode; time?: string;
+  /** CI passed: the tick is green, like a connected App's tick, so a pass reads at a glance beside a red failure. */
+  passed?: boolean;
 }) {
   return (
     <p className="app-connector-receipt-head">
-      <Icon aria-hidden="true" className={statusInkClass(tone)} />
+      <Icon aria-hidden="true" className={statusInkClass(tone)} {...(passed ? { "data-ci": "passed" } : {})} />
       <span className="app-connector-receipt-subject">{children}</span>
       {time && <Time value={time} className="ml-auto pl-3 text-xs text-muted-foreground" />}
     </p>
@@ -271,7 +273,7 @@ export function PullRequestSlip({ lines }: { lines: NonNullable<TimelineItem["pu
         const steps = items.filter(isPullRequestStep);
         return (
           <div key={`${ref.repository}#${ref.number}`} className="app-connector-receipt-entry" data-pull-request={`#${ref.number}`}>
-            <SlipHead icon={state.icon} tone={state.tone} {...(several ? { time: items[items.length - 1]!.sentAt } : {})}>
+            <SlipHead icon={state.icon} tone={state.tone} passed={state.icon === CircleCheck} {...(several ? { time: items[items.length - 1]!.sentAt } : {})}>
               <PullRef {...ref} />{(state.title || title) && <> {state.title || title}</>}
             </SlipHead>
             {/* The subscription keeps its anchor, so a link to its message still lands on this entry. */}
