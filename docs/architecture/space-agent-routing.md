@@ -312,22 +312,24 @@ it answers clears it. An answer to a Norn request counts as the Run's first
 reply (`recordAgentLaunchFirstReply`), as a message in the conversation
 does.
 
-Routing keeps no record of whether a harness is signed in, and does not read
-the one its machine last reported. Only the program knows whether its provider
-accepts it now, and nothing tells xMatrix when that changes (a sign-in in a
-terminal, a token another process refreshed, a revocation), so any copy goes
-stale: a copy kept here refused summons to a signed-in program on 2026-10-22
-and again on 2026-11-13. A summon is given to its machine, and the program
-answers by taking the work or refusing it. A start or turn it refuses as signed
-out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed, with a
-notice that is its sign-in (`HARNESS_SIGNED_OUT_NOTICE_KIND`). What follows
-belongs to that one request: when the Run never answered an `@auto` summon, the
-message goes on to the next-ranked Agent, once (`dispatchStartupFallback`),
-and a `handoff:@auto` whose successor could not start goes on the same way, up
-to three successors, never back to one it tried (`handoffFallbackOrigin`);
-otherwise the notice carries the summon and sends it again once the program is
-signed in. The owner who does not want that program used turns the Agent off,
-which is the only thing that keeps routing away from it.
+Explicit summons (`@<harness>` or `@auto harness:...`) are never blocked on
+cached sign-in state or account-level billing refusals: only the program knows
+whether its provider accepts it now, so a named summon is always given to its
+machine (and a stale copy never refuses a summon when the user signed in outside
+xMatrix). Unnamed `@auto` routing, however, excludes candidates whose harness
+is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
+or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
+under an account-level billing/payment refusal (such as missing payment method or
+insufficient balance). A signed-out candidate returns to unnamed `@auto` once a
+newer harness inventory check reports `signed_in` or a Run on that registration
+replies; an account-level billing refusal holds without a time-based 1-hour
+expiry and clears only when an explicit Run on that registration replies
+successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
+out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed with a
+sign-in notice (`HARNESS_SIGNED_OUT_NOTICE_KIND`): when an `@auto` summon never
+answered, the message still falls back once (`dispatchStartupFallback`) or via
+handoff fallback (`handoffFallbackOrigin`), and otherwise the notice offers to
+send the summon again after sign-in.
 
 ### Machine network measurement
 

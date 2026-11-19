@@ -1,5 +1,5 @@
 import { createJevClient } from "@xmatrix/decision-model";
-import { observeRegistrationQuota, PostgresRuntimeRepository, type AuthorityDatabase } from "@xmatrix/db";
+import { clearRegistrationAccountHold, observeRegistrationQuota, PostgresRuntimeRepository, type AuthorityDatabase } from "@xmatrix/db";
 
 import type { AppConnectorEnv } from "./app-connectors";
 import { refreshAgentRoutingQuota, registrationQuotaProbeTargetReader } from "./agent-routing-quota-refresh";
@@ -106,6 +106,23 @@ export async function recordInstancePresentation(env: RuntimeEnv, input: {
     : false;
   return { instanceId: result.instanceId, recorded: result.recorded, ...(result.record ? { record: result.record } : {}),
     ...(quotaWaitsReady && result.registration ? { quotaWaitsReadyFor: result.registration.ownerUserId } : {}) };
+}
+
+/** Record the first reply of an Agent Launch and clear any active account billing hold on its registration. */
+export async function recordAgentLaunchFirstReply(env: PostgresAuthorityFleetEnv, input: {
+  requestId: string; channelId: string; runId: string; actorUserId: string; at: string;
+}): Promise<{ recorded: boolean; launchAgeMs?: number }> {
+  const repo = runtimeRepository(env);
+  const recorded = await repo.recordAgentLaunchFirstReply(input);
+  if (recorded.recorded) {
+    const registration = await repo.readRunRegistration({ requestId: `${input.requestId}:reg`,
+      channelId: input.channelId, runId: input.runId }).catch(() => undefined);
+    if (registration) {
+      await clearRegistrationAccountHold(runtimeDirectory(env), {
+        requestId: `${input.requestId}:clear-hold`, ...registration }).catch(() => undefined);
+    }
+  }
+  return recorded;
 }
 
 /** How often one daemon is asked to read quota no reading covers, however

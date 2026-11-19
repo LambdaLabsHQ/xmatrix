@@ -114,7 +114,7 @@ export async function launchHandoffSuccessor(env: Env, input: HandoffSuccessor,
       ...(input.sourceMention ? { sourceMention: input.sourceMention } : {}) },
   }).catch(async (error: unknown) => {
     const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
-    if (!input.harness && ["registration_quota_exhausted", "registration_not_found", "registration_daemon_offline"].includes(String(code))) {
+    if (!input.harness && ["registration_quota_exhausted", "registration_not_found", "registration_daemon_offline", "registration_harness_unavailable"].includes(String(code))) {
       await offerUsageLimitRecovery(env, { channelId: input.channelId, actorUserId: input.actorUserId,
         sourceMessageId: input.sourceMessageId, sourceMention: input.sourceMention ?? input.sourceAddress,
         sourceRunId: input.sourceRunId, sourceInstanceId: input.sourceInstanceId });
