@@ -45,6 +45,7 @@ export const MOVABLE_SPACE_TABLES = Object.freeze([
   "page_access",
   "page_co_writing",
   "page_links",
+  "page_unlinks",
   "page_migrations",
   "page_reads",
   "page_revisions",

@@ -171,6 +171,16 @@ automatically:
 | A pasted page or block reference | Renders as a live card and becomes a link |
 | A human drags or removes a link | Manual correction, always allowed |
 
+Unlinking a page from a conversation (a bookmark's **Unlink from this
+conversation**, or `xmatrix page unlink <page-id>`) removes every link between
+them, stops co-writing between them, and records the unlink in
+`data.page_unlinks`. The page then no longer reaches the conversation: new Runs
+there do not get it as launch context, it leaves the header cards, and typing on
+it does not wake the conversation's Agent. Reading, editing or mentioning the
+page from that conversation afterwards does not link it again; only an explicit
+link (`xmatrix page link`, a human's link, an attachment) does, and it clears
+the unlink. Whoever may read the page and post in the conversation may unlink.
+
 A conversation inherits context from its linked pages and their ancestors. This
 replaces today's inheritance through ancestor Channels.
 

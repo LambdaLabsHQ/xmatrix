@@ -655,7 +655,7 @@ export class PostgresPageRepository {
       }))[0];
       if (!rev) throw new PageControlError("page_revision_not_found", 404);
       if (input.conversationId) {
-        await this.recordLink(tx, spaceId, actor, input.principal, {
+        await this.implicitLink(tx, spaceId, actor, input.principal, {
           conversationId: input.conversationId, pageId, blockId: blockId(input.blockId), source: "read",
         });
       }
@@ -844,7 +844,7 @@ export class PostgresPageRepository {
     }
     for (const conversationId of conversationIds) {
       for (const block of blocks.length ? blocks : [""]) {
-        await this.recordLink(tx, spaceId, actor, principal,
+        await this.implicitLink(tx, spaceId, actor, principal,
           { conversationId, pageId, blockId: block, source: "edit" });
       }
     }
@@ -1555,8 +1555,8 @@ export class PostgresPageRepository {
         text: "SELECT 1 FROM data.pages WHERE space_id=$1 AND parent_page_id=$2 LIMIT 1",
         values: [spaceId, pageId], maxRows: 1 });
       if (child.length) throw new PageControlError("page_has_children", 409, "Move or remove its child pages first");
-      for (const table of ["data.page_links", "data.page_access", "data.page_reads", "data.page_co_writing",
-        "data.page_revisions"]) {
+      for (const table of ["data.page_links", "data.page_unlinks", "data.page_access", "data.page_reads",
+        "data.page_co_writing", "data.page_revisions"]) {
         await tx.query({ name: `page_remove_${table.slice(5)}_v1`,
           text: `DELETE FROM ${table} WHERE space_id=$1 AND page_id=$2`, values: [spaceId, pageId], maxRows: 0 });
       }
@@ -1607,6 +1607,21 @@ export class PostgresPageRepository {
       });
       return { redactedRevisions: Number(rows[0]?.n ?? 0) };
     });
+  }
+
+  /**
+   * A page read, edited or mentioned from a conversation it was unlinked from stays unlinked: only
+   * `link` links it again.
+   */
+  private async implicitLink(tx: DatabaseTransaction, spaceId: string, actor: Actor, principal: PagePrincipal,
+    input: { conversationId: string; pageId: string; blockId: string; source: "read" | "edit" | "reference" }):
+    Promise<boolean> {
+    const unlinked = await tx.query({ name: "page_unlink_find_v1",
+      text: "SELECT 1 FROM data.page_unlinks WHERE space_id=$1 AND conversation_id=$2 AND page_id=$3",
+      values: [spaceId, bounded(input.conversationId, "conversationId"), input.pageId], maxRows: 1 });
+    if (unlinked.length) return false;
+    await this.recordLink(tx, spaceId, actor, principal, input);
+    return true;
   }
 
   /** Links require that the actor (and, for an Agent, its owner) may read both sides. */
@@ -1677,9 +1692,14 @@ export class PostgresPageRepository {
     return this.inSpace(bounded(input.requestId, "requestId"), "page.link", spaceId, async (tx) => {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       await this.page(tx, spaceId, actor, pageId, "read");
-      return { link: await this.recordLink(tx, spaceId, actor, input.principal,
+      const link = await this.recordLink(tx, spaceId, actor, input.principal,
         { conversationId: input.conversationId, pageId, blockId: blockId(input.blockId), source: input.source,
-          anchor: input.anchor ?? null }) };
+          anchor: input.anchor ?? null });
+      // Linking it again by hand undoes an unlink.
+      await tx.query({ name: "page_unlink_clear_v1",
+        text: "DELETE FROM data.page_unlinks WHERE space_id=$1 AND conversation_id=$2 AND page_id=$3",
+        values: [spaceId, link.conversationId, pageId], maxRows: 0 });
+      return { link };
     });
   }
 
@@ -1703,9 +1723,8 @@ export class PostgresPageRepository {
       const linked: string[] = [];
       for (const pageId of pageIds) {
         if (!readable.has(pageId)) continue;
-        await this.recordLink(tx, route.spaceId, actor, input.principal,
-          { conversationId, pageId, blockId: "", source: "reference" });
-        linked.push(pageId);
+        if (await this.implicitLink(tx, route.spaceId, actor, input.principal,
+          { conversationId, pageId, blockId: "", source: "reference" })) linked.push(pageId);
       }
       return { linked };
     });
@@ -1730,6 +1749,46 @@ export class PostgresPageRepository {
         text: "DELETE FROM data.page_links WHERE space_id=$1 AND link_id=$2 RETURNING link_id",
         values: [spaceId, input.linkId], maxRows: 1 });
       return { removed: rows.length === 1 };
+    });
+  }
+
+  /**
+   * Unlinks a page from a conversation: every link between them goes, co-writing between them stops, and
+   * the page no longer reaches the conversation (its Runs' launch context, its page bookmarks, a
+   * person's typing waking its Agent). Reading, editing or mentioning the page from the conversation
+   * afterwards does not link it again; only an explicit link does. Whoever may read the page and post
+   * in the conversation may do it, as for `unlink`.
+   */
+  async unlinkPage(input: { requestId: string; spaceId: string; principal: PagePrincipal; conversationId: string;
+    pageId: string }): Promise<{ removed: number }> {
+    const spaceId = bounded(input.spaceId, "spaceId");
+    const pageId = bounded(input.pageId, "pageId");
+    const conversationId = bounded(input.conversationId, "conversationId");
+    return this.inSpace(bounded(input.requestId, "requestId"), "page.unlink_page", spaceId, async (tx) => {
+      const actor = await pageActor(tx, spaceId, input.principal, true);
+      await this.page(tx, spaceId, actor, pageId, "read");
+      const readers = input.principal.kind === "agent"
+        ? [{ kind: "agent" as const, id: input.principal.id }, { kind: "user" as const, id: actor.userId }]
+        : [{ kind: "user" as const, id: actor.userId }];
+      for (const reader of readers) {
+        await requireChannelCapability(tx, { capability: "message_active_command", channelId: conversationId,
+          spaceId, principal: reader, error: (failure) => new PageControlError(failure.code, failure.status) });
+      }
+      const removed = await tx.query({ name: "page_unlink_page_v1",
+        text: "DELETE FROM data.page_links WHERE space_id=$1 AND conversation_id=$2 AND page_id=$3 RETURNING link_id",
+        values: [spaceId, conversationId, pageId], maxRows: MAX_LINKS });
+      await tx.query({ name: "page_unlink_page_co_writing_v1",
+        text: `UPDATE data.page_co_writing SET ended_at=COALESCE(ended_at, now()), stopped=true
+          WHERE space_id=$1 AND page_id=$2 AND conversation_id=$3 AND stopped IS NOT TRUE`,
+        values: [spaceId, pageId, conversationId], maxRows: 0 });
+      await tx.query({ name: "page_unlink_record_v1",
+        text: `INSERT INTO data.page_unlinks (space_id,conversation_id,page_id,unlinked_by_kind,unlinked_by_id)
+          VALUES ($1,$2,$3,$4,$5)
+          ON CONFLICT (space_id,conversation_id,page_id) DO UPDATE
+            SET unlinked_by_kind=EXCLUDED.unlinked_by_kind, unlinked_by_id=EXCLUDED.unlinked_by_id,
+              unlinked_at=clock_timestamp()`,
+        values: [spaceId, conversationId, pageId, input.principal.kind, input.principal.id], maxRows: 0 });
+      return { removed: removed.length };
     });
   }
 

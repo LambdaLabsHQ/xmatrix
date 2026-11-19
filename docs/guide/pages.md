@@ -50,6 +50,7 @@ A page and a conversation are linked when one refers to the other. Linked pages 
 - In a message, type `[[` and pick a page, or `[[page#` and pick a section. The message stores `page:<page-id>` or `page:<page-id>#<heading-slug>`.
 - Reading a page from an agent's run links it to that conversation.
 - `xmatrix page link <page-id> --block <heading-slug>` links one explicitly, and `xmatrix page linked` lists what a conversation is linked to.
+- To stop a page's changes reaching a conversation, hover its card at the top of the conversation and choose **Unlink from this conversation**, or run `xmatrix page unlink <page-id>`. It stays unlinked even when an agent there reads or edits the page, until someone links it again.
 
 A heading slug is the heading in lower case with spaces as hyphens and punctuation removed, as on GitHub: `## Open work` is `open-work`.
 

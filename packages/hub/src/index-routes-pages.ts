@@ -824,6 +824,17 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       principal: await principal(c), linkId: c.req.param("linkId"), resolved: body.resolved !== false });
   }));
 
+  // Unlinks a page from a conversation for good: implicit links (reads, edits, mentions) stop until it is linked again.
+  app.delete("/api/spaces/:spaceId/page-links", async (c) => run(c, async () => {
+    const pageId = c.req.query("pageId");
+    const conversationId = c.req.query("conversationId");
+    if (!pageId || !conversationId) {
+      throw new PageControlError("invalid_request", 400, "name both pageId and conversationId");
+    }
+    return repository(c.env).unlinkPage({ requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"),
+      principal: await principal(c), pageId, conversationId });
+  }));
+
   app.delete("/api/spaces/:spaceId/page-links/:linkId", async (c) => run(c, async () => repository(c.env).unlink({
     requestId: crypto.randomUUID(), spaceId: c.req.param("spaceId"), principal: await principal(c),
     linkId: c.req.param("linkId"),
