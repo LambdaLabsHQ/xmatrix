@@ -1193,28 +1193,24 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   const usageGlance = row("mobile-actions-agent").getByTestId("agent-usage-glance");
   await expect(usageGlance).toBeVisible();
   await expect(usageGlance).toHaveAttribute("aria-label", /5-hour window: 40% used.*Weekly: 86% used/);
-  await expect(usageGlance).toContainText("5h40%");
   await expect(usageGlance).toContainText("1w86%");
-  await expect(usageGlance.locator("[data-tone=green]")).toHaveCount(1);
   await expect(usageGlance.locator("[data-tone=yellow]")).toHaveCount(1);
   await expect(row("research-agent").getByTestId("agent-usage-glance")).toHaveCount(0);
-  /* An agent is listed under its machine, starting where the machine's name
-     does, so the two read as a machine and what runs on it. */
+  /* Agents sit in a 2-column grid under their machine, aligned with the machine heading. */
   const machineHeading = page.getByRole("region", { name: "Mobile test machine" }).locator(".app-tool-list-group-title");
   // The reader's own machine is with the machines, not under the teammates' heading, even before the list carries it.
   await expect(page.getByRole("heading", { name: "Teammates' machines" }).locator("xpath=following::section[1]"))
     .toHaveAccessibleName("Research Mac");
   await expect(page.getByRole("region", { name: "Mobile test machine" }).getByTestId("agent-row")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("agents-list-phone.png") });
-  const machineName = machineHeading.locator("span.truncate").first();
-  const agentFace = row("mobile-actions-agent").locator(".app-tool-state-icon");
-  await expect(agentFace.locator("img")).toBeVisible();
-  const [nameBox, iconBox] = await Promise.all([machineName, agentFace].map((locator) => locator.boundingBox()));
-  expect(Math.abs(iconBox!.x - nameBox!.x)).toBeLessThanOrEqual(1);
+  const headingLeading = machineHeading.locator(".app-tool-state-icon");
+  await expect(row("mobile-actions-agent").locator("img")).toBeVisible();
+  const [headingBox, tileBox] = await Promise.all([headingLeading, row("mobile-actions-agent")].map((locator) => locator.boundingBox()));
+  expect(Math.abs(tileBox!.x - headingBox!.x)).toBeLessThanOrEqual(1);
   // Its one live process waits for a message: that is ready, not working.
-  await expect(row("mobile-actions-agent")).toContainText("codex · Ready");
+  await expect(row("mobile-actions-agent")).toContainText("Ready");
   await expect(row("mobile-actions-agent")).not.toContainText("E2E Tester");
-  await expect(row("research-agent")).toContainText(/codex · Offline · seen \d+d ago/);
+  await expect(row("research-agent")).toHaveAttribute("aria-label", /Offline · seen \d+d ago/);
   await expect(page.getByRole("region", { name: "Research Mac" }).getByTestId("agent-row")).toHaveCount(1);
   // A teammate's machine names its owner once, on the machine.
   await expect(page.getByRole("region", { name: "Research Mac" }).locator(".app-tool-list-group-title")).toContainText("Research Owner");
@@ -1233,8 +1229,11 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(row("Discover")).toHaveCount(0);
   await expect(row("Role Studio")).toHaveCount(0);
 
-  /* A Space admin configures and disables another member's agent in the Space; only its owner disables it everywhere. */
+  /* Tapping a tile opens its Bottom Sheet editor; full settings are one step deeper on the agent's page. */
   await row("research-agent").tap();
+  const cellSheet = page.getByTestId("fleet-cell-editor").filter({ visible: true });
+  await expect(cellSheet).toContainText("research-agent");
+  await cellSheet.getByTestId("fleet-cell-open-agent").tap();
   await expect(detail.getByRole("button", { name: /^Configure/ })).toBeVisible();
   await expect(detail.getByRole("switch", { name: "Enabled: research-agent" })).toHaveAttribute("aria-checked", "true");
   await back();
@@ -1257,6 +1256,7 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   });
 
   await row("mobile-actions-agent").tap();
+  await page.getByTestId("fleet-cell-editor").filter({ visible: true }).getByTestId("fleet-cell-open-agent").tap();
   /* Its provider windows, soonest reset first, each with its countdown. */
   const usage = detail.getByRole("region", { name: "Usage" });
   await expect(usage.getByRole("meter")).toHaveCount(2);

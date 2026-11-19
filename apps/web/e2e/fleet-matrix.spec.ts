@@ -1,5 +1,5 @@
 import { expect, test } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule,
+import { E2E_DESKTOP_CONTEXT, E2E_MOBILE_CONTEXT, E2E_NOW, E2E_SPACE, fixtureJson, fixtureRequestBodies, fixtureRequests, fixtureRule,
   fixtureUnconfirmedAccess, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 /* The matrix is edited where it is read, as a table is: a cell is changed in
@@ -154,4 +154,85 @@ test("a row is added from the table's last row: another machine is connected in 
   expect(await fixtureRequests(page, "funnel")).toHaveLength(0);
   await add.click();
   await expect(steps).toHaveCount(0);
+});
+
+test.describe("mobile agents grid and bottom sheets", () => {
+  test.use(E2E_MOBILE_CONTEXT);
+
+  test("compact chips, 2-column machine cells, bottom-sheet install, attention sheet, and add machine", async ({ page }) => {
+    const base = { intentId: INTENT, spaceId: E2E_SPACE.id, expiresAt: "2099-01-01T00:00:00.000Z", registeredHarnesses: [] };
+    await openWorkspaceWithStubs(page, {
+      spaces: [E2E_SPACE],
+      machineDaemons: [{
+        ...daemon,
+        metadata: {
+          ...daemon.metadata,
+          harnesses: {
+            schemaVersion: 1,
+            capturedAt: E2E_NOW,
+            items: [
+              { id: "codex", installed: true, probeStatus: "ok", version: "1.0.0", autoUpdate: "disabled", login: "signed_out" },
+              { id: "claude", installed: false, probeStatus: "missing", autoUpdate: "unknown" },
+              { id: "antigravity", installed: false, probeStatus: "unsupported", autoUpdate: "unknown" },
+            ],
+          },
+        },
+      }],
+    });
+    await fixtureJson(page, "catalog", CATALOG, {
+      registrations: [{
+        ...registration("codex"),
+        live: { machine: { online: true, lastSeenAt: new Date().toISOString(), platform: "linux" }, running: [] },
+      }],
+      capabilities: [{ harness: "codex", models: [], locations: [registration("codex")] }],
+    });
+    await fixtureJson(page, "harness-recent", /\/api\/xmatrix\/machine-daemons\/harness-actions\?machineId=/u, { actions: [] });
+    await fixtureRule(page, { id: "intent-create", pattern: "**/api/xmatrix/setup-intents",
+      responder: { kind: "static", json: { ...base, phase: "waiting" } } });
+    await fixtureRule(page, { id: "intent-read", pattern: `**/api/xmatrix/setup-intents/${INTENT}`,
+      responder: { kind: "static", json: { ...base, phase: "waiting" } } });
+
+    await page.goto("/app/personal-sspaceperso/status");
+    const machine = page.getByTestId("fleet-machine").filter({ hasText: "Workbench" });
+    await expect(machine).toBeVisible();
+
+    // Compact Space chip renders with status-runtime test id.
+    const chip = page.getByTestId("status-runtime").filter({ hasText: "codex" });
+    await expect(chip).toBeVisible();
+
+    // Tapping a Needs attention item on a phone opens the in-place Bottom Sheet editor without navigating away.
+    const attention = page.getByTestId("status-attention");
+    await expect(attention).toContainText("codex on Workbench");
+    await attention.first().click();
+    const sheet = page.getByTestId("fleet-cell-editor").filter({ visible: true });
+    await expect(sheet).toContainText("Codex on Workbench");
+    await expect(page).toHaveURL(/\/app\/personal-sspaceperso\/status$/u);
+    await sheet.getByRole("button", { name: "Close" }).click();
+    await expect(page.getByTestId("fleet-cell-editor").filter({ visible: true })).toHaveCount(0);
+
+    // + Add agent opens the picker bottom sheet (excluding unsupported antigravity), chooses Claude Code, and installs in place.
+    await machine.getByTestId("fleet-mobile-add-cell").click();
+    const picker = page.getByTestId("fleet-mobile-add-menu");
+    await expect(picker).toBeVisible();
+    await expect(picker).not.toContainText("Antigravity");
+    await picker.getByRole("button", { name: "Claude Code" }).click();
+
+    await fixtureJson(page, "harness-action", "**/api/xmatrix/machine-daemons/harness-actions", { controlId: CONTROL, status: "queued" });
+    await fixtureJson(page, "harness-status", "**/api/xmatrix/machine-daemons/harness-actions/*",
+      { controlId: CONTROL, presetId: "claude", action: "install", status: "running" });
+    const installEditor = page.getByTestId("fleet-cell-editor").filter({ visible: true });
+    await expect(installEditor).toContainText("Claude Code on Workbench");
+    await installEditor.getByRole("button", { name: "Install", exact: true }).click();
+    await expect(machine.getByRole("button", { name: "claude on Workbench: Installing…" })).toContainText("Installing…");
+
+    await installEditor.getByRole("button", { name: "Close" }).click();
+    await expect(machine.getByRole("button", { name: "claude on Workbench: Installing…" })).toContainText("Installing…");
+
+    // Interactive Add a machine row works on phone as well.
+    const add = page.getByTestId("fleet-add-row");
+    await add.scrollIntoViewIfNeeded();
+    await add.click();
+    await expect(page.getByTestId("add-machine")).toBeVisible();
+    await expect(add).toHaveAttribute("aria-expanded", "true");
+  });
 });

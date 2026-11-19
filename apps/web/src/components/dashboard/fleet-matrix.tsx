@@ -59,11 +59,39 @@ export type FleetMatrixCellKey = { row: string; harness: string };
 /** A cell's editor, kept alive while its cell is chosen or while what it started still runs. */
 export type FleetMatrixEditor = FleetMatrixCellKey & { label: string; node: ReactNode };
 
-const cellId = (cell: FleetMatrixCellKey) => `${cell.row}|${cell.harness}`;
+export const cellId = (cell: FleetMatrixCellKey) => `${cell.row}|${cell.harness}`;
 
 /** The window closest to its limit: the one that decides whether this agent can take more work. */
 function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usage"]) {
   return usage.length ? [usage.reduce((worst, reading) => reading.percent > worst.percent ? reading : worst)] : [];
+}
+
+/** Shared status readout + tightest quota bar for one Space-registered cell (matrix or mobile grid). */
+export function FleetCellBusyReadout({ busy }: { busy: string }) {
+  return (
+    <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
+      <AnimatedIcon icon={Loader2} className="size-3 shrink-0 animate-spin" />
+      <span className="min-w-0 truncate">{busy}</span>
+    </span>
+  );
+}
+
+/** Shared state line and tightest usage bar for an active agent cell. */
+export function FleetCellAgentReadout({ cell }: { cell: Extract<FleetMatrixCell, { kind: "agent" }> }) {
+  const meter = tightest(cell.usage);
+  return (
+    <>
+      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs",
+        cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
+          : cell.working > 0 ? "font-semibold text-foreground" : "text-muted-foreground")}>
+        {/* On, though its machine is away: the row is dimmed, and the mark stays the one of an agent that is on. */}
+        <ToolStateDot state={cell.state === "offline" ? "running" : cell.state} />
+        <span className="min-w-0 truncate">{cell.label}</span>
+      </span>
+      {meter.length > 0 && <MachineLoadGlanceBars glance={meter} testId="agent-usage-glance"
+        label={cell.usage.map((reading) => reading.detail).join(", ")} />}
+    </>
+  );
 }
 
 /**
@@ -225,10 +253,7 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
     return (
       <button {...edits} data-testid={cell.kind === "agent" ? "agent-row" : "fleet-cell"} data-state="busy"
         aria-label={`${harness} on ${machine}: ${cell.busy}`} className={cn(CELL, "hover:bg-foreground/5", selected && CHOSEN)}>
-        <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
-          <AnimatedIcon icon={Loader2} className="size-3 shrink-0 animate-spin" />
-          <span className="min-w-0 truncate">{cell.busy}</span>
-        </span>
+        <FleetCellBusyReadout busy={cell.busy} />
       </button>
     );
   }
@@ -252,22 +277,13 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
       </button>
     );
   }
-  const meter = tightest(cell.usage);
   return (
     <button {...edits} data-testid="agent-row" data-state={cell.state}
       title={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       aria-label={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       className={cn(CELL, "hover:bg-foreground/5", selected && CHOSEN)}>
       {cell.name && <span className="block w-full truncate text-xs text-muted-foreground">{cell.name}</span>}
-      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-xs",
-        cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
-          : cell.working > 0 ? "font-semibold text-foreground" : "text-muted-foreground")}>
-        {/* On, though its machine is away: the row is dimmed, and the mark stays the one of an agent that is on. */}
-        <ToolStateDot state={cell.state === "offline" ? "running" : cell.state} />
-        <span className="min-w-0 truncate">{cell.label}</span>
-      </span>
-      {meter.length > 0 && <MachineLoadGlanceBars glance={meter} testId="agent-usage-glance"
-        label={cell.usage.map((reading) => reading.detail).join(", ")} />}
+      <FleetCellAgentReadout cell={cell} />
     </button>
   );
 }

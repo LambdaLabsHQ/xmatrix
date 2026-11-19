@@ -30,26 +30,20 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
     test("a machine's installed agents are offered under it, and turned on from its page without registering them first", async ({ page }) => {
       await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [machine] });
       await page.goto("/app/personal-sspaceperso/status");
-      // Installed and not in this Space. A desktop's matrix has a cell for each, which says Off; a phone's list
-      // has one quiet line under their machine. Either opens the machine's page.
-      // By test id: a phone hides the list while the machine's page is open, and it is still read below.
+      // Installed and not in this Space: desktop matrix & mobile grid both render a cell for each, which says Off, and open its editor in place.
       const under = page.getByTestId("fleet-machine").filter({ hasText: "Remote server" });
       await expect(under.getByTestId("agent-row")).toHaveCount(0);
-      const phone = name === "mobile";
-      const off = phone ? under.getByTestId("fleet-machine-off") : under.locator('[data-testid="fleet-cell"][data-state="off"]');
-      if (phone) await expect(off).toHaveText("2 more installed · off in this Space");
-      else await expect(off).toHaveCount(2);
-      // A phone opens the machine's page; a desktop edits the cell where it is.
-      const codexCell = phone ? off : under.getByRole("button", { name: "codex on Remote server: off in this Space" });
+      const off = under.locator('[data-testid="fleet-cell"][data-state="off"]');
+      await expect(off).toHaveCount(2);
+      const codexCell = under.getByRole("button", { name: "codex on Remote server: off in this Space" });
       // With no agent in the Space yet, the overview says the same in words and names the machine to open.
       const empty = page.getByTestId("fleet-empty").filter({ visible: true });
       await expect(empty).toContainText("Turn on an installed agent");
       await expect(empty.getByRole("button", { name: "Open Remote server" })).toBeVisible();
       await codexCell.click();
-      if (phone) await expect(page).toHaveURL(/\/machines\?machine=/u);
-      else await expect(page).toHaveURL(/\/status$/u);
+      await expect(page).toHaveURL(/\/status$/u);
       const panel = page.getByTestId("machine-harness-panel").filter({ visible: true });
-      await expect(panel.getByRole("switch", { name: /^Enabled: /u })).toHaveCount(phone ? 2 : 1);
+      await expect(panel.getByRole("switch", { name: /^Enabled: /u })).toHaveCount(1);
       const codex = panel.getByRole("switch", { name: "Enabled: Codex" });
       await expect(codex).toHaveAttribute("aria-checked", "false");
       await fixtureJson(page, "enable-command", COMMANDS, { version: 1 }, { method: "POST" });
@@ -69,15 +63,10 @@ function installedHarnessTests(name: string, context: typeof E2E_DESKTOP_CONTEXT
         expect.objectContaining({ action: "create", key: key("codex"),
           environment: expect.objectContaining({ launch: expect.objectContaining({ access: "full" }) }) }),
       ]);
-      // On, it is an agent of the Space: a row under its machine, and one fewer left to turn on.
+      // On, it is an agent of the Space: a tile under its machine, and one fewer left to turn on.
       await expect(codex).toHaveAttribute("aria-checked", "true");
-      if (phone) {
-        await expect(under.getByTestId("agent-row")).toHaveCount(1);
-        await expect(off).toHaveText("1 more installed · off in this Space");
-      } else {
-        await expect(under.getByTestId("agent-row")).toHaveCount(1);
-        await expect(off).toHaveCount(1);
-      }
+      await expect(under.getByTestId("agent-row")).toHaveCount(1);
+      await expect(off).toHaveCount(1);
       await page.screenshot({ path: test.info().outputPath(`installed-agents-${name}.png`) });
     });
 

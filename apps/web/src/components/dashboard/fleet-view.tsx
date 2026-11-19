@@ -14,17 +14,17 @@ import { useAgentRegistrationCatalog } from "./agent-capability-select";
 import { agentHarnessSelectionId, agentListGroups, type AgentListGroup } from "./agent-list-groups";
 import { AGENT_USAGE_REFRESH_MS } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
-import { BringAgentsIn, RemoteMachineHint } from "./bring-agents-in";
+import { BringAgentsIn } from "./bring-agents-in";
 import { channelTitle } from "./channel-links";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
-import { Face } from "./face";
 import { signedOutRegistrations } from "./harness-sign-in";
 import { FleetCellEditor } from "./fleet-cell-editor";
 import { FleetMatrix, type FleetMatrixCell, type FleetMatrixCellKey, type FleetMatrixEditor, type FleetMatrixRow } from "./fleet-matrix";
+import { MobileFleetSheets, MobileMachineCellGrid, type MobileAddOption } from "./fleet-mobile";
 import { ListSectionHeading } from "./list-section-heading";
 import { MachineGlyph } from "./machine-glyph";
 import { MachineListRow, machinePlatform, machineStateLine, machineUnresponsive } from "./machine-list-row";
-import { MachineLoadGlance, MachineLoadGlanceBars } from "./machine-load-panel";
+import { MachineLoadGlance } from "./machine-load-panel";
 import { machineOs } from "./machine-os";
 import { AgentPaper } from "./my-agents-view";
 import { SetupCardShell } from "./space-setup-card-chrome";
@@ -33,7 +33,7 @@ import {
   LIST_ROW_CLASS_NAME, LIST_ROW_COPY_CLASS_NAME, LIST_ROW_LEADING_CLASS_NAME, LIST_ROW_LEADING_TWO_LINE_CLASS_NAME,
   LIST_ROW_META_CLASS_NAME, LIST_ROW_TITLE_CLASS_NAME, LIST_ROW_TITLE_LINE_CLASS_NAME,
 } from "./row-frames";
-import { ToolDetailSection, ToolList, ToolListRow, ToolPaperScroll, ToolSheet, ToolSplit } from "./tool-split";
+import { ToolList, ToolPaperScroll, ToolSheet, ToolSplit } from "./tool-split";
 import { useViewSelection } from "./url-query-state";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
 import {
@@ -111,6 +111,7 @@ export function FleetView({
   // Columns added for agents no machine has yet, and the row that adds a machine.
   const [addedColumns, setAddedColumns] = useState<string[]>([]);
   const [addingMachine, setAddingMachine] = useState(false);
+  const [addingAgentOn, setAddingAgentOn] = useState<{ rowKey: string; machineName: string; options: MobileAddOption[] } | null>(null);
   const ready = Boolean(spaceId && token);
   const catalog = useAgentRegistrationCatalog(spaceId ?? "", token ?? "", ready, { live: true });
   const fleet = useInstalledHarnesses(spaceId, token, currentUserId);
@@ -126,7 +127,6 @@ export function FleetView({
     selectedMachineId: onMachines ? selectedMachineId : null,
     defaultMachineId: view === "local" ? THIS_MACHINE_SELECTION : undefined });
 
-  const openAgent = (id: string) => view === "agents" ? selectAgent(id) : onChangeView("agents", id);
   const openMachine = (machine: MachineSummary | null) => {
     const id = !machine || model.isThis(machine) ? THIS_MACHINE_SELECTION : machine.id;
     if (onMachines) selectMachine(id);
@@ -174,7 +174,7 @@ export function FleetView({
     for (const row of found) placed.add(row.id);
     return found;
   };
-  const machineSections = model.ordered.map((machine) => ({ machine, agents: agentsOn(machine) }));
+  for (const machine of model.ordered) agentsOn(machine);
   // An agent on a Machine this reader's list does not carry (a teammate's) is listed under that Machine's name.
   const elsewhere = rows.filter((row) => !placed.has(row.id)).reduce<Array<{ key: string; name: string; platform?: string; agents: AgentRow[] }>>(
     (sections, row) => {
@@ -200,174 +200,7 @@ export function FleetView({
   /** What a row says under an agent's name; the usage bars beside it say the quota, so the line does not. */
   const rowLine = (row: AgentRow) => row.usage.length ? row.activity.brief : row.activity.line;
 
-  const agentRow = (row: AgentRow, own: boolean) => {
-    // Its machine's own row already says it is offline.
-    const text = own && row.activity.state === "offline" ? null : rowLine(row);
-    return (
-      <ToolListRow key={row.id} testId="agent-row" state={row.activity.state} child
-        selected={view === "agents" && row.id === selectedAgentId}
-        onSelect={() => openAgent(row.id)}
-        leading={<span className="app-tool-state-icon" data-state={row.activity.state} aria-hidden="true">
-          <Face of={{ kind: "agent", name: row.harness, harness: row.harness }} size="xs" showKindBadge={false} /></span>}
-        meter={<MachineLoadGlanceBars glance={row.usage}
-          testId="agent-usage-glance" label={row.usage.map((reading) => reading.detail).join(", ")} />}
-        title={agentRowName(row)}
-        subtitle={[row.machineInLine ? row.harness : null, text].filter(Boolean).join(" · ") || undefined} />
-    );
-  };
-
-  // What waits on a person, each line opening where it is dealt with.
-  const placeOf = (row: AgentRow) => `${agentRowName(row)} on ${row.registration.machineName}`;
-  const attention: FleetOverviewLine[] = [
-    ...model.listed.filter(machineUnresponsive).map((machine) => ({ key: `machine:${machine.id}`,
-      title: model.nameOf(machine), line: "Not responding", onOpen: () => onChangeView("machines", machine.id) })),
-    ...rows.flatMap((row) => {
-      // Only what cannot take work until someone acts: exactly the cells the matrix draws in that ink.
-      if (row.activity.state !== "attention") return [];
-      const { registration } = row;
-      const machine = machineOf(registration);
-      const outdated = tooOld.has(candidateId(registration));
-      const line = row.activity.brief;
-      // A program is updated on its machine's page; everything else is on the agent's own.
-      return [{ key: row.id, harness: row.harness, title: placeOf(row), line,
-        onOpen: () => outdated && machine ? onChangeView("machines", machine.id) : onChangeView("agents", row.id) }];
-    }),
-  ];
-
-  // An empty Space has nothing to overview: it shows where agents come from.
-  const empty = Boolean(catalog.data) && rows.length === 0;
-  // The machine to open for it: one with something installed, else this machine, else any of the reader's own.
-  const firstOwn = model.listed.find((machine) => newCandidates.some((candidate) => candidate.key.machineId === machine.machineId))
-    ?? (thisMachine ? null : model.listed.find((machine) => machine.daemon?.userId === currentUserId));
-  // With no machine either there is nothing to list: the Space reads how its first machine is connected.
-  const setup = empty && newCandidates.length === 0 && !addsOnThisMachine && model.ordered.length === 0 && elsewhere.length === 0;
-  const bringIn = (
-    <SetupCardShell>
-      <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
-    </SetupCardShell>
-  );
-  // No agent in the Space yet, though one is installed: where it is turned on.
-  const turnOn = empty ? (
-    <div className="space-y-3 text-sm text-muted-foreground" data-testid="fleet-empty">
-      <p className="font-bold text-foreground">{newCandidates.length ? copy.enableInstalledTitle : copy.connectAgentsTitle}</p>
-      <p>{copy.enableOrInstall}</p>
-      {firstOwn !== undefined && <Button size="sm" variant="outline" onClick={() => openMachine(firstOwn)}>
-        <Plus /> {firstOwn ? `Open ${model.nameOf(firstOwn)}` : `Open ${model.thisLabel}`}</Button>}
-    </div>
-  ) : undefined;
-  // Another machine: the same connection a first machine makes, followed for that machine alone.
-  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another />;
-  const addMachineHelp = !setup && (
-    <ToolDetailSection title="Add a machine">
-      <div className="space-y-1.5 text-sm text-muted-foreground" data-testid="fleet-add-machine">
-        <p>On that computer, <a href="/download" className="font-semibold text-foreground underline-offset-2 hover:underline">open xMatrix</a> and
-          sign in as you. It joins this list with the agents already installed on it.</p>
-        <RemoteMachineHint copy={copy} />
-      </div>
-    </ToolDetailSection>
-  );
-  const catalogError = catalog.isError && (
-    <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
-      className={statusInkClass("alert", "text-sm")} />
-  );
-
-  const chosenRow = view === "agents" ? rows.find((row) => row.id === selectedAgentId) : undefined;
-  const chosenGroup = view === "agents" && !chosenRow
-    ? groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) : undefined;
-  // An address that names an agent waits for the agent list before it falls back to the overview.
-  const awaitingAgent = view === "agents" && Boolean(selectedAgentId) && !chosenRow && !chosenGroup && loading;
-  const showsOverview = view === "status" || (view === "agents" && !chosenRow && !chosenGroup && !awaitingAgent)
-    // With no list to choose from, a desktop's bare machines address is the matrix, not the first machine.
-    || (!phone && view === "machines" && !selectedMachineId);
-  // A desktop's page goes back to the matrix; a phone's closes over its list.
-  const back = phone ? undefined : () => onChangeView("status");
-
-  /** A machine the reader's list has no record of: named for what runs on it, with no page of its own to open. */
-  const unlistedMachine = (section: (typeof elsewhere)[number]) => {
-    const owners = ownedByReader(section) ? null
-      : [...new Set(section.agents.map((row) => row.registration.ownerName))].join(", ");
-    const up = section.agents.some((row) => row.registration.live?.machine.online);
-    return (
-      <section key={section.key} aria-label={section.name} data-testid="fleet-machine">
-        <ul>
-          <li className={cn(LIST_ROW_CLASS_NAME, "app-tool-list-group-title")}>
-            <span className={cn(LIST_ROW_LEADING_CLASS_NAME, owners && LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>
-              <span className="app-tool-state-icon" data-state={up ? "running" : "offline"} aria-hidden="true">
-                <MachineGlyph os={machineOs(section.platform)} /></span></span>
-            <span className={LIST_ROW_COPY_CLASS_NAME}>
-              <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}><span className={LIST_ROW_TITLE_CLASS_NAME}>{section.name}</span></span>
-              {owners && <span className={LIST_ROW_META_CLASS_NAME}>{owners}</span>}
-            </span>
-          </li>
-          {section.agents.map((row) => agentRow(row, false))}
-        </ul>
-      </section>
-    );
-  };
-
-  const list = (
-    <ToolList title="Agents">
-      {/* On a phone the overview leads the list: it is the first thing the tab shows. */}
-      <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-4">{setup ? bringIn : (
-        <FleetOverview status={status} attention={attention}>
-          <FleetRuntimeLines runtimes={runtimes} loading={loading} error={catalog.isError ? catalog.error : null}
-            onRetry={() => void catalog.refetch()} empty={turnOn}
-            onOpenHarness={(harness) => onChangeView("agents", agentHarnessSelectionId(harness))} />
-        </FleetOverview>
-      )}</div>
-      {error && <p role="alert" className="px-5 pb-2 text-xs font-medium text-destructive md:px-6">{error}</p>}
-      {model.identityUnavailable && <p role="status" className="px-5 pb-2 text-xs text-muted-foreground md:px-6">
-        Update xMatrix to identify this computer and show its controls on the registered Machine.
-      </p>}
-      {(machineSections.length > 0 || unlisted.length > 0 || loading) && <ListSectionHeading label={`Machines · ${status.online}/${status.machineCount} online`}
-        mark={{ icon: HardDrive, tone: "primary" }} />}
-      {machineSections.length === 0 && elsewhere.length === 0 && (loading
-        ? <ListSkeleton label="Loading agents" rows={4} />
-        : <p className="px-5 py-2 text-sm text-muted-foreground md:px-6">
-          {ready ? "No machines yet." : "Choose a Space to see its machines and agents."}
-        </p>)}
-      {machineSections.map(({ machine, agents }) => {
-        // This machine is a row like any other, only tagged; before the Hub lists it, the desktop says its state.
-        const local = !machine || model.isThis(machine);
-        const name = machine ? model.nameOf(machine) : thisMachine!.name;
-        const host = machine ? model.hostOf(machine) : undefined;
-        const facts = [host ? `WSL on ${model.nameOf(host)}` : null,
-          machine ? machineStateLine(machine, status.workingOn(machine)) : thisMachine!.summary,
-          machine && !model.autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
-        const selected = onMachines && (local ? model.showingThis : machine!.id === model.chosen?.id);
-        const beside = onMachines && !selectedMachineId && (local ? model.showThisBeside
-          : !model.chosen && !model.showingThis && !model.showThisBeside && machine!.id === model.shown?.id);
-        const machineId = machine ? machine.machineId : thisMachine?.machineId;
-        const off = machineId ? newCandidates.filter((candidate) => candidate.key.machineId === machineId).length : 0;
-        return (
-          <section key={machine?.id ?? THIS_MACHINE_SELECTION} aria-label={name} data-testid="fleet-machine">
-            <ul>
-              <MachineListRow machine={machine} name={name}
-                platform={local ? thisMachine!.platform : machinePlatform(machine!)}
-                online={machine ? machine.status === "online" : thisMachine!.online} hosted={Boolean(host)}
-                selected={selected} shownBeside={beside} onSelect={() => openMachine(machine)}
-                now={now}
-                subtitle={local ? <><ThisMachineTag label={model.thisLabel} />{facts ? <> · {facts}</> : null}</> : facts} />
-              {agents.map((row) => agentRow(row, true))}
-              {off > 0 && <li>
-                {/* Installed here and not in this Space: one quiet line, turned on from the machine's page. */}
-                <button type="button" data-testid="fleet-machine-off" onClick={() => openMachine(machine)}
-                  className="w-full py-1.5 pl-[calc(var(--app-list-row-start)+1.875rem)] pr-[var(--app-list-row-end)] text-left text-xs font-medium text-muted-foreground hover:text-foreground">
-                  {off} more installed · off in this Space
-                </button>
-              </li>}
-            </ul>
-          </section>
-        );
-      })}
-      {unlisted.map(unlistedMachine)}
-      {teammates.length > 0 && <ListSectionHeading label="Teammates' machines" mark={{ icon: Users, tone: "plain" }} />}
-      {teammates.map(unlistedMachine)}
-      <div className="px-[var(--mobile-content-inset,1rem)] pt-8">{addMachineHelp}</div>
-    </ToolList>
-  );
-
-  // ---- The matrix: a machine to a row, an agent to a column. ----------------------------------------
+  // ---- The matrix & mobile cells: a machine to a row, an agent to a column / grid tile. ----
   /** What the reader's own machine reports of each program; another member's machine reports nothing to this reader. */
   const inventoryOf = (machine: MachineSummary) => machine.daemon?.userId === currentUserId
     ? parseHarnessInventory(machine.daemon.metadata.harnesses)?.items : undefined;
@@ -412,18 +245,20 @@ export function FleetView({
   /** What a row is for its cells' editors: the machine it is, and the agents on it. */
   type RowSubject = { name: string; machine?: MachineSummary; own: boolean; rowOf: (harness: string) => AgentRow | undefined };
   const subjects = new Map<string, RowSubject>();
+  const ownMachines = model.ordered.map((machine) => {
+    const local = !machine || model.isThis(machine);
+    const key = machine?.id ?? THIS_MACHINE_SELECTION;
+    const name = machine ? model.nameOf(machine) : thisMachine!.name;
+    const host = machine ? model.hostOf(machine) : undefined;
+    const online = machine ? machine.status === "online" : thisMachine!.online;
+    const stalled = Boolean(machine && machineUnresponsive(machine));
+    const facts = [host ? `WSL on ${model.nameOf(host)}` : null,
+      machine ? machineStateLine(machine, status.workingOn(machine)) : thisMachine!.summary,
+      machine && !model.autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
+    return { machine, local, key, name, host, online, stalled, facts };
+  });
   const matrixRows: FleetMatrixRow[] = [
-    ...model.ordered.map((machine): FleetMatrixRow => {
-      // This machine is a row like any other, only tagged; before the Hub lists it, the desktop says its state.
-      const local = !machine || model.isThis(machine);
-      const key = machine?.id ?? THIS_MACHINE_SELECTION;
-      const name = machine ? model.nameOf(machine) : thisMachine!.name;
-      const host = machine ? model.hostOf(machine) : undefined;
-      const online = machine ? machine.status === "online" : thisMachine!.online;
-      const stalled = Boolean(machine && machineUnresponsive(machine));
-      const facts = [host ? `WSL on ${model.nameOf(host)}` : null,
-        machine ? machineStateLine(machine, status.workingOn(machine)) : thisMachine!.summary,
-        machine && !model.autoAssigned(machine) ? "Named only" : null].filter(Boolean).join(" · ");
+    ...ownMachines.map(({ machine, local, key, name, host, online, stalled, facts }): FleetMatrixRow => {
       const items = machine ? inventoryOf(machine) : undefined;
       const machineId = machine ? machine.machineId : thisMachine?.machineId;
       const rowOf = (harness: string) => rows.find((candidate) => candidate.harness === harness && Boolean(machineId)
@@ -481,6 +316,19 @@ export function FleetView({
       };
     }),
   ];
+  const rowMap = new Map(matrixRows.map((row) => [row.key, row]));
+  const installableOn = (rowKey: string): MobileAddOption[] => {
+    const subject = subjects.get(rowKey);
+    if (!subject?.own || !subject.machine || subject.machine.status !== "online") return [];
+    const items = inventoryOf(subject.machine);
+    if (!items) return [];
+    return AGENT_PRESETS.flatMap((preset) => {
+      if (preset.id === "custom" || subject.rowOf(preset.id)) return [];
+      const item = items.find((entry) => entry.id === preset.id);
+      if (item?.installed || item?.probeStatus === "unsupported" || doing[cellKey(rowKey, preset.id)]) return [];
+      return [{ harness: preset.id, name: preset.displayName }];
+    });
+  };
   // The chosen cell's editor, and those of cells where something still runs: closing a slip does not stop an install.
   const editing = [...new Set([...(cell ? [cellKey(cell.row, cell.harness)] : []), ...Object.keys(doing)])];
   const editors: FleetMatrixEditor[] = editing.flatMap((id) => {
@@ -509,6 +357,150 @@ export function FleetView({
     }];
   });
 
+  // What waits on a person, each line opening where it is dealt with (on a phone, the cell sheet edits in place).
+  const placeOf = (row: AgentRow) => `${agentRowName(row)} on ${row.registration.machineName}`;
+  const attention: FleetOverviewLine[] = [
+    ...model.listed.filter(machineUnresponsive).map((machine) => ({ key: `machine:${machine.id}`,
+      title: model.nameOf(machine), line: "Not responding", onOpen: () => onChangeView("machines", machine.id) })),
+    ...rows.flatMap((row) => {
+      // Only what cannot take work until someone acts: exactly the cells the matrix draws in that ink.
+      if (row.activity.state !== "attention") return [];
+      const { registration } = row;
+      const machine = machineOf(registration);
+      const outdated = tooOld.has(candidateId(registration));
+      const rowKey = machine?.id ?? registration.key.machineId;
+      const line = row.activity.brief;
+      // A program is updated on its machine's page; everything else is on the agent's own.
+      return [{ key: row.id, harness: row.harness, title: placeOf(row), line,
+        onOpen: () => phone && subjects.has(rowKey)
+          ? setCell({ row: rowKey, harness: row.harness })
+          : outdated && machine ? onChangeView("machines", machine.id) : onChangeView("agents", row.id) }];
+    }),
+  ];
+
+  // An empty Space has nothing to overview: it shows where agents come from.
+  const empty = Boolean(catalog.data) && rows.length === 0;
+  // The machine to open for it: one with something installed, else this machine, else any of the reader's own.
+  const firstOwn = model.listed.find((machine) => newCandidates.some((candidate) => candidate.key.machineId === machine.machineId))
+    ?? (thisMachine ? null : model.listed.find((machine) => machine.daemon?.userId === currentUserId));
+  // With no machine either there is nothing to list: the Space reads how its first machine is connected.
+  const setup = empty && newCandidates.length === 0 && !addsOnThisMachine && model.ordered.length === 0 && elsewhere.length === 0;
+  const bringIn = (
+    <SetupCardShell>
+      <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" />
+    </SetupCardShell>
+  );
+  // No agent in the Space yet, though one is installed: where it is turned on.
+  const turnOn = empty ? (
+    <div className="space-y-3 text-sm text-muted-foreground" data-testid="fleet-empty">
+      <p className="font-bold text-foreground">{newCandidates.length ? copy.enableInstalledTitle : copy.connectAgentsTitle}</p>
+      <p>{copy.enableOrInstall}</p>
+      {firstOwn !== undefined && <Button size="sm" variant="outline" onClick={() => openMachine(firstOwn)}>
+        <Plus /> {firstOwn ? `Open ${model.nameOf(firstOwn)}` : `Open ${model.thisLabel}`}</Button>}
+    </div>
+  ) : undefined;
+  // Another machine: the same connection a first machine makes, followed for that machine alone.
+  const addMachine = <BringAgentsIn spaceId={spaceId} token={token} userId={currentUserId} surface="agents" another />;
+  const catalogError = catalog.isError && (
+    <ErrorNotice error={catalog.error} action="Couldn't load the agent list" onRetry={() => void catalog.refetch()}
+      className={statusInkClass("alert", "text-sm")} />
+  );
+
+  const chosenRow = view === "agents" ? rows.find((row) => row.id === selectedAgentId) : undefined;
+  const chosenGroup = view === "agents" && !chosenRow
+    ? groups.find((group) => agentHarnessSelectionId(group.harness) === selectedAgentId) : undefined;
+  // An address that names an agent waits for the agent list before it falls back to the overview.
+  const awaitingAgent = view === "agents" && Boolean(selectedAgentId) && !chosenRow && !chosenGroup && loading;
+  const showsOverview = view === "status" || (view === "agents" && !chosenRow && !chosenGroup && !awaitingAgent)
+    // With no list to choose from, a desktop's bare machines address is the matrix, not the first machine.
+    || (!phone && view === "machines" && !selectedMachineId);
+  // A desktop's page goes back to the matrix; a phone's closes over its list.
+  const back = phone ? undefined : () => onChangeView("status");
+
+  /** A machine the reader's list has no record of: named for what runs on it, with no page of its own to open. */
+  const unlistedMachine = (section: (typeof elsewhere)[number]) => {
+    const owners = ownedByReader(section) ? null
+      : [...new Set(section.agents.map((row) => row.registration.ownerName))].join(", ");
+    const up = section.agents.some((row) => row.registration.live?.machine.online);
+    const matrixRow = rowMap.get(section.key);
+    return (
+      <section key={section.key} aria-label={section.name} data-testid="fleet-machine">
+        <ul>
+          <li className={cn(LIST_ROW_CLASS_NAME, "app-tool-list-group-title")}>
+            <span className={cn(LIST_ROW_LEADING_CLASS_NAME, owners && LIST_ROW_LEADING_TWO_LINE_CLASS_NAME)}>
+              <span className="app-tool-state-icon" data-state={up ? "running" : "offline"} aria-hidden="true">
+                <MachineGlyph os={machineOs(section.platform)} /></span></span>
+            <span className={LIST_ROW_COPY_CLASS_NAME}>
+              <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}><span className={LIST_ROW_TITLE_CLASS_NAME}>{section.name}</span></span>
+              {owners && <span className={LIST_ROW_META_CLASS_NAME}>{owners}</span>}
+            </span>
+          </li>
+        </ul>
+        {matrixRow && <MobileMachineCellGrid row={matrixRow} harnesses={harnesses} installable={[]}
+          selected={cell} onSelect={setCell} onOpenAdd={() => undefined} />}
+      </section>
+    );
+  };
+
+  const list = (
+    <ToolList title="Agents">
+      {/* On a phone the overview leads the list: it is the first thing the tab shows. */}
+      <div className="px-[var(--mobile-content-inset,1rem)] pt-3 pb-4">{setup ? bringIn : (
+        <FleetOverview status={status} attention={attention}>
+          <FleetRuntimeLines compact runtimes={runtimes} loading={loading} error={catalog.isError ? catalog.error : null}
+            onRetry={() => void catalog.refetch()} empty={turnOn}
+            onOpenHarness={(harness) => onChangeView("agents", agentHarnessSelectionId(harness))} />
+        </FleetOverview>
+      )}</div>
+      {error && <p role="alert" className="px-5 pb-2 text-xs font-medium text-destructive md:px-6">{error}</p>}
+      {model.identityUnavailable && <p role="status" className="px-5 pb-2 text-xs text-muted-foreground md:px-6">
+        Update xMatrix to identify this computer and show its controls on the registered Machine.
+      </p>}
+      {(model.ordered.length > 0 || unlisted.length > 0 || loading) && <ListSectionHeading label={`Machines · ${status.online}/${status.machineCount} online`}
+        mark={{ icon: HardDrive, tone: "primary" }} />}
+      {model.ordered.length === 0 && elsewhere.length === 0 && (loading
+        ? <ListSkeleton label="Loading agents" rows={4} />
+        : <p className="px-5 py-2 text-sm text-muted-foreground md:px-6">
+          {ready ? "No machines yet." : "Choose a Space to see its machines and agents."}
+        </p>)}
+      {ownMachines.map(({ machine, local, key, name, host, online, facts }) => {
+        const selected = onMachines && (local ? model.showingThis : machine!.id === model.chosen?.id);
+        const beside = onMachines && !selectedMachineId && (local ? model.showThisBeside
+          : !model.chosen && !model.showingThis && !model.showThisBeside && machine!.id === model.shown?.id);
+        const matrixRow = rowMap.get(key);
+        const installable = installableOn(key);
+        return (
+          <section key={key} aria-label={name} data-testid="fleet-machine">
+            <ul>
+              <MachineListRow machine={machine} name={name}
+                platform={local ? thisMachine!.platform : machinePlatform(machine!)}
+                online={online} hosted={Boolean(host)}
+                selected={selected} shownBeside={beside} onSelect={() => { setCell(null); openMachine(machine); }}
+                now={now}
+                subtitle={local ? <><ThisMachineTag label={model.thisLabel} />{facts ? <> · {facts}</> : null}</> : facts} />
+            </ul>
+            {matrixRow && <MobileMachineCellGrid row={matrixRow} harnesses={harnesses} installable={installable}
+              selected={cell} onSelect={setCell}
+              onOpenAdd={() => setAddingAgentOn({ rowKey: key, machineName: name, options: installable })} />}
+          </section>
+        );
+      })}
+      {unlisted.map(unlistedMachine)}
+      {teammates.length > 0 && <ListSectionHeading label="Teammates' machines" mark={{ icon: Users, tone: "plain" }} />}
+      {teammates.map(unlistedMachine)}
+      {!setup && (
+        <div className="px-[var(--mobile-content-inset,1rem)] pt-4 pb-[calc(6.5rem+var(--app-safe-area-bottom))]">
+          <button type="button" onClick={() => setAddingMachine(!addingMachine)} aria-expanded={addingMachine} data-testid="fleet-add-row"
+            className="flex w-full items-center gap-2.5 rounded-lg py-2 text-left text-sm font-semibold text-muted-foreground hover:text-foreground">
+            <Plus className={cn("size-4 shrink-0 transition-transform", addingMachine && "rotate-45")} aria-hidden="true" />
+            Add a machine
+          </button>
+          {addingMachine && <div className="pt-2" data-testid="fleet-add-row-steps">{addMachine}</div>}
+        </div>
+      )}
+    </ToolList>
+  );
+
   const page = awaitingAgent ? <ToolPaperScroll><ContentSkeleton label="Loading agent" lines={4} /></ToolPaperScroll>
     : view === "agents" ? (
       <AgentPaper spaceId={spaceId} token={token} currentUserId={currentUserId} chosen={chosenRow} group={chosenGroup}
@@ -531,7 +523,27 @@ export function FleetView({
 
   if (phone) {
     const open = view === "agents" ? Boolean(chosenRow || chosenGroup || awaitingAgent) : onMachines ? Boolean(selectedMachineId) : false;
-    return <ToolSplit label="Agents" open={open} list={list} detail={showsOverview ? null : page} />;
+    return (
+      <>
+        <ToolSplit label="Agents" open={open} list={list} detail={showsOverview ? null : page} />
+        {!open && (
+          <MobileFleetSheets
+            editors={editors}
+            selected={cell}
+            onSelect={setCell}
+            addingOn={addingAgentOn}
+            onPickInstallable={(harness) => {
+              if (!addingAgentOn) return;
+              const targetRow = addingAgentOn.rowKey;
+              setAddingAgentOn(null);
+              setAddedColumns((current) => current.includes(harness) || present.has(harness) ? current : [...current, harness]);
+              setCell({ row: targetRow, harness });
+            }}
+            onCloseAdd={() => setAddingAgentOn(null)}
+          />
+        )}
+      </>
+    );
   }
   if (!showsOverview) return <ToolSheet label="Agents">{page}</ToolSheet>;
   return (
