@@ -321,6 +321,32 @@ integration("first-reply observation records once past a locked Channel and reta
   }
 });
 
+integration("recordRunSignedOutTurn records turnSignedOutAt without touching signedOutAt", async () => {
+  await seed();
+  const { repo, session } = await repository();
+  const client = new Client({ connectionString });
+  await client.connect();
+  try {
+    await client.query(`INSERT INTO data.runs
+      (run_id,owner_user_id,channel_id,workspace_machine_id,workspace_canonical_cwd,
+       status,version,metadata_json,created_at,updated_at)
+      VALUES ('channel-launch:1#1','owner','channel-launch','machine-1','/srv/xmatrix','running',1,'{}',$1,$1)`, [at]);
+    await client.query(`INSERT INTO control.entity_space_routes
+      (entity_kind,entity_id,space_id,shard_id,placement_epoch,entity_version,route_version,state,updated_at)
+      VALUES ('run','channel-launch:1#1','space-launch','shard-0',1,1,1,'active',$1)`, [at]);
+    const at1 = "2026-09-04T00:01:00.000Z";
+    const marked = await repo.recordRunSignedOutTurn({ requestId: randomUUID(), runId: "channel-launch:1#1",
+      actorUserId: "owner", at: at1 });
+    assert.equal(marked, true);
+    const meta = (await client.query(`SELECT metadata_json FROM data.runs WHERE run_id='channel-launch:1#1'`)).rows[0].metadata_json;
+    assert.equal(new Date(meta.turnSignedOutAt).toISOString(), at1);
+    assert.equal(meta.signedOutAt, undefined);
+  } finally {
+    await session.close();
+    await client.end();
+  }
+});
+
 integration("message-id ACK preserves the summon boundary, scope and replay on PostgreSQL", async () => {
   await seed();
   const client = new Client({ connectionString });

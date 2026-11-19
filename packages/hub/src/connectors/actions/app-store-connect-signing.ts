@@ -32,7 +32,7 @@ const day = (value: unknown) => text(value).slice(0, 10);
 
 /** The registered bundle ID with exactly this identifier; Apple's own filter also matches longer ones. */
 async function registeredBundle(api: AppStoreConnectApi, identifier: string): Promise<{ bundle?: AppleResource; included: AppleResource[] }> {
-  const { rows, included } = await api.list("/v1/bundleIds", { "filter[identifier]": identifier, include: "bundleIdCapabilities", limit: "200",
+  const { rows, included } = await api.listComplete("/v1/bundleIds", { "filter[identifier]": identifier, include: "bundleIdCapabilities", limit: "200",
     "fields[bundleIds]": "name,platform,identifier,seedId,bundleIdCapabilities", "fields[bundleIdCapabilities]": "capabilityType" });
   return { bundle: rows.find(row => text(row.attributes.identifier).toLowerCase() === identifier.toLowerCase()), included };
 }
@@ -63,10 +63,10 @@ export const APP_STORE_CONNECT_SIGNING_ACTIONS: Record<string, ConnectorAction> 
     async execute({ credentials }, input) {
       const api = appStoreConnect(credentials);
       const [{ bundle, included }, certificates] = await Promise.all([registeredBundle(api, input.identifier!),
-        api.list("/v1/certificates", { "filter[certificateType]": Object.values(CERTIFICATE_TYPES).join(","), limit: "50",
-          "fields[certificates]": "name,certificateType,serialNumber,expirationDate" }, 1)]);
-      const profiles = bundle ? (await api.list(`/v1/bundleIds/${encodeURIComponent(bundle.id)}/profiles`,
-        { "fields[profiles]": "name,profileType,profileState,uuid,expirationDate", limit: "50" }, 1)).rows : [];
+        api.listComplete("/v1/certificates", { "filter[certificateType]": Object.values(CERTIFICATE_TYPES).join(","), limit: "50",
+          "fields[certificates]": "name,certificateType,serialNumber,expirationDate" })]);
+      const profiles = bundle ? (await api.listComplete(`/v1/bundleIds/${encodeURIComponent(bundle.id)}/profiles`,
+        { "fields[profiles]": "name,profileType,profileState,uuid,expirationDate", limit: "50" })).rows : [];
       const capabilities = bundle ? relatedIds(bundle, "bundleIdCapabilities").flatMap(id => cell(included.find(row => row.id === id)?.attributes.capabilityType) || []) : [];
       const lines = [bundle ? `bundle ID: ${cell(bundle.attributes.identifier)} (${cell(bundle.attributes.name)}, ${cell(bundle.attributes.platform)}), capabilities: ${capabilities.join(", ") || "none"}`
         : "bundle ID: not registered",

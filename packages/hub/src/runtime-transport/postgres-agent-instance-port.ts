@@ -26,6 +26,7 @@ import {
   PAGE_COWRITE_OUTPUT_CAPABILITY,
   PAGE_COWRITE_INPUT_CAPABILITY,
   agentUsageLimitFromError,
+  isAccountBillingRefusalError,
   boundAgentTurnFailureDetail,
   safeAgentFailureDetail,
   callerMessageMetadata,
@@ -90,6 +91,7 @@ import { recordInstancePresentation, runtimeRepository } from "../runtime";
 import { deliverQuotaWakes } from "../quota-waits";
 import { holdRegistrationUsageLimit } from "../registration-launch-dispatch";
 import { offerUsageLimitRecovery, type UsageLimitRecovery } from "../agent-quota-retry";
+import { openNornRequests } from "../norn-programs";
 import type { RegistrationUsageLimit } from "@xmatrix/db";
 
 type Message<Type extends AgentInstanceClientMessage["type"]> = Extract<
@@ -164,6 +166,8 @@ export interface PostgresAgentInstancePortDependencies {
   turnRetry?(session: Readonly<AgentInstanceRuntimeSession>, message: Message<"agent_turn_retry">): Promise<AuthorityOutput>;
   /** A turn its program refused as signed out: what its notice offers (signedOutTurn). */
   signedOutTurn?(session: Readonly<AgentInstanceRuntimeSession>): Promise<SignedOutRefusal | undefined>;
+  /** Record that a connected Run refused a turn as signed out (`turnSignedOutAt`). */
+  recordSignedOutTurn?(session: Readonly<AgentInstanceRuntimeSession>): Promise<unknown>;
   /** Settle a questionnaire card once (postgresSettleQuestionnaire). */
   settleQuestionnaire?(input: Parameters<typeof postgresSettleQuestionnaire>[1]): ReturnType<typeof postgresSettleQuestionnaire>;
   observeAgentLaunchStage?(stage: string, outcome: "ok" | "error", durationMs: number): void;
@@ -173,6 +177,8 @@ export interface PostgresAgentInstancePortDependencies {
   instanceRecords?: InstanceRecordCache;
   /** Offer to retry a turn refused for a quota narrower than the account (offerUsageLimitRecovery). */
   offerUsageLimitRetry?(input: UsageLimitRecovery): Promise<void>;
+  /** The Run holds an open request of a Norn program (openNornRequests): the program hands that work on itself. */
+  holdsNornRequest?(session: Readonly<AgentInstanceRuntimeSession>): Promise<boolean>;
 }
 
 export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
@@ -229,8 +235,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       },
       turnRetry: (session, message) => reportAgentTurnRetry(input.env, session, message),
       offerUsageLimitRetry: (recovery) => offerUsageLimitRecovery(input.env, recovery),
+      holdsNornRequest: async (session) => (await openNornRequests(input.env, { channelId: session.run.channelId,
+        runId: session.principal.runId, instanceId: session.run.instanceId })).some(request => request.held),
       signedOutTurn: (session) => signedOutTurn(input.env, { runId: session.principal.runId,
         channelId: session.run.channelId, ownerUserId: session.principal.ownerUserId }),
+      recordSignedOutTurn: (session) => runtimeRepository(input.env).recordRunSignedOutTurn({
+        requestId: crypto.randomUUID(), runId: session.principal.runId,
+        actorUserId: session.principal.ownerUserId, at: new Date().toISOString() }),
       settleQuestionnaire: (settle) => postgresSettleQuestionnaire(input.env, settle),
       history: input.history,
       signals: input.signals,
@@ -809,6 +820,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         console.error("Signed-out harness could not be read for the turn-failure notice", error);
         return undefined;
       }) : undefined;
+    if (message.reason === AGENT_SIGNED_OUT_LIFECYCLE_REASON && this.dependencies.recordSignedOutTurn) {
+      await this.dependencies.recordSignedOutTurn(session).catch((error: unknown) => {
+        console.error("Signed-out turn timestamp could not be recorded", error);
+      });
+    }
     const command = agentTurnFailureAppendCommand({
       runId: session.principal.runId,
       instanceId: session.run.instanceId,
@@ -849,6 +865,11 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     // explains, waits on this one for a quota retry its owner chooses.
     if (limit?.usedUp === "scope" || limit?.usedUp === "unresolved") {
       await this.offerUsageLimitRetry(session, command.messageId, limit);
+    } else if (await this.holdsNornRequest(session)) {
+      // A Norn program's request this Run holds: the program hands it to a new
+      // Instance and lets this one go. A handoff besides would start a second
+      // successor that cannot answer the request and that nothing lets go.
+      return;
     } else await this.handOffUsageLimitedInstance(session, command.messageId);
   }
 
@@ -867,6 +888,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     sourceMessageId: string,
   ): Promise<RegistrationUsageLimit | undefined> {
     const ids = await usageLimitHandoffIds(sourceMessageId);
+    const billingRefusal = isAccountBillingRefusalError(message.detail);
     try {
       return await this.dependencies.runtime.holdUsageLimit({
         commandId: ids.commandId,
@@ -876,11 +898,19 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         ...(typeof message.resetsAt === "string" ? { resetsAt: message.resetsAt.slice(0, 64) } : {}),
         ...(typeof message.quotaScope === "string" ? { quotaScope: message.quotaScope.slice(0, 64) } : {}),
         ...(message.usage && typeof message.usage === "object" ? { usage: message.usage } : {}),
+        ...(billingRefusal ? { billingRefusal: true } : {}),
       });
     } catch (error) {
       console.error("Agent usage limit could not be recorded", error);
       return undefined;
     }
+  }
+
+  private async holdsNornRequest(session: Readonly<AgentInstanceRuntimeSession>): Promise<boolean> {
+    return await this.dependencies.holdsNornRequest?.(session).catch((error: unknown) => {
+      console.error("Norn requests of a usage-limited Run could not be read", error);
+      return false;
+    }) ?? false;
   }
 
   /** The turn used up a quota narrower than the account: offer to retry it on

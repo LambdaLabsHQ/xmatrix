@@ -15,6 +15,7 @@ import {
   agentPresetForLauncher,
   agentPresetById,
   harnessCommandLine,
+  harnessItemObservedAt,
   harnessTooOld,
   parseHarnessInventory,
   digestCanonicalCloneCborV1,
@@ -64,8 +65,8 @@ import { RegistrationAccessError, registrationRouteRefusal } from "./agent-regis
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
-import { currentRegistrationQuotaJoin, registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage,
-  type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
+import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, registrationQuotaColumns, registrationQuotaReading,
+  registrationQuotaUsage, type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
 import { firstMessageSummonId, messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
 import { initialMessageSource, withInitialMessageSource } from "./runtime-initial-input.js";
 import { MessageAuthorityError } from "./message-authority-error.js";
@@ -161,6 +162,12 @@ export interface RegistrationLaunchCandidate {
    * across every launch in the last RESPONSE_LATENCY_WINDOW_DAYS; absent with
    * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
   responseLatencyMs?: number;
+  /** Daemon inventory reports this harness is not installed on the machine. */
+  uninstalled?: boolean;
+  /** Daemon inventory or a recent unrecovered runtime refusal shows this harness signed out. */
+  signedOut?: boolean;
+  /** Account-level billing/payment refusal is held until a direct Run succeeds on this registration. */
+  accountBillingRefusal?: boolean;
 }
 
 /** The declared models a registration's grant and policy both allow; empty
@@ -232,6 +239,9 @@ export type RegistrationLaunchChooser = (input: {
   managedOnly?: true;
   /** The mention being launched, when a message launches: its send asked for it to start. */
   summon?: { text: string; start: number; end: number };
+  /** True when routing unnamed `@auto` (no explicit harness named): excludes
+   * uninstalled, signed-out, and billing-refused candidates. */
+  automaticHarness?: boolean;
   /** A message that summons nobody: Jev first reads whether its author wants
    * an Agent to start now. */
   askToStart?: true;
@@ -938,7 +948,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         try {
           selected = await choose({ message: input.body, sourceSequence: source.sourceSequence, candidates, managedWorkspace,
             ...(managedOnly ? { managedOnly } : {}), blocked: listed.blocked,
-            tags: options.tags,
+            tags: options.tags, automaticHarness: selection.target.kind === "auto" && !options.tags.harness,
             summon: { text: summonText(selection), start: selection.start, end: options.end } });
         }
         catch (error) {
@@ -1054,7 +1064,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     }
     // A caller may constrain the directory or repository it states.
     const tags: AutoLaunchTags = { ...input.tags };
-    const selected = await choose({ message: input.body, tags, candidates, blocked: listed.blocked, managedWorkspace: true });
+    const selected = await choose({ message: input.body, tags, candidates, blocked: listed.blocked, managedWorkspace: true,
+      automaticHarness: !tags.harness });
     const candidate = candidates.find(item => sameAgentRegistration(item.key, selected.key) && item.key.spaceId === selected.key.spaceId);
     if (!candidate || !selectedModelGranted(candidate, selected) || (selected.workspaceReference !== undefined &&
         !candidate.workspaceReferences.includes(selected.workspaceReference)) ||
@@ -1178,7 +1189,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
       throw RegistrationAccessError.refusal(refusal, 404);
     }
     const selected = await choose({ message: input.body, tags: {}, candidates, managedWorkspace: true, askToStart: true,
-      ...(input.onHarness ? { onHarness: input.onHarness } : {}) });
+      automaticHarness: true, ...(input.onHarness ? { onHarness: input.onHarness } : {}) });
     return selected.key.harness;
   }
 
@@ -1248,7 +1259,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
     const modelReads = singleReadStatements(this.database, { requestId: `registration-models:${target.harness ?? "auto"}`,
       operation: "registration.launch.model-catalog", placement: this.placement });
     const observed = await modelReads.query({
-      name: "registration_launch_model_catalog_v7", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at
+      name: "registration_launch_model_catalog_v8", text: `SELECT requested.owner,requested.machine,requested.harness,silent.unanswered_at,catalog.models,catalog.observed_at,parameter_catalog.parameters,parameter_catalog.parameter_model,parameter_catalog.parameters_observed_at,startup.startup_failed_at,signed_out.signed_out_at,replied.replied_at
         FROM jsonb_to_recordset($1::jsonb) AS requested(owner text,machine text,harness text)
         LEFT JOIN LATERAL (SELECT i.presentation_json->'models' AS models,
           i.presentation_json->>'modelsObservedAt' AS observed_at
@@ -1277,6 +1288,19 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
             AND (run.metadata_json->'spawnResult'->>'ok'='false'
               OR run.metadata_json->'invocationProgress'->>'phase'=ANY($3::text[]))) startup ON TRUE
+        LEFT JOIN LATERAL (SELECT max(COALESCE(
+            CASE WHEN pg_input_is_valid(run.metadata_json->>'turnSignedOutAt','timestamp with time zone')
+              THEN (run.metadata_json->>'turnSignedOutAt')::timestamptz END,
+            run.finished_at)) AS signed_out_at
+          FROM data.run_agent_registrations r JOIN data.runs run ON run.run_id=r.run_id
+          WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND run.metadata_json->'stopRequest' IS NULL AND run.metadata_json->'executionCancellation' IS NULL
+            AND (run.metadata_json->'invocationProgress'->'operationFailure'->>'code'='harness_signed_out'
+              OR run.metadata_json ? 'turnSignedOutAt')) signed_out ON TRUE
+        LEFT JOIN LATERAL (SELECT max(launch.first_reply_at) AS replied_at
+          FROM data.run_agent_registrations r JOIN data.agent_launches launch ON launch.run_id=r.run_id
+          WHERE r.space_id=$2 AND r.owner_user_id=requested.owner AND r.machine_id=requested.machine AND r.harness=requested.harness
+            AND launch.state='connected' AND launch.first_reply_at IS NOT NULL) replied ON TRUE
         -- Its latest summons whose first turn has ended, newest first. Silent: the turn completed and the Run
         -- never replied, in the conversation or to a program's request, however long it took.
         LEFT JOIN LATERAL (SELECT CASE WHEN count(*)=${SILENT_SUMMONS} AND bool_and(recent.silent)
@@ -1381,10 +1405,9 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
             reason: "harness_outdated", tooOld });
           continue;
         }
-        // Whether its harness is signed in is not read here. Only the program
-        // knows whether its provider accepts it, and it says so when given
-        // work: a refused start or first turn shows its sign-in where it
-        // failed, and an `@auto` message goes on to the next Agent.
+        // Named summons always reach this registration (`#1630`), even when its
+        // harness was reported uninstalled, signed out, or billing-refused;
+        // unnamed `@auto` excludes those candidates until signed in or replied.
         // Jev never sees a machine whose daemon cannot show the host abilities
         // the work needs; workspace() checks the same evidence again at launch.
         const machineResources = currentMachineResources(daemon, Date.parse(evaluatedAt));
@@ -1405,9 +1428,27 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
         const unansweredAt = observation?.unanswered_at ? new Date(observation.unanswered_at).toISOString() : undefined;
+        const harnessInventory = daemonHarnessInventory(daemon);
+        const harnessEntry = harnessInventory?.items.find(item => item.id === candidate.key.harness);
+        const uninstalled = harnessEntry?.installed === false;
+        const inventoryObservedMs = harnessInventory && harnessEntry ? harnessItemObservedAt(harnessInventory, harnessEntry) : Number.NaN;
+        const signedOutAtMs = observation?.signed_out_at ? Date.parse(String(observation.signed_out_at)) : Number.NaN;
+        const repliedAtMs = observation?.replied_at ? Date.parse(String(observation.replied_at)) : Number.NaN;
+        const signedOut = harnessEntry?.login === "signed_out"
+          ? !(Number.isFinite(repliedAtMs) && Number.isFinite(inventoryObservedMs) && repliedAtMs > inventoryObservedMs)
+          : harnessEntry?.login === "signed_in" && Number.isFinite(inventoryObservedMs)
+            && (!Number.isFinite(signedOutAtMs) || inventoryObservedMs >= signedOutAtMs)
+            ? false
+            : Number.isFinite(signedOutAtMs) && !(Number.isFinite(repliedAtMs) && repliedAtMs > signedOutAtMs);
+        const factObservedMs = fact?.observed_at ? Date.parse(String(fact.observed_at)) : Number.NaN;
+        const accountBillingRefusal = isRegistrationBillingRefusalRow(fact, Date.now()) &&
+          !(Number.isFinite(repliedAtMs) && Number.isFinite(factObservedMs) && repliedAtMs > factObservedMs);
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
           ...(catalogModels ? { catalogModels } : {}),
           ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
+          ...(uninstalled ? { uninstalled: true } : {}),
+          ...(signedOut ? { signedOut: true } : {}),
+          ...(accountBillingRefusal ? { accountBillingRefusal: true } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
           ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),
@@ -1457,12 +1498,18 @@ function daemonCapable(row: QueryResultRow, capability: string): boolean {
   return Array.isArray(row.capabilities_json) && row.capabilities_json.includes(capability);
 }
 
+function daemonHarnessInventory(row: QueryResultRow) {
+  const metadata = row.metadata_json && typeof row.metadata_json === "object"
+    ? row.metadata_json as Record<string, unknown> : undefined;
+  return parseHarnessInventory(metadata?.harnesses);
+}
+
 /** The machine's own report of this harness when it is older than the oldest
  * version its preset can be launched as: what is too old, where, and the
  * preset's update for that machine's platform. */
 export function harnessTooOldOn(daemon: QueryResultRow, harness: string): HarnessTooOld | undefined {
   const metadata = daemon.metadata_json && typeof daemon.metadata_json === "object" ? daemon.metadata_json as Record<string, unknown> : undefined;
-  const item = parseHarnessInventory(metadata?.harnesses)?.items.find(entry => entry.id === harness && entry.installed);
+  const item = daemonHarnessInventory(daemon)?.items.find(entry => entry.id === harness && entry.installed);
   const management = agentPresetById(harness)?.management;
   const tooOld = harnessTooOld(management, item?.version);
   if (!tooOld) return undefined;

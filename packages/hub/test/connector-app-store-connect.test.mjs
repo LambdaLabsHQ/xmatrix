@@ -11,19 +11,28 @@ import { ACTIONS, APP, apps, BUNDLE, credentials, pair, pem, run, statement, ver
 const SPACE = "space-1";
 const env = { HUB_URL: "https://hub.test" };
 
-test("collection continuation remains explicit at the page budget", async () => {
+test("collection continuation and completeness reject truncation, cycles, and out-of-scope links", async () => {
   const routes = { "GET /v1/apps": call => call.query.cursor
     ? { data: [{ ...APP, id: "second" }] }
     : { data: [APP], links: { next: "https://api.appstoreconnect.apple.com/v1/apps?cursor=2" } } };
   const { value } = await withApple(routes, async () => {
     const api = appStoreConnect(credentials);
-    const first = await api.list("/v1/apps", {}, 1);
+    const first = await api.listPreview("/v1/apps", {}, 1);
+    assert.equal(first.incomplete, true);
     assert.ok(first.next);
-    const rest = await api.list(first.next, {}, 1);
-    return [first, rest];
+    const rest = await api.listPreview(first.next, {}, 1);
+    assert.equal(rest.incomplete, false);
+    assert.equal(rest.next, undefined);
+    const complete = await api.listComplete("/v1/apps");
+    await assert.rejects(api.listComplete("/v1/apps", {}, { pages: 1 }), /more items/u);
+    return [first, rest, complete];
   });
-  assert.deepEqual(value.map(page => page.rows.map(row => row.id)), [[APP.id], ["second"]]);
-  assert.equal(value[1].next, undefined);
+  assert.deepEqual(value.map(page => page.rows.map(row => row.id)), [[APP.id], ["second"], [APP.id, "second"]]);
+
+  await withApple({ "GET /v1/apps": { data: [APP], links: { next: "https://api.appstoreconnect.apple.com/v1/other?cursor=2" } } },
+    () => assert.rejects(appStoreConnect(credentials).listComplete("/v1/apps"), /outside this collection/u));
+  await withApple({ "GET /v1/apps": { data: [APP], links: { next: "https://api.appstoreconnect.apple.com/v1/apps?cursor=loop" } } },
+    () => assert.rejects(appStoreConnect(credentials).listComplete("/v1/apps"), /repeated a page/u));
 });
 
 test("every call carries a short-lived ES256 token Apple can verify and goes only to Apple's API", async () => {

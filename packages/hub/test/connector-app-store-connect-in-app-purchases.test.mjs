@@ -49,17 +49,30 @@ test("one-time purchases are listed with their type and review state, and the re
   assert.deepEqual(writes(missing.calls), []);
 });
 
-test("a partial purchase catalog is disclosed and never used to select submissions", async () => {
-  const routes = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": {
-    data: [purchase("p-1", "app.beans.starter", "CONSUMABLE", "READY_TO_SUBMIT")],
-    links: { next: "https://api.appstoreconnect.apple.com/v1/apps/6760000001/inAppPurchasesV2?cursor=2" } } };
-  const shown = await run(routes, `@appstoreconnect:in_app_purchases:${BUNDLE}`);
+test("multi-page purchase catalogs list and submit later-page products, while truncated catalogs fail closed", async () => {
+  const laterRoutes = { ...catalog(),
+    "GET /v1/apps/6760000001/inAppPurchasesV2": call => call.query.cursor
+      ? { data: [purchase("p-1", "app.beans.later", "CONSUMABLE", "READY_TO_SUBMIT")] }
+      : { data: [purchase("p-2", "app.beans.starter", "CONSUMABLE", "APPROVED")],
+        links: { next: "https://api.appstoreconnect.apple.com/v1/apps/6760000001/inAppPurchasesV2?cursor=2" } } };
+  const complete = await run(laterRoutes, `@appstoreconnect:in_app_purchases:${BUNDLE}`);
+  assert.doesNotMatch(complete.value.summary, /list is incomplete/u);
+  assert.match(complete.value.summary, /app\.beans\.later/u);
+  const submittedLater = await run(laterRoutes, `@appstoreconnect:submit_in_app_purchases:${BUNDLE} app.beans.later`);
+  assert.deepEqual(itemsOf(submittedLater.calls), ["iv-1"]);
+
+  const paged = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": call => {
+    const nextCursor = Number(call.query.cursor ?? "1") + 1;
+    return { data: nextCursor === 2 ? [purchase("p-1", "app.beans.starter", "CONSUMABLE", "READY_TO_SUBMIT")] : [],
+      links: { next: `https://api.appstoreconnect.apple.com/v1/apps/6760000001/inAppPurchasesV2?cursor=${nextCursor}` } };
+  } };
+  const shown = await run(paged, `@appstoreconnect:in_app_purchases:${BUNDLE}`);
   assert.match(shown.value.summary, /list is incomplete/u);
   for (const products of ["", "app.beans.starter", "app.beans.later"]) {
-    const refused = await withApple(routes, () => assert.rejects(ACTIONS.submit_in_app_purchases.execute({ credentials },
+    const refused = await withApple(paged, () => assert.rejects(ACTIONS.submit_in_app_purchases.execute({ credentials },
       { app: BUNDLE, products }), /no purchases were submitted/u));
     assert.deepEqual(writes(refused.calls), []);
   }
-  const foreign = { ...routes, "GET /v1/apps/6760000001/inAppPurchasesV2": { data: [], links: { next: "https://evil.example/v1/apps" } } };
+  const foreign = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": { data: [], links: { next: "https://evil.example/v1/apps" } } };
   await assert.rejects(run(foreign, `@appstoreconnect:in_app_purchases:${BUNDLE}`), /outside its API/u);
 });

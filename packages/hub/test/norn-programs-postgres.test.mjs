@@ -326,6 +326,67 @@ integration("only the Agent that asked a question with a command calls it off, a
     assert.deepEqual(work.reports.map(report => [report.programId, report.ended.error]), [["norn-ask:question", "Called off by the Agent that asked"]]);
   }));
 
+integration("of the Runs one delivery started, the one that took it is let go when the request ends", () =>
+  conversation("norn_release_taker", async ({ sql, message, programs, scope, execution, instance }) => {
+    await message("program", 1, "user", "owner");
+    await programs.start({ ...scope(), authorKind: "user", authorId: "owner", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `run(@auto, "Check the sites")->wait` }, nornStep());
+    const [delivery] = (await programs.channelWork(scope())).deliveries;
+    // The delivery started two Runs: the one that took it, and a later one whose start failed and never took it.
+    await sql("INSERT INTO data.agent_registrations VALUES ('owner','machine','codex',1,now(),now())");
+    await sql("INSERT INTO data.space_agent_registrations VALUES ('space','owner','machine','codex','codex','{}',1,now(),now())");
+    const launch = async (id, at) => {
+      await instance(id);
+      await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,
+          authorization_digest,grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
+        VALUES ($1,'space','owner','machine','codex','owner',$1,repeat('d',64),1,1,1,1,'{}')`, [`${id}#1`]);
+      await sql(`INSERT INTO data.agent_launches (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,
+          run_id,instance_id,execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
+        VALUES ($2,'space','channel',$1,$2,'owner',$3,$4,$2,$2,'machine-1','host-1','admitted','{}',now(),$5,$5)`,
+      [delivery.deliveryMessageId, `launch-${id}`, `${id}#1`, id, at]);
+    };
+    await launch("channel:3", "2026-11-18T01:05:00Z");
+    await launch("channel:2", "2026-11-18T01:00:00Z");
+    await sql("UPDATE data.runs SET status='failed' WHERE run_id='channel:3#1'");
+    await execution("took", "channel:2", delivery.deliveryMessageId, "running");
+    await programs.delivered({ ...scope(), ledgerRequestId: delivery.requestId, epoch: delivery.epoch });
+    assert.equal((await programs.advance(scope(), nornStep({ requestId: delivery.requestId, epoch: delivery.epoch,
+      reply: { typed: "all up" } }))).status, "completed");
+    await programs.reported(scope());
+    // The Run that did the work is the one stopped, not the one that never started.
+    assert.deepEqual((await programs.channelWork(scope())).releases.map(release => [release.requestId, release.runId, release.mention]),
+      [[delivery.requestId, "channel:2#1", "codex:2"]]);
+  }));
+
+integration("a request handed on because its work broke off lets go of the Run its first delivery started", () =>
+  conversation("norn_handed_on_release", async ({ sql, message, programs, scope, execution, instance }) => {
+    await message("program", 1, "user", "owner");
+    await programs.start({ ...scope(), authorKind: "user", authorId: "owner", authorityUserId: "owner", ledger: nornStartLedger,
+      source: `run(@auto, "Check the sites")->wait` }, nornStep());
+    const [first] = (await programs.channelWork(scope())).deliveries;
+    await sql("INSERT INTO data.agent_registrations VALUES ('owner','machine','cursor',1,now(),now())");
+    await sql("INSERT INTO data.space_agent_registrations VALUES ('space','owner','machine','cursor','cursor','{}',1,now(),now())");
+    await instance("channel:2");
+    await sql(`INSERT INTO data.run_agent_registrations(run_id,space_id,owner_user_id,machine_id,harness,actor_user_id,allocation_id,
+        authorization_digest,grant_revision,grant_execution_revision,policy_revision,policy_execution_revision,requested_json)
+      VALUES ('channel:2#1','space','owner','machine','cursor','owner','allocation-2',repeat('d',64),1,1,1,1,'{}')`);
+    await sql(`INSERT INTO data.agent_launches (launch_id,space_id,channel_id,trigger_id,launch_kind,owner_user_id,run_id,instance_id,
+        execution_key,control_id,machine_id,hostname,state,spawn_payload_json,next_attempt_at,created_at,updated_at)
+      VALUES ('launch-2','space','channel',$1,'mention','owner','channel:2#1','channel:2','execution-2','control-2','machine-1','host-1',
+        'connected','{}',now(),now(),now())`, [first.deliveryMessageId]);
+    await programs.delivered({ ...scope(), ledgerRequestId: first.requestId, epoch: first.epoch });
+    // The provider refused the turn: it failed, though the Run lives on.
+    await execution("refused", "channel:2", first.deliveryMessageId, "failed");
+    assert.equal((await programs.advance(scope(), nornStep())).status, "running");
+    const [again] = (await programs.channelWork(scope())).deliveries;
+    assert.deepEqual([again.requestId, again.epoch], [first.requestId, first.epoch + 1]);
+    // The Run the first delivery started has no part in the new holding: it is let go, once.
+    assert.deepEqual((await programs.channelWork(scope())).delegatedAway.map(release => [release.requestId, release.runId, release.mention]),
+      [[first.requestId, "channel:2#1", "cursor:2"]]);
+    await programs.letGoDelegatedAway({ ...scope(), ledgerRequestId: first.requestId });
+    assert.deepEqual((await programs.channelWork(scope())).delegatedAway, []);
+  }));
+
 integration("an Agent that delegates the request its Run was started for is let go, unless something else keeps it here", () =>
   conversation("norn_delegated_away", async ({ sql, message, programs, scope, instance }) => {
     await message("program", 1, "user", "owner");

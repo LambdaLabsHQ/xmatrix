@@ -997,3 +997,45 @@ test("a Space's model on a machine that declares none runs from the runtime's ca
   await assert.rejects(registrationLaunchChooser(async input => answer(input))({ message: '@antigravity', tags: {},
     candidates: [{ ...antigravity, supportsNativeModel: false }] }));
 });
+
+test('unnamed @auto excludes uninstalled, signed-out, and billing-refused candidates while explicit harness summons still reach them', async () => {
+  const choose = registrationLaunchChooser(async input => answer(input));
+  const healthy = { ...candidates[1], key: { ...candidates[1].key, harness: 'codex' } };
+  const signedOut = { ...candidates[0], key: { ...candidates[0].key, harness: 'antigravity' }, signedOut: true };
+  const uninstalled = { ...candidates[0], key: { ...candidates[0].key, harness: 'claude' }, uninstalled: true };
+  const billingRefused = {
+    ...candidates[0],
+    key: { ...candidates[0].key, harness: 'cursor' },
+    accountBillingRefusal: true,
+    observations: {
+      ...candidates[0].observations,
+      quota: { remainingPercent: 0, assumed: false, source: 'daemon', expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
+    },
+  };
+  const chosen = await choose({
+    message: '@auto check this', tags: {}, automaticHarness: true,
+    candidates: [signedOut, uninstalled, billingRefused, healthy],
+  });
+  assert.equal(chosen.key.harness, 'codex');
+
+  await assert.rejects(
+    choose({ message: '@auto check this', tags: {}, automaticHarness: true, candidates: [signedOut, uninstalled] }),
+    error => error.code === 'registration_harness_unavailable',
+  );
+  await assert.rejects(
+    choose({ message: '@auto check this', tags: {}, automaticHarness: true, candidates: [billingRefused] }),
+    error => error.code === 'registration_quota_exhausted',
+  );
+
+  // Explicit summons (`automaticHarness: false`) still reach signed-out and billing-refused candidates (#1630 & recovery).
+  const directSignedOut = await choose({
+    message: '@auto harness:antigravity', tags: { harness: 'antigravity' }, automaticHarness: false,
+    candidates: [signedOut],
+  });
+  assert.equal(directSignedOut.key.harness, 'antigravity');
+  const directBilling = await choose({
+    message: '@cursor retry after payment', tags: { harness: 'cursor' }, automaticHarness: false,
+    candidates: [billingRefused],
+  });
+  assert.equal(directBilling.key.harness, 'cursor');
+});

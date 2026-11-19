@@ -30,15 +30,15 @@ const STORES: Readonly<Record<string, string>> = { iphone: "IPHONE_APP_STORE", i
 const list = (value: unknown) => (Array.isArray(value) ? value : []).map(record);
 
 async function localizations(api: AppStoreConnectApi, version: AppleResource): Promise<AppleResource[]> {
-  return (await api.list(`/v1/appStoreVersions/${encodeURIComponent(version.id)}/appStoreVersionLocalizations`,
-    { "fields[appStoreVersionLocalizations]": "locale", limit: "200" }, 1)).rows;
+  return (await api.listComplete(`/v1/appStoreVersions/${encodeURIComponent(version.id)}/appStoreVersionLocalizations`,
+    { "fields[appStoreVersionLocalizations]": "locale", limit: "200" })).rows;
 }
 
 /** A listing's screenshot placements in display order, with the library image each one shows. */
 async function placements(api: AppStoreConnectApi, localization: AppleResource, group?: string) {
-  const { rows, included } = await api.list(`/v1/appStoreVersionLocalizations/${encodeURIComponent(localization.id)}/placements`, {
+  const { rows, included } = await api.listComplete(`/v1/appStoreVersionLocalizations/${encodeURIComponent(localization.id)}/placements`, {
     "filter[placementType]": SCREENSHOT, ...(group ? { "filter[placementGroup]": group } : {}), sort: "placementGroupPosition", include: "image",
-    "fields[appAssetLibraryPlacements]": "placementType,placementGroup,state,image", "fields[appAssetLibraryImages]": "fileName,state", limit: "200" }, 1);
+    "fields[appAssetLibraryPlacements]": "placementType,placementGroup,state,image", "fields[appAssetLibraryImages]": "fileName,state", limit: "200" });
   const images = new Map(included.filter(row => row.type === "appAssetLibraryImages").map(row => [row.id, row.attributes]));
   return rows.map(row => ({ row, image: relatedId(row, "image") ?? "", file: cell(images.get(relatedId(row, "image") ?? "")?.fileName) }));
 }

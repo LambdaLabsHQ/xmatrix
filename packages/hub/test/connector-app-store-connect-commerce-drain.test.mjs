@@ -22,8 +22,10 @@ function drainer({ request, stage, finish }) {
   const imports = { "@xmatrix/db": db, "./apple-commerce-watch-failure": failure, "./http": { ProviderRequestError },
     "./credentials": { appleCommerceRepository: () => repository, connectorCredentialRepository: () => ({
       resolve: async () => ({ version: 1, connectionGeneration: "generation", values: { privateKey: "private-key" } }) }) },
-    "./app-store-connect-api": { appStoreConnect: () => ({ request }), appleApp: async () => ({ id: "private-app" }),
-      appleResource: () => undefined },
+    "./app-store-connect-api": {
+      appStoreConnect: () => ({ request, listComplete: async path => ({ rows: (await request(path)).data, included: [] }) }),
+      appleApp: async () => ({ id: "private-app" }),
+    },
     "./event-format": { connectorEvent: input => input, record: value => value && typeof value === "object" ? value : {},
       text: value => typeof value === "string" ? value : "" },
     "./event-ingress": { appendToRoutes: async () => {} },

@@ -15,10 +15,12 @@ import { RuntimeAuthorityOperationError } from "../src/runtime-transport/runtime
  * ordinary handoff's job, exactly as if somebody had typed it.
  */
 
-function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" })) {
+function harness(hold = async () => ({ quotaPoolId: "pool", limitedUntil: "2026-10-01T13:00:00.000Z", usedUp: "account" }),
+  holdsNornRequest = async () => false) {
   const { port, commands } = recordingAgentInstancePort({
     respond: (family, input) => family === "registration-usage-limit-hold" ? hold(input) : { sequence: 7 },
     offerUsageLimitRetry: async () => undefined,
+    holdsNornRequest,
   });
   const session = {
     principal: {
@@ -63,6 +65,14 @@ test("a usage-limited turn holds its pool before its notice wakes anyone, then o
   assert.equal(handoff.input.agentRunProof, undefined);
   assert.equal(handoff.input.senderSnapshot.userId, "owner");
   assert.equal(handoff.context.actorUserId, "owner");
+});
+
+test("a Run that holds a Norn program's request is handed on by the program, not by a handoff besides", async () => {
+  const { commands, port, session } = harness(undefined, async ({ principal }) => principal.runId === "run-1");
+  await port.execute(session, limited);
+  // The pool is held and the failure told; the program sees the turn broke off and hands its request on once.
+  assert.deepEqual(commands.map(command => command.family), ["registration-usage-limit-hold", "append-message"]);
+  assert.equal(commands[1].input.residual.appMetadata.xmatrixTurnFailure, true);
 });
 
 test("a replayed usage-limit signal resolves to the same hold and handoff message", async () => {
@@ -194,4 +204,36 @@ test("only an addressable Instance gets a handoff", () => {
   assert.equal(usageLimitHandoffCommand(" claude ", "3"), "@claude:3:handoff:@auto");
   assert.equal(usageLimitHandoffCommand("claude", undefined), undefined);
   assert.equal(usageLimitHandoffCommand("  ", "3"), undefined);
+});
+
+test("account billing refusals flag billingRefusal on the hold; non-billing usage limits omit it", async () => {
+  for (const detail of [
+    "Cursor refused the turn for its account: Add a payment method to continue",
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: Insufficient Balance",
+  ]) {
+    const { commands, port, session } = harness();
+    await port.execute(session, { ...limited, resetsAt: undefined, detail });
+    const hold = commands.find(command => command.family === "registration-usage-limit-hold");
+    assert.equal(hold.input.billingRefusal, true, detail);
+  }
+  const { commands, port, session } = harness();
+  await port.execute(session, limited);
+  const hold = commands.find(command => command.family === "registration-usage-limit-hold");
+  assert.equal(Object.hasOwn(hold.input, "billingRefusal"), false);
+});
+
+test("a signed-out turn failure records turnSignedOutAt via recordSignedOutTurn", async () => {
+  const { PostgresAgentInstancePort } = await import("../src/runtime-transport/postgres-agent-instance-port.ts");
+  let recorded = 0;
+  const { session } = harness();
+  const port = new PostgresAgentInstancePort({
+    atomicInstanceConnect: true,
+    history: { async join() {}, async leave() {}, async replay() {}, async history() {} },
+    messages: { async append() { return { sequence: 7 }; }, async acknowledge() { return {}; } },
+    runtime: { async getRun() { return {}; }, async transition() { return {}; }, async holdUsageLimit() { return undefined; } },
+    signals: { async publish() {} },
+    recordSignedOutTurn: async () => { recorded += 1; },
+  });
+  await port.execute(session, { ...limited, reason: "harness_signed_out", detail: "Antigravity is signed out" });
+  assert.equal(recorded, 1);
 });

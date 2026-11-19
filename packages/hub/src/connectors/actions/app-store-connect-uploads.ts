@@ -90,7 +90,7 @@ function uploadRef(statement: { target: string; text: string }, extra: (words: s
 async function uploadFile(api: AppStoreConnectApi, kind: string, id: string): Promise<{ upload: AppleResource; file: AppleResource }> {
   const root = `${UPLOADS[kind]!.root}/${encodeURIComponent(id)}`;
   const upload = appleResource((await api.request(root)).data);
-  const file = kind === "build" ? (await api.list(`${root}/buildUploadFiles`, { limit: "10" }, 1)).rows.find(row => row.attributes.assetType === "ASSET") : upload;
+  const file = kind === "build" ? (await api.listComplete(`${root}/buildUploadFiles`, { limit: "10" })).rows.find(row => row.attributes.assetType === "ASSET") : upload;
   if (!upload || !file || !FILE_TYPES.has(file.type)) throw new ProviderRequestError(404, `App Store Connect has no ${UPLOADS[kind]!.what} ${id} with a file to upload`);
   return { upload, file };
 }
@@ -161,7 +161,7 @@ export const APP_STORE_CONNECT_UPLOAD_ACTIONS: Record<string, ConnectorAction> =
     const app = bundleId(statement.target), build = statement.text.trim();
     return app && (!build || /^\d[\d.]{0,17}$/u.test(build)) ? { app, build } : "name an app, and optionally one build number: <com.example.app> [<412>]";
   }, async ({ api, app, input }) => {
-    const { rows } = await api.list(`/v1/apps/${encodeURIComponent(app.id)}/buildUploads`, { sort: "-uploadedDate", limit: "5",
+    const { rows } = await api.listPreview(`/v1/apps/${encodeURIComponent(app.id)}/buildUploads`, { sort: "-uploadedDate", limit: "5",
       "fields[buildUploads]": "cfBundleShortVersionString,cfBundleVersion,createdDate,state,platform,uploadedDate",
       ...(input.build ? { "filter[cfBundleVersion]": input.build } : {}) }, 1);
     const lines = rows.flatMap(upload => {

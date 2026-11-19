@@ -181,7 +181,7 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
     const { copyright, ...attributes } = JSON.parse(input.fields!) as Record<string, string>;
     const changed = Object.keys(attributes);
     if (changed.length) {
-      const { rows } = await api.list(`${versionPath(version)}/appStoreVersionLocalizations`, { "fields[appStoreVersionLocalizations]": "locale", limit: "200" }, 1);
+      const { rows } = await api.listComplete(`${versionPath(version)}/appStoreVersionLocalizations`, { "fields[appStoreVersionLocalizations]": "locale", limit: "200" });
       const existing = rows.find(row => text(row.attributes.locale).toLowerCase() === input.locale!.toLowerCase());
       if (existing) {
         await api.request(`/v1/appStoreVersionLocalizations/${encodeURIComponent(existing.id)}`, { method: "PATCH",
@@ -228,8 +228,8 @@ export const APP_STORE_CONNECT_RELEASE_ACTIONS: Record<string, ConnectorAction> 
     const submissionState = text(submission?.attributes.state);
     const rejected = submissionState === "UNRESOLVED_ISSUES";
     if (submission && !rejected && submissionState !== "READY_FOR_REVIEW") throw new ProviderRequestError(409, `Another review submission is ${submissionState}`);
-    const items = submission ? (await api.list(`/v1/reviewSubmissions/${encodeURIComponent(submission.id)}/items`,
-      { include: "appStoreVersion", limit: "200" }, 1)).rows : [];
+    const items = submission ? (await api.listComplete(`/v1/reviewSubmissions/${encodeURIComponent(submission.id)}/items`,
+      { include: "appStoreVersion", limit: "200" })).rows : [];
     const versions = items.flatMap(item => relatedId(item, "appStoreVersion") ?? []);
     if (versions.some(id => id !== version.id)) {
       throw new ProviderRequestError(409, "The open submission holds another version; finish or cancel it in App Store Connect first");

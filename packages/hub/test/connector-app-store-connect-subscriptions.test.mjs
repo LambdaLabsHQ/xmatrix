@@ -90,11 +90,27 @@ test("named subscriptions must exist and be ready, or nothing is sent", async ()
   assert.deepEqual(itemsOf(one.calls), ["subscriptionGroupVersion:gv-1", "subscriptionVersion:sv-s-month"]);
 });
 
-test("partial subscription groups or products are disclosed and cannot authorize a submission", async () => {
+test("multi-page subscriptions and truncated catalogs/versions/items are handled safely", async () => {
+  const multiPage = { ...catalog(), ...submitted,
+    "GET /v1/subscriptionGroups/g-1/subscriptions": call => call.query.cursor
+      ? { data: [subscription("s-year", "app.pro.later", "READY_TO_SUBMIT")] }
+      : { data: [subscription("s-month", "app.pro.monthly", "APPROVED")],
+        links: { next: "https://api.appstoreconnect.apple.com/v1/subscriptionGroups/g-1/subscriptions?cursor=2" } } };
+  const listed = await run(multiPage, `@appstoreconnect:subscriptions:${BUNDLE}`);
+  assert.doesNotMatch(listed.value.summary, /list is incomplete/u);
+  assert.match(listed.value.summary, /app\.pro\.later/u);
+  const submittedLater = await run(multiPage, `@appstoreconnect:submit_subscriptions:${BUNDLE} app.pro.later`);
+  assert.deepEqual(itemsOf(submittedLater.calls), ["subscriptionGroupVersion:gv-1", "subscriptionVersion:sv-year"]);
+
   for (const path of ["/v1/apps/6760000001/subscriptionGroups", "/v1/subscriptionGroups/g-1/subscriptions"]) {
     const routes = catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT"));
     const key = `GET ${path}`;
-    routes[key] = { ...routes[key], links: { next: `https://api.appstoreconnect.apple.com${path}?cursor=2` } };
+    const base = routes[key];
+    routes[key] = call => {
+      const nextCursor = Number(call.query.cursor ?? "1") + 1;
+      return { ...(nextCursor === 2 ? base : { data: [] }),
+        links: { next: `https://api.appstoreconnect.apple.com${path}?cursor=${nextCursor}` } };
+    };
     const shown = await run(routes, `@appstoreconnect:subscriptions:${BUNDLE}`);
     assert.match(shown.value.summary, /list is incomplete/u);
     for (const products of ["", "app.pro.monthly", "app.pro.later"]) {
@@ -103,4 +119,13 @@ test("partial subscription groups or products are disclosed and cannot authorize
       assert.deepEqual(writes(refused.calls), []);
     }
   }
+
+  /* Truncated draft items or product versions also refuse before creating duplicate items or versions. */
+  const truncatedItems = { ...catalog(subscription("s-month", "app.pro.monthly", "READY_TO_SUBMIT")), ...submitted,
+    "GET /v1/reviewSubmissions": { data: [{ type: "reviewSubmissions", id: "draft-1", attributes: { state: "READY_FOR_REVIEW" } }] },
+    "GET /v1/reviewSubmissions/draft-1/items": call => ({ data: [],
+      links: { next: `https://api.appstoreconnect.apple.com/v1/reviewSubmissions/draft-1/items?cursor=${Number(call.query.cursor ?? "1") + 1}` } }) };
+  const refusedItems = await withApple(truncatedItems, () => assert.rejects(
+    ACTIONS.submit_subscriptions.execute({ credentials }, { app: BUNDLE, products: "" }), /more items/u));
+  assert.deepEqual(writes(refusedItems.calls), []);
 });

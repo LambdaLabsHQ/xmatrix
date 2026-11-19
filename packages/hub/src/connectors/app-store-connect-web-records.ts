@@ -34,7 +34,7 @@ interface DataType { category: string; purposes: string[]; linked: boolean; trac
 
 /** The one registered bundle ID with this identifier, or why there is none. */
 async function registeredBundleId(api: AppStoreConnectApi, identifier: string): Promise<AppleResource> {
-  const { rows } = await api.list("/v1/bundleIds", { "filter[identifier]": identifier, "fields[bundleIds]": "identifier,name,platform", limit: "20" }, 1);
+  const { rows } = await api.listComplete("/v1/bundleIds", { "filter[identifier]": identifier, "fields[bundleIds]": "identifier,name,platform", limit: "20" });
   const bundle = rows.find(row => text(row.attributes.identifier).toLowerCase() === identifier.toLowerCase());
   if (!bundle) throw new ProviderRequestError(404, `${identifier} is not a registered bundle ID; run register_bundle_id first`);
   return bundle;
@@ -92,7 +92,7 @@ export const APP_STORE_CONNECT_WEB_RECORD_ACTIONS: Record<string, ConnectorActio
     },
     async execute(context, input) {
       const api = appStoreConnect(context.credentials);
-      const existing = (await api.list("/v1/apps", { "filter[bundleId]": input.app!, "fields[apps]": "bundleId,name", limit: "20" }, 1)).rows
+      const existing = (await api.listComplete("/v1/apps", { "filter[bundleId]": input.app!, "fields[apps]": "bundleId,name", limit: "20" })).rows
         .find(row => text(row.attributes.bundleId).toLowerCase() === input.app!.toLowerCase());
       if (existing) throw new ProviderRequestError(409, `${input.app} already has an app record, ${cell(existing.attributes.name)} (${existing.id})`);
       const bundle = await registeredBundleId(api, input.app!);

@@ -234,8 +234,9 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
       sides, balance, utility: balance + 0.001 * (fit + room) };
   });
-  // The breakers: an environment that just failed to start, or whose last summons all ended without a reply.
-  const tripped = (candidate: T) => candidate.startupFailedAt !== undefined || candidate.unansweredAt !== undefined;
+  // The breakers: an environment that just failed to start, is unavailable, or whose last summons all ended without a reply.
+  const tripped = (candidate: T) => candidate.startupFailedAt !== undefined || candidate.unansweredAt !== undefined
+    || candidate.uninstalled === true || candidate.signedOut === true || candidate.accountBillingRefusal === true;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
     tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
     other.room >= item.room && other.quotaPace >= item.quotaPace && other.networkQuality >= item.networkQuality &&
@@ -269,7 +270,7 @@ export const START_INTENT_DECLINED = "start_intent_declined";
  * runs the work is a whole registered key offering all of them. */
 export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContext?: (sourceSequence: number) => Promise<Record<string, unknown>>): RegistrationLaunchChooser {
   return async ({ message, sourceSequence, tags, candidates, blocked: blockedRegistrations, managedWorkspace, managedOnly, summon,
-    askToStart, onHarness }) => {
+    automaticHarness, askToStart, onHarness }) => {
     let eligible = candidates;
     const blocked = blockedRegistrations ?? [];
     const narrow = (code: string, matches: (candidate: RegistrationLaunchCandidate) => boolean) => {
@@ -297,6 +298,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     });
     if (tags.harness) narrow("registration_harness_unavailable",
       candidate => candidate.key.harness === canonicalRegistrationHarness(tags.harness!));
+    if (automaticHarness) narrow("registration_harness_unavailable",
+      candidate => candidate.uninstalled !== true && candidate.signedOut !== true);
     narrow(tags.effort ? "registration_effort_unavailable" : "registration_model_unavailable",
       candidate => usesRuntimeDefaults(candidate, tags) || modelPairs(candidate, tags).some(option => !tags.parameters || !candidate.parameterModel || (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel));
     // A named repository is offered as written; only an unreadable reference misses.
@@ -318,9 +321,12 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
     const runsDefault = (candidate: RegistrationLaunchCandidate) => usesRuntimeDefaults(candidate, tags) &&
       !modelExhausted(candidate, runtimeDefaultPair(tags));
-    const usedUp = (candidate: RegistrationLaunchCandidate) => providerQuotaExhausted(candidate, now) ||
-      [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []]
-        .every(option => modelExhausted(candidate, option));
+    const usedUp = (candidate: RegistrationLaunchCandidate) => {
+      if (!automaticHarness && candidate.accountBillingRefusal) return false;
+      return candidate.accountBillingRefusal === true || providerQuotaExhausted(candidate, now) ||
+        [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []]
+          .every(option => modelExhausted(candidate, option));
+    };
     if (eligible.every(usedUp)) {
       // The earliest reading this refusal rested on: any reading of these
       // pools newer than it is one the refusal never saw.
