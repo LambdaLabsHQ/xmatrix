@@ -74,7 +74,7 @@ export type FleetOverviewLine = {
  * machines it runs on, which opens what the Space has set on that agent.
  * Each machine and what runs on it is the list's to say, not repeated here.
  */
-export function FleetOverview({ status, runtimes, attention, loading, error, onRetry, onOpenHarness, empty, children }: {
+export function FleetOverview({ status, runtimes, attention, loading, error, onRetry, onOpenHarness, empty }: {
   status: FleetStatus;
   /** Each agent across the machines it runs on, read from the same rows the list shows. */
   runtimes: FleetRuntime[];
@@ -86,8 +86,6 @@ export function FleetOverview({ status, runtimes, attention, loading, error, onR
   onOpenHarness: (harness: string) => void;
   /** What the Space reads in place of its agents while it has none. */
   empty?: ReactNode;
-  /** What follows the agents: how another machine is added. */
-  children?: ReactNode;
 }) {
   const { online, busy, workingCount } = status;
   return (
@@ -156,8 +154,6 @@ export function FleetOverview({ status, runtimes, attention, loading, error, onR
             </ul>
           )}
         </ToolDetailSection>
-
-        {children}
       </div>
     </>
   );

@@ -256,8 +256,9 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
       : signedOut ? "Not signed in"
         : spaceSwitch && !on ? "Off in this Space"
         : agent ? agent.line
-          : spaceSwitches.owner && spaceSwitches.ready && !spaceSwitch ? "Waiting for the Space to accept it" : "Installed";
-  const attention = Boolean(tooOld) || signedOut || (installed && Boolean(spaceSwitch?.on) && agent?.state === "attention");
+          // The Space asked for it and its owner has not answered: that answer is not this switch.
+          : spaceSwitches.owner && spaceSwitches.ready && !spaceSwitch ? "Sharing request pending" : "Installed";
+  const attention = Boolean(tooOld) || signedOut || (installed && (spaceSwitch ? Boolean(on) : true) && agent?.state === "attention");
   const name = <span className="truncate font-semibold">{preset.displayName}</span>;
   return <li data-testid="harness-row" data-harness={preset.id} className="py-2.5 text-sm">
     <div className="flex min-w-0 items-center gap-3">
