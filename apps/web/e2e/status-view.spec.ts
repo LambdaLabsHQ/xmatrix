@@ -140,7 +140,7 @@ test("on a desktop Agents is a matrix of machines and agents, which says each of
   // The matrix is the list: no column of machines stands beside it, and the conversation list gives way to it.
   await expect(page.locator(".app-sidebar")).toBeHidden();
   await expect(page.getByRole("navigation", { name: "Agents list" })).toHaveCount(0);
-  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "System Overview" })).toBeVisible();
   await expect(page.getByTestId("status-working")).toHaveText("11");
   await expect(page.getByTestId("status-summary")).toHaveText("on 2 machines");
 
