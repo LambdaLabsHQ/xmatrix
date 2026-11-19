@@ -164,15 +164,15 @@ test("full-panel desktop matrix uses panel width, aligns its left axis, and keep
   const machines = [
     { id: "d1", machineId: "m:laptop", name: "Laptop", platform: "darwin", online: true, diskFree: 7,
       installed: ["codex", "grok", "antigravity", "cursor", "opencode", "claude", "deepseek", "kimi", "auggie", "copilot", "gemini"] },
-    { id: "d2", machineId: "m:builder", name: "Mac Builder Shanghai", platform: "darwin", online: true, diskFree: 40,
+    { id: "d2", machineId: "m:builder", name: "Build Mac Studio", platform: "darwin", online: true, diskFree: 40,
       installed: ["codex", "grok"] },
-    { id: "d3", machineId: "m:srv1", name: "srv2006562", platform: "linux", online: true, diskFree: 2,
+    { id: "d3", machineId: "m:srv1", name: "worker-alpha", platform: "linux", online: true, diskFree: 2,
       installed: ["codex", "antigravity", "claude", "kimi"] },
-    { id: "d4", machineId: "m:srv2", name: "srv2018194", platform: "linux", online: true, diskFree: 15,
+    { id: "d4", machineId: "m:srv2", name: "worker-beta", platform: "linux", online: true, diskFree: 15,
       installed: ["codex", "antigravity", "claude"] },
     { id: "d5", machineId: "m:workstation", name: "Workstation", platform: "win32", online: true, diskFree: 30,
       installed: ["codex", "grok", "cursor", "opencode", "kimi", "gemini"] },
-    { id: "d6", machineId: "m:bot", name: "Grok Bot Machine", platform: "linux", online: false, diskFree: 50,
+    { id: "d6", machineId: "m:bot", name: "Bot Runner", platform: "linux", online: false, diskFree: 50,
       installed: ["codex", "grok", "cursor", "opencode"] },
   ];
   const daemons = machines.map((m) => ({
@@ -193,7 +193,7 @@ test("full-panel desktop matrix uses panel width, aligns its left axis, and keep
   }));
   const reg = (machine: (typeof machines)[number], harness: string, extra: Record<string, unknown> = {}) => ({
     key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: machine.machineId, harness },
-    displayName: harness, ownerName: "Daniel", machineName: machine.name, version: 1, state: "enabled",
+    displayName: harness, ownerName: "E2E Tester", machineName: machine.name, version: 1, state: "enabled",
     models: [], routingReady: true, canManageOwnerGrant: true, canConfigureSpace: true, canRemoveFromSpace: true,
     live: {
       machine: { online: machine.online, lastSeenAt: recent, platform: machine.platform },
