@@ -320,6 +320,11 @@ export async function installWorkspaceStubs(
       return { harness, models: [...new Set(locations.flatMap((location) => location.models))], locations };
     }),
   });
+  await fixtureJson(page, "registration-query", "**/api/xmatrix/spaces/*/agent-registrations/query", {
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "machine-default", harness: "codex" },
+    displayName: "", version: 1, canManageOwnerGrant: false, canConfigureSpace: false, canRemoveFromSpace: false,
+    configuration: { workspaceReferences: [] },
+  }, { method: "POST" });
   await fixtureRule(page, {
     id: "launch-targets",
     pattern: "**/api/xmatrix/spaces/*/launch-targets**",

@@ -1235,7 +1235,7 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
 
   /* A Space admin configures and disables another member's agent in the Space; only its owner disables it everywhere. */
   await row("research-agent").tap();
-  await expect(detail.getByRole("button", { name: /^Configure/ })).toBeVisible();
+  await expect(detail.getByRole("region", { name: "Settings" }).getByLabel("Working mode")).toBeVisible();
   await expect(detail.getByRole("switch", { name: "Enabled: research-agent" })).toHaveAttribute("aria-checked", "true");
   await back();
 
