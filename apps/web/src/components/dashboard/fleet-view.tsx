@@ -486,7 +486,7 @@ export function FleetView({
       <ToolPaperScroll full>
         {setup ? (
           <div className="mx-auto max-w-3xl">
-            <h1 className="mb-6 text-2xl font-black tracking-[-0.02em] text-foreground">Agents</h1>
+            <h1 className="mb-6 text-2xl font-black tracking-[-0.02em] text-foreground">System Overview</h1>
             {bringIn}
           </div>
         ) : <>

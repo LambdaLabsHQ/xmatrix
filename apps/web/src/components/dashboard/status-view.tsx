@@ -72,7 +72,7 @@ export type FleetOverviewLine = {
  * matrix on a desktop, the agents across their machines above the list on a
  * phone.
  */
-export function FleetOverview({ title = "Agents", status, attention, note, children }: {
+export function FleetOverview({ title = "System Overview", status, attention, note, children }: {
   title?: string;
   status: FleetStatus;
   /** Said after the count's own line: what waits on a person, where no list of it follows. */
