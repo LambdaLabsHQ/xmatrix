@@ -160,4 +160,12 @@ test("a repo Instance is reborn or handed off whatever its Space's GitHub connec
   }
 });
 
+test("a billing refusal usage limit records a long-lived billing hold", async () => {
+  const { repo, calls } = repository();
+  const res = await repo.holdUsageLimit({ ...input, resetsAt: undefined, billingRefusal: true });
+  assert.equal(res.usedUp, "account");
+  assert.equal(calls.limits.length, 2);
+  assert.deepEqual(calls.limits[1], ["owner", "registration:m1:claude"]);
+});
+
 function calls({ calls: recorded }) { return recorded.handoffs; }

@@ -10,6 +10,7 @@ const {
   agentTurnFailureNoticeBody,
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
+  isAccountBillingRefusalError,
   isAgentTurnFailureLifecycle,
   isAgentUsageLimitLifecycle,
 } = await loadTypescriptModule(new URL("../src/authority-foundation.ts", import.meta.url));
@@ -141,4 +142,19 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     undefined,
   ]) assert.equal(agentUsageLimitFromError(error), undefined, String(error));
   assert.deepEqual(agentUsageLimitFromError("Claude AI usage limit reached|1790000000"), { resetsAt: "2026-09-21T14:13:20Z" });
+  for (const error of [
+    "Cursor refused the turn for its account: Add a payment method to continue",
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: Insufficient Balance (request_id: 92cd1934)",
+    "402 Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+    "Your credit balance is too low to access the Anthropic API.",
+    "账户余额不足，请充值后重试",
+  ]) assert.equal(isAccountBillingRefusalError(error), true, error);
+  for (const error of [
+    "You've hit your usage limit. Upgrade to Pro or try again at 3:04 PM.",
+    "You've hit your limit · resets 7pm (America/Los_Angeles)",
+    "Claude AI usage limit reached|1790000000",
+    "Overloaded",
+    "",
+    undefined,
+  ]) assert.equal(isAccountBillingRefusalError(error), false, String(error));
 });

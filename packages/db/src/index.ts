@@ -228,7 +228,8 @@ export { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationC
 export { PostgresFirstMessageLaunchChoiceRepository, readFirstMessageLaunchChoices, readDueFirstMessageSummons,
   FIRST_MESSAGE_SUMMON_PENDING_SQL, FIRST_MESSAGE_SUMMON_DUE_AT_SQL, type PendingFirstMessageSummon,
   type FirstMessageLaunchChooser } from "./first-message-launch-choice.js";
-export { ACCOUNT_QUOTA_SCOPE, readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
+export { ACCOUNT_QUOTA_SCOPE, clearRegistrationAccountHold, isRegistrationBillingRefusalRow,
+  readRegistrationQuotaProbeTargets, registrationQuotaProbeTargets, REGISTRATION_QUOTA_PROBE_TARGET_PREFIX,
   UNRESOLVED_QUOTA_SCOPE, type RegistrationQuotaUsage, type RegistrationUsageLimit,
   type RegistrationQuotaProbeTarget } from "./agent-registration-quota-probe.js";
 

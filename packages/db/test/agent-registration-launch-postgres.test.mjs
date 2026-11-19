@@ -7,6 +7,7 @@ import { PostgresRegistrationLaunchRepository, reconcileRegistrationPreparationC
 import { PostgresRegistrationAccessRepository } from "../dist/agent-registration-access.js";
 import { PostgresRegistrationExecutionRepository } from "../dist/agent-registration-execution.js";
 import { PostgresAgentEnvironmentRepository } from "../dist/agent-registration-environment.js";
+import { clearRegistrationAccountHold } from "../dist/agent-registration-quota-probe.js";
 import { cleanLifecycleData, launchRequestDigest } from "../scripts/agent-lifecycle-cleanup.mjs";
 import { RegistrationAccessError } from "../dist/agent-registration-errors.js";
 import { DatabaseCommitUnknownError } from "../dist/errors.js";
@@ -1360,6 +1361,48 @@ integration("launch survives a hostname change with stale Workspace metadata and
       assert.equal(refusal.prepared.length, 0);
       assert.equal(refusal.rejected.length, 1);
     }
+
+    // Unnamed @auto tracks signed-out / uninstalled / billing-refusal state and recovers
+    // when signed in or on a direct successful reply, while named summons still pass.
+    await sql(`UPDATE data.machine_daemons SET metadata_json=jsonb_build_object('harnesses', jsonb_build_object(
+      'schemaVersion', 1, 'capturedAt', to_char(statement_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+      'items', jsonb_build_array(jsonb_build_object('id', 'codex', 'installed', true, 'probeStatus', 'ok', 'version', '1.0.0', 'login', 'signed_out'))))`);
+    const signedOutCandidates = (await launches.candidatesFor({ managedWorkspace: true, checkoutAtRun: true })).offered;
+    assert.equal(signedOutCandidates.find(c => c.key.harness === 'codex')?.signedOut, true);
+    let sawAutoFlag;
+    await launches.dispatchFromMessage(await managedMessage('auto-signed-out-flag', '@auto', { kind: 'auto' }),
+      async ({ candidates, automaticHarness }) => {
+        sawAutoFlag = automaticHarness;
+        const c = candidates.find(candidate => candidate.key.harness === 'codex');
+        return { key: c.key, model: '', useRuntimeDefaultModel: true };
+      });
+    assert.equal(sawAutoFlag, true);
+    // Recover via newer signed_in inventory.
+    await sql(`UPDATE data.machine_daemons SET metadata_json=jsonb_build_object('harnesses', jsonb_build_object(
+      'schemaVersion', 1, 'capturedAt', to_char((statement_timestamp()+interval '10 seconds') AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+      'items', jsonb_build_array(jsonb_build_object('id', 'codex', 'installed', true, 'probeStatus', 'ok', 'version', '1.0.0', 'login', 'signed_in'))))`);
+    const recoveredCandidates = (await launches.candidatesFor({ managedWorkspace: true, checkoutAtRun: true })).offered;
+    assert.equal(recoveredCandidates.find(c => c.key.harness === 'codex')?.signedOut, undefined);
+    // Account billing refusal persists past 1h and clears via clearRegistrationAccountHold.
+    await reborn.holdUsageLimit({ commandId: 'billing-hold-1', actorUserId: key.ownerUserId, channelId: 'channel',
+      sourceInstanceId: managedLaunches[0].instanceId, billingRefusal: true });
+    const billingHeld = (await launches.candidatesFor({ managedWorkspace: true, checkoutAtRun: true })).offered
+      .find(c => c.key.harness === 'codex');
+    assert.equal(billingHeld?.accountBillingRefusal, true);
+    const cleared = await clearRegistrationAccountHold(database, { requestId: 'clear-hold-1',
+      ownerUserId: key.ownerUserId, machineId: key.machineId, harness: 'codex' });
+    assert.equal(cleared, true);
+    const billingCleared = (await launches.candidatesFor({ managedWorkspace: true, checkoutAtRun: true })).offered
+      .find(c => c.key.harness === 'codex');
+    assert.equal(billingCleared?.accountBillingRefusal, undefined);
+    // Also verify turnSignedOutAt on data.runs marks signedOut for unnamed @auto and recovers on reply/clear.
+    await sql(`UPDATE data.runs SET metadata_json=COALESCE(metadata_json,'{}'::jsonb)||jsonb_build_object('turnSignedOutAt',$2::text) WHERE run_id=$1`,
+      [managedLaunches[0].runId, new Date(Date.now() + 20_000).toISOString()]);
+    const turnSignedOutCandidate = (await launches.candidatesFor({ managedWorkspace: true, checkoutAtRun: true })).offered
+      .find(c => c.key.harness === 'codex');
+    assert.equal(turnSignedOutCandidate?.signedOut, true);
+    await sql(`UPDATE data.runs SET metadata_json=metadata_json-'turnSignedOutAt' WHERE run_id=$1`, [managedLaunches[0].runId]);
+    await sql(`UPDATE data.machine_daemons SET metadata_json=metadata_json-'harnesses'`);
 
     // 2026-10-24: a message could not wake an interrupted Instance because its
     // machine was offline, and nobody saw why. The refusal stays a rest, with

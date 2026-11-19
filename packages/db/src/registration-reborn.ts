@@ -3,7 +3,7 @@ import { assertQuotaRetryAdmission } from "./agent-quota-retry.js";
 import type { AgentQuotaRetryAdmission } from "@xmatrix/protocol";
 import { RegistrationPreparationAuthority } from "./registration-preparation-authority.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
-import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseRegistrationResourceLimits,
+import { canonicalRegistrationHarness, currentRoutingQuotaWindows, machineMentionValue, digestCanonicalCloneCborV1, parseAgentRegistrationEnvironment, parseHarnessInventory, parseRegistrationResourceLimits,
   parseSpaceAgentConfiguration, registrationLaunchBindingForDaemon, routingModelCatalogObservation, routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace, TERMINAL_RUN_STATUS_SQL, type RegistrationLaunchBinding, type RoutingModelOption, type RegistrationResourceLimits,
   type SpaceAgentRegistrationKey, type AgentInstanceOfflineReason, hasControlCharacter,
 } from "@xmatrix/protocol";
@@ -22,7 +22,7 @@ import { prepareReborn, prepareHandoff, advanceReborn } from "./runtime-reborn.j
 import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { handoffResumeSource } from "./handoff-resume-source.js";
-import { currentRegistrationQuotaJoin, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
+import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
   registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage, registrationQuotaVerdict,
   type RegistrationUsageLimit } from "./agent-registration-quota-probe.js";
 
@@ -790,7 +790,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * off, anything narrower waits for a quota retry. Only the Instance's owner,
    * acting through that Instance's own Run, gets here. */
   async holdUsageLimit(raw: { commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string;
-    resetsAt?: string; quotaScope?: string; usage?: unknown }): Promise<RegistrationUsageLimit | undefined> {
+    resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean }): Promise<RegistrationUsageLimit | undefined> {
     const input = continuationInput({ ...raw, sourceMessageId: raw.commandId, prompt: "" });
     const located = await this.locate(input, "handoff");
     if (located.key.ownerUserId !== input.actorUserId) throw new RegistrationAccessError("forbidden", 403);
@@ -798,7 +798,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       operation: "registration.usage-limit.record" }, tx => recordRegistrationUsageLimit(tx, {
       ownerUserId: located.key.ownerUserId, machineId: located.key.machineId, harness: located.key.harness,
       ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(raw.quotaScope ? { quotaScope: raw.quotaScope } : {}),
-      ...(raw.usage !== undefined ? { usage: raw.usage } : {}) }));
+      ...(raw.usage !== undefined ? { usage: raw.usage } : {}),
+      ...(raw.billingRefusal ? { billingRefusal: true } : {}) }));
   }
 
   /** `handoff:@auto`: hand the retained directory to the first other harness
@@ -864,19 +865,26 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
     if (!harnesses.length) return [];
     const facts = await this.directory.transaction({ requestId: `${input.commandId}:successor-quota`,
       operation: "registration.usage-limit.successor-quota" }, tx => tx.query({
-      name: "registration_usage_limit_successor_quota_v3", text: `SELECT e.harness,e.declaration_json,
+      name: "registration_usage_limit_successor_quota_v4", text: `SELECT e.harness,e.declaration_json,
         statement_timestamp() AS evaluated_at,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         (SELECT ${REGISTRATION_QUOTA_POOL_SQL} FROM control.agent_registration_environments e
           WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$4) AS source_pool_id,
+        (SELECT daemon.metadata_json FROM data.machine_daemons daemon
+          WHERE daemon.owner_user_id=$1 AND daemon.machine_id=$2 AND daemon.status='online'
+          ORDER BY daemon.connected_at DESC NULLS LAST, daemon.hostname LIMIT 1) AS daemon_metadata_json,
         ${registrationQuotaColumns("q")}
         FROM control.agent_registration_environments e ${currentRegistrationQuotaJoin("q")}
         WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=ANY($3::text[])`,
       values: [key.ownerUserId, key.machineId, harnesses, key.harness], maxRows: USAGE_LIMIT_SUCCESSOR_CANDIDATES }));
+    const harnessInventory = parseHarnessInventory(object(facts[0]?.daemon_metadata_json).harnesses);
     return autoHandoffSuccessorOrder(facts.flatMap(row => {
       let environment;
       try { environment = parseAgentRegistrationEnvironment(row.declaration_json); } catch { return []; }
       const evaluatedAt = new Date(row.evaluated_at as string).getTime();
       if (!environment.enabled || environment.availableUntil && Date.parse(environment.availableUntil) <= evaluatedAt) return [];
+      const harnessStatus = harnessInventory?.items.find(item => item.id === String(row.harness));
+      if (harnessStatus?.installed === false || harnessStatus?.login === "signed_out") return [];
+      if (isRegistrationBillingRefusalRow(row, evaluatedAt)) return [];
       const reading = registrationQuotaReading(row);
       return [{ harness: String(row.harness), sharesSourcePool: row.quota_pool_id === row.source_pool_id,
         ...(reading ? { quotaPace: routingQuotaPace({ remainingPercent: reading.remainingPercent,

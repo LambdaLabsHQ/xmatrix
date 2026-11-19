@@ -6,6 +6,7 @@ import { currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAc
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
+import { storedObject } from "./stored-values.js";
 
 /** A registration target on the machine quota probe wire. Owner and machine are
  * the daemon route the probe is issued to; only the harness travels. */
@@ -35,6 +36,15 @@ export function currentRegistrationQuotaJoin(alias: string): string {
 export function registrationQuotaColumns(alias: string): string {
   return ["source", "remaining", "observed_at", "expires_at", "windows_json", "account_json", "scoped_windows_json",
     "scoped_observed_at", "scoped_expires_at"].map(column => `${alias}.${column}`).join(",");
+}
+
+/** Whether a quota observation row holds an unresolved account billing/payment
+ * refusal recorded by the daemon (`add a payment method`, `Insufficient Balance`). */
+export function isRegistrationBillingRefusalRow(row: Record<string, unknown> | undefined, now = Date.now()): boolean {
+  if (!row || row.source !== "daemon") return false;
+  const expires = time(row.expires_at);
+  if (!Number.isFinite(expires) || expires <= now) return false;
+  return storedObject(row.account_json).billingRefusal === true;
 }
 
 /** A stored pool reading in usage form: account windows and the scoped
@@ -288,9 +298,12 @@ const setWhen = (condition: string, columns: readonly string[], values: Record<s
     ELSE o.${column} END`).join(",");
 /** The account part of a stored reading is replaced by a newer reading, but a
  * windowless usage-limit hold only by a reading that explains it ($11: one of
- * its windows resets when the hold ends) or once it ends. */
+ * its windows resets when the hold ends) or once it ends. An account-level
+ * billing refusal hold is never cleared by periodic probes; only a direct
+ * successful reply clears it. */
 const ACCOUNT_PART_NEWER = `EXCLUDED.observed_at>=o.observed_at AND (o.source<>'daemon'
-  OR o.expires_at<=statement_timestamp() OR $11::boolean)`;
+  OR o.expires_at<=statement_timestamp()
+  OR ($11::boolean AND NOT COALESCE((o.account_json->>'billingRefusal')::boolean,FALSE)))`;
 /** The scoped part only by a newer complete reading. */
 const SCOPED_PART_NEWER = `EXCLUDED.scoped_observed_at>=COALESCE(o.scoped_observed_at,'-infinity'::timestamptz)`;
 
@@ -339,9 +352,10 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
   let record = input.record;
   let explainsHold = false;
   if (record.scoped) {
-    const [hold] = await tx.query<QueryResultRow>({ name: "registration_quota_hold_v1", text: `SELECT
+    const [hold] = await tx.query<QueryResultRow>({ name: "registration_quota_hold_v2", text: `SELECT
         to_json(expires_at)#>>'{}' AS held_until FROM control.registration_quota_observations
       WHERE owner_user_id=$1 AND quota_pool_id=$2 AND source='daemon' AND expires_at>statement_timestamp()
+        AND NOT COALESCE((account_json->>'billingRefusal')::boolean,FALSE)
         AND observed_at<=$3::timestamptz FOR UPDATE`,
     values: [input.ownerUserId, input.quotaPoolId, record.observedAt], maxRows: 1 });
     const narrowed = hold ? quotaRecordUsedUp(record, Date.parse(String(hold.held_until)), undefined, Date.now()) : undefined;
@@ -441,6 +455,7 @@ export async function recordRegistrationQuotaProbeResult(tx: DatabaseTransaction
 const REGISTRATION_USAGE_LIMIT_DEFAULT_HOLD = "1 hour";
 const REGISTRATION_USAGE_LIMIT_MIN_HOLD = "5 minutes";
 const REGISTRATION_USAGE_LIMIT_MAX_HOLD = "7 days";
+const REGISTRATION_BILLING_REFUSAL_HOLD = "365 days";
 
 /** What a recorded usage limit used up: the account (every model of the
  * pool), one scope (the models whose catalog row lists it), or something no
@@ -468,6 +483,7 @@ export type RegistrationUsageLimit = { quotaPoolId: string; limitedUntil?: strin
  */
 export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, input: {
   ownerUserId: string; machineId: string; harness: string; resetsAt?: string; quotaScope?: string; usage?: unknown;
+  billingRefusal?: boolean;
 }): Promise<RegistrationUsageLimit | undefined> {
   const now = Date.now();
   const reset = input.resetsAt ? Date.parse(input.resetsAt) : NaN;
@@ -477,6 +493,23 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
   values: [input.ownerUserId, input.machineId, input.harness], maxRows: 1 });
   if (!pool) return undefined;
   const quotaPoolId = String(pool.quota_pool_id);
+  if (input.billingRefusal) {
+    // Account-level billing/payment refusals have no reset timer and do not return to @auto
+    // until a direct Run succeeds on this registration.
+    const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_billing_v1", text: `INSERT INTO
+        control.registration_quota_observations AS o (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,
+          windows_json,account_json,scoped_windows_json,scoped_observed_at,scoped_expires_at)
+        SELECT $1,$2,0,statement_timestamp(),statement_timestamp()+interval '${REGISTRATION_BILLING_REFUSAL_HOLD}',
+          'daemon',NULL,'{"billingRefusal":true}'::jsonb,NULL,NULL,NULL
+      ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET remaining=EXCLUDED.remaining,observed_at=EXCLUDED.observed_at,
+        expires_at=EXCLUDED.expires_at,source=EXCLUDED.source,windows_json=NULL,account_json=EXCLUDED.account_json,
+        scoped_windows_json=NULL,scoped_observed_at=NULL,scoped_expires_at=NULL
+        WHERE EXCLUDED.observed_at>=o.observed_at
+      RETURNING to_json(expires_at)#>>'{}' AS expires_at`,
+    values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
+    const limitedUntil = rows[0] ? new Date(String(rows[0].expires_at)).toISOString() : undefined;
+    return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}), usedUp: "account" };
+  }
   const record = input.usage === undefined ? undefined : routingQuotaRecord(input.usage, now);
   const scope = input.quotaScope?.trim();
   const usedUp = scope && scope !== UNRESOLVED_QUOTA_SCOPE && record?.scoped && Number.isFinite(reset)
@@ -506,4 +539,23 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
   // A daemon that predates scopes reports the account used up, as before.
   return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}),
     usedUp: scope === undefined || scope === "" || scope === ACCOUNT_QUOTA_SCOPE ? "account" : "unresolved" };
+}
+
+/** Clear an active billing-refusal hold when a direct Run on this registration replies successfully. */
+export async function clearRegistrationAccountHold(directory: AuthorityDatabase, input: {
+  requestId: string; ownerUserId: string; machineId: string; harness: string;
+}): Promise<boolean> {
+  return directory.transaction({ requestId: input.requestId, operation: "registration.account-hold.clear" }, async tx => {
+    const rows = await tx.query<QueryResultRow>({ name: "registration_account_hold_clear_v1", text: `DELETE FROM
+        control.registration_quota_observations o
+      USING control.agent_registration_environments e
+      WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3
+        AND o.owner_user_id=e.owner_user_id
+        AND o.quota_pool_id=${REGISTRATION_QUOTA_POOL_SQL}
+        AND o.source='daemon'
+        AND COALESCE((o.account_json->>'billingRefusal')::boolean,FALSE)
+      RETURNING o.quota_pool_id`,
+    values: [input.ownerUserId, input.machineId, input.harness], maxRows: 1 });
+    return Boolean(rows[0]);
+  });
 }

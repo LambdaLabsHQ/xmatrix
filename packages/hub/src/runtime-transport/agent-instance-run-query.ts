@@ -10,7 +10,7 @@ export interface AgentInstanceRuntime {
   /** Records what the Instance's refused turn used up of its provider quota,
    * with the reading the daemon told it from. */
   holdUsageLimit(input: { commandId: string; actorUserId: string; channelId: string;
-    sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown }): Promise<RegistrationUsageLimit | undefined>;
+    sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean }): Promise<RegistrationUsageLimit | undefined>;
   /** Records whether the Run rests, which starts or withdraws its idle sleep (instance-idle-sleep.ts). */
   markResting?(input: { runId: string; channelId: string; ownerUserId: string; resting: boolean }): Promise<unknown>;
 }

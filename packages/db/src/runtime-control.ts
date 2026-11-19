@@ -1526,6 +1526,48 @@ export class PostgresRuntimeRepository {
     });
   }
 
+  /** Record that a connected Run refused a turn as signed out (`turnSignedOutAt`),
+   * without touching `signedOutAt` or blocking explicit summons to that harness. */
+  async recordRunSignedOutTurn(input: { requestId: string; runId: string; actorUserId: string; at: string }): Promise<boolean> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const runId = text(input.runId, "runId", 300);
+    const at = text(input.at, "at", 100);
+    const route = await this.entityDirectory.resolve(
+      { requestId, operation: "runtime.run-signed-out-turn.locate" }, "run", runId,
+    );
+    if (!route) return false;
+    const placement = await this.spaces.resolve(requestId, "runtime.run-signed-out-turn.placement", route.spaceId);
+    const rows = await this.spaces.transaction(requestId, "runtime.run-signed-out-turn", placement, tx => tx.query<QueryResultRow>({
+      name: "runtime_run_signed_out_turn_v1", text: `UPDATE data.runs
+        SET metadata_json=CASE
+          WHEN pg_input_is_valid(metadata_json->>'turnSignedOutAt','timestamp with time zone')
+            AND (metadata_json->>'turnSignedOutAt')::timestamptz>=$3::timestamptz THEN metadata_json
+          ELSE COALESCE(metadata_json,'{}'::jsonb)||jsonb_build_object('turnSignedOutAt',$3::text) END,
+          updated_at=GREATEST(updated_at,$3::timestamptz),version=version+1
+        WHERE run_id=$1 AND owner_user_id=$2
+        RETURNING run_id`,
+      values: [runId, text(input.actorUserId, "actorUserId", 300), at], maxRows: 1 }));
+    return Boolean(rows[0]);
+  }
+
+  /** The registration bound to a Run, when one exists (for clearing account holds on first reply). */
+  async readRunRegistration(input: { requestId: string; channelId: string; runId: string }): Promise<{
+    ownerUserId: string; machineId: string; harness: string;
+  } | undefined> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const channelId = text(input.channelId, "channelId", 300);
+    const route = await this.channelDirectory.resolve(
+      { requestId, operation: "runtime.run-registration.locate" }, channelId);
+    if (!route) return undefined;
+    const placement = await this.spaces.resolve(requestId, "runtime.run-registration.placement", route.spaceId);
+    const rows = await this.spaces.transaction(requestId, "runtime.run-registration", placement, tx => tx.query<QueryResultRow>({
+      name: "runtime_run_registration_read_v1", text: `SELECT owner_user_id,machine_id,harness
+        FROM data.run_agent_registrations WHERE run_id=$1 LIMIT 1`,
+      values: [text(input.runId, "runId", 300)], maxRows: 1 }));
+    return rows[0] ? { ownerUserId: String(rows[0].owner_user_id), machineId: String(rows[0].machine_id),
+      harness: String(rows[0].harness) } : undefined;
+  }
+
   async getChannelAgentRebornTarget(input: { requestId: string; channelId: string;
     agentName: string; channelInstanceId: number; actorUserId: string }) {
     const requestId = text(input.requestId, "requestId", 200);

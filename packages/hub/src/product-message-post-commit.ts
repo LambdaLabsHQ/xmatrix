@@ -25,7 +25,7 @@ import type { Env } from "./types";
 import { relayCrossChannelReply, type CrossChannelReplyOrigin } from "./product-cross-channel-reply";
 import { recordAgentLaunchStage } from "./postgres-observability";
 import { dispatchRegistrationLaunchesAfterMessage, markFirstMessageSummoned, messageAskAction, wakeRestingInstances } from "./registration-launch-dispatch";
-import { runtimeRepository } from "./runtime";
+import { recordAgentLaunchFirstReply } from "./runtime";
 import { ControlError, lostBeforeCommit } from "@xmatrix/db";
 import { AgentLaunchHandoverUnavailable } from "./agent-launch-coordinator-wake";
 import { pageReferencesIn } from "@xmatrix/protocol";
@@ -374,7 +374,7 @@ export async function dispatchProductMessagePostCommit(
   }
   if (input.senderKind === "agent" && input.senderRunId) {
     const started = performance.now();
-    sideTasks.push(runtimeRepository(input.env).recordAgentLaunchFirstReply({ requestId: crypto.randomUUID(),
+    sideTasks.push(recordAgentLaunchFirstReply(input.env, { requestId: crypto.randomUUID(),
       channelId: input.channelId, runId: input.senderRunId, actorUserId: input.actorUserId,
       at: new Date().toISOString() }).then(async (result) => {
       if (result.recorded === true) recordAgentLaunchStage({ env: input.env, stage: "first_reply_append",

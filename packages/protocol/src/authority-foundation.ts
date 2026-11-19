@@ -911,15 +911,26 @@ export function isAgentUsageLimitLifecycle(message: {
  * "rate limit", "overloaded") is retried by the provider CLIs and is not a
  * usage limit.
  */
+const ACCOUNT_BILLING_REFUSAL_PHRASES = [
+  // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
+  // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
+  "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足",
+  // Cursor CLI's whole reply when its account has no payment method or credit left.
+  "add a payment method to continue",
+] as const;
+
+/** Whether a provider error refuses the whole account for billing/payment until
+ * fixed (no time-based reset). */
+export function isAccountBillingRefusalError(error: string | undefined | null): boolean {
+  const lower = (error ?? "").toLowerCase();
+  return ACCOUNT_BILLING_REFUSAL_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
 export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {
   const lower = (error ?? "").toLowerCase();
   const limited = ["usage limit", "usage_limit", "usagelimitexceeded", "hit your limit", "hit your session limit",
     "hit your weekly limit", "insufficient_quota", "exceeded your current quota", "quota exceeded",
-    // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
-    // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
-    "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足",
-    // Cursor CLI's whole reply when its account has no payment method or credit left.
-    "add a payment method to continue"]
+    ...ACCOUNT_BILLING_REFUSAL_PHRASES]
     .some((phrase) => lower.includes(phrase)) || (lower.includes("limit reached") && lower.includes("reset"));
   if (!limited) return undefined;
   // Claude Code's legacy result text `Claude AI usage limit reached|<unix seconds>`.
