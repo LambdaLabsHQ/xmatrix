@@ -397,7 +397,7 @@ function RegistrationSettingsForm({
   );
   return (
     <form
-      className="mt-3 grid gap-3 sm:grid-cols-3"
+      className="mt-3 grid items-start gap-3 sm:grid-cols-3"
       onSubmit={(event) => {
         event.preventDefault();
         if (!changed || busy || !value.displayName.trim()) return;
