@@ -368,6 +368,13 @@ fact is about.
   the caret's paragraph. Escape, or a click anywhere else, closes the box and the
   passage is no longer selected; a comment closed unsent comes back when the
   same passage is selected again.
+  - The box completes as a new conversation's composer does (decided by
+    Daniel 2026-11-19): `@` lists every Agent the Space can start, its
+    machines, and the launch conditions (`@machine:…`), `#` channels and
+    pages, `/` commands. An Agent picked there, `@auto`, or a condition summon
+    asks for a new Agent: the comment starts a new discussion of the passage,
+    its first message carrying the pick, rather than going to the Agent at
+    work on the page.
   - A comment continues the existing conversation about the passage when
     possible (decided by Daniel 2026-10-28). A live Instance it names
     (`@claude:2`, or `@claude` for the selected live Agent) takes it as the Agent

@@ -8,11 +8,9 @@ import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
-  isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
+  invocationSelectionsEnvelope, isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
   agentModelLabel,
-  digestCanonicalCloneCborV1,
-  parseAgentInvocationSelections,
   type AgentInvocationSelection,
 } from "@xmatrix/protocol";
 
@@ -938,11 +936,8 @@ export const Composer = memo(function Composer({
     let handedOver = false;
     try {
       const { body, selections } = sendDraft();
-      const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
-      const invocationSelections = sourceBodyHash ? parseAgentInvocationSelections({ schemaVersion: 1,
-        sourceRevision: 1, sourceBodyHash, selections }, {
-        spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
-      }) : undefined;
+      const invocationSelections = await invocationSelectionsEnvelope(body, selections,
+        space?.id ?? channel?.spaceId ?? "");
       if (invocationScopeRef.current !== sendScope) {
         // The composer moved to another conversation, which ends its uploads.
         for (const upload of uploads) {

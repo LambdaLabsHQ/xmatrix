@@ -30,7 +30,7 @@ import { programsKey } from "./page-program-chips";
 import type { ReadGitHubFile } from "./page-github-file-embeds";
 import type { LocalMedia, PageMediaUrl, UploadPageMedia } from "./page-media";
 import { referencesKey, type PageReferenceTargets } from "./page-reference-chips";
-import { PageCommentBox } from "./page-comment-box";
+import { PageCommentBox, type PageCommentComposerContext, type PageCommentText } from "./page-comment-box";
 import type { MarginAgent } from "./page-margin-model";
 import { PageBlameLayer, PageByline, type PageBlameSource } from "./page-blame";
 import { SectionAgentsInPage } from "./page-section-agents";
@@ -73,9 +73,11 @@ export interface PageSectionActions {
    * A comment on a passage (§4.2): a discussion of the passage whose first message is the comment, which an
    * Agent takes and answers there and in the page.
    */
-  comment?: (blockId: string, anchor: PassageAnchor, text: string) => void;
+  comment?: (blockId: string, anchor: PassageAnchor, comment: PageCommentText) => void;
   /** The Agent at work on the page that takes a comment on the block, shown under the box. */
   commentTaker?: (blockId: string) => MarginAgent | undefined;
+  /** What the comment box completes from, as a conversation's composer does. */
+  commentComposer?: PageCommentComposerContext;
 }
 
 type PassageAnchor = { quote: string; from: unknown; to: unknown };
@@ -880,10 +882,11 @@ export function PageEditor({ session, canEdit, onBlockChange, onBlocks, actions,
         <div className={commentInMargin ? "absolute z-30 w-80" : "absolute z-30 w-[28rem] max-w-full"}
           style={{ left: commentInMargin ? "calc(100% + 1.5rem)" : commentDraft.left, top: commentDraft.top }}>
           <PageCommentBox text={commentDraft.text} taker={actions?.commentTaker?.(commentDraft.blockId)}
+            context={actions?.commentComposer}
             onText={(text) => setCommentDraft({ ...commentDraft, text })}
             onClose={(away) => closeComment({ away })}
-            onSend={(text) => {
-              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, text);
+            onSend={(comment) => {
+              actions?.comment?.(commentDraft.blockId, commentDraft.anchor, comment);
               closeComment({ collapse: true });
             }} />
         </div>

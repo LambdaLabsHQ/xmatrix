@@ -1402,6 +1402,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
       members={currentSpace?.members}
+      commentComposer={{ space: currentSpace, token: token ?? null, workspaces: projects,
+        localContext: localMentionContext, onOpenAppsForSpace: openAppsForSpace,
+        onEditHarnessProfile: openHarnessProfile }}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} onSend={sendInConversation} focusSection={pageSectionRequest}
       onReturnToMessage={(from) => navigateToChannel(from.channelId, from.messageId)}
       activeConversationId={selectedPageId ? selectedChannelId : null}
@@ -1412,10 +1415,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation} onResolveConversation={readPageConversation}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, firstSelections, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
-          ...(sent ? { sent } : {}), ...(existing ? { existing } : {}) })}
+          ...(sent ? { sent } : {}), ...(existing ? { existing } : {}),
+          ...(firstSelections ? { firstSelections } : {}) })}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );

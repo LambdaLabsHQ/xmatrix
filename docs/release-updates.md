@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: a page comment's @ lists every Agent the Space can start
+
+The comment box on a selected passage used the conversation composer but was
+given no Space, so `@` offered nothing and a new Agent had to be typed out by
+name. It now gets the same context as a new conversation's composer: `@`
+lists every Agent and machine the Space can start and the launch conditions,
+`#` channels and pages. A picked Agent, `@auto` or `@machine:…` starts a new
+discussion of the passage, its first message carrying the pick, instead of
+going to the Agent already at work on the page. Web only. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: Agents no longer report a plan; conversations show talk and pull requests
 
 Grok and Codex Runs showed their runtime's plan (completed steps, the step in

@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { appViewSelectionQuery, discussionHead, isAppSelectionView, presenceInstanceId } from "@xmatrix/protocol";
 
 import { pageShellActions } from "./page-shell-actions";
+import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
@@ -75,6 +76,7 @@ import {
 import { APP_CONNECTORS } from "@/lib/app-connectors";
 import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness, parseHandoffInstanceTarget, type AgentRegistrationDetails } from "@xmatrix/protocol";
 import type {
+  AgentInvocationSelection,
   ChannelMessage,
   SerializedAgentInstance,
   ChannelSnapshot,
@@ -1483,8 +1485,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   /** A message sent as the composer sends it: shown at once, and kept to send again if it fails. */
-  const sendInConversation = (channel: ChannelSnapshot, body: string) => deliverOutgoingMessage(channel,
-    { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS) });
+  const sendInConversation = async (channel: ChannelSnapshot, body: string,
+    selections: AgentInvocationSelection[] = []) => {
+    const invocationSelections = await invocationSelectionsEnvelope(body, selections, channel.spaceId);
+    return deliverOutgoingMessage(channel, { body, attachments: [], appMentions: parseAppMentions(body, APP_CONNECTORS),
+      ...(invocationSelections ? { invocationSelections } : {}) });
+  };
 
   const { openPage, closePage, internalPageLink, startPageConversation, openPageConversation,
     closePageConversation } = pageShellActions({
