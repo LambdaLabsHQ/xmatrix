@@ -203,15 +203,16 @@ Built:
 
 1. Protocol field, Hub cleaning, Web dots and the Now line's wait phrase
    (#3599).
-2. Runtimes report waits: Claude Code (tool calls, background tasks) and
-   Codex (command executions, web searches, MCP tool calls); `xmatrix list`
-   shows `waiting` and its JSON carries the wait. The threshold lives in
+2. Runtimes report waits: Claude Code (tool calls, background tasks),
+   Codex (command executions, web searches, MCP tool calls), and ACP
+   runtimes (in-turn tool calls and parked questions/permissions, plus
+   Antigravity's cross-turn background `run_command`/`schedule`/`run_workflow`
+   tasks and reactive wakeups); `xmatrix list` shows `waiting` and its JSON
+   carries the wait. The threshold lives in
    `packages/cli-rs/crates/runtime/src/runtime_waiting.rs`.
 
 Open:
 
-- ACP runtimes (tool calls in progress). Until then their Instances show
-  working or free, never waiting.
 - A "needs you" mark for an Agent blocked on a person (an approval, a
   question), drawn as a badge rather than a colour.
 

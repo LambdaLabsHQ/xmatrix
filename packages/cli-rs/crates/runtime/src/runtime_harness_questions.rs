@@ -213,50 +213,84 @@ fn questionnaire_reply_in(
 /// The harness requests a runtime has parked until their person answers, by
 /// request key, each with the card that shows it. Shared between the reader
 /// that receives them and the turn loop that receives the answers.
-pub(crate) struct PendingQuestions<T>(Arc<Mutex<HashMap<String, (T, QuestionCard)>>>);
+pub(crate) struct PendingQuestions<T> {
+    parked: Arc<Mutex<HashMap<String, (T, QuestionCard)>>>,
+    changed: Arc<tokio::sync::Notify>,
+}
 
 impl<T> Clone for PendingQuestions<T> {
     fn clone(&self) -> Self {
-        Self(self.0.clone())
+        Self {
+            parked: self.parked.clone(),
+            changed: self.changed.clone(),
+        }
     }
 }
 
 impl<T> Default for PendingQuestions<T> {
     fn default() -> Self {
-        Self(Arc::default())
+        Self {
+            parked: Arc::default(),
+            changed: Arc::new(tokio::sync::Notify::new()),
+        }
     }
 }
 
 impl<T> PendingQuestions<T> {
     pub(crate) fn park(&self, key: String, native: T, card: QuestionCard) {
-        self.0
+        self.parked
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .insert(key, (native, card));
+        self.changed.notify_waiters();
     }
 
     /// The request a card answer settles. Hub recorded the answer on the card.
     pub(crate) fn take(&self, key: &str) -> Option<T> {
-        self.0
+        let taken = self
+            .parked
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .remove(key)
-            .map(|(native, _)| native)
+            .map(|(native, _)| native);
+        if taken.is_some() {
+            self.changed.notify_waiters();
+        }
+        taken
     }
 
     pub(crate) fn any(&self) -> bool {
-        !self.0.lock().unwrap_or_else(|p| p.into_inner()).is_empty()
+        !self
+            .parked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_empty()
+    }
+
+    pub(crate) fn contains(&self, key: &str) -> bool {
+        self.parked
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .contains_key(key)
+    }
+
+    /// Resolves when a parked request is added, answered, or withdrawn.
+    pub(crate) async fn changed(&self) {
+        self.changed.notified().await;
     }
 
     /// Every parked request, for cancelling them all; their cards are withdrawn.
     pub(crate) fn drain(&self) -> Vec<T> {
         let drained: Vec<_> = self
-            .0
+            .parked
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .drain()
             .map(|(_, parked)| parked)
             .collect();
+        if !drained.is_empty() {
+            self.changed.notify_waiters();
+        }
         drained
             .into_iter()
             .map(|(native, card)| {
@@ -270,7 +304,7 @@ impl<T> PendingQuestions<T> {
     /// withdrew them itself, so their cards are withdrawn too.
     pub(crate) fn forget(&self, matches: impl Fn(&T) -> bool) {
         let forgotten: Vec<_> = {
-            let mut parked = self.0.lock().unwrap_or_else(|p| p.into_inner());
+            let mut parked = self.parked.lock().unwrap_or_else(|p| p.into_inner());
             let keys: Vec<String> = parked
                 .iter()
                 .filter(|(_, (native, _))| matches(native))
@@ -280,6 +314,9 @@ impl<T> PendingQuestions<T> {
                 .filter_map(|key| parked.remove(&key))
                 .collect()
         };
+        if !forgotten.is_empty() {
+            self.changed.notify_waiters();
+        }
         for (_, card) in forgotten {
             card.withdraw();
         }

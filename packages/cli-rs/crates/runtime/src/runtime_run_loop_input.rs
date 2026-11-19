@@ -49,6 +49,16 @@ pub(crate) trait ChannelControlledRuntime {
     fn pending_parameter_selection(&self, _id: &str) -> Option<String> {
         None
     }
+
+    /// Wait for runtime-originated background activity (such as an ACP
+    /// background task completing between channel turns). Must be cancellation
+    /// safe so `next_input` can race it against incoming channel events.
+    async fn next_background_ready(&mut self) -> bool {
+        std::future::pending().await
+    }
+
+    /// Handle whatever `next_background_ready` made ready.
+    async fn handle_background_ready(&mut self) {}
 }
 
 /// What a vendor run loop acts on next.
@@ -295,7 +305,19 @@ impl<'a> RunLoopEvents<'a> {
             if let Some(resume) = self.take_ready_resume() {
                 return Some(resume);
             }
-            let event = match self.next_event().await? {
+            let raw_event = loop {
+                if let Some(event) = self.pending.pop_front() {
+                    break event;
+                }
+                let ready = tokio::select! {
+                    event = self.next_event() => break event?,
+                    ready = runtime.next_background_ready() => ready,
+                };
+                if ready {
+                    runtime.handle_background_ready().await;
+                }
+            };
+            let event = match raw_event {
                 // The page this conversation co-writes asks for the Agent's next turn: it runs
                 // as a resume of that conversation, whatever the harness. An interrupt that
                 // arrives with no turn running has nothing to stop.

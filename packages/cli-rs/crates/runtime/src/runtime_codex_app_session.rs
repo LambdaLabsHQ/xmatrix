@@ -582,14 +582,15 @@ enum InterruptibleCodexTurn {
     EventStreamClosed,
 }
 
-/// Report a changed wait during a Codex turn; an unchanged one sends nothing.
-fn report_codex_waiting(
+/// Report a changed wait during a turn; an unchanged one sends nothing.
+fn report_runtime_waiting(
     relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
     runtime_state: Option<&AgentRuntimeStateTracker>,
     waiting: Option<protocol::AgentRuntimeWaiting>,
 ) {
-    if let (Some(relay), Some(runtime_state)) = (relay, runtime_state)
+    if let Some(runtime_state) = runtime_state
         && runtime_state.set_waiting(waiting)
+        && let Some(relay) = relay
     {
         send_presence(
             relay,
@@ -2505,7 +2506,7 @@ impl CodexAppSession {
         // Commands and tool calls open in this turn (docs/design/agent-status.md).
         let mut tool_waits = crate::runtime_waiting::ToolWaits::default();
         loop {
-            report_codex_waiting(
+            report_runtime_waiting(
                 trace_relay,
                 runtime_state,
                 tool_waits.waiting(Instant::now()),
@@ -3068,7 +3069,7 @@ impl CodexAppSession {
                 && let Some(result) = completed_result.take()
             {
                 self.clear_active_turn(&thread_id, turn_id.as_deref());
-                report_codex_waiting(trace_relay, runtime_state, None);
+                report_runtime_waiting(trace_relay, runtime_state, None);
                 return Ok(result);
             }
         }

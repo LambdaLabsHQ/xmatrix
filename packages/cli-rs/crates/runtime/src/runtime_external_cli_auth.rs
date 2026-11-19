@@ -2171,6 +2171,9 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         available_models,
         latest_goal,
         latest_usage,
+        last_channel_id: auto_join_channel_id.clone(),
+        pending_bg_message: None,
+        reactive_wakeup: None,
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
     // Every message's local attachment copies stay for the whole Run: its
@@ -2308,6 +2311,8 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                 }
                 let primary_message_id = primary_inbound_message_id(&inbound_messages);
                 ack_inbound_channel_messages(&relay, &inbound_messages);
+                run.finish_reactive_wakeup(true).await;
+                run.last_channel_id = Some(primary_channel_id.clone());
                 let mut runtime_turn = runtime_state.begin_message_turn(
                     Some(&primary_channel_id),
                     Some(&primary_message_id),
@@ -2365,6 +2370,8 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                 events.turn_ended(&primary_channel_id, cancelled);
             }
             RunLoopInput::Resume { channel_id, prompt } => {
+                run.finish_reactive_wakeup(true).await;
+                run.last_channel_id = Some(channel_id.clone());
                 send_presence(&relay, Some("busy"), run.presence());
                 write_current_run_status("turn_running", false, None);
                 let turn = submit_acp_turn_interruptible(
@@ -2390,6 +2397,13 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
             }
             RunLoopInput::Event(event) => {
                 let event = *event;
+                if let Some(reply) = crate::runtime_harness_questions::questionnaire_reply(&event)
+                    && let Ok(interrupter) = run.app.interrupter()
+                    && interrupter.answer_question(&reply).await
+                {
+                    crate::runtime_harness_questions::ack_questionnaire_reply(&relay, &reply);
+                    continue;
+                }
                 let reconnected = matches!(
                     &event,
                     agent_instance_connection::AgentInstanceConnectionEvent::Reconnected { .. }
@@ -2405,14 +2419,33 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                     break;
                 }
                 if reconnected {
-                    send_presence(&relay, Some("idle"), run.presence());
+                    let status = if run.reactive_wakeup.is_some() {
+                        "busy"
+                    } else {
+                        "idle"
+                    };
+                    send_presence(&relay, Some(status), run.presence());
                 }
             }
         }
     }
 
+    run.finish_reactive_wakeup(true).await;
     run.app.shutdown().await;
     relay.graceful_disconnect().await
+}
+
+/// State of an unsolicited ACP reactive wakeup turn (for example Antigravity
+/// waking itself up after a background `run_command` or `schedule` timer).
+struct AcpReactiveWakeup {
+    turn_id: String,
+    tool_waits: crate::runtime_waiting::ToolWaits,
+    daemon_tool_ids: HashSet<String>,
+    parked_question_keys: Vec<String>,
+    saw_message_since_tool: bool,
+    settle_deadline: Option<Instant>,
+    safety_idle_deadline: Option<Instant>,
+    turn_guard: AgentRuntimeTurnGuard,
 }
 
 /// An ACP run: the session and the state its presence reports.
@@ -2434,6 +2467,9 @@ struct AcpRun<'a> {
     available_models: Vec<protocol::AgentModelInfo>,
     latest_goal: Option<protocol::AgentGoalStatus>,
     latest_usage: Option<protocol::LlmUsage>,
+    last_channel_id: Option<String>,
+    pending_bg_message: Option<Option<Value>>,
+    reactive_wakeup: Option<AcpReactiveWakeup>,
 }
 
 impl AcpRun<'_> {
@@ -2466,6 +2502,10 @@ impl AcpRun<'_> {
     }
 
     async fn restart(&mut self) -> error::Result<()> {
+        self.reactive_wakeup = None;
+        self.pending_bg_message = None;
+        self.app.clear_background_tasks();
+        self.runtime_state.set_waiting(None);
         restart_acp_app_session(
             &mut self.app,
             self.cmd,
@@ -2635,14 +2675,421 @@ impl ChannelControlledRuntime for AcpRun<'_> {
 
     fn parameter_presence(&self) -> PresencePatch {
         PresencePatch::presentation(self.presentation())
+            .runtime_state(Some(self.runtime_state.snapshot()))
     }
 
     fn parameter_catalog(&self) -> Vec<protocol::HarnessParameter> {
         self.presentation().parameters.unwrap_or_default()
     }
+
+    async fn next_background_ready(&mut self) -> bool {
+        if !self.should_poll_background() {
+            return std::future::pending().await;
+        }
+        if self.pending_bg_message.is_some() {
+            return true;
+        }
+        let deadline = self.background_deadline(Instant::now());
+        let has_parked_questions = self
+            .reactive_wakeup
+            .as_ref()
+            .is_some_and(|wakeup| !wakeup.parked_question_keys.is_empty());
+        let questions = self.app.questions.clone();
+        match deadline {
+            Some(at) => tokio::select! {
+                msg = self.app.next_message() => {
+                    self.pending_bg_message = Some(msg);
+                    true
+                }
+                () = tokio::time::sleep_until(at.into()) => true,
+                () = questions.changed(), if has_parked_questions => true,
+            },
+            None => tokio::select! {
+                msg = self.app.next_message() => {
+                    self.pending_bg_message = Some(msg);
+                    true
+                }
+                () = questions.changed(), if has_parked_questions => true,
+            },
+        }
+    }
+
+    async fn handle_background_ready(&mut self) {
+        if let Some(maybe_msg) = self.pending_bg_message.take() {
+            match maybe_msg {
+                Some(message) => self.handle_background_acp_message(message).await,
+                None => {
+                    self.app.inbox_closed = true;
+                    self.abort_background_activity();
+                    return;
+                }
+            }
+        }
+        let settle_now = if let Some(wakeup) = self.reactive_wakeup.as_mut() {
+            prune_answered_acp_question_waits(
+                &self.app.questions,
+                &mut wakeup.parked_question_keys,
+                &mut wakeup.tool_waits,
+            );
+            let now = Instant::now();
+            let timed_out = wakeup.settle_deadline.is_some_and(|d| now >= d)
+                || wakeup.safety_idle_deadline.is_some_and(|d| now >= d);
+            if timed_out && !self.app.questions.any() {
+                true
+            } else {
+                report_runtime_waiting(
+                    Some(self.relay),
+                    Some(self.runtime_state),
+                    wakeup.tool_waits.waiting(now),
+                );
+                false
+            }
+        } else {
+            false
+        };
+        if settle_now {
+            self.finish_reactive_wakeup(false).await;
+        }
+    }
 }
 
 impl AcpRun<'_> {
+    fn should_poll_background(&self) -> bool {
+        self.config.supports_background_tasks
+            && !self.app.inbox_closed
+            && (!self.app.background_tasks.is_empty() || self.reactive_wakeup.is_some())
+    }
+
+    fn background_deadline(&self, now: Instant) -> Option<Instant> {
+        let wakeup = self.reactive_wakeup.as_ref()?;
+        [
+            wakeup.tool_waits.deadline(now),
+            wakeup.settle_deadline,
+            wakeup.safety_idle_deadline,
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
+    async fn send_background_trace(
+        &self,
+        session_id: &str,
+        turn_id: &str,
+        phase: &str,
+        usage: Option<protocol::LlmUsage>,
+        chunk_update: Option<&Value>,
+        fields: Value,
+    ) {
+        let Some(channel_id) = self.last_channel_id.as_deref() else {
+            return;
+        };
+        let trace_source = self.config.trace_source.clone();
+        let trace = TurnTrace {
+            relay: Some(self.relay),
+            channel_id: Some(channel_id),
+            source: &trace_source,
+            agent: self.agent,
+        };
+        let turn_ids = AcpTurnIds {
+            session_id,
+            turn_id,
+        };
+        let payload = match chunk_update {
+            Some(update) => turn_ids.chunk_payload(update, fields),
+            None => turn_ids.payload(fields),
+        };
+        trace
+            .send(phase, usage, self.latest_model.clone(), payload)
+            .await;
+    }
+
+    async fn ensure_reactive_wakeup(&mut self, received: Instant) -> &mut AcpReactiveWakeup {
+        if self.reactive_wakeup.is_none() {
+            let id = self.app.next_id;
+            self.app.next_id += 1;
+            let turn_id = format!("bg-{id}");
+            let turn_guard = self
+                .runtime_state
+                .begin_turn(self.last_channel_id.as_deref(), None);
+            self.runtime_state.set_waiting(None);
+            write_current_run_status("turn_running", false, None);
+            send_presence(self.relay, Some("busy"), self.presence());
+            if let Some(session_id) = self.app.session_id.clone() {
+                self.send_background_trace(
+                    &session_id,
+                    &turn_id,
+                    "turn_started",
+                    None,
+                    None,
+                    serde_json::json!({ "reactiveWakeup": true }),
+                )
+                .await;
+            }
+            self.reactive_wakeup = Some(AcpReactiveWakeup {
+                turn_id,
+                tool_waits: crate::runtime_waiting::ToolWaits::new(self.app.tool_wait_threshold),
+                daemon_tool_ids: HashSet::new(),
+                parked_question_keys: Vec::new(),
+                saw_message_since_tool: false,
+                settle_deadline: None,
+                safety_idle_deadline: Some(received + ACP_REACTIVE_WAKEUP_START_GRACE),
+                turn_guard,
+            });
+        }
+        self.reactive_wakeup.as_mut().expect("reactive wakeup initialized")
+    }
+
+    async fn handle_background_acp_message(&mut self, message: Value) {
+        let received = (Instant::now(), unix_millis_now());
+        self.config
+            .presentation_adapter
+            .observe_acp(&message, &mut self.app.presentation);
+        self.latest_usage = merge_llm_usage(
+            self.latest_usage.take(),
+            self.app.presentation.usage.clone(),
+        );
+        self.latest_model = self
+            .app
+            .presentation
+            .model
+            .clone()
+            .or(self.latest_model.take());
+
+        let channel_id = self.last_channel_id.clone();
+        match self
+            .app
+            .handle_turn_server_request(&message, Some(self.relay), channel_id.as_deref())
+            .await
+        {
+            Ok(AcpTurnServerRequest::ParkedQuestion { key, prompt }) => {
+                let wakeup = self.ensure_reactive_wakeup(received.0).await;
+                wakeup.settle_deadline = None;
+                wakeup.safety_idle_deadline = None;
+                open_acp_question_wait(
+                    &mut wakeup.tool_waits,
+                    &mut wakeup.parked_question_keys,
+                    key,
+                    prompt,
+                    received,
+                );
+                return;
+            }
+            Ok(AcpTurnServerRequest::Handled) => return,
+            Ok(AcpTurnServerRequest::NotHandled) | Err(_) => {}
+        }
+
+        if message.get("method").and_then(Value::as_str) != Some("session/update") {
+            return;
+        }
+        let params = message.get("params").unwrap_or(&Value::Null);
+        let Some(session_id) = self.app.session_id.clone() else {
+            return;
+        };
+        if params.get("sessionId").and_then(Value::as_str) != Some(session_id.as_str()) {
+            return;
+        }
+        let update = params.get("update").unwrap_or(&Value::Null);
+        let session_update = update.get("sessionUpdate").and_then(Value::as_str);
+        match session_update {
+            Some("tool_call") | Some("tool_call_update") => {
+                let status = update.get("status").and_then(Value::as_str);
+                let terminal = crate::runtime_waiting::acp_tool_is_terminal(status);
+                let completed_bg = if self.reactive_wakeup.is_none() {
+                    if terminal {
+                        let removed = update
+                            .get("toolCallId")
+                            .and_then(Value::as_str)
+                            .is_some_and(|id| self.app.background_tasks.remove(id));
+                        if removed {
+                            self.app.publish_background_tasks();
+                        }
+                        removed
+                    } else {
+                        true
+                    }
+                } else {
+                    false
+                };
+                if self.reactive_wakeup.is_none() && !completed_bg {
+                    return;
+                }
+                self.ensure_reactive_wakeup(received.0).await;
+                let (turn_id, bg_changed) = {
+                    let wakeup = self
+                        .reactive_wakeup
+                        .as_mut()
+                        .expect("reactive wakeup initialized");
+                    let bg_changed = if !completed_bg || !terminal {
+                        let changed = observe_acp_tool_wait(
+                            session_update,
+                            update,
+                            &mut wakeup.tool_waits,
+                            &mut wakeup.daemon_tool_ids,
+                            &mut self.app.background_tasks,
+                            received,
+                        );
+                        if session_update == Some("tool_call") && !terminal {
+                            wakeup.saw_message_since_tool = false;
+                        }
+                        wakeup.settle_deadline = None;
+                        wakeup.safety_idle_deadline = None;
+                        changed
+                    } else {
+                        false
+                    };
+                    (wakeup.turn_id.clone(), bg_changed)
+                };
+                if bg_changed {
+                    self.app.publish_background_tasks();
+                }
+                if let Some(goal) = self
+                    .config
+                    .goal_status_from_update
+                    .and_then(|hook| hook(update))
+                {
+                    self.latest_goal = Some(goal);
+                }
+                let event = if session_update == Some("tool_call") {
+                    "tool_call"
+                } else {
+                    "tool_call_update"
+                };
+                self.send_background_trace(
+                    &session_id,
+                    &turn_id,
+                    event,
+                    None,
+                    None,
+                    serde_json::json!({ "update": redact_data_urls_value(update) }),
+                )
+                .await;
+            }
+            Some("agent_message_chunk" | "agent_thought_chunk") => {
+                if let Some(delta) = update
+                    .get("content")
+                    .and_then(|content| content.get("text"))
+                    .and_then(Value::as_str)
+                {
+                    let is_message = session_update == Some("agent_message_chunk");
+                    let turn_id = {
+                        let wakeup = self.ensure_reactive_wakeup(received.0).await;
+                        if is_message {
+                            wakeup.saw_message_since_tool = true;
+                        }
+                        wakeup.settle_deadline = None;
+                        wakeup.safety_idle_deadline = None;
+                        wakeup.turn_id.clone()
+                    };
+                    let (phase, fields) = if is_message {
+                        ("assistant_delta", serde_json::json!({ "delta": delta }))
+                    } else {
+                        ("runtime_event", acp_reasoning_payload(delta))
+                    };
+                    self.send_background_trace(
+                        &session_id,
+                        &turn_id,
+                        phase,
+                        None,
+                        Some(update),
+                        fields,
+                    )
+                    .await;
+                }
+            }
+            Some("plan") => {
+                let turn_id = {
+                    let wakeup = self.ensure_reactive_wakeup(received.0).await;
+                    wakeup.settle_deadline = None;
+                    wakeup.safety_idle_deadline = None;
+                    wakeup.turn_id.clone()
+                };
+                if let Some(channel_id) = channel_id.as_deref() {
+                    observe_acp_plan(&mut self.app.activity, self.relay, channel_id, update);
+                }
+                self.send_background_trace(
+                    &session_id,
+                    &turn_id,
+                    "runtime_event",
+                    None,
+                    None,
+                    acp_plan_payload(update),
+                )
+                .await;
+            }
+            Some("notice") => {
+                if let (Some(payload), Some(turn_id)) = (
+                    acp_session_notice_payload(update),
+                    self.reactive_wakeup.as_ref().map(|w| w.turn_id.clone()),
+                ) {
+                    self.send_background_trace(
+                        &session_id,
+                        &turn_id,
+                        "runtime_event",
+                        None,
+                        None,
+                        payload,
+                    )
+                    .await;
+                }
+            }
+            Some("usage_update") => {
+                if let Some(wakeup) = self.reactive_wakeup.as_mut() {
+                    wakeup.safety_idle_deadline = None;
+                    if wakeup.tool_waits.is_empty() || wakeup.saw_message_since_tool {
+                        wakeup.settle_deadline =
+                            Some(received.0 + self.app.reactive_wakeup_settle);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    async fn finish_reactive_wakeup(&mut self, for_new_turn: bool) {
+        let Some(mut wakeup) = self.reactive_wakeup.take() else {
+            return;
+        };
+        if wakeup.saw_message_since_tool || for_new_turn {
+            promote_acp_background_tasks(
+                &mut wakeup.tool_waits,
+                &wakeup.daemon_tool_ids,
+                &mut self.app.background_tasks,
+            );
+            self.app.publish_background_tasks();
+        }
+        if let Some(channel_id) = self.last_channel_id.as_deref() {
+            finish_acp_turn(&mut self.app.activity, self.relay, channel_id);
+        }
+        if let Some(session_id) = self.app.session_id.clone() {
+            self.send_background_trace(
+                &session_id,
+                &wakeup.turn_id,
+                "turn_completed",
+                self.latest_usage.clone(),
+                None,
+                serde_json::json!({ "reactiveWakeup": true }),
+            )
+            .await;
+        }
+        self.runtime_state
+            .set_waiting(self.app.background_tasks.waiting());
+        wakeup.turn_guard.finish_as("completed");
+        if !for_new_turn {
+            write_current_run_status("turn_completed", true, None);
+            send_presence(self.relay, Some("idle"), self.presence());
+        }
+    }
+
+    fn abort_background_activity(&mut self) {
+        if let Some(mut wakeup) = self.reactive_wakeup.take() {
+            wakeup.turn_guard.finish_as("failed");
+        }
+        self.app.clear_background_tasks();
+        self.runtime_state.set_waiting(None);
+        send_presence(self.relay, Some("idle"), self.presence());
+    }
+
     async fn apply_parameter_control(
         &mut self,
         command: crate::harness_parameters::ParameterCommand,
@@ -2702,6 +3149,7 @@ async fn submit_acp_turn_interruptible(
         agent,
         trace_relay,
         trace_channel_id,
+        Some(runtime_state),
     );
     await_turn_with_events(turn, event_rx, pending_events, async |event| {
         let relay = trace_relay.map(|relay| relay.as_ref());
@@ -2981,6 +3429,10 @@ struct AcpVendorConfig {
     /// launcher already speaks ACP with no subcommand (`pi-acp`); None falls
     /// back to the `acp` subcommand convention.
     preset_acp_args: Option<Vec<String>>,
+    /// Whether this ACP harness keeps background tool calls (such as async
+    /// `run_command` or `schedule`) open across `end_turn` and emits their
+    /// completion plus reactive wakeup updates between turns.
+    supports_background_tasks: bool,
 }
 
 impl AcpVendorConfig {
@@ -3014,6 +3466,7 @@ impl AcpVendorConfig {
             resume_namespace: "grok-resume".to_string(),
             presentation_adapter: agent_presentation_adapter_for_runtime("grok"),
             preset_acp_args: None,
+            supports_background_tasks: false,
         }
     }
 
@@ -3061,6 +3514,7 @@ impl AcpVendorConfig {
             resume_namespace: format!("acp-resume-{stem}"),
             presentation_adapter: agent_presentation_adapter_for_acp_runtime(&stem),
             preset_acp_args: preset.and_then(|preset| preset.acp_args.clone()),
+            supports_background_tasks: stem == "antigravity",
         }
     }
 
@@ -3184,6 +3638,14 @@ struct AcpSession {
     /// elicitation/create requests parked until their card is answered: the
     /// JSON-RPC id and params, by request key.
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
+    /// Non-daemon tool calls still running after their turn ended (Antigravity).
+    background_tasks: crate::runtime_waiting::AcpBackgroundTasks,
+    /// How long an in-turn tool call must stay open before reading as a wait.
+    tool_wait_threshold: Duration,
+    /// Quiet window after a reactive wakeup's `usage_update` before settling.
+    reactive_wakeup_settle: Duration,
+    /// True once the child's stdout stream returned EOF.
+    inbox_closed: bool,
 }
 
 /// Where a vendor takes a session's trusted rules (the registration's
