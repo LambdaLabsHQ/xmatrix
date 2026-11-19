@@ -18,7 +18,7 @@ Rules:
 - Do not install unknown binaries or use unofficial install URLs unless the human explicitly provides and approves a different xMatrix deployment.
 - Ask before using elevated privileges such as `sudo`, administrator PowerShell, launch agents, systemd user services, or OS schedulers (cron, Windows Task Scheduler).
 - If a command fails, report the exact failing command and the shortest actionable next step.
-- For multi-step or long-running work, report progress incrementally in the active chat. Send concise updates at natural milestones such as after initial diagnosis, before edits or risky commands, before verification, and when blocked; do not wait until the final response to reveal meaningful progress. In an xMatrix channel, follow the channel contract instead: keep your plan current with your runtime's plan tool and post only what someone needs.
+- For multi-step or long-running work, report progress incrementally in the active chat. Send concise updates at natural milestones such as after initial diagnosis, before edits or risky commands, before verification, and when blocked; do not wait until the final response to reveal meaningful progress. In an xMatrix channel, follow the channel contract instead: post only what someone needs.
 
 Step 0: Install the `$xmatrix` skill for this agent.
 - Install the full skill, including its workflow references. On macOS/Linux:

@@ -88,36 +88,20 @@ export function isReservedAnnotationNamespace(namespace: string): boolean {
   return namespace.trim().toLowerCase().startsWith("xmatrix.");
 }
 
-export type ChannelActivityPlanStepStatus = "pending" | "in_progress" | "completed";
+/**
+ * A fact a Run's runtime observed about its own work. A runtime's plan
+ * (`kind: "plan"`) is retired: newer models keep track of multi-step work
+ * without a written checklist, so it is no fact every Run has. Entries
+ * already stored keep their provenance and their stored line.
+ */
+export type ChannelActivity = {
+  kind: "pull_request";
+  /** `owner/name`, derived from the URL. */
+  repository: string;
+  number: number;
+  url: string;
+};
 
-export interface ChannelActivityPlanStep {
-  text: string;
-  status: ChannelActivityPlanStepStatus;
-}
-
-export type ChannelActivity =
-  | {
-      kind: "plan";
-      /** Steps completed since the Run's previous plan entry, oldest first. */
-      completed: string[];
-      /** The step now in progress, if any. */
-      inProgress?: string;
-      /** The whole plan as it stands. */
-      steps: ChannelActivityPlanStep[];
-    }
-  | {
-      kind: "pull_request";
-      /** `owner/name`, derived from the URL. */
-      repository: string;
-      number: number;
-      url: string;
-    };
-
-export const CHANNEL_ACTIVITY_MAX_STEPS = 30;
-export const CHANNEL_ACTIVITY_MAX_COMPLETED = 10;
-export const CHANNEL_ACTIVITY_MAX_STEP_TEXT = 200;
-
-const STEP_STATUSES: readonly ChannelActivityPlanStepStatus[] = ["pending", "in_progress", "completed"];
 const PULL_REQUEST_URL =
   /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,38}))\/([A-Za-z0-9._-]{1,100})\/pull\/([1-9][0-9]{0,8})$/u;
 
@@ -137,22 +121,6 @@ function onlyKeys(value: Record<string, unknown>, allowed: readonly string[], re
   if (Object.keys(value).some((key) => !allowed.includes(key))) throw new ChannelActivityInvalid(reason);
 }
 
-/** Step titles are the Agent's own untrusted text: one bounded line. */
-function stepText(value: unknown): string {
-  if (typeof value !== "string") throw new ChannelActivityInvalid("step_text");
-  const text = value.replace(/\s+/gu, " ").trim();
-  if (!text) throw new ChannelActivityInvalid("step_text");
-  return [...text].length > CHANNEL_ACTIVITY_MAX_STEP_TEXT
-    ? `${[...text].slice(0, CHANNEL_ACTIVITY_MAX_STEP_TEXT - 1).join("")}…`
-    : text;
-}
-
-function stepList(value: unknown, maximum: number, reason: string): unknown[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > maximum) throw new ChannelActivityInvalid(reason);
-  return value;
-}
-
 /**
  * The canonical form of one activity report, or ChannelActivityInvalid.
  * Unknown keys, kinds and statuses are refused rather than dropped, so a
@@ -160,23 +128,7 @@ function stepList(value: unknown, maximum: number, reason: string): unknown[] {
  */
 export function normalizeChannelActivity(value: unknown): ChannelActivity {
   const input = record(value, "activity");
-  if (input.kind === "plan") {
-    onlyKeys(input, ["kind", "completed", "inProgress", "steps"], "plan_fields");
-    const steps = stepList(input.steps, CHANNEL_ACTIVITY_MAX_STEPS, "steps").map((entry) => {
-      const step = record(entry, "step");
-      onlyKeys(step, ["text", "status"], "step_fields");
-      if (!STEP_STATUSES.includes(step.status as ChannelActivityPlanStepStatus)) {
-        throw new ChannelActivityInvalid("step_status");
-      }
-      return { text: stepText(step.text), status: step.status as ChannelActivityPlanStepStatus };
-    });
-    const completed = stepList(input.completed, CHANNEL_ACTIVITY_MAX_COMPLETED, "completed").map(stepText);
-    const inProgress = input.inProgress === undefined ? undefined : stepText(input.inProgress);
-    if (completed.length === 0 && inProgress === undefined && steps.length === 0) {
-      throw new ChannelActivityInvalid("empty_plan");
-    }
-    return { kind: "plan", completed, ...(inProgress === undefined ? {} : { inProgress }), steps };
-  }
+  if (input.kind === "plan") throw new ChannelActivityInvalid("plan_retired");
   if (input.kind === "pull_request") {
     onlyKeys(input, ["kind", "repository", "number", "url"], "pull_request_fields");
     const match = typeof input.url === "string" ? PULL_REQUEST_URL.exec(input.url) : null;
@@ -198,13 +150,7 @@ export function normalizeChannelActivity(value: unknown): ChannelActivity {
  * be read as a mention, a summon or a command by anything that scans bodies.
  */
 export function channelActivityLine(activity: ChannelActivity): string {
-  const line = activity.kind === "pull_request"
-    ? `↗ Opened pull request ${activity.repository}#${activity.number}`
-    : [
-        ...activity.completed.map((step) => `✓ ${step}`),
-        ...(activity.inProgress ? [`→ ${activity.inProgress}`] : []),
-      ].join(" · ") || `Plan: ${activity.steps.length} step${activity.steps.length === 1 ? "" : "s"}`;
-  return line.replace(/[@＠]/gu, "");
+  return `↗ Opened pull request ${activity.repository}#${activity.number}`.replace(/[@＠]/gu, "");
 }
 
 /** The activity an entry carries, when its metadata is a well-formed activity entry. */

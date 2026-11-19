@@ -52,7 +52,6 @@ impl AcpSession {
             prompt_images: false,
             presentation: AgentPresentationFacts::default(),
             config,
-            activity: ChannelActivityReporter::default(),
             questions: Default::default(),
             background_tasks: crate::runtime_waiting::AcpBackgroundTasks::default(),
             tool_wait_threshold: crate::runtime_waiting::TOOL_WAIT_THRESHOLD,
@@ -916,9 +915,6 @@ impl AcpSession {
                     }
                     None => report_runtime_waiting(trace_relay, runtime_state, None),
                 }
-                if let Some((relay, channel_id)) = trace.target() {
-                    finish_acp_turn(&mut self.activity, relay, channel_id);
-                }
                 trace
                     .send(
                         if cancellation_detail.is_some() {
@@ -1041,9 +1037,6 @@ impl AcpSession {
                     }
                 }
                 Some("plan") => {
-                    if let Some((relay, channel_id)) = trace.target() {
-                        observe_acp_plan(&mut self.activity, relay, channel_id, update);
-                    }
                     trace
                         .send(
                             "runtime_event",

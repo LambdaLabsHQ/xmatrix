@@ -61,8 +61,7 @@ export type {
   ChannelMessage, ChannelMessageThreadSummary,
 } from "./channel-message.js";
 export {
-  callerMessageMetadata, CHANNEL_ACTIVITY_MAX_COMPLETED, CHANNEL_ACTIVITY_MAX_STEP_TEXT,
-  CHANNEL_ACTIVITY_MAX_STEPS, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
+  callerMessageMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
   activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity,
   SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
@@ -70,7 +69,7 @@ export {
   AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction, NORN_ASK_MESSAGE_PREFIX, isNornAskProgramMessage, NORN_DELEGATED_NOTE,
 } from "./channel-activity.js";
 export type {
-  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
+  ChannelActivity, QuestionnaireState,
   CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {

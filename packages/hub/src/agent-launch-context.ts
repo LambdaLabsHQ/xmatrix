@@ -1,4 +1,4 @@
-import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, type ChannelMessage,
+import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, isChannelActivity, type ChannelMessage,
   type ChannelSummarySource, type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
 import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
@@ -60,6 +60,10 @@ function renderHistoryEntry(message: ChannelMessage, readAt: string | undefined)
   // Activity folds to one line, as it does on the web.
   const activity = message.recalledAt ? undefined : channelActivityOf(message.metadata);
   if (activity) return `${head}: ▸ ${channelActivityLine(activity)}\n`;
+  // A retired kind (a runtime's plan) still folds, as the line the Hub stored.
+  if (!message.recalledAt && isChannelActivity(message.metadata)) {
+    return `${head}: ▸ ${message.body.replace(/\s+/gu, " ").trim()}\n`;
+  }
   let entry = `${head}:\n`;
   if (message.recalledAt) return `${entry}  (recalled)\n`;
   for (const line of message.body.split(/\r?\n/u)) entry += `  ${line}\n`;

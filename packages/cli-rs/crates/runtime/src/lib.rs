@@ -69,9 +69,7 @@ use runtime_daemon_lease_retry::{
 mod runtime_channel_activity;
 mod runtime_channel_history_bootstrap;
 mod runtime_waiting;
-use runtime_channel_activity::{
-    ChannelActivityReporter, finish_acp_turn, observe_acp_plan, observe_codex_activity,
-};
+use runtime_channel_activity::{ChannelActivityReporter, observe_codex_activity};
 use runtime_channel_history_bootstrap::with_channel_history_bootstrap;
 mod runtime_channel_history_cache;
 #[cfg(unix)]

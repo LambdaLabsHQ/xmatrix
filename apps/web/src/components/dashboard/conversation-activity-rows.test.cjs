@@ -5,8 +5,8 @@ require("./typescript-require.cjs").installTypeScriptRequire();
 const { buildConversationRows, foldSummary, sinceDigest, sinceDigestLine } = require("./conversation-activity-rows.ts");
 
 /**
- * A conversation keeps talk whole and folds progress, without losing who did
- * what in which order (docs/design/conversation-activity.md §4.1).
+ * A conversation keeps talk whole and reads a stretch of pull request facts
+ * as one slip (docs/design/conversation-activity.md §4.1).
  */
 
 let sequence = 0;
@@ -19,6 +19,7 @@ function said(sender, body, minute, extra = {}) {
     author: sender.author, senderKind: sender.kind, senderId: sender.id, senderInstanceId: sender.instance,
     ...extra };
 }
+/** An entry of the retired runtime plan, as the Hub stored it. */
 function step(sender, completed, minute, inProgress) {
   return said(sender, completed.map((text) => `✓ ${text}`).join(" · "), minute, {
     metadata: { xmatrixProvenance: "activity", xmatrixActivity: {
@@ -38,23 +39,19 @@ const claude2 = { author: "claude:2", kind: "agent", id: "agent-claude", instanc
 const codex = { author: "codex:2", kind: "agent", id: "agent-codex", instance: "i-9" };
 const yiming = { author: "Yiming Hu", kind: "user", id: "user:yiming" };
 
-test("one Instance's run of activity folds into one row that keeps its place", () => {
+test("a retired plan entry is left out; talk and pull requests keep their place", () => {
   const rows = buildConversationRows([
     said(yiming, "Please build PR 2", 0),
     step(claude1, ["lint", "tsc"], 27),
-    step(claude1, ["e2e 191/191"], 28),
+    step(claude1, ["e2e 191/191"], 28, "Open PR 2"),
     pullRequest(claude1, 3043, 29),
     said(claude1, "The two db failures also fail on main: known baseline.", 29),
   ]);
-  assert.equal(rows.length, 4);
-  const [, fold, pull, finding] = rows;
-  assert.equal(fold.folded.length, 2);
-  assert.equal(fold.id, "fold:message:m-2", "keyed by the run's first entry");
-  assert.equal(fold.sequence, 3, "exposes the run's newest entry as read");
-  assert.equal(fold.messageId, undefined);
-  assert.deepEqual(foldSummary(fold.folded).segments, ["✓ lint", "✓ tsc", "✓ e2e 191/191"]);
+  assert.equal(rows.length, 3);
+  const [, pull, finding] = rows;
   assert.deepEqual(pull.pullRequests.map((line) => line.ref),
     [{ repository: "a/b", number: 3043, url: "https://github.com/a/b/pull/3043" }], "a pull request is its own slip");
+  assert.deepEqual(foldSummary(pull.folded).segments, ["↗ a/b#3043"]);
   assert.equal(finding.folded, undefined, "a finding is talk and stays whole");
   assert.equal(finding.continuation, true, "a pull request is its opener's message when GitHub said nothing of it");
 });
@@ -102,17 +99,6 @@ test("a pull request is named by the latest title GitHub said, in later stretche
   assert.equal("title" in untitled[0].pullRequests[0], false, "a pull request GitHub has not named is its number");
 });
 
-test("anyone else's entry ends a run, so interleaving stays visible", () => {
-  const rows = buildConversationRows([
-    step(claude1, ["a"], 27),
-    step(codex, ["merged #3041"], 33),
-    step(claude1, ["b"], 34),
-    step(claude2, ["c"], 35),
-  ]);
-  assert.deepEqual(rows.map((row) => row.folded.map((item) => item.author)),
-    [["claude:1"], ["codex:2"], ["claude:1"], ["claude:2"]]);
-});
-
 test("a message right after its sender's own drops the header, until tags or time change", () => {
   const first = said(yiming, "one", 0);
   const second = said(yiming, "two", 5);
@@ -137,7 +123,6 @@ test("the since digest counts what happened after the reader's position", () => 
   sequence = 0;
   const rows = buildConversationRows([
     said(yiming, "go", 0),
-    step(claude1, ["a", "b"], 27),
     pullRequest(claude1, 3043, 28),
     said(claude1, "Should I merge?", 29, {
       mentionReadStatuses: [{ targetId: "user:yiming", targetKind: "user", label: "Yiming", status: "unread" }],
@@ -147,10 +132,10 @@ test("the since digest counts what happened after the reader's position", () => 
   assert.equal(digest.index, 1);
   assert.equal(digest.messages, 1);
   assert.equal(digest.mentions, 1);
-  assert.equal(digest.folded, 2);
+  assert.equal(digest.folded, 1);
   assert.deepEqual(digest.pullRequests, ["a/b#3043"]);
   assert.equal(sinceDigestLine(digest),
-    "Since you last read · 1 mention of you · 1 message · ↗ a/b#3043 · 2 updates folded · from claude:1");
+    "Since you last read · 1 mention of you · 1 message · ↗ a/b#3043 · 1 update folded · from claude:1");
   assert.equal(sinceDigest(rows, 99, "user:yiming"), undefined, "nothing unread");
   assert.equal(sinceDigest(rows, undefined, "user:yiming"), undefined, "position unknown");
 });

@@ -473,13 +473,6 @@ html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-mes
   padding: 0.5rem 0.75rem 0.25rem !important;
   background: transparent !important;
 }
-/* Same inset and avatar column as a comment in this card. Set on the row only: the card's composer
-   also reads these tokens, and a smaller size there pulls its caret out of the capsule. */
-html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .app-activity-row {
-  padding: 0.5rem 0.75rem 0.25rem !important;
-  --app-message-avatar-size: 1.5rem;
-  --app-message-avatar-gap: 0.5rem;
-}
 html .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-margin-open .message-author-avatar {
   width: 1.5rem !important;
   height: 1.5rem !important;

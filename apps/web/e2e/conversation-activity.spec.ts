@@ -9,8 +9,8 @@ import {
   openGeneralChannelWithHistory,
 } from "./workspace-fixtures";
 
-/* A conversation keeps talk whole and folds progress, without losing who did
-   what in which order (docs/design/conversation-activity.md §4). */
+/* A conversation keeps talk whole; a runtime's plan is retired, so entries
+   of it already stored are left out (docs/design/conversation-activity.md §4). */
 
 test.use(E2E_DESKTOP_CONTEXT);
 
@@ -36,6 +36,7 @@ function entry(from: object, minute: number, body: string, extra: object = {}) {
   return { messageId: `m-${sequence}`, channelId: "channel-general", sequence, body, sentAt: at(minute),
     from, ...extra };
 }
+/** An entry of the retired runtime plan, as the Hub stored it. */
 function plan(from: object, minute: number, completed: string[], inProgress?: string) {
   return entry(from, minute, completed.map((step) => `✓ ${step}`).join(" · "), {
     metadata: { xmatrixProvenance: "activity", xmatrixActivity: {
@@ -63,7 +64,7 @@ function history() {
   ];
 }
 
-test("activity folds per run, anyone else's entry breaks the run, and talk stays whole", async ({ page }) => {
+test("retired plan entries are left out, and talk and pull requests stay whole", async ({ page }) => {
   const messages = history();
   await openGeneralChannelWithHistory(page, {
     ...E2E_CHANNEL,
@@ -77,32 +78,26 @@ test("activity folds per run, anyone else's entry breaks the run, and talk stays
     },
   }, messages);
 
-  const folds = page.locator(".app-activity-row");
-  await expect(folds).toHaveCount(3);
-  // claude:1's two plan entries are one run; its report before them and its
-  // finding after stay whole; codex:2's entry ends its next run.
-  await expect(folds.nth(0)).toContainText("claude:1");
-  await expect(folds.nth(0)).toContainText("✓ e2e regression 191/191");
+  const timeline = page.locator(".app-message-timeline");
+  await expect(timeline.getByText("The two db cross-space failures fail on main too")).toBeVisible();
+  // Every plan entry is left out: no step a runtime once reported reads in the conversation.
+  await expect(timeline.getByText("e2e regression 191/191")).toHaveCount(0);
+  await expect(timeline.getByText("merged #3041")).toHaveCount(0);
+  await expect(timeline.getByText("codex:2")).toHaveCount(0);
   // Its pull request is a slip of its own, like any App's receipt, under its finding.
   const pull = page.locator("[data-pull-requests]");
   await expect(pull).toHaveText(/#3043.*opened by claude:1/u);
   await expect(pull.getByRole("link", { name: "LambdaLabsHQ/xmatrix#3043" }))
     .toHaveAttribute("href", "https://github.com/LambdaLabsHQ/xmatrix/pull/3043");
-  await expect(folds.nth(1)).toContainText("codex:2");
-  await expect(folds.nth(2)).toContainText("→ Web");
-  await expect(page.getByText("The two db cross-space failures fail on main too")).toBeVisible();
   // What anyone said stays whole, however soon its sender said more.
-  await expect(page.locator(".app-message-timeline").getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
+  await expect(timeline.getByText("Progress: running jscpd, knip and tsc.")).toBeVisible();
 
-  // A second message moments later from the same sender drops the header: the
-  // reviewer's second request, and claude:1's pull request after its finding.
-  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(2);
+  // A message moments later from the same sender drops the header: the
+  // reviewer's second request, claude:1's finding (the plan between is gone),
+  // and its pull request after its finding.
+  await expect(page.locator(".app-message-continuation-gutter")).toHaveCount(3);
 
-  // Opening a run shows every entry it stands for, in order.
-  await folds.nth(0).getByRole("button").first().click();
-  await expect(folds.nth(0).getByText("e2e regression 191/191").last()).toBeVisible();
-
-  // The work dock says what the Instance is on now.
+  // The work dock still says what the Instance is on now, as its presence says.
   await expect(page.locator(".app-agent-work-intent")).toContainText("Writing the Web part");
 
   await page.screenshot({ path: test.info().outputPath("conversation-activity.png"), fullPage: false });

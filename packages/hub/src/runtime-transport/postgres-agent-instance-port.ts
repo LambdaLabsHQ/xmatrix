@@ -1014,7 +1014,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       activity = normalizeChannelActivity(message.activity);
     } catch (error) {
       if (error instanceof ChannelActivityInvalid) {
-        throw new RuntimeClientOperationError("invalid_channel_activity");
+        throw new RuntimeClientOperationError(
+          error.reason === "plan_retired" ? "channel_activity_retired" : "invalid_channel_activity");
       }
       throw error;
     }

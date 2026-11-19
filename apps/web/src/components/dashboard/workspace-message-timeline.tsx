@@ -142,7 +142,7 @@ import {
 import { useTimelineReadingAnchor } from "./timeline-reading-anchor";
 import { TimelineVirtuosoScroller } from "./timeline-virtuoso-scroller";
 import { TIMELINE_HEIGHT_PROBE_ATTRIBUTE, beginTimelineSendRise, isJustSentRow, playSentRowEntrance } from "./timeline-send-rise";
-import { FoldedActivityRow, GitHubWordsSlip, PullRequestSlip } from "./conversation-activity-row";
+import { GitHubWordsSlip, PullRequestSlip } from "./conversation-activity-row";
 import { HumanAboveViewJump, TIMELINE_ROW_ID_ATTRIBUTE } from "./timeline-human-above";
 import {
   buildConversationRows,
@@ -750,18 +750,6 @@ export const MessageTimeline = memo(function MessageTimeline({
     buildConversationRows(timeline.filter(message => !(onboardingStageOf(message.metadata) === "connect-agents" &&
       message.replyTo && asksByMessage.has(message.replyTo.messageId)))), (row) => row.id)), [timeline, asksByMessage]);
   const continuedTurnFailures = useMemo(() => turnFailuresContinuedByLaterSpeech(timeline), [timeline]);
-  const [expandedFolds, setExpandedFolds] = useState<{ channelId?: string; ids: ReadonlySet<string> }>(
-    () => ({ ids: new Set() }),
-  );
-  const openFolds = expandedFolds.channelId === channel?.id ? expandedFolds.ids : EMPTY_FOLDS;
-  const toggleFold = useStableCallback((rowId: string) => {
-    setExpandedFolds((current) => {
-      const ids = new Set(current.channelId === channel?.id ? current.ids : EMPTY_FOLDS);
-      if (ids.has(rowId)) ids.delete(rowId);
-      else ids.add(rowId);
-      return { channelId: channel?.id, ids };
-    });
-  });
   // Where the reader had read to when they opened the conversation: the
   // divider above it says what happened since (§3.5), until they leave.
   const [sincePosition, setSincePosition] = useState<{ channelId?: string; sequence?: number }>({});
@@ -906,9 +894,6 @@ export const MessageTimeline = memo(function MessageTimeline({
     const index = rows.findIndex((item) => item.messageId === messageId ||
       item.folded?.some((entry) => entry.messageId === messageId));
     if (index < 0) return "unavailable";
-    // An entry inside a fold has no row of its own until the fold is open.
-    const fold = rows[index]?.folded ? rows[index] : undefined;
-    if (fold && !openFolds.has(fold.id)) toggleFold(fold.id);
     readingAnchor.release();
     // The list is still landing on its last row and undoes a scroll made now.
     // What the tail shows keeps its place through the handover, so a row in
@@ -1186,13 +1171,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                 )}
               >
                 {since && message.id === sinceRowId && <SinceDivider digest={since} />}
-                {message.folded && !message.pullRequests ? (
-                  <FoldedActivityRow
-                    row={message}
-                    expanded={openFolds.has(message.id)}
-                    onToggle={toggleFold}
-                  />
-                ) : (
                 <MessageRow
                   message={message}
                   agentLaunches={agentLaunchesByMessage.get(message.messageId || message.id) ?? NO_LAUNCHES}
@@ -1244,7 +1222,6 @@ export const MessageTimeline = memo(function MessageTimeline({
                   onOpenInternalAppLink={stableOnOpenInternalAppLink}
                   onJumpToMessage={stableOnJumpToMessage}
                 />
-                )}
               </div>
   );
   const openingRowHeights = openingMeasure?.listKey === timelineListKey ? openingMeasure.rowHeights : NO_ROW_HEIGHTS;
@@ -1565,7 +1542,6 @@ interface OpeningRowMeasure {
 }
 const NO_ROW_HEIGHTS: ReadonlyMap<string, number> = new Map();
 
-const EMPTY_FOLDS: ReadonlySet<string> = new Set();
 /* Rows are memoized on identity: a fresh `[]` per render would re-render every
    visible message, Markdown included, on each realtime event in the Space. */
 const NO_LAUNCHES: readonly SerializedAgentLaunch[] = [];
