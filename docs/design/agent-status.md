@@ -149,12 +149,14 @@ dot). A small timer ring at the
 trailing end keeps turning; its arc grows toward that threshold, with the
 elapsed time beside it.
 
-Pressing a dock item (its face or its island) grows that Instance's Trace up
-out of it as a small panel standing just above the capsule, rather than a
-centered window; the conversation stays usable beneath it. The item's hover
-controls stay folded while its Trace is out. Pressing the item again, pressing
-outside, Escape or system Back folds it away. Traces opened from anywhere else
-(a message sender, the members list) keep the centered window.
+Pressing a dock item (its face or its island) morphs its capsule into that
+Instance's Trace: the same one glass grows up and right into a panel whose
+bottom row is the capsule with its controls beside the face, and the Trace
+above it. The conversation stays usable beneath; the panel stays out while the
+Trace is open, not only while hovered. Pressing the item again, pressing
+outside, Escape or system Back folds it back into the capsule. Traces opened
+from anywhere else (a message sender, the members list) keep the centered
+window.
 
 The work-island highlight and Status monitor use native Web Animations to
 avoid CSS iteration events. The window and its counter-moving ink share

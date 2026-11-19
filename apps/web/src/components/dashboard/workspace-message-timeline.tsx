@@ -3741,8 +3741,8 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   onOpenAgentTrace: (key: string, anchor: Element) => void;
 }) {
   const [itemElement, setItemElement] = useState<HTMLDivElement | null>(null);
-  // Its trace grows up out of this item; while it is out, it stands where the
-  // hover panel would, so that panel stays folded.
+  // Pressed, the capsule morphs into its Trace: the hover panel's one glass
+  // grows up and right, the Trace above the capsule and its controls.
   const traceOpen = itemElement !== null && traceAnchor === itemElement;
   const openTraceHere = () => {
     if (itemElement) onOpenAgentTrace(item.key, itemElement);
@@ -3847,6 +3847,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     // The panel grows up out of the capsule the pointer is on: the island,
     // or the bare disc when there is none.
     const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    // The Trace takes what the conversation column allows, up to a reading width.
+    const traceSlot = content.querySelector<HTMLElement>(":scope > .app-agent-work-trace-slot");
+    if (traceSlot) {
+      const boundary = capsule.closest(".app-main")?.getBoundingClientRect().width ?? window.innerWidth;
+      traceSlot.style.width = `${Math.max(240, Math.min(560, boundary - 24))}px`;
+    }
     // The content keeps its final layout whatever size the glass is at, so
     // it measures the panel the glass grows into.
     const contentRect = content.getBoundingClientRect();
@@ -3886,7 +3892,8 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       <span className="app-agent-work-hover-line">{usageLimit.title}</span>
     </div>
   );
-  const hoverCards = traceOpen ? null : hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const hoverCards = traceOpen ? instanceCards : hoverPart === "intent" && intentCard ? intentCard : instanceCards;
+  const morphShape = traceOpen ? (island ? "trace-panel" : "trace-row") : island ? "panel" : "row";
   const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
   const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
@@ -3904,12 +3911,12 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
     capsuleObserver.observe(capsule);
     const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
-      () => workItem.matches(":hover, :focus-within"));
+      () => workItem.matches(":hover, :focus-within, [data-trace-open]"));
     return () => {
       capsuleObserver.disconnect();
       stopFollowingLayout();
     };
-  }, [positionActionToolbar, hasHoverCards, island]);
+  }, [positionActionToolbar, hasHoverCards, island, traceOpen]);
 
   useLayoutEffect(() => {
     positionActionToolbar();
@@ -4018,7 +4025,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
       ref={setItemElement}
       data-trace-open={traceOpen || undefined}
       className="app-agent-work-item group relative flex shrink-0 items-center"
-      data-morph={hoverCards ? (island ? "panel" : "row") : undefined}
+      data-morph={hoverCards || traceOpen ? (traceOpen ? "trace" : morphShape) : undefined}
       // The capsule's geometry rides on the item, so a stretching disc can
       // push the items after it aside by exactly the width it grows.
       style={morphGeometry}
@@ -4055,15 +4062,17 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
             busy={displayStatus === "busy"} waiting={waiting} />}
         </LiquidGlassPill>
       ) : avatarButton}
-      {hoverCards ? (
+      {hoverCards || traceOpen ? (
         // The island grows up into a panel, as the composer does for its
         // completions: one glass whose bottom row is the island itself (the
         // seat), with the card the pointer asked for above it. A bare disc
         // has no words to sit under, so it just stretches right into a
         // capsule with its controls beside the face.
         <div ref={actionPopupRef} className="app-agent-work-actions" style={actionLayerPosition}>
-          <LiquidGlassPill className="app-agent-work-morph" data-shape={island ? "panel" : "row"}>
+          <LiquidGlassPill className="app-agent-work-morph" data-shape={morphShape}>
             <div ref={morphContentRef} className="app-agent-work-morph-content">
+              {/* The open Trace renders here (AgentInstanceWindowShell's anchor). */}
+              {traceOpen && <div className="app-agent-work-trace-slot" />}
               <div ref={hoverStackRef} className="app-agent-work-hover-stack">{hoverCards}</div>
               <span className="app-agent-work-morph-seat" aria-hidden="true" />
             </div>

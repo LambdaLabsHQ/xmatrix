@@ -11,7 +11,6 @@ import {
   useRef,
   useState,
   type ComponentType,
-  type CSSProperties,
   type ReactNode,
   type Ref,
 } from "react";
@@ -50,7 +49,6 @@ import { createPortal } from "react-dom";
 import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { useSystemBackDismiss } from "./use-system-back";
-import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
@@ -911,14 +909,7 @@ export function AgentInstanceWindowShell({
       </div>
   </>);
 
-  if (anchor) {
-    return (
-      <AnchoredInstancePanel anchor={anchor} busy={busy} labelledBy={labelledBy} onClose={onClose}>
-        {content}
-      </AnchoredInstancePanel>
-    );
-  }
-  return (
+  const centered = (
     <CenteredDialogShell
       open
       busy={busy}
@@ -930,131 +921,85 @@ export function AgentInstanceWindowShell({
       {content}
     </CenteredDialogShell>
   );
+  if (!anchor) return centered;
+  // In the dock the capsule below already names the Instance; the panel keeps
+  // only what it is doing.
+  return (
+    <DockTraceSlot anchor={anchor} busy={busy} onClose={onClose} fallback={centered}>
+      <div role="dialog" aria-modal="false" aria-labelledby={labelledBy}
+        className="app-agent-instance-docked flex min-h-0 flex-1 flex-col">
+        <div className="flex items-center gap-2 border-b border-border py-1.5 pl-3.5 pr-1.5">
+          <p id={labelledBy} className="min-w-0 flex-1 truncate text-xs text-muted-foreground" title={headerContext}>
+            {headerContext}
+          </p>
+          <button
+            type="button"
+            title="Close"
+            aria-label="Close trace"
+            disabled={busy}
+            onClick={onClose}
+            className="flex size-7 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+          >
+            <X className="size-3.5" />
+          </button>
+        </div>
+        <div className="relative flex min-h-0 flex-1 flex-col">
+          <div ref={scrollRef} onScroll={onScroll} data-agent-instance-scroll
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+            <div>{children}</div>
+          </div>
+          {overlay ? (
+            <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">{overlay}</div>
+          ) : null}
+        </div>
+      </div>
+    </DockTraceSlot>
+  );
 }
 
-/** Widest the docked trace grows; narrower viewports keep a gutter instead. */
-const ANCHORED_PANEL_MAX_WIDTH = 560;
-const ANCHORED_PANEL_GUTTER = 12;
-/** Space between the panel's bottom edge and the item it grows out of. */
-const ANCHORED_PANEL_GAP = 8;
-const ANCHORED_PANEL_MIN_HEIGHT = 200;
-
-/** Where the docked trace sits: its bottom just above the item's capsule, its
- * left edge on the capsule's where the viewport allows, and the capsule's own
- * box (relative to the panel) as the seed the panel grows from. */
-export function anchoredInstancePanelGeometry(capsule: DOMRect, viewport: { width: number; height: number }) {
-  const width = Math.min(ANCHORED_PANEL_MAX_WIDTH, viewport.width - ANCHORED_PANEL_GUTTER * 2);
-  const left = Math.min(Math.max(capsule.left, ANCHORED_PANEL_GUTTER), viewport.width - width - ANCHORED_PANEL_GUTTER);
-  const bottom = viewport.height - capsule.top + ANCHORED_PANEL_GAP;
-  const room = capsule.top - ANCHORED_PANEL_GAP - ANCHORED_PANEL_GUTTER;
-  const maxHeight = Math.max(Math.min(room, viewport.height * 0.7), Math.min(ANCHORED_PANEL_MIN_HEIGHT, room));
-  const seedLeft = Math.max(0, capsule.left - left);
-  const seedRight = Math.max(0, width - seedLeft - capsule.width);
-  return { left, bottom, width, maxHeight, seedLeft, seedRight, seedHeight: capsule.height };
-}
-
-function capsuleOf(anchor: Element): Element {
-  return anchor.querySelector(".app-agent-work-island") ?? anchor.querySelector(".app-agent-work-avatar") ?? anchor;
-}
-
-/** The trace as a small panel growing up out of its Instance in the work dock.
- * Unlike the centered window it does not block the conversation: Escape, the
- * system back gesture, a press outside it, or the item again folds it away. */
-function AnchoredInstancePanel({
+/** The open Trace as the inside of its dock item's morph: the item's capsule
+ * grows up and right into this panel (workspace-message-timeline.tsx), and the
+ * Trace renders into the slot it leaves above the capsule. Escape, system Back,
+ * a press outside the item, or the item again folds it away. Should the item
+ * leave the dock, the Trace stays readable as the centered window. */
+function DockTraceSlot({
   anchor,
   busy,
-  labelledBy,
   onClose,
+  fallback,
   children,
 }: {
   anchor: Element;
   busy: boolean;
-  labelledBy: string;
   onClose: () => void;
+  fallback: ReactNode;
   children: ReactNode;
 }) {
-  const panelRef = useRef<HTMLElement | null>(null);
-  const [style, setStyle] = useState<CSSProperties | null>(null);
-  useSystemBackDismiss(true, onClose, busy);
+  const [slot, setSlot] = useState<HTMLElement | null>(null);
+  useSystemBackDismiss(slot !== null, onClose, busy);
 
   useLayoutEffect(() => {
-    let lastRect: DOMRect | null = null;
-    let frame: number | null = null;
-    const place = () => {
-      frame = null;
-      // The item may leave the dock while its trace is open; the panel stays
-      // where it last stood rather than jumping to the corner.
-      const rect = anchor.isConnected ? capsuleOf(anchor).getBoundingClientRect() : lastRect;
-      if (!rect) return;
-      lastRect = rect;
-      // Fixed boxes sit in the layout viewport.
-      const geometry = anchoredInstancePanelGeometry(rect, {
-        width: document.documentElement.clientWidth || window.innerWidth,
-        height: window.innerHeight,
-      });
-      const next = {
-        left: `${Math.round(geometry.left)}px`,
-        bottom: `${Math.round(geometry.bottom)}px`,
-        width: `${Math.round(geometry.width)}px`,
-        maxHeight: `${Math.round(geometry.maxHeight)}px`,
-        "--app-agent-trace-seed-l": `${Math.round(geometry.seedLeft)}px`,
-        "--app-agent-trace-seed-r": `${Math.round(geometry.seedRight)}px`,
-        "--app-agent-trace-seed-h": `${Math.round(geometry.seedHeight)}px`,
-      } as CSSProperties;
-      setStyle((current) => sameValue(current, next) ? current : next);
-    };
-    const schedule = () => {
-      if (frame === null) frame = window.requestAnimationFrame(place);
-    };
-    place();
-    const resizeObserver = new ResizeObserver(schedule);
-    resizeObserver.observe(anchor);
-    resizeObserver.observe(document.documentElement);
-    window.addEventListener("resize", schedule);
-    window.addEventListener("scroll", schedule, true);
-    window.visualViewport?.addEventListener("resize", schedule);
-    return () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      resizeObserver.disconnect();
-      window.removeEventListener("resize", schedule);
-      window.removeEventListener("scroll", schedule, true);
-      window.visualViewport?.removeEventListener("resize", schedule);
-    };
+    const find = () => setSlot(anchor.isConnected
+      ? anchor.querySelector<HTMLElement>(".app-agent-work-trace-slot")
+      : null);
+    find();
+    // The slot comes and goes with the item's own renders and the dock's roster.
+    const observer = new MutationObserver(find);
+    observer.observe(anchor, { childList: true, subtree: true });
+    if (anchor.parentNode) observer.observe(anchor.parentNode, { childList: true });
+    return () => observer.disconnect();
   }, [anchor]);
 
   useEffect(() => {
-    if (busy) return;
-    // A press on the item itself toggles through its own click.
+    if (busy || !slot) return;
     return listenForOverlayDismissal((event) => {
       const target = event.target as Node | null;
-      if (!target || panelRef.current?.contains(target) || anchor.contains(target)) return;
+      // A press on the item itself toggles through its own click.
+      if (!target || anchor.contains(target)) return;
       onClose();
     }, onClose);
-  }, [anchor, busy, onClose]);
+  }, [anchor, busy, onClose, slot]);
 
-  const placed = style !== null;
-  useEffect(() => {
-    if (placed) panelRef.current?.focus({ preventScroll: true });
-  }, [placed]);
-
-  if (typeof document === "undefined") return null;
-  return createPortal(
-    // The fixed box is plain: the glass inside gives its surfaces a relative
-    // position the app's material rules insist on.
-    <div className="xmatrix-app app-agent-instance-anchor-frame fixed z-50 flex flex-col"
-      style={style ?? { visibility: "hidden" }}>
-      <LiquidGlassCard
-        ref={panelRef}
-        role="dialog"
-        aria-modal="false"
-        aria-labelledby={labelledBy}
-        tabIndex={-1}
-        className="app-agent-instance-window app-agent-instance-anchored flex min-h-0 w-full flex-col overflow-hidden p-0 text-foreground outline-none"
-        style={style ? { maxHeight: style.maxHeight } : undefined}
-      >
-        {children}
-      </LiquidGlassCard>
-    </div>,
-    document.body
-  );
+  if (!slot) return <>{fallback}</>;
+  return createPortal(children, slot);
 }
