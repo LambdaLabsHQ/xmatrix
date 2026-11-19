@@ -190,9 +190,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     loadingHistory,
     olderLoading,
     hasOlderMessages,
-    stoppingAgentInstanceId,
-    reborningAgentInstanceId,
-    handingOffAgentInstanceId,
+    stoppingAgentInstanceIds,
+    reborningAgentInstanceIds,
+    handingOffAgentInstanceIds,
     renamingChannelId,
     updatingChannelVisibilityId,
     error,
@@ -1273,7 +1273,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         onQuotePassage={handleTimelineQuotePassage}
         onMentionSender={handleTimelineMentionSender}
         onRebornSender={handleTimelineRebornSender}
-        reborningSenderKey={reborningAgentInstanceId}
+        reborningSenderKeys={reborningAgentInstanceIds}
         onQuestionnaireAnswer={handleTimelineQuestionnaireAnswer}
         onOpenInternalAppLink={handleTimelineOpenInternalAppLink}
         onOpenPage={openPageAt}
@@ -1305,9 +1305,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
         token={token ?? null}
         timeline={timeline}
         events={events}
-        stoppingAgentInstanceId={stoppingAgentInstanceId}
-        reborningAgentInstanceId={reborningAgentInstanceId}
-        handingOffAgentInstanceId={handingOffAgentInstanceId}
+        stoppingAgentInstanceIds={stoppingAgentInstanceIds}
+        reborningAgentInstanceIds={reborningAgentInstanceIds}
+        handingOffAgentInstanceIds={handingOffAgentInstanceIds}
         onStopAgentInstance={stopDockInstance}
         onRebornAgentInstance={rebornDockInstance}
         onHandoffAgentInstance={handoffDockInstance}

@@ -41,7 +41,10 @@ import {
   useMemo,
   useRef,
   useState,
+  type Dispatch,
+  type SetStateAction,
 } from "react";
+import { withBusyInstance } from "./agent-work-view";
 import { useXMatrixQueryFetch } from "@/lib/query/use-query-fetch";
 
 import {
@@ -204,7 +207,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     setLoadingWorkspace,
     setLoadingHistory,
     setOlderLoading,
-    setReborningAgentInstanceId,
+    setReborningAgentInstanceIds,
     setRenamingChannelId,
     setUpdatingChannelVisibilityId,
     setOutgoingMessages,
@@ -2182,7 +2185,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     instance: SerializedAgentInstance,
     agentLabel?: string
   ) {
-    if (!s.token || s.stoppingAgentInstanceId || s.reborningAgentInstanceId || s.handingOffAgentInstanceId) return;
+    if (!s.token || lifecycleRequestInFlight(instance.id)) return;
     const liveAgent = s.realtimeAgents.get(agentId);
     const body = agentInstanceStopBody(liveAgent, instance, agentLabel);
     if (!body) {
@@ -2191,16 +2194,16 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setHistoryError(message);
       return;
     }
-    void sendLifecycleMention(body, instance.id, s.setStoppingAgentInstanceId);
+    void sendLifecycleMention(body, instance.id, s.setStoppingAgentInstanceIds);
   }
 
   /** Posts one lifecycle mention while `setBusy` marks that Instance busy. */
   async function sendLifecycleMention(
     body: string,
     instanceId: string,
-    setBusy: (instanceId: string | null) => void,
+    setBusy: Dispatch<SetStateAction<ReadonlySet<string>>>,
   ) {
-    setBusy(instanceId);
+    setBusy((busy) => withBusyInstance(busy, instanceId, true));
     setAgentsError(null);
     setHistoryError(null);
     try {
@@ -2210,13 +2213,18 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setAgentsError(message);
       setHistoryError(message);
     } finally {
-      setBusy(null);
+      setBusy((busy) => withBusyInstance(busy, instanceId, false));
     }
   }
 
-  function lifecycleControlBlocked(): boolean {
-    return !s.token || !s.selectedChannel || !s.canUseSelectedChannel ||
-      Boolean(s.reborningAgentInstanceId || s.stoppingAgentInstanceId || s.handingOffAgentInstanceId);
+  /** Whether this Instance already has a stop, reborn or handoff being sent. */
+  function lifecycleRequestInFlight(instanceId: string): boolean {
+    return s.stoppingAgentInstanceIds.has(instanceId) || s.reborningAgentInstanceIds.has(instanceId) ||
+      s.handingOffAgentInstanceIds.has(instanceId);
+  }
+
+  function lifecycleControlBlocked(instanceId: string): boolean {
+    return !s.token || !s.selectedChannel || !s.canUseSelectedChannel || lifecycleRequestInFlight(instanceId);
   }
 
   /** The Agent name a lifecycle mention addresses, without a leading @. */
@@ -2226,7 +2234,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }
 
   async function rebornAgentInstance(agentId: string, instance: SerializedAgentInstance, agentLabel: string) {
-    if (lifecycleControlBlocked()) return;
+    if (lifecycleControlBlocked(instance.id)) return;
 
     const channelInstanceId = instance.channelInstanceId?.trim();
     if (!channelInstanceId || !/^[1-9]\d*$/.test(channelInstanceId)) {
@@ -2245,7 +2253,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
 
     await sendLifecycleMention(`@${mentionName}:${channelInstanceId}:reborn`, instance.id,
-      setReborningAgentInstanceId);
+      setReborningAgentInstanceIds);
   }
 
   /** Posts the same `@<name>:<n>:handoff:@<successor>` mention a person would type. */
@@ -2255,7 +2263,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     agentLabel: string,
     successor: string,
   ) {
-    if (lifecycleControlBlocked()) return;
+    if (lifecycleControlBlocked(instance.id)) return;
 
     const channelInstanceId = instance.channelInstanceId?.trim();
     const mentionName = lifecycleMentionName(agentId, agentLabel);
@@ -2270,12 +2278,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       return;
     }
 
-    await sendLifecycleMention(body, instance.id, s.setHandingOffAgentInstanceId);
+    await sendLifecycleMention(body, instance.id, s.setHandingOffAgentInstanceIds);
   }
 
   async function rebornMessageSender(message: TimelineItem) {
     if (!s.token || !s.selectedChannel || !s.canUseSelectedChannel) return;
-    if (s.reborningAgentInstanceId || s.stoppingAgentInstanceId) return;
 
     const instance = message.senderInstanceId
       ? s.realtimeChannels.get(message.channelId ?? "")?.presence?.instances.get(presenceInstanceId(message.senderInstanceId))
@@ -2289,7 +2296,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
 
     const busyKey = message.senderInstanceId || message.senderMention || message.messageId || message.author;
-    setReborningAgentInstanceId(busyKey);
+    if (lifecycleRequestInFlight(busyKey)) return;
+    setReborningAgentInstanceIds((busy) => withBusyInstance(busy, busyKey, true));
     setAgentsError(null);
     setHistoryError(null);
     try {
@@ -2299,7 +2307,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setAgentsError(error);
       setHistoryError(error);
     } finally {
-      setReborningAgentInstanceId(null);
+      setReborningAgentInstanceIds((busy) => withBusyInstance(busy, busyKey, false));
     }
   }
 
