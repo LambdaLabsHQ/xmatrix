@@ -160,3 +160,16 @@ test("quota status names exhausted windows and drops windows that have reset", (
   assert.equal(activity([{ ...five, resetAt: "2026-10-08T11:00:00Z" }, week]).line, "1w limit reached");
   assert.equal(activity([{ usedPercent: 100 }]).line, "Out of quota · window unavailable");
 });
+
+test("the Default model menu lists the catalog, declared models and the saved value once each", () => {
+  const { registrationModelChoices } = compiled.exports;
+  const catalog = [
+    { model: "gpt-5.5", description: "Frontier", efforts: [] },
+    { model: "gpt-5.5-mini", description: "", efforts: [] },
+  ];
+  assert.deepEqual(registrationModelChoices(registration({ modelCatalog: catalog, models: ["gpt-5.5", "o9"] }), "custom-x"), [
+    { model: "gpt-5.5", description: "Frontier" }, { model: "gpt-5.5-mini" }, { model: "o9" }, { model: "custom-x" },
+  ]);
+  assert.deepEqual(registrationModelChoices(registration(), ""), [], "no catalog and nothing saved offers only the harness default");
+  assert.deepEqual(registrationModelChoices(registration({ models: ["o9"] }), " o9 "), [{ model: "o9" }]);
+});

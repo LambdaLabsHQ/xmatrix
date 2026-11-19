@@ -37,11 +37,13 @@ import { useViewSelection } from "./url-query-state";
 import { agentHarnessSelectionId, type AgentListGroup } from "./agent-list-groups";
 import { agentBalanceReadings, agentUsageReadings } from "./agent-quota-usage";
 import { HarnessSetUpSection, HarnessSignInSection } from "./harness-sign-in";
+import { DefaultModelSelect } from "./default-model-select";
 import { Face } from "./face";
 import { MeterReadingList } from "./machine-load-panel";
 import {
   MY_AGENT_ACTION_LABEL,
   registrationActions,
+  registrationModelChoices,
   registrationSettingsMode,
   registrationSwitch,
   type MyAgentAction,
@@ -361,6 +363,7 @@ function RegistrationSettings({
   return (
     <RegistrationSettingsForm
       server={server}
+      modelChoices={registrationModelChoices(registration, server.model)}
       busy={busy}
       onSave={async (change) => {
         if (!(await onSave(change))) return false;
@@ -373,10 +376,12 @@ function RegistrationSettings({
 
 function RegistrationSettingsForm({
   server,
+  modelChoices,
   busy,
   onSave,
 }: {
   server: RegistrationSettingsValues;
+  modelChoices: ReadonlyArray<{ model: string; description?: string }>;
   busy: boolean;
   onSave: (change: RegistrationSettingsValues) => Promise<boolean>;
 }) {
@@ -392,7 +397,7 @@ function RegistrationSettingsForm({
   );
   return (
     <form
-      className="mt-3 grid gap-3 sm:grid-cols-3"
+      className="mt-3 grid items-start gap-3 sm:grid-cols-3"
       onSubmit={(event) => {
         event.preventDefault();
         if (!changed || busy || !value.displayName.trim()) return;
@@ -413,12 +418,13 @@ function RegistrationSettingsForm({
       </label>
       <label className="grid gap-1.5 text-[13px] font-semibold">
         Default model
-        <input
+        <DefaultModelSelect
           value={value.model}
+          choices={modelChoices}
           disabled={busy}
-          placeholder="Harness default"
-          onChange={(event) => update({ model: event.target.value })}
+          onChange={(model) => update({ model })}
           className={INPUT_CLASS}
+          inputClassName={`${INPUT_CLASS} font-normal`}
         />
       </label>
       <label className="grid gap-1.5 text-[13px] font-semibold">
