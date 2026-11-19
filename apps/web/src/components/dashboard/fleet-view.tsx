@@ -494,9 +494,9 @@ export function FleetView({
   if (!showsOverview) return <ToolSheet label="Agents">{page}</ToolSheet>;
   return (
     <ToolSheet label="Agents">
-      {setup ? <div className="app-tool-detail-scroll app-below-band min-h-0 flex-1 overflow-y-auto">{bringIn}</div> : (
-        <ToolPaperScroll wide>
-          <h1 className="mb-6 text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
+      <ToolPaperScroll wide>
+        <h1 className="mb-6 text-xs font-black uppercase tracking-wide text-muted-foreground">Agents</h1>
+        {setup ? bringIn : <>
           {error && <p role="alert" className="mb-4 text-xs font-medium text-destructive">{error}</p>}
           {model.identityUnavailable && <p role="status" className="mb-4 text-xs text-muted-foreground">
             Update xMatrix to identify this computer and show its controls on the registered Machine.
@@ -524,8 +524,8 @@ export function FleetView({
             </section>
             {addMachine}
           </FleetOverview>
-        </ToolPaperScroll>
-      )}
+        </>}
+      </ToolPaperScroll>
     </ToolSheet>
   );
 }
