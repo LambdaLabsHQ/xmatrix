@@ -465,7 +465,7 @@ export function agentRunHttpRouteAllowed(
   // A CLI released while schedule lines ran still calls a page's schedule routes; its Run is told they are retired
   // (index-routes-automation.ts).
   if (/^\/api\/spaces\/[^/]+\/pages\/[^/]+\/automations(?:\/[^/]+(?:\/(?:pause|resume|run|reference))?)?$/u.test(path)) return true;
-  if (["GET", "POST"].includes(request.method) && /^\/api\/spaces\/[^/]+\/page-links$/u.test(path)) return true;
+  if (["GET", "POST", "DELETE"].includes(request.method) && /^\/api\/spaces\/[^/]+\/page-links$/u.test(path)) return true;
   if (request.method === "PUT" && /^\/api\/spaces\/[^/]+\/page-links\/[^/]+\/resolution$/u.test(path)) return true;
   if (request.method === "GET" && /^\/api\/channels\/[^/]+\/(?:page-space|pages)$/u.test(path)) return true;
   // An owner's or admin's Run reads, drafts and applies the move to pages.
