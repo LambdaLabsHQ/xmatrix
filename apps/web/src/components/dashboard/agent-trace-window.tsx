@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   type ComponentType,
+  type CSSProperties,
   type ReactNode,
   type Ref,
 } from "react";
@@ -45,7 +46,11 @@ import {
 } from "./agent-trace-stream";
 import { visibleAgentTraceReplicasForHistoryReads, type AgentTraceReplica } from "./agent-trace-replica";
 import { agentTraceHistoryStatusCopy, type AgentTraceHistoryReadState } from "./agent-trace-on-demand";
+import { createPortal } from "react-dom";
 import { CenteredDialogShell, DialogButton } from "./centered-dialog-shell";
+import { listenForOverlayDismissal } from "./use-overlay-dismiss";
+import { useSystemBackDismiss } from "./use-system-back";
+import { LiquidGlassCard } from "@/components/ui/material-surfaces";
 import { RichMessageContent } from "./workspace-shell-rich-message";
 import { AGENT_BUSY_TRACE_STALE_MS } from "./workspace-shell-constants";
 import { tagsFromUsage, traceBlockText, traceFieldValue, traceToolPreviewText } from "./workspace-shell-formatters";
@@ -75,9 +80,12 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
   history,
   channelId,
   onLoadOlder,
+  anchor,
   onClose,
 }: {
   target: AgentTraceTarget;
+  /** The work-dock item to grow up out of; without one it is a centered window. */
+  anchor?: Element | null;
   traceReplicas: AgentTraceReplica[];
   traceHistoryState: AgentTraceHistoryPanelState | null;
   history: ChannelMessage[];
@@ -172,6 +180,7 @@ export const AgentInstanceDetailWindow = memo(function AgentInstanceDetailWindow
       target={target}
       busy={false}
       labelledBy="agent-instance-detail-title"
+      anchor={anchor}
       onClose={onClose}
       scrollRef={scroll.scrollerRef}
       onScroll={scroll.onScroll}
@@ -853,10 +862,12 @@ export function AgentInstanceWindowShell({
   scrollRef,
   onScroll,
   overlay,
+  anchor,
 }: {
   target: AgentTraceTarget;
   busy: boolean;
   labelledBy: string;
+  anchor?: Element | null;
   children: ReactNode;
   onClose: () => void;
   scrollRef?: Ref<HTMLDivElement>;
@@ -866,15 +877,7 @@ export function AgentInstanceWindowShell({
 }) {
   const headerContext = [target.activity || target.status || "offline", target.gitBranch].filter(Boolean).join(" | ");
 
-  return (
-    <CenteredDialogShell
-      open
-      busy={busy}
-      labelledBy={labelledBy}
-      overlayClassName="app-agent-instance-overlay"
-      panelClassName="app-agent-instance-window flex max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0"
-      onCancel={onClose}
-    >
+  const content = (<>
       <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           {/* Opened from where its face is known, it keeps it; else the exact Instance it traces names it. */}
@@ -906,6 +909,152 @@ export function AgentInstanceWindowShell({
           <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">{overlay}</div>
         ) : null}
       </div>
+  </>);
+
+  if (anchor) {
+    return (
+      <AnchoredInstancePanel anchor={anchor} busy={busy} labelledBy={labelledBy} onClose={onClose}>
+        {content}
+      </AnchoredInstancePanel>
+    );
+  }
+  return (
+    <CenteredDialogShell
+      open
+      busy={busy}
+      labelledBy={labelledBy}
+      overlayClassName="app-agent-instance-overlay"
+      panelClassName="app-agent-instance-window flex max-h-[86vh] max-w-3xl flex-col overflow-hidden p-0"
+      onCancel={onClose}
+    >
+      {content}
     </CenteredDialogShell>
+  );
+}
+
+/** Widest the docked trace grows; narrower viewports keep a gutter instead. */
+const ANCHORED_PANEL_MAX_WIDTH = 560;
+const ANCHORED_PANEL_GUTTER = 12;
+/** Space between the panel's bottom edge and the item it grows out of. */
+const ANCHORED_PANEL_GAP = 8;
+const ANCHORED_PANEL_MIN_HEIGHT = 200;
+
+/** Where the docked trace sits: its bottom just above the item's capsule, its
+ * left edge on the capsule's where the viewport allows, and the capsule's own
+ * box (relative to the panel) as the seed the panel grows from. */
+export function anchoredInstancePanelGeometry(capsule: DOMRect, viewport: { width: number; height: number }) {
+  const width = Math.min(ANCHORED_PANEL_MAX_WIDTH, viewport.width - ANCHORED_PANEL_GUTTER * 2);
+  const left = Math.min(Math.max(capsule.left, ANCHORED_PANEL_GUTTER), viewport.width - width - ANCHORED_PANEL_GUTTER);
+  const bottom = viewport.height - capsule.top + ANCHORED_PANEL_GAP;
+  const room = capsule.top - ANCHORED_PANEL_GAP - ANCHORED_PANEL_GUTTER;
+  const maxHeight = Math.max(Math.min(room, viewport.height * 0.7), Math.min(ANCHORED_PANEL_MIN_HEIGHT, room));
+  const seedLeft = Math.max(0, capsule.left - left);
+  const seedRight = Math.max(0, width - seedLeft - capsule.width);
+  return { left, bottom, width, maxHeight, seedLeft, seedRight, seedHeight: capsule.height };
+}
+
+function capsuleOf(anchor: Element): Element {
+  return anchor.querySelector(".app-agent-work-island") ?? anchor.querySelector(".app-agent-work-avatar") ?? anchor;
+}
+
+/** The trace as a small panel growing up out of its Instance in the work dock.
+ * Unlike the centered window it does not block the conversation: Escape, the
+ * system back gesture, a press outside it, or the item again folds it away. */
+function AnchoredInstancePanel({
+  anchor,
+  busy,
+  labelledBy,
+  onClose,
+  children,
+}: {
+  anchor: Element;
+  busy: boolean;
+  labelledBy: string;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const [style, setStyle] = useState<CSSProperties | null>(null);
+  useSystemBackDismiss(true, onClose, busy);
+
+  useLayoutEffect(() => {
+    let lastRect: DOMRect | null = null;
+    let frame: number | null = null;
+    const place = () => {
+      frame = null;
+      // The item may leave the dock while its trace is open; the panel stays
+      // where it last stood rather than jumping to the corner.
+      const rect = anchor.isConnected ? capsuleOf(anchor).getBoundingClientRect() : lastRect;
+      if (!rect) return;
+      lastRect = rect;
+      // Fixed boxes sit in the layout viewport.
+      const geometry = anchoredInstancePanelGeometry(rect, {
+        width: document.documentElement.clientWidth || window.innerWidth,
+        height: window.innerHeight,
+      });
+      const next = {
+        left: `${Math.round(geometry.left)}px`,
+        bottom: `${Math.round(geometry.bottom)}px`,
+        width: `${Math.round(geometry.width)}px`,
+        maxHeight: `${Math.round(geometry.maxHeight)}px`,
+        "--app-agent-trace-seed-l": `${Math.round(geometry.seedLeft)}px`,
+        "--app-agent-trace-seed-r": `${Math.round(geometry.seedRight)}px`,
+        "--app-agent-trace-seed-h": `${Math.round(geometry.seedHeight)}px`,
+      } as CSSProperties;
+      setStyle((current) => sameValue(current, next) ? current : next);
+    };
+    const schedule = () => {
+      if (frame === null) frame = window.requestAnimationFrame(place);
+    };
+    place();
+    const resizeObserver = new ResizeObserver(schedule);
+    resizeObserver.observe(anchor);
+    resizeObserver.observe(document.documentElement);
+    window.addEventListener("resize", schedule);
+    window.addEventListener("scroll", schedule, true);
+    window.visualViewport?.addEventListener("resize", schedule);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      window.removeEventListener("resize", schedule);
+      window.removeEventListener("scroll", schedule, true);
+      window.visualViewport?.removeEventListener("resize", schedule);
+    };
+  }, [anchor]);
+
+  useEffect(() => {
+    if (busy) return;
+    // A press on the item itself toggles through its own click.
+    return listenForOverlayDismissal((event) => {
+      const target = event.target as Node | null;
+      if (!target || panelRef.current?.contains(target) || anchor.contains(target)) return;
+      onClose();
+    }, onClose);
+  }, [anchor, busy, onClose]);
+
+  const placed = style !== null;
+  useEffect(() => {
+    if (placed) panelRef.current?.focus({ preventScroll: true });
+  }, [placed]);
+
+  if (typeof document === "undefined") return null;
+  return createPortal(
+    // The fixed box is plain: the glass inside gives its surfaces a relative
+    // position the app's material rules insist on.
+    <div className="xmatrix-app app-agent-instance-anchor-frame fixed z-50 flex flex-col"
+      style={style ?? { visibility: "hidden" }}>
+      <LiquidGlassCard
+        ref={panelRef}
+        role="dialog"
+        aria-modal="false"
+        aria-labelledby={labelledBy}
+        tabIndex={-1}
+        className="app-agent-instance-window app-agent-instance-anchored flex min-h-0 w-full flex-col overflow-hidden p-0 text-foreground outline-none"
+        style={style ? { maxHeight: style.maxHeight } : undefined}
+      >
+        {children}
+      </LiquidGlassCard>
+    </div>,
+    document.body
   );
 }

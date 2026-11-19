@@ -149,6 +149,13 @@ dot). A small timer ring at the
 trailing end keeps turning; its arc grows toward that threshold, with the
 elapsed time beside it.
 
+Pressing a dock item (its face or its island) grows that Instance's Trace up
+out of it as a small panel standing just above the capsule, rather than a
+centered window; the conversation stays usable beneath it. The item's hover
+controls stay folded while its Trace is out. Pressing the item again, pressing
+outside, Escape or system Back folds it away. Traces opened from anywhere else
+(a message sender, the members list) keep the centered window.
+
 The work-island highlight and Status monitor use native Web Animations to
 avoid CSS iteration events. The window and its counter-moving ink share
 one 2.2-second clock. They pause together when the whole island leaves its

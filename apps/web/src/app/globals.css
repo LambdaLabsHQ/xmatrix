@@ -4432,6 +4432,39 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   border-radius: var(--app-agent-instance-window-radius) var(--app-agent-instance-window-radius) 0 0;
 }
 
+/* From the work dock the trace grows up out of its Instance: the panel stands
+   just above the capsule and opens from the capsule's own box (the seed vars
+   come from anchoredInstancePanelGeometry) on the dock panel's curve. A clip,
+   not opacity or scale, so the glass keeps its backdrop while it grows. */
+.xmatrix-app.app-agent-instance-anchor-frame {
+  padding: 0;
+}
+
+.xmatrix-app .app-agent-instance-window.app-agent-instance-anchored {
+  border-radius: var(--app-agent-instance-window-radius) !important;
+  animation: app-agent-trace-grow 360ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes app-agent-trace-grow {
+  from {
+    clip-path: inset(
+      calc(100% - var(--app-agent-trace-seed-h, 2.75rem)) var(--app-agent-trace-seed-r, 0px) 0
+      var(--app-agent-trace-seed-l, 0px) round calc(var(--app-agent-trace-seed-h, 2.75rem) / 2)
+    );
+    transform: translateY(calc(var(--app-agent-trace-seed-h, 2.75rem) + 0.5rem));
+  }
+  to {
+    clip-path: inset(0 0 0 0 round var(--app-agent-instance-window-radius));
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xmatrix-app .app-agent-instance-window.app-agent-instance-anchored {
+    animation: none;
+  }
+}
+
 .xmatrix-app.app-agent-instance-overlay {
   align-items: center !important;
   padding-block: 1rem !important;

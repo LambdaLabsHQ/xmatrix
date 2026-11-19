@@ -171,6 +171,41 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toBeFocused();
 });
 
+test("the avatar grows its trace up out of its dock item and folds it back", async ({ page }, testInfo) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openActiveAgentWorkspace(page);
+  const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+  const panel = page.getByRole("dialog");
+
+  await avatar.click();
+  await expect(panel).toBeVisible();
+  // It stands just above the capsule it grew from, starting at its left edge,
+  // and leaves the conversation usable: no overlay catches the page.
+  await expect.poll(async () => {
+    const [avatarBox, panelBox] = await Promise.all([avatar.boundingBox(), panel.boundingBox()]);
+    if (!avatarBox || !panelBox) return null;
+    return { gap: Math.round(avatarBox.y - (panelBox.y + panelBox.height)), left: Math.round(panelBox.x - avatarBox.x) };
+  }).toEqual({ gap: 8, left: 0 });
+  await expect(page.locator(".app-agent-instance-overlay")).toHaveCount(0);
+  await expect(panel.getByRole("heading")).toHaveText("codex:1");
+  // The trace stands where the hover panel would; that panel stays folded.
+  await avatar.hover();
+  await expect(page.locator(".app-agent-work-actions")).toHaveCount(0);
+  await page.screenshot({ path: testInfo.outputPath("dock-trace-panel.png") });
+
+  // The same item folds it back, as does a press outside or Escape.
+  await avatar.click();
+  await expect(panel).toHaveCount(0);
+  await avatar.click();
+  await expect(panel).toBeVisible();
+  await page.locator(".composer-textarea").first().click();
+  await expect(panel).toHaveCount(0);
+  await avatar.click();
+  await expect(panel).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toHaveCount(0);
+});
+
 test("Stop asks in place and posts the card's address on the second press", async ({ page }) => {
   await openActiveAgentWorkspace(page);
   const { avatar, toolbar } = await hoverCodexControlsWithSend(page, "stop-send");
