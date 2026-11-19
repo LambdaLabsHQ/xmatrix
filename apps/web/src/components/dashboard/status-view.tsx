@@ -84,9 +84,9 @@ export function FleetOverview({ title = "Agents", status, attention, note, child
   const { online, busy, workingCount } = status;
   return (
     <>
-      <header className="app-status-hero mb-7" data-testid="status-hero">
+      <header className="app-status-hero mb-5" data-testid="status-hero">
         <h1 className="text-2xl font-black tracking-[-0.02em] text-foreground">{title}</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
+        <p className="mt-1 text-[13px] text-muted-foreground">
           <span className={cn("tabular-nums", workingCount > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80")}
             data-testid="status-working">{workingCount}</span>{" "}
           <span className={workingCount > 0 ? "font-medium text-foreground" : undefined}>

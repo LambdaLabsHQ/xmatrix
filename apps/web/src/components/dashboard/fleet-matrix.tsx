@@ -69,7 +69,7 @@ export function tightest(usage: Extract<FleetMatrixCell, { kind: "agent" }>["usa
 /** Shared status readout + tightest quota bar for one Space-registered cell (matrix or mobile grid). */
 export function FleetCellBusyReadout({ busy }: { busy: string }) {
   return (
-    <span className="flex w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
+    <span className="flex h-5 w-full min-w-0 items-center gap-1.5 text-xs font-semibold">
       <AnimatedIcon icon={Loader2} className="size-3 shrink-0 animate-spin" />
       <span className="min-w-0 truncate">{busy}</span>
     </span>
@@ -81,10 +81,10 @@ export function FleetCellAgentReadout({ cell }: { cell: Extract<FleetMatrixCell,
   const meter = tightest(cell.usage);
   return (
     <>
-      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-[12.5px] leading-snug",
+      <span className={cn("flex h-5 w-full min-w-0 items-center gap-1.5 text-[12.5px] leading-5 tracking-[-0.005em]",
         cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
           : cell.working > 0 ? "font-semibold text-foreground"
-            : cell.state === "offline" ? "text-muted-foreground" : "font-medium text-foreground/80")}>
+            : cell.state === "offline" ? "text-muted-foreground" : "text-foreground/75")}>
         {/* On, though its machine is away: the row is dimmed, and the mark stays the one of an agent that is on. */}
         <ToolStateDot state={cell.state === "offline" ? "running" : cell.state} />
         <span className="min-w-0 truncate">{cell.label}</span>
@@ -152,21 +152,21 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
         <table className="w-full border-separate border-spacing-0 text-sm">
           <thead>
             <tr>
-              <th scope="col" className={cn(sticky, "w-56 min-w-[12.5rem] max-w-[16rem] border-b border-foreground/10 pb-2.5 pl-2 pr-3 text-left align-bottom")}>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Machine</span>
+              <th scope="col" className={cn(sticky, "w-52 min-w-[12rem] max-w-[15rem] pb-2 pl-2 pr-3 text-left align-bottom")}>
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">Machine</span>
               </th>
               {columns.map((column) => {
                 const heading = (
                   <>
                     <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm"
-                      showKindBadge={false} className={cn("shrink-0", !column.onOpen && "opacity-60")} />
-                    <span className="block w-full truncate text-[13px] font-semibold tracking-[-0.01em]">{column.harness}</span>
+                      showKindBadge={false} className={cn("!size-6 shrink-0", !column.onOpen && "opacity-60")} />
+                    <span className="block w-full truncate text-xs font-medium leading-4 tracking-[-0.005em] text-foreground/80">{column.harness}</span>
                   </>
                 );
-                const headingClass = "flex w-full min-w-0 flex-col items-start gap-1.5 px-2 py-1.5";
+                const headingClass = "flex w-full min-w-0 flex-col items-start gap-1.5 px-2 pt-1.5 pb-1";
                 return (
                   <th key={column.harness} scope="col" className={cn(
-                    "border-b border-foreground/10 px-0.5 pb-1.5 text-left align-bottom font-normal",
+                    "px-px pb-1 text-left align-bottom font-normal",
                     hasFiller ? "w-[7.5rem] min-w-[6.75rem]" : "min-w-[5.75rem]",
                   )}>
                     {column.onOpen ? (
@@ -184,7 +184,7 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
                 );
               })}
               {addColumn && (
-                <th scope="col" className="w-9 border-b border-foreground/10 pb-1.5 pl-1 text-left align-bottom font-normal">
+                <th scope="col" className="w-9 pb-1 pl-1 text-left align-bottom font-normal">
                   <button type="button" onClick={() => setChoosingColumn(!choosingColumn)} aria-expanded={choosingColumn}
                     aria-haspopup="menu" data-testid="fleet-add-column" data-cell="+" disabled={addColumn.options.length === 0}
                     title={addColumn.options.length ? "Add an agent: a column for one no machine has yet" : "Every agent xMatrix knows is already a column"}
@@ -194,7 +194,7 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
                   </button>
                 </th>
               )}
-              {hasFiller && <th aria-hidden="true" className="w-full border-b border-foreground/10" />}
+              {hasFiller && <th aria-hidden="true" className="w-full" />}
             </tr>
           </thead>
           <tbody>
@@ -206,9 +206,9 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
             {addRow && (
               <>
                 <tr>
-                  <th scope="row" colSpan={span} className="pt-2 pb-1 text-left font-normal">
+                  <th scope="row" colSpan={span} className="pt-1.5 pb-1 text-left font-normal">
                     <button type="button" onClick={addRow.onToggle} aria-expanded={addRow.open} data-testid="fleet-add-row"
-                      className="flex items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm font-semibold text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground">
+                      className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-[13px] font-medium text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground">
                       <Plus className={cn("size-4 shrink-0 transition-transform", addRow.open && "rotate-45")} aria-hidden="true" />
                       Add a machine
                     </button>
@@ -258,34 +258,37 @@ function FleetMatrixRowLines({ row, columns, sticky, span, hasAddColumn, hasFill
     <>
       {label && (
         <tr>
-          <th scope="rowgroup" colSpan={span} className="pt-5 pb-1.5 pl-2 text-left text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">{label}</th>
+          <th scope="rowgroup" colSpan={span} className="pt-5 pb-1.5 pl-2 text-left text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">{label}</th>
         </tr>
       )}
-      <tr aria-label={row.name} data-testid="fleet-machine" className="group/row transition-colors hover:bg-foreground/[0.025]">
+      <tr aria-label={row.name} data-testid="fleet-machine" className="app-fleet-matrix-row group/row transition-colors hover:bg-foreground/[0.025]">
         <th scope="row" className={cn(
           sticky,
-          "border-b border-foreground/10 py-2 pr-3 text-left align-middle font-normal group-hover/row:bg-[color-mix(in_oklab,var(--foreground)_2.5%,var(--app-panel-paper,var(--background)))]",
+          "p-0 pr-3 text-left align-top font-normal group-hover/row:bg-[color-mix(in_oklab,var(--foreground)_2.5%,var(--app-panel-paper,var(--background)))]",
         )}>
           {row.heading}
         </th>
         {columns.map((column) => {
           const id = cellId({ row: row.key, harness: column.harness });
           return (
-            <td key={column.harness} className={cn("border-b border-foreground/10 px-0.5 py-2 align-middle", row.dimmed && "opacity-55")}>
+            <td key={column.harness} className={cn("px-px py-0 align-top", row.dimmed && "opacity-55")}>
               <FleetMatrixCellView cell={row.cells[column.harness] ?? { kind: "unknown" }} harness={column.harness} machine={row.name}
                 id={id} selected={id === selectedId}
                 onSelect={() => onSelect(id === selectedId ? null : { row: row.key, harness: column.harness })} />
             </td>
           );
         })}
-        {hasAddColumn && <td className="border-b border-foreground/10" />}
-        {hasFiller && <td aria-hidden="true" className="border-b border-foreground/10" />}
+        {hasAddColumn && <td />}
+        {hasFiller && <td aria-hidden="true" />}
       </tr>
     </>
   );
 }
 
-const CELL = "flex min-h-12 w-full min-w-0 flex-col justify-center gap-1 rounded-md px-2 py-1.5 text-left transition-colors";
+/* A row is two lines on one grid: the first carries the machine's name and each cell's state, the second what
+   qualifies them (the machine's facts, a cell's tightest quota). A cell with no second line leaves it empty, so
+   every state in a row sits on the same line whether or not a meter hangs under it. */
+const CELL = "flex h-[3.25rem] w-full min-w-0 flex-col justify-start gap-0.5 rounded-md px-2 pt-2 text-left transition-colors";
 /** The chosen cell is ringed, as a spreadsheet rings the cell being edited. */
 const CHOSEN = "bg-foreground/5 outline outline-2 -outline-offset-2 outline-foreground/40";
 
@@ -294,7 +297,7 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
 }) {
   if (cell.kind === "unknown") return null;
   if (cell.kind === "unsupported") {
-    return <span className="block px-2 text-muted-foreground/45" data-testid="fleet-cell" data-state="unsupported"
+    return <span className="block px-2 pt-2 leading-5 text-muted-foreground/40" data-testid="fleet-cell" data-state="unsupported"
       title={`${harness} cannot run on ${machine}`}><span aria-hidden="true">—</span>
       <span className="sr-only">{harness} cannot run on {machine}</span></span>;
   }
@@ -312,8 +315,8 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
       <button {...edits} data-testid="fleet-cell" data-state="absent"
         title={`${harness} is not installed on ${machine}. Choose the cell to install it.`}
         aria-label={`${harness} is not installed on ${machine}`}
-        className={cn(CELL, "text-muted-foreground/30 group-hover/row:text-muted-foreground/55 hover:bg-foreground/5 hover:!text-foreground", selected && CHOSEN, selected && "!text-foreground")}>
-        <Plus className="size-3.5" aria-hidden="true" />
+        className={cn(CELL, "text-muted-foreground/25 group-hover/row:text-muted-foreground/55 hover:bg-foreground/5 hover:!text-foreground", selected && CHOSEN, selected && "!text-foreground")}>
+        <span className="flex h-5 items-center"><Plus className="size-3" aria-hidden="true" /></span>
       </button>
     );
   }
@@ -322,8 +325,8 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
       <button {...edits} data-testid="fleet-cell" data-state="off"
         title={`${harness} is installed on ${machine} and off in this Space. Choose the cell to turn it on.`}
         aria-label={`${harness} on ${machine}: off in this Space`}
-        className={cn(CELL, "text-muted-foreground/65 hover:bg-foreground/5 hover:text-foreground", selected && CHOSEN)}>
-        <span className="flex items-center gap-1.5 text-[12.5px] leading-snug"><span className="size-2 shrink-0 rounded-full border border-current" aria-hidden="true" />Off</span>
+        className={cn(CELL, "text-muted-foreground/60 hover:bg-foreground/5 hover:text-foreground", selected && CHOSEN)}>
+        <span className="flex h-5 items-center gap-1.5 text-[12.5px] leading-5"><span className="size-2 shrink-0 rounded-full border border-current" aria-hidden="true" />Off</span>
       </button>
     );
   }
@@ -332,7 +335,7 @@ function FleetMatrixCellView({ cell, harness, machine, id, selected, onSelect }:
       title={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       aria-label={`${cell.name ?? harness} on ${machine}: ${cell.detail}`}
       className={cn(CELL, "hover:bg-foreground/5", selected && CHOSEN)}>
-      {cell.name && <span className="block w-full truncate text-xs text-muted-foreground">{cell.name}</span>}
+      {cell.name && <span className="-mb-0.5 -mt-1.5 block w-full truncate text-[10px] leading-3 text-muted-foreground">{cell.name}</span>}
       <FleetCellAgentReadout cell={cell} />
     </button>
   );
