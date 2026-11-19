@@ -138,8 +138,8 @@ export function MachineHarnessPanel({ daemon, token, spaceId, agentOn, onOpenAge
   onOpenAgent?: (harness: string) => void;
   /** Just this agent's line, with its upkeep open: one cell of the matrix, edited in place. */
   only?: string;
-  /** What is being done to that agent on the Machine now, or null once nothing is: its cell says it meanwhile. */
-  onOperation?: (action: HarnessAction | null) => void;
+  /** What is being done to that agent now ("Installing…"), or null once nothing is: its cell says it meanwhile. */
+  onOperation?: (doing: string | null) => void;
 }) {
   const { user } = useAuth();
   const [notice, setNotice] = useState<string | null>(null);
@@ -218,23 +218,27 @@ function HarnessRow({ row: { preset, item }, state, context, spaceSwitches, reco
   agent?: MachineAgentGlance; onOpenAgent?: (harness: string) => void; onTouched: (presetId: string) => void;
   /** The only line shown: its upkeep is open and stays open. */
   single?: boolean;
-  onOperation?: (action: HarnessAction | null) => void;
+  onOperation?: (doing: string | null) => void;
 }) {
   const [armed, setArmed] = useState(false);
   const [unfolded, setOpen] = useState(false);
   const open = unfolded || Boolean(single);
   const { operation, status, busy, run } = useHarnessOperation(context, recorded, preset.displayName);
-  const doing = busy && operation ? operation.action : null;
+  const registration = spaceSwitches.registrationFor(preset.id);
+  const installed = Boolean(item?.installed);
+  const spaceSwitch = spaceSwitches.ready && installed ? harnessSpaceSwitch(registration) : null;
+  const spacePending = spaceSwitches.pending?.presetId === preset.id ? spaceSwitches.pending : null;
+  // What a cell of the matrix says while this goes on: on the machine, or in the Space.
+  const doing = busy && operation
+    ? operation.action === "install" ? "Installing…" : operation.action === "update" ? "Updating…"
+      : operation.action === "uninstall" ? "Removing…" : "Saving…"
+    : spacePending ? (spacePending.on ? "Turning on…" : "Turning off…") : null;
   const report = useRef(onOperation);
   useEffect(() => { report.current = onOperation; });
   useEffect(() => {
     report.current?.(doing);
     return () => { if (doing) report.current?.(null); };
   }, [doing]);
-  const registration = spaceSwitches.registrationFor(preset.id);
-  const installed = Boolean(item?.installed);
-  const spaceSwitch = spaceSwitches.ready && installed ? harnessSpaceSwitch(registration) : null;
-  const spacePending = spaceSwitches.pending?.presetId === preset.id ? spaceSwitches.pending : null;
   // Installed from here, it is turned on in this Space once.
   const turnedOn = useRef<string | null>(null);
   useEffect(() => {

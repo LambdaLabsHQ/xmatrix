@@ -2,10 +2,7 @@
 
 import { HardDrive, Plus, Users } from "lucide-react";
 import { useState } from "react";
-import {
-  AGENT_PRESETS, parseHarnessInventory, type AgentRegistrationSummary, type ChannelSnapshot, type HarnessAction,
-  type ObservabilityEvent,
-} from "@xmatrix/protocol";
+import { AGENT_PRESETS, parseHarnessInventory, type AgentRegistrationSummary, type ChannelSnapshot, type ObservabilityEvent } from "@xmatrix/protocol";
 
 import { Button } from "@/components/ui/button";
 import { ErrorNotice } from "@/components/ui/error-notice";
@@ -22,7 +19,7 @@ import { channelTitle } from "./channel-links";
 import { ContentSkeleton, ListSkeleton } from "./content-skeleton";
 import { Face } from "./face";
 import { signedOutRegistrations } from "./harness-sign-in";
-import { FleetCellEditor, cellOperationLabel } from "./fleet-cell-editor";
+import { FleetCellEditor } from "./fleet-cell-editor";
 import { FleetMatrix, type FleetMatrixCell, type FleetMatrixCellKey, type FleetMatrixEditor, type FleetMatrixRow } from "./fleet-matrix";
 import { ListSectionHeading } from "./list-section-heading";
 import { MachineGlyph } from "./machine-glyph";
@@ -110,7 +107,7 @@ export function FleetView({
   // The cell being edited, as a spreadsheet has one cell chosen.
   const [cell, setCell] = useState<FleetMatrixCellKey | null>(null);
   // What is being done on a machine to the agent of a cell, by cell: it is said in the cell and outlives its editor.
-  const [doing, setDoing] = useState<Record<string, HarnessAction>>({});
+  const [doing, setDoing] = useState<Record<string, string>>({});
   // Columns added for agents no machine has yet, and the row that adds a machine.
   const [addedColumns, setAddedColumns] = useState<string[]>([]);
   const [addingMachine, setAddingMachine] = useState(false);
@@ -406,9 +403,9 @@ export function FleetView({
     };
   });
   const cellsOf = (rowKey: string, pick: (harness: string) => FleetMatrixCell) => Object.fromEntries(harnesses.map((harness) => {
-    const action = doing[cellKey(rowKey, harness)];
+    const busy = doing[cellKey(rowKey, harness)];
     const found = pick(harness);
-    return [harness, action && found.kind !== "unknown" && found.kind !== "unsupported" ? { ...found, busy: cellOperationLabel(action) } : found];
+    return [harness, busy && found.kind !== "unknown" && found.kind !== "unsupported" ? { ...found, busy } : found];
   }));
   // No `rounded` on what is not a button: a rounded span is drawn as a chip everywhere in the app.
   const machineHeading = "flex w-full min-w-0 items-center gap-2.5 px-1.5 py-1.5 text-left";
@@ -498,10 +495,10 @@ export function FleetView({
       node: (
         <FleetCellEditor harness={harness} machineName={subject.name} machine={subject.machine} own={subject.own} row={row}
           token={token} spaceId={spaceId} now={now} working={status.workingInstanceIds} conversationTitle={conversationTitle}
-          onOperation={(action) => setDoing((current) => {
-            if ((current[id] ?? null) === action) return current;
+          onOperation={(what) => setDoing((current) => {
+            if ((current[id] ?? null) === what) return current;
             const next = { ...current };
-            if (action) next[id] = action;
+            if (what) next[id] = what;
             else delete next[id];
             return next;
           })}

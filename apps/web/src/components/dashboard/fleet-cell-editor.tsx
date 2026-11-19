@@ -1,7 +1,7 @@
 "use client";
 
 import { ChevronRight, X } from "lucide-react";
-import { AGENT_PRESETS, type HarnessAction } from "@xmatrix/protocol";
+import { AGENT_PRESETS } from "@xmatrix/protocol";
 
 import { actionClass } from "@/components/ui/action-tone";
 import { cn } from "@/lib/utils";
@@ -17,11 +17,6 @@ import type { MachineSummary } from "./workspace-shell-helpers";
 
 /** Instances listed before the rest are counted: a cell's editor is a slip, not the agent's page. */
 const INSTANCES_SHOWN = 4;
-
-/** What a cell says while something is being done to its agent on the machine. */
-export function cellOperationLabel(action: HarnessAction): string {
-  return action === "install" ? "Installing…" : action === "update" ? "Updating…" : action === "uninstall" ? "Removing…" : "Saving…";
-}
 
 /**
  * One cell of the matrix, edited where it is: an agent on a machine. On the
@@ -48,7 +43,8 @@ export function FleetCellEditor({
   /** The Instances with work in hand. */
   working: ReadonlySet<string>;
   conversationTitle: (channelId: string) => string | undefined;
-  onOperation: (action: HarnessAction | null) => void;
+  /** What is being done to the agent now, for its cell to say; null once nothing is. */
+  onOperation: (doing: string | null) => void;
   onOpenAgent: () => void;
   onOpenMachine: () => void;
   onOpenConversation: (channelId: string) => void;
