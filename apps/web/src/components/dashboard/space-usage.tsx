@@ -1,5 +1,6 @@
 "use client";
 
+import { Face, type FaceOf } from "./face";
 import type { SpaceBilling, SpaceUsageItem } from "./space-billing";
 
 /*
@@ -44,6 +45,19 @@ function itemDetail(item: SpaceUsageItem): string {
   ].filter(Boolean).join(" · ");
 }
 
+function itemFace(item: SpaceUsageItem, userId: string): FaceOf {
+  if (item.kind === "agent") {
+    return { kind: "agent", name: item.name || "Agent", harness: item.harness ?? item.name };
+  }
+  if (item.kind === "app") {
+    const id = item.name.replace(/^app:/u, "");
+    return { kind: "app", id, name: id || "App" };
+  }
+  if (item.kind === "x") return { kind: "app", id: "x", name: "X" };
+  const owner = item.ownerName || (item.ownerUserId === userId ? "You" : "a former member");
+  return item.ownerUserId ? { kind: "user", id: item.ownerUserId, name: owner } : { kind: "external", name: owner };
+}
+
 export function SpaceUsage({ billing, userId }: { billing: SpaceBilling; userId: string }) {
   const usage = billing.usage;
   if (!usage) return null;
@@ -63,10 +77,14 @@ export function SpaceUsage({ billing, userId }: { billing: SpaceBilling; userId:
       ) : (
         <ul className="space-y-2 text-sm">
           {usage.items.map((item) => (
-            <li key={`${item.kind}:${item.ownerUserId}:${item.name}`} className="flex items-baseline justify-between gap-3">
-              <span className="min-w-0">
-                <span className="font-medium [overflow-wrap:anywhere]">{itemTitle(item, userId)}</span>
-                <span className="text-muted-foreground"> · {itemDetail(item)}</span>
+            <li key={`${item.kind}:${item.ownerUserId}:${item.name}`} className="flex items-start justify-between gap-3">
+              <span className="flex min-w-0 items-start gap-2">
+                <Face of={itemFace(item, userId)} size="xs" shape="circle" glass={false}
+                  className="app-usage-face shrink-0" />
+                <span className="min-w-0">
+                  <span className="font-medium [overflow-wrap:anywhere]">{itemTitle(item, userId)}</span>
+                  <span className="text-muted-foreground"> · {itemDetail(item)}</span>
+                </span>
               </span>
               <span className="shrink-0 tabular-nums">{item.units.toLocaleString()}</span>
             </li>
