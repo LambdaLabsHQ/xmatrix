@@ -283,7 +283,7 @@ function AnchoredPaper({ root, cell, visible, label, onClose, narrow, children }
   narrow?: boolean; children: ReactNode;
 }) {
   const paper = useRef<HTMLDivElement | null>(null);
-  const [place, setPlace] = useState<{ left: number; top: number } | null>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; maxHeight: number } | null>(null);
   const close = useRef(onClose);
   useEffect(() => { close.current = onClose; });
   const anchor = () => root.current?.querySelector<HTMLElement>(`[data-cell="${CSS.escape(cell)}"]`) ?? null;
@@ -294,11 +294,14 @@ function AnchoredPaper({ root, cell, visible, label, onClose, narrow, children }
       const at = anchor()?.getBoundingClientRect();
       if (!at) return;
       const width = paper.current?.offsetWidth ?? 0;
-      const height = paper.current?.offsetHeight ?? 0;
+      const height = Math.min(paper.current?.scrollHeight ?? 0, window.innerHeight * 0.7);
       const left = Math.max(12, Math.min(at.left, window.innerWidth - width - 12));
-      const below = at.bottom + 6;
-      const above = at.top - 6 - height;
-      setPlace({ left, top: below + height > window.innerHeight - 12 && above > 12 ? above : below });
+      const below = Math.max(0, window.innerHeight - 12 - (at.bottom + 6));
+      const above = Math.max(0, at.top - 6 - 12);
+      const useAbove = height > below && above > below;
+      const maxHeight = Math.min(window.innerHeight * 0.7, useAbove ? above : below);
+      const top = useAbove ? at.top - 6 - Math.min(height, maxHeight) : at.bottom + 6;
+      setPlace({ left, top, maxHeight });
     };
     put();
     const resized = new ResizeObserver(put);
@@ -331,6 +334,7 @@ function AnchoredPaper({ root, cell, visible, label, onClose, narrow, children }
       style={visible && place ? { left: place.left, top: place.top, background: "transparent" }
         : visible ? { left: 0, top: 0, visibility: "hidden", background: "transparent" } : { display: "none" }}>
       <PaperPopover ref={paper} role="dialog" aria-label={label} data-testid="fleet-cell-editor"
+        style={place ? { maxHeight: place.maxHeight } : undefined}
         className={cn("app-tool-detail max-h-[70vh] max-w-[calc(100vw-1.5rem)] overflow-y-auto border border-foreground/10 p-3",
           narrow ? "w-56" : "w-[24rem]")}>
         {children}

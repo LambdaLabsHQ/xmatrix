@@ -114,6 +114,21 @@ test("a column is added for an agent no machine has yet, and it is installed fro
   await expect(row.getByRole("button", { name: /antigravity/u })).toHaveCount(0);
 });
 
+test("the add-agent menu stays within a short viewport and scrolls", async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 600 });
+  await openMatrix(page);
+  await page.getByTestId("fleet-add-column").click();
+  const editor = page.getByTestId("fleet-cell-editor").filter({ visible: true });
+  await expect(editor).toBeVisible();
+  await expect.poll(async () => editor.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    return rect.top >= 12 && rect.bottom <= window.innerHeight - 12 && element.scrollHeight > element.clientHeight;
+  })).toBe(true);
+  const menu = page.getByRole("menu", { name: "Agents no machine has yet" });
+  await menu.getByRole("menuitem").last().scrollIntoViewIfNeeded();
+  await expect(menu.getByRole("menuitem").last()).toBeInViewport();
+});
+
 test("a row is added from the table's last row: another machine is connected in place", async ({ page }) => {
   const base = { intentId: INTENT, spaceId: E2E_SPACE.id, expiresAt: "2099-01-01T00:00:00.000Z", registeredHarnesses: [] };
   const matrix = await openMatrix(page);
