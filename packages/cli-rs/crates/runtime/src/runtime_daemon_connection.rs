@@ -2289,6 +2289,9 @@ async fn run_daemon_connection(
     if let Some(platform) = runtime_daemon_harness_action::daemon_platform() {
         metadata["platform"] = serde_json::json!(platform);
     }
+    if let Some(manager) = xmatrix_cli_update::recorded_daemon_service_manager() {
+        metadata["daemonServiceManager"] = serde_json::json!(manager);
+    }
     metadata["machineFingerprint"] = serde_json::json!(machine_identity.fingerprint.value);
     metadata["machineFingerprintSource"] = serde_json::json!(machine_identity.fingerprint.source);
     if let Some(parent) = machine_identity.parent_machine_id {

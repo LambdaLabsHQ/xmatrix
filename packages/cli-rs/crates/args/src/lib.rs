@@ -59,6 +59,9 @@ pub enum SetupCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Remove the daemon startup entry (launchd, systemd --user, or Windows
+    /// Scheduled Task and HKCU Run fallback) and stop the managed daemon
+    Uninstall,
 }
 
 #[derive(Subcommand)]

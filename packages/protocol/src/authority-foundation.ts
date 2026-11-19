@@ -718,6 +718,21 @@ export function isAgentInstanceRest(value: unknown): value is AgentInstanceRest 
 }
 
 /**
+ * Rest states an ordinary `@<name>:<instance>` message can wake. `wake_failed`
+ * and stopped (`offline` with no rest) need an explicit `:reborn` and are
+ * excluded from peer rosters, 400 hints, and the `@` menu's in-conversation list.
+ */
+export const ADDRESSABLE_AGENT_INSTANCE_RESTS = ["sleeping", "interrupted", "waking"] as const;
+
+export function isAddressableAgentInstance(
+  instance: { status?: unknown; rest?: unknown },
+): boolean {
+  return isLiveAgentStatus(instance.status) ||
+    (typeof instance.rest === "string" &&
+      (ADDRESSABLE_AGENT_INSTANCE_RESTS as readonly string[]).includes(instance.rest));
+}
+
+/**
  * Why a connected Instance is projected `offline`. `machine_offline`: the
  * Instance's own socket is open, but the Machine Daemon that hosts its Run is
  * not (disconnected or failed delivery), so

@@ -93,6 +93,37 @@ test("a failing seed surfaces its stderr and a silent one is not mistaken for su
   assert.deepEqual(silent, { ok: false, reason: "install-failed", message: "The xMatrix CLI seed did not report an install result." });
 });
 
+test("windows HKCU Run fallback reports watchdog false and is recognized as run-key fallback", async () => {
+  const result = await seedInstall.installCliFromSeed({
+    seedPath: "C:\\seed\\xmatrix.exe",
+    env: {},
+    platform: "win32",
+    exists: () => true,
+    execFileImpl: (_file, _args, _options, callback) => {
+      callback(null, JSON.stringify({
+        installedPath: "C:\\Users\\me\\.local\\bin\\xmatrix.exe",
+        version: "xmatrix 0.16.282",
+        daemon: {
+          manager: "windows-run-key",
+          definitionPath: "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+          watchdog: false,
+        },
+      }), "");
+    },
+  });
+  assert.deepEqual(result, {
+    ok: true,
+    installedPath: "C:\\Users\\me\\.local\\bin\\xmatrix.exe",
+    version: "xmatrix 0.16.282",
+    daemon: {
+      manager: "windows-run-key",
+      definitionPath: "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+      watchdog: false,
+    },
+  });
+  assert.equal(seedInstall.seedInstallUsedWindowsRunKey(result), true);
+});
+
 function installLinuxSeed(execFileImpl) {
   return seedInstall.installCliFromSeed({
     seedPath: "/seed/xmatrix", env: {}, platform: "linux", exists: () => true, execFileImpl,

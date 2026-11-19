@@ -431,6 +431,57 @@ test("agent reference stage keeps offline instances without offering a bare ment
   );
 });
 
+test("in-conversation @ completion includes sleeping and interrupted instances while excluding wake_failed and stopped", () => {
+  const channel = openChannel({
+    memberPresence: {
+      "channel-1:1": {
+        registration: FIXTURE_AGENT_REGISTRATION,
+        kind: "agent",
+        label: "codex",
+        instances: [{
+          id: "channel-1:1", channelInstanceId: "1", label: "codex:1", status: "offline", rest: "sleeping",
+          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
+        }],
+      },
+      "channel-1:2": {
+        registration: FIXTURE_AGENT_REGISTRATION,
+        kind: "agent",
+        label: "cursor",
+        instances: [{
+          id: "channel-1:2", channelInstanceId: "2", label: "cursor:2", status: "offline", rest: "interrupted",
+          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
+        }],
+      },
+      "channel-1:3": {
+        registration: FIXTURE_AGENT_REGISTRATION,
+        kind: "agent",
+        label: "claude",
+        instances: [{
+          id: "channel-1:3", channelInstanceId: "3", label: "claude:3", status: "offline", rest: "wake_failed",
+          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
+        }],
+      },
+      "channel-1:4": {
+        registration: FIXTURE_AGENT_REGISTRATION,
+        kind: "agent",
+        label: "gemini",
+        instances: [{
+          id: "channel-1:4", channelInstanceId: "4", label: "gemini:4", status: "offline",
+          connectedAt: "2026-05-07T00:00:00Z", lastSeenAt: "2026-05-07T00:00:00Z",
+        }],
+      },
+    },
+  });
+  const completion = resolveMentionCompletion("@", 1, channel);
+  const inConversation = groupedMentionCandidates(completion.candidates, { limitPerKind: 10 })
+    .find((section) => section.kind === "instance");
+  assert.ok(inConversation, "expected In this conversation section");
+  assert.deepEqual(
+    inConversation.candidates.map((candidate) => candidate.mention),
+    ["codex:1", "cursor:2"],
+  );
+});
+
 test("handoff successor stage offers the Space's registered harnesses as a new instance", () => {
   const channel = openChannel({
     memberPresence: {

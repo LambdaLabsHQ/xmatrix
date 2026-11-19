@@ -32,6 +32,19 @@ test("a narrow desktop browser window stays desktop_web; mobile browsers and tou
   assert.equal(classifyOnboardingDevice({
     userAgent: macChrome, platform: "MacIntel", maxTouchPoints: 5, narrowViewport: false, coarsePointer: true,
   }), "phone");
+  // Touch-screen Windows laptops (e.g. Surface) keep desktop_web in a narrow window.
+  const windowsEdge = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36 Edg/133.0.0.0";
+  assert.equal(classifyOnboardingDevice({
+    userAgent: windowsEdge, platform: "Win32", maxTouchPoints: 10, narrowViewport: true, coarsePointer: false,
+  }), "desktop_web");
+  assert.equal(classifyOnboardingDevice({
+    userAgent: windowsEdge, platform: "Win32", maxTouchPoints: 10, narrowViewport: true, coarsePointer: true,
+  }), "desktop_web");
+  // Touch-screen Linux laptop with a fine pointer in a narrow window stays desktop_web.
+  assert.equal(classifyOnboardingDevice({
+    userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
+    platform: "Linux x86_64", maxTouchPoints: 10, narrowViewport: true, coarsePointer: false,
+  }), "desktop_web");
   // Emulated mobile viewport with touch (e.g. Playwright mobile context).
   assert.equal(classifyOnboardingDevice({
     userAgent: "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",

@@ -1,4 +1,4 @@
-param([switch]$BinaryOnly)
+﻿param([switch]$BinaryOnly)
 
 $ErrorActionPreference = "Stop"
 
@@ -223,10 +223,10 @@ function Start-DaemonSetup {
   $daemonPath = Install-DaemonStartup -InstallPath $InstallPath
   Mark-Done 1
 
-  Write-Step "Verifying daemon task startup..."
+  Write-Step "Verifying daemon startup..."
   if (-not (Test-DaemonTaskStartup -DaemonPath $daemonPath)) {
-    Write-Err "xMatrix daemon task started, but no daemon process answered the local ping"
-    Write-Dim "Task: xmatrix-daemon"
+    Write-Err "xMatrix daemon startup completed, but no daemon process answered the local check"
+    Write-Dim "Startup: xmatrix-daemon (or HKCU Run fallback)"
     Write-Dim "Expected: $daemonPath daemon"
     exit 1
   }
