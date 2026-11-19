@@ -336,6 +336,21 @@ fn claude_stream_extra_args_enables_bidirectional_stream_json() {
 }
 
 #[test]
+fn claude_stream_process_keeps_a_todo_write_plan() {
+    // Without these Claude Code hides TodoWrite from current models (or offers
+    // TaskCreate/TaskUpdate), and the conversation never sees the plan.
+    let mut command = tokio::process::Command::new("claude");
+    crate::runtime_trusted_role_prompt::enable_claude_todo_plan(&mut command);
+    let envs: std::collections::BTreeMap<_, _> = command
+        .as_std()
+        .get_envs()
+        .filter_map(|(key, value)| Some((key.to_str()?, value?.to_str()?)))
+        .collect();
+    assert_eq!(envs.get("CLAUDE_CODE_ENABLE_TODO_TOOLS"), Some(&"1"));
+    assert_eq!(envs.get("CLAUDE_CODE_ENABLE_TASKS"), Some(&"0"));
+}
+
+#[test]
 fn claude_stream_extra_args_resumes_only_with_a_real_session_id() {
     let resumed = claude_stream_extra_args(Some("sess-123"), None, None, None);
     assert!(resumed.windows(2).any(|w| w == ["--resume", "sess-123"]));

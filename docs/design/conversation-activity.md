@@ -71,7 +71,7 @@ by supplying metadata (§6).
 
 | Kind | Reported by | Carries |
 |---|---|---|
-| `plan` | The Run's runtime, when its plan tool (Claude Code `TodoWrite`, Codex `turn/plan/updated`, ACP `plan`) completes steps or replaces the plan | Newly completed steps, the step now in progress, and the plan snapshot (at most 30 steps) |
+| `plan` | The Run's runtime, when its plan tool (Claude Code `TodoWrite`, which the runtime turns on for every Claude it starts, Codex `turn/plan/updated`, ACP `plan`) completes steps or replaces the plan | Newly completed steps, the step now in progress, and the plan snapshot (at most 30 steps) |
 | `pull_request` | The Run's runtime, when a command it ran created a pull request | Repository, number, URL |
 
 - **Sender.** The entry is authored by the reporting Run's Agent Instance

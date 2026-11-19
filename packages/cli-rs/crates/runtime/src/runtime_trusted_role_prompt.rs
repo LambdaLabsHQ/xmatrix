@@ -33,6 +33,24 @@ pub(crate) fn label_claude_entrypoint(command: &mut tokio::process::Command) {
     command.env(CLAUDE_CODE_ENTRYPOINT_ENV, CLAUDE_CODE_ENTRYPOINT);
 }
 
+/// The conversation shows an Agent's plan from Claude Code `TodoWrite`
+/// (`runtime_channel_activity::claude_todo_steps`). Claude Code hides its todo
+/// tools from current models unless `CLAUDE_CODE_ENABLE_TODO_TOOLS` is set, and
+/// with it set offers the stateful `TaskCreate`/`TaskUpdate` tools instead
+/// unless `CLAUDE_CODE_ENABLE_TASKS` is off. Both are set so every Claude the
+/// runtime drives keeps one `TodoWrite` plan the conversation can show, as
+/// Codex and ACP runtimes already do.
+pub(crate) const CLAUDE_TODO_PLAN_ENV: [(&str, &str); 2] = [
+    ("CLAUDE_CODE_ENABLE_TODO_TOOLS", "1"),
+    ("CLAUDE_CODE_ENABLE_TASKS", "0"),
+];
+
+pub(crate) fn enable_claude_todo_plan(command: &mut tokio::process::Command) {
+    for (name, value) in CLAUDE_TODO_PLAN_ENV {
+        command.env(name, value);
+    }
+}
+
 pub(crate) fn claude_stream_extra_args(
     resume_id: Option<&str>,
     model: Option<&str>,
