@@ -266,12 +266,25 @@ function choiceAnswer(answer: RoutingAnswer | undefined): RoutingChoice {
 /** A message that summons nobody and that Jev reads as not asking for work. */
 export const START_INTENT_DECLINED = "start_intent_declined";
 
+/** The candidate without its billing refusal's hold: a refused account's
+ * reading is the daemon's hold alone (`registrationQuotaUsage`), one used-up
+ * account window, so dropping the account windows leaves its scoped ones. */
+function liftBillingHold<T extends RegistrationLaunchCandidate>(candidate: T): T {
+  const usage = candidate.observations?.quota?.usage;
+  if (!candidate.accountBillingRefusal || !usage || typeof usage !== "object") return candidate;
+  return { ...candidate, observations: { ...candidate.observations!, quota: { ...candidate.observations!.quota!,
+    usage: { ...usage, quotaUsages: [] } } } };
+}
+
 /** Jev's opaque handles resolve to listed values only, and the environment that
  * runs the work is a whole registered key offering all of them. */
 export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContext?: (sourceSequence: number) => Promise<Record<string, unknown>>): RegistrationLaunchChooser {
   return async ({ message, sourceSequence, tags, candidates, blocked: blockedRegistrations, managedWorkspace, managedOnly, summon,
     automaticHarness, askToStart, onHarness }) => {
-    let eligible = candidates;
+    // A summon that names its harness reaches a billing-refused account (#1630):
+    // the refusal's usage-limit hold, which stands in for the account's windows,
+    // then refuses none of its models either. Scoped windows still count.
+    let eligible = automaticHarness ? candidates : candidates.map(liftBillingHold);
     const blocked = blockedRegistrations ?? [];
     const narrow = (code: string, matches: (candidate: RegistrationLaunchCandidate) => boolean) => {
       eligible = eligible.filter(matches);
@@ -321,12 +334,10 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
     const runsDefault = (candidate: RegistrationLaunchCandidate) => usesRuntimeDefaults(candidate, tags) &&
       !modelExhausted(candidate, runtimeDefaultPair(tags));
-    const usedUp = (candidate: RegistrationLaunchCandidate) => {
-      if (!automaticHarness && candidate.accountBillingRefusal) return false;
-      return candidate.accountBillingRefusal === true || providerQuotaExhausted(candidate, now) ||
+    const usedUp = (candidate: RegistrationLaunchCandidate) =>
+      automaticHarness === true && candidate.accountBillingRefusal === true || providerQuotaExhausted(candidate, now) ||
         [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []]
           .every(option => modelExhausted(candidate, option));
-    };
     if (eligible.every(usedUp)) {
       // The earliest reading this refusal rested on: any reading of these
       // pools newer than it is one the refusal never saw.
