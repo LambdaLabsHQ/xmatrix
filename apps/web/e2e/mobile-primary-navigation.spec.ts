@@ -1196,24 +1196,20 @@ test("Agents lists registrations by runtime and opens one over the list on a pho
   await expect(usageGlance).toContainText("1w86%");
   await expect(usageGlance.locator("[data-tone=yellow]")).toHaveCount(1);
   await expect(row("research-agent").getByTestId("agent-usage-glance")).toHaveCount(0);
-  /* Agents sit in a 2-column grid under their machine, aligned with the machine heading. */
-  const machineHeading = page.getByRole("region", { name: "Mobile test machine" }).locator(".app-tool-list-group-title");
-  // The reader's own machine is with the machines, not under the teammates' heading, even before the list carries it.
-  await expect(page.getByRole("heading", { name: "Teammates' machines" }).locator("xpath=following::section[1]"))
+  /* Agents sit in the compact Machine × Agent matrix, with teammates grouped under their own heading. */
+  const matrix = page.getByTestId("fleet-matrix");
+  await expect(matrix.getByRole("row", { name: "Teammates' machines" }).locator("xpath=following-sibling::tr[1]"))
     .toHaveAccessibleName("Research Mac");
-  await expect(page.getByRole("region", { name: "Mobile test machine" }).getByTestId("agent-row")).toHaveCount(1);
+  await expect(matrix.getByRole("row", { name: "Mobile test machine" }).getByTestId("agent-row")).toHaveCount(1);
   await page.screenshot({ path: test.info().outputPath("agents-list-phone.png") });
-  const headingLeading = machineHeading.locator(".app-tool-state-icon");
-  await expect(row("mobile-actions-agent").locator("img")).toBeVisible();
-  const [headingBox, tileBox] = await Promise.all([headingLeading, row("mobile-actions-agent")].map((locator) => locator.boundingBox()));
-  expect(Math.abs(tileBox!.x - headingBox!.x)).toBeLessThanOrEqual(1);
+  await expect(matrix.getByTestId("fleet-agent-column").locator("img").first()).toBeVisible();
   // Its one live process waits for a message: that is ready, not working.
   await expect(row("mobile-actions-agent")).toContainText("Ready");
   await expect(row("mobile-actions-agent")).not.toContainText("E2E Tester");
   await expect(row("research-agent")).toHaveAttribute("aria-label", /Offline · seen \d+d ago/);
-  await expect(page.getByRole("region", { name: "Research Mac" }).getByTestId("agent-row")).toHaveCount(1);
+  await expect(matrix.getByRole("row", { name: "Research Mac" }).getByTestId("agent-row")).toHaveCount(1);
   // A teammate's machine names its owner once, on the machine.
-  await expect(page.getByRole("region", { name: "Research Mac" }).locator(".app-tool-list-group-title")).toContainText("Research Owner");
+  await expect(matrix.getByRole("row", { name: "Research Mac" })).toContainText("Research Owner");
   await expect(row("research-agent")).not.toContainText("Research Owner");
   await expect(row("research-agent")).toHaveAttribute("data-state", "offline");
   await expect(page.locator(".app-topbar")).toContainText(E2E_SPACE.name);

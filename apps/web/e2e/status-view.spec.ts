@@ -76,15 +76,14 @@ test.describe("on a phone", () => {
     await expect(page.getByTestId("status-working").filter({ visible: true })).toHaveText("11");
     await expect(page.getByTestId("status-summary").filter({ visible: true })).toHaveText("on 2 machines");
 
-    // Each agent once across its machines, busiest first.
-    const runtimes = page.getByTestId("status-runtime").filter({ visible: true });
-    await expect(runtimes).toHaveCount(4);
-    await expect(runtimes.first()).toHaveAccessibleName(/^codex: 6 working, on 2 machines · 1 ready/u);
+    // Each agent once as a matrix column, and each machine once as a sticky row.
+    const matrix = page.getByTestId("fleet-matrix");
+    const columns = matrix.getByTestId("fleet-agent-column");
+    await expect(columns).toHaveCount(4);
+    await expect(columns.filter({ hasText: "codex" })).toHaveAccessibleName(/^codex: 6 working · on 2 machines · 1 ready/u);
 
-    // The machines are the list's to say, once: the overview does not repeat them.
     await expect(page.getByTestId("status-machine-row")).toHaveCount(0);
-    await expect(page.getByText("Machines · 3/4 online").filter({ visible: true })).toBeVisible();
-    const machine = (name: string) => page.getByRole("region", { name });
+    const machine = (name: string) => matrix.getByRole("row", { name });
     await expect(page.getByTestId("machine-row").filter({ visible: true })).toHaveCount(machines.length);
     await expect(machine("busy-box").getByTestId("machine-row")).toContainText("7 working");
     await expect(machine("wide-box").getByTestId("machine-row")).toContainText("4 working");

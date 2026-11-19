@@ -163,14 +163,13 @@ test.describe("a phone's list rows", () => {
     expect((await edges(pageRow.locator(":scope > button svg").first())).right).toBeLessThanOrEqual(line.start);
     expect((await edges(pageRow.locator(".app-channel-row-time"), { text: true })).right).toBeCloseTo(line.end, 0);
 
-    // Agents lists each machine on the content line with a 2-column grid of agent tiles aligned to it.
+    // Agents renders the compact Machine × Agent matrix aligned to the content line.
     await dock.getByRole("button", { name: "Agents" }).tap();
-    const heading = page.locator(".app-tool-list-group-title").first();
+    const firstRow = page.getByTestId("fleet-machine").first();
     const agent = page.getByTestId("agent-row").first();
     await expect(agent).toBeVisible();
     await settled(page);
-    expect((await edges(heading.locator(":scope > *").first())).left).toBeCloseTo(line.start, 0);
-    expect((await edges(agent)).left).toBeCloseTo(line.start, 0);
+    expect((await edges(firstRow.locator(".app-tool-state-icon").first())).left).toBeCloseTo(line.start, 0);
 
     // The same row a desktop draws. A phone never shows its list beside a
     // conversation, so the list is the conversation's paper, not the column's tone.

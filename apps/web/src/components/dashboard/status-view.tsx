@@ -130,7 +130,7 @@ export function FleetOverview({ status, attention, note, children }: {
  * Each agent across the machines it runs on, where no matrix shows it: a
  * line opens what the Space set on that agent, whichever machine runs it.
  */
-export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHarness, empty, compact = false }: {
+export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHarness, empty }: {
   /** Counted from the same rows the list shows. */
   runtimes: FleetRuntime[];
   loading: boolean;
@@ -139,8 +139,6 @@ export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHar
   onOpenHarness: (harness: string) => void;
   /** What the Space reads in place of its agents while it has none. */
   empty?: ReactNode;
-  /** Compact wrapping chips instead of full stacked rows (for narrow viewports). */
-  compact?: boolean;
 }) {
   return (
     <ToolDetailSection title="Agents in this Space">
@@ -151,41 +149,22 @@ export function FleetRuntimeLines({ runtimes, loading, error, onRetry, onOpenHar
       ) : runtimes.length === 0 ? (
         empty ?? <p className="text-sm text-muted-foreground">No agents yet.</p>
       ) : (
-        <ul className={compact ? "flex flex-wrap gap-1.5 pt-0.5" : "app-tool-lines"}>
+        <ul className="app-tool-lines">
           {runtimes.map((runtime) => (
             <li key={runtime.harness}>
               <button type="button" onClick={() => onOpenHarness(runtime.harness)} data-testid="status-runtime"
                 aria-label={`${runtime.harness}: ${runtime.working} working, ${runtimeLine(runtime)}`}
-                className={compact
-                  ? "inline-flex items-center gap-1.5 rounded-full bg-foreground/[0.05] px-2.5 py-1 text-xs transition-colors hover:bg-foreground/10 active:bg-foreground/15"
-                  : "flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm"}>
-                <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size={compact ? "xs" : "sm"}
+                className="flex w-full min-w-0 items-center gap-3 py-2 text-left text-sm">
+                <Face of={{ kind: "agent", name: runtime.harness, harness: runtime.harness }} size="sm"
                   showKindBadge={false} className="shrink-0" />
-                {compact ? (
-                  <>
-                    <span className="font-semibold text-foreground">{runtime.harness}</span>
-                    {runtime.working > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-foreground/80">
-                        <span className="size-1.5 shrink-0 rounded-full bg-[var(--m-ink-running,currentColor)]" aria-hidden="true" />
-                        {runtime.working}
-                      </span>
-                    )}
-                    {runtime.blocked > 0 && (
-                      <span className="size-1.5 shrink-0 rounded-full bg-[var(--m-ink-attention,var(--accent))]" aria-hidden="true" />
-                    )}
-                  </>
-                ) : (
-                  <>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-semibold">{runtime.harness}</span>
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {runtime.working > 0 && <span className="font-semibold text-foreground">{runtime.working} working · </span>}
-                        {runtimeLine(runtime)}
-                      </span>
-                    </span>
-                    <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                  </>
-                )}
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-semibold">{runtime.harness}</span>
+                  <span className="block truncate text-xs text-muted-foreground">
+                    {runtime.working > 0 && <span className="font-semibold text-foreground">{runtime.working} working · </span>}
+                    {runtimeLine(runtime)}
+                  </span>
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
               </button>
             </li>
           ))}
