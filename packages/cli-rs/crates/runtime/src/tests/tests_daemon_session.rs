@@ -1018,6 +1018,7 @@ fn an_unexecuted_effect_from_an_older_cli_runs_after_the_daemon_update() {
         {
             let journal = journal.lock().expect("journal lock");
             let _ = std::fs::remove_file(root.join("effects.json"));
+            let _ = std::fs::remove_file(root.join("effects.json.previous"));
             let effect = journal
                 .receive("control-rekey-1", &command_type, &"b".repeat(64))
                 .expect("older CLI receive");
