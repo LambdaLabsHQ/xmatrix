@@ -122,8 +122,8 @@ test("a schedule's new conversation starts with its linked page, whole, ahead of
   const context = await readLaunchContext({ channelId: "c1", readAt: READ_AT, startedForId: "m1",
     history: async () => ({ messages: [message("m1", 1, "Ann", "@auto remind me to check out")], hasMore: false }),
     about: async () => null,
-    pages: async () => [{ pageId: "p1", title: "Bali stay", headRevision: 208,
-      body: "# Bali stay\n\n## Lodging\nEscotel, check out 11-06 12:00\n- [ ] @auto remind me to check out ⏳ 2026-11-06 10:00 +08:00\n" }] });
+    pages: async () => ({ pages: [{ pageId: "p1", title: "Bali stay", headRevision: 208,
+      body: "# Bali stay\n\n## Lodging\nEscotel, check out 11-06 12:00\n- [ ] @auto remind me to check out ⏳ 2026-11-06 10:00 +08:00\n" }] }) });
   assert.ok(context.text.startsWith("## Pages linked to this conversation (read at launch)\n"));
   assert.ok(context.text.includes("### Bali stay (page p1 · r208)\n\n# Bali stay\n\n## Lodging\nEscotel, check out 11-06 12:00\n"));
   assert.ok(context.text.includes("End of page p1."));
@@ -145,6 +145,29 @@ test("a page that does not fit whole is named with its read, never cut", () => {
   assert.ok(!text.includes("zzz"));
   assert.ok(text.includes("- Huge: `xmatrix page read p2`"));
   assert.equal(renderLinkedPages([]), undefined);
+});
+
+test("a page only read from the conversation is named with its line, not carried whole", async () => {
+  const pages = [
+    { pageId: "p1", title: "Plan", headRevision: 4, body: "# Plan\n\nthe plan\n" },
+    { pageId: "p2", title: "Competitors", headRevision: 9, body: "# Competitors\n\nlong research\n",
+      summary: { text: "Ten rivals\ncompared", revision: 9, at: READ_AT } },
+  ];
+  const text = renderLinkedPages(pages, undefined, new Set(["p2"]));
+  assert.ok(text.includes("### Plan (page p1 · r4)"));
+  assert.ok(!text.includes("long research"));
+  assert.ok(text.includes("Read earlier in this conversation, not carried here"));
+  assert.ok(text.includes("- Competitors: Ten rivals compared — `xmatrix page read p2`"));
+
+  const onlyRead = renderLinkedPages([pages[1]], undefined, new Set(["p2"]));
+  assert.ok(!onlyRead.includes("Each is whole"));
+  assert.ok(onlyRead.includes("`xmatrix page read p2`"));
+
+  const context = await readLaunchContext({ channelId: "c1", readAt: READ_AT, startedForId: "m1",
+    history: async () => ({ messages: [message("m1", 1, "Ann", "go")], hasMore: false }),
+    about: async () => null, pages: async () => ({ pages, readOnlyPageIds: ["p2"] }) });
+  assert.ok(context.text.includes("the plan"));
+  assert.ok(!context.text.includes("long research"));
 });
 
 test("launch context names only addressable Instances in the Channel and 400 hints never point at unrelated Agents", async () => {

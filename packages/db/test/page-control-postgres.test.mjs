@@ -329,6 +329,13 @@ integration("unlinking a page from a conversation keeps it out until someone lin
     await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
     await call("startCoWriting", { principal: member, pageId, conversationId: ids.open });
     assert.deepEqual(await linked(), [pageId]);
+    // A page only read from the conversation comes after the ones it works on, and is named as read only.
+    const { page: looked } = await call("create", { principal: owner, title: "Background", body: "# Background\n" });
+    await call("read", { principal: agent, pageId: looked.pageId, conversationId: ids.open });
+    const both = await pages.conversationPages({ requestId: crypto.randomUUID(), conversationId: ids.open, principal: member });
+    assert.deepEqual(both.pages.map((item) => item.pageId), [pageId, looked.pageId]);
+    assert.deepEqual(both.readOnlyPageIds, [looked.pageId]);
+    await call("unlinkPage", { principal: member, conversationId: ids.open, pageId: looked.pageId });
 
     assert.deepEqual(await call("unlinkPage", { principal: member, pageId, conversationId: ids.open }), { removed: 2 },
       "every link between the page and the conversation goes, section links included");
@@ -418,6 +425,15 @@ integration("pages: search reads titles and section text, and skips pages the re
       ["Notes", "title", ""],
     ]);
     assert.deepEqual((await call("search", { principal: member, query: "finance" })).results, []);
+    // Words that are apart find the page that holds them all, at the section holding the most of them;
+    // a page holding the query as typed comes first.
+    await call("create", { principal: owner, title: "Roadmap",
+      body: "# Roadmap\n\n## Now\nthe ledger is late\n\n## Next\nwe ship in May, ledger first\n" });
+    assert.deepEqual((await call("search", { principal: member, query: "ledger  SHIP" })).results
+      .map((hit) => [hit.title, hit.blockId]), [["Roadmap", "next"], ["Plan", "goals"]]);
+    assert.deepEqual((await call("search", { principal: member, query: "ship the ledger" })).results
+      .map((hit) => [hit.title, hit.blockId]), [["Plan", "goals"], ["Roadmap", "now"]]);
+    assert.deepEqual((await call("search", { principal: member, query: "ledger absent" })).results, []);
     await assert.rejects(call("search", { principal: member, query: "  " }), code("invalid_request"));
   } finally {
     await cleanup(client, ids);
