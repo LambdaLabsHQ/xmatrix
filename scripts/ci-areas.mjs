@@ -206,6 +206,7 @@ export function affectedPartitions(changedFiles) {
     android ||
     touches(
       files,
+      "apps/chrome-extension",
       "packages/mock-agent",
       "packages/decision-model",
       "scripts/hub-network-e2e",

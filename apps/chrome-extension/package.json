@@ -1,0 +1,11 @@
+{
+  "name": "@xmatrix/chrome-extension",
+  "version": "1.0.0",
+  "private": true,
+  "license": "FSL-1.1-ALv2",
+  "type": "module",
+  "scripts": {
+    "package": "node scripts/package.mjs",
+    "test": "node --test test/*.test.mjs"
+  }
+}
