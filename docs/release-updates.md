@@ -1,5 +1,19 @@
 # Release Updates
 
+## Unreleased: Antigravity stays busy while its subagents run
+
+Antigravity's ACP v1 server marks `invoke_subagent` `completed` as soon as the
+subagent starts and emits no ACP events while it runs, so an Instance dropped
+to `idle` (green) right after spawning a subagent, left the idle-sleep counter
+at zero, and did not listen to ACP stdout for the subagent's reactive wakeup.
+Antigravity Runs now read the session's local `.system_generated/subagents/`
+and message state to keep the Instance `busy` (and count active subagents
+against idle sleep) until every launched subagent reports back or is killed,
+and always listen to the ACP stream between turns so unsolicited wakeups
+transition into `busy` and stream traces without waiting for a new message.
+CLI / daemon only. Recovery is a CI-validated CLI release reverting this
+change.
+
 ## Unreleased: the Hub canary waits for Cloudflare to know its new version
 
 Two Hub betas in a row failed before any traffic moved: right after the upload,

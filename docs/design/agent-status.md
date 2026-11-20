@@ -216,9 +216,10 @@ Built:
    Codex (command executions, web searches, MCP tool calls), and ACP
    runtimes (in-turn tool calls and parked questions/permissions, plus
    Antigravity's cross-turn background `run_command`/`schedule`/`run_workflow`
-   tasks and reactive wakeups); `xmatrix list` shows `waiting` and its JSON
-   carries the wait. The threshold lives in
-   `packages/cli-rs/crates/runtime/src/runtime_waiting.rs`.
+   tasks, active `invoke_subagent` work staying `busy` across `end_turn` from
+   Antigravity's local session state, and between-turns reactive wakeups);
+   `xmatrix list` shows `waiting` and its JSON carries the wait. The threshold
+   lives in `packages/cli-rs/crates/runtime/src/runtime_waiting.rs`.
 
 Open:
 
