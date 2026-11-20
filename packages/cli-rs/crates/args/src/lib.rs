@@ -2129,6 +2129,17 @@ pub enum PageCommand {
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
+        /// Under each page, the one line saying how it stands
+        #[arg(long)]
+        summaries: bool,
+    },
+    /// Find the pages and sections whose text holds every word of a query
+    Search {
+        /// Words to find; several words may be apart, and the pages holding them as typed come first
+        query: Vec<String>,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
     },
     /// Print a page as markdown with its revision header
     Read {

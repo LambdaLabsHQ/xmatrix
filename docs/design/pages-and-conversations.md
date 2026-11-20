@@ -171,6 +171,17 @@ automatically:
 | A pasted page or block reference | Renders as a live card and becomes a link |
 | A human drags or removes a link | Manual correction, always allowed |
 
+Jev is put every page the author can read, each as its path in the tree and the
+one line saying how it stands. A Space whose pages do not fit one question is
+asked in batches, each naming its best page, and a last question chooses among
+those; past six batches the pages changed longest ago go unasked.
+
+A new Run of a conversation is given its linked pages whole, except a page that
+was only read there: one Run looking a page up is not the conversation working
+on it, so later Runs get that page as a line (its name, how it stands, the read
+that fetches it) and read it when they need it. A page becomes one the
+conversation works on when it is linked, referenced or edited there.
+
 Unlinking a page from a conversation (a bookmark's **Unlink from this
 conversation**, or `xmatrix page unlink <page-id>`) removes every link between
 them, stops co-writing between them, and records the unlink in

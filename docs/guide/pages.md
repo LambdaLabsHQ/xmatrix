@@ -15,12 +15,16 @@ In the app, open **Pages**. The list starts with recent changes, then the whole 
 
 ```sh
 xmatrix page tree
+xmatrix page tree --summaries
+xmatrix page search <words>
 xmatrix page read <page-id>
 xmatrix page create "Billing" --under <parent-page-id>
 xmatrix page rename <page-id> "Billing and invoices"
 xmatrix page move <page-id> --under <other-page-id>
 xmatrix page delete <page-id>
 ```
+
+`page tree --summaries` adds, under each page, the one line saying how it stands. `page search` finds the pages holding every word of the query, names the section that answers it as `page:<id>#<section>` and shows the text around the match; pages holding the words exactly as typed come first. Start there in a large Space instead of reading pages to find the right one.
 
 ## Reading and editing
 

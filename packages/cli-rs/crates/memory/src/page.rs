@@ -33,6 +33,59 @@ pub(crate) struct PageSummary {
     /// The page that states how the Space is run.
     #[serde(default)]
     pub governance: bool,
+    /// One line saying how the page stands.
+    #[serde(default)]
+    pub summary: Option<PageSummaryLine>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PageSummaryLine {
+    pub text: String,
+}
+
+/// One page a search found, at the section that answers it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PageSearchHit {
+    pub page_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub block_id: String,
+    #[serde(default)]
+    pub block_title: String,
+    #[serde(default)]
+    pub snippet: String,
+}
+
+#[derive(Deserialize)]
+struct SearchResponse {
+    results: Vec<PageSearchHit>,
+}
+
+/// Each hit as the reference that names it, then the text around the match.
+pub(crate) fn render_page_search(hits: &[PageSearchHit]) -> String {
+    let mut out = String::new();
+    for hit in hits {
+        let section = if hit.block_id.is_empty() {
+            String::new()
+        } else {
+            format!(" › {}", hit.block_title)
+        };
+        let anchor = if hit.block_id.is_empty() {
+            String::new()
+        } else {
+            format!("#{}", hit.block_id)
+        };
+        out.push_str(&format!(
+            "- {}{} (page:{}{})\n",
+            hit.title, section, hit.page_id, anchor
+        ));
+        let snippet = hit.snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !snippet.is_empty() && snippet != hit.title {
+            out.push_str(&format!("  {snippet}\n"));
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -248,7 +301,22 @@ pub(crate) fn page_route(space: &str, page: &str) -> String {
 }
 
 /// Children listed under their parent, in sibling order.
-pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
+/// A page's one line, indented under it; nothing for a page that has none yet.
+fn push_summary(out: &mut String, page: &PageSummary, depth: usize) {
+    let Some(summary) = &page.summary else {
+        return;
+    };
+    let text = summary
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !text.is_empty() {
+        out.push_str(&format!("{}{}\n", "  ".repeat(depth), text));
+    }
+}
+
+pub(crate) fn render_page_tree(pages: &[PageSummary], summaries: bool) -> String {
     let mut children: BTreeMap<Option<String>, Vec<&PageSummary>> = BTreeMap::new();
     for page in pages {
         children
@@ -266,6 +334,7 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
         children: &BTreeMap<Option<String>, Vec<&PageSummary>>,
         parent: Option<String>,
         depth: usize,
+        summaries: bool,
     ) {
         let Some(list) = children.get(&parent) else {
             return;
@@ -289,12 +358,21 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
                 page.head_revision,
                 marks
             ));
+            if summaries {
+                push_summary(out, page, depth + 1);
+            }
             if depth < 64 {
-                walk(out, children, Some(page.page_id.clone()), depth + 1);
+                walk(
+                    out,
+                    children,
+                    Some(page.page_id.clone()),
+                    depth + 1,
+                    summaries,
+                );
             }
         }
     }
-    walk(&mut out, &children, None, 0);
+    walk(&mut out, &children, None, 0, summaries);
     // A page whose parent this reader cannot open is shown at the top level.
     for (parent, list) in &children {
         if let Some(parent) = parent
@@ -305,7 +383,16 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
                     "- {} ({} · r{})\n",
                     page.title, page.page_id, page.head_revision
                 ));
-                walk(&mut out, &children, Some(page.page_id.clone()), 1);
+                if summaries {
+                    push_summary(&mut out, page, 1);
+                }
+                walk(
+                    &mut out,
+                    &children,
+                    Some(page.page_id.clone()),
+                    1,
+                    summaries,
+                );
             }
         }
     }
@@ -732,14 +819,34 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             print!("{}", render_linked_pages(&pages));
             Ok(())
         }
-        PageCommand::Tree { space } => {
+        PageCommand::Tree { space, summaries } => {
             let space = resolve_space(hub_url, token, space).await?;
             let url = with_route(hub_url, &format!("/api/spaces/{}/pages", enc(&space)));
             let response: TreeResponse = http::request_json(&url, "GET", Some(token), None).await?;
             if response.pages.is_empty() {
                 println!("(no pages yet)");
             } else {
-                print!("{}", render_page_tree(&response.pages));
+                print!("{}", render_page_tree(&response.pages, summaries));
+            }
+            Ok(())
+        }
+        PageCommand::Search { query, space } => {
+            let query = query.join(" ");
+            if query.trim().is_empty() {
+                return Err(CliError::Launch("page search needs words to find".into()));
+            }
+            let space = resolve_space(hub_url, token, space).await?;
+            let route = format!(
+                "/api/spaces/{}/pages/search?query={}",
+                enc(&space),
+                enc(query.trim())
+            );
+            let response: SearchResponse =
+                http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
+            if response.results.is_empty() {
+                println!("(no page holds every word of that; try fewer words)");
+            } else {
+                print!("{}", render_page_search(&response.results));
             }
             Ok(())
         }
@@ -1335,7 +1442,48 @@ mod page_tests {
             agent_suggest_only: false,
             can_edit: true,
             governance: false,
+            summary: None,
         }
+    }
+
+    #[test]
+    fn tree_shows_each_page_s_line_only_when_asked() {
+        let pages = [
+            PageSummary {
+                summary: Some(PageSummaryLine {
+                    text: "Ships\nFriday".into(),
+                }),
+                ..page("plan", None, "V")
+            },
+            page("notes", Some("plan"), "V"),
+        ];
+        assert_eq!(
+            render_page_tree(&pages, true),
+            "- PLAN (plan · r1)\n  Ships Friday\n  - NOTES (notes · r1)\n"
+        );
+        assert_eq!(
+            render_page_tree(&pages, false),
+            "- PLAN (plan · r1)\n  - NOTES (notes · r1)\n"
+        );
+    }
+
+    #[test]
+    fn search_names_each_hit_by_its_reference_and_shows_the_text_around_it() {
+        let hit = |block: &str, snippet: &str| PageSearchHit {
+            page_id: "p1".into(),
+            title: "Plan".into(),
+            block_id: block.into(),
+            block_title: if block.is_empty() {
+                String::new()
+            } else {
+                "Goals".into()
+            },
+            snippet: snippet.into(),
+        };
+        assert_eq!(
+            render_page_search(&[hit("goals", "…ship the\nledger…"), hit("", "Plan")]),
+            "- Plan › Goals (page:p1#goals)\n  …ship the ledger…\n- Plan (page:p1)\n"
+        );
     }
 
     #[test]
@@ -1346,19 +1494,22 @@ mod page_tests {
             ..page("rules", None, "V")
         };
         assert_eq!(
-            render_page_tree(&[rules]),
+            render_page_tree(&[rules], false),
             "- RULES (rules · r1) [governance] [read-only]\n"
         );
     }
 
     #[test]
     fn tree_lists_children_under_their_parent_in_sibling_order() {
-        let rendered = render_page_tree(&[
-            page("b", Some("root"), "W"),
-            page("root", None, "V"),
-            page("a", Some("root"), "V"),
-            page("orphan", Some("hidden"), "V"),
-        ]);
+        let rendered = render_page_tree(
+            &[
+                page("b", Some("root"), "W"),
+                page("root", None, "V"),
+                page("a", Some("root"), "V"),
+                page("orphan", Some("hidden"), "V"),
+            ],
+            false,
+        );
         assert_eq!(
             rendered,
             "- ROOT (root · r1)\n  - A (a · r1)\n  - B (b · r1)\n- ORPHAN (orphan · r1)\n"

@@ -1,5 +1,5 @@
 import type { QueryResultRow } from "pg";
-import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlockAt, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
+import { LIVE_AGENT_STATUS_SQL, isLiveAgentStatus, pageBlocks, pageChangeGist, pagePositionBetween as positionBetween, PagePositionError, pageTitleLine, utf8ByteLength } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
 import { spaceBilling } from "@xmatrix/billing";
 import { readsOnly } from "./space-roles.js";
@@ -50,6 +50,7 @@ const MAX_PAGES = 5_000;
 
 /** Ctrl+F lists at most this many page hits; the dialog has the same ceiling. */
 const PAGE_SEARCH_RESULT_LIMIT = 80;
+const PAGE_SEARCH_MAX_TERMS = 8;
 const PAGE_SEARCH_SNIPPET_CHARS = 160;
 const MAX_GIT_REVISIONS = 5_000;
 const MAX_DEPTH = 64;
@@ -139,25 +140,52 @@ function pageSearchSnippet(text: string, at: number, length: number): string {
   return `${start > 0 ? "…" : ""}${slice}${end < text.length ? "…" : ""}`;
 }
 
+/** The words of a search: split on whitespace, each one once, at most PAGE_SEARCH_MAX_TERMS. */
+function pageSearchTerms(query: string): string[] {
+  return [...new Set(query.toLocaleLowerCase().split(/\s+/u).filter(Boolean))].slice(0, PAGE_SEARCH_MAX_TERMS);
+}
+
 /**
- * The section whose text contains the query, or a title hit when only the page's name does: the
- * name is the heading that names its document, so a match on that line is a title hit. Body wins.
+ * Where a page answers a search: the section holding the query as typed; failing that the section
+ * holding the most of its words. The name is the heading that names its document, so a match only
+ * on that line is a title hit. Body wins.
  */
 function pageSearchHit(title: string, body: string, pageId: string, query: string): PageSearchHit {
   const needle = query.toLocaleLowerCase();
   const text = body.toLocaleLowerCase();
   const name = pageTitleLine(body);
-  let bodyAt = text.indexOf(needle);
-  if (name && bodyAt >= name.start && bodyAt < name.end) bodyAt = text.indexOf(needle, name.end);
-  if (bodyAt >= 0) {
-    const blockId = pageBlockAt(body, bodyAt);
-    const block = pageBlocks(body).find((item) => item.id === blockId);
+  const inBody = (term: string): number => {
+    const at = text.indexOf(term);
+    return name && at >= name.start && at < name.end ? text.indexOf(term, name.end) : at;
+  };
+  const blocks = pageBlocks(body);
+  const hit = (at: number, length: number): PageSearchHit => {
+    const block = blocks.filter((item) => item.start <= at).at(-1);
     return {
-      pageId, title, blockId, blockTitle: block?.title ?? "", field: "body",
-      snippet: pageSearchSnippet(body, bodyAt, needle.length),
+      pageId, title, blockId: block?.id ?? "", blockTitle: block?.title ?? "", field: "body",
+      snippet: pageSearchSnippet(body, at, length),
     };
-  }
-  return { pageId, title, blockId: "", blockTitle: "", field: "title", snippet: title };
+  };
+  const phraseAt = inBody(needle);
+  if (phraseAt >= 0) return hit(phraseAt, needle.length);
+  // The words are apart: show the section that holds the most of them, at the first one it holds.
+  const terms = pageSearchTerms(query);
+  let best: { count: number; at: number; length: number } | undefined;
+  blocks.forEach((block, index) => {
+    const from = name && block.start < name.end ? Math.max(block.start, name.end) : block.start;
+    const section = text.slice(from, blocks[index + 1]?.start ?? text.length);
+    let count = 0;
+    let first: { at: number; length: number } | undefined;
+    for (const term of terms) {
+      const at = section.indexOf(term);
+      if (at < 0) continue;
+      count += 1;
+      if (!first || at < first.at) first = { at, length: term.length };
+    }
+    if (first && count > (best?.count ?? 0)) best = { count, at: from + first.at, length: first.length };
+  });
+  return best ? hit(best.at, best.length)
+    : { pageId, title, blockId: "", blockTitle: "", field: "title", snippet: title };
 }
 
 function blockId(value: unknown): string {
@@ -477,13 +505,17 @@ export class PostgresPageRepository {
    * one transaction rather than a space lookup, a link list and a read per page.
    */
   async conversationPages(input: { requestId: string; conversationId: string; principal: PagePrincipal }):
-    Promise<{ spaceId: string; pages: PageDocument[] }> {
+    Promise<{ spaceId: string; pages: PageDocument[]; readOnlyPageIds: string[] }> {
     return this.inConversation(input, "page.conversation.pages", async (tx, spaceId, actor) => {
       const tree = new Map((await this.accessibleTree(tx, spaceId, actor)).map((row) => [row.page_id, row]));
-      const links = await linkRows(tx, spaceId, null, input.conversationId);
-      const pageIds = [...new Set(links.map((link) => link.page_id).filter((pageId) => tree.has(pageId)))]
+      const links = (await linkRows(tx, spaceId, null, input.conversationId)).filter((link) => tree.has(link.page_id));
+      // A page someone only looked at is not one the conversation works on: it comes after the pages
+      // that were linked, referenced or edited, and is named apart so a launch does not carry it whole.
+      const worked = new Set(links.filter((link) => link.source !== "read").map((link) => link.page_id));
+      const linked = [...new Set(links.map((link) => link.page_id))];
+      const pageIds = [...linked.filter((pageId) => worked.has(pageId)), ...linked.filter((pageId) => !worked.has(pageId))]
         .slice(0, MAX_CONVERSATION_PAGES);
-      if (pageIds.length === 0) return { spaceId, pages: [] };
+      if (pageIds.length === 0) return { spaceId, pages: [], readOnlyPageIds: [] };
       const revisions = new Map((await tx.query<RevisionRow & { page_id: string }>({
         name: "page_head_revisions_v1",
         text: `SELECT r.page_id,r.revision,r.kind,r.body,r.authors_json,r.conversation_ids,r.based_on_revision,r.created_at
@@ -497,7 +529,7 @@ export class PostgresPageRepository {
         const rev = revisions.get(pageId);
         if (!rev) throw new PageControlError("page_revision_not_found", 404);
         return { ...this.summary(tree.get(pageId)!), body: rev.body ?? "", revisionInfo: revisionOf(rev) };
-      }) };
+      }), readOnlyPageIds: pageIds.filter((pageId) => !worked.has(pageId)) };
     });
   }
 
@@ -607,16 +639,19 @@ export class PostgresPageRepository {
       const actor = await pageActor(tx, spaceId, input.principal, false);
       const tree = await this.accessibleTree(tx, spaceId, actor);
       if (tree.length === 0) return { results: [] };
+      // A page answers when it holds every word, wherever each is; the ones holding the query as
+      // typed come first. Text without spaces is one word, so it is matched as before.
       const rows = await tx.query<QueryResultRow & { page_id: string; title: string | null; body: string }>({
-        name: "page_search_heads_v3",
+        name: "page_search_heads_v4",
         text: `SELECT p.page_id, data.page_title(r.body) AS title, r.body
           FROM data.pages p
           JOIN data.page_revisions r
             ON r.space_id=p.space_id AND r.page_id=p.page_id AND r.revision=p.head_revision
-          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[]) AND strpos(lower(r.body), lower($3)) > 0
-          ORDER BY p.updated_at DESC
+          WHERE p.space_id=$1 AND p.page_id = ANY($2::text[])
+            AND NOT EXISTS (SELECT 1 FROM unnest($4::text[]) AS term WHERE strpos(lower(r.body), term) = 0)
+          ORDER BY (strpos(lower(r.body), lower($3)) > 0) DESC, p.updated_at DESC
           LIMIT ${PAGE_SEARCH_RESULT_LIMIT}`,
-        values: [spaceId, tree.map((row) => row.page_id), query],
+        values: [spaceId, tree.map((row) => row.page_id), query, pageSearchTerms(query)],
         maxRows: PAGE_SEARCH_RESULT_LIMIT,
       });
       return { results: rows.map((row) => pageSearchHit(row.title ?? UNNAMED_PAGE, row.body ?? "", row.page_id, query)) };

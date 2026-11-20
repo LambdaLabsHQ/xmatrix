@@ -544,8 +544,8 @@ export function registerIndexRoutesChannelAgent(app: Hono<{ Bindings: Env }>): v
           return channel as { summary?: string; summarySource?: ChannelSummarySource };
         },
         // As the caller itself; a Run's read through its owner's cross-Space grant goes without pages.
-        pages: async () => run && principal.kind !== "agent" ? []
-          : (await linkedPages(c.env, channelId, runPrincipalOf(authUser))).pages,
+        pages: async () => run && principal.kind !== "agent" ? { pages: [] }
+          : linkedPages(c.env, channelId, runPrincipalOf(authUser)),
         peers: async () => {
           const { channel } = await loadChannel();
           const records = (channel as { instanceRecords?: InstanceRecord[] }).instanceRecords;
