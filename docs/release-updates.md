@@ -1,5 +1,27 @@
 # Release Updates
 
+## Unreleased: a start its machine never answered is ended in its place
+
+A connected daemon that took a start command and never admitted, ran or failed
+it left the Hub to end the start after ten deliveries, about five minutes, and
+then only in the database: nothing was written on the summon, an `@auto` summon
+went to nobody else, and the start breaker never saw it, because all three
+hang off the failure report a daemon sends. On 2026-11-20 two machines'
+daemons refused every command for six hours and twenty starts ended that way;
+six more had since 2026-10-31. A spawn command now fails as
+`machine_not_answering` after three silent deliveries (other commands keep
+ten), and in the same transaction the Hub records the failed-spawn report the
+machine never made, which the coordinator finalizes like any terminal report:
+the failure is said on the summon, an `@auto` summon goes to the next Agent,
+and the Run counts as a failed start. Every environment on that machine then
+ranks last, in every Space, until the machine answers any command or 30
+minutes pass; the fact is read from the commands the Hub sent, and nothing is
+stored about the machine. Hub and Web (the summon reason names the machine).
+Migration `0261` lets `data.machine_run_terminal_reports` hold a
+`machine_spawn_result`; an older Hub finalizes such a row the same way and
+never writes one. Recovery is a CI-validated beta reverting this change; the
+relaxed constraint is harmless to keep.
+
 ## Unreleased: stop message hover flicker across channel switches and hide Windows background consoles
 
 Switching channels painted the last screen of messages immediately in
@@ -42,6 +64,7 @@ has no report beside it, while holding that lock, and a lock taken on a file
 released that way is not treated as the lock. An outbox already in that state
 empties on the first pass after the update. CLI / daemon only. Recovery is a
 CI-validated CLI release reverting this change.
+
 ## Unreleased: Antigravity quota reads the Gemini weekly window
 
 Google's Cloud Code `retrieveUserQuotaSummary` endpoint omits the native
