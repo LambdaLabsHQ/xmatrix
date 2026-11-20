@@ -1,5 +1,30 @@
 # Release Updates
 
+## Unreleased: the daemon keeps unconfirmed results, not a command journal
+
+On 2026-11-20 one stored quota reading that 4.7.0 could not read back made two
+machines' daemons refuse every command for six hours: the daemon kept its own
+record of each command's phase in one checksummed file,
+`daemon-command-effects-v1.json`, and a file it could not verify vetoed
+everything. 4.7.1 fixed the verification and added a `.previous` image and a
+quarantine. The journal itself is now gone. Whether a command runs is the
+Hub's admission to decide, and the daemon already asks it before every
+execution; a `Received` or `Admitted` record was re-executed on redelivery
+anyway, and the payload digest check had refused real commands twice. The
+daemon keeps one thing: the result of a command it finished and the Hub has
+not confirmed, one file per command under `daemon-command-results/`, removed
+when the Hub confirms it. A redelivered command with a kept result is answered
+with it under the new lease; any other delivery runs. A result that cannot be
+written is still reported, and one that cannot be read is removed, so the cost
+of either is that one command running again if the Hub delivers it again.
+Removed with the journal: phases, payload digests and re-keying, the checksum,
+`.previous`, quarantine and size eviction, and the Windows update handoff's
+refusal while a `Received` or `Admitted` record remained (up to 31 days). The
+old file is deleted at daemon start and not migrated; the Hub redelivers what
+it had not confirmed. `BootJournal` and `ActivationJournal` are unchanged. CLI
+/ daemon only. Recovery is a CI-validated CLI release reverting this change;
+the reverted daemon starts from an empty journal.
+
 ## Unreleased: a start its machine never answered is ended in its place
 
 A connected daemon that took a start command and never admitted, ran or failed
