@@ -274,8 +274,7 @@ export {
   machineExecutionCompleted, scheduledMachineExecutionCompleted,
 } from "./machine-execution-outcome.js";
 export {
-  HARNESS_SESSION_IN_USE, machineNotAnsweringDetail, machineReconnectExpiredDetail,
-  publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
+  HARNESS_SESSION_IN_USE, machineNotAnsweringDetail, publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
   RUN_PHASES_BEFORE_READY, runPhaseBeforeReady,
 } from "./machine-startup-failure.js";
 export type {

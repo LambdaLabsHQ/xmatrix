@@ -446,6 +446,11 @@ export class PostgresMachineLifecycleRepository {
         (typeof input.payload.executionKey !== "string" ||
          input.payload.executionKey !== body.executionKey)) throw new RuntimeControlError(
       "conflict", 409, "Machine lifecycle execution key does not match the Run");
+    // The Hub's own verdict that a machine never answered a start is about a
+    // start nobody saw happen. An Agent that connected meanwhile did start: its
+    // daemon only failed to say so, and a Run at work is not failed for that.
+    if (input.eventType === "machine_spawn_result" && input.payload.unanswered === true &&
+        (run.status === "running" || run.status === "stopping")) return undefined;
     const terminal = isTerminalRunStatus(run.status);
     let status: string | undefined;
     let finishedAt: string | null | undefined;

@@ -1413,7 +1413,7 @@ export class PostgresMachineControlRepository {
         payload: { type: "machine_spawn_result", requestId: String(row.command_id), runId, channelId, launchId,
           ...(typeof issued.executionKey === "string" ? { executionKey: issued.executionKey } : {}),
           ...(typeof issued.instanceId === "string" ? { instanceId: issued.instanceId } : {}),
-          ok: false, error: machineNotAnsweringDetail(MAX_UNANSWERED_SPAWN_DELIVERIES) },
+          ok: false, unanswered: true, error: machineNotAnsweringDetail(MAX_UNANSWERED_SPAWN_DELIVERIES) },
       });
       unansweredRunChannelIds.add(channelId);
     }

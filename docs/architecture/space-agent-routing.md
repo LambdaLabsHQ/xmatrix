@@ -299,6 +299,26 @@ unrecoverably, the same message is handed once to the next-ranked environment
 conditions still apply, and the retry gets no fallback of its own. An Agent the
 author named is never replaced.
 
+A machine can also be connected and answer nothing: its daemon takes the start
+command and never admits, runs or fails it. No report arrives, so the Hub ends
+the start itself. A spawn command handed out three times, each lease left to
+lapse, fails as `machine_not_answering` (other commands keep ten deliveries);
+of 2,336 starts that succeeded in the three weeks to 2026-11-20, two needed
+more than three. In the transaction that ends it, the Hub records the
+failed-spawn report the machine never made
+(`data.machine_run_terminal_reports`, event `machine_spawn_result`), and the
+coordinator finalizes it like any terminal report: the failure is written on
+the summon, an `@auto` summon goes to the next environment, and the Run counts
+as a failed start. A reborn or wake has no Launch; its intent reads the
+command's failure as before.
+
+From that verdict every environment on the machine ranks last, in every Space,
+until the machine answers any command (a quota reading, a stop, a start) or 30
+minutes pass (`machineUnansweredAtSql`). If it is the only option it still
+gets the work, and the summon reason says its machine left the last command
+unanswered. Nothing is stored about the machine: placement reads the commands
+the Hub sent it, so the next one it answers ends the mark.
+
 A harness can also start, connect and do nothing: its turn ends with no
 reply and no error, in seconds or after half an hour, so nothing above
 notices. An environment whose last three summons in the Space all went that

@@ -273,22 +273,28 @@ integration("an unanswered action shows on the Machine, settles as expired, and 
   } finally { await fixture.close(); }
 });
 
+/** A connected daemon that is handed commands and says nothing; `claim` is its next look at what waits. */
+async function silentDaemon(session, metadata = {}) {
+  const controls = new PostgresMachineControlRepository(session);
+  const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "silent-machine",
+    hostId: "silent-host", daemonId: "silent-daemon" };
+  const principal = { kind: "machine", id: "machine-daemon:owner:silent-machine:silent-host",
+    ownerUserId: "owner", machineId: "silent-machine", hostId: "silent-host" };
+  const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
+    principal, capabilities: ["machine_harness_action_v1"], payload: {}, metadata });
+  return { controls, machine, principal, connected,
+    claim: (commandTypes = ["harness_action"]) => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
+      principal, connectionEpoch: connected.connectionEpoch, commandTypes, payload: {} }),
+    issue: requestId => controls.command({ ...machine, commandId: randomUUID(), action: "issue",
+      principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
+      payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" } }) };
+}
+
 integration("a command handed out ten times and never answered fails instead of going out again", async () => {
   const fixture = await isolatedPostgres("unanswered_command", { shard: true });
   const { client, session } = fixture;
   try {
-    const controls = new PostgresMachineControlRepository(session);
-    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "silent-machine",
-      hostId: "silent-host", daemonId: "silent-daemon" };
-    const principal = { kind: "machine", id: "machine-daemon:owner:silent-machine:silent-host",
-      ownerUserId: "owner", machineId: "silent-machine", hostId: "silent-host" };
-    const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
-      principal, capabilities: ["machine_harness_action_v1"], payload: {}, metadata: {} });
-    const claim = () => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
-      principal, connectionEpoch: connected.connectionEpoch, commandTypes: ["harness_action"], payload: {} });
-    const issue = requestId => controls.command({ ...machine, commandId: randomUUID(), action: "issue",
-      principal: { kind: "user", id: "owner" }, controlId: requestId, commandType: "harness_action",
-      payload: { type: "machine_harness_action", requestId, presetId: "claude", action: "update" } });
+    const { claim, issue } = await silentDaemon(session);
     const lapse = (requestId, attempts) => client.query(`UPDATE data.machine_daemon_commands SET status='leased',
       attempts=$2,lease_owner='silent-daemon',lease_until=now()-interval '1 second' WHERE command_id=$1`,
     [requestId, attempts]);
@@ -323,17 +329,9 @@ integration("a start a connected machine never answered ends after three deliver
   const fixture = await isolatedPostgres("unanswered_start", { shard: true });
   const { client, session } = fixture;
   try {
-    const controls = new PostgresMachineControlRepository(session);
-    const machine = { ownerUserId: "owner", ownerEmail: "owner@example.test", machineId: "silent-machine",
-      hostId: "silent-host", daemonId: "silent-daemon" };
-    const principal = { kind: "machine", id: "machine-daemon:owner:silent-machine:silent-host",
-      ownerUserId: "owner", machineId: "silent-machine", hostId: "silent-host" };
     const item = { id: "claude", installed: true, version: "1.0.0", probeStatus: "ok" };
-    const connected = await controls.command({ ...machine, commandId: randomUUID(), action: "connect",
-      principal, capabilities: ["machine_harness_action_v1"], payload: {},
-      metadata: { harnesses: { schemaVersion: 1, capturedAt: new Date(Date.now() - 60_000).toISOString(), items: [item] } } });
-    const claim = commandTypes => controls.command({ ...machine, commandId: randomUUID(), action: "claim",
-      principal, connectionEpoch: connected.connectionEpoch, commandTypes, payload: {} });
+    const { controls, machine, principal, connected, claim, issue } = await silentDaemon(session,
+      { harnesses: { schemaVersion: 1, capturedAt: new Date(Date.now() - 60_000).toISOString(), items: [item] } });
     // A spawn as the coordinator issues it for a Launch, or as a reborn does without one,
     // already handed out `attempts` times with its last lease lapsed.
     const lapsedSpawn = (id, attempts, launch = true) => client.query(`INSERT INTO data.machine_daemon_commands
@@ -377,7 +375,7 @@ integration("a start a connected machine never answered ends after three deliver
       channel_id: "channel-second", connection_epoch: connected.connectionEpoch, request_id: "second",
       payload_json: { type: "machine_spawn_result", requestId: "second", runId: "run-second",
         channelId: "channel-second", launchId: "launch-second", executionKey: "execution-second",
-        instanceId: "instance-second", ok: false, error:
+        instanceId: "instance-second", ok: false, unanswered: true, error:
           "machine_not_answering: the machine is connected but did not answer the start command, sent to it 3 times. Nothing was started." },
       state: "pending" }]);
 
@@ -385,9 +383,7 @@ integration("a start a connected machine never answered ends after three deliver
     assert.ok(await unansweredAt(), "a start left unanswered marks its machine");
     // A command another kind of work waits on keeps its ten deliveries.
     const action = `harness:${randomUUID()}`;
-    await controls.command({ ...machine, commandId: randomUUID(), action: "issue",
-      principal: { kind: "user", id: "owner" }, controlId: action, commandType: "harness_action",
-      payload: { type: "machine_harness_action", requestId: action, presetId: "claude", action: "update" } });
+    await issue(action);
     await client.query(`UPDATE data.machine_daemon_commands SET status='leased',attempts=3,lease_owner='silent-daemon',
       lease_until=now()-interval '1 second' WHERE command_id=$1`, [action]);
     const [handed] = (await claim(["harness_action"])).commands;
