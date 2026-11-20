@@ -34,6 +34,7 @@ has no report beside it, while holding that lock, and a lock taken on a file
 released that way is not treated as the lock. An outbox already in that state
 empties on the first pass after the update. CLI / daemon only. Recovery is a
 CI-validated CLI release reverting this change.
+
 ## Unreleased: Antigravity quota reads the Gemini weekly window
 
 Google's Cloud Code `retrieveUserQuotaSummary` endpoint omits the native
