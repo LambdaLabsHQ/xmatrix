@@ -37,21 +37,37 @@ for (const scenario of cases) {
       await expect(recommendation).toContainText(scenario.architecture === "x86" ? "Intel-based Macs" : "Apple Silicon");
       await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", scenario.other);
     }
-    await recommendation.getByRole("link", { name: "All platforms and preview builds" }).click();
+    await recommendation.getByRole("link", { name: "All platforms", exact: true }).click();
     await expect(page).toHaveURL(/#all-downloads$/);
-    // The list under the recommendation carries every build, whatever the device.
-    const builds = {
-      "macOS Apple Silicon": "/api/desktop/releases/stable/latest-arm64.dmg",
-      "macOS Intel": "/api/desktop/releases/stable/latest-x64.dmg",
-      "Windows Installer": "/api/desktop/releases/stable/latest-x64.exe",
-      "Android APK": "/api/android/releases/stable/latest.apk",
-      "Preview builds: Windows": "/api/desktop/releases/dev/latest-x64.exe",
-      "macOS as ZIP: Preview Intel": "/api/desktop/releases/dev/latest-x64.zip",
+    // The list under the recommendation carries every build of one channel,
+    // whatever the device; the switch moves the whole list to the other one.
+    const builds = (channel: "stable" | "dev", suffix: string) => ({
+      [`macOS Apple Silicon${suffix}`]: `/api/desktop/releases/${channel}/latest-arm64.dmg`,
+      [`macOS Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.dmg`,
+      [`Windows Installer${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.exe`,
+      [`Android APK${suffix}`]: `/api/android/releases/${channel}/latest.apk`,
+      [`macOS ZIP Apple Silicon${suffix}`]: `/api/desktop/releases/${channel}/latest-arm64.zip`,
+      [`macOS ZIP Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.zip`,
+      [`Web Open${suffix}`]: channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app",
+    });
+    const expectBuilds = async (channel: "stable" | "dev", suffix: string) => {
+      for (const [name, href] of Object.entries(builds(channel, suffix))) {
+        const link = page.getByRole("link", { name, exact: true });
+        await expect(link).toBeVisible();
+        await expect(link).toHaveAttribute("href", href);
+      }
     };
-    for (const [name, href] of Object.entries(builds)) {
-      const link = page.getByRole("link", { name, exact: true });
-      await expect(link).toBeVisible();
-      await expect(link).toHaveAttribute("href", href);
+    const channel = page.getByRole("group", { name: "Release channel" });
+    await expect(channel.getByRole("button", { name: "Stable" })).toHaveAttribute("aria-pressed", "true");
+    await expectBuilds("stable", "");
+    await channel.getByRole("button", { name: "Preview" }).click();
+    await expect(page).toHaveURL(/\?channel=preview/);
+    await expectBuilds("dev", " preview");
+    // The main download is the same channel as the list.
+    const preview = (href: string) => href === "/app" ? "https://beta.xmatrix.sh/app" : href.replace("/stable/", "/dev/");
+    await expect(recommendation.getByRole("link").first()).toHaveAttribute("href", preview(scenario.href));
+    if (scenario.other) {
+      await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", preview(scenario.other));
     }
     // One primary action on the page, and no sideways scrolling on a phone.
     await expect(page.locator(".download-page [data-material='wood-panel']")).toHaveCount(1);
