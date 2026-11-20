@@ -700,6 +700,41 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   width: 1rem;
   height: 1rem;
 }
+/* The composer's @ list on the comment's paper reads as the page's own paper menus: rows run flat from edge to
+   edge of the card with the paper's fill when chosen, their faces and section labels in the comment's text column,
+   names in the text's weight. So the composer spans the card and its line keeps the card's inset itself. */
+html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comment-box .composer-input-row {
+  padding-left: 1.125rem !important;
+  padding-right: 0.75rem !important;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions {
+  border-bottom: none;
+  padding-block: 0.25rem 0;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-category-heading { padding: 0.375rem 1.125rem 0.125rem; }
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .app-mention-capability {
+  width: 100%;
+  margin: 0;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .app-mention-category button.app-completion-option {
+  width: 100% !important;
+  min-height: 2rem;
+  margin: 0 !important;
+  padding: 0 1.125rem;
+  border-radius: 0 !important;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .app-mention-category button.app-completion-option:is(:hover, [aria-selected="true"]),
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-capability:has(.app-mention-profile-edit:hover) button.app-completion-option {
+  background: color-mix(in oklch, var(--foreground) 7%, transparent) !important;
+  border-radius: 0 !important;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .font-semibold { font-weight: 400; }
+/* Its fold row is one more quiet line of the menu, in the names' column and size; it opens in place, so no arrow. */
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .app-mention-category button.app-mention-category-more {
+  min-height: 2rem;
+  font-size: 0.875rem;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-category-more > svg { display: none; }
 /* A caret's name shows while its person moves or types and goes about five seconds later, as in
    Google Docs, leaving the caret with a square at its top; hovering brings the name back. */
 @keyframes page-cursor-name {

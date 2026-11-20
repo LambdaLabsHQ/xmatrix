@@ -58,7 +58,7 @@ export function PageCommentBox({ text, taker, context, onText, onSend, onClose }
   };
   const space = context?.space ?? null;
   return (
-    <PaperPopover className="page-comment-box py-1 pr-1.5 pl-3" data-testid="page-comment-box" onMouseDown={(event) => {
+    <PaperPopover className="page-comment-box py-1" data-testid="page-comment-box" onMouseDown={(event) => {
       event.stopPropagation();
       // Its buttons act without taking the focus from the text, which would close it first.
       if (!(event.target instanceof Node && field.current?.element.contains(event.target))) event.preventDefault();
@@ -86,7 +86,7 @@ export function PageCommentBox({ text, taker, context, onText, onSend, onClose }
           onSend(composerSendDraft(picks.current, typed));
         }} onEscape={() => onClose()}
         onFieldBlur={() => onClose(true)} />
-      {taker && <WorkingLine agents={[taker]} className="pb-1.5" />}
+      {taker && <WorkingLine agents={[taker]} className="pb-1.5 pl-3" />}
     </PaperPopover>
   );
 }
