@@ -31,8 +31,9 @@ open-source releases use the single-binary behavior documented in the next secti
 - Wrapper adoption intersects Hub Run authority, PID birth identity, exact executable digest/path, named Job
   membership, and an Ed25519 challenge. Stable wrapper broker proxies retain their local endpoints while a recovered
   daemon rotates new epoch-local upstream capabilities; raw upstream capabilities are never persisted.
-- Command effects are journaled as `Received -> Admitted -> EffectCommitted(result) -> HubCompletionAcked` using
-  `controlId + commandType + payloadDigest`; reconnect replays committed results instead of repeating local effects.
+- Hub admission decides whether a command runs. The daemon keeps only the result of a command it finished and Hub
+  has not confirmed, one file per `controlId` under `daemon-command-results/`; a redelivery or reconnect answers
+  with that result, and Hub's confirmation removes it. No local file can refuse a command.
 - `xmatrix update` writes a bounded local request. The running daemon downloads only the immutable R2 manifest asset,
   verifies size, full SHA-256, reviewed provenance and Authenticode, promotes an immutable generation, and asks the
   Supervisor to activate it. No PowerShell handoff, process scan, temporary Task, Task stop, or breakaway flag exists

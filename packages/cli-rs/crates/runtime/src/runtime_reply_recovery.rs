@@ -142,25 +142,25 @@ pub(super) async fn polled(
     hub_url: String,
     token: String,
     relay: super::SharedMachineDaemonConnection,
-    journal: super::DaemonEffectJournal,
+    journal: super::DaemonCommandResults,
     broker: Option<DaemonRequestBroker>,
     command: super::MachineDaemonCommand,
 ) -> Result<()> {
     let control_id = super::polled_daemon_command_control_id(&command)
         .ok_or_else(|| failure("Recovery control ID is unavailable"))?
         .to_string();
-    let Some((effect_id, _)) =
-        super::prepare_polled_daemon_command(&hub_url, &token, &relay, &journal, &command).await?
-    else {
+    if super::prepare_polled_daemon_command(&hub_url, &token, &relay, &journal, &command)
+        .await?
+        .is_none()
+    {
         return Ok(());
-    };
+    }
     let report = execute(broker.as_ref(), command).await?;
-    super::report_polled_command_effect_result_http(
+    super::report_polled_command_result_http(
         &hub_url,
         &token,
         &relay,
         &journal,
-        &effect_id,
         &control_id,
         report,
     )
