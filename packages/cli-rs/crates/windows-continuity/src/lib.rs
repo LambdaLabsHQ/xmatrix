@@ -2281,6 +2281,27 @@ mod tests {
         let _ = std::fs::remove_dir_all(root);
     }
 
+    #[test]
+    fn effect_journal_round_trips_float_results_without_checksum_mismatch() {
+        let dir = std::env::temp_dir().join(format!("xm-float-{}", uuid::Uuid::new_v4()));
+        let journal = CommandEffectJournal::new(dir.join("effects.json"));
+        let id = journal
+            .receive("quota:float-1", "quota_probe", &"c".repeat(64))
+            .unwrap()
+            .stable_id();
+        journal.admit(&id).unwrap();
+        // Exact float from Antigravity quota `(1.0 - 0.9004436) * 100.0`
+        // (`9.955639999999999`); without `serde_json/float_roundtrip`, parsing
+        // shifts it by 1 ULP to `9.95564` and trips `ChecksumMismatch`.
+        let payload = serde_json::json!({ "percent": (1.0_f64 - 0.9004436_f64) * 100.0_f64 });
+        journal.commit_result(&id, payload).unwrap();
+        assert_eq!(
+            journal.acknowledge("quota:float-1").unwrap().phase,
+            EffectPhase::HubCompletionAcked
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     /// Write a journal as an older CLI left it: no dating, no budget.
     fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
         let envelope = EffectJournalEnvelope {

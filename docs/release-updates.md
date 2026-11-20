@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: daemon command journal round-trips floating-point results
+
+When a daemon command result carried a floating-point number that shifted by 1
+ULP under `serde_json`'s default approximate parser (such as an Antigravity
+quota reading like `(1.0 - 0.9004436) * 100.0 = 9.955639999999999`), the next
+read of `daemon-command-effects-v1.json` re-serialized it as `9.95564`, failed
+checksum verification (`activation journal checksum mismatch`), and rejected
+every subsequent command on that machine. `xmatrix-windows-continuity` now
+enables `serde_json`'s `float_roundtrip` feature so journal reloads preserve
+exact IEEE-754 floats and existing affected journal files recover automatically
+on upgrade. CLI / daemon only. Recovery is a CI-validated CLI release reverting
+this change.
+
 ## Unreleased: a billing refusal is a hold, read once
 
 A payment refusal (an empty prepaid balance, or Cursor asking for a payment
