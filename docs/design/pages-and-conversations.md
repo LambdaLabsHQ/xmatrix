@@ -182,6 +182,14 @@ on it, so later Runs get that page as a line (its name, how it stands, the read
 that fetches it) and read it when they need it. A page becomes one the
 conversation works on when it is linked, referenced or edited there.
 
+A page is read a level at a time: the tree with each page's one line, a search
+that names the section holding the words, a page's outline (headings with their
+sizes), one section, the whole page. A part of a page is never written back as
+the page: a section goes back through an edit that names it, which the Hub
+applies to the revision it was read from and then merges like any other edit.
+What reaches a Run without its asking (the launch context) is still whole pages
+or a line naming one, never a cut page.
+
 Unlinking a page from a conversation (a bookmark's **Unlink from this
 conversation**, or `xmatrix page unlink <page-id>`) removes every link between
 them, stops co-writing between them, and records the unlink in
