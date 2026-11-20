@@ -27,8 +27,10 @@ import { autoUpdater } from "electron-updater";
 import {
   commandLooksLikeXmatrixDaemon,
   daemonLockReadRefused,
+  daemonStatusChanged,
   parseDaemonLockPid,
   parsePsDaemonProcesses,
+  windowsPowerShellCommand,
   type ExistingDaemonProcess,
 } from "./daemon-owner";
 import {
@@ -997,8 +999,11 @@ function setDaemonStatus(
 ) {
   if (state === "running" || state === "stopped") lastDaemonFailure = null;
   else if (status.failure) lastDaemonFailure = status.failure;
-  daemonStatus = createDaemonStatus(state, { ...status, ...(lastDaemonFailure ? { failure: lastDaemonFailure } : {}) });
-  sendDaemonStatus();
+  const next = createDaemonStatus(state, { ...status, ...(lastDaemonFailure ? { failure: lastDaemonFailure } : {}) });
+  if (daemonStatusChanged(daemonStatus, next)) {
+    daemonStatus = next;
+    sendDaemonStatus();
+  }
   return getDaemonStatus();
 }
 
@@ -1629,7 +1634,7 @@ function checkCliInstalled(): Promise<{ installed: boolean; version?: string; pa
       return;
     }
 
-    execFile(executable, ["--version"], { timeout: 3000 }, (error, stdout, stderr) => {
+    execFile(executable, ["--version"], { timeout: 3000, windowsHide: true }, (error, stdout, stderr) => {
       if (error) {
         resolve({ installed: false });
         return;
@@ -1891,11 +1896,13 @@ function findWindowsDaemonProcess(): Promise<ExistingDaemonProcess | null> {
   ].join(" | ");
   const script = `$ErrorActionPreference = 'SilentlyContinue'; ${pipeline}`;
 
+  const command = windowsPowerShellCommand(["-Command", script], DAEMON_PROCESS_SCAN_TIMEOUT_MS);
+
   return new Promise((resolve) => {
     const child = execFile(
-      "powershell",
-      ["-NoProfile", "-Command", script],
-      { timeout: DAEMON_PROCESS_SCAN_TIMEOUT_MS },
+      command.file,
+      command.args,
+      command.options,
       (error, stdout) => {
         if (error || !stdout.trim()) {
           resolve(null);
@@ -1983,11 +1990,12 @@ function runWindowsDaemonTaskCommand(scriptBody: string): Promise<boolean> {
 function runWindowsDaemonTaskCommandOutcome(scriptBody: string): Promise<ManagedStart> {
   if (process.platform !== "win32") return Promise.resolve({ started: false, output: "" });
 
+  const command = windowsPowerShellCommand(["-ExecutionPolicy", "Bypass", "-Command", scriptBody], 5_000);
   return new Promise((resolve) => {
     execFile(
-      "powershell",
-      ["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", scriptBody],
-      { timeout: 5_000 },
+      command.file,
+      command.args,
+      command.options,
       (error, stdout, stderr) => resolve({ started: !error, output: `${stdout || ""}${stderr || ""}` })
     );
   });
@@ -2249,6 +2257,7 @@ function spawnDaemon(executable: string) {
       detached: false,
       stdio: ["ignore", "pipe", "pipe"],
       env: daemonEnvironment(),
+      windowsHide: true,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not start xMatrix daemon.";
@@ -2855,6 +2864,7 @@ async function checkRuntime(runtime: string): Promise<DesktopRuntimeCheckResult>
       ["--version"],
       {
         timeout: 3_000,
+        windowsHide: true,
         env: {
           ...process.env,
           PATH: augmentPath(process.env.PATH),

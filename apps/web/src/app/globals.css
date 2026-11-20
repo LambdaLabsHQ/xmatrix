@@ -2320,7 +2320,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 }
 
 :root:not(.dark) .xmatrix-app .app-agent-work-dock > div {
-  pointer-events: auto !important;
+  pointer-events: none !important;
   background: transparent !important;
   background-color: transparent !important;
   border: 0 !important;

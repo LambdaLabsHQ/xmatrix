@@ -48,7 +48,9 @@ fn refuse_unless_a_person_asked(agent_run: bool, interactive_terminal: bool) -> 
 /// True only when `gh` confirmed the star. A missing or signed-out `gh`, a
 /// refusal, and a timeout all leave the choice to the browser.
 async fn star_with_github_cli() -> bool {
-    let status = tokio::process::Command::new("gh")
+    let mut command = tokio::process::Command::new("gh");
+    crate::process_tree::hide_tokio_console_window(&mut command);
+    let status = command
         .args([
             "api",
             "--method",

@@ -1083,6 +1083,17 @@ pub fn hide_tokio_console_window(command: &mut tokio::process::Command) {
     let _ = command;
 }
 
+/// Keeps a background `std::process` child from opening a console window on Windows.
+pub fn hide_std_console_window(command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    #[cfg(not(windows))]
+    let _ = command;
+}
+
 /// Sends SIGTERM to exactly one process, leaving its descendants alone. Used
 /// by `update-self`, which runs inside the target wrapper's own process tree:
 /// the wrapper must be asked to shut down gracefully (its own teardown handles

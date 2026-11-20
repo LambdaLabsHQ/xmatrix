@@ -910,16 +910,17 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     [s.channels]
   );
 
+  const windowTitle = `${
+    s.view === "messages" && s.selectedChannel
+      ? `#${channelTitle(s.selectedChannel)}`
+      : viewLabels[s.view]
+  } - xMatrix`;
+
   useEffect(() => {
     if (!s.desktopBridge) return;
-
-    const viewTitle = s.view === "messages" && s.selectedChannel
-      ? `#${channelTitle(s.selectedChannel)}`
-      : viewLabels[s.view];
-    const title = `${viewTitle} - xMatrix`;
-    void s.desktopBridge.setTitle(title);
-    document.title = title;
-  }, [s.desktopBridge, s.selectedChannel, s.view]);
+    void s.desktopBridge.setTitle(windowTitle);
+    document.title = windowTitle;
+  }, [s.desktopBridge, windowTitle]);
 
   useEffect(() => {
     if (!s.desktopBridge) return;

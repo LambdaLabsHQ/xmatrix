@@ -1,5 +1,35 @@
 # Release Updates
 
+## Unreleased: stop message hover flicker across channel switches and hide Windows background consoles
+
+Switching channels painted the last screen of messages immediately in
+`TimelineOpeningTail` while the virtual list measured behind it with
+`visibility: hidden`, then dropped `invisible` and called `slot.moveBefore(host, null)`
+in the same commit. Because the newly mounted destination slot still resolved
+as `visibility: hidden` until style recalculation, Chromium dropped `:hover`
+for a painted frame during handover — flashing the hovered message row's
+background highlight off and back on and restarting the action toolbar's
+opacity fade on both macOS and Windows. In addition, a legacy
+`:root:not(.dark) .app-agent-work-dock > div` rule in `globals.css` outranked
+the wood theme's `pointer-events: none` on `.app-agent-work-scroller`, letting
+the transparent band above the work dock steal hover from scrolled messages.
+Separately on Windows, several periodic background commands in the Desktop App
+and CLI/daemon ran without hiding their console window (`powershell` daemon
+heartbeat, 100 `ping.exe` network probes, `gh auth status`, `codex` parameter
+discovery, `update-self`, `git cat-file`, `gh api`, and the one-shot
+update-handoff PowerShell task), and the Desktop App rebroadcast unchanged
+daemon heartbeat status every 30 seconds and re-sent unchanged window titles.
+
+`TimelineRowSlot` now resolves the destination slot's `visibility` style before
+calling `moveBefore`, keeping `:hover`, the row background highlight, and the
+hover action toolbar steady across channel-switch handover; the light-mode
+`.app-agent-work-dock > div` rule now keeps `pointer-events: none` so only
+agent dock items capture pointers; all Windows background spawns pass
+`windowsHide: true` / `CREATE_NO_WINDOW` / `-WindowStyle Hidden`; unchanged
+daemon heartbeat status is deduplicated; and desktop window titles only update
+when the title text changes. Web, Desktop, and CLI / daemon. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: harden continuity journal checksums and self-healing
 
 `BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously

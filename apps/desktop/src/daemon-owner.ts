@@ -1,3 +1,5 @@
+import type { DesktopDaemonStatus } from "./desktop-ipc-types";
+
 export type ExistingDaemonProcess = {
   /** Unknown when only the daemon's held lock says it runs (Windows). */
   pid?: number;
@@ -73,4 +75,32 @@ export function daemonLockReadRefused(read: () => unknown): boolean {
   } catch (error) {
     return (error as NodeJS.ErrnoException)?.code === "EBUSY";
   }
+}
+
+/**
+ * Hidden PowerShell invocation for background daemon checks on Windows.
+ * Without `windowsHide`, each periodic heartbeat pops a transient console
+ * window that steals foreground focus and drops hover state in the desktop UI.
+ */
+export function windowsPowerShellCommand(args: string[], timeout: number) {
+  return {
+    file: "powershell" as const,
+    args: ["-NoProfile", "-NonInteractive", ...args],
+    options: { timeout, windowsHide: true as const },
+  };
+}
+
+/**
+ * Whether a daemon status update changed anything visible beyond `updatedAt`.
+ * Heartbeats that find the same running daemon leave the renderer alone.
+ */
+export function daemonStatusChanged(previous: DesktopDaemonStatus, next: DesktopDaemonStatus): boolean {
+  return (
+    previous.state !== next.state ||
+    previous.pid !== next.pid ||
+    previous.message !== next.message ||
+    previous.failure?.stage !== next.failure?.stage ||
+    previous.failure?.detail !== next.failure?.detail ||
+    previous.failure?.exitCode !== next.failure?.exitCode
+  );
 }
