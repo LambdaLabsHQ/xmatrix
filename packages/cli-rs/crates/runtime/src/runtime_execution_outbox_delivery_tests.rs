@@ -177,3 +177,62 @@ fn an_over_full_outbox_is_still_drainable() {
         "an over-full outbox must still surface its pending reports",
     );
 }
+
+fn entries(root: &Path) -> Vec<String> {
+    let mut names = fs::read_dir(root)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    names.sort();
+    names
+}
+
+/// A confirmed report leaves nothing behind. Its lock file used to stay, and
+/// admission counts every entry, so 1024 delivered reports filled the outbox
+/// for good.
+#[tokio::test]
+async fn a_delivered_report_leaves_no_lock_behind() {
+    let fixture = Fixture::new();
+    let outbox = fixture.outbox();
+    let report = report();
+    outbox.save(&report).unwrap();
+    let lock = outbox.record_lock(&report.execution_id).unwrap();
+    batch(&outbox.root, &outbox.scope.hub_origin, None).unwrap();
+    assert!(lock.exists(), "a pending report keeps its lock");
+    assert_eq!(
+        drain_with(
+            outbox.root.clone(),
+            outbox.scope.hub_origin.clone(),
+            cursor(),
+            |body| async move { Ok(receipt(&body)) }
+        )
+        .await
+        .unwrap(),
+        1
+    );
+    batch(&outbox.root, &outbox.scope.hub_origin, None).unwrap();
+    assert_eq!(entries(&outbox.root), Vec::<String>::new());
+}
+
+/// The state machines in the field are in: every slot taken by the lock of a
+/// report delivered long ago. One pass frees them and the outbox admits again.
+#[test]
+fn an_outbox_filled_by_leftover_locks_admits_again() {
+    let fixture = Fixture::new();
+    let outbox = fixture.outbox();
+    fs::create_dir_all(&outbox.root).unwrap();
+    for n in 0..MAX_ENTRIES - 1 {
+        fs::write(outbox.root.join(format!("{n:064}.lock")), b"").unwrap();
+    }
+    let pending = report();
+    assert!(outbox.save(&pending).unwrap_err().contains("full"));
+    let held = outbox.root.join(format!("{:064}.lock", 0));
+    let holder = crate::runtime_private_journal::lock(&held).unwrap();
+    batch(&outbox.root, &outbox.scope.hub_origin, None).unwrap();
+    assert_eq!(entries(&outbox.root), vec![format!("{:064}.lock", 0)]);
+    drop(holder);
+    outbox.save(&pending).unwrap();
+    batch(&outbox.root, &outbox.scope.hub_origin, None).unwrap();
+    assert!(outbox.path(&pending.execution_id).unwrap().exists());
+    assert!(outbox.record_lock(&pending.execution_id).unwrap().exists());
+}

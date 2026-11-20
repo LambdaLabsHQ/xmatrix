@@ -20,6 +20,7 @@ fn batch(
     // a few entries; the scan reaches twice that far so directory order cannot
     // hide a report behind lock files and strays, and stops once it holds as
     // many reports as an outbox can admit.
+    let mut locks = Vec::new();
     for entry in fs::read_dir(root)
         .map_err(|_| "Execution outbox is unavailable")?
         .take(2 * (MAX_ENTRIES + 1))
@@ -30,8 +31,11 @@ fn batch(
             if paths.len() > MAX_ENTRIES {
                 break;
             }
+        } else if path.extension().is_some_and(|ext| ext == "lock") {
+            locks.push(path);
         }
     }
+    release_unused_locks(locks);
     paths.sort();
     let split = after
         .map(|after| {
@@ -65,6 +69,20 @@ fn batch(
         }
     }
     Ok(selected)
+}
+
+/// A record's lock file outlives the record: a confirmed report is removed,
+/// its lock is not, and admission counts every entry. Left alone, the locks of
+/// reports long since delivered fill the outbox and it admits nothing more.
+/// Each lock is removed while held, and only with no record beside it, so a
+/// writer about to publish keeps its lock.
+fn release_unused_locks(locks: Vec<PathBuf>) {
+    for lock in locks {
+        let record = lock.with_extension("json");
+        if !record.exists() {
+            release_lock(&lock, || !record.exists());
+        }
+    }
 }
 
 fn acknowledge(path: &Path, expected: &PendingExecution) -> Result<bool, String> {
