@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: delivered execution reports release their lock files
+
+Each execution report in a machine's `execution-outbox/` has a lock file of its
+own. A confirmed report was removed; its lock file never was, and admission
+counts every entry against the 2049-entry bound. After 1024 delivered reports a
+machine's outbox held only lock files and refused every new report with
+`Execution outbox is full` (seen on a production machine from 2026-11-16: 2048
+lock files, no reports). The daemon's drain pass now removes a lock file that
+has no report beside it, while holding that lock, and a lock taken on a file
+released that way is not treated as the lock. An outbox already in that state
+empties on the first pass after the update. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
 ## Unreleased: harden continuity journal checksums and self-healing
 
 `BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously
