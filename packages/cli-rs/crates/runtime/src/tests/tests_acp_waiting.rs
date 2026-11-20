@@ -87,14 +87,33 @@ async fn submit_acp_waiting_turn(
     .await
 }
 
-fn make_acp_run<'a>(
+async fn spawn_antigravity_fixture(
+    name: &str,
+    mode: &str,
+) -> (
+    AcpVendorConfig,
+    SerializedAgent,
+    Arc<AgentInstanceConnectionClient>,
+    TraceFixtureLog,
+    AcpSession,
+    AgentRuntimeStateTracker,
+) {
+    let config = AcpVendorConfig::generic("antigravity");
+    assert!(config.supports_background_tasks);
+    let (agent, relay, frames, app) =
+        spawn_acp_waiting_fixture(name, "antigravity", mode, config.clone()).await;
+    let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
+    (config, agent, relay, frames, app, runtime_state)
+}
+
+async fn start_settled_acp_run<'a>(
     app: AcpSession,
     config: &'a AcpVendorConfig,
     relay: &'a Arc<AgentInstanceConnectionClient>,
     agent: &'a SerializedAgent,
     runtime_state: &'a AgentRuntimeStateTracker,
 ) -> super::AcpRun<'a> {
-    super::AcpRun {
+    let mut run = super::AcpRun {
         app,
         config,
         relay,
@@ -115,32 +134,33 @@ fn make_acp_run<'a>(
         pending_bg_message: None,
         reactive_wakeup: None,
         subagent_wakeup_grace_deadline: None,
-    }
-}
-
-async fn submit_and_settle_waiting_turn(run: &mut super::AcpRun<'_>) {
-    let mut runtime_turn = run.runtime_state.begin_turn(Some("channel-1"), None);
-    let turn = submit_acp_waiting_turn(&mut run.app, run.agent, run.relay, run.runtime_state).await;
+    };
+    let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
+    let turn = submit_acp_waiting_turn(&mut run.app, agent, relay, runtime_state).await;
     let cancelled = run
         .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
         .await
         .expect("settle turn");
     assert!(!cancelled);
+    run
+}
+
+async fn drain_acp_background(run: &mut super::AcpRun<'_>) {
+    use crate::ChannelControlledRuntime as _;
+    while run.has_active_background_work() {
+        if run.next_background_ready().await {
+            run.handle_background_ready().await;
+        }
+    }
 }
 
 #[tokio::test]
 async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        use crate::ChannelControlledRuntime as _;
         let _env_guard = crate::tests::test_process_env_lock();
-        let config = AcpVendorConfig::generic("antigravity");
-        assert!(config.supports_background_tasks);
-        let (agent, relay, frames, app) =
-            spawn_acp_waiting_fixture("antigravity-wait", "antigravity", "antigravity", config.clone())
-                .await;
-        let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
-        let mut run = make_acp_run(app, &config, &relay, &agent, &runtime_state);
-        submit_and_settle_waiting_turn(&mut run).await;
+        let (config, agent, relay, frames, app, runtime_state) =
+            spawn_antigravity_fixture("antigravity-wait", "antigravity").await;
+        let mut run = start_settled_acp_run(app, &config, &relay, &agent, &runtime_state).await;
 
         // 1. Long foreground command was reported as a tool wait, and the
         //    subagent call before it was never reported as a wait.
@@ -194,11 +214,7 @@ async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() 
         // 4. Drive between-turns background polling until the timer completes,
         //    runs its reactive wakeup (`busy`), and settles back to `idle` with
         //    no remaining wait.
-        while run.has_active_background_work() {
-            if run.next_background_ready().await {
-                run.handle_background_ready().await;
-            }
-        }
+        drain_acp_background(&mut run).await;
         let wakeup_busy = wait_for_frame(&frames, bg_idle + 1, |frame| {
             acp_waiting_report(frame)
                 && frame["status"] == "busy"
@@ -281,17 +297,12 @@ impl Drop for ScopedAppDataDir {
 }
 
 async fn run_antigravity_subagent_fixture(mode: &str) -> Vec<serde_json::Value> {
-    use crate::ChannelControlledRuntime as _;
     let _env_guard = crate::tests::test_process_env_lock();
     let _app_data = ScopedAppDataDir::new("xmatrix-acp-subagent-fixture");
 
-    let config = AcpVendorConfig::generic("antigravity");
-    let (agent, relay, frames, app) =
-        spawn_acp_waiting_fixture("antigravity-subagent", "antigravity", mode, config.clone())
-            .await;
-    let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
-    let mut run = make_acp_run(app, &config, &relay, &agent, &runtime_state);
-    submit_and_settle_waiting_turn(&mut run).await;
+    let (config, agent, relay, frames, app, runtime_state) =
+        spawn_antigravity_fixture("antigravity-subagent", mode).await;
+    let mut run = start_settled_acp_run(app, &config, &relay, &agent, &runtime_state).await;
 
     // At end_turn the subagent is still running: must stay `busy` (not `idle`
     // or `waiting`) and keep polling ACP stdout for the reactive wakeup.
@@ -305,11 +316,7 @@ async fn run_antigravity_subagent_fixture(mode: &str) -> Vec<serde_json::Value> 
     assert!(run.has_active_background_work());
     assert!(runtime_state.waiting_snapshot().is_none());
 
-    while run.has_active_background_work() {
-        if run.next_background_ready().await {
-            run.handle_background_ready().await;
-        }
-    }
+    drain_acp_background(&mut run).await;
 
     wait_for_frame(&frames, busy_at_end_turn + 1, |frame| {
         acp_waiting_report(frame)
