@@ -1,5 +1,24 @@
 # Release Updates
 
+## Unreleased: tolerate small clock skew on quota probes and prune dead probe results
+
+Provider quota probe reports carried `quotaObservedAt` from the host's wall
+clock, while Hub validation (`parseRoutingQuotaProbeResponse`,
+`routingQuotaRecord`, `providerQuotaReading`, and PostgreSQL
+`upsertRegistrationQuotaObservation`) rejected any timestamp even a few
+milliseconds ahead of the Worker's `Date.now()` or `statement_timestamp()`.
+Because Cloudflare Workers' `Date.now()` and host NTP clocks can differ by
+tens to hundreds of milliseconds, valid `quota_probe` completions were rejected
+with `machine_command_result_mismatch` (409, surfaced as
+`runtime.authority_rejected`), leaving commands in `leased` and stranding their
+files in `~/.config/xmatrix/daemon-command-results/` for an hour. Protocol and
+DB validation now accept bounded forward clock skew up to 5 seconds and clamp
+it to `now` (while still rejecting timestamps beyond 5 seconds in the future),
+and the daemon drops kept `machine_quota_probe_result` files immediately on
+non-retryable rejection or connection-epoch change (with a 5-minute fallback
+sweep window). Protocol, DB, Hub, and CLI. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: the download page's channel picker is a paper menu
 
 The channel picker beside the main download was the system select: opened, it

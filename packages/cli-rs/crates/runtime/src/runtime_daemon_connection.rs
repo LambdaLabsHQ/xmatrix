@@ -276,7 +276,10 @@ async fn hold_owner_action_lease(
     match heartbeat {
         Ok(heartbeat) => Some(heartbeat),
         Err(error) => {
-            eprintln!("{} {label} lease could not be held: {error}", "⚠".yellow().bold());
+            eprintln!(
+                "{} {label} lease could not be held: {error}",
+                "⚠".yellow().bold()
+            );
             None
         }
     }
@@ -304,7 +307,8 @@ async fn execute_leased_harness_action(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
         action,
@@ -333,9 +337,10 @@ async fn execute_leased_harness_action(
         }
     };
     if let Some(inventory) = result.inventory.clone()
-        && let Err(error) = relay.report_harness_inventory(inventory) {
-            eprintln!("Harness inventory report deferred: {error}");
-        }
+        && let Err(error) = relay.report_harness_inventory(inventory)
+    {
+        eprintln!("Harness inventory report deferred: {error}");
+    }
     Some(MachineDaemonReport::MachineHarnessActionResult {
         request_id,
         result,
@@ -363,9 +368,11 @@ async fn execute_leased_text_task(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "text task").await?;
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "text task").await?;
     let result =
-        crate::runtime_daemon_text_task::execute(&request_id, &preset_id, &instruction, &input).await;
+        crate::runtime_daemon_text_task::execute(&request_id, &preset_id, &instruction, &input)
+            .await;
     Some(MachineDaemonReport::MachineTextTaskResult {
         request_id,
         result,
@@ -429,15 +436,23 @@ async fn execute_leased_worktree_action(
         return None;
     };
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
-    use xmatrix_repo_pool::machine_worktree_actions::{WorktreeActionKind, execute_worktree_action};
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
+    use xmatrix_repo_pool::machine_worktree_actions::{
+        WorktreeActionKind, execute_worktree_action,
+    };
     let kind = match action {
         machine_daemon_connection::WorktreeAction::List => WorktreeActionKind::List,
         machine_daemon_connection::WorktreeAction::Reclaim => WorktreeActionKind::Reclaim,
-        machine_daemon_connection::WorktreeAction::AutoReclaimOn => WorktreeActionKind::AutoReclaimOn,
-        machine_daemon_connection::WorktreeAction::AutoReclaimOff => WorktreeActionKind::AutoReclaimOff,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOn => {
+            WorktreeActionKind::AutoReclaimOn
+        }
+        machine_daemon_connection::WorktreeAction::AutoReclaimOff => {
+            WorktreeActionKind::AutoReclaimOff
+        }
     };
-    let result = execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
+    let result =
+        execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
     Some(MachineDaemonReport::MachineWorktreeActionResult {
         request_id,
         result,
@@ -476,6 +491,13 @@ fn replay_unconfirmed_command_results(
         // command, whose replay rebinds this result to the new lease, or has
         // already settled it.
         if !completion_lease_is_current(&value, |epoch| relay.owns_connection_epoch(epoch)) {
+            // A quota probe is bound to a single connection epoch: Hub never
+            // redelivers or accepts it on a later connection, so drop it now.
+            if runtime_daemon_command_results::is_quota_probe_result(&value)
+                && let Some(control_id) = value.get("requestId").and_then(Value::as_str)
+            {
+                results.confirmed(control_id);
+            }
             continue;
         }
         let Ok(report) = serde_json::from_value(value) else {
@@ -1715,7 +1737,8 @@ async fn register_long_lived_relay(
     // second refusal with a fresh one is the failure it says.
     let mut refreshed_after_refusal = false;
     loop {
-        if next_daemon_auth_refresh.is_some_and(|deadline| std::time::SystemTime::now() >= deadline) {
+        if next_daemon_auth_refresh.is_some_and(|deadline| std::time::SystemTime::now() >= deadline)
+        {
             match resolve_local_daemon_auth_token_for_refresh().await {
                 Ok(Some(token)) => {
                     relay.update_auth_token(token)?;
@@ -1734,7 +1757,8 @@ async fn register_long_lived_relay(
                     write_current_run_error_status("relay_auth_refresh_retrying", false, &err);
                     eprintln!("{} {detail}", "⚠".yellow().bold());
                     next_daemon_auth_refresh = Some(
-                        std::time::SystemTime::now() + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS),
+                        std::time::SystemTime::now()
+                            + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS),
                     );
                 }
             }
@@ -2065,18 +2089,21 @@ async fn run_daemon_connection(
         metadata["parentMachineId"] = serde_json::json!(parent);
     }
     if let Ok(app_version) = std::env::var("XMATRIX_APP_VERSION")
-        && !app_version.trim().is_empty() {
-            metadata["xmatrixAppVersion"] = serde_json::json!(app_version);
-        }
+        && !app_version.trim().is_empty()
+    {
+        metadata["xmatrixAppVersion"] = serde_json::json!(app_version);
+    }
     // Only the profile that runs this machine's self-update asks the Hub for
     // CLI release notices; a daemon with self-update turned off asks for none.
-    let cli_release_capability =
-        (update_authority && !daemon_self_update_disabled()).then_some(CLI_RELEASE_NOTICE_CAPABILITY);
+    let cli_release_capability = (update_authority && !daemon_self_update_disabled())
+        .then_some(CLI_RELEASE_NOTICE_CAPABILITY);
     // The same profile takes requests to check for an update now. With
     // self-update off it still says it can check, so the Hub can tell the
     // owner exactly why it will not (no release capability beside it).
     let cli_update_check_capability = update_authority.then_some(CLI_UPDATE_CHECK_CAPABILITY);
-    let daemon_capabilities: Vec<String> = DAEMON_CAPABILITIES.iter().copied()
+    let daemon_capabilities: Vec<String> = DAEMON_CAPABILITIES
+        .iter()
+        .copied()
         .chain(cli_release_capability)
         .chain(cli_update_check_capability)
         .map(str::to_string)
@@ -2114,9 +2141,8 @@ async fn run_daemon_connection(
 
     let mut event_rx = relay.event_rx.take().unwrap();
     let relay = Arc::new(relay);
-    let command_results = DaemonCommandResults::new(
-        config::profile_state_dir().join("daemon-command-results"),
-    );
+    let command_results =
+        DaemonCommandResults::new(config::profile_state_dir().join("daemon-command-results"));
     remove_retired_command_effect_journal();
     match replay_unconfirmed_command_results(&command_results, &relay) {
         Ok(count) if count > 0 => println!(
@@ -2740,7 +2766,10 @@ async fn run_daemon_connection(
                         relay.disconnect();
                         break ProfileRuntimeExit::HubShutdown(reason);
                     }
-                    MachineDaemonConnectionEvent::Error { message, correlation } => {
+                    MachineDaemonConnectionEvent::Error { message, correlation, terminal_request_id } => {
+                        if let Some(control_id) = terminal_request_id {
+                            command_results.drop_if_quota_probe(&control_id);
+                        }
                         match correlation {
                             Some(correlation) => eprintln!(
                                 "{} daemon control message rejected: {message} ({correlation})",

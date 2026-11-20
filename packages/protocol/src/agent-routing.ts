@@ -534,6 +534,20 @@ export const ROUTING_QUOTA_MAX_AGE_MS = 15 * 60_000;
 const ROUTING_EXHAUSTED_MAX_AGE_MS = 31 * 24 * 60 * 60_000;
 const ROUTING_SERVED_PAST_LIMIT_REMAINING = 1;
 
+/** Maximum reporter-ahead clock skew accepted on provider quota readings.
+ * Cloudflare Workers `Date.now()` and host NTP clocks can differ by hundreds
+ * of milliseconds; bounded skew is clamped to `now`, while larger future
+ * timestamps are still rejected. */
+export const ROUTING_QUOTA_MAX_CLOCK_SKEW_MS = 5_000;
+
+/** Accept a finite observation time up to `ROUTING_QUOTA_MAX_CLOCK_SKEW_MS`
+ * ahead of `now`, clamping any ahead skew to `now`. */
+export function clampRoutingQuotaObservedTime(observed: number, now: number): number | undefined {
+  if (!Number.isFinite(observed) || !Number.isFinite(now)) return undefined;
+  if (observed > now + ROUTING_QUOTA_MAX_CLOCK_SKEW_MS) return undefined;
+  return Math.min(observed, now);
+}
+
 /** A provider reset as epoch milliseconds, NaN when it is not a time. */
 export function routingQuotaResetTime(value: unknown): number {
   if (typeof value !== "string" && typeof value !== "number") return NaN;
@@ -609,11 +623,14 @@ function providerQuotaReading(usage: unknown, now: number):
   if (!usage || typeof usage !== "object" || Array.isArray(usage) || !Number.isFinite(now)) return undefined;
   const row = usage as Record<string, unknown>;
   if (row.quotaSource !== "provider_api") return undefined;
-  const observed = typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN;
-  if (!Number.isFinite(observed) || observed > now) return undefined;
+  const rawObserved = typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN;
+  const observed = clampRoutingQuotaObservedTime(rawObserved, now);
+  if (observed === undefined) return undefined;
   // A stored reading keeps its scoped windows' own read time: a partial read
   // (a rate-limit verdict) renews only the account windows.
-  const scopedObserved = typeof row.scopedQuotaObservedAt === "string" ? Date.parse(row.scopedQuotaObservedAt) : observed;
+  const scopedObserved = typeof row.scopedQuotaObservedAt === "string"
+    ? (clampRoutingQuotaObservedTime(Date.parse(row.scopedQuotaObservedAt), now) ?? NaN)
+    : observed;
   return { row, observed, scopedObserved, allowed: parseLlmQuotaAccount(row.quotaAccount)?.allowed };
 }
 

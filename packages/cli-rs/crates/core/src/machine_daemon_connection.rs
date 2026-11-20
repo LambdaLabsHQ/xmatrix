@@ -1276,6 +1276,7 @@ pub enum MachineDaemonConnectionEvent {
     Error {
         message: String,
         correlation: Option<String>,
+        terminal_request_id: Option<String>,
     },
     /// Hub's verdict on one approval-card report. `request_id` is the report
     /// identity (`machine-request-notice:<daemon request id>:<phase>`); the
@@ -2252,6 +2253,7 @@ async fn after_failed_attempt(
             let _ = events.send(MachineDaemonConnectionEvent::Error {
                 message: failure.reason,
                 correlation: None,
+                terminal_request_id: None,
             });
             return true;
         }
@@ -2301,6 +2303,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                     let _ = event_tx.send(MachineDaemonConnectionEvent::Error {
                         message: reason,
                         correlation: None,
+                        terminal_request_id: None,
                     });
                 }
                 return;
@@ -2342,6 +2345,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                     let _ = event_tx.send(MachineDaemonConnectionEvent::Error {
                         message: reason,
                         correlation: None,
+                        terminal_request_id: None,
                     });
                     return;
                 }
@@ -2489,6 +2493,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                                     let _ = event_tx.send(MachineDaemonConnectionEvent::Error {
                                         message: format!("Machine Daemon report serialization failed: {error}"),
                                         correlation: None,
+                                        terminal_request_id: None,
                                     });
                                     continue;
                                 }
@@ -2689,7 +2694,7 @@ async fn run_machine_daemon_connection<Dial: MachineDaemonDial>(
                                     .map(|frame| frame.reason.to_string())
                                     .filter(|reason| !reason.is_empty())
                                     .unwrap_or_else(|| "This xMatrix daemon must be updated before reconnecting.".into());
-                                let _ = event_tx.send(MachineDaemonConnectionEvent::Error { message: reason, correlation: None });
+                                let _ = event_tx.send(MachineDaemonConnectionEvent::Error { message: reason, correlation: None, terminal_request_id: None });
                                 abort_machine_daemon_writer(writer).await;
                                 return;
                             }
@@ -3305,6 +3310,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 Err(error) => MachineDaemonConnectionEvent::Error {
                     message: format!("Invalid Machine Daemon command: {error}"),
                     correlation: None,
+                    terminal_request_id: None,
                 },
             },
         ),
@@ -3320,6 +3326,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 None => MachineDaemonConnectionEvent::Error {
                     message: "Invalid CLI update check".into(),
                     correlation: None,
+                    terminal_request_id: None,
                 },
             },
         ),
@@ -3338,6 +3345,7 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 _ => MachineDaemonConnectionEvent::Error {
                     message: "Invalid CLI release notice".into(),
                     correlation: None,
+                    terminal_request_id: None,
                 },
             })
         }
@@ -3354,6 +3362,9 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
             let code = value
                 .pointer("/failure/code")
                 .and_then(serde_json::Value::as_str);
+            let retryable = value
+                .pointer("/failure/retryable")
+                .and_then(serde_json::Value::as_bool);
             let correlation = match (request_id, diagnostic_id) {
                 (None, None) => code.map(|code| format!("code={code}")),
                 (request_id, diagnostic_id) => Some(format!(
@@ -3381,6 +3392,11 @@ fn parse_machine_daemon_server_event(text: &str) -> Option<MachineDaemonConnecti
                 _ => MachineDaemonConnectionEvent::Error {
                     message,
                     correlation,
+                    terminal_request_id: if retryable == Some(false) {
+                        request_id.map(str::to_string)
+                    } else {
+                        None
+                    },
                 },
             })
         }
@@ -4886,12 +4902,12 @@ mod tests {
         ));
 
         let other = parse_machine_daemon_server_event(
-            r#"{"type":"error","requestId":"report-7","message":"nope","failure":{"diagnosticId":"diag_2"}}"#,
+            r#"{"type":"error","requestId":"report-7","message":"nope","failure":{"diagnosticId":"diag_2","retryable":false}}"#,
         );
         assert!(matches!(
             other,
-            Some(MachineDaemonConnectionEvent::Error { message, correlation: Some(correlation) })
-                if message == "nope" && correlation == "requestId=report-7, diagnosticId=diag_2"
+            Some(MachineDaemonConnectionEvent::Error { message, correlation: Some(correlation), terminal_request_id: Some(req_id) })
+                if message == "nope" && correlation == "requestId=report-7, diagnosticId=diag_2" && req_id == "report-7"
         ));
     }
 }

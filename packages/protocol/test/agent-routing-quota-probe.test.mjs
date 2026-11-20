@@ -46,6 +46,21 @@ test('quota probe rejects partial, duplicate and oversized target sets', () => {
   assert.throws(() => parseRoutingQuotaProbeResponse({ ...response(observed), results: [observed, observed] }, two, now));
 });
 
+test('quota probe clamps small forward clock skew and still rejects far-future observations', () => {
+  const slightFuture = { ...observed, quotaObservedAt: new Date(now + 46).toISOString(),
+    quotaUsages: [{ percent: 100, resetAt: '1790423712' }] };
+  const clamped = parse(response(slightFuture));
+  assert.equal(clamped.results[0].quotaObservedAt, new Date(now).toISOString());
+  const [fact] = routingQuotaProbeObservations(response(slightFuture), request, now);
+  assert.equal(fact.record.observedAt, new Date(now).toISOString());
+
+  const atLimit = { ...observed, quotaObservedAt: new Date(now + 5_000).toISOString() };
+  assert.equal(parse(response(atLimit)).results[0].quotaObservedAt, new Date(now).toISOString());
+
+  const pastLimit = { ...observed, quotaObservedAt: new Date(now + 5_001).toISOString() };
+  assert.throws(() => parse(response(pastLimit)));
+});
+
 test('quota probe rejects non-provider, future, malformed and out-of-range observations', () => {
   for (const patch of [{ quotaSource: 'session' }, { quotaObservedAt: 'bad' },
     { quotaObservedAt: '2026-09-22T00:00:00Z' }, { quotaUsages: [] },

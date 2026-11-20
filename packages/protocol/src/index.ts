@@ -222,7 +222,7 @@ export type {
   DecisionAnswerFailure, DecisionAnswerIssue, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
 } from "./invocation-failure.js";
 export {
-  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
+  boundedRoutingLabel, clampRoutingQuotaObservedTime, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, ROUTING_QUOTA_MAX_CLOCK_SKEW_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
 } from "./agent-routing.js";
 export type {
   AgentRoutingDeclaration, AgentRoutingExclusion, AgentRoutingRequirements,
