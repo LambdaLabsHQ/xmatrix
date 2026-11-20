@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: the download page's channel picker is a paper menu
+
+The channel picker beside the main download was the system select: opened, it
+drew a wood-coloured focus ring and the platform's blue list, the loudest
+thing on the page. It is now quiet text that opens a paper slip listing
+Stable and Preview with one line on what each is and a check on the chosen
+one; Escape, arrow keys and a click outside work, and focus returns to the
+text. The sentence under the platform list that described the channel moved
+into that menu. Web only. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: cross-compile macOS x64 CLI releases on Apple Silicon (`macos-26`)
 
 Hosted `macos-x64` (`x86_64-apple-darwin`) CLI release and cache-warm jobs
