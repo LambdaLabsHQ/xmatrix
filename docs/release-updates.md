@@ -1,5 +1,26 @@
 # Release Updates
 
+## Unreleased: a message row scrolled into view costs its own style, not the app's
+
+Scrolling a conversation mounts message rows, and the main thread took long
+enough over each batch that the timeline showed blank where rows had not yet
+been drawn. Style recalculation was the largest part, and most of it was not
+the rows' own. One admin rule, `.app-admin-view:has(...) ... article > button`,
+made the browser restyle every button in the app whenever a node was inserted;
+the open user record is now read from the address instead. One `::selection`
+and three `::highlight()` rules matched every element, so each element was
+styled five times over; where highlight styles inherit (Chromium, detected
+before first paint as `data-highlight-inherit` on `<html>`) they are named
+once on an ancestor, and other engines keep the previous rules unchanged. The
+passage toolbar no longer reads the selection on every scroll frame unless a
+passage is selected. On 300 mixed rows at 4x CPU throttle, elements restyled
+over a scroll fell from 74-82 thousand to 12-13 thousand and style time from
+5.0-5.9 s to 2.3-2.8 s; mounting the rows in React is unchanged and is now the
+larger share. `app-style-scope.test.mjs` holds the two selector shapes out and
+lets the stylesheets' rule count only fall (`css-rule-budget.json`): new
+styling goes on the element as utility classes. Web only. Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: the download page is one action and a ruled list of platforms
 
 The download page was five wood slabs carrying fourteen liquid-glass buttons,
