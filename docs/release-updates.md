@@ -4,8 +4,8 @@
 
 The download page offered stable builds as buttons and tucked preview builds
 into a line of text links under the list, so the two channels did not read as
-the same choice. A Stable | Preview switch now sits above the main download
-and decides the whole page: the main button, the other-Mac link, every row
+the same choice. A quiet Stable / Preview picker now sits beside the main
+download (under it on phones) and decides the whole page: the main button, the other-Mac link, every row
 (macOS, Windows, Android, Web), its release notes and the macOS ZIP links are
 the selected channel; the list heading names it and one sentence under the
 list says what it is. Preview adds the Android preview APK and the beta Web,

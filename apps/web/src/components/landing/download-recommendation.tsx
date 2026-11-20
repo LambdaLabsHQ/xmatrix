@@ -46,7 +46,7 @@ export const downloads = (copy: OnboardingCopy, channel: Channel = "stable") => 
 /** Where the web app of a channel lives: Preview is the beta Web. */
 export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
 
-/** The page's one action. `channelSwitch` sits between the sentence and the button it decides. */
+/** The page's one action. `channelSwitch` sits beside the button it decides. */
 export function DownloadRecommendation({ channel = "stable", channelSwitch }: { channel?: Channel; channelSwitch?: ReactNode }) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [intelMac, setIntelMac] = useState(false);
@@ -69,12 +69,15 @@ export function DownloadRecommendation({ channel = "stable", channelSwitch }: { 
       <p className="mt-5 max-w-md text-base leading-7 text-muted-foreground">
         {download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
       </p>
-      {channelSwitch && <div className="mt-8">{channelSwitch}</div>}
-      <WoodPanel as="a" href={download?.href ?? webApp(channel)} className="site-wood-pill mt-5 inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
-        {download && <Download className="size-4" />}
-        {download ? download.label : copy.openWebApp}
-      </WoodPanel>
-      <p className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
+      <div className="relative mt-9 flex w-full flex-col items-center gap-y-1 sm:w-auto">
+        <WoodPanel as="a" href={download?.href ?? webApp(channel)} className="site-wood-pill inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
+          {download && <Download className="size-4" />}
+          {download ? download.label : copy.openWebApp}
+        </WoodPanel>
+        {/* Beside the button on desktop, without moving it off the page's centre line. */}
+        {channelSwitch && <div className="sm:absolute sm:left-full sm:top-1/2 sm:ml-4 sm:-translate-y-1/2">{channelSwitch}</div>}
+      </div>
+      <p className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
         {otherMac && <a href={otherMac.href} className="download-quiet-link">{copy.otherMac(otherMac.name)}</a>}
         <a href="#all-downloads" className="download-quiet-link">{copy.allPlatforms}</a>
       </p>

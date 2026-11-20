@@ -57,10 +57,10 @@ for (const scenario of cases) {
         await expect(link).toHaveAttribute("href", href);
       }
     };
-    const channel = page.getByRole("group", { name: "Release channel" });
-    await expect(channel.getByRole("button", { name: "Stable" })).toHaveAttribute("aria-pressed", "true");
+    const channel = recommendation.getByLabel("Release channel");
+    await expect(channel).toHaveValue("stable");
     await expectBuilds("stable", "");
-    await channel.getByRole("button", { name: "Preview" }).click();
+    await channel.selectOption({ label: "Preview" });
     await expect(page).toHaveURL(/\?channel=preview/);
     await expectBuilds("dev", " preview");
     // The main download is the same channel as the list.
