@@ -42,7 +42,13 @@ pub const ANTIGRAVITY_LOGIN_OVERRIDE_KEYS: &[&str] = &[
 ];
 
 const ANTIGRAVITY_CLOUD_CODE_BASE_URL: &str = "https://daily-cloudcode-pa.googleapis.com";
-const ANTIGRAVITY_USER_AGENT: &str = "antigravity/xmatrix";
+/// Fallback Antigravity CLI version sent in the Cloud Code `User-Agent`.
+/// `retrieveUserQuotaSummary` gates the native `Gemini Models` group (5h and
+/// weekly buckets) behind `antigravity/cli/1.2.0+` and omits Gemini entirely
+/// for unversioned strings like `antigravity/xmatrix`.
+const FALLBACK_ANTIGRAVITY_CLI_VERSION: &str = "1.5.13";
+const MIN_QUOTA_SUMMARY_CLI_VERSION: (u64, u64, u64) = (1, 2, 0);
+const AGY_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 const EXPIRY_BUFFER_SECS: i64 = 60;
 const WEEKLY_RESET_THRESHOLD_SECS: i64 = 24 * 60 * 60;
 
@@ -171,12 +177,14 @@ where
     }
     ANTIGRAVITY_QUOTA
         .single_flight(key, || async {
+            let user_agent = antigravity_user_agent().await;
             let Some(load_resp) = fetch_provider_json(
                 "antigravity",
                 cloud_code_post(
                     base_url,
                     "loadCodeAssist",
                     &credential.access_token,
+                    &user_agent,
                     &serde_json::json!({ "metadata": { "ideType": "ANTIGRAVITY" } }),
                 ),
             )
@@ -201,6 +209,7 @@ where
                         base_url,
                         "retrieveUserQuotaSummary",
                         &credential.access_token,
+                        &user_agent,
                         &body,
                     ),
                 ),
@@ -210,6 +219,7 @@ where
                         base_url,
                         "fetchAvailableModels",
                         &credential.access_token,
+                        &user_agent,
                         &body,
                     ),
                 ),
@@ -235,10 +245,75 @@ where
         .await
 }
 
+fn parse_cli_semver(raw: &str) -> Option<(u64, u64, u64)> {
+    raw.split(|ch: char| !(ch.is_ascii_digit() || ch == '.'))
+        .find_map(|token| {
+            let mut parts = token.split('.');
+            let major = parts.next()?.parse::<u64>().ok()?;
+            let minor = parts.next()?.parse::<u64>().ok()?;
+            let patch = parts.next()?.parse::<u64>().ok()?;
+            if parts.next().is_some() {
+                return None;
+            }
+            Some((major, minor, patch))
+        })
+}
+
+fn format_antigravity_user_agent(detected: Option<&str>) -> String {
+    if let Some((major, minor, patch)) = detected.and_then(parse_cli_semver)
+        && (major, minor, patch) >= MIN_QUOTA_SUMMARY_CLI_VERSION
+    {
+        return format!("antigravity/cli/{major}.{minor}.{patch}");
+    }
+    format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
+}
+
+async fn read_agy_version_from(program: &std::ffi::OsStr) -> Option<String> {
+    let mut command = tokio::process::Command::new(program);
+    command
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    let output = tokio::time::timeout(AGY_VERSION_TIMEOUT, command.output())
+        .await
+        .ok()?
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8(output.stdout).ok()
+}
+
+async fn detect_installed_agy_version() -> Option<String> {
+    if let Some(output) = read_agy_version_from(std::ffi::OsStr::new("agy")).await {
+        return Some(output);
+    }
+    #[cfg(not(windows))]
+    if let Some(home) = home_dir_path() {
+        let local_bin = home.join(".local").join("bin").join("agy");
+        if local_bin.is_file() {
+            return read_agy_version_from(local_bin.as_os_str()).await;
+        }
+    }
+    None
+}
+
+async fn antigravity_user_agent() -> String {
+    if let Ok(version) = std::env::var("ANTIGRAVITY_CLI_VERSION")
+        && parse_cli_semver(&version).is_some_and(|v| v >= MIN_QUOTA_SUMMARY_CLI_VERSION)
+    {
+        return format_antigravity_user_agent(Some(&version));
+    }
+    let detected = detect_installed_agy_version().await;
+    format_antigravity_user_agent(detected.as_deref())
+}
+
 fn cloud_code_post(
     base_url: &str,
     method: &str,
     access_token: &str,
+    user_agent: &str,
     body: &Value,
 ) -> reqwest::RequestBuilder {
     let base = base_url.trim_end_matches('/');
@@ -250,7 +325,7 @@ fn cloud_code_post(
         )
         .header(reqwest::header::CONTENT_TYPE, "application/json")
         .header(reqwest::header::ACCEPT, "application/json")
-        .header(reqwest::header::USER_AGENT, ANTIGRAVITY_USER_AGENT)
+        .header(reqwest::header::USER_AGENT, user_agent)
         .json(body)
 }
 
@@ -733,6 +808,26 @@ mod tests {
         assert_eq!(antigravity_quota_scope_for_model("tab_flash_lite"), None);
     }
 
+    #[test]
+    fn user_agent_uses_cli_semver_and_clamps_legacy_versions() {
+        assert_eq!(
+            format_antigravity_user_agent(Some("1.5.13\n")),
+            "antigravity/cli/1.5.13"
+        );
+        assert_eq!(
+            format_antigravity_user_agent(Some("agy 2.0.4")),
+            "antigravity/cli/2.0.4"
+        );
+        assert_eq!(
+            format_antigravity_user_agent(Some("1.1.9")),
+            format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
+        );
+        assert_eq!(
+            format_antigravity_user_agent(None),
+            format!("antigravity/cli/{FALLBACK_ANTIGRAVITY_CLI_VERSION}")
+        );
+    }
+
     #[tokio::test]
     async fn loopback_read_calls_cloud_code_endpoints_and_parses_pools() {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -746,12 +841,22 @@ mod tests {
                     "expected antigravity cloud code request",
                 );
                 assert!(req.contains("authorization: bearer test-antigravity-token"));
+                let has_versioned_cli_ua = req
+                    .lines()
+                    .find_map(|line| line.strip_prefix("user-agent: "))
+                    .and_then(|ua| ua.strip_prefix("antigravity/cli/"))
+                    .and_then(parse_cli_semver)
+                    .is_some_and(|version| version >= MIN_QUOTA_SUMMARY_CLI_VERSION);
+                assert!(
+                    has_versioned_cli_ua,
+                    "expected versioned antigravity/cli/<semver> user-agent, got request:\n{req}"
+                );
                 let body = if req.contains("v1internal:loadcodeassist") {
                     r#"{"cloudaicompanionProject":"test-project-1"}"#
                 } else if req.contains("v1internal:retrieveuserquotasummary") {
-                    r#"{"groups":[{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-5h","window":"5h","resetTime":"2026-11-19T16:00:00Z","remainingFraction":1}]}]}"#
+                    r#"{"groups":[{"displayName":"Gemini Models","buckets":[{"bucketId":"gemini-weekly","window":"weekly","resetTime":"2026-11-26T09:34:53Z","remainingFraction":0.87},{"bucketId":"gemini-5h","window":"5h","resetTime":"2026-11-20T20:34:53Z","remainingFraction":0.96}]},{"displayName":"Claude and GPT models","buckets":[{"bucketId":"3p-weekly","window":"weekly","resetTime":"2026-11-27T16:00:00Z","remainingFraction":1},{"bucketId":"3p-5h","window":"5h","resetTime":"2026-11-20T21:00:00Z","remainingFraction":1}]}]}"#
                 } else if req.contains("v1internal:fetchavailablemodels") {
-                    r#"{"models":{"gemini-2.5-pro":{"quotaInfo":{"remainingFraction":0.9,"resetTime":"2026-11-19T14:30:00Z"}}}}"#
+                    r#"{"models":{"gemini-4-neon-high":{"quotaInfo":{"remainingFraction":0.96,"resetTime":"2026-11-20T20:34:53Z"}}}}"#
                 } else {
                     panic!("unexpected request: {req}");
                 };
@@ -780,11 +885,19 @@ mod tests {
 
         assert_eq!(usage.quota_source.as_deref(), Some("provider_api"));
         let scoped = usage.scoped_quota_usages.expect("scoped");
-        assert_eq!(scoped.len(), 2);
+        assert_eq!(scoped.len(), 4);
         assert_eq!(scoped[0].scope.as_deref(), Some("Gemini"));
-        assert!((scoped[0].percent.unwrap() - 10.0).abs() < 1e-6);
+        assert_eq!(scoped[0].label.as_deref(), Some("5h"));
+        assert!((scoped[0].percent.unwrap() - 4.0).abs() < 1e-6);
         assert_eq!(scoped[1].scope.as_deref(), Some("Claude & GPT"));
+        assert_eq!(scoped[1].label.as_deref(), Some("5h"));
         assert_eq!(scoped[1].percent, Some(0.0));
+        assert_eq!(scoped[2].scope.as_deref(), Some("Gemini"));
+        assert_eq!(scoped[2].label.as_deref(), Some("1w"));
+        assert!((scoped[2].percent.unwrap() - 13.0).abs() < 1e-6);
+        assert_eq!(scoped[3].scope.as_deref(), Some("Claude & GPT"));
+        assert_eq!(scoped[3].label.as_deref(), Some("1w"));
+        assert_eq!(scoped[3].percent, Some(0.0));
     }
 
     #[tokio::test]
@@ -800,8 +913,18 @@ mod tests {
         assert!(
             scoped
                 .iter()
-                .any(|window| window.scope.as_deref() == Some("Gemini") && window.percent.is_some()),
-            "expected Gemini pool in {scoped:?}"
+                .any(|window| window.scope.as_deref() == Some("Gemini")
+                    && window.label.as_deref() == Some("5h")
+                    && window.percent.is_some()),
+            "expected Gemini 5h pool in {scoped:?}"
+        );
+        assert!(
+            scoped
+                .iter()
+                .any(|window| window.scope.as_deref() == Some("Gemini")
+                    && window.label.as_deref() == Some("1w")
+                    && window.percent.is_some()),
+            "expected Gemini 1w pool in {scoped:?}"
         );
         eprintln!("LIVE_ANTIGRAVITY_QUOTA={scoped:?}");
     }
