@@ -1,5 +1,6 @@
 import { PostgresPageRepository, type PagePrincipal, type PageSummary } from "@xmatrix/db";
 import { createJevClient } from "@xmatrix/decision-model";
+import { utf8ByteLength } from "@xmatrix/protocol";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import type { Env } from "./types";
 import { meterJev } from "./usage-cost-metering";
@@ -59,12 +60,11 @@ export async function attachConversationToPage(input: {
   // Each page is put as its path and the one line saying how it stands: a title alone does not say
   // what a page is about. The tree is in sibling order, so when a Space outgrows the questions it is
   // the pages changed longest ago that go unasked, not whichever a parent's id sorts last.
-  const encoder = new TextEncoder();
   const described = [...tree].sort((left, right) => left.updatedAt < right.updatedAt ? 1 : left.updatedAt > right.updatedAt ? -1 : 0)
     .map((page) => {
       const about = page.summary?.text.replace(/\s+/gu, " ").trim();
       const text = `${pagePath(page, byId)}${about ? ` — ${[...about].slice(0, MAX_SUMMARY_CHARS).join("")}` : ""}`;
-      return { page, text, bytes: encoder.encode(text).byteLength + 16 };
+      return { page, text, bytes: utf8ByteLength(text) + 16 };
     });
   const batches: Array<typeof described> = [];
   let size = 0;
