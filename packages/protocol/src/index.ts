@@ -227,7 +227,7 @@ export {
 export type {
   AgentRoutingDeclaration, AgentRoutingExclusion, AgentRoutingRequirements,
   MachineResourceObservation, PresentedRoutingDecision, RoutingBoundMachine, RoutingChoiceRow, RoutingDecisionSource,
-  RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions, RoutingQuotaVerdict,
+  RoutingBillingHolds, RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions, RoutingQuotaVerdict,
 } from "./agent-routing.js";
 export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
 export type {

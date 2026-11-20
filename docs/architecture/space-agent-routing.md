@@ -316,18 +316,22 @@ Explicit summons (`@<harness>` or `@auto harness:...`) are never blocked on
 cached sign-in state or billing refusals: only the program knows
 whether its provider accepts it now, so a named summon is always given to its
 machine (and a stale copy never refuses a summon when the user signed in outside
-xMatrix). For a named summon both an account billing refusal's usage-limit hold
-and a scoped billing refusal hold take none of its models away; scoped windows
-the provider measured used up still refuse their models. Unnamed `@auto` routing, however, excludes candidates whose harness
+xMatrix). For a named summon both an account billing refusal and a scoped billing
+refusal take none of its models away; windows the provider measured used up
+still refuse their models. That is one call to `routingQuotaVerdict` with
+`summon: "named"`. The holds travel on the registration reading as
+`billingHolds` (an account expiry, or one expiry per quota scope), not as
+fabricated quota windows, so a hold keeps its own expiry instead of a
+window's max age. Unnamed `@auto` routing, however, excludes candidates whose harness
 is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
 or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
 under an account-level billing/payment refusal (such as insufficient balance).
 When a payment-method refusal applies to one model's quota scope (such as Cursor's
 `API` pool refusing `"Add a payment method to continue"` while `Auto` stays
-included), xMatrix holds only that scope in `billingRefusalScopes`: unnamed
-`@auto` excludes models in the refused scope while keeping the registration
-routable on its other models, the Agents page keeps showing the open pool rather
-than `"Out of quota · window unavailable"`, and a successful reply clears only
+included), xMatrix holds only that scope: unnamed `@auto` excludes models in
+the refused scope while keeping the registration routable on its other models,
+the Agents page keeps showing the open pool rather than
+`"Out of quota · window unavailable"`, and a successful reply clears only
 the scope that Run actually ran. A signed-out candidate returns to unnamed `@auto` once a
 newer harness inventory check reports `signed_in` or a Run on that registration
 replies; a billing refusal holds without a time-based 1-hour

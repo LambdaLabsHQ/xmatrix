@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { routingQuotaObservation } from "@xmatrix/protocol";
 import { registrationQuotaSchema } from "./registration-quota.fixture.mjs";
 import { clearRegistrationAccountHold, isRegistrationBillingRefusalRow, recordRegistrationUsageLimit,
-  registrationBillingRefusalScopes, registrationQuotaProbeTargets, registrationQuotaReading,
+  registrationQuotaProbeTargets, registrationQuotaReading,
   registrationQuotaWindows, registrationShownQuotaReading }
   from "../dist/agent-registration-quota-probe.js";
 import { observeRegistrationQuota, readRegistrationQuotaUsages, registrationQuotaKey } from "../dist/registration-quota-state.js";
@@ -178,6 +178,7 @@ integration("a scoped billing refusal holds only that scope, survives probes, ke
       ],
     });
     const limit = input => database.transaction({}, tx => recordRegistrationUsageLimit(tx, { ...key, ...input }));
+    const heldScopes = stored => Object.keys(stored?.account_json?.billingRefusalScopes ?? {});
 
     // 1. Seed a healthy Cursor reading (Auto 4% used, API 0% used), then record a scoped API billing refusal.
     await observeRegistrationQuota(database, key, cursorReading(2000, 4, 0), "cursor-initial");
@@ -185,7 +186,7 @@ integration("a scoped billing refusal holds only that scope, survives probes, ke
     assert.deepEqual([held.usedUp, held.scope], ["scope", "API"]);
     const afterHold = await row();
     assert.equal(isRegistrationBillingRefusalRow(afterHold), false, "not a whole-account billing refusal");
-    assert.deepEqual(registrationBillingRefusalScopes(afterHold), ["API"]);
+    assert.deepEqual(heldScopes(afterHold), ["API"]);
     assert.equal(registrationQuotaReading(afterHold, auto)?.remainingPercent, 96, "Auto stays open at 96%");
     assert.equal(registrationQuotaReading(afterHold, api)?.remainingPercent, 0, "API is held at 0%");
     // Agents page reading picks the open Auto pool (96%) rather than "Out of quota · window unavailable",
@@ -196,19 +197,19 @@ integration("a scoped billing refusal holds only that scope, survives probes, ke
     // 2. A newer periodic provider probe refreshes Auto/API percentages without erasing the API billing refusal.
     await observeRegistrationQuota(database, key, cursorReading(0, 5, 0), "cursor-refresh");
     const afterProbe = await row();
-    assert.deepEqual(registrationBillingRefusalScopes(afterProbe), ["API"]);
+    assert.deepEqual(heldScopes(afterProbe), ["API"]);
     assert.equal(registrationQuotaReading(afterProbe, auto)?.remainingPercent, 95);
     assert.equal(registrationQuotaReading(afterProbe, api)?.remainingPercent, 0);
     assert.equal(registrationShownQuotaReading(afterProbe)?.remainingPercent, 95);
 
     // 3. A successful reply on Auto does NOT clear the API billing refusal.
     assert.equal(await clearRegistrationAccountHold(database, { requestId: "clear-auto", ...key, scopes: ["Auto"] }), false);
-    assert.deepEqual(registrationBillingRefusalScopes(await row()), ["API"]);
+    assert.deepEqual(heldScopes(await row()), ["API"]);
 
     // 4. A successful reply on API clears ONLY the API billing refusal while keeping the real Auto/API provider windows.
     assert.equal(await clearRegistrationAccountHold(database, { requestId: "clear-api", ...key, scopes: ["API"] }), true);
     const afterClear = await row();
-    assert.deepEqual(registrationBillingRefusalScopes(afterClear), []);
+    assert.deepEqual(heldScopes(afterClear), []);
     assert.equal(registrationQuotaReading(afterClear, auto)?.remainingPercent, 95);
     assert.equal(registrationQuotaReading(afterClear, api)?.remainingPercent, 100);
 
@@ -220,7 +221,7 @@ integration("a scoped billing refusal holds only that scope, survives probes, ke
     await limit({ billingRefusal: true, quotaScope: "API" });
     const selfHealed = await row();
     assert.equal(isRegistrationBillingRefusalRow(selfHealed), false);
-    assert.deepEqual(registrationBillingRefusalScopes(selfHealed), ["API"]);
+    assert.deepEqual(heldScopes(selfHealed), ["API"]);
     assert.equal(registrationShownQuotaReading(selfHealed), undefined);
     const probeTargets = await registrationQuotaProbeTargets(database, { requestId: "unread", registrations: [key], onlyUnread: true });
     assert.equal(probeTargets.length, 1, "pool with only a scoped billing refusal still asks for a real provider reading");

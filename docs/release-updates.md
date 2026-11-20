@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: a billing refusal is a hold, read once
+
+A payment refusal (an empty prepaid balance, or Cursor asking for a payment
+method on one model pool) was stored as a used-up quota window and also as
+side flags. Launch then stripped the window for a named summon and checked
+the flags again, and the window's max age cut a year-long hold down to 31
+days. The registration reading now carries `billingHolds`, and
+`routingQuotaVerdict` is the only decision: unnamed `@auto` treats a hold as
+used up until the hold's own expiry, a named summon ignores holds, and a
+provider window that is actually used up still refuses both. Hub only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Antigravity stays busy while its subagents run
 
 Antigravity's ACP v1 server marks `invoke_subagent` `completed` as soon as the

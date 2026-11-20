@@ -233,9 +233,9 @@ test('with equal fit the work runs where the most headroom is; then the fewest o
 });
 
 /** A stored provider reading as a launch candidate carries it (`RegistrationQuotaUsage`). */
-function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed } = {}) {
+function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed, billingHolds } = {}) {
   const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: account,
-    ...(scoped ? { scopedQuotaUsages: scoped } : {}) };
+    ...(scoped ? { scopedQuotaUsages: scoped } : {}), ...(billingHolds ? { billingHolds } : {}) };
   return { quota: { remainingPercent: assumed ? 0 : 100, assumed: assumed === true, observedAt, usage } };
 }
 
@@ -1009,7 +1009,14 @@ test('unnamed @auto excludes uninstalled, signed-out, and billing-refused candid
     accountBillingRefusal: true,
     observations: {
       ...candidates[0].observations,
-      quota: { remainingPercent: 0, assumed: false, source: 'daemon', expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
+      quota: {
+        remainingPercent: 0, assumed: false, source: 'daemon',
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        usage: {
+          quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [],
+          billingHolds: { accountUntil: new Date(Date.now() + 365 * 86_400_000).toISOString() },
+        },
+      },
     },
   };
   const chosen = await choose({
@@ -1044,8 +1051,10 @@ test("a summon naming a billing-refused harness runs its Space's model; the refu
   // 2026-11-19: `@cursor machine:Workstation` with the Space's model gemini-4-neon failed
   // registration_selection_invalid: the hold read as a used-up account window took every model away.
   const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
-  const held = reading({ account: [{ percent: 100, resetAt: back }],
-    scoped: [{ label: '1mo', percent: 4, resetAt: back, scope: 'Auto' }] });
+  const held = reading({
+    scoped: [{ label: '1mo', percent: 4, resetAt: back, scope: 'Auto' }],
+    billingHolds: { accountUntil: back },
+  });
   const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
     catalogModels: ['gemini-4-neon'], supportsNativeModel: true, accountBillingRefusal: true, observations: held,
     modelCatalog: [{ model: 'gemini-4-neon', description: '', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] }] };
@@ -1070,23 +1079,24 @@ test("a summon naming a billing-refused harness runs its Space's model; the refu
 test('a scoped billing refusal holds only that scope for unnamed @auto while keeping other models and explicit summons open (#1837)', async () => {
   const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
   const heldUntil = new Date(Date.now() + 365 * 86_400_000).toISOString();
-  const scopedObs = (scopedQuotaUsages) => ({
+  const scopedObs = (scopedQuotaUsages, billingHolds) => ({
     evaluatedAt: new Date().toISOString(),
     quota: {
       remainingPercent: 100, assumed: true,
-      usage: { quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [], scopedQuotaUsages },
+      usage: { quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [],
+        scopedQuotaUsages, ...(billingHolds ? { billingHolds } : {}) },
     },
   });
+  const apiHold = { scopes: [{ scope: 'API', until: heldUntil }] };
   const scopedHeld = scopedObs([
     { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
-    { percent: 100, resetAt: heldUntil, scope: 'API', billingRefusal: true },
-  ]);
+  ], apiHold);
   const catalog = [
     { model: 'default', description: 'Auto', efforts: [], names: ['Auto'], isDefault: true, quotaScopes: ['Auto'] },
     { model: 'gemini-4-neon', description: 'API model', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] },
   ];
   const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
-    supportsNativeModel: true, billingRefusalScopes: ['API'], observations: scopedHeld, modelCatalog: catalog };
+    supportsNativeModel: true, observations: scopedHeld, modelCatalog: catalog };
   const choose = registrationLaunchChooser(async input => answer(input));
 
   // Unnamed @auto stays routable on Cursor's Auto pool and does not offer API models.
@@ -1107,8 +1117,7 @@ test('a scoped billing refusal holds only that scope for unnamed @auto while kee
   const providerApiUsed = scopedObs([
     { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
     { label: '1mo', percent: 100, resetAt: back, scope: 'API' },
-    { percent: 100, resetAt: heldUntil, scope: 'API', billingRefusal: true },
-  ]);
+  ], apiHold);
   await assert.rejects(choose({ message: '@cursor fix this', tags: { harness: 'cursor' },
     automaticHarness: false, candidates: [{ ...apiOnly, observations: providerApiUsed }] }),
     error => error.code === 'registration_quota_exhausted');
