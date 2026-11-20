@@ -263,3 +263,37 @@ test("a completion panel covers the timeline instead of pushing it up", async ({
     .poll(async () => (await tailGeometry(page)).lastRowBottom)
     .toBeCloseTo(beforeGeometry.lastRowBottom, 0);
 });
+
+/* The work dock scroller reserves transparent vertical space above the agent
+   islands for hover popups. In light/wood mode, a legacy `:root:not(.dark)`
+   rule used to override its `pointer-events: none` back to `auto`, stealing
+   `:hover` from scrolled messages passing behind that transparent band. */
+test("the transparent space above the work dock lets pointer events reach scrolled messages behind it", async ({ page }) => {
+  await openChannelWithAgents(page, 1);
+
+  await page.evaluate(() => {
+    const timeline = document.querySelector<HTMLElement>(".app-message-timeline");
+    if (timeline) timeline.scrollTop = Math.max(0, timeline.scrollTop - 160);
+  });
+
+  await expect.poll(() => page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>(".app-agent-work-scroller");
+    const item = scroller?.querySelector<HTMLElement>(".app-agent-work-item");
+    if (!scroller || !item) return null;
+    const scrollerRect = scroller.getBoundingClientRect();
+    const itemRect = item.getBoundingClientRect();
+    const x = itemRect.left + Math.min(24, itemRect.width / 2);
+    const y = scrollerRect.top + 12;
+    if (y >= itemRect.top) return null;
+    const hit = document.elementFromPoint(x, y) as HTMLElement | null;
+    return {
+      scrollerPointerEvents: getComputedStyle(scroller).pointerEvents,
+      overDock: Boolean(hit?.closest(".app-agent-work-dock")),
+      overMessageRow: Boolean(hit?.closest(".app-message-row")),
+    };
+  })).toEqual({
+    scrollerPointerEvents: "none",
+    overDock: false,
+    overMessageRow: true,
+  });
+});

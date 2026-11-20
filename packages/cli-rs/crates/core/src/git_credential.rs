@@ -82,7 +82,13 @@ pub fn holds_retired_history(repository: &str, cwd: &std::path::Path) -> bool {
 }
 
 fn holds_commit(commit: &str, cwd: &std::path::Path) -> bool {
-    std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    command
         .args(["cat-file", "-e", &format!("{commit}^{{commit}}")])
         .current_dir(cwd)
         .stdin(std::process::Stdio::null())

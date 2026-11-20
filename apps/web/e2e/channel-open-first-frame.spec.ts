@@ -85,6 +85,14 @@ async function expectNewestMessageInEveryOpenFrame(page: Page, newestRowId = NEW
   return open;
 }
 
+async function openUnevenGeneral(page: Page, count: number) {
+  const newestRowId = `message:uneven-${count}`;
+  await openWorkspace(page, "/app/personal-sspaceperso/channels/general-cchannelgen", unevenHistory(count));
+  await expect(page.locator(`[id="${newestRowId}"]`)).toBeVisible();
+  await conversationOpened(page);
+  return newestRowId;
+}
+
 /** Leaves #general for the other conversation, as a reader between two visits does. */
 async function openQuietConversation(page: Page) {
   await clickConversationRow(page, "channel-quiet");
@@ -173,11 +181,7 @@ test.describe("desktop", () => {
      (user 2026-10-10: "切换频道的时候，消息列表在抖动"). Messages of one height hide
      that, because every estimate is right; these are of many. */
   test("switching back to a conversation of uneven messages moves none of them", async ({ page }) => {
-    const history = unevenHistory(60);
-    const newestRowId = `message:uneven-${history.length}`;
-    await openWorkspace(page, "/app/personal-sspaceperso/channels/general-cchannelgen", history);
-    await expect(page.locator(`[id="${newestRowId}"]`)).toBeVisible();
-    await conversationOpened(page);
+    const newestRowId = await openUnevenGeneral(page, 60);
 
     // A reopened conversation draws only the screen it showed last time, so
     // the list has the most rows of its own to measure. On a slow processor
@@ -228,5 +232,71 @@ test.describe("desktop", () => {
       await expect.poll(() => page.locator(".app-message-timeline").evaluate((timeline) =>
         Math.round(timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop))).toBe(0);
     }
+  });
+
+  /* Handing a live hovered row from the opening tail into the virtual list used
+     to drop `:hover` for one painted frame, flashing the row highlight off and
+     restarting the hover toolbar's opacity fade on every channel switch: the
+     list's `invisible` class came off in the same commit that called
+     `moveBefore`, so the target slot still resolved as `visibility: hidden`. */
+  test("switching back to a conversation keeps a hovered row and its hover toolbar steady across handover", async ({ page }) => {
+    await openUnevenGeneral(page, 40);
+
+    const targetId = "message:uneven-38";
+    const targetBox = await page.locator(`[id="${targetId}"] .app-message-row`).boundingBox();
+    expect(targetBox).not.toBeNull();
+    const pointerX = targetBox!.x + targetBox!.width / 2;
+    const pointerY = targetBox!.y + targetBox!.height / 2;
+
+    await openQuietConversation(page);
+    await expect(page.getByText("No messages yet.", { exact: true })).toBeVisible();
+
+    // Slow the handover slightly so the pointer hovers the row in the opening
+    // tail and its toolbar reaches full opacity before the virtual list adopts it.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setCPUThrottlingRate", { rate: 3 });
+
+    await page.evaluate((id) => {
+      const state = {
+        sawInTailAtFullOpacity: false,
+        sawInList: false,
+        drops: [] as Array<{ hover: boolean; bg: string; opacity: number; inTail: boolean }>,
+      };
+      (window as unknown as { __hoverHandover?: typeof state }).__hoverHandover = state;
+      const mc = new MessageChannel();
+      mc.port1.onmessage = () => {
+        const row = document.getElementById(id)?.querySelector<HTMLElement>(".app-message-row");
+        if (!row) return;
+        const inTail = Boolean(row.closest(".app-message-timeline-opening-tail"));
+        const inList = Boolean(row.closest('[data-testid="virtuoso-item-list"]'));
+        const hover = row.matches(":hover");
+        const bar = row.querySelector<HTMLElement>(".app-message-hover-toolbar");
+        const opacity = bar ? Math.round(parseFloat(getComputedStyle(bar).opacity) * 100) / 100 : 0;
+        if (inTail && hover && opacity >= 0.99) state.sawInTailAtFullOpacity = true;
+        if (inList) state.sawInList = true;
+        if (state.sawInTailAtFullOpacity && (!hover || opacity < 0.99)) {
+          state.drops.push({ hover, bg: getComputedStyle(row).backgroundColor, opacity, inTail });
+        }
+      };
+      const tick = () => {
+        if ((window as unknown as { __hoverHandover?: typeof state }).__hoverHandover !== state) return;
+        mc.port2.postMessage(null);
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    }, targetId);
+
+    await clickConversationRow(page, "channel-general");
+    await page.mouse.move(pointerX, pointerY);
+    await expect(page.locator(`[id="${targetId}"] .app-message-row`)).toBeVisible();
+    await conversationOpened(page);
+    await page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))));
+
+    const result = await page.evaluate(() =>
+      (window as unknown as { __hoverHandover?: { sawInTailAtFullOpacity: boolean; sawInList: boolean; drops: unknown[] } }).__hoverHandover);
+    expect(result?.sawInTailAtFullOpacity).toBe(true);
+    expect(result?.sawInList).toBe(true);
+    expect(result?.drops).toEqual([]);
   });
 });

@@ -2515,7 +2515,7 @@ fn windows_update_handoff_schedule_ps(script_path: &Path, task_name: &str) -> St
          try {{\n\
            Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue\n\
            $powerShell = Join-Path $env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'\n\
-           $arguments = '-NoProfile -ExecutionPolicy Bypass -File \"' + $scriptPath + '\"'\n\
+           $arguments = '-NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File \"' + $scriptPath + '\"'\n\
            $action = New-ScheduledTaskAction -Execute $powerShell -Argument $arguments\n\
            $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddMinutes(5))\n\
            $trigger.EndBoundary = (Get-Date).AddMinutes(10).ToString('s')\n\
@@ -3003,6 +3003,7 @@ mod tests {
         assert!(script.contains("Start-ScheduledTask"));
         assert!(script.contains("DeleteExpiredTaskAfter"));
         assert!(script.contains("Unregister-ScheduledTask"));
+        assert!(script.contains("-WindowStyle Hidden"));
         assert!(script.contains("xmatrix update.ps1"));
         assert!(!script.contains("CREATE_BREAKAWAY_FROM_JOB"));
     }
