@@ -156,16 +156,28 @@ test("a repo Instance is reborn or handed off whatever its Space's GitHub connec
       assert.equal(located.remoteRepo, "LambdaLabsHQ/xmatrix");
       assert.equal(Object.hasOwn(located, "repositoryAuthorization"), false);
     }
-    assert.deepEqual(statements, ["registration_reborn_predecessor_v2", "registration_reborn_predecessor_v2"]);
+    assert.deepEqual(statements, ["registration_reborn_predecessor_v3", "registration_reborn_predecessor_v3"]);
   }
 });
 
-test("a billing refusal usage limit records a long-lived billing hold", async () => {
+test("a billing refusal usage limit records a long-lived billing hold, or scopes it to the failing model's pool", async () => {
   const { repo, calls } = repository();
   const res = await repo.holdUsageLimit({ ...input, resetsAt: undefined, billingRefusal: true });
   assert.equal(res.usedUp, "account");
   assert.equal(calls.limits.length, 2);
   assert.deepEqual(calls.limits[1], ["owner", "registration:m1:claude"]);
+
+  const scoped = repository({ located: {
+    key: { spaceId: "space", ownerUserId: "owner", machineId: "m1", harness: "cursor" },
+    preferredRuntimeModel: "gemini-4-neon",
+    instanceModels: [
+      { id: "default", model: "default", displayName: "Auto", isDefault: true, quotaScopes: ["Auto"] },
+      { id: "gemini-4-neon", model: "gemini-4-neon", displayName: "Gemini 4 Neon", quotaScopes: ["API"] },
+    ],
+  } });
+  const scopedRes = await scoped.repo.holdUsageLimit({ ...input, resetsAt: undefined, billingRefusal: true, scopedBillingRefusal: true });
+  assert.deepEqual([scopedRes.usedUp, scopedRes.scope], ["scope", "API"]);
+  assert.deepEqual(scoped.calls.limits[1], ["owner", "registration:m1:claude", "API"]);
 });
 
 function calls({ calls: recorded }) { return recorded.handoffs; }

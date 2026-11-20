@@ -65,7 +65,7 @@ import { RegistrationAccessError, registrationRouteRefusal } from "./agent-regis
 import { PostgresRegistrationExecutionRepository } from "./agent-registration-execution.js";
 import { requireRegistrationAdmission } from "./agent-registration-access.js";
 import { REGISTRATION_KEY_SQL, registrationKeyValues } from "./agent-registration-rows.js";
-import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, registrationQuotaColumns, registrationQuotaReading,
+import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, registrationBillingRefusalScopes, registrationQuotaColumns, registrationQuotaReading,
   registrationQuotaUsage, type RegistrationQuotaUsage } from "./agent-registration-quota-probe.js";
 import { firstMessageSummonId, messageAuthoredForActor, readMessageInvocationSelections } from "./message-invocation-selections.js";
 import { initialMessageSource, withInitialMessageSource } from "./runtime-initial-input.js";
@@ -168,6 +168,10 @@ export interface RegistrationLaunchCandidate {
   signedOut?: boolean;
   /** Account-level billing/payment refusal is held until a direct Run succeeds on this registration. */
   accountBillingRefusal?: boolean;
+  /** Quota scopes held by a billing/payment refusal (e.g. Cursor's `API` pool
+   * requiring a payment method while `Auto` stays included). Unnamed `@auto`
+   * excludes models in these scopes; explicit harness summons still reach them. */
+  billingRefusalScopes?: string[];
 }
 
 /** The declared models a registration's grant and policy both allow; empty
@@ -1443,12 +1447,14 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         const factObservedMs = fact?.observed_at ? Date.parse(String(fact.observed_at)) : Number.NaN;
         const accountBillingRefusal = isRegistrationBillingRefusalRow(fact, Date.now()) &&
           !(Number.isFinite(repliedAtMs) && Number.isFinite(factObservedMs) && repliedAtMs > factObservedMs);
+        const billingRefusalScopes = registrationBillingRefusalScopes(fact, Date.now());
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
           ...(catalogModels ? { catalogModels } : {}),
           ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
           ...(uninstalled ? { uninstalled: true } : {}),
           ...(signedOut ? { signedOut: true } : {}),
           ...(accountBillingRefusal ? { accountBillingRefusal: true } : {}),
+          ...(billingRefusalScopes.length ? { billingRefusalScopes } : {}),
           ...(responseLatency.has(candidate.key.harness) ? { responseLatencyMs: responseLatency.get(candidate.key.harness)! } : {}),
           modelAliases: environment.modelAliases,
           ...(daemonCapable(daemon, "registration_native_model_v1") ? { supportsNativeModel: true } : {}),

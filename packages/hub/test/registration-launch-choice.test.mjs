@@ -1066,3 +1066,50 @@ test("a summon naming a billing-refused harness runs its Space's model; the refu
   await assert.rejects(choose({ message: '@auto test', tags: {}, automaticHarness: true, candidates: [cursor] }),
     error => error.code === 'registration_quota_exhausted');
 });
+
+test('a scoped billing refusal holds only that scope for unnamed @auto while keeping other models and explicit summons open (#1837)', async () => {
+  const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const heldUntil = new Date(Date.now() + 365 * 86_400_000).toISOString();
+  const scopedObs = (scopedQuotaUsages) => ({
+    evaluatedAt: new Date().toISOString(),
+    quota: {
+      remainingPercent: 100, assumed: true,
+      usage: { quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [], scopedQuotaUsages },
+    },
+  });
+  const scopedHeld = scopedObs([
+    { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
+    { percent: 100, resetAt: heldUntil, scope: 'API', billingRefusal: true },
+  ]);
+  const catalog = [
+    { model: 'default', description: 'Auto', efforts: [], names: ['Auto'], isDefault: true, quotaScopes: ['Auto'] },
+    { model: 'gemini-4-neon', description: 'API model', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] },
+  ];
+  const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
+    supportsNativeModel: true, billingRefusalScopes: ['API'], observations: scopedHeld, modelCatalog: catalog };
+  const choose = registrationLaunchChooser(async input => answer(input));
+
+  // Unnamed @auto stays routable on Cursor's Auto pool and does not offer API models.
+  const autoChosen = await choose({ message: '@auto fix this', tags: {}, automaticHarness: true, candidates: [cursor] });
+  assert.deepEqual([autoChosen.key.harness, autoChosen.useRuntimeDefaultModel, autoChosen.preferredModel], ['cursor', true, undefined]);
+
+  // Unnamed @auto with a Space pinned exclusively to an API model excludes Cursor.
+  const apiOnly = { ...cursor, catalogModels: ['gemini-4-neon'] };
+  await assert.rejects(choose({ message: '@auto fix this', tags: {}, automaticHarness: true, candidates: [apiOnly] }),
+    error => error.code === 'registration_quota_exhausted');
+
+  // Explicit @cursor still reaches the API model so a user can retry after adding a payment method.
+  const explicit = await choose({ message: '@cursor fix this', tags: { harness: 'cursor' },
+    automaticHarness: false, candidates: [apiOnly] });
+  assert.deepEqual([explicit.key.harness, explicit.useRuntimeDefaultModel, explicit.preferredModel], ['cursor', true, 'gemini-4-neon']);
+
+  // A provider-measured 100% API window still refuses the explicit summon even when the billing hold is lifted.
+  const providerApiUsed = scopedObs([
+    { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
+    { label: '1mo', percent: 100, resetAt: back, scope: 'API' },
+    { percent: 100, resetAt: heldUntil, scope: 'API', billingRefusal: true },
+  ]);
+  await assert.rejects(choose({ message: '@cursor fix this', tags: { harness: 'cursor' },
+    automaticHarness: false, candidates: [{ ...apiOnly, observations: providerApiUsed }] }),
+    error => error.code === 'registration_quota_exhausted');
+});
