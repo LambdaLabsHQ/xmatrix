@@ -82,7 +82,7 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: packages/cli-rs
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --bin xmatrix
 
       - name: Build release binary to warm kache (Windows)
         if: runner.os == 'Windows'
@@ -90,7 +90,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --bin xmatrix
           if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 
       - if: steps.kache-cache.outputs.cache-hit != 'true'
