@@ -2030,12 +2030,55 @@ html:not([data-highlight-inherit]) .site-page ::selection {
 }
 
 .download-list-heading {
-  padding-bottom: 0.75rem;
   color: var(--site-wood-deep);
   font-size: 0.68rem;
   font-weight: 760;
   letter-spacing: 0.19em;
   text-transform: uppercase;
+}
+
+/* Stable | Preview. A flat track on paper with a white tab: a capsule on
+   phones, a 10px track around 7px tabs on desktop. */
+.download-channel {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 999px;
+  background: oklch(0.255 0.025 58 / 0.07);
+}
+
+.download-channel button {
+  height: 1.875rem;
+  padding-inline: 0.875rem;
+  border-radius: 999px;
+  color: var(--site-ink-muted);
+  font-size: 0.8125rem;
+  font-weight: 650;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+
+.download-channel button:hover {
+  color: var(--site-ink);
+}
+
+.download-channel button[aria-pressed="true"] {
+  color: var(--site-ink);
+  background: oklch(1 0 0);
+  box-shadow: 0 1px 2px oklch(0.18 0.04 55 / 0.12);
+}
+
+.download-channel button:focus-visible {
+  outline: 2px solid var(--site-wood-deep);
+  outline-offset: 2px;
+}
+
+@media (min-width: 640px) {
+  .download-channel {
+    border-radius: 10px;
+  }
+
+  .download-channel button {
+    border-radius: 7px;
+  }
 }
 
 .download-list {

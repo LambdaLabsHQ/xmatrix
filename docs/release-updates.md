@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: the download list is one release channel at a time
+
+The download page listed stable builds as buttons and tucked preview builds
+into a line of text links under them, so the two channels did not read as the
+same choice. The list now has a Stable | Preview switch in its heading: every
+row (macOS, Windows, Android, Web), its release notes and the macOS ZIP links
+belong to the selected channel, with one sentence under the list saying what
+that channel is. Preview adds the Android preview APK and the beta Web, which
+the page did not link before. `/download?channel=preview` opens on Preview.
+The recommended download at the top stays the stable build. Web only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a Windows Supervisor with an unreadable journal starts its own release
 
 The Windows Supervisor starts the daemon its `activation-journal.json` names.
