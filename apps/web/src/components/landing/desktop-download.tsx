@@ -6,16 +6,15 @@ import Link from "next/link";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
 
-import { DownloadRecommendation } from "./download-recommendation";
+import { DownloadRecommendation, webApp, type Channel } from "./download-recommendation";
 
-type Channel = "stable" | "dev";
 type Build = { label: string; href: string };
 type PlatformRow = { name: string; icon: ReactNode; note: string; notes?: string; builds: Build[] };
 
 const desktop = (channel: Channel, file: string) => `/api/desktop/releases/${channel}/latest-${file}`;
 const notes = (component: "desktop" | "android", channel: Channel) => `/releases?component=${component}&channel=${channel}`;
 
-/** The two release channels. Every row and link in the list belongs to the selected one. */
+/** The two release channels. The whole page, the main download and every row, is the selected one. */
 const channels: { id: Channel; label: string; detail: string }[] = [
   { id: "stable", label: "Stable", detail: "Tested releases. The right choice for most people." },
   { id: "dev", label: "Preview", detail: "The newest build, ahead of Stable. Updates often and can have rough edges." },
@@ -36,7 +35,7 @@ const platforms = (channel: Channel): PlatformRow[] => [
   },
   {
     name: "Web", icon: <Globe className="size-5" strokeWidth={1.75} aria-hidden />, note: "iPhone, iPad, Linux and any browser",
-    builds: [{ label: "Open", href: channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app" }],
+    builds: [{ label: "Open", href: webApp(channel) }],
   },
 ];
 
@@ -60,21 +59,30 @@ export function DesktopDownload() {
   };
   const current = channels.find(({ id }) => id === channel)!;
   const suffix = channel === "dev" ? " preview" : "";
+  /* A flat track on paper with a white tab: a capsule on phones, a 10px track around 7px tabs on desktop. */
+  const channelSwitch = (
+    <div className="inline-flex rounded-full bg-[oklch(0.255_0.025_58/0.07)] p-[3px] sm:rounded-[10px]" role="group" aria-label="Release channel">
+      {channels.map(({ id, label }) => (
+        <button
+          key={id}
+          type="button"
+          aria-pressed={id === channel}
+          onClick={() => choose(id)}
+          className="h-[30px] rounded-full px-3.5 text-[13px] font-[650] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--site-wood-deep)] aria-pressed:bg-white aria-pressed:text-[var(--site-ink)] aria-pressed:shadow-[0_1px_2px_oklch(0.18_0.04_55/0.12)] sm:rounded-[7px]"
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 
   return (
     <section id="download" className="x-section download-page">
       <div className="x-container">
-        <DownloadRecommendation />
+        <DownloadRecommendation channel={channel} channelSwitch={channelSwitch} />
 
         <div id="all-downloads" className="mx-auto mt-24 max-w-2xl scroll-mt-24 sm:mt-32">
-          <div className="flex items-end justify-between gap-4 pb-3">
-            <h2 className="download-list-heading">All platforms</h2>
-            <div className="download-channel" role="group" aria-label="Release channel">
-              {channels.map(({ id, label }) => (
-                <button key={id} type="button" aria-pressed={id === channel} onClick={() => choose(id)}>{label}</button>
-              ))}
-            </div>
-          </div>
+          <h2 className="download-list-heading">All platforms · {current.label}</h2>
           <ul className="download-list" data-channel={channel}>
             {platforms(channel).map(({ name, icon, note, notes: releaseNotes, builds }) => (
               <li key={name} className="download-row">

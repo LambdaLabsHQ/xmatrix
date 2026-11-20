@@ -37,7 +37,7 @@ for (const scenario of cases) {
       await expect(recommendation).toContainText(scenario.architecture === "x86" ? "Intel-based Macs" : "Apple Silicon");
       await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", scenario.other);
     }
-    await recommendation.getByRole("link", { name: "All platforms and preview builds" }).click();
+    await recommendation.getByRole("link", { name: "All platforms", exact: true }).click();
     await expect(page).toHaveURL(/#all-downloads$/);
     // The list under the recommendation carries every build of one channel,
     // whatever the device; the switch moves the whole list to the other one.
@@ -63,8 +63,12 @@ for (const scenario of cases) {
     await channel.getByRole("button", { name: "Preview" }).click();
     await expect(page).toHaveURL(/\?channel=preview/);
     await expectBuilds("dev", " preview");
-    // The recommendation stays the tested build.
-    await expect(recommendation.getByRole("link").first()).toHaveAttribute("href", scenario.href);
+    // The main download is the same channel as the list.
+    const preview = (href: string) => href === "/app" ? "https://beta.xmatrix.sh/app" : href.replace("/stable/", "/dev/");
+    await expect(recommendation.getByRole("link").first()).toHaveAttribute("href", preview(scenario.href));
+    if (scenario.other) {
+      await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", preview(scenario.other));
+    }
     // One primary action on the page, and no sideways scrolling on a phone.
     await expect(page.locator(".download-page [data-material='wood-panel']")).toHaveCount(1);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

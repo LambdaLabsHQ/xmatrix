@@ -128,8 +128,8 @@ const en = {
   downloadFor: (platform: "macOS" | "Windows" | "Android") => `Download for ${platform}`,
   appleSiliconDetail: "For Apple Silicon (M-series) Macs.",
   intelDetail: "For Intel-based Macs.",
-  windowsDetail: "Stable installer for Windows x64.",
-  androidDetail: "Install the stable Android APK.",
+  windowsDetail: "For Windows x64.",
+  androidDetail: "For Android phones, as an APK.",
   getXMatrix: "Get xMatrix",
   useOnWeb: "Use xMatrix on the web",
   chooseBelow: "Choose a download below, or open the web app on any device.",
@@ -157,7 +157,7 @@ const en = {
     askOwnerUpgrade: "Ask the Space owner to upgrade.",
     askOwnerCredits: "Ask the Space owner to buy credits.",
   },
-  allPlatforms: "All platforms and preview builds",
+  allPlatforms: "All platforms",
 };
 
 export type OnboardingCopy = typeof en;
@@ -268,8 +268,8 @@ const zh: OnboardingCopy = {
   downloadFor: (platform) => `下载 ${platform} 版`,
   appleSiliconDetail: "适用于 Apple 芯片（M 系列）的 Mac。",
   intelDetail: "适用于 Intel 芯片的 Mac。",
-  windowsDetail: "Windows x64 稳定版安装包。",
-  androidDetail: "安装稳定版 Android APK。",
+  windowsDetail: "适用于 Windows x64。",
+  androidDetail: "适用于 Android 手机的 APK。",
   getXMatrix: "下载 xMatrix",
   useOnWeb: "使用网页版 xMatrix",
   chooseBelow: "在下面选一个下载，或者在任何设备上打开网页版。",
@@ -296,7 +296,7 @@ const zh: OnboardingCopy = {
     askOwnerUpgrade: "请 Space 所有者升级。",
     askOwnerCredits: "请 Space 所有者购买 credit。",
   },
-  allPlatforms: "所有平台和预览版",
+  allPlatforms: "所有平台",
 };
 
 export const ONBOARDING_COPY: Record<OnboardingLocale, OnboardingCopy> = { en, zh };
