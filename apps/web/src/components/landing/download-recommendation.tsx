@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Download } from "lucide-react";
 import Image from "next/image";
 import { WoodPanel } from "@/components/ui/material-surfaces";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
 
+export type Channel = "stable" | "dev";
 export type Platform = "macOS" | "Windows" | "Android" | "iOS" | "Linux" | "unknown";
 
 export function detectPlatform(): Platform {
@@ -32,17 +33,21 @@ export async function detectIntelMac() {
   return architecture === "x86";
 }
 
-export const macDownloads = (copy: OnboardingCopy) => ({
-  arm64: { name: "Apple Silicon", href: "/api/desktop/releases/stable/latest-arm64.dmg", label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
-  x64: { name: "Intel", href: "/api/desktop/releases/stable/latest-x64.dmg", label: copy.downloadFor("macOS"), detail: copy.intelDetail },
+export const macDownloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+  arm64: { name: "Apple Silicon", href: `/api/desktop/releases/${channel}/latest-arm64.dmg`, label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
+  x64: { name: "Intel", href: `/api/desktop/releases/${channel}/latest-x64.dmg`, label: copy.downloadFor("macOS"), detail: copy.intelDetail },
 });
 
-export const downloads = (copy: OnboardingCopy) => ({
-  Windows: { href: "/api/desktop/releases/stable/latest-x64.exe", label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
-  Android: { href: "/api/android/releases/stable/latest.apk", label: copy.downloadFor("Android"), detail: copy.androidDetail },
+export const downloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+  Windows: { href: `/api/desktop/releases/${channel}/latest-x64.exe`, label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
+  Android: { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
 
-export function DownloadRecommendation() {
+/** Where the web app of a channel lives: Preview is the beta Web. */
+export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
+
+/** The page's one action. `channelSwitch` sits between the sentence and the button it decides. */
+export function DownloadRecommendation({ channel = "stable", channelSwitch }: { channel?: Channel; channelSwitch?: ReactNode }) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [intelMac, setIntelMac] = useState(false);
   const copy = ONBOARDING_COPY[useBrowserOnboardingLocale()];
@@ -51,9 +56,9 @@ export function DownloadRecommendation() {
     setPlatform(detected);
     if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
   }, []);
-  const download = platform === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"]
-    : platform === "Windows" || platform === "Android" ? downloads(copy)[platform] : null;
-  const otherMac = platform === "macOS" ? macDownloads(copy)[intelMac ? "arm64" : "x64"] : null;
+  const download = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "x64" : "arm64"]
+    : platform === "Windows" || platform === "Android" ? downloads(copy, channel)[platform] : null;
+  const otherMac = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "arm64" : "x64"] : null;
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col items-center text-center" data-testid="download-recommendation">
@@ -64,7 +69,8 @@ export function DownloadRecommendation() {
       <p className="mt-5 max-w-md text-base leading-7 text-muted-foreground">
         {download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
       </p>
-      <WoodPanel as="a" href={download?.href ?? "/app"} className="site-wood-pill mt-9 inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
+      {channelSwitch && <div className="mt-8">{channelSwitch}</div>}
+      <WoodPanel as="a" href={download?.href ?? webApp(channel)} className="site-wood-pill mt-5 inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
         {download && <Download className="size-4" />}
         {download ? download.label : copy.openWebApp}
       </WoodPanel>

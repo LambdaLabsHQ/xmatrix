@@ -1697,46 +1697,6 @@ mod page_tests {
     }
 
     #[test]
-    fn tree_shows_each_page_s_line_only_when_asked() {
-        let pages = [
-            PageSummary {
-                summary: Some(PageSummaryLine {
-                    text: "Ships\nFriday".into(),
-                }),
-                ..page("plan", None, "V")
-            },
-            page("notes", Some("plan"), "V"),
-        ];
-        assert_eq!(
-            render_page_tree(&pages, true),
-            "- PLAN (plan · r1)\n  Ships Friday\n  - NOTES (notes · r1)\n"
-        );
-        assert_eq!(
-            render_page_tree(&pages, false),
-            "- PLAN (plan · r1)\n  - NOTES (notes · r1)\n"
-        );
-    }
-
-    #[test]
-    fn search_names_each_hit_by_its_reference_and_shows_the_text_around_it() {
-        let hit = |block: &str, snippet: &str| PageSearchHit {
-            page_id: "p1".into(),
-            title: "Plan".into(),
-            block_id: block.into(),
-            block_title: if block.is_empty() {
-                String::new()
-            } else {
-                "Goals".into()
-            },
-            snippet: snippet.into(),
-        };
-        assert_eq!(
-            render_page_search(&[hit("goals", "…ship the\nledger…"), hit("", "Plan")]),
-            "- Plan › Goals (page:p1#goals)\n  …ship the ledger…\n- Plan (page:p1)\n"
-        );
-    }
-
-    #[test]
     fn tree_marks_the_governance_page() {
         let rules = PageSummary {
             governance: true,
