@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: the download page is one action and a ruled list of platforms
+
+The download page was five wood slabs carrying fourteen liquid-glass buttons,
+two competing headings and a sideways card scroller on phones. It is now the
+app icon, `Get xMatrix`, a line naming the build this device gets and one wood
+pill to download it; the other Mac architecture and the jump to every platform
+are text links under it. macOS, Windows, Android and Web follow as rows on the
+same paper, each with its system glyph, release notes and white pill buttons
+for its builds; preview builds and ZIPs are two lines of links under the list.
+Every download URL, device detection and copy key is unchanged. Web only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: a start its machine never answered is ended in its place
 
 A connected daemon that took a start command and never admitted, ran or failed

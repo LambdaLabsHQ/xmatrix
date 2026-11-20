@@ -2000,3 +2000,88 @@ html:has(.site-page) {
   .public-page-byline { margin-bottom: 24px; font-size: 13px; }
   .public-page-crumbs > .public-page-crumb:first-of-type, .public-page-crumb-gap { display: none; }
 }
+
+/* Download page: one wood action for this device, then every platform as a
+   ruled list on the same paper. No slabs: the page has a single thing to do. */
+.download-page.download-page {
+  padding-block: clamp(7rem, 11vw, 9.5rem) clamp(5.5rem, 9vw, 8.5rem);
+}
+
+.download-app-icon {
+  border-radius: 22.5%;
+  box-shadow:
+    0 1px 2px oklch(0.18 0.04 55 / 0.16),
+    0 18px 30px -16px oklch(0.18 0.04 55 / 0.5);
+}
+
+.download-quiet-link {
+  color: var(--site-ink-muted);
+  font-weight: 550;
+  text-decoration: underline;
+  text-decoration-color: oklch(0.49 0.03 62 / 0.32);
+  text-underline-offset: 4px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+
+.download-quiet-link:hover {
+  color: var(--site-ink);
+  text-decoration-color: currentColor;
+}
+
+.download-list-heading {
+  padding-bottom: 0.75rem;
+  color: var(--site-wood-deep);
+  font-size: 0.68rem;
+  font-weight: 760;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+}
+
+.download-list {
+  border-block: 1px solid oklch(0.255 0.025 58 / 0.1);
+}
+
+.download-row {
+  display: flex;
+  min-height: 4.5rem;
+  align-items: center;
+  gap: 1rem;
+  padding-block: 0.875rem;
+}
+
+.download-row + .download-row {
+  border-top: 1px solid oklch(0.255 0.025 58 / 0.1);
+}
+
+.download-row-icon {
+  display: flex;
+  width: 1.5rem;
+  flex-shrink: 0;
+  justify-content: center;
+  color: var(--site-ink);
+}
+
+.download-build {
+  display: inline-flex;
+  height: 2.25rem;
+  align-items: center;
+  padding-inline: 1rem;
+  border-radius: 999px;
+  color: var(--site-ink);
+  background: oklch(1 0 0);
+  box-shadow: inset 0 0 0 1px oklch(0.255 0.025 58 / 0.14);
+  font-size: 0.875rem;
+  font-weight: 650;
+  white-space: nowrap;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.download-build:hover {
+  background: var(--site-paper-soft);
+  box-shadow: inset 0 0 0 1px oklch(0.255 0.025 58 / 0.26);
+}
+
+.download-page a:focus-visible {
+  outline: 2px solid var(--site-wood-deep);
+  outline-offset: 2px;
+}
