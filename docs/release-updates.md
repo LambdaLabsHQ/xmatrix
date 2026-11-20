@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: the comment card's @ list sits on its paper, and never folds one Agent
+
+The @ list in a page's comment card was the glass composer's list dropped
+onto paper. On the card it now reads as the page's paper menus: flat rows
+from edge to edge, faces in the comment's text column, names at the text's
+weight, a fold row as one more quiet line without an arrow. In every
+composer, an open section shows its last candidate rather than spending a
+"Show 1 more" row to hide it. Web only. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: unlink a page from a conversation
 
 A page linked to a conversation kept reaching it (new Runs read it at launch,
