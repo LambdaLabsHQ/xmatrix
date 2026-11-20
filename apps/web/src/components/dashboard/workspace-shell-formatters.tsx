@@ -535,8 +535,11 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
     });
+  // Match the protocol window ceiling (`ROUTING_QUOTA_MAX_WINDOWS = 8`) so
+  // providers with multiple scoped pools (e.g. Antigravity's Gemini +
+  // Claude & GPT 5h/1w) keep every window in both display tags and limit verdicts.
   return dedupeQuotaUsagesByLabel(selected.sort(compareQuotaUsageForDisplay))
-    .slice(0, 3);
+    .slice(0, 8);
 }
 
 /** A provider may report the same semantic window through label and window forms. */
@@ -552,7 +555,7 @@ export function dedupeQuotaUsagesByLabel(value: LlmQuotaUsage[]): LlmQuotaUsage[
 
 const QUOTA_DISPLAY_ORDER = ["5h", "1w", "2h", "1mo"] as const;
 
-/** Provider array order is transport detail; the visible three are
+/** Provider array order is transport detail; the visible order is
  * deterministic. A window's account form comes before its scoped ones. */
 export function compareQuotaUsageForDisplay(left: LlmQuotaUsage, right: LlmQuotaUsage): number {
   const leftRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(left).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);
