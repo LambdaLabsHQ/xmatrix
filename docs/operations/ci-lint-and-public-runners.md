@@ -208,11 +208,13 @@ that puts the language back on the beta list. Do not cancel a train to change
 its scan, and do not treat an alert as a skipped gate.
 
 CLI release builds run both macOS architectures in parallel on isolated hosted
-VMs: ARM64 on `macos-26`, Intel on `macos-26-intel`. GitHub reported ARM64
-capacity constraints and cancelled both jobs before assigning a runner. The
-Intel build uses its own standard pool instead of taking a second ARM slot;
-each binary still runs its exact-version probe on a host that can execute it.
-The standard pools are free for public repositories
+`macos-26` (Apple Silicon) VMs: `aarch64-apple-darwin` natively and
+`x86_64-apple-darwin` cross-compiled. Both targets verify their Mach-O
+architecture (`lipo -archs`), Developer ID signature, and exact `--version`
+output (via Rosetta `arch -x86_64` for the Intel binary) before upload. If
+GitHub's Apple Silicon pool experiences capacity constraints, moving the Intel
+target back to `macos-26-intel` is a one-line workflow revert. The standard
+pools are free for public repositories
 ([GitHub runner reference](https://docs.github.com/en/enterprise-cloud%40latest/actions/reference/runners/github-hosted-runners)).
 Desktop stays on Apple Silicon because its signed ARM app must actually start
 before publication; moving its build to Intel would drop that native probe.
