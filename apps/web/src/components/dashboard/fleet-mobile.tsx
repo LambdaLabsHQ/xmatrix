@@ -179,7 +179,7 @@ export function MobileAvatarMatrix({
                 <div className="flex w-full min-w-0 items-center gap-2 pb-1.5">{headingCopy}</div>
               )}
 
-              <div className={cn(scrollable && "-mx-[var(--mobile-content-inset,1rem)] overflow-x-auto px-[var(--mobile-content-inset,1rem)] snap-x")}>
+              <div className={cn(scrollable && "-mx-[var(--mobile-content-inset,1rem)] overflow-x-auto px-[var(--mobile-content-inset,1rem)] scroll-px-[var(--mobile-content-inset,1rem)] snap-x")}>
                 <div className="grid items-center" style={gridStyle}>
                   {columns.map((column) => {
                     const id = cellId({ row: row.key, harness: column.harness });
