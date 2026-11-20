@@ -1,6 +1,7 @@
 import { currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount, quotaAccountBalance,
-  routingQuotaAccountPartExpiry, routingQuotaObservation, routingQuotaProbeObservations, routingQuotaVerdict, type RoutingQuotaVerdict, routingQuotaRecord,
-  routingQuotaUsageWindows, type AgentRegistrationLiveState, type LlmQuotaAccount, type LlmUsage,
+  routingModelOptionNamed, routingModelOptions, routingQuotaAccountPartExpiry, routingQuotaObservation,
+  routingQuotaProbeObservations, routingQuotaVerdict, type RoutingQuotaVerdict, routingQuotaRecord,
+  routingQuotaUsageWindows, type AgentRegistrationLiveState, type LlmQuotaAccount, type LlmQuotaUsage, type LlmUsage,
   type RoutingModelOption, type RoutingQuotaProbeRequest, type RoutingQuotaRecord,
   type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
@@ -18,11 +19,14 @@ export const REGISTRATION_QUOTA_PROBE_TARGET_PREFIX = "registration:";
 export const REGISTRATION_QUOTA_POOL_SQL =
   `COALESCE(NULLIF(btrim(e.declaration_json->>'quotaPoolId'),''),'registration:'||e.machine_id||':'||e.harness)`;
 
-/** Whether the pool reading `alias` is current: its account part or its
- * scoped part still counts (see migration 0254). */
+/** Whether the pool reading `alias` is current: its account part, its scoped
+ * part, or a scoped billing refusal still counts (see migration 0254). */
 export function currentRegistrationQuotaSql(alias: string): string {
   return `${alias}.observed_at<=statement_timestamp() AND (${alias}.expires_at>statement_timestamp()
-    OR ${alias}.scoped_expires_at>statement_timestamp())`;
+    OR ${alias}.scoped_expires_at>statement_timestamp()
+    OR (${alias}.account_json ? 'billingRefusalScopes'
+      AND jsonb_typeof(${alias}.account_json->'billingRefusalScopes')='object'
+      AND ${alias}.account_json->'billingRefusalScopes'<>'{}'::jsonb))`;
 }
 
 /** The registration's pool reading while it is current, joined as `alias`
@@ -47,33 +51,82 @@ export function isRegistrationBillingRefusalRow(row: Record<string, unknown> | u
   return storedObject(row.account_json).billingRefusal === true;
 }
 
+/** Active per-scope billing/payment refusal holds stored on `account_json.billingRefusalScopes`. */
+function registrationBillingRefusalScopeEntries(row: Record<string, unknown> | undefined, now = Date.now()):
+  Array<{ scope: string; observedAt: number; expiresAt: number }> {
+  const scopes = storedObject(storedObject(row?.account_json).billingRefusalScopes);
+  const active: Array<{ scope: string; observedAt: number; expiresAt: number }> = [];
+  for (const [rawScope, rawEntry] of Object.entries(scopes)) {
+    const scope = rawScope.trim();
+    if (!scope) continue;
+    const entry = storedObject(rawEntry);
+    const observedAt = time(entry.observedAt);
+    const expiresAt = time(entry.expiresAt);
+    if (!Number.isFinite(observedAt) || observedAt > now || !Number.isFinite(expiresAt) || expiresAt <= now) continue;
+    active.push({ scope, observedAt, expiresAt });
+  }
+  return active;
+}
+
+/** Quota scopes currently held by a billing/payment refusal on this pool (e.g.
+ * Cursor's `API` pool requiring a payment method while `Auto` stays open). */
+export function registrationBillingRefusalScopes(row: Record<string, unknown> | undefined, now = Date.now()): string[] {
+  return registrationBillingRefusalScopeEntries(row, now).map(entry => entry.scope);
+}
+
+/** The quota scopes of `model` (or the runtime default when omitted) in a stored
+ * Instance model catalog, normalized and non-empty. */
+export function modelQuotaScopes(rawModels: unknown, model: string | undefined): string[] {
+  const options = routingModelOptions(rawModels);
+  const wanted = model?.trim();
+  const entry = wanted ? options.find(option => routingModelOptionNamed(option, wanted))
+    : options.find(option => option.isDefault);
+  return entry?.quotaScopes?.map(scope => scope.trim()).filter(Boolean) ?? [];
+}
+
 /** A stored pool reading in usage form: account windows and the scoped
  * windows with their own read time. Readers derive any model's headroom from
  * it with `routingQuotaObservation`. */
-export type RegistrationQuotaUsage = LlmUsage & { scopedQuotaObservedAt?: string };
+export type RegistrationQuotaUsage = Omit<LlmUsage, "scopedQuotaUsages"> & {
+  scopedQuotaObservedAt?: string;
+  scopedQuotaUsages?: Array<LlmQuotaUsage & { billingRefusal?: true }>;
+};
 
 const time = (value: unknown) => value instanceof Date ? value.getTime()
   : typeof value === "string" ? Date.parse(value) : NaN;
 
 /** The pool reading of a row of `registrationQuotaColumns`, or none when
- * neither part counts at `now`. A windowless usage-limit hold
- * (`source='daemon'`) reads as one used-up account window until it ends. */
+ * nothing counts at `now`. A windowless usage-limit hold (`source='daemon'`)
+ * reads as one used-up account window until it ends; a scoped billing refusal
+ * reads as one used-up window for that scope alone, leaving other scopes open. */
 export function registrationQuotaUsage(row: Record<string, unknown> | undefined, now = Date.now()):
   RegistrationQuotaUsage | undefined {
   const observed = time(row?.observed_at), expires = time(row?.expires_at);
   const scopedObserved = time(row?.scoped_observed_at), scopedExpires = time(row?.scoped_expires_at);
   if (!row || !Number.isFinite(observed) || observed > now) return undefined;
   const accountCurrent = expires > now;
-  const scopedCurrent = scopedObserved <= now && scopedExpires > now;
-  if (!accountCurrent && !scopedCurrent) return undefined;
+  const scopedCurrent = Number.isFinite(scopedObserved) && scopedObserved <= now && scopedExpires > now;
+  const billingScopes = registrationBillingRefusalScopeEntries(row, now);
+  if (!accountCurrent && !scopedCurrent && !billingScopes.length) return undefined;
   const hold = row.source === "daemon";
   const quotaAccount = accountCurrent && !hold ? parseLlmQuotaAccount(row.account_json) : undefined;
   const quotaUsages = !accountCurrent ? [] : hold
     ? [{ percent: 100 - Number(row.remaining), resetAt: new Date(expires).toISOString() }]
     : routingQuotaUsageWindows(currentRoutingQuotaWindows(row.windows_json, now));
-  return { quotaSource: "provider_api", quotaObservedAt: new Date(observed).toISOString(), quotaUsages,
-    ...(scopedCurrent ? { scopedQuotaUsages: routingQuotaUsageWindows(currentRoutingQuotaWindows(row.scoped_windows_json, now)),
-      scopedQuotaObservedAt: new Date(scopedObserved).toISOString() } : {}),
+  const billingObserved = billingScopes.length ? Math.max(...billingScopes.map(entry => entry.observedAt)) : NaN;
+  const quotaObservedMs = accountCurrent ? observed : scopedCurrent ? scopedObserved : billingObserved;
+  const providerScoped = scopedCurrent
+    ? routingQuotaUsageWindows(currentRoutingQuotaWindows(row.scoped_windows_json, now)) : [];
+  const billingScoped = billingScopes.map(entry => ({
+    percent: 100, resetAt: new Date(entry.expiresAt).toISOString(), scope: entry.scope, billingRefusal: true as const,
+  }));
+  const hasScoped = scopedCurrent || billingScoped.length > 0;
+  // Without a current provider scoped reading, keep an active 365-day scoped
+  // billing hold inside the 31-day routing window while its hold lasts.
+  const effectiveScopedObserved = scopedCurrent ? scopedObserved : Math.min(Math.max(billingObserved, now - 1_000), now);
+  return { quotaSource: "provider_api", quotaObservedAt: new Date(quotaObservedMs).toISOString(), quotaUsages,
+    ...(hasScoped ? { scopedQuotaUsages: [...providerScoped, ...billingScoped],
+      scopedQuotaObservedAt: new Date(effectiveScopedObserved).toISOString() } : {}),
     ...(quotaAccount ? { quotaAccount } : {}) };
 }
 
@@ -88,8 +141,6 @@ export function registrationQuotaReading(row: Record<string, unknown> | undefine
     expiresAt: observation.expiresAt } : undefined;
 }
 
-/** The headroom shown for a pool: the account's own, or, when no account
- * window counts, that of its least used scope (the best model it can run). */
 /** Whether the joined reading leaves one model (its catalog row), or the
  * account without one, any quota (`routingQuotaVerdict`). */
 export function registrationQuotaVerdict(row: Record<string, unknown> | undefined,
@@ -98,23 +149,32 @@ export function registrationQuotaVerdict(row: Record<string, unknown> | undefine
   return routingQuotaVerdict(registrationQuotaUsage(row, now), now, model ? { model } : undefined);
 }
 
+/** The headroom shown for a pool: the account's own, or, when no account
+ * window counts and a provider scoped reading is current, that of its least
+ * used scope (the best model it can run; billing-refused scopes count as 0%). */
 export function registrationShownQuotaReading(row: Record<string, unknown> | undefined):
   ReturnType<typeof registrationQuotaReading> {
+  const now = Date.now();
   const account = registrationQuotaReading(row);
   if (account) return account;
-  const scopes = new Set((registrationQuotaUsage(row)?.scopedQuotaUsages ?? []).flatMap(window =>
+  const scopedObserved = time(row?.scoped_observed_at), scopedExpires = time(row?.scoped_expires_at);
+  if (!Number.isFinite(scopedObserved) || scopedObserved > now || scopedExpires <= now) return undefined;
+  const scopes = new Set((registrationQuotaUsage(row, now)?.scopedQuotaUsages ?? []).flatMap(window =>
     window.scope ? [window.scope] : []));
   return [...scopes].flatMap(scope => registrationQuotaReading(row, { quotaScopes: [scope] }) ?? [])
     .sort((left, right) => right.remainingPercent - left.remainingPercent)[0];
 }
 
 /** Every window of a current pool reading as shown: its account windows, then
- * its scoped ones (each with its scope). */
+ * its provider-measured scoped ones (each with its scope). */
 export function registrationQuotaWindows(row: Record<string, unknown> | undefined, now = Date.now()): RoutingQuotaWindow[] {
   const usage = registrationQuotaUsage(row, now);
   if (!usage) return [];
   const account = time(row?.expires_at) > now ? currentRoutingQuotaWindows(row?.windows_json, now) : [];
-  return [...account, ...usage.scopedQuotaUsages ? currentRoutingQuotaWindows(row?.scoped_windows_json, now) : []];
+  const scopedObserved = time(row?.scoped_observed_at), scopedExpires = time(row?.scoped_expires_at);
+  const scoped = Number.isFinite(scopedObserved) && scopedObserved <= now && scopedExpires > now
+    ? currentRoutingQuotaWindows(row?.scoped_windows_json, now) : [];
+  return [...account, ...scoped];
 }
 
 /**
@@ -190,6 +250,10 @@ export async function readRegistrationQuotaProbeTargets(input: {
  * came and explained nothing leaves the hold to its end, read as usual. */
 const UNREAD_HOLD_SQL = `(q.source='daemon' AND q.expires_at>statement_timestamp()
   AND (q.scoped_observed_at IS NULL OR q.scoped_observed_at<q.observed_at))`;
+/** A row kept joined solely by `billingRefusalScopes` still has no current
+ * provider reading and should be probed when `onlyUnread` is set. */
+const UNREAD_PROVIDER_SQL = `(q.expires_at<=statement_timestamp()
+  AND (q.scoped_expires_at IS NULL OR q.scoped_expires_at<=statement_timestamp()))`;
 
 /** Probe targets for these registrations whose single online daemon can read
  * their quota (see `readRegistrationQuotaProbeTargets`). The caller has
@@ -202,7 +266,7 @@ export async function registrationQuotaProbeTargets(directory: AuthorityDatabase
   if (!registrations.length) return [];
   const rows = await directory.transaction({ requestId: input.requestId,
     operation: "registration.quota-probe.daemons" }, tx => tx.query<QueryResultRow>({
-    name: "registration_quota_probe_daemons_v8", text: `SELECT requested.owner,requested.machine,requested.harness,
+    name: "registration_quota_probe_daemons_v9", text: `SELECT requested.owner,requested.machine,requested.harness,
         e.version AS environment_version,${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id,
         d.hostname,d.connection_epoch,CASE WHEN ${UNREAD_HOLD_SQL} THEN to_json(q.observed_at)#>>'{}' END AS held_since,
         $2::integer IS NOT NULL AND EXISTS (SELECT 1 FROM data.machine_daemon_commands probe
@@ -218,7 +282,7 @@ export async function registrationQuotaProbeTargets(directory: AuthorityDatabase
         WHERE daemon.owner_user_id=requested.owner AND daemon.machine_id=requested.machine
           AND daemon.status='online' AND daemon.capabilities_json ? 'machine_quota_probe_v2'
         ORDER BY daemon.hostname LIMIT 2) d ON TRUE
-      WHERE $3::boolean IS NOT TRUE OR q.owner_user_id IS NULL OR ${UNREAD_HOLD_SQL}
+      WHERE $3::boolean IS NOT TRUE OR q.owner_user_id IS NULL OR ${UNREAD_HOLD_SQL} OR ${UNREAD_PROVIDER_SQL}
       ORDER BY requested.owner,requested.machine,requested.harness,d.hostname LIMIT 200`,
     values: [JSON.stringify(registrations.map(row => ({ owner: row.ownerUserId, machine: row.machineId,
       harness: row.harness }))), input.probedWithinMs ?? null, input.onlyUnread === true], maxRows: 200 }));
@@ -361,7 +425,7 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
     const narrowed = hold ? quotaRecordUsedUp(record, Date.parse(String(hold.held_until)), undefined, Date.now()) : undefined;
     if (narrowed) { record = narrowed; explainsHold = true; }
   }
-  await tx.query({ name: "registration_quota_observe_v7", text: `INSERT INTO control.registration_quota_observations AS o
+  await tx.query({ name: "registration_quota_observe_v8", text: `INSERT INTO control.registration_quota_observations AS o
       (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json,
         scoped_windows_json,scoped_observed_at,scoped_expires_at)
       SELECT $1,$2,$3,$4::timestamptz,$5::timestamptz,'provider',$6::jsonb,$7::jsonb,$8::jsonb,$9::timestamptz,$10::timestamptz
@@ -369,7 +433,10 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
       ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
         ${setWhen(ACCOUNT_PART_NEWER, ["remaining", "observed_at", "expires_at", "source", "windows_json", "account_json"], {
           windows_json: KEPT_ACCOUNT_WINDOWS, remaining: KEPT_REMAINING,
-          expires_at: keptExpiry("EXCLUDED.expires_at", KEPT_ACCOUNT_WINDOWS, "EXCLUDED.observed_at") })},
+          expires_at: keptExpiry("EXCLUDED.expires_at", KEPT_ACCOUNT_WINDOWS, "EXCLUDED.observed_at"),
+          account_json: `CASE WHEN o.account_json ? 'billingRefusalScopes'
+            THEN COALESCE(EXCLUDED.account_json,'{}'::jsonb)||jsonb_build_object('billingRefusalScopes',o.account_json->'billingRefusalScopes')
+            ELSE EXCLUDED.account_json END` })},
         ${setWhen(SCOPED_PART_NEWER, ["scoped_windows_json", "scoped_observed_at", "scoped_expires_at"], {
           scoped_windows_json: KEPT_SCOPED_WINDOWS,
           scoped_expires_at: keptExpiry("EXCLUDED.scoped_expires_at", KEPT_SCOPED_WINDOWS, "EXCLUDED.scoped_observed_at") })}
@@ -494,6 +561,36 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
   if (!pool) return undefined;
   const quotaPoolId = String(pool.quota_pool_id);
   if (input.billingRefusal) {
+    const scope = input.quotaScope?.trim();
+    if (scope && scope !== ACCOUNT_QUOTA_SCOPE && scope !== UNRESOLVED_QUOTA_SCOPE) {
+      // Scoped billing/payment refusal (e.g. Cursor's `API` pool requiring a
+      // payment method while `Auto` stays included): hold only this scope in
+      // `account_json.billingRefusalScopes` without wiping provider readings.
+      const legacyHold = `o.source='daemon' AND COALESCE((o.account_json->>'billingRefusal')::boolean,FALSE)`;
+      const entry = `jsonb_build_object($3::text,jsonb_build_object(
+        'observedAt',to_json(statement_timestamp())#>>'{}',
+        'expiresAt',to_json(statement_timestamp()+interval '${REGISTRATION_BILLING_REFUSAL_HOLD}')#>>'{}'))`;
+      const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_billing_scope_v1", text: `INSERT INTO
+          control.registration_quota_observations AS o (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,
+            windows_json,account_json,scoped_windows_json,scoped_observed_at,scoped_expires_at)
+          SELECT $1,$2,100,statement_timestamp()-interval '1 millisecond',statement_timestamp(),'provider',NULL,
+            jsonb_build_object('billingRefusalScopes',${entry}),NULL,NULL,NULL
+        ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
+          remaining=CASE WHEN ${legacyHold} THEN 100 ELSE o.remaining END,
+          observed_at=CASE WHEN ${legacyHold} THEN statement_timestamp()-interval '1 millisecond' ELSE o.observed_at END,
+          expires_at=CASE WHEN ${legacyHold} THEN statement_timestamp() ELSE o.expires_at END,
+          source=CASE WHEN ${legacyHold} THEN 'provider' ELSE o.source END,
+          account_json=(CASE WHEN ${legacyHold} THEN COALESCE(o.account_json,'{}'::jsonb)-'billingRefusal'
+            ELSE COALESCE(o.account_json,'{}'::jsonb) END) || jsonb_build_object('billingRefusalScopes',
+            COALESCE((SELECT jsonb_object_agg(e.key,e.value)
+              FROM jsonb_each(CASE WHEN jsonb_typeof(o.account_json->'billingRefusalScopes')='object'
+                THEN o.account_json->'billingRefusalScopes' ELSE '{}'::jsonb END) e
+              WHERE lower(btrim(e.key))<>lower($3::text)),'{}'::jsonb) || ${entry})
+        RETURNING to_json(statement_timestamp()+interval '${REGISTRATION_BILLING_REFUSAL_HOLD}')#>>'{}' AS expires_at`,
+      values: [input.ownerUserId, quotaPoolId, scope], maxRows: 1 });
+      const limitedUntil = rows[0] ? new Date(String(rows[0].expires_at)).toISOString() : undefined;
+      return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}), usedUp: "scope", scope };
+    }
     // Account-level billing/payment refusals have no reset timer and do not return to @auto
     // until a direct Run succeeds on this registration.
     const rows = await tx.query<QueryResultRow>({ name: "registration_usage_limit_billing_v1", text: `INSERT INTO
@@ -541,10 +638,12 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
     usedUp: scope === undefined || scope === "" || scope === ACCOUNT_QUOTA_SCOPE ? "account" : "unresolved" };
 }
 
-/** Clear an active billing-refusal hold when a direct Run on this registration replies successfully. */
+/** Clear an active account billing-refusal hold, and any scoped billing holds
+ * matching `scopes`, when a Run on this registration replies successfully. */
 export async function clearRegistrationAccountHold(directory: AuthorityDatabase, input: {
-  requestId: string; ownerUserId: string; machineId: string; harness: string;
+  requestId: string; ownerUserId: string; machineId: string; harness: string; scopes?: readonly string[];
 }): Promise<boolean> {
+  const scopes = [...new Set((input.scopes ?? []).map(scope => scope.trim().toLowerCase()).filter(Boolean))];
   return directory.transaction({ requestId: input.requestId, operation: "registration.account-hold.clear" }, async tx => {
     const rows = await tx.query<QueryResultRow>({ name: "registration_account_hold_clear_v1", text: `DELETE FROM
         control.registration_quota_observations o
@@ -556,6 +655,36 @@ export async function clearRegistrationAccountHold(directory: AuthorityDatabase,
         AND COALESCE((o.account_json->>'billingRefusal')::boolean,FALSE)
       RETURNING o.quota_pool_id`,
     values: [input.ownerUserId, input.machineId, input.harness], maxRows: 1 });
-    return Boolean(rows[0]);
+    let cleared = Boolean(rows[0]);
+    if (scopes.length) {
+      const scopedRows = await tx.query<QueryResultRow>({ name: "registration_scoped_billing_hold_clear_v1", text: `WITH kept AS (
+          SELECT o.owner_user_id,o.quota_pool_id,
+            (SELECT jsonb_object_agg(kv.key,kv.value)
+              FROM jsonb_each(o.account_json->'billingRefusalScopes') kv
+              WHERE lower(btrim(kv.key))<>ALL($4::text[])) AS remaining_scopes,
+            o.account_json-'billingRefusalScopes' AS base_account
+          FROM control.registration_quota_observations o
+          JOIN control.agent_registration_environments e
+            ON o.owner_user_id=e.owner_user_id AND o.quota_pool_id=${REGISTRATION_QUOTA_POOL_SQL}
+          WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3
+            AND o.account_json ? 'billingRefusalScopes'
+            AND jsonb_typeof(o.account_json->'billingRefusalScopes')='object'
+            AND EXISTS (SELECT 1 FROM jsonb_object_keys(o.account_json->'billingRefusalScopes') k
+              WHERE lower(btrim(k))=ANY($4::text[]))
+          FOR UPDATE OF o
+        )
+        UPDATE control.registration_quota_observations o
+        SET account_json=CASE
+          WHEN kept.remaining_scopes IS NOT NULL
+            THEN kept.base_account||jsonb_build_object('billingRefusalScopes',kept.remaining_scopes)
+          WHEN kept.base_account='{}'::jsonb THEN NULL
+          ELSE kept.base_account END
+        FROM kept
+        WHERE o.owner_user_id=kept.owner_user_id AND o.quota_pool_id=kept.quota_pool_id
+        RETURNING o.quota_pool_id`,
+      values: [input.ownerUserId, input.machineId, input.harness, scopes], maxRows: 1 });
+      cleared = cleared || Boolean(scopedRows[0]);
+    }
+    return cleared;
   });
 }

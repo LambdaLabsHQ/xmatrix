@@ -1,5 +1,5 @@
 import { launchHarnessParameters, launchRefusal, validateHarnessParameterValues,
-  routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace,
+  routingModelOptionNamed, routingQuotaVerdict, routingQuotaPace, routingQuotaScopeConstrains,
   machineNetworkObservation, type MachineNetworkObservation, type QuotaRetryModel, type QuotaRetryRegistration,
   type RoutingModelOption } from "@xmatrix/protocol";
 import { RegistrationAccessError, type RegistrationLaunchCandidate, type RegistrationLaunchChooser,
@@ -266,14 +266,21 @@ function choiceAnswer(answer: RoutingAnswer | undefined): RoutingChoice {
 /** A message that summons nobody and that Jev reads as not asking for work. */
 export const START_INTENT_DECLINED = "start_intent_declined";
 
-/** The candidate without its billing refusal's hold: a refused account's
- * reading is the daemon's hold alone (`registrationQuotaUsage`), one used-up
- * account window, so dropping the account windows leaves its scoped ones. */
+/** The candidate without its billing refusal's holds: an account billing hold
+ * reads as one used-up account window and a scoped billing hold as one
+ * `billingRefusal: true` scoped window, so lifting them leaves all real
+ * provider-measured windows intact. */
 function liftBillingHold<T extends RegistrationLaunchCandidate>(candidate: T): T {
   const usage = candidate.observations?.quota?.usage;
-  if (!candidate.accountBillingRefusal || !usage || typeof usage !== "object") return candidate;
+  const heldScopes = new Set((candidate.billingRefusalScopes ?? []).map(scope => scope.trim().toLowerCase()));
+  if ((!candidate.accountBillingRefusal && !heldScopes.size) || !usage || typeof usage !== "object") return candidate;
+  const scoped = heldScopes.size && Array.isArray(usage.scopedQuotaUsages)
+    ? usage.scopedQuotaUsages.filter(window =>
+        !(window.billingRefusal === true && typeof window.scope === "string" && heldScopes.has(window.scope.trim().toLowerCase())))
+    : usage.scopedQuotaUsages;
   return { ...candidate, observations: { ...candidate.observations!, quota: { ...candidate.observations!.quota!,
-    usage: { ...usage, quotaUsages: [] } } } };
+    usage: { ...usage, ...(candidate.accountBillingRefusal ? { quotaUsages: [] } : {}),
+      ...(scoped !== undefined ? { scopedQuotaUsages: scoped } : {}) } } } };
 }
 
 /** Jev's opaque handles resolve to listed values only, and the environment that
@@ -327,8 +334,12 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // to weigh. A used-up model is no option; an environment is out only when
     // its account is used up, or every model it could run is.
     const now = Date.now();
-    const modelExhausted = (candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">) =>
-      providerQuotaExhausted(candidate, now, catalogRow(candidate, option));
+    const billingHeldScope = (candidate: RegistrationLaunchCandidate, row: RoutingModelOption | undefined) =>
+      automaticHarness === true && Boolean(candidate.billingRefusalScopes?.some(scope => routingQuotaScopeConstrains(scope, row)));
+    const modelExhausted = (candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">) => {
+      const row = catalogRow(candidate, option);
+      return providerQuotaExhausted(candidate, now, row) || billingHeldScope(candidate, row);
+    };
     const parameterPairs = (candidate: RegistrationLaunchCandidate) => modelPairs(candidate, tags).filter(option =>
       !tags.parameters || !candidate.parameterModel ||
       (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);

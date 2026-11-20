@@ -313,20 +313,26 @@ reply (`recordAgentLaunchFirstReply`), as a message in the conversation
 does.
 
 Explicit summons (`@<harness>` or `@auto harness:...`) are never blocked on
-cached sign-in state or account-level billing refusals: only the program knows
+cached sign-in state or billing refusals: only the program knows
 whether its provider accepts it now, so a named summon is always given to its
 machine (and a stale copy never refuses a summon when the user signed in outside
-xMatrix). For a named summon the billing refusal's usage-limit hold, which reads as
-one used-up account window, also takes none of its models away; scoped windows
+xMatrix). For a named summon both an account billing refusal's usage-limit hold
+and a scoped billing refusal hold take none of its models away; scoped windows
 the provider measured used up still refuse their models. Unnamed `@auto` routing, however, excludes candidates whose harness
 is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
 or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
-under an account-level billing/payment refusal (such as missing payment method or
-insufficient balance). A signed-out candidate returns to unnamed `@auto` once a
+under an account-level billing/payment refusal (such as insufficient balance).
+When a payment-method refusal applies to one model's quota scope (such as Cursor's
+`API` pool refusing `"Add a payment method to continue"` while `Auto` stays
+included), xMatrix holds only that scope in `billingRefusalScopes`: unnamed
+`@auto` excludes models in the refused scope while keeping the registration
+routable on its other models, the Agents page keeps showing the open pool rather
+than `"Out of quota · window unavailable"`, and a successful reply clears only
+the scope that Run actually ran. A signed-out candidate returns to unnamed `@auto` once a
 newer harness inventory check reports `signed_in` or a Run on that registration
-replies; an account-level billing refusal holds without a time-based 1-hour
-expiry and clears only when an explicit Run on that registration replies
-successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
+replies; a billing refusal holds without a time-based 1-hour
+expiry and clears only when a Run on that registration (or on the refused scope)
+replies successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
 out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed with a
 sign-in notice (`HARNESS_SIGNED_OUT_NOTICE_KIND`): when an `@auto` summon never
 answered, the message still falls back once (`dispatchStartupFallback`) or via

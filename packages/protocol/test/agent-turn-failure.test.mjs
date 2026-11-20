@@ -11,6 +11,7 @@ const {
   agentUsageLimitFromError,
   boundAgentTurnFailureDetail,
   isAccountBillingRefusalError,
+  isScopedBillingRefusalError,
   isAgentTurnFailureLifecycle,
   isAgentUsageLimitLifecycle,
 } = await loadTypescriptModule(new URL("../src/authority-foundation.ts", import.meta.url));
@@ -157,4 +158,13 @@ test("Hub reads a usage limit from the original provider error, never a plain ra
     "",
     undefined,
   ]) assert.equal(isAccountBillingRefusalError(error), false, String(error));
+  assert.equal(isScopedBillingRefusalError("Cursor refused the turn for its account: Add a payment method to continue"), true);
+  for (const error of [
+    "DeepSeek Harness ACP turn failed: Internal error: turn failed: Insufficient Balance (request_id: 92cd1934)",
+    "402 Insufficient credits. Add more using https://openrouter.ai/settings/credits",
+    "Your credit balance is too low to access the Anthropic API.",
+    "账户余额不足，请充值后重试",
+    "",
+    undefined,
+  ]) assert.equal(isScopedBillingRefusalError(error), false, String(error));
 });

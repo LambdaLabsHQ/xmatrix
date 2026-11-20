@@ -1,4 +1,5 @@
 import { cleanRepositoryBaseline, localLlmUsage } from "@xmatrix/protocol";
+import { modelQuotaScopes } from "./agent-registration-quota-probe.js";
 import { hostnameMetadata } from "./hostname-metadata.js";
 import { readFirstMessageLaunchChoices } from "./first-message-launch-choice.js";
 import { readMessageAsks } from "./message-asks.js";
@@ -1550,9 +1551,10 @@ export class PostgresRuntimeRepository {
     return Boolean(rows[0]);
   }
 
-  /** The registration bound to a Run, when one exists (for clearing account holds on first reply). */
+  /** The registration bound to a Run, plus the model quota scopes it ran when
+   * known (for clearing account or scoped billing holds on first reply). */
   async readRunRegistration(input: { requestId: string; channelId: string; runId: string }): Promise<{
-    ownerUserId: string; machineId: string; harness: string;
+    ownerUserId: string; machineId: string; harness: string; scopes?: string[];
   } | undefined> {
     const requestId = text(input.requestId, "requestId", 200);
     const channelId = text(input.channelId, "channelId", 300);
@@ -1561,11 +1563,22 @@ export class PostgresRuntimeRepository {
     if (!route) return undefined;
     const placement = await this.spaces.resolve(requestId, "runtime.run-registration.placement", route.spaceId);
     const rows = await this.spaces.transaction(requestId, "runtime.run-registration", placement, tx => tx.query<QueryResultRow>({
-      name: "runtime_run_registration_read_v1", text: `SELECT owner_user_id,machine_id,harness
-        FROM data.run_agent_registrations WHERE run_id=$1 LIMIT 1`,
+      name: "runtime_run_registration_read_v2", text: `SELECT r.owner_user_id,r.machine_id,r.harness,
+          i.presentation_json->>'model' AS model,i.presentation_json->'models' AS models,
+          run.metadata_json->>'preferredRuntimeModel' AS preferred_model,
+          run.metadata_json->>'requestedRuntimeModel' AS requested_model
+        FROM data.run_agent_registrations r
+        JOIN data.runs run ON run.run_id=r.run_id
+        LEFT JOIN data.instances i ON i.run_id=r.run_id
+        WHERE r.run_id=$1 LIMIT 1`,
       values: [text(input.runId, "runId", 300)], maxRows: 1 }));
-    return rows[0] ? { ownerUserId: String(rows[0].owner_user_id), machineId: String(rows[0].machine_id),
-      harness: String(rows[0].harness) } : undefined;
+    if (!rows[0]) return undefined;
+    const row = rows[0];
+    const model = [row.model, row.preferred_model, row.requested_model]
+      .find((value): value is string => typeof value === "string" && Boolean(value.trim()));
+    const scopes = modelQuotaScopes(row.models, model);
+    return { ownerUserId: String(row.owner_user_id), machineId: String(row.machine_id),
+      harness: String(row.harness), ...(scopes.length ? { scopes } : {}) };
   }
 
   async getChannelAgentRebornTarget(input: { requestId: string; channelId: string;
