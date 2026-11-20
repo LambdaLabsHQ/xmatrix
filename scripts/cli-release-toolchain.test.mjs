@@ -21,12 +21,16 @@ function compilerInstalls(steps) {
   });
 }
 
-test("Unix CLI artifacts use the same immutable compiler installation as PR Clippy", () => {
+test("Unix CLI artifacts and release cache use the same immutable compiler installation as PR Clippy", () => {
   const ci = compilerInstalls(readYaml(".github/workflows/ci.yml").jobs["rust-cli"].steps);
   const release = compilerInstalls(readYaml(".github/workflows/cli-build.yml").jobs.build.steps);
+  const cache = compilerInstalls(readYaml(".github/workflows/cli-release-cache.yml").jobs.warm.steps);
   assert.equal(ci.length, 1, "PR must install one explicit compiler");
   assert.equal(release.length, 1, "release must install one explicit compiler");
+  assert.equal(cache.length, 1, "release cache must install one explicit compiler");
   assert.match(ci[0].uses, /@[a-f0-9]{40}$/u, "compiler action must be immutable");
   assert.equal(release[0].uses, ci[0].uses);
   assert.equal(release[0].with?.toolchain, ci[0].with?.toolchain);
+  assert.equal(cache[0].uses, ci[0].uses);
+  assert.equal(cache[0].with?.toolchain, ci[0].with?.toolchain);
 });

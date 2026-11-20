@@ -1,0 +1,98 @@
+name: CLI Release Cache
+
+# Maintains warm per-target release kache stores on the default branch (`main`)
+# for ephemeral GitHub-hosted runners. Production CLI releases run on immutable
+# version tags (`refs/tags/xmatrix-v*`), which can read Actions caches scoped to
+# `main` but cannot read caches written by earlier tags. Because library crates
+# in `packages/cli-rs` keep version 0.0.0, every dependency and unchanged crate
+# hits kache byte-for-byte when `cli-build.yml` stamps a release version.
+on:
+  push:
+    branches: [main]
+    paths:
+      - packages/cli-rs/**
+      - .github/workflows/cli-build.yml
+      - .github/workflows/cli-release-cache.yml
+      - .github/actions/cli-release-kache-restore/**
+      - .github/actions/cli-release-kache-save/**
+      - .github/actions/disable-windows-defender/**
+      - .github/actions/setup-unix-cli-release-rust/**
+      - .github/actions/setup-unix-rust-toolchain/**
+      - .github/actions/setup-windows-rust-cli/**
+      - .github/actions/setup-rust-kache/**
+      - .github/scripts/setup-kache.sh
+      - .github/scripts/setup-kache.ps1
+      - scripts/kache.toml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    if: vars.XMATRIX_RUNNER_FLEET != 'self-hosted'
+    concurrency:
+      group: cli-release-cache-${{ matrix.part }}
+      cancel-in-progress: true
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - part: linux-x64
+            target: x86_64-unknown-linux-gnu
+            runner: ubuntu-24.04
+          - part: macos-arm64
+            target: aarch64-apple-darwin
+            runner: macos-26
+          - part: macos-x64
+            target: x86_64-apple-darwin
+            runner: macos-26-intel
+          - part: windows-x64
+            target: x86_64-pc-windows-msvc
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    env:
+      CARGO_INCREMENTAL: "0"
+    timeout-minutes: 45
+    steps:
+      - uses: ./.github/actions/disable-windows-defender
+
+      - uses: actions/checkout@v6
+
+      - id: kache-cache
+        uses: ./.github/actions/cli-release-kache-restore
+        with:
+          part: ${{ matrix.part }}
+
+      - name: Setup Windows Rust CLI
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-windows-rust-cli
+        with:
+          validate-kache-contract: "false"
+          rust-target: ${{ matrix.target }}
+
+      - name: Setup Unix Rust toolchain and kache
+        if: runner.os != 'Windows'
+        uses: ./.github/actions/setup-unix-cli-release-rust
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build release binary to warm kache (Unix)
+        if: runner.os != 'Windows'
+        working-directory: packages/cli-rs
+        shell: bash
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release binary to warm kache (Windows)
+        if: runner.os == 'Windows'
+        working-directory: packages/cli-rs
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --target ${{ matrix.target }}
+          if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
+
+      - if: steps.kache-cache.outputs.cache-hit != 'true'
+        uses: ./.github/actions/cli-release-kache-save
+        with:
+          part: ${{ matrix.part }}
