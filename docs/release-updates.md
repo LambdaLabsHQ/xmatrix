@@ -6,10 +6,9 @@ Web's `normalizeQuotaUsageList` sliced deduplicated quota windows to three
 entries (`.slice(0, 3)`). For providers with two scoped pools and both 5h and
 weekly windows (such as Antigravity's `Claude & GPT` and `Gemini` 5h/1w pools),
 sorting placed `Gemini · 1w` fourth and silently dropped it from both the
-rendered agent quota chips and `usageLimitSummary`. The display ceiling now
-matches the protocol limit (`8` windows) so all scoped windows render and
-participate in limit verdicts. Web only. Recovery is a CI-validated beta
-reverting this change.
+rendered agent quota chips and `usageLimitSummary`. The arbitrary display slice
+is removed so every deduplicated window renders and participates in limit
+verdicts. Web only. Recovery is a CI-validated beta reverting this change.
 
 ## Unreleased: tolerate small clock skew on quota probes and prune dead probe results
 

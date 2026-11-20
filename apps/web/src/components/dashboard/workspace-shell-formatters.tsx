@@ -535,11 +535,9 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
     });
-  // Match the protocol window ceiling (`ROUTING_QUOTA_MAX_WINDOWS = 8`) so
-  // providers with multiple scoped pools (e.g. Antigravity's Gemini +
-  // Claude & GPT 5h/1w) keep every window in both display tags and limit verdicts.
-  return dedupeQuotaUsagesByLabel(selected.sort(compareQuotaUsageForDisplay))
-    .slice(0, 8);
+  // Keep every deduplicated window: slicing here would hide scoped pools from
+  // both rendered chips and `usageLimitSummary` limit verdicts.
+  return dedupeQuotaUsagesByLabel(selected.sort(compareQuotaUsageForDisplay));
 }
 
 /** A provider may report the same semantic window through label and window forms. */
