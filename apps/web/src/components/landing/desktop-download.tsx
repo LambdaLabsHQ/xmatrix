@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
-import { Globe, Smartphone } from "lucide-react";
+import { ChevronDown, Globe, Smartphone } from "lucide-react";
 import Link from "next/link";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
@@ -59,21 +59,19 @@ export function DesktopDownload() {
   };
   const current = channels.find(({ id }) => id === channel)!;
   const suffix = channel === "dev" ? " preview" : "";
-  /* A flat track on paper with a white tab: a capsule on phones, a 10px track around 7px tabs on desktop. */
+  /* Quiet text beside the main download: the system's own picker, no track or border. */
   const channelSwitch = (
-    <div className="inline-flex rounded-full bg-[oklch(0.255_0.025_58/0.07)] p-[3px] sm:rounded-[10px]" role="group" aria-label="Release channel">
-      {channels.map(({ id, label }) => (
-        <button
-          key={id}
-          type="button"
-          aria-pressed={id === channel}
-          onClick={() => choose(id)}
-          className="h-[30px] rounded-full px-3.5 text-[13px] font-[650] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--site-wood-deep)] aria-pressed:bg-white aria-pressed:text-[var(--site-ink)] aria-pressed:shadow-[0_1px_2px_oklch(0.18_0.04_55/0.12)] sm:rounded-[7px]"
-        >
-          {label}
-        </button>
-      ))}
-    </div>
+    <label className="relative inline-flex h-11 items-center gap-1 text-sm font-[550] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-within:text-[var(--site-ink)]">
+      <span className="sr-only">Release channel</span>
+      <select
+        value={channel}
+        onChange={(event) => choose(event.target.value as Channel)}
+        className="cursor-pointer appearance-none rounded-md border-0 !bg-transparent !shadow-none py-1 pl-1 pr-5 text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--site-wood-deep)]"
+      >
+        {channels.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-0 size-4" strokeWidth={2} aria-hidden />
+    </label>
   );
 
   return (
