@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: a Windows Supervisor with an unreadable journal starts its own release
+
+The Windows Supervisor starts the daemon its `activation-journal.json` names.
+When neither that file nor its `.previous` image could be read (bad JSON, a
+checksum mismatch, a payload that fails validation), the Supervisor exited, so
+the machine had no daemon; a daemon is the only way a fixed release reaches a
+machine, which left a person running `install.ps1` by hand. The Supervisor now
+moves both files aside as `activation-journal.json*.unreadable-<unix seconds>`,
+writes the journal a first start writes (its own Authenticode-verified
+executable as the committed release) and starts that daemon, which updates
+itself as usual; it records `supervisor / activation_journal_unreadable` in
+`continuity-events.json`. An I/O error other than a missing file still stops
+the Supervisor. Nothing reports this to the Hub yet: `xmatrix daemon doctor`
+shows the event on the machine. Windows CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
 ## Unreleased: the daemon keeps unconfirmed results, not a command journal
 
 On 2026-11-20 one stored quota reading that 4.7.0 could not read back made two

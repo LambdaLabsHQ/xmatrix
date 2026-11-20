@@ -413,6 +413,42 @@ fn run_windows_supervisor(supervisor_exe: &Path, hub_url: &str) -> error::Result
             journal.store(&payload).map_err(continuity_error)?;
             payload
         }
+        // A journal that cannot be read names no daemon to start. Exiting here
+        // would leave the machine without a daemon, and the daemon is the only
+        // way a fixed release reaches it. The unreadable files are kept, and
+        // this Supervisor's own release starts as it does on a first start;
+        // that daemon then updates itself as usual.
+        Err(
+            error @ (xmatrix_windows_continuity::ContinuityError::Json(_)
+            | xmatrix_windows_continuity::ContinuityError::Invalid(_)
+            | xmatrix_windows_continuity::ContinuityError::ChecksumMismatch
+            | xmatrix_windows_continuity::ContinuityError::FrameTooLarge(_)),
+        ) => {
+            let kept = journal.set_aside_unreadable();
+            let payload = initial_journal(supervisor_exe)?;
+            journal.store(&payload).map_err(continuity_error)?;
+            eprintln!(
+                "Machine supervisor could not read its activation journal ({error}); kept {kept:?} and started from its own release {}",
+                payload.committed.version
+            );
+            let _ = xmatrix_windows_continuity::ContinuityEventLog::new(
+                daemon_root.join("continuity-events.json"),
+            )
+            .append(
+                "supervisor",
+                "activation_journal_unreadable",
+                None,
+                Some(&payload.committed.sha256),
+                None,
+                Some(match error {
+                    xmatrix_windows_continuity::ContinuityError::Json(_) => "json",
+                    xmatrix_windows_continuity::ContinuityError::ChecksumMismatch => "checksum",
+                    xmatrix_windows_continuity::ContinuityError::FrameTooLarge(_) => "too_large",
+                    _ => "invalid",
+                }),
+            );
+            payload
+        }
         Err(error) => return Err(continuity_error(error)),
     };
     let target = verified_committed_target(&daemon_root, &payload.committed)?;
