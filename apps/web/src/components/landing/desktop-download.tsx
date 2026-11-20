@@ -1,157 +1,98 @@
-import { Cpu, Download, MonitorDown, Package, Smartphone } from "lucide-react";
+import type { ReactNode } from "react";
+import { Globe, Smartphone } from "lucide-react";
 import Link from "next/link";
-import { LiquidGlassCard, LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+
+import { MachineGlyph } from "@/components/dashboard/machine-glyph";
 
 import { DownloadRecommendation } from "./download-recommendation";
 
-const channels = [
+type Build = { label: string; href: string };
+type PlatformRow = { name: string; icon: ReactNode; note: string; notes?: string; builds: Build[] };
+
+const desktop = (channel: "stable" | "dev", file: string) => `/api/desktop/releases/${channel}/latest-${file}`;
+const notes = (component: "desktop" | "android", channel: "stable" | "dev") => `/releases?component=${component}&channel=${channel}`;
+
+const platforms: PlatformRow[] = [
   {
-    title: "Stable",
-    description: "Tested releases for everyday work.",
-    badge: "Recommended",
-    builds: [
-      ["Apple Silicon", "M-series Macs", "/api/desktop/releases/stable/latest-arm64.dmg", "/api/desktop/releases/stable/latest-arm64.zip"],
-      ["Intel", "Intel-based Macs", "/api/desktop/releases/stable/latest-x64.dmg", "/api/desktop/releases/stable/latest-x64.zip"],
+    name: "macOS", icon: <MachineGlyph os="macos" />, note: "Desktop app", notes: notes("desktop", "stable"),
+    builds: [{ label: "Apple Silicon", href: desktop("stable", "arm64.dmg") }, { label: "Intel", href: desktop("stable", "x64.dmg") }],
+  },
+  {
+    name: "Windows", icon: <MachineGlyph os="windows" className="size-[18px]" />, note: "Desktop app, x64", notes: notes("desktop", "stable"),
+    builds: [{ label: "Installer", href: desktop("stable", "x64.exe") }],
+  },
+  {
+    name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: "Phone app", notes: notes("android", "stable"),
+    builds: [{ label: "APK", href: "/api/android/releases/stable/latest.apk" }],
+  },
+  {
+    name: "Web", icon: <Globe className="size-5" strokeWidth={1.75} aria-hidden />, note: "iPhone, iPad, Linux and any browser",
+    builds: [{ label: "Open", href: "/app" }],
+  },
+];
+
+/** Everything that is not the tested installer, as plain links under the list. */
+const more: { title: string; links: Build[] }[] = [
+  {
+    title: "Preview builds",
+    links: [
+      { label: "macOS Apple Silicon", href: desktop("dev", "arm64.dmg") },
+      { label: "macOS Intel", href: desktop("dev", "x64.dmg") },
+      { label: "Windows", href: desktop("dev", "x64.exe") },
+      { label: "Release notes", href: notes("desktop", "dev") },
     ],
   },
   {
-    title: "Dev",
-    description: "Latest preview build for early access.",
-    badge: "Latest",
-    builds: [
-      ["Apple Silicon", "M-series Macs", "/api/desktop/releases/dev/latest-arm64.dmg", "/api/desktop/releases/dev/latest-arm64.zip"],
-      ["Intel", "Intel-based Macs", "/api/desktop/releases/dev/latest-x64.dmg", "/api/desktop/releases/dev/latest-x64.zip"],
+    title: "macOS as ZIP",
+    links: [
+      { label: "Apple Silicon", href: desktop("stable", "arm64.zip") },
+      { label: "Intel", href: desktop("stable", "x64.zip") },
+      { label: "Preview Apple Silicon", href: desktop("dev", "arm64.zip") },
+      { label: "Preview Intel", href: desktop("dev", "x64.zip") },
     ],
   },
 ];
 
 export function DesktopDownload() {
   return (
-    <section id="download" className="x-section py-24">
+    <section id="download" className="x-section download-page">
       <div className="x-container">
         <DownloadRecommendation />
-        <div id="all-downloads" className="scroll-mt-24" />
-        <div className="grid min-w-0 gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-end">
-          <div className="min-w-0">
-            <span className="x-eyebrow">Apps</span>
-            <h1 className="site-display mt-5 max-w-xl text-3xl font-semibold text-foreground sm:text-5xl">
-              Stay close to the work, wherever it runs.
-            </h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground">
-              Use xMatrix on desktop or mobile to see active work, respond to agents, and keep
-              everyone coordinated from one shared place.
-            </p>
-          </div>
 
-          <div className="x-mobile-card-scroller grid min-w-0 gap-4 md:grid-cols-2">
-            {channels.map((channel) => (
-              <WoodPanel key={channel.title} className="min-w-0 p-5">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">
-                      {channel.badge}
-                    </p>
-                    <h3 className="mt-3 text-2xl font-semibold tracking-tight">{channel.title}</h3>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">{channel.description}</p>
-                    <Link className="mt-2 inline-block text-sm text-primary underline" href={`/releases?component=desktop&channel=${channel.title === "Dev" ? "dev" : "stable"}`}>Release notes</Link>
-                  </div>
-                  <LiquidGlassCard className="flex size-11 items-center justify-center">
-                    <Download className="size-5 text-primary" />
-                  </LiquidGlassCard>
+        <div id="all-downloads" className="mx-auto mt-24 max-w-2xl scroll-mt-24 sm:mt-32">
+          <h2 className="download-list-heading">All platforms</h2>
+          <ul className="download-list">
+            {platforms.map(({ name, icon, note, notes: releaseNotes, builds }) => (
+              <li key={name} className="download-row">
+                <span className="download-row-icon">{icon}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-semibold text-foreground">{name}</p>
+                  <p className="text-sm text-muted-foreground">
+                    <span className="block sm:inline">{note}</span>
+                    {releaseNotes && <><span className="hidden sm:inline"> · </span><Link href={releaseNotes} className="download-quiet-link" aria-label={`${name} release notes`}>Release notes</Link></>}
+                  </p>
                 </div>
-
-                <div className="mt-6 space-y-3">
-                  {channel.builds.map(([title, description, dmg, zip]) => (
-                    <div key={title}>
-                      <div className="flex items-center gap-3">
-                        <LiquidGlassCard className="flex size-8 shrink-0 items-center justify-center">
-                          <Cpu className="size-4 text-primary" />
-                        </LiquidGlassCard>
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold">{title}</p>
-                          <p className="text-xs text-muted-foreground">{description}</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row">
-                        <LiquidGlassPill as="a" href={dmg} className="inline-flex h-9 min-w-0 flex-1 items-center justify-center gap-2 px-3 text-sm font-semibold">
-                          <Download className="size-4" />
-                          DMG
-                        </LiquidGlassPill>
-                        <LiquidGlassPill as="a" href={zip} className="inline-flex h-9 min-w-0 items-center justify-center gap-2 px-3 text-sm font-semibold sm:w-20">
-                          <Package className="size-4" />
-                          ZIP
-                        </LiquidGlassPill>
-                      </div>
-                    </div>
+                <div className="flex shrink-0 flex-wrap justify-end gap-2">
+                  {builds.map((build) => (
+                    <a key={build.href} href={build.href} className="download-build" aria-label={`${name} ${build.label}`}>{build.label}</a>
                   ))}
                 </div>
-              </WoodPanel>
+              </li>
             ))}
-          </div>
-        </div>
+          </ul>
 
-        <div className="x-mobile-card-scroller mt-6 grid min-w-0 gap-4 md:grid-cols-2">
-          <WoodPanel className="min-w-0 p-5">
-            <div className="flex h-full flex-col gap-5 md:justify-between">
-              <div className="flex items-start gap-4">
-                <LiquidGlassCard className="flex size-11 shrink-0 items-center justify-center">
-                  <MonitorDown className="size-5 text-primary" />
-                </LiquidGlassCard>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Windows</p>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-tight">Desktop App</h3>
-                  <p className="mt-2 flex gap-3 text-sm text-primary underline"><Link href="/releases?component=desktop&channel=stable">Stable release notes</Link><Link href="/releases?component=desktop&channel=dev">Dev release notes</Link></p>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    Stay connected to agent work from the native Windows app.
-                  </p>
-                </div>
+          <dl className="mt-8 space-y-3 text-sm text-muted-foreground">
+            {more.map(({ title, links }) => (
+              <div key={title} className="flex flex-col gap-x-4 gap-y-1 sm:flex-row">
+                <dt className="shrink-0 font-semibold text-foreground sm:w-32">{title}</dt>
+                <dd className="flex flex-wrap gap-x-4 gap-y-1">
+                  {links.map((link) => (
+                    <a key={link.href} href={link.href} className="download-quiet-link" aria-label={`${title}: ${link.label}`}>{link.label}</a>
+                  ))}
+                </dd>
               </div>
-              <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
-                <LiquidGlassPill
-                  as="a"
-                  href="/api/desktop/releases/stable/latest-x64.exe"
-                  className="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 px-4 text-sm font-semibold"
-                >
-                  <Download className="size-4" />
-                  Stable EXE
-                </LiquidGlassPill>
-                <LiquidGlassPill
-                  as="a"
-                  href="/api/desktop/releases/dev/latest-x64.exe"
-                  className="inline-flex h-11 min-w-0 flex-1 items-center justify-center gap-2 px-4 text-sm font-semibold"
-                >
-                  <Package className="size-4" />
-                  Dev EXE
-                </LiquidGlassPill>
-              </div>
-            </div>
-          </WoodPanel>
-
-          <WoodPanel className="min-w-0 p-5">
-            <div className="flex h-full flex-col gap-5 md:justify-between">
-              <div className="flex items-start gap-4">
-                <LiquidGlassCard className="flex size-11 shrink-0 items-center justify-center">
-                  <Smartphone className="size-5 text-primary" />
-                </LiquidGlassCard>
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary">Android</p>
-                  <h3 className="mt-2 text-2xl font-semibold tracking-tight">APK</h3>
-                  <Link className="mt-2 inline-block text-sm text-primary underline" href="/releases?component=android&channel=stable">Release notes</Link>
-                  <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-                    Stay connected to agent work from Android.
-                  </p>
-                </div>
-              </div>
-              <LiquidGlassPill
-                as="a"
-                href="/api/android/releases/stable/latest.apk"
-                className="inline-flex h-11 items-center justify-center gap-2 px-4 text-sm font-semibold"
-              >
-                <Download className="size-4" />
-                Download APK
-              </LiquidGlassPill>
-            </div>
-          </WoodPanel>
+            ))}
+          </dl>
         </div>
       </div>
     </section>
