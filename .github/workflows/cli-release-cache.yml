@@ -55,9 +55,10 @@ jobs:
       CARGO_INCREMENTAL: "0"
     timeout-minutes: 45
     steps:
-      - uses: ./.github/actions/disable-windows-defender
-
       - uses: actions/checkout@v6
+
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/disable-windows-defender
 
       - id: kache-cache
         uses: ./.github/actions/cli-release-kache-restore

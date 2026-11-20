@@ -550,11 +550,11 @@ jobs:
       # this job's build, cache and toolchain directories; a GitHub-hosted VM,
       # discarded after the job, turns real-time scanning off altogether. A
       # runner without the right to change Defender keeps scanning and says so.
-      - uses: ./.github/actions/disable-windows-defender
       # Default clean checkout; kache restores compile artifacts across jobs.
       - *checkout_selected_ref
       - *setup_node
       - *select_ci_ref
+      - uses: ./.github/actions/disable-windows-defender
       # An ephemeral hosted runner keeps kache's store on the workspace volume
       # (hard links need one volume) and restores it from the Actions cache.
       # v2 archives only persistent payloads after the cache writer exits;

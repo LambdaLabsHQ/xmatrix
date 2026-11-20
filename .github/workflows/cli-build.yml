@@ -167,9 +167,10 @@ jobs:
       # worktree target. In-package packages/cli-rs/target stays job-local.
       # Do not inject a macOS proxy endpoint here; its runner service owns it.
       # Windows retains its separately configured system TUN route.
-      - uses: ./.github/actions/disable-windows-defender
-
       - uses: actions/checkout@v6
+
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/disable-windows-defender
 
       # Hosted CLI releases run on immutable version tags (`refs/tags/xmatrix-v*`),
       # which restore the warm per-target kache store maintained on `main`
