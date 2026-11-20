@@ -1226,9 +1226,9 @@ test("filterMentionCandidates supports second-level goal command completion", ()
   );
 });
 
-/** Three online candidates of one kind: `kind:1` … `kind:3`. */
-function threeOnline(kind, label) {
-  return [1, 2, 3].map((n) => ({ id: `${kind}:${n}`, name: `${label} ${n}`, kind, status: "online" }));
+/** Four online candidates of one kind: `kind:1` … `kind:4`. */
+function fourOnline(kind, label) {
+  return [1, 2, 3, 4].map((n) => ({ id: `${kind}:${n}`, name: `${label} ${n}`, kind, status: "online" }));
 }
 
 function sectionSummary(sections) {
@@ -1242,19 +1242,25 @@ function sectionSummary(sections) {
 
 test("groupedMentionCandidates separates agent, human, and app candidates with two per section", () => {
   const candidates = [
-    ...threeOnline("agent", "Agent"),
-    ...threeOnline("user", "Human"),
-    ...threeOnline("app", "App"),
+    ...fourOnline("agent", "Agent"),
+    ...fourOnline("user", "Human"),
+    ...fourOnline("app", "App"),
   ];
 
   assert.deepEqual(
     sectionSummary(groupedMentionCandidates(candidates)),
     [
-      { label: "Agent", startIndex: 0, hiddenCount: 1, ids: ["agent:1", "agent:2"] },
-      { label: "Human", startIndex: 3, hiddenCount: 1, ids: ["user:1", "user:2"] },
-      { label: "App", startIndex: 6, hiddenCount: 1, ids: ["app:1", "app:2"] },
+      { label: "Agent", startIndex: 0, hiddenCount: 2, ids: ["agent:1", "agent:2"] },
+      { label: "Human", startIndex: 3, hiddenCount: 2, ids: ["user:1", "user:2"] },
+      { label: "App", startIndex: 6, hiddenCount: 2, ids: ["app:1", "app:2"] },
     ]
   );
+});
+
+test("an open section never folds a single candidate: the row it would take shows that candidate", () => {
+  const candidates = [1, 2, 3].map((n) => ({ id: `agent:${n}`, name: `Agent ${n}`, kind: "agent", status: "online" }));
+  assert.deepEqual(sectionSummary(groupedMentionCandidates(candidates)),
+    [{ label: "Agent", startIndex: 0, hiddenCount: 0, ids: ["agent:1", "agent:2", "agent:3"] }]);
 });
 
 test("launch conditions are one section after the Agents; Auto is listed with the Agents", () => {
@@ -1267,13 +1273,13 @@ test("launch conditions are one section after the Agents; Auto is listed with th
 });
 
 test("groupedMentionCandidates expands selected sections and removes their more row", () => {
-  const candidates = [...threeOnline("agent", "Agent"), ...threeOnline("user", "Human")];
+  const candidates = [...fourOnline("agent", "Agent"), ...fourOnline("user", "Human")];
 
   assert.deepEqual(
     sectionSummary(groupedMentionCandidates(candidates, { expandedKinds: ["agent"] })),
     [
-      { label: "Agent", startIndex: 0, hiddenCount: 0, ids: ["agent:1", "agent:2", "agent:3"] },
-      { label: "Human", startIndex: 3, hiddenCount: 1, ids: ["user:1", "user:2"] },
+      { label: "Agent", startIndex: 0, hiddenCount: 0, ids: ["agent:1", "agent:2", "agent:3", "agent:4"] },
+      { label: "Human", startIndex: 4, hiddenCount: 2, ids: ["user:1", "user:2"] },
     ]
   );
 });

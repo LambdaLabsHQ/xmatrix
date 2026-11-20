@@ -729,6 +729,12 @@ html[data-app-theme] .xmatrix-app.xmatrix-app.xmatrix-app.xmatrix-app .page-comm
   border-radius: 0 !important;
 }
 .xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .font-semibold { font-weight: 400; }
+/* Its fold row is one more quiet line of the menu, in the names' column and size; it opens in place, so no arrow. */
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-suggestions .app-mention-category button.app-mention-category-more {
+  min-height: 2rem;
+  font-size: 0.875rem;
+}
+.xmatrix-app.xmatrix-app .page-comment-box .app-mention-category-more > svg { display: none; }
 /* A caret's name shows while its person moves or types and goes about five seconds later, as in
    Google Docs, leaving the caret with a square at its top; hovering brings the name back. */
 @keyframes page-cursor-name {
