@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { publicMachineStartupFailure, repositoryAccessUnavailableDetail } from "../dist/machine-startup-failure.js";
+import { machineNotAnsweringDetail, machineReconnectExpiredDetail, publicMachineStartupFailure,
+  repositoryAccessUnavailableDetail } from "../dist/machine-startup-failure.js";
 
 test("repository preparation errors have the original cause with stable codes", () => {
   for (const [detail, code] of [["base_ref_unresolved", "repository_base_unresolved"],
@@ -87,4 +88,14 @@ test("a harness whose launcher the daemon cannot find is named with its install"
   assert.match(failure.summary, /OpenCode \(`opencode`\) is not installed/u);
   assert.match(failure.summary, /npm install -g @opencode\/cli/u);
   assert.match(failure.summary, /~\/\.local\/bin/u);
+});
+
+test("a start the Hub ended for a machine that never answered says so, with its own code", () => {
+  const silent = publicMachineStartupFailure(machineNotAnsweringDetail(3));
+  assert.equal(silent.code, "machine_not_answering");
+  assert.equal(silent.summary,
+    "machine_not_answering: the machine is connected but did not answer the start command, sent to it 3 times. Nothing was started.");
+  const away = publicMachineStartupFailure(machineReconnectExpiredDetail());
+  assert.equal(away.code, "machine_reconnect_expired");
+  assert.match(away.summary, /did not reconnect in time/u);
 });

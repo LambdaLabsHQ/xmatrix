@@ -186,6 +186,9 @@ export const roomText = (headroom: number | undefined) => headroom === undefined
 export function placementReason(ranking: readonly LaunchPlacementCandidate[], compared: boolean): string {
   const [chosen] = ranking;
   if (!chosen) return "";
+  // The machine's breaker: one that left the Hub's last command unanswered is tried after every other.
+  const quiet = !chosen.machineUnansweredAt && ranking.find(item => item.machineUnansweredAt && item.fit >= chosen.fit);
+  if (quiet) return `${quiet.machineName ?? "Its machine"} left the last command sent to it unanswered, so ${quiet.harness} there goes last`;
   // The breaker: an environment that just failed to start is tried after every other.
   const failed = !chosen.startupFailedAt && ranking.find(item => item.startupFailedAt && item.fit >= chosen.fit);
   if (failed) return `${failed.harness}${failed.machineName ? ` on ${failed.machineName}` : ""} failed to start in the last 30 minutes, so it goes last`;

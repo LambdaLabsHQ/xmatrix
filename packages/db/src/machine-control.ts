@@ -7,7 +7,7 @@ import {
   parseHarnessInventory, parseHarnessActionRequest, parseHarnessActionResult, parseRoutingQuotaProbeRequest, parseRoutingQuotaProbeResponse,
   MACHINE_WORKTREE_ACTION_CAPABILITY, parseWorktreeActionRequest, parseWorktreeActionResult, WORKTREE_ACTION_CLAIM_TTL_MS,
   MACHINE_TEXT_TASK_CAPABILITY, parseTextTaskRequest, parseTextTaskResult, TEXT_TASK_CLAIM_TTL_MS,
-  MACHINE_SLEEP_CAPABILITY, parseMachineCliUpdateStatus, stableMachineDaemonId,
+  MACHINE_SLEEP_CAPABILITY, machineNotAnsweringDetail, parseMachineCliUpdateStatus, stableMachineDaemonId,
   sha256Hex, type MachineResourceObservation } from "@xmatrix/protocol";
 import { commandDigest as digest, commandJson as stable } from "./command-digest.js";
 
@@ -79,6 +79,35 @@ const UNANSWERED_WINDOW_MS = 30 * 60 * 1_000;
  */
 const MAX_UNANSWERED_DELIVERIES = 10;
 const UNANSWERED_FAILURE = `The machine was given this ${MAX_UNANSWERED_DELIVERIES} times and never answered, so it was not run`;
+/**
+ * A start waits on nothing after its third silent delivery: someone is waiting
+ * for the Agent, and another machine can take the work. Of 2,336 starts that
+ * succeeded in the three weeks to 2026-11-20, 2,321 were answered on the first
+ * delivery and two needed more than three; the 26 that reached ten had each
+ * been silent from the first (twenty of them on the two machines whose daemons
+ * refused every command that day), and each kept its summon waiting five minutes.
+ */
+const MAX_UNANSWERED_SPAWN_DELIVERIES = 3;
+/** Commands one claim ends as unanswered; a machine with more has them ended by its next claims. */
+const UNANSWERED_FAIL_LIMIT = 100;
+
+/**
+ * When this machine last left a command unanswered to the end, unless it has
+ * answered one since. The Hub's own observation of the commands it sent, read
+ * where a start is placed: nothing is stored about the machine, and the next
+ * command it answers (a quota reading, a stop, a start) ends it. So does the
+ * window, so one lost command does not follow a machine for its lifetime.
+ */
+export function machineUnansweredAtSql(owner: string, machine: string): string {
+  return `(SELECT max(silent.completed_at) FROM data.machine_daemon_commands silent
+    WHERE silent.owner_user_id=${owner} AND silent.machine_id=${machine} AND silent.status='failed'
+      AND silent.result_json->>'unanswered'='true'
+      AND silent.completed_at>=statement_timestamp()-interval '${UNANSWERED_WINDOW_MS / 60_000} minutes'
+      AND NOT EXISTS (SELECT 1 FROM data.machine_daemon_commands answered
+        WHERE answered.owner_user_id=silent.owner_user_id AND answered.machine_id=silent.machine_id
+          AND answered.completed_at>silent.completed_at
+          AND answered.result_json->>'unanswered' IS DISTINCT FROM 'true'))`;
+}
 const MACHINE_ACTIVATION_RUN_LIMIT = 1_000;
 const SNAPSHOT_ROUTE_WINDOW_MS = 15 * 60 * 1_000;
 const ACTIVATION_TERMINAL_PHASES = new Set(["stable_granted", "aborted"]);
@@ -1348,12 +1377,46 @@ export class PostgresMachineControlRepository {
       "invalid_machine_command", 400, "Machine claim includes an unknown command type");
     const leaseMs = Math.min(integer(input.leaseMs ?? 30_000, "leaseMs", 1), 60_000);
     const leaseOwner = `machine-daemon:${String(current.owner_user_id)}:${String(current.machine_id)}:epoch:${connectionEpoch}`;
-    await tx.query({ name: "machine_control_unanswered_fail_v1", text: `UPDATE data.machine_daemon_commands SET
-        status='failed',result_json=jsonb_build_object('ok',false,'error',$3::text),lease_owner=NULL,lease_until=NULL,
-        completed_at=clock_timestamp(),version=version+1,updated_at=clock_timestamp()
-      WHERE owner_user_id=$1 AND machine_id=$2 AND attempts>=$4
-        AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))`,
-    values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES], maxRows: 0 });
+    // `unanswered` tells this verdict from a failure the daemon reported: placement reads it
+    // (machineUnansweredAtSql), and whoever issued the command answers for a silent machine.
+    const silent = await tx.query<QueryResultRow>({ name: "machine_control_unanswered_fail_v2", text: `WITH silent AS (
+        SELECT command_id FROM data.machine_daemon_commands
+        WHERE owner_user_id=$1 AND machine_id=$2
+          AND attempts>=CASE WHEN command_type='spawn' THEN $6::integer ELSE $4::integer END
+          AND (status='pending' OR (status='leased' AND lease_until<=clock_timestamp()))
+        ORDER BY created_at,command_id LIMIT ${UNANSWERED_FAIL_LIMIT} FOR UPDATE SKIP LOCKED)
+      UPDATE data.machine_daemon_commands command SET
+        status='failed',result_json=jsonb_build_object('ok',false,'unanswered',true,'error',
+          CASE WHEN command.command_type='spawn' THEN $5::text ELSE $3::text END),lease_owner=NULL,lease_until=NULL,
+        completed_at=clock_timestamp(),version=command.version+1,updated_at=clock_timestamp()
+      FROM silent WHERE command.command_id=silent.command_id
+      RETURNING command.command_id,command.command_type,command.payload_json`,
+    values: [current.owner_user_id, current.machine_id, UNANSWERED_FAILURE, MAX_UNANSWERED_DELIVERIES,
+      machineNotAnsweringDetail(MAX_UNANSWERED_SPAWN_DELIVERIES), MAX_UNANSWERED_SPAWN_DELIVERIES],
+    maxRows: UNANSWERED_FAIL_LIMIT });
+    // A daemon that fails a spawn reports it, and that report is what tells the
+    // Channel, hands an \`@auto\` summon to the next Agent and trips the start
+    // breaker. A silent machine reports nothing, so its Launch's report is
+    // recorded here, with the verdict, for the coordinator to finalize. A
+    // reborn or wake has no Launch: its intent reads this command's failure.
+    const unansweredRunChannelIds = new Set<string>();
+    for (const row of silent) {
+      const issued = row.payload_json as Record<string, unknown>;
+      const { runId, channelId, launchId } = issued;
+      if (row.command_type !== "spawn" || typeof launchId !== "string" || typeof runId !== "string" || !runId ||
+          typeof channelId !== "string" || !channelId) continue;
+      await recordMachineRunTerminalReport(tx, {
+        runId, eventType: "machine_spawn_result", ownerUserId: String(current.owner_user_id),
+        ownerEmail: String(current.owner_email), machineId: String(current.machine_id),
+        hostId: typeof current.hostname === "string" ? current.hostname : "", channelId, connectionEpoch,
+        requestId: String(row.command_id),
+        payload: { type: "machine_spawn_result", requestId: String(row.command_id), runId, channelId, launchId,
+          ...(typeof issued.executionKey === "string" ? { executionKey: issued.executionKey } : {}),
+          ...(typeof issued.instanceId === "string" ? { instanceId: issued.instanceId } : {}),
+          ok: false, error: machineNotAnsweringDetail(MAX_UNANSWERED_SPAWN_DELIVERIES) },
+      });
+      unansweredRunChannelIds.add(channelId);
+    }
     const rows = await tx.query<QueryResultRow>({ name: "machine_control_claim_candidates_v11", text: `SELECT
       command.command_id,command.command_type,
       CASE WHEN command.command_type='spawn' AND launch.launch_id IS NOT NULL
@@ -1413,7 +1476,8 @@ export class PostgresMachineControlRepository {
         ...relayLease });
     }
     return { daemon: daemon(current), connectionEpoch, audit: {
-      commandId: input.commandId, action: "claim", at, persisted: false }, commands };
+      commandId: input.commandId, action: "claim", at, persisted: false }, commands,
+    ...(unansweredRunChannelIds.size ? { unansweredRunChannelIds: [...unansweredRunChannelIds] } : {}) };
   }
 
   /**

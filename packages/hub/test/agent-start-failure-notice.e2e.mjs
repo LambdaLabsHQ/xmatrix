@@ -10,8 +10,8 @@ import {
   test,
   waitForChannelHistoryMessage,
 } from "./agent-mention-spawn.fixture.mjs";
-import { createPgSpawnableScenario, launchScenarioRun, sendSpawnResult, sendStopResult }
-  from "./agent-launch-postgres.fixture.mjs";
+import { createPgSpawnableScenario, inTestTransaction, isSpawnOf, launchScenarioRun, postAutoLaunch, sendSpawnResult,
+  sendStopResult } from "./agent-launch-postgres.fixture.mjs";
 
 /** The Hub's note about one Run on the summon that started it, once it lands. */
 async function runNote(worker, auth, channelId, runId, label) {
@@ -177,6 +177,50 @@ for (const [reason, code] of [
     const { notes: replayed } = await runNote(worker, auth, channelId, command.runId, "pre-spawn failure after replay");
     assert.equal(replayed.filter(item => item.id.includes(":startup-failure:")).length, 1,
       "replay does not duplicate the failure note");
+  } finally {
+    await stopAgentWorker(worker, undefined, daemon);
+  }
+});
+
+// 2026-11-20: two daemons refused every command for six hours while connected.
+// Each start was failed by the Hub after ten deliveries, with no word on its summon.
+test("a start its connected machine never answers is ended after three deliveries and said on its summon", async () => {
+  const worker = await startMockUserHubWorker({ id: `silent-machine-${randomUUID()}`,
+    email: "silent-machine@example.com", name: "Silent Machine" });
+  let daemon;
+  try {
+    const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-silent" });
+    ({ daemon } = scenario);
+    const { auth, channelId, registration } = scenario;
+    const spawned = (label, other) => daemon.inbox.waitFor(message => message.channelId === channelId &&
+      isSpawnOf(message, registration) && message.runId !== other, label);
+    const first = spawned("the start, handed out once");
+    await postAutoLaunch(worker, { ...scenario, harness: registration.harness }, "start on a machine that says nothing");
+    // Handed to the daemon, which neither admits nor answers it.
+    const command = await first;
+    // Its second and third deliveries lapse the same way.
+    await inTestTransaction(tx => tx.query({ text: `UPDATE data.machine_daemon_commands
+      SET attempts=3,lease_until=clock_timestamp()-interval '1 second' WHERE command_id=$1 RETURNING command_id`,
+    values: [command.requestId] }));
+    // The Hub looks at what a machine left lapsed when it next hands it work.
+    const next = spawned("the next start", command.runId);
+    await postAutoLaunch(worker, { ...scenario, harness: registration.harness }, "start again");
+    await next;
+
+    const { notes } = await runNote(worker, auth, channelId, command.runId, "the silent start on its summon");
+    assert.equal(notes.length, 1);
+    assert.match(notes[0].text, /Couldn't start @codex-silent/u);
+    assert.ok(notes[0].text.includes(
+      "machine_not_answering: the machine is connected but did not answer the start command, sent to it 3 times. Nothing was started."),
+    notes[0].text);
+    const launch = await diagnosedLaunch(worker, { ...auth, "content-type": "application/json" }, command.runId);
+    assert.equal(launch.state, "failed");
+    assert.equal(launch.errorCode, "machine_not_answering");
+    assert.equal(launch.spawnedAt, undefined);
+    const [stored] = await inTestTransaction(tx => tx.query({
+      text: "SELECT status,result_json->>'unanswered' AS unanswered FROM data.machine_daemon_commands WHERE command_id=$1",
+      values: [command.requestId] }));
+    assert.deepEqual(stored, { status: "failed", unanswered: "true" });
   } finally {
     await stopAgentWorker(worker, undefined, daemon);
   }

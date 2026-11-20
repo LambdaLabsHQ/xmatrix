@@ -922,6 +922,29 @@ test('an environment whose latest summons all ended without a reply goes after e
   assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
 });
 
+test('every environment on a machine that left the Hub\'s last command unanswered goes after every other', async () => {
+  // 2026-11-20: two daemons refused every command for six hours while connected, and `@auto`
+  // kept sending work to them: the harness that had just failed there, then the next one.
+  const on = (machineId, harness, machineUnansweredAt) => ({ ...candidates[0],
+    key: { ...candidates[0].key, machineId, harness }, ...(machineUnansweredAt ? { machineUnansweredAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true } } });
+  const at = '2026-11-20T10:23:00.000Z';
+  const quiet = [on('quiet', 'antigravity', at), on('quiet', 'claude', at)], answering = on('answering', 'opencode');
+  // A better fit on the quiet machine still goes last, whichever of its harnesses it is.
+  assert.deepEqual(jointRanking([...quiet, answering], candidate => candidate === answering ? 1 / 3 : 1)
+    .map(item => item.candidate.key.harness), ['opencode', 'antigravity', 'claude']);
+  // With no other machine, the work still goes there: its answer is what ends the mark.
+  assert.deepEqual(jointRanking(quiet, () => 1).map(item => item.candidate.key.machineId), ['quiet', 'quiet']);
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...quiet[0], key: candidates[0].key }, { ...candidates[1], observations: answering.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].machineUnansweredAt, at);
+  assert.equal(chosen.parameterEvidence.placement.ranking[0].machineUnansweredAt, undefined);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+});
+
 test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {
   // 2026-10-17 production medians, connected Run to first reply: Claude 22 s, Grok 60 s, OpenCode 160 s.
   const harness = (name, responseLatencyMs) => ({ ...candidates[0],

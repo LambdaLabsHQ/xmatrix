@@ -29,6 +29,9 @@ export interface LaunchPlacementCandidate {
   /** When it last ended a summon without a reply, its latest summons
    * all having gone that way: it was ranked after every environment that had not. */
   unansweredAt?: string;
+  /** When its machine last left a command the Hub sent it unanswered, having
+   * answered none since: every environment on it was ranked after the rest. */
+  machineUnansweredAt?: string;
 }
 
 /** Public decision evidence contains opaque workspace handles, never private directory catalogs. */
@@ -122,7 +125,7 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       !unit(item.fit, 0, 1) || item.headroom !== undefined && !unit(item.headroom, -1_000, 1) ||
       item.quotaPace !== undefined && !unit(item.quotaPace, 0, 1e12) || typeof item.frontier !== "boolean" || !unit(item.utility, -1_000, 2) ||
       item.described !== undefined && typeof item.described !== "boolean" ||
-      [item.startupFailedAt, item.unansweredAt].some(at => at !== undefined && (typeof at !== "string" ||
+      [item.startupFailedAt, item.unansweredAt, item.machineUnansweredAt].some(at => at !== undefined && (typeof at !== "string" ||
         at.length > 40 || !Number.isFinite(Date.parse(at)))) ||
       item.network !== undefined && (!network || !unit(item.networkQuality, 0, 1)) ||
       (item.responseLatencyMs !== undefined || item.responseQuality !== undefined) &&
@@ -134,6 +137,7 @@ function parsePlacement(value: unknown, evaluatedAt: number): LaunchParameterEvi
       ...(item.described !== undefined ? { described: item.described as boolean } : {}),
       ...(item.startupFailedAt !== undefined ? { startupFailedAt: item.startupFailedAt as string } : {}),
       ...(item.unansweredAt !== undefined ? { unansweredAt: item.unansweredAt as string } : {}),
+      ...(item.machineUnansweredAt !== undefined ? { machineUnansweredAt: item.machineUnansweredAt as string } : {}),
       ...(network ? { network, networkQuality: item.networkQuality as number } : {}),
       ...(item.responseLatencyMs !== undefined ? { responseLatencyMs: item.responseLatencyMs as number,
         responseQuality: item.responseQuality as number } : {}) });
