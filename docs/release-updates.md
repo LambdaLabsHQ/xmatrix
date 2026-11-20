@@ -12,6 +12,18 @@ has no report beside it, while holding that lock, and a lock taken on a file
 released that way is not treated as the lock. An outbox already in that state
 empties on the first pass after the update. CLI / daemon only. Recovery is a
 CI-validated CLI release reverting this change.
+## Unreleased: Antigravity quota reads the Gemini weekly window
+
+Google's Cloud Code `retrieveUserQuotaSummary` endpoint omits the native
+`Gemini Models` group (both 5-hour and weekly buckets) unless the request
+carries a versioned CLI `User-Agent` (`antigravity/cli/1.2.0+`). The quota
+reader previously sent `antigravity/xmatrix`, so only `Claude & GPT` (`5h` and
+`1w`) came back from the summary and the fallback `fetchAvailableModels` path
+filled in only `Gemini · 5h`, leaving `Gemini · 1w` missing everywhere. The
+reader now sends `antigravity/cli/<version>` from the installed `agy` CLI (or a
+`1.5.13` floor when unavailable), restoring both `Gemini · 5h` and `Gemini · 1w`
+alongside `Claude & GPT`. CLI / daemon only. Recovery is a CI-validated CLI
+release reverting this change.
 
 ## Unreleased: hosted CLI release builds reuse warm per-target kache stores
 
