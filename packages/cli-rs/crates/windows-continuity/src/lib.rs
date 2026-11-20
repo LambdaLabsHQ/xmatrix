@@ -5,7 +5,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
 #[cfg(windows)]
@@ -501,32 +503,18 @@ impl BootJournal {
     }
 
     pub fn load(&self) -> Result<BootPayload, ContinuityError> {
-        load_with_previous_image(&self.path, |path| self.load_path(path))
-    }
-
-    fn load_path(&self, path: &Path) -> Result<BootPayload, ContinuityError> {
-        let bytes = read_bounded(path, MAX_CONTROL_FRAME_BYTES)?;
-        let envelope: BootEnvelope = serde_json::from_slice(&bytes)?;
-        verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-        envelope.payload.selected()?;
-        Ok(envelope.payload)
+        load_with_previous_image(&self.path, |path| {
+            load_checked_journal(path, MAX_CONTROL_FRAME_BYTES, |payload: &BootPayload| {
+                payload.selected().map(|_| ())
+            })
+        })
     }
 
     pub fn store(&self, payload: &BootPayload) -> Result<(), ContinuityError> {
-        payload.selected()?;
-        let envelope = BootEnvelope {
-            checksum_sha256: payload_checksum(payload)?,
-            payload: payload.clone(),
-        };
-        store_with_previous_image(&self.path, &envelope, || self.load_path(&self.path).is_ok())
+        store_checked_journal(&self.path, payload, MAX_CONTROL_FRAME_BYTES, |value| {
+            value.selected().map(|_| ())
+        })
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BootEnvelope {
-    payload: BootPayload,
-    checksum_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1079,13 +1067,6 @@ pub fn insert_bounded_quarantine(quarantine: &mut BTreeSet<String>, digest: Stri
     quarantine.insert(digest);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JournalEnvelope {
-    payload: JournalPayload,
-    checksum_sha256: String,
-}
-
 pub struct ActivationJournal {
     path: PathBuf,
 }
@@ -1096,24 +1077,18 @@ impl ActivationJournal {
     }
 
     pub fn load(&self) -> Result<JournalPayload, ContinuityError> {
-        load_with_previous_image(&self.path, |path| self.load_path(path))
-    }
-
-    fn load_path(&self, path: &Path) -> Result<JournalPayload, ContinuityError> {
-        let bytes = read_bounded(path, MAX_CONTROL_FRAME_BYTES)?;
-        let envelope: JournalEnvelope = serde_json::from_slice(&bytes)?;
-        verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-        envelope.payload.validate()?;
-        Ok(envelope.payload)
+        load_with_previous_image(&self.path, |path| {
+            load_checked_journal(path, MAX_CONTROL_FRAME_BYTES, JournalPayload::validate)
+        })
     }
 
     pub fn store(&self, payload: &JournalPayload) -> Result<(), ContinuityError> {
-        payload.validate()?;
-        let envelope = JournalEnvelope {
-            payload: payload.clone(),
-            checksum_sha256: payload_checksum(payload)?,
-        };
-        store_with_previous_image(&self.path, &envelope, || self.load_path(&self.path).is_ok())
+        store_checked_journal(
+            &self.path,
+            payload,
+            MAX_CONTROL_FRAME_BYTES,
+            JournalPayload::validate,
+        )
     }
 }
 
@@ -1223,13 +1198,6 @@ struct EffectJournalPayload {
     schema: u32,
     revision: u64,
     effects: BTreeMap<String, CommandEffect>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EffectJournalEnvelope {
-    payload: EffectJournalPayload,
-    checksum_sha256: String,
 }
 
 pub struct CommandEffectJournal {
@@ -1497,19 +1465,30 @@ impl CommandEffectJournal {
             .clone())
     }
 
+    fn load_path(&self, path: &Path) -> Result<EffectJournalPayload, ContinuityError> {
+        let bytes = read_bounded(path, MAX_EFFECT_JOURNAL_BYTES)?;
+        decode_checked_envelope(&bytes)
+    }
+
     fn load_or_empty(&self) -> Result<EffectJournalPayload, ContinuityError> {
-        match read_bounded(&self.path, MAX_EFFECT_JOURNAL_BYTES) {
-            Ok(bytes) => {
-                let envelope: EffectJournalEnvelope = serde_json::from_slice(&bytes)?;
-                verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-                Ok(envelope.payload)
-            }
+        let empty = || EffectJournalPayload {
+            schema: JOURNAL_SCHEMA,
+            revision: 1,
+            effects: BTreeMap::new(),
+        };
+        match load_with_previous_image(&self.path, |path| self.load_path(path)) {
+            Ok(payload) => Ok(payload),
             Err(ContinuityError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(EffectJournalPayload {
-                    schema: JOURNAL_SCHEMA,
-                    revision: 1,
-                    effects: BTreeMap::new(),
-                })
+                Ok(empty())
+            }
+            Err(
+                error @ (ContinuityError::ChecksumMismatch
+                | ContinuityError::Json(_)
+                | ContinuityError::Invalid(_)
+                | ContinuityError::FrameTooLarge(_)),
+            ) => {
+                quarantine_corrupt_journal(&self.path, &error);
+                Ok(empty())
             }
             Err(error) => Err(error),
         }
@@ -1533,13 +1512,14 @@ impl CommandEffectJournal {
             for effect in dated.effects.values_mut() {
                 effect.received_unix_ms.get_or_insert(now);
             }
-            let envelope = EffectJournalEnvelope {
-                checksum_sha256: payload_checksum(&dated)?,
-                payload: dated,
-            };
-            let bytes = serde_json::to_vec_pretty(&envelope)?;
+            let bytes = encode_checked_envelope(&dated)?;
             if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
-                return atomic_replace(&self.path, &bytes);
+                return store_bytes_with_previous_image(
+                    &self.path,
+                    &bytes,
+                    MAX_EFFECT_JOURNAL_BYTES,
+                    || self.load_path(&self.path).is_ok(),
+                );
             }
             let mut evictable = payload
                 .effects
@@ -1953,6 +1933,125 @@ impl From<serde_json::Error> for ContinuityError {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RawEnvelopeRef<'a> {
+    payload: &'a RawValue,
+    checksum_sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawEnvelopeOwned {
+    payload: Box<RawValue>,
+    checksum_sha256: String,
+}
+
+fn encode_checked_envelope(payload: &impl Serialize) -> Result<Vec<u8>, ContinuityError> {
+    let payload_json = serde_json::to_string(payload)?;
+    let checksum_sha256 = hex_sha256(payload_json.as_bytes());
+    let raw = RawValue::from_string(payload_json)?;
+    Ok(serde_json::to_vec_pretty(&RawEnvelopeRef {
+        payload: raw.as_ref(),
+        checksum_sha256,
+    })?)
+}
+
+fn decode_checked_envelope<T: Serialize + DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, ContinuityError> {
+    let envelope: RawEnvelopeOwned = serde_json::from_slice(bytes)?;
+    let raw_digest = hex_sha256(envelope.payload.get().as_bytes());
+    if constant_time_eq(raw_digest.as_bytes(), envelope.checksum_sha256.as_bytes()) {
+        return Ok(serde_json::from_str(envelope.payload.get())?);
+    }
+    // Legacy compatibility for journals written before raw-byte checksumming:
+    // older CLIs pretty-printed the payload while hashing its compact encoding.
+    let payload: T = serde_json::from_str(envelope.payload.get())?;
+    verify_payload_checksum(&payload, &envelope.checksum_sha256)?;
+    Ok(payload)
+}
+
+const MAX_CORRUPT_JOURNAL_BACKUPS: usize = 4;
+
+fn quarantine_corrupt_journal(path: &Path, reason: &ContinuityError) {
+    let stamp = format!(
+        "{}-{}",
+        unix_millis(),
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+    let mut quarantined = Vec::new();
+    for candidate in [path.to_path_buf(), previous_image_path(path)] {
+        let Some(name) = candidate.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let target = candidate.with_file_name(format!("{name}.corrupt-{stamp}"));
+        if fs::rename(&candidate, &target).is_ok() {
+            quarantined.push(target);
+        }
+    }
+    prune_corrupt_journal_backups(path);
+    eprintln!(
+        "warning: quarantined unrecoverable command effect journal {} ({reason}); moved {} file(s) and started fresh",
+        path.display(),
+        quarantined.len()
+    );
+}
+
+fn prune_corrupt_journal_backups(path: &Path) {
+    let (Some(parent), Some(base)) = (
+        path.parent(),
+        path.file_name().and_then(|value| value.to_str()),
+    ) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(parent) else {
+        return;
+    };
+    let primary_prefix = format!("{base}.corrupt-");
+    let previous_prefix = format!("{base}.previous.corrupt-");
+    let mut backups = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            (name.starts_with(&primary_prefix) || name.starts_with(&previous_prefix))
+                .then_some((name, entry.path()))
+        })
+        .collect::<Vec<_>>();
+    if backups.len() <= MAX_CORRUPT_JOURNAL_BACKUPS {
+        return;
+    }
+    backups.sort_by(|left, right| left.0.cmp(&right.0));
+    let remove_count = backups.len() - MAX_CORRUPT_JOURNAL_BACKUPS;
+    for (_, old_path) in backups.into_iter().take(remove_count) {
+        let _ = fs::remove_file(old_path);
+    }
+}
+
+fn load_checked_journal<T: Serialize + DeserializeOwned>(
+    path: &Path,
+    max_bytes: usize,
+    validate: impl Fn(&T) -> Result<(), ContinuityError>,
+) -> Result<T, ContinuityError> {
+    let bytes = read_bounded(path, max_bytes)?;
+    let payload: T = decode_checked_envelope(&bytes)?;
+    validate(&payload)?;
+    Ok(payload)
+}
+
+fn store_checked_journal<T: Serialize + DeserializeOwned>(
+    path: &Path,
+    payload: &T,
+    max_bytes: usize,
+    validate: impl Fn(&T) -> Result<(), ContinuityError>,
+) -> Result<(), ContinuityError> {
+    validate(payload)?;
+    let bytes = encode_checked_envelope(payload)?;
+    store_bytes_with_previous_image(path, &bytes, max_bytes, || {
+        load_checked_journal(path, max_bytes, &validate).is_ok()
+    })
+}
+
 fn load_with_previous_image<T>(
     path: &Path,
     load: impl Fn(&Path) -> Result<T, ContinuityError>,
@@ -1960,21 +2059,21 @@ fn load_with_previous_image<T>(
     load(path).or_else(|primary_error| load(&previous_image_path(path)).map_err(|_| primary_error))
 }
 
-fn store_with_previous_image(
+fn store_bytes_with_previous_image(
     path: &Path,
-    envelope: &impl Serialize,
+    bytes: &[u8],
+    max_bytes: usize,
     primary_valid: impl FnOnce() -> bool,
 ) -> Result<(), ContinuityError> {
-    let bytes = serde_json::to_vec_pretty(envelope)?;
-    if bytes.len() > MAX_CONTROL_FRAME_BYTES {
+    if bytes.len() > max_bytes {
         return Err(ContinuityError::FrameTooLarge(bytes.len()));
     }
-    if let Ok(existing) = read_bounded(path, MAX_CONTROL_FRAME_BYTES)
+    if let Ok(existing) = read_bounded(path, max_bytes)
         && primary_valid()
     {
         atomic_replace(&previous_image_path(path), &existing)?;
     }
-    atomic_replace(path, &bytes)
+    atomic_replace(path, bytes)
 }
 
 /// Read a required process argument used by continuity entrypoints.
@@ -2282,33 +2381,95 @@ mod tests {
     }
 
     #[test]
-    fn effect_journal_round_trips_float_results_without_checksum_mismatch() {
-        let dir = std::env::temp_dir().join(format!("xm-float-{}", uuid::Uuid::new_v4()));
-        let journal = CommandEffectJournal::new(dir.join("effects.json"));
-        let id = journal
+    fn effect_journal_verifies_raw_bytes_and_self_heals_from_previous_or_quarantine() {
+        let dir = std::env::temp_dir().join(format!("xm-resilience-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("effects.json");
+        let journal = CommandEffectJournal::new(&path);
+
+        // 1) Float results & raw-byte checksumming: hash is verified over exact
+        //    on-disk payload bytes without re-serializing deserialized structs.
+        let id1 = journal
             .receive("quota:float-1", "quota_probe", &"c".repeat(64))
             .unwrap()
             .stable_id();
-        journal.admit(&id).unwrap();
-        // Exact float from Antigravity quota `(1.0 - 0.9004436) * 100.0`
-        // (`9.955639999999999`); without `serde_json/float_roundtrip`, parsing
-        // shifts it by 1 ULP to `9.95564` and trips `ChecksumMismatch`.
-        let payload = serde_json::json!({ "percent": (1.0_f64 - 0.9004436_f64) * 100.0_f64 });
-        journal.commit_result(&id, payload).unwrap();
+        journal.admit(&id1).unwrap();
+        let tricky_float = (1.0_f64 - 0.9004436_f64) * 100.0_f64;
+        journal
+            .commit_result(
+                &id1,
+                serde_json::json!({ "percent": tricky_float, "negZero": -0.0_f64 }),
+            )
+            .unwrap();
         assert_eq!(
             journal.acknowledge("quota:float-1").unwrap().phase,
             EffectPhase::HubCompletionAcked
         );
-        let _ = std::fs::remove_dir_all(dir);
+
+        // Extra unknown fields inside the payload still pass raw-byte checksum.
+        let raw_payload =
+            r#"{"schema":1,"revision":5,"effects":{},"futureField":9.955639999999999}"#;
+        let raw_value = RawValue::from_string(raw_payload.into()).unwrap();
+        let envelope_bytes = serde_json::to_vec_pretty(&RawEnvelopeRef {
+            payload: raw_value.as_ref(),
+            checksum_sha256: hex_sha256(raw_payload.as_bytes()),
+        })
+        .unwrap();
+        let decoded: EffectJournalPayload = decode_checked_envelope(&envelope_bytes).unwrap();
+        assert_eq!(decoded.revision, 5);
+        let tampered = String::from_utf8(envelope_bytes)
+            .unwrap()
+            .replace("9.955639999999999", "9.955640000000000");
+        assert!(matches!(
+            decode_checked_envelope::<EffectJournalPayload>(tampered.as_bytes()),
+            Err(ContinuityError::ChecksumMismatch)
+        ));
+
+        // 2) Legacy pretty-printed journal with the exact 9.955639999999999 float
+        //    loads via fallback and upgrades on the next write.
+        let mut legacy = journal.load_or_empty().unwrap();
+        legacy.revision = 9;
+        write_as_older_cli(&path, legacy);
+        assert_eq!(journal.load_or_empty().unwrap().revision, 9);
+
+        // 3) Corrupt primary recovers from `.previous` without losing state.
+        let id2 = journal
+            .receive("spawn:keep", "spawn", &"d".repeat(64))
+            .unwrap()
+            .stable_id();
+        journal.admit(&id2).unwrap();
+        assert!(previous_image_path(&path).is_file());
+        fs::write(&path, b"{truncated").unwrap();
+        assert!(
+            journal
+                .effect_for_control_id("spawn:keep")
+                .unwrap()
+                .is_some()
+        );
+
+        // 4) Unrecoverable corruption of both primary and `.previous` quarantines
+        //    the bad files and starts fresh instead of wedging every command.
+        fs::write(&path, b"not-json").unwrap();
+        fs::write(previous_image_path(&path), b"also-bad").unwrap();
+        let fresh = journal
+            .receive("spawn:after-heal", "spawn", &"e".repeat(64))
+            .unwrap();
+        assert_eq!(fresh.phase, EffectPhase::Received);
+        let quarantined = fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".corrupt-"))
+            .count();
+        assert_eq!(quarantined, 2);
+        let _ = fs::remove_dir_all(dir);
     }
 
-    /// Write a journal as an older CLI left it: no dating, no budget.
+    /// Write a journal as an older CLI left it: pretty-printed payload, compact checksum.
     fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(&payload).unwrap(),
-            payload,
-        };
-        fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
+        let envelope = serde_json::json!({
+            "payload": payload,
+            "checksumSha256": payload_checksum(&payload).unwrap(),
+        });
+        fs::write(path, serde_json::to_vec_pretty(&envelope).unwrap()).unwrap();
     }
 
     #[test]
