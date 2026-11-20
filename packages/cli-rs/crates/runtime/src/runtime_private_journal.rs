@@ -43,9 +43,15 @@ pub(super) fn private(path: &Path, directory: bool) -> Result<(), String> {
     Ok(())
 }
 
+const BUSY: &str = "Private journal is busy";
+
 pub(super) fn lock(path: &Path) -> Result<JournalLock, String> {
-    if path.exists() {
-        private(path, false)?;
+    // Refuses a symlink or directory planted under the lock's name before it
+    // is opened; a lock file released meanwhile is simply created again.
+    if let Err(error) = private(path, false)
+        && path.exists()
+    {
+        return Err(error);
     }
     let mut options = OpenOptions::new();
     options.create(true).truncate(false).read(true).write(true);
@@ -54,13 +60,52 @@ pub(super) fn lock(path: &Path) -> Result<JournalLock, String> {
         use std::os::unix::fs::OpenOptionsExt as _;
         options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    let file = options
-        .open(path)
-        .map_err(|_| "Private journal lock is unavailable")?;
+    let file = options.open(path).map_err(|error| {
+        // Windows keeps a released lock file's name until its last handle
+        // closes; opening it meanwhile is refused, and the name is free again
+        // a moment later.
+        if cfg!(windows) && error.kind() == std::io::ErrorKind::PermissionDenied {
+            BUSY
+        } else {
+            "Private journal lock is unavailable"
+        }
+    })?;
+    file.try_lock_exclusive().map_err(|_| BUSY)?;
+    // A lock on a file its holder released (`release_lock`) guards nothing:
+    // the next caller creates a new file under the same name and both would
+    // hold "the" lock. Whoever lost that race asks again.
+    if !names(path, &file) {
+        return Err(BUSY.into());
+    }
     private(path, false)?;
-    file.try_lock_exclusive()
-        .map_err(|_| "Private journal is busy")?;
     Ok(JournalLock(file))
+}
+
+/// Whether `path` still names the open `file`.
+#[cfg(unix)]
+fn names(path: &Path, file: &File) -> bool {
+    use std::os::unix::fs::MetadataExt as _;
+    let identity = |metadata: fs::Metadata| (metadata.dev(), metadata.ino());
+    match (fs::symlink_metadata(path), file.metadata()) {
+        (Ok(named), Ok(held)) => identity(named) == identity(held),
+        _ => false,
+    }
+}
+
+/// Windows refuses to open a name whose file is being deleted, so a lock
+/// taken there is always on the file the name still means.
+#[cfg(not(unix))]
+fn names(path: &Path, _file: &File) -> bool {
+    path.exists()
+}
+
+/// Remove a lock file while holding it, so a lock that guards nothing does
+/// not stay behind. `still_unused` is asked under the lock.
+pub(super) fn release_lock(path: &Path, still_unused: impl FnOnce() -> bool) -> bool {
+    let Ok(_guard) = lock(path) else {
+        return false;
+    };
+    still_unused() && fs::remove_file(path).is_ok()
 }
 
 pub(super) fn lock_with_deadline(path: &Path) -> Result<JournalLock, String> {
@@ -68,8 +113,7 @@ pub(super) fn lock_with_deadline(path: &Path) -> Result<JournalLock, String> {
     loop {
         match lock(path) {
             Err(error)
-                if error == "Private journal is busy"
-                    && started.elapsed() < std::time::Duration::from_millis(250) =>
+                if error == BUSY && started.elapsed() < std::time::Duration::from_millis(250) =>
             {
                 std::thread::sleep(std::time::Duration::from_millis(2));
             }
@@ -158,4 +202,52 @@ pub(super) fn stage_bytes(path: &Path, bytes: &[u8]) -> Result<StagedRecord, Str
 
 pub(super) fn write_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
     stage_bytes(path, bytes)?.install()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lock_path() -> (PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("xmatrix-private-journal-{}", uuid::Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        (root.clone(), root.join("record.lock"))
+    }
+
+    #[test]
+    fn a_released_lock_is_removed_only_while_nobody_holds_or_needs_it() {
+        let (root, path) = lock_path();
+        let held = lock(&path).unwrap();
+        assert!(!release_lock(&path, || true), "a held lock stays");
+        drop(held);
+        assert!(!release_lock(&path, || false), "a lock still in use stays");
+        assert!(path.exists());
+        assert!(release_lock(&path, || true));
+        assert!(!path.exists());
+        drop(lock(&path).expect("the name is free for the next holder"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// The race `names` closes: a holder that opened the file just before it
+    /// was released must not believe it holds the lock the name now means.
+    #[cfg(unix)]
+    #[test]
+    fn a_lock_on_a_released_file_is_not_the_lock() {
+        let (root, path) = lock_path();
+        let stale = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(release_lock(&path, || true));
+        stale.try_lock_exclusive().unwrap();
+        assert!(!names(&path, &stale), "the released file has no name");
+        let current = lock(&path).unwrap();
+        assert!(!names(&path, &stale), "the name means the new file");
+        assert!(names(&path, &current.0));
+        fs::remove_dir_all(root).unwrap();
+    }
 }

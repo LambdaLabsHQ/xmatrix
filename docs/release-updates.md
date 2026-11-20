@@ -30,6 +30,45 @@ daemon heartbeat status is deduplicated; and desktop window titles only update
 when the title text changes. Web, Desktop, and CLI / daemon. Recovery is a
 CI-validated beta reverting this change.
 
+## Unreleased: delivered execution reports release their lock files
+
+Each execution report in a machine's `execution-outbox/` has a lock file of its
+own. A confirmed report was removed; its lock file never was, and admission
+counts every entry against the 2049-entry bound. After 1024 delivered reports a
+machine's outbox held only lock files and refused every new report with
+`Execution outbox is full` (seen on a production machine from 2026-11-16: 2048
+lock files, no reports). The daemon's drain pass now removes a lock file that
+has no report beside it, while holding that lock, and a lock taken on a file
+released that way is not treated as the lock. An outbox already in that state
+empties on the first pass after the update. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+## Unreleased: Antigravity quota reads the Gemini weekly window
+
+Google's Cloud Code `retrieveUserQuotaSummary` endpoint omits the native
+`Gemini Models` group (both 5-hour and weekly buckets) unless the request
+carries a versioned CLI `User-Agent` (`antigravity/cli/1.2.0+`). The quota
+reader previously sent `antigravity/xmatrix`, so only `Claude & GPT` (`5h` and
+`1w`) came back from the summary and the fallback `fetchAvailableModels` path
+filled in only `Gemini · 5h`, leaving `Gemini · 1w` missing everywhere. The
+reader now sends `antigravity/cli/<version>` from the installed `agy` CLI (or a
+`1.5.13` floor when unavailable), restoring both `Gemini · 5h` and `Gemini · 1w`
+alongside `Claude & GPT`. CLI / daemon only. Recovery is a CI-validated CLI
+release reverting this change.
+
+## Unreleased: hosted CLI release builds reuse warm per-target kache stores
+
+Hosted CLI releases (`cli-build.yml`) previously compiled all 400+ Rust crates
+cold on every beta and stable tag (5–14 minutes per platform, with
+`macos-26-intel` at 14m11s), ran Windows release builds with Defender real-time
+scanning enabled, and throttled hosted PNPM upload-dependency installs without
+reusing the `lockfile-verified.jsonl` cache. A new `cli-release-cache.yml`
+workflow on `main` now maintains bounded per-target `kache` stores (`linux-x64`,
+`macos-arm64`, `macos-x64`, `windows-x64`) using the same pinned compiler as PR
+CI and `cli-build.yml`; `cli-build.yml` restores those stores on release tags,
+excludes build directories from Windows Defender, and reuses the hosted PNPM
+verification cache. CI / release infrastructure only; no client or schema
+change. Recovery is reverting the workflow PR.
+
 ## Unreleased: harden continuity journal checksums and self-healing
 
 `BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously

@@ -169,6 +169,17 @@ jobs:
       # Windows retains its separately configured system TUN route.
       - uses: actions/checkout@v6
 
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/disable-windows-defender
+
+      # Hosted CLI releases run on immutable version tags (`refs/tags/xmatrix-v*`),
+      # which restore the warm per-target kache store maintained on `main`
+      # (`cli-release-cache.yml`). Library crates stay at 0.0.0 so a release
+      # version stamp only recompiles the top-level binary crate.
+      - uses: ./.github/actions/cli-release-kache-restore
+        with:
+          part: ${{ matrix.part }}
+
       # One Windows path shared with rust-cli-windows CI: native MSVC + kache.
       # validate-kache-contract is CI-only; release still uses the same
       # toolchain and cargo feature set.
@@ -279,9 +290,44 @@ jobs:
       # Every builder invokes the repository R2 uploader after producing its
       # binary. Clean self-hosted checkouts cannot rely on another job's
       # node_modules, so install the root package that owns the pinned S3 SDK
-      # before the release part can be uploaded.
+      # before the release part can be uploaded. On hosted VMs, reuse the
+      # lockfile verification cache maintained on `main` and skip self-hosted
+      # concurrency throttling.
+      - name: Locate PNPM lockfile verification record on a GitHub-hosted runner
+        id: hosted-pnpm-verified
+        if: runner.environment == 'github-hosted' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ -n "${XDG_CACHE_HOME:-}" ]; then dir="$XDG_CACHE_HOME/pnpm"
+          elif [ "$RUNNER_OS" = macOS ]; then dir="$HOME/Library/Caches/pnpm"
+          else dir="$HOME/.cache/pnpm"
+          fi
+          echo "path=$dir/lockfile-verified.jsonl" >> "$GITHUB_OUTPUT"
+
+      - name: Locate PNPM lockfile verification record on a GitHub-hosted Windows runner
+        id: hosted-pnpm-verified-windows
+        if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = if (-not [string]::IsNullOrWhiteSpace($env:XDG_CACHE_HOME)) {
+            Join-Path $env:XDG_CACHE_HOME 'pnpm'
+          } else {
+            Join-Path $env:LOCALAPPDATA 'pnpm-cache'
+          }
+          $path = Join-Path $dir 'lockfile-verified.jsonl'
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "path=$path`n", $utf8)
+
+      - name: Restore PNPM lockfile verification record on a GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.hosted-pnpm-verified.outputs.path || steps.hosted-pnpm-verified-windows.outputs.path }}
+          key: pnpm-lockfile-verified-${{ runner.os }}-pnpm-11.3.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc') }}
+
       - name: Install pinned release upload dependencies
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && runner.environment != 'github-hosted'
         timeout-minutes: 20
         uses: ./.github/actions/macos-pnpm-install
         with:
@@ -289,7 +335,7 @@ jobs:
           args: install --frozen-lockfile --filter xmatrix --child-concurrency=1
 
       - name: Install pinned release upload dependencies
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' && runner.environment != 'github-hosted'
         timeout-minutes: 20
         run: >-
           npx --yes pnpm@11.3.0 install
@@ -298,18 +344,18 @@ jobs:
           --child-concurrency=1
           --network-concurrency=4
 
+      - name: Install pinned release upload dependencies (hosted)
+        if: runner.environment == 'github-hosted'
+        timeout-minutes: 20
+        run: npx --yes pnpm@11.3.0 install --frozen-lockfile --filter xmatrix --prefer-offline
+
       # Use the same immutable compiler as PR Clippy. Runner image updates
       # must not change which diagnostics or compiler build a release receives.
-      - name: Install reviewed Unix Rust toolchain
+      - name: Setup Unix Rust toolchain and kache
         if: runner.os != 'Windows'
-        uses: ./.github/actions/setup-unix-rust-toolchain
+        uses: ./.github/actions/setup-unix-cli-release-rust
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Set up kache
-        if: runner.os != 'Windows'
-        shell: bash
-        run: bash .github/scripts/setup-kache.sh
+          target: ${{ matrix.target }}
 
       - name: Build release binary
         if: runner.os != 'Windows'
