@@ -361,7 +361,7 @@ jobs:
         if: runner.os != 'Windows'
         working-directory: packages/cli-rs
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --bin xmatrix
 
       - name: Build release binary
         if: runner.os == 'Windows'
@@ -375,7 +375,7 @@ jobs:
           if ($env:PATH -match '(?i)\\Git\\(?:[^;\\]+\\)*(?:bin|usr\\bin)(?:;|$)|\\(?:mingw(?:32|64)|msys[^\\]*)\\bin(?:;|$)') {
             throw 'Windows CLI build PATH still contains Git Bash or MSYS bin directories'
           }
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --bin xmatrix
           if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 
       - name: Rename binary on Windows

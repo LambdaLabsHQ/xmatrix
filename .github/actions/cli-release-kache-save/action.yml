@@ -9,7 +9,7 @@ inputs:
   max-size:
     description: Maximum retained kache size before saving
     required: false
-    default: 640MiB
+    default: 960MiB
 runs:
   using: composite
   steps:
