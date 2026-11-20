@@ -28,10 +28,10 @@ path = "src/bin/xmatrix-release-envelope.rs"
 [dependencies]
 fs2 = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-# Checksum verification re-serializes deserialized JSON payloads (including
-# floating-point quota readings in CommandEffectJournal), so float parsing must
-# round-trip exact IEEE-754 f64 values rather than shifting by 1 ULP.
-serde_json = { workspace = true, features = ["float_roundtrip"] }
+# Journal checksums hash the exact serialized payload bytes via `RawValue`
+# without re-serializing on read; `float_roundtrip` preserves exact IEEE-754
+# f64 values when verifying legacy journals and round-tripping float results.
+serde_json = { workspace = true, features = ["float_roundtrip", "raw_value"] }
 sha2 = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
 

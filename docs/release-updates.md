@@ -1,17 +1,19 @@
 # Release Updates
 
-## Unreleased: daemon command journal round-trips floating-point results
+## Unreleased: harden continuity journal checksums and self-healing
 
-When a daemon command result carried a floating-point number that shifted by 1
-ULP under `serde_json`'s default approximate parser (such as an Antigravity
-quota reading like `(1.0 - 0.9004436) * 100.0 = 9.955639999999999`), the next
-read of `daemon-command-effects-v1.json` re-serialized it as `9.95564`, failed
-checksum verification (`activation journal checksum mismatch`), and rejected
-every subsequent command on that machine. `xmatrix-windows-continuity` now
-enables `serde_json`'s `float_roundtrip` feature so journal reloads preserve
-exact IEEE-754 floats and existing affected journal files recover automatically
-on upgrade. CLI / daemon only. Recovery is a CI-validated CLI release reverting
-this change.
+`BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously
+verified `checksumSha256` by deserializing the JSON payload into structs and
+re-serializing it, so any 1-ULP float shift (such as an Antigravity quota
+reading `(1.0 - 0.9004436) * 100.0 = 9.955639999999999`) or future serialization
+difference tripped `activation journal checksum mismatch` and permanently
+rejected every daemon command. Journals now hash and verify exact raw payload
+bytes via `serde_json::value::RawValue` (keeping a `float_roundtrip`-backed
+legacy fallback so existing pre-fix journals recover automatically on upgrade),
+and `CommandEffectJournal` now maintains a `.previous` image and quarantines
+unrecoverably corrupt files (`*.corrupt-*`, bounded) so a broken local effect
+journal can no longer wedge a machine's daemon. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
 
 ## Unreleased: a billing refusal is a hold, read once
 
