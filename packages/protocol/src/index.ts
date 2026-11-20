@@ -501,7 +501,8 @@ export {
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
-  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageTitleLine,
+  pageOutline, pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageSection, pageTitleLine,
+  replacePageSection,
   parseGitHubFileReference,
 } from "./page-markdown.js";
 export {
@@ -509,7 +510,7 @@ export {
 } from "./media-types.js";
 export type { AttachmentKind } from "./media-types.js";
 export type {
-  GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageEditGlimpse, PageOutlineEntry, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   pageSchedules,

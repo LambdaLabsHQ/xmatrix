@@ -180,6 +180,106 @@ struct PageResponse {
     page: PageDocument,
 }
 
+/// One heading of a page and the characters its section holds.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PageOutlineEntry {
+    pub id: String,
+    pub title: String,
+    pub depth: usize,
+    pub chars: usize,
+}
+
+#[derive(Deserialize)]
+struct PageSectionMark {
+    id: String,
+}
+
+/// A read of part of a page. A Hub that does not serve parts answers with the whole page and
+/// neither field, which must never be taken for the part.
+#[derive(Deserialize)]
+struct PagePartResponse {
+    page: PageDocument,
+    #[serde(default)]
+    outline: Option<Vec<PageOutlineEntry>>,
+    #[serde(default)]
+    section: Option<PageSectionMark>,
+}
+
+const NO_PARTS: &str =
+    "This Hub does not serve a page's outline or sections yet; read the whole page.";
+
+/// The header every read of a page opens with, without its closing line.
+fn read_header_open(page: &PageDocument) -> String {
+    format!(
+        "---\npageId: {}\ntitle: {}\nrevision: {}\nheadRevision: {}\ncanEdit: {}\n",
+        page.summary.page_id,
+        page.summary.title,
+        page.revision_info.revision,
+        page.summary.head_revision,
+        page.summary.can_edit
+    )
+}
+
+/// A page's headings, nested, each with its slug and size: what to read next, not the page.
+pub(crate) fn render_page_outline(page: &PageDocument, outline: &[PageOutlineEntry]) -> String {
+    let mut out = read_header_open(page);
+    out.push_str("outline: headings only; read one with --section <slug>\n---\n");
+    for entry in outline {
+        if entry.id.is_empty() {
+            out.push_str(&format!(
+                "- (text before the first heading) · {} chars\n",
+                entry.chars
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "{}- {} (#{}) · {} chars\n",
+            "  ".repeat(entry.depth.saturating_sub(1)),
+            entry.title,
+            entry.id,
+            entry.chars
+        ));
+    }
+    out
+}
+
+/// One section under a header that names it, so writing the read back rewrites that section only.
+pub(crate) fn render_page_section(page: &PageDocument, section: &str) -> String {
+    let mut out = read_header_open(page);
+    out.push_str(&format!(
+        "{SECTION_HEADER}{section}\nedit: xmatrix page edit {} --base {} --section {section} -f <file>\n---\n{}",
+        page.summary.page_id, page.revision_info.revision, page.body
+    ));
+    if !page.body.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+const SECTION_HEADER: &str = "section: ";
+
+/// The section a read's header names, when `text` opens with the header of a section read.
+fn read_header_section(text: &str) -> Option<String> {
+    let end = read_header_end(text)?;
+    text[..end]
+        .lines()
+        .find_map(|line| line.strip_prefix(SECTION_HEADER))
+        .map(|section| section.trim().to_string())
+}
+
+async fn read_page_part(
+    hub_url: &str,
+    token: &str,
+    route: &str,
+) -> error::Result<PagePartResponse> {
+    let part: PagePartResponse =
+        http::request_json(&with_route(hub_url, route), "GET", Some(token), None).await?;
+    if part.outline.is_none() && part.section.is_none() {
+        return Err(CliError::Launch(NO_PARTS.into()));
+    }
+    Ok(part)
+}
+
 #[derive(Deserialize)]
 struct PageSummaryResponse {
     page: PageSummary,
@@ -856,9 +956,45 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             revision,
             since,
             block,
+            outline,
+            section,
             no_link,
         } => {
             let space = resolve_space(hub_url, token, space).await?;
+            if outline || section.is_some() {
+                let mut query = Vec::new();
+                if let Some(revision) = revision {
+                    query.push(format!("revision={revision}"));
+                }
+                match &section {
+                    Some(section) => query.push(format!("section={}", enc(section))),
+                    None => query.push("outline=1".into()),
+                }
+                if !no_link && let Some(conversation) = run_conversation() {
+                    query.push(format!("conversationId={}", enc(&conversation)));
+                    if let Some(section) = section.as_ref().filter(|section| !section.is_empty()) {
+                        query.push(format!("blockId={}", enc(section)));
+                    }
+                }
+                let route = format!("{}?{}", page_route(&space, &page), query.join("&"));
+                let mut part = read_page_part(hub_url, token, &route).await?;
+                match (&part.outline, &part.section) {
+                    (Some(outline), _) => print!("{}", render_page_outline(&part.page, outline)),
+                    (None, Some(mark)) => {
+                        part.page.body = page_text_for_agent(
+                            hub_url,
+                            token,
+                            &space,
+                            &part.page.summary.page_id,
+                            &part.page.body,
+                        )
+                        .await;
+                        print!("{}", render_page_section(&part.page, &mark.id));
+                    }
+                    (None, None) => {}
+                }
+                return Ok(());
+            }
             if let Some(since) = since {
                 let route = format!("{}/changes?since={since}", page_route(&space, &page));
                 let changes: PageChanges =
@@ -929,11 +1065,26 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             body,
             file,
             stdin,
-            blocks,
+            mut blocks,
+            section,
             conversation,
         } => {
             let space = resolve_space(hub_url, token, space).await?;
             let text = read_body(body, file, stdin)?;
+            // What a section read printed is written back as that section, never as the page.
+            let section = section.or_else(|| read_header_section(&text));
+            if let Some(section) = &section {
+                // A Hub that ignored the section would take its text for the whole page: ask first.
+                let route = format!(
+                    "{}?revision={base}&section={}",
+                    page_route(&space, &page),
+                    enc(section)
+                );
+                read_page_part(hub_url, token, &route).await?;
+                if blocks.is_empty() && !section.is_empty() {
+                    blocks.push(section.clone());
+                }
+            }
             let text =
                 page_text_from_agent(hub_url, token, &space, Some((&page, base)), &text).await?;
             let conversations: Vec<String> =
@@ -943,12 +1094,21 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 &url,
                 "PUT",
                 Some(token),
-                Some(json!({
-                    "baseRevision": base,
-                    "body": text,
-                    "conversationIds": conversations,
-                    "blockIds": blocks,
-                })),
+                Some(match &section {
+                    Some(section) => json!({
+                        "baseRevision": base,
+                        "body": text,
+                        "conversationIds": conversations,
+                        "blockIds": blocks,
+                        "sectionId": section,
+                    }),
+                    None => json!({
+                        "baseRevision": base,
+                        "body": text,
+                        "conversationIds": conversations,
+                        "blockIds": blocks,
+                    }),
+                }),
             )
             .await;
             match result {
@@ -1444,6 +1604,56 @@ mod page_tests {
             governance: false,
             summary: None,
         }
+    }
+
+    fn document(id: &str, body: &str) -> PageDocument {
+        PageDocument {
+            summary: page(id, None, "V"),
+            body: body.into(),
+            revision_info: PageRevision {
+                revision: 7,
+                kind: "edit".into(),
+                authors: vec![],
+                conversation_ids: vec![],
+                created_at: "2026-09-30T00:00:00Z".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn an_outline_lists_headings_by_depth_with_their_slug_and_size() {
+        let entry = |id: &str, title: &str, depth, chars| PageOutlineEntry {
+            id: id.into(),
+            title: title.into(),
+            depth,
+            chars,
+        };
+        let rendered = render_page_outline(
+            &document("plan", ""),
+            &[
+                entry("", "", 0, 12),
+                entry("plan", "Plan", 1, 900),
+                entry("now", "Now", 2, 400),
+            ],
+        );
+        assert!(rendered.starts_with("---\npageId: plan\ntitle: PLAN\nrevision: 7\n"));
+        assert!(rendered.ends_with(
+            "---\n- (text before the first heading) · 12 chars\n- Plan (#plan) · 900 chars\n  - Now (#now) · 400 chars\n"
+        ));
+    }
+
+    #[test]
+    fn a_section_read_written_back_names_its_section_and_leaves_its_header_out() {
+        let rendered = render_page_section(&document("plan", "## Now\n\nship\n"), "now");
+        assert!(rendered.contains(
+            "section: now\nedit: xmatrix page edit plan --base 7 --section now -f <file>\n---\n## Now\n\nship\n"
+        ));
+        assert_eq!(read_header_section(&rendered).as_deref(), Some("now"));
+        assert_eq!(page_text(&rendered).unwrap(), "## Now\n\nship\n");
+        // A whole-page read names no section, and a page that merely says `section:` is not a header.
+        let whole = render_page_document_with(&document("plan", "# Plan\n"), None);
+        assert_eq!(read_header_section(&whole), None);
+        assert_eq!(read_header_section("section: now\n## Now\n"), None);
     }
 
     #[test]
