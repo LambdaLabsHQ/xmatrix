@@ -1771,7 +1771,9 @@ pub(crate) fn spawn_daemon_handoff_request_watch() -> Option<tokio::task::JoinHa
                 "○ Daemon runs xMatrix CLI {}; handing this idle run to it",
                 request.version
             );
-            let failure = match tokio::process::Command::new(&request.executable)
+            let mut update_command = tokio::process::Command::new(&request.executable);
+            crate::process_tree::hide_tokio_console_window(&mut update_command);
+            let failure = match update_command
                 .arg("update-self")
                 .stdin(Stdio::null())
                 .output()

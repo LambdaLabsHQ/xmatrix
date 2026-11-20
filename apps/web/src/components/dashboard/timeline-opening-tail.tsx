@@ -28,11 +28,21 @@ import { cn } from "@/lib/utils";
 export const TimelineRowSlot = memo(function TimelineRowSlot({ host, ...attributes }: { host: HTMLElement } & HTMLAttributes<HTMLDivElement>) {
   const adopt = useCallback((slot: HTMLDivElement | null) => {
     if (!slot || host.parentElement === slot) return;
-    // A move keeps the row's focus, selection and running animations; where
-    // the browser has none, or the host is not in the page yet, it is appended.
+    // A move keeps the row's focus, selection, hover and running animations;
+    // where the browser has none, or the host is not in the page yet, it is
+    // appended.
     const movable = slot as HTMLDivElement & { moveBefore?: (node: Node, before: Node | null) => void };
-    if (movable.moveBefore && host.isConnected && slot.isConnected) movable.moveBefore(host, null);
-    else slot.appendChild(host);
+    if (movable.moveBefore && host.isConnected && slot.isConnected) {
+      // The virtual list drops its `invisible` class in the same commit that
+      // mounts these slots. Resolve the slot's visibility before moving a live
+      // row into it: landing `moveBefore` inside an ancestor whose cached
+      // style is still `visibility: hidden` makes Chromium drop `:hover` for a
+      // frame, flashing the row highlight and restarting the hover bar's fade.
+      void slot.ownerDocument.defaultView?.getComputedStyle(slot).visibility;
+      movable.moveBefore(host, null);
+    } else {
+      slot.appendChild(host);
+    }
   }, [host]);
   return <div ref={adopt} {...attributes} />;
 });

@@ -67,3 +67,39 @@ test("a daemon lock whose read is refused is a running daemon's, and only then",
   assert.equal(daemonLockReadRefused(refused("ENOENT")), false);
   assert.equal(daemonLockReadRefused(() => "pid=42\n"), false);
 });
+
+test("windowsPowerShellCommand always hides the console window", async () => {
+  const { windowsPowerShellCommand } = await import("./daemon-owner.ts");
+  assert.deepEqual(windowsPowerShellCommand(["-Command", "Get-Date"], 5_000), {
+    file: "powershell",
+    args: ["-NoProfile", "-NonInteractive", "-Command", "Get-Date"],
+    options: { timeout: 5_000, windowsHide: true },
+  });
+});
+
+test("daemonStatusChanged ignores heartbeat timestamp refreshes when state is unchanged", async () => {
+  const { daemonStatusChanged } = await import("./daemon-owner.ts");
+  const running = {
+    state: "running",
+    pid: 42,
+    message: "xMatrix daemon is managed by the local service (pid 42); Hub reconnection is managed by the daemon.",
+    updatedAt: "2026-11-20T16:00:00.000Z",
+  };
+  assert.equal(
+    daemonStatusChanged(running, { ...running, updatedAt: "2026-11-20T16:00:30.000Z" }),
+    false,
+  );
+  assert.equal(
+    daemonStatusChanged(running, { ...running, pid: 99, updatedAt: "2026-11-20T16:00:30.000Z" }),
+    true,
+  );
+  assert.equal(
+    daemonStatusChanged(running, {
+      state: "error",
+      message: "failed",
+      failure: { stage: "service_start", detail: "denied", exitCode: 1 },
+      updatedAt: "2026-11-20T16:00:30.000Z",
+    }),
+    true,
+  );
+});

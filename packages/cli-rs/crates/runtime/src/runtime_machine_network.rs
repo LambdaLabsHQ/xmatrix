@@ -207,13 +207,17 @@ async fn direction(client: &reqwest::Client, upload: bool) -> (Option<Value>, Op
 
 async fn echo_probe() -> Option<bool> {
     let mut command = tokio::process::Command::new("ping");
+    crate::process_tree::hide_tokio_console_window(&mut command);
     #[cfg(windows)]
     command.args(["-n", "1", "-w", "1000", "1.1.1.1"]);
     #[cfg(target_os = "macos")]
     command.args(["-n", "-c", "1", "-W", "1000", "1.1.1.1"]);
     #[cfg(not(any(windows, target_os = "macos")))]
     command.args(["-n", "-c", "1", "-W", "1", "1.1.1.1"]);
-    command.env("LC_ALL", "C").kill_on_drop(true);
+    command
+        .stdin(std::process::Stdio::null())
+        .env("LC_ALL", "C")
+        .kill_on_drop(true);
     let output = tokio::time::timeout(Duration::from_millis(1500), command.output())
         .await
         .ok()?

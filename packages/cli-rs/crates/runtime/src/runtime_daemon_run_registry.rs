@@ -3033,7 +3033,9 @@ fn host_capabilities() -> Vec<String> {
 /// `gh auth status` exits 0 only when a GitHub login is usable for the host.
 /// A missing `gh`, a timeout or any failure is "not shown", never assumed.
 fn github_cli_authenticated() -> bool {
-    let Ok(mut child) = std::process::Command::new("gh")
+    let mut command = std::process::Command::new("gh");
+    process_tree::hide_std_console_window(&mut command);
+    let Ok(mut child) = command
         .args(["auth", "status", "--hostname", "github.com"])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

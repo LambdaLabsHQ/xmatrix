@@ -415,6 +415,7 @@ pub(crate) async fn discover_codex_parameters(cmd: &str) -> CodexParameterSchema
     }
     let directory = ExportDirectory(directory);
     let mut command = tokio::process::Command::new(cmd);
+    crate::process_tree::hide_tokio_console_window(&mut command);
     command
         .args([
             "app-server",
