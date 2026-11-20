@@ -95,7 +95,7 @@ export function PlatformAdminUsers({ token }: { token?: string }) {
 
 function UsersList({ token, onOpen }: { token?: string; onOpen: (userId: string) => void }) {
   return (
-    <AdminQueryView title="Users" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
+    <AdminQueryView title="Users" skeleton="table" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
       emptyTitle="No users yet" emptyBody="Registered users appear here once someone signs up.">
       {(overview) => (
         <AdminTable

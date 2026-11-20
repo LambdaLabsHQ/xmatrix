@@ -4881,6 +4881,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
 .app-content-skeleton-line,
 .app-skeleton-bar,
+.app-skeleton-circle,
 .app-list-skeleton-mark,
 .app-message-skeleton-avatar,
 .app-media-skeleton {
@@ -5018,13 +5019,15 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   border-radius: 4px !important;
 }
 
-/* A placeholder row is not a row to point at. */
+/* A placeholder row or surface is not interactive. */
 .app-list-skeleton,
-.app-message-timeline-skeleton {
+.app-message-timeline-skeleton,
+.app-skeleton-inert {
   pointer-events: none;
 }
 
-.xmatrix-app .app-message-skeleton-avatar.app-message-skeleton-avatar {
+.xmatrix-app .app-message-skeleton-avatar.app-message-skeleton-avatar,
+.xmatrix-app .app-skeleton-circle.app-skeleton-circle {
   border-radius: 999px !important;
 }
 
@@ -5193,6 +5196,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 @media (prefers-reduced-motion: reduce) {
   .app-content-skeleton-line,
   .app-skeleton-bar,
+  .app-skeleton-circle,
   .app-list-skeleton-mark,
   .app-message-skeleton-avatar,
   .app-media-skeleton {
