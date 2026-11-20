@@ -1,6 +1,6 @@
 import { currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount, quotaAccountBalance,
   routingModelOptionNamed, routingModelOptions, routingQuotaAccountPartExpiry, routingQuotaObservation,
-  routingQuotaProbeObservations, routingQuotaVerdict, type RoutingQuotaVerdict, routingQuotaRecord,
+  routingQuotaProbeObservations, routingQuotaVerdict, type RoutingBillingHolds, type RoutingQuotaVerdict, routingQuotaRecord,
   routingQuotaUsageWindows, type AgentRegistrationLiveState, type LlmQuotaAccount, type LlmQuotaUsage, type LlmUsage,
   type RoutingModelOption, type RoutingQuotaProbeRequest, type RoutingQuotaRecord,
   type RoutingQuotaWindow } from "@xmatrix/protocol";
@@ -68,12 +68,6 @@ function registrationBillingRefusalScopeEntries(row: Record<string, unknown> | u
   return active;
 }
 
-/** Quota scopes currently held by a billing/payment refusal on this pool (e.g.
- * Cursor's `API` pool requiring a payment method while `Auto` stays open). */
-export function registrationBillingRefusalScopes(row: Record<string, unknown> | undefined, now = Date.now()): string[] {
-  return registrationBillingRefusalScopeEntries(row, now).map(entry => entry.scope);
-}
-
 /** The quota scopes of `model` (or the runtime default when omitted) in a stored
  * Instance model catalog, normalized and non-empty. */
 export function modelQuotaScopes(rawModels: unknown, model: string | undefined): string[] {
@@ -89,7 +83,10 @@ export function modelQuotaScopes(rawModels: unknown, model: string | undefined):
  * it with `routingQuotaObservation`. */
 export type RegistrationQuotaUsage = Omit<LlmUsage, "scopedQuotaUsages"> & {
   scopedQuotaObservedAt?: string;
-  scopedQuotaUsages?: Array<LlmQuotaUsage & { billingRefusal?: true }>;
+  scopedQuotaUsages?: LlmQuotaUsage[];
+  /** Payment refusals. Not quota windows: `routingQuotaVerdict` is the only
+   * reader that turns them into "used up", and a named summon ignores them. */
+  billingHolds?: RoutingBillingHolds;
 };
 
 const time = (value: unknown) => value instanceof Date ? value.getTime()
@@ -97,8 +94,9 @@ const time = (value: unknown) => value instanceof Date ? value.getTime()
 
 /** The pool reading of a row of `registrationQuotaColumns`, or none when
  * nothing counts at `now`. A windowless usage-limit hold (`source='daemon'`)
- * reads as one used-up account window until it ends; a scoped billing refusal
- * reads as one used-up window for that scope alone, leaving other scopes open. */
+ * reads as one used-up account window until it ends. A billing refusal is
+ * `billingHolds` beside the provider's own windows: an account hold, or one
+ * hold per refused scope. It is not another window. */
 export function registrationQuotaUsage(row: Record<string, unknown> | undefined, now = Date.now()):
   RegistrationQuotaUsage | undefined {
   const observed = time(row?.observed_at), expires = time(row?.expires_at);
@@ -107,26 +105,30 @@ export function registrationQuotaUsage(row: Record<string, unknown> | undefined,
   const accountCurrent = expires > now;
   const scopedCurrent = Number.isFinite(scopedObserved) && scopedObserved <= now && scopedExpires > now;
   const billingScopes = registrationBillingRefusalScopeEntries(row, now);
-  if (!accountCurrent && !scopedCurrent && !billingScopes.length) return undefined;
   const hold = row.source === "daemon";
+  const accountBilling = accountCurrent && hold && storedObject(row.account_json).billingRefusal === true;
+  if (!accountCurrent && !scopedCurrent && !billingScopes.length) return undefined;
   const quotaAccount = accountCurrent && !hold ? parseLlmQuotaAccount(row.account_json) : undefined;
-  const quotaUsages = !accountCurrent ? [] : hold
+  // An account billing refusal is a hold, not a fabricated 100% window. A
+  // usage-limit hold that names no window still reads as one used-up window.
+  const quotaUsages = !accountCurrent || accountBilling ? [] : hold
     ? [{ percent: 100 - Number(row.remaining), resetAt: new Date(expires).toISOString() }]
     : routingQuotaUsageWindows(currentRoutingQuotaWindows(row.windows_json, now));
   const billingObserved = billingScopes.length ? Math.max(...billingScopes.map(entry => entry.observedAt)) : NaN;
   const quotaObservedMs = accountCurrent ? observed : scopedCurrent ? scopedObserved : billingObserved;
   const providerScoped = scopedCurrent
     ? routingQuotaUsageWindows(currentRoutingQuotaWindows(row.scoped_windows_json, now)) : [];
-  const billingScoped = billingScopes.map(entry => ({
-    percent: 100, resetAt: new Date(entry.expiresAt).toISOString(), scope: entry.scope, billingRefusal: true as const,
-  }));
-  const hasScoped = scopedCurrent || billingScoped.length > 0;
-  // Without a current provider scoped reading, keep an active 365-day scoped
-  // billing hold inside the 31-day routing window while its hold lasts.
-  const effectiveScopedObserved = scopedCurrent ? scopedObserved : Math.min(Math.max(billingObserved, now - 1_000), now);
+  const billingHolds: RoutingBillingHolds = {
+    ...(accountBilling ? { accountUntil: new Date(expires).toISOString() } : {}),
+    ...(billingScopes.length ? { scopes: billingScopes.map(entry => ({
+      scope: entry.scope, until: new Date(entry.expiresAt).toISOString(),
+    })) } : {}),
+  };
+  const hasHolds = billingHolds.accountUntil !== undefined || (billingHolds.scopes?.length ?? 0) > 0;
   return { quotaSource: "provider_api", quotaObservedAt: new Date(quotaObservedMs).toISOString(), quotaUsages,
-    ...(hasScoped ? { scopedQuotaUsages: [...providerScoped, ...billingScoped],
-      scopedQuotaObservedAt: new Date(effectiveScopedObserved).toISOString() } : {}),
+    ...(scopedCurrent ? { scopedQuotaUsages: providerScoped,
+      scopedQuotaObservedAt: new Date(scopedObserved).toISOString() } : {}),
+    ...(hasHolds ? { billingHolds } : {}),
     ...(quotaAccount ? { quotaAccount } : {}) };
 }
 
@@ -151,7 +153,8 @@ export function registrationQuotaVerdict(row: Record<string, unknown> | undefine
 
 /** The headroom shown for a pool: the account's own, or, when no account
  * window counts and a provider scoped reading is current, that of its least
- * used scope (the best model it can run; billing-refused scopes count as 0%). */
+ * used scope (the best model it can run). A scope a billing hold refuses
+ * reads as none left, so an open pool is the one shown. */
 export function registrationShownQuotaReading(row: Record<string, unknown> | undefined):
   ReturnType<typeof registrationQuotaReading> {
   const now = Date.now();

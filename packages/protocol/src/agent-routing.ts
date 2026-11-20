@@ -553,10 +553,25 @@ export function routingQuotaScopeConstrains(scope: unknown,
   return Boolean(wanted) && (model?.quotaScopes ?? []).some(item => item.trim().toLowerCase() === wanted);
 }
 
+/** A payment refusal recorded beside a provider reading. It is not a quota
+ * window: it has its own expiry, and a named summon ignores it. */
+export type RoutingBillingHolds = {
+  /** Whole-account refusal. Every model is used up until this time. */
+  accountUntil?: string;
+  /** One quota scope (Cursor's `API` pool). Only models whose catalog row
+   * lists that scope are used up, until this time. */
+  scopes?: ReadonlyArray<{ scope: string; until: string }>;
+};
+
 export type RoutingQuotaObservationOptions = {
   /** The catalog row of the model to launch; its `quotaScopes` select the
    * scoped windows that apply. Without it only account windows count. */
   model?: Pick<RoutingModelOption, "quotaScopes">;
+  /** A named summon asks the provider reading alone. Billing holds stay. */
+  ignoreBillingHolds?: boolean;
+  /** Who is asking. A named summon ignores billing holds; automatic does not.
+   * Only `routingQuotaVerdict` reads this. */
+  summon?: "automatic" | "named";
 };
 
 type QuotaWindowReading = { remaining: number; expires: number };
@@ -602,9 +617,45 @@ function providerQuotaReading(usage: unknown, now: number):
   return { row, observed, scopedObserved, allowed: parseLlmQuotaAccount(row.quotaAccount)?.allowed };
 }
 
+/** Payment holds carried on a registration reading. Absent when it has none. */
+function billingHoldsOf(row: Record<string, unknown>): RoutingBillingHolds | undefined {
+  const raw = row.billingHolds;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const holds = raw as Record<string, unknown>;
+  const accountUntil = typeof holds.accountUntil === "string" && Number.isFinite(Date.parse(holds.accountUntil))
+    ? holds.accountUntil : undefined;
+  const scopes = Array.isArray(holds.scopes) ? holds.scopes.flatMap((item): Array<{ scope: string; until: string }> => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const scope = (item as Record<string, unknown>).scope;
+    const until = (item as Record<string, unknown>).until;
+    return typeof scope === "string" && scope.trim() && typeof until === "string" && Number.isFinite(Date.parse(until))
+      ? [{ scope: scope.trim(), until }] : [];
+  }) : [];
+  return accountUntil || scopes.length ? { ...(accountUntil ? { accountUntil } : {}), ...(scopes.length ? { scopes } : {}) } : undefined;
+}
+
+/** Holds as exhausted windows that last until their own expiry. A quota
+ * window's max age does not apply: a payment refusal has no provider reset. */
+function billingHoldReadings(row: Record<string, unknown>, now: number,
+  model: RoutingQuotaObservationOptions["model"]): QuotaWindowReading[] {
+  const holds = billingHoldsOf(row);
+  if (!holds) return [];
+  const readings: QuotaWindowReading[] = [];
+  const accountUntil = holds.accountUntil ? Date.parse(holds.accountUntil) : NaN;
+  if (accountUntil > now) readings.push({ remaining: 0, expires: accountUntil });
+  if (model) {
+    for (const scope of holds.scopes ?? []) {
+      const until = Date.parse(scope.until);
+      if (until > now && routingQuotaScopeConstrains(scope.scope, model)) readings.push({ remaining: 0, expires: until });
+    }
+  }
+  return readings;
+}
+
 /** The headroom a reading leaves one model (`options.model`): its account
- * windows and the scoped windows that constrain it. Without a model, the
- * account's own headroom. */
+ * windows, the scoped windows that constrain it, and any billing hold that
+ * applies. Without a model, the account's own headroom; a scope hold does
+ * not use the account up. */
 export function routingQuotaObservation(usage: unknown, now: number,
   options?: RoutingQuotaObservationOptions): RoutingObservation<number> | undefined {
   const reading = providerQuotaReading(usage, now);
@@ -618,7 +669,8 @@ export function routingQuotaObservation(usage: unknown, now: number,
   // while every Fable request was refused until Fable's reset).
   const scoped = quotaWindowReadings(row.scopedQuotaUsages, reading.scopedObserved, now, scopedVerdict(allowed),
     window => routingQuotaScopeConstrains(window.scope, options?.model));
-  const readings = [...account, ...scoped];
+  const holds = options?.ignoreBillingHolds ? [] : billingHoldReadings(row, now, options?.model);
+  const readings = [...account, ...scoped, ...holds];
   if (!readings.length) {
     // A prepaid account has no window: the provider's verdict on it, else
     // whether any money is left, is all the headroom there is to read.
@@ -629,13 +681,17 @@ export function routingQuotaObservation(usage: unknown, now: number,
       expiresAt: new Date(expires).toISOString(), source: "provider" };
   }
   // The tightest window counts; an exhausted window holds until its reset.
+  // A billing hold is exhausted until its own expiry, even when the provider
+  // still serves the account past a used-up window.
   const least = (windows: QuotaWindowReading[]) => Math.min(...windows.map(item => item.remaining));
-  const exhausted = [...allowed === true ? [] : account, ...scoped].filter(item => item.remaining === 0);
+  const exhausted = [...allowed === true ? [] : account, ...scoped, ...holds].filter(item => item.remaining === 0);
   const expires = exhausted.length ? Math.max(...exhausted.map(item => item.expires))
     : Math.min(...readings.map(item => item.expires));
-  const accountRemaining = allowed === true && account.length
-    ? Math.max(least(account), ROUTING_SERVED_PAST_LIMIT_REMAINING) : least(account);
-  const value = allowed === false ? 0 : Math.min(accountRemaining, least(scoped));
+  const accountRemaining = account.length
+    ? (allowed === true ? Math.max(least(account), ROUTING_SERVED_PAST_LIMIT_REMAINING) : least(account))
+    : Infinity;
+  const value = allowed === false ? 0
+    : Math.min(accountRemaining, scoped.length ? least(scoped) : Infinity, holds.length ? least(holds) : Infinity);
   return { value, observedAt: new Date(observed).toISOString(),
     expiresAt: new Date(expires).toISOString(), source: "provider" };
 }
@@ -644,8 +700,10 @@ export function routingQuotaObservation(usage: unknown, now: number,
  * Whether a reading leaves one model (`options.model`, else the account) any
  * quota: the one answer to "is it used up" every launch, retry, switch and
  * resume reads. `usedUp` is a measured, never assumed, zero that holds
- * `until` the window that ran out resets; `open` is headroom left; `unknown`
- * is no current provider reading. Both readings carry when they were made.
+ * `until` the window that ran out resets, or until a billing hold ends;
+ * `open` is headroom left; `unknown` is no current provider reading. A named
+ * summon (`options.summon`) ignores billing holds and reads the provider
+ * windows alone. Both readings carry when they were made.
  */
 export type RoutingQuotaVerdict =
   | { state: "open"; observedAt: string; expiresAt: string }
@@ -654,7 +712,8 @@ export type RoutingQuotaVerdict =
 
 export function routingQuotaVerdict(usage: unknown, now: number,
   options?: RoutingQuotaObservationOptions): RoutingQuotaVerdict {
-  const quota = routingQuotaObservation(usage, now, options);
+  const quota = routingQuotaObservation(usage, now, options?.summon === "named"
+    ? { ...options, ignoreBillingHolds: true } : options);
   if (!quota || !(Date.parse(quota.expiresAt) > now)) return { state: "unknown" };
   return quota.value > 0 ? { state: "open", observedAt: quota.observedAt, expiresAt: quota.expiresAt }
     : { state: "usedUp", observedAt: quota.observedAt, until: quota.expiresAt };
