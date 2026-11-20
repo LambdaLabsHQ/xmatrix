@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: the Hub canary waits for Cloudflare to know its new version
+
+Two Hub betas in a row failed before any traffic moved: right after the upload,
+Cloudflare had not yet listed the new version, and then could not view a
+version it had just listed (code 100146). The canary now looks the version up
+up to six times with growing waits (about 75 s in all) and retries only that
+not-found answer when it views it; any other failure still stops the release
+before a deployment. Release tooling only. Recovery is a CI-validated change
+reverting this one.
+
 ## Unreleased: the comment card's @ list sits on its paper, and never folds one Agent
 
 The @ list in a page's comment card was the glass composer's list dropped
