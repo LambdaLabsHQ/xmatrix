@@ -8,6 +8,7 @@ import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
 import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { OverlayScrollbars } from "@/components/ui/overlay-scrollbars";
 import { OVERLAY_SCROLLBARS_MODE_SCRIPT } from "@/components/ui/overlay-scrollbars-mode";
+import { HIGHLIGHT_INHERITANCE_MODE_SCRIPT } from "@/components/ui/highlight-inheritance-mode";
 import { shareImage, siteUrl } from "@/lib/site-url";
 import { browserBackEntryScript } from "@/components/dashboard/browser-back-entry-script";
 
@@ -68,6 +69,7 @@ export default function Document(props: { children: React.ReactNode; lang: strin
       }
     })();
     ${OVERLAY_SCROLLBARS_MODE_SCRIPT}
+    ${HIGHLIGHT_INHERITANCE_MODE_SCRIPT}
   `;
 
   return (

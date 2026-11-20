@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import Image from "next/image";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
 
@@ -55,21 +56,22 @@ export function DownloadRecommendation() {
   const otherMac = platform === "macOS" ? macDownloads(copy)[intelMac ? "arm64" : "x64"] : null;
 
   return (
-    <WoodPanel className="mb-10 min-w-0 p-5 sm:p-7" data-testid="download-recommendation">
-      <h3 className="text-2xl font-semibold tracking-tight">
-        {download ? download.label : platform === "unknown" ? copy.getXMatrix : copy.useOnWeb}
-      </h3>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
+    <div className="mx-auto flex max-w-2xl flex-col items-center text-center" data-testid="download-recommendation">
+      <Image src="/brand/xmatrix-icon-128.png" alt="" width={72} height={72} priority className="download-app-icon" />
+      <h1 className="site-display mt-8 text-5xl font-semibold leading-[1.02] text-foreground sm:text-6xl">
+        {platform === "unknown" || download ? copy.getXMatrix : copy.useOnWeb}
+      </h1>
+      <p className="mt-5 max-w-md text-base leading-7 text-muted-foreground">
         {download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
       </p>
-      <div className="mt-5 flex flex-wrap items-center gap-4">
-        <LiquidGlassPill as="a" href={download?.href ?? "/app"} className="inline-flex min-h-11 items-center justify-center gap-2 px-5 text-sm font-semibold">
-          {download && <Download className="size-4" />}
-          {download ? download.label : copy.openWebApp}
-        </LiquidGlassPill>
-        {otherMac && <a href={otherMac.href} className="text-sm font-semibold text-primary underline underline-offset-4">{copy.otherMac(otherMac.name)}</a>}
-        <a href="#all-downloads" className="text-sm font-semibold text-primary underline underline-offset-4">{copy.allPlatforms}</a>
-      </div>
-    </WoodPanel>
+      <WoodPanel as="a" href={download?.href ?? "/app"} className="site-wood-pill mt-9 inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
+        {download && <Download className="size-4" />}
+        {download ? download.label : copy.openWebApp}
+      </WoodPanel>
+      <p className="mt-5 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
+        {otherMac && <a href={otherMac.href} className="download-quiet-link">{copy.otherMac(otherMac.name)}</a>}
+        <a href="#all-downloads" className="download-quiet-link">{copy.allPlatforms}</a>
+      </p>
+    </div>
   );
 }

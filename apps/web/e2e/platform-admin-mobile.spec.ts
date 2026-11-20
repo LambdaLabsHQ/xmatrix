@@ -59,9 +59,13 @@ test("a phone shares a filtered user list, opens a user, and Back restores the f
   await expect(users.locator('[title="2026-08-04T11:00:00.000Z"]')).toBeVisible();
   await expectPaperFits(page);
   await page.screenshot({ path: testInfo.outputPath("mobile-users.png") });
+  // The section's own Back gives way to the record's, which returns to this list.
+  const sectionBack = page.locator(".app-tool-detail-scroll article > button");
+  await expect(sectionBack).toBeVisible();
   await users.getByRole("button", { name: /owner@example.com/ }).click();
   await expect(page.getByRole("heading", { name: "Owner", exact: true })).toBeVisible();
   await expect(page).toHaveURL(/user=user%3A1/);
+  await expect(sectionBack).toBeHidden();
   await page.reload();
   await expect(page.getByRole("heading", { name: "Owner", exact: true })).toBeVisible();
   await expectPaperFits(page);
