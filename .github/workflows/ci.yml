@@ -550,24 +550,7 @@ jobs:
       # this job's build, cache and toolchain directories; a GitHub-hosted VM,
       # discarded after the job, turns real-time scanning off altogether. A
       # runner without the right to change Defender keeps scanning and says so.
-      - name: Keep Defender off the build directories
-        shell: powershell
-        run: |
-          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
-          $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $HOME '.rustup' }
-          $paths = @(
-            $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP,
-            (Join-Path $env:LOCALAPPDATA 'kache-runners'), $cargoHome, $rustupHome
-          ) | Where-Object { $_ } | Select-Object -Unique
-          try {
-            Add-MpPreference -ExclusionPath $paths -ErrorAction Stop
-            if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
-              Set-MpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableIOAVProtection $true -ErrorAction Stop
-            }
-            Write-Host "Defender skips: $($paths -join '; ')"
-          } catch {
-            Write-Host "Defender settings unchanged on this runner: $($_.Exception.Message)"
-          }
+      - uses: ./.github/actions/disable-windows-defender
       # Default clean checkout; kache restores compile artifacts across jobs.
       - *checkout_selected_ref
       - *setup_node

@@ -13,6 +13,20 @@ released that way is not treated as the lock. An outbox already in that state
 empties on the first pass after the update. CLI / daemon only. Recovery is a
 CI-validated CLI release reverting this change.
 
+## Unreleased: hosted CLI release builds reuse warm per-target kache stores
+
+Hosted CLI releases (`cli-build.yml`) previously compiled all 400+ Rust crates
+cold on every beta and stable tag (5–14 minutes per platform, with
+`macos-26-intel` at 14m11s), ran Windows release builds with Defender real-time
+scanning enabled, and throttled hosted PNPM upload-dependency installs without
+reusing the `lockfile-verified.jsonl` cache. A new `cli-release-cache.yml`
+workflow on `main` now maintains bounded per-target `kache` stores (`linux-x64`,
+`macos-arm64`, `macos-x64`, `windows-x64`) using the same pinned compiler as PR
+CI and `cli-build.yml`; `cli-build.yml` restores those stores on release tags,
+excludes build directories from Windows Defender, and reuses the hosted PNPM
+verification cache. CI / release infrastructure only; no client or schema
+change. Recovery is reverting the workflow PR.
+
 ## Unreleased: harden continuity journal checksums and self-healing
 
 `BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously
