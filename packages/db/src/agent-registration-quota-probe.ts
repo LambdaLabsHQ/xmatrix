@@ -1,9 +1,9 @@
-import { currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount, quotaAccountBalance,
-  routingModelOptionNamed, routingModelOptions, routingQuotaAccountPartExpiry, routingQuotaObservation,
-  routingQuotaProbeObservations, routingQuotaVerdict, type RoutingBillingHolds, type RoutingQuotaVerdict, routingQuotaRecord,
-  routingQuotaUsageWindows, type AgentRegistrationLiveState, type LlmQuotaAccount, type LlmQuotaUsage, type LlmUsage,
-  type RoutingModelOption, type RoutingQuotaProbeRequest, type RoutingQuotaRecord,
-  type RoutingQuotaWindow } from "@xmatrix/protocol";
+import { clampRoutingQuotaObservedTime, currentRoutingQuotaWindows, digestCanonicalCloneCborV1, parseLlmQuotaAccount,
+  quotaAccountBalance, routingModelOptionNamed, routingModelOptions, routingQuotaAccountPartExpiry,
+  routingQuotaObservation, routingQuotaProbeObservations, routingQuotaVerdict, type RoutingBillingHolds,
+  type RoutingQuotaVerdict, routingQuotaRecord, routingQuotaUsageWindows, type AgentRegistrationLiveState,
+  type LlmQuotaAccount, type LlmQuotaUsage, type LlmUsage, type RoutingModelOption, type RoutingQuotaProbeRequest,
+  type RoutingQuotaRecord, type RoutingQuotaWindow } from "@xmatrix/protocol";
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 import type { DatabasePlacementContext } from "./context.js";
@@ -99,11 +99,12 @@ const time = (value: unknown) => value instanceof Date ? value.getTime()
  * hold per refused scope. It is not another window. */
 export function registrationQuotaUsage(row: Record<string, unknown> | undefined, now = Date.now()):
   RegistrationQuotaUsage | undefined {
-  const observed = time(row?.observed_at), expires = time(row?.expires_at);
-  const scopedObserved = time(row?.scoped_observed_at), scopedExpires = time(row?.scoped_expires_at);
-  if (!row || !Number.isFinite(observed) || observed > now) return undefined;
+  const observed = clampRoutingQuotaObservedTime(time(row?.observed_at), now), expires = time(row?.expires_at);
+  const scopedObserved = clampRoutingQuotaObservedTime(time(row?.scoped_observed_at), now);
+  const scopedExpires = time(row?.scoped_expires_at);
+  if (!row || observed === undefined) return undefined;
   const accountCurrent = expires > now;
-  const scopedCurrent = Number.isFinite(scopedObserved) && scopedObserved <= now && scopedExpires > now;
+  const scopedCurrent = scopedObserved !== undefined && scopedExpires > now;
   const billingScopes = registrationBillingRefusalScopeEntries(row, now);
   const hold = row.source === "daemon";
   const accountBilling = accountCurrent && hold && storedObject(row.account_json).billingRefusal === true;
@@ -428,11 +429,12 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
     const narrowed = hold ? quotaRecordUsedUp(record, Date.parse(String(hold.held_until)), undefined, Date.now()) : undefined;
     if (narrowed) { record = narrowed; explainsHold = true; }
   }
-  await tx.query({ name: "registration_quota_observe_v8", text: `INSERT INTO control.registration_quota_observations AS o
+  await tx.query({ name: "registration_quota_observe_v9", text: `INSERT INTO control.registration_quota_observations AS o
       (owner_user_id,quota_pool_id,remaining,observed_at,expires_at,source,windows_json,account_json,
         scoped_windows_json,scoped_observed_at,scoped_expires_at)
-      SELECT $1,$2,$3,$4::timestamptz,$5::timestamptz,'provider',$6::jsonb,$7::jsonb,$8::jsonb,$9::timestamptz,$10::timestamptz
-      WHERE $4::timestamptz<=statement_timestamp() AND GREATEST($5::timestamptz,$10::timestamptz)>statement_timestamp()
+      SELECT $1,$2,$3,LEAST($4::timestamptz,statement_timestamp()),$5::timestamptz,'provider',$6::jsonb,$7::jsonb,$8::jsonb,
+        CASE WHEN $9::timestamptz IS NULL THEN NULL ELSE LEAST($9::timestamptz,statement_timestamp()) END,$10::timestamptz
+      WHERE $4::timestamptz<=statement_timestamp()+interval '5 seconds' AND GREATEST($5::timestamptz,$10::timestamptz)>statement_timestamp()
       ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
         ${setWhen(ACCOUNT_PART_NEWER, ["remaining", "observed_at", "expires_at", "source", "windows_json", "account_json"], {
           windows_json: KEPT_ACCOUNT_WINDOWS, remaining: KEPT_REMAINING,

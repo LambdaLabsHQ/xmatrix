@@ -13,7 +13,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-const HOUR: Duration = Duration::from_secs(60 * 60);
+const MINUTE: Duration = Duration::from_secs(60);
 const DAY: Duration = Duration::from_secs(24 * 60 * 60);
 
 #[derive(Clone, Debug)]
@@ -50,6 +50,18 @@ impl DaemonCommandResults {
     /// Hub holds this command's result.
     pub(super) fn confirmed(&self, control_id: &str) {
         let _ = fs::remove_file(self.path(control_id));
+    }
+
+    /// Drop a kept `machine_quota_probe_result` once Hub rejects it
+    /// non-retryably or its connection epoch ends. Other command types stay
+    /// kept so a redelivered claim can rebind their result to a new lease.
+    pub(super) fn drop_if_quota_probe(&self, control_id: &str) {
+        if self
+            .unconfirmed(control_id)
+            .is_some_and(|saved| is_quota_probe_result(&saved))
+        {
+            self.confirmed(control_id);
+        }
     }
 
     /// Every result Hub may still ask for. A result whose command Hub can no
@@ -112,12 +124,16 @@ impl DaemonCommandResults {
     }
 }
 
+pub(super) fn is_quota_probe_result(result: &Value) -> bool {
+    result.get("type").and_then(Value::as_str) == Some("machine_quota_probe_result")
+}
+
 /// How long Hub may deliver a command again: a quota probe within a minute, a
 /// harness, text or worktree action within 10 minutes, anything else within
 /// 30 days. The margin past that covers an action still renewing its lease.
 fn redelivery_window(result: &Value) -> Duration {
     match result.get("type").and_then(Value::as_str) {
-        Some("machine_quota_probe_result") => HOUR,
+        Some("machine_quota_probe_result") => 5 * MINUTE,
         Some(
             "machine_harness_action_result"
             | "machine_text_task_result"
@@ -154,9 +170,15 @@ mod tests {
             .unwrap();
         assert_eq!(results.unconfirmed("probe/1:a"), Some(result.clone()));
         assert_eq!(results.all_unconfirmed().len(), 2);
-        results.confirmed("probe/1:a");
+        results.drop_if_quota_probe("probe/1:a");
         assert_eq!(results.unconfirmed("probe/1:a"), None);
         assert_eq!(results.all_unconfirmed().len(), 1);
+        // Non-quota results survive `drop_if_quota_probe` so a redelivered
+        // claim can still rebind them to a new lease.
+        results.drop_if_quota_probe("other");
+        assert!(results.unconfirmed("other").is_some());
+        results.confirmed("other");
+        assert!(results.all_unconfirmed().is_empty());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -190,13 +212,13 @@ mod tests {
         results
             .keep("spawn", &json!({ "type": "machine_spawn_result" }))
             .unwrap();
-        let two_hours_ago = SystemTime::now() - 2 * HOUR;
+        let ten_minutes_ago = SystemTime::now() - 10 * MINUTE;
         for id in ["probe", "spawn"] {
             fs::File::options()
                 .write(true)
                 .open(results.path(id))
                 .unwrap()
-                .set_modified(two_hours_ago)
+                .set_modified(ten_minutes_ago)
                 .unwrap();
         }
         let left = results.all_unconfirmed();
