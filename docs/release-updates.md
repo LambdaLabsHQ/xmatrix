@@ -1,5 +1,37 @@
 # Release Updates
 
+## Unreleased: a page is found, read and written a level at a time
+
+An Agent had the title tree and whole-page reads, with nothing between, and a
+conversation carried every page any of its Runs had opened. Two changes (#1873
+and #1875):
+
+Finding the page. Jev attaches a new conversation to a page chosen among every
+page its author can read, each put as its path and the one line saying how it
+stands; it was the first 60 of the tree by title alone, and the tree's order
+made that an arbitrary 60 (in a Space of 111 pages, 51 could never be
+attached). A Space that does not fit one question is asked in up to six
+batches, then among each batch's choice. Page search (Web, the MCP
+`search_pages` tool and the new `xmatrix page search`) matches every word of
+the query wherever each stands, with pages holding it as typed first, and
+names the section holding the most of the words; a query without spaces
+matches as before. `xmatrix page tree --summaries` prints each page's line.
+
+Carrying and reading it. A page that was only read from a conversation, never
+linked, referenced or edited there, is no longer put whole into each later
+Run's launch context: it is named with its line and its read. The link itself
+stays. `xmatrix page read --outline` prints a page's headings with their sizes
+and `--section <slug>` one section; `xmatrix page edit --section <slug>`
+rewrites that section, which the Hub applies to the revision it was read from
+and merges like any edit. What a section read printed is written back as that
+section, never as the page, and the CLI refuses a section edit against a Hub
+that does not serve sections.
+
+Hub and CLI; Web only through the search results it shows. No schema change.
+Recovery is a CI-validated beta reverting these changes; a reverted Hub makes
+the newer CLI's `--outline`, `--section` and section edits refuse with a
+message and write nothing.
+
 ## Unreleased: a Windows Supervisor with an unreadable journal starts its own release
 
 The Windows Supervisor starts the daemon its `activation-journal.json` names.
