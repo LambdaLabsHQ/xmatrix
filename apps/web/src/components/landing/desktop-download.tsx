@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-import { ChevronDown, Globe, Smartphone } from "lucide-react";
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { Check, ChevronDown, Globe, Smartphone } from "lucide-react";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
+import { PaperPopover } from "@/components/ui/material-surfaces";
 
 import { DownloadRecommendation, webApp, type Channel } from "./download-recommendation";
 
@@ -16,7 +17,7 @@ const notes = (component: "desktop" | "android", channel: Channel) => `/releases
 /** The two release channels. The whole page, the main download and every row, is the selected one. */
 const channels: { id: Channel; label: string; detail: string }[] = [
   { id: "stable", label: "Stable", detail: "Tested releases. The right choice for most people." },
-  { id: "dev", label: "Preview", detail: "The newest build, ahead of Stable. Updates often and can have rough edges." },
+  { id: "dev", label: "Preview", detail: "The newest build, ahead of Stable. Can have rough edges." },
 ];
 
 const platforms = (channel: Channel): PlatformRow[] => [
@@ -46,6 +47,64 @@ const more = (channel: Channel): Build[] => [
   { label: "macOS ZIP, Intel", href: desktop(channel, "x64.zip") },
 ];
 
+/**
+ * The channel as quiet text beside the main download. It opens a paper slip
+ * that says what each channel is, in place of the system picker, whose blue
+ * list and focus ring were the loudest thing on the page.
+ */
+function ChannelMenu({ channel, onChoose }: { channel: Channel; onChoose: (next: Channel) => void }) {
+  const [open, setOpen] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    root.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
+    const outside = (event: PointerEvent) => { if (!root.current?.contains(event.target as Node)) setOpen(false); };
+    document.addEventListener("pointerdown", outside);
+    return () => document.removeEventListener("pointerdown", outside);
+  }, [open]);
+  const close = () => { setOpen(false); trigger.current?.focus(); };
+  const keys = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === "Escape") return close();
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    items[(items.indexOf(document.activeElement as HTMLElement) + (event.key === "ArrowDown" ? 1 : items.length - 1)) % items.length]?.focus();
+  };
+  return (
+    <div ref={root} className="relative">
+      <button
+        ref={trigger}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="inline-flex h-11 items-center gap-1 rounded-md px-1 text-sm font-[550] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-visible:outline-2 focus-visible:outline-[var(--site-wood-deep)] aria-expanded:text-[var(--site-ink)]"
+      >
+        <span className="sr-only">Release channel: </span>
+        {channels.find(({ id }) => id === channel)!.label}
+        <ChevronDown className="size-4" strokeWidth={2} aria-hidden />
+      </button>
+      {open && (
+        <PaperPopover role="menu" aria-label="Release channel" onKeyDown={keys}
+          className="absolute left-1/2 top-full z-20 mt-1 flex w-64 -translate-x-1/2 flex-col border border-foreground/10 text-left sm:left-0 sm:translate-x-0">
+          {channels.map(({ id, label, detail }) => (
+            <button key={id} type="button" role="menuitemradio" aria-checked={id === channel}
+              onClick={() => { onChoose(id); close(); }}
+              className="flex items-start gap-3 px-3.5 py-2.5 text-left hover:bg-foreground/5 focus-visible:bg-foreground/5 focus-visible:outline-none">
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-foreground">{label}</span>
+                <span className="block text-[13px] leading-5 text-muted-foreground">{detail}</span>
+              </span>
+              <Check className={id === channel ? "mt-0.5 size-4 text-foreground" : "invisible size-4"} strokeWidth={2.25} aria-hidden />
+            </button>
+          ))}
+        </PaperPopover>
+      )}
+    </div>
+  );
+}
+
 export function DesktopDownload() {
   const [channel, setChannel] = useState<Channel>("stable");
   // `/download?channel=preview` opens the list on Preview, so the choice can be linked.
@@ -61,20 +120,7 @@ export function DesktopDownload() {
   };
   const current = channels.find(({ id }) => id === channel)!;
   const suffix = channel === "dev" ? " preview" : "";
-  /* Quiet text beside the main download: the system's own picker, no track or border. */
-  const channelSwitch = (
-    <label className="relative inline-flex h-11 items-center gap-1 text-sm font-[550] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-within:text-[var(--site-ink)]">
-      <span className="sr-only">Release channel</span>
-      <select
-        value={channel}
-        onChange={(event) => choose(event.target.value as Channel)}
-        className="cursor-pointer appearance-none rounded-md border-0 !bg-transparent !shadow-none py-1 pl-1 pr-5 text-inherit focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--site-wood-deep)]"
-      >
-        {channels.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-0 size-4" strokeWidth={2} aria-hidden />
-    </label>
-  );
+  const channelSwitch = <ChannelMenu channel={channel} onChoose={choose} />;
 
   return (
     <section id="download" className="x-section download-page">
@@ -100,8 +146,7 @@ export function DesktopDownload() {
             ))}
           </ul>
 
-          <p className="mt-5 text-sm text-muted-foreground" aria-live="polite">{current.detail}</p>
-          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+          <p className="mt-5 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
             {more(channel).map((link) => (
               <a key={link.href} href={link.href} className="download-quiet-link" aria-label={`${link.label}${suffix}`}>{link.label}</a>
             ))}
