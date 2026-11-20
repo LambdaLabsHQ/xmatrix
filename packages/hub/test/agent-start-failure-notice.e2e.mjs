@@ -7,6 +7,7 @@ import {
   MOCK_TOKEN,
   randomUUID,
   runAgentConnection,
+  sleep,
   test,
   waitForChannelHistoryMessage,
 } from "./agent-mention-spawn.fixture.mjs";
@@ -182,6 +183,19 @@ for (const [reason, code] of [
   }
 });
 
+/** The spawn command has gone out three times with every lease left to lapse; the Hub finds it
+ * when it next hands the machine work, here a second start. */
+async function leaveUnanswered(worker, scenario, command) {
+  const { daemon, channelId, registration } = scenario;
+  await inTestTransaction(tx => tx.query({ text: `UPDATE data.machine_daemon_commands
+    SET attempts=3,lease_until=clock_timestamp()-interval '1 second' WHERE command_id=$1 RETURNING command_id`,
+  values: [command.requestId] }));
+  const next = daemon.inbox.waitFor(message => message.channelId === channelId && isSpawnOf(message, registration) &&
+    message.runId !== command.runId, "the next start");
+  await postAutoLaunch(worker, { ...scenario, harness: registration.harness }, "start again");
+  await next;
+}
+
 // 2026-11-20: two daemons refused every command for six hours while connected.
 // Each start was failed by the Hub after ten deliveries, with no word on its summon.
 test("a start its connected machine never answers is ended after three deliveries and said on its summon", async () => {
@@ -192,20 +206,12 @@ test("a start its connected machine never answers is ended after three deliverie
     const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-silent" });
     ({ daemon } = scenario);
     const { auth, channelId, registration } = scenario;
-    const spawned = (label, other) => daemon.inbox.waitFor(message => message.channelId === channelId &&
-      isSpawnOf(message, registration) && message.runId !== other, label);
-    const first = spawned("the start, handed out once");
+    const first = daemon.inbox.waitFor(message => message.channelId === channelId && isSpawnOf(message, registration),
+      "the start, handed out once");
     await postAutoLaunch(worker, { ...scenario, harness: registration.harness }, "start on a machine that says nothing");
     // Handed to the daemon, which neither admits nor answers it.
     const command = await first;
-    // Its second and third deliveries lapse the same way.
-    await inTestTransaction(tx => tx.query({ text: `UPDATE data.machine_daemon_commands
-      SET attempts=3,lease_until=clock_timestamp()-interval '1 second' WHERE command_id=$1 RETURNING command_id`,
-    values: [command.requestId] }));
-    // The Hub looks at what a machine left lapsed when it next hands it work.
-    const next = spawned("the next start", command.runId);
-    await postAutoLaunch(worker, { ...scenario, harness: registration.harness }, "start again");
-    await next;
+    await leaveUnanswered(worker, scenario, command);
 
     const { notes } = await runNote(worker, auth, channelId, command.runId, "the silent start on its summon");
     assert.equal(notes.length, 1);
@@ -223,5 +229,43 @@ test("a start its connected machine never answers is ended after three deliverie
     assert.deepEqual(stored, { status: "failed", unanswered: "true" });
   } finally {
     await stopAgentWorker(worker, undefined, daemon);
+  }
+});
+
+// The verdict is about a start nobody saw happen. A daemon that started the
+// Agent and only failed to report it must not cost the Agent its Run.
+test("an Agent that connected is not failed because its daemon never reported the start", async () => {
+  const worker = await startMockUserHubWorker({ id: `quiet-daemon-${randomUUID()}`,
+    email: "quiet-daemon@example.com", name: "Quiet Daemon" });
+  let daemon;
+  let agent;
+  try {
+    const scenario = await createPgSpawnableScenario(worker, { agentName: "codex-quiet" });
+    ({ daemon } = scenario);
+    const { auth, channelId } = scenario;
+    // Admitted and started; the spawn result never comes.
+    const { command, token } = await launchScenarioRun(worker, scenario, "start on a daemon that reports nothing");
+    agent = await connectAgent(worker, runAgentConnection(command, channelId), token);
+    const instanceId = agent.agent.instanceId || agent.agent.id;
+    await leaveUnanswered(worker, scenario, command);
+    // The Hub ended the command and recorded its report; the coordinator finalizes it.
+    const report = () => inTestTransaction(tx => tx.query({
+      text: "SELECT state FROM data.machine_run_terminal_reports WHERE run_id=$1 AND event_type='machine_spawn_result'",
+      values: [command.runId] }));
+    let finalized;
+    for (let attempt = 0; attempt < 200 && !(finalized = (await report())[0]?.state === "finalized"); attempt += 1) await sleep(50);
+    assert.equal(finalized, true, "the recorded report is finalized");
+
+    const headers = { ...auth, "content-type": "application/json" };
+    const launch = await diagnosedLaunch(worker, headers, command.runId);
+    assert.equal(launch.state, "connected");
+    assert.equal(launch.errorCode, undefined);
+    const live = await json(await worker.fetch("/api/agent-instances", { headers: auth }));
+    assert.ok(live.instances.some(instance => instance.instanceId === instanceId), "the Agent keeps its Run");
+    const history = await json(await worker.fetch(`/api/channels/${channelId}/history?limit=20`, { headers: auth }));
+    assert.deepEqual(history.messages.flatMap(message => message.commandResult?.notes ?? [])
+      .filter(note => note.runId === command.runId), [], "nothing is said about a start that happened");
+  } finally {
+    await stopAgentWorker(worker, agent, daemon);
   }
 });
