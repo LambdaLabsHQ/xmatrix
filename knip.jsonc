@@ -92,6 +92,10 @@
       ],
       "ignoreDependencies": ["cloudflare", "tsx"],
     },
+    "apps/chrome-extension": {
+      // Chrome loads these by the paths manifest.json and popup.html name.
+      "entry": ["src/background.js", "src/popup.js", "src/popup.css", "scripts/package.mjs", "test/*.test.mjs", "package.json"],
+    },
     "packages/mock-agent": {
       "entry": ["src/index.mjs", "package.json"],
     },

@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: Chrome extension to send pages to a Channel
+
+New `apps/chrome-extension` (Manifest V3). From the toolbar popup
+(Alt+Shift+X) or the context menu, a person sends the current page, a link or
+the selected text, with a note, to a conversation in their Space as
+themselves. The selected text goes as a quote, and mentioning an Agent hands it
+the work. The badge shows how many conversations are waiting on them. Sign-in
+uses the existing CLI device flow. Requests declare an `app` client identity
+on platform `chrome-extension`. No Hub, protocol, Web or client release
+component changes. The extension ships outside the release train until a
+Chrome Web Store listing and its publish workflow exist; until then it loads
+unpacked. Recovery is reverting the directory.
+
 ## Unreleased: show all scoped quota windows in Web instead of truncating at three
 
 Web's `normalizeQuotaUsageList` sliced deduplicated quota windows to three

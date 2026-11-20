@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "xMatrix",
+  "description": "Send the page you are on, a link or selected text to a conversation in your xMatrix Space, and see what is waiting on you.",
+  "version": "1.0.0",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "Send to xMatrix",
+    "default_popup": "src/popup.html",
+    "default_icon": {
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png"
+    }
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "permissions": ["activeTab", "alarms", "contextMenus", "scripting", "storage"],
+  "host_permissions": ["https://xmatrix-hub.xmatrix.sh/*"],
+  "commands": {
+    "_execute_action": {
+      "suggested_key": { "default": "Alt+Shift+X" },
+      "description": "Send this page to xMatrix"
+    }
+  }
+}
