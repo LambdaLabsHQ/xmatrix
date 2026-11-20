@@ -54,21 +54,62 @@ impl AcpSession {
             config,
             questions: Default::default(),
             background_tasks: crate::runtime_waiting::AcpBackgroundTasks::default(),
+            active_subagents: 0,
+            subagent_read_reports: 0,
             tool_wait_threshold: crate::runtime_waiting::TOOL_WAIT_THRESHOLD,
             reactive_wakeup_settle: ACP_REACTIVE_WAKEUP_SETTLE,
+            subagent_poll_interval: ACP_SUBAGENT_POLL_INTERVAL,
+            subagent_wakeup_grace: ACP_SUBAGENT_WAKEUP_GRACE,
             inbox_closed: false,
         })
     }
 
     fn publish_background_tasks(&self) {
         if self.config.supports_background_tasks {
-            write_current_run_background_tasks(Some(self.background_tasks.count()));
+            write_current_run_background_tasks(Some(
+                self.background_tasks
+                    .count()
+                    .saturating_add(self.active_subagents),
+            ));
+        }
+    }
+
+    fn has_active_subagents(&self) -> bool {
+        self.active_subagents > 0
+    }
+
+    fn refresh_active_subagents(&mut self) -> AcpSubagentRefresh {
+        if !self.config.supports_background_tasks {
+            return AcpSubagentRefresh::default();
+        }
+        let next = self
+            .session_id
+            .as_deref()
+            .and_then(|session_id| {
+                crate::runtime_waiting::antigravity_brain_dir().map(|brain_dir| {
+                    crate::runtime_waiting::read_antigravity_subagent_state(&brain_dir, session_id)
+                })
+            })
+            .unwrap_or_default();
+        let prev_active = self.active_subagents;
+        let prev_read_reports = self.subagent_read_reports;
+        self.active_subagents = next.active_count;
+        self.subagent_read_reports = next.read_report_count;
+        AcpSubagentRefresh {
+            active: next.active_count,
+            changed: prev_active != next.active_count,
+            dropped_to_zero_with_report: prev_active > 0
+                && next.active_count == 0
+                && next.read_report_count > prev_read_reports,
         }
     }
 
     fn clear_background_tasks(&mut self) {
-        if !self.background_tasks.is_empty() {
-            self.background_tasks.clear();
+        let had_any = !self.background_tasks.is_empty() || self.active_subagents > 0;
+        self.background_tasks.clear();
+        self.active_subagents = 0;
+        self.subagent_read_reports = 0;
+        if had_any {
             self.publish_background_tasks();
         }
     }
@@ -77,6 +118,8 @@ impl AcpSession {
     fn set_wait_timings(&mut self, tool_wait: Duration, reactive_settle: Duration) {
         self.tool_wait_threshold = tool_wait;
         self.reactive_wakeup_settle = reactive_settle;
+        self.subagent_poll_interval = Duration::from_millis(50);
+        self.subagent_wakeup_grace = Duration::from_millis(180);
     }
 
     fn current_model(&self) -> Option<&str> {
@@ -903,11 +946,20 @@ impl AcpSession {
                         &daemon_tool_ids,
                         &mut self.background_tasks,
                     );
+                    self.refresh_active_subagents();
                     self.publish_background_tasks();
                 } else {
                     tool_waits.clear();
                 }
-                match self.background_tasks.waiting() {
+                let between_turns_waiting = if cancellation_detail.is_none()
+                    && incomplete_detail.is_none()
+                    && self.has_active_subagents()
+                {
+                    None
+                } else {
+                    self.background_tasks.waiting()
+                };
+                match between_turns_waiting {
                     Some(background) => {
                         if let Some(runtime_state) = runtime_state {
                             runtime_state.set_waiting(Some(background));
@@ -1105,6 +1157,22 @@ const ACP_REACTIVE_WAKEUP_SETTLE: Duration = Duration::from_millis(2_500);
 /// Maximum quiet wait after a background task finishes if the ACP agent does
 /// not emit any reactive wakeup events (for example, a cancelled task).
 const ACP_REACTIVE_WAKEUP_START_GRACE: Duration = Duration::from_secs(90);
+
+/// How often to re-check local Antigravity subagent state while at least one
+/// subagent is running between turns.
+const ACP_SUBAGENT_POLL_INTERVAL: Duration = Duration::from_secs(2);
+
+/// Grace period after a subagent's report message is marked read by Antigravity
+/// before settling back to `idle` if no reactive wakeup frame arrives yet
+/// (prevents a brief green flicker while the parent model starts thinking).
+const ACP_SUBAGENT_WAKEUP_GRACE: Duration = Duration::from_secs(15);
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct AcpSubagentRefresh {
+    active: u32,
+    changed: bool,
+    dropped_to_zero_with_report: bool,
+}
 
 fn open_acp_question_wait(
     tool_waits: &mut crate::runtime_waiting::ToolWaits,

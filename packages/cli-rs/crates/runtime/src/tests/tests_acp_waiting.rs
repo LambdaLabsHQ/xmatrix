@@ -87,45 +87,80 @@ async fn submit_acp_waiting_turn(
     .await
 }
 
+async fn spawn_antigravity_fixture(
+    name: &str,
+    mode: &str,
+) -> (
+    AcpVendorConfig,
+    SerializedAgent,
+    Arc<AgentInstanceConnectionClient>,
+    TraceFixtureLog,
+    AcpSession,
+    AgentRuntimeStateTracker,
+) {
+    let config = AcpVendorConfig::generic("antigravity");
+    assert!(config.supports_background_tasks);
+    let (agent, relay, frames, app) =
+        spawn_acp_waiting_fixture(name, "antigravity", mode, config.clone()).await;
+    let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
+    (config, agent, relay, frames, app, runtime_state)
+}
+
+async fn start_settled_acp_run<'a>(
+    app: AcpSession,
+    config: &'a AcpVendorConfig,
+    relay: &'a Arc<AgentInstanceConnectionClient>,
+    agent: &'a SerializedAgent,
+    runtime_state: &'a AgentRuntimeStateTracker,
+) -> super::AcpRun<'a> {
+    let mut run = super::AcpRun {
+        app,
+        config,
+        relay,
+        agent,
+        cmd: "node",
+        cmd_args: &[],
+        cwd: Some(env!("CARGO_MANIFEST_DIR")),
+        resume_session_key: None,
+        trusted_rules: None,
+        runtime_state,
+        skill_overlay: Vec::new(),
+        latest_model: None,
+        latest_effort: None,
+        available_models: Vec::new(),
+        latest_goal: None,
+        latest_usage: None,
+        last_channel_id: Some("channel-1".into()),
+        pending_bg_message: None,
+        reactive_wakeup: None,
+        subagent_wakeup_grace_deadline: None,
+    };
+    let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
+    let turn = submit_acp_waiting_turn(&mut run.app, agent, relay, runtime_state).await;
+    let cancelled = run
+        .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
+        .await
+        .expect("settle turn");
+    assert!(!cancelled);
+    run
+}
+
+async fn drain_acp_background(run: &mut super::AcpRun<'_>) {
+    use crate::ChannelControlledRuntime as _;
+    while run.has_active_background_work() {
+        if run.next_background_ready().await {
+            run.handle_background_ready().await;
+        }
+    }
+}
+
 #[tokio::test]
 async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() {
     tokio::time::timeout(Duration::from_secs(15), async {
-        use crate::ChannelControlledRuntime as _;
-        let config = AcpVendorConfig::generic("antigravity");
-        assert!(config.supports_background_tasks);
-        let (agent, relay, frames, app) =
-            spawn_acp_waiting_fixture("antigravity-wait", "antigravity", "antigravity", config.clone())
-                .await;
-        let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
-        let mut run = super::AcpRun {
-            app,
-            config: &config,
-            relay: &relay,
-            agent: &agent,
-            cmd: "node",
-            cmd_args: &[],
-            cwd: Some(env!("CARGO_MANIFEST_DIR")),
-            resume_session_key: None,
-            trusted_rules: None,
-            runtime_state: &runtime_state,
-            skill_overlay: Vec::new(),
-            latest_model: None,
-            latest_effort: None,
-            available_models: Vec::new(),
-            latest_goal: None,
-            latest_usage: None,
-            last_channel_id: Some("channel-1".into()),
-            pending_bg_message: None,
-            reactive_wakeup: None,
-        };
-
-        let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
-        let turn = submit_acp_waiting_turn(&mut run.app, &agent, &relay, &runtime_state).await;
-        let cancelled = run
-            .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
-            .await
-            .expect("settle turn");
-        assert!(!cancelled);
+        let _env_guard = crate::tests::test_process_env_lock();
+        let (config, agent, relay, frames, app, runtime_state) =
+            spawn_antigravity_fixture("antigravity-wait", "antigravity").await;
+        let mut run = start_settled_acp_run(app, &config, &relay, &agent, &runtime_state).await;
 
         // 1. Long foreground command was reported as a tool wait, and the
         //    subagent call before it was never reported as a wait.
@@ -179,11 +214,7 @@ async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() 
         // 4. Drive between-turns background polling until the timer completes,
         //    runs its reactive wakeup (`busy`), and settles back to `idle` with
         //    no remaining wait.
-        while run.should_poll_background() {
-            if run.next_background_ready().await {
-                run.handle_background_ready().await;
-            }
-        }
+        drain_acp_background(&mut run).await;
         let wakeup_busy = wait_for_frame(&frames, bg_idle + 1, |frame| {
             acp_waiting_report(frame)
                 && frame["status"] == "busy"
@@ -236,4 +267,102 @@ async fn non_antigravity_acp_reports_tool_waits_and_clears_unclosed_tools_at_end
     })
     .await
     .expect("grok waiting fixture must not hang");
+}
+
+struct ScopedAppDataDir {
+    path: PathBuf,
+    previous: Option<std::ffi::OsString>,
+}
+
+impl ScopedAppDataDir {
+    fn new(prefix: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("{prefix}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&path).expect("create temp app data dir");
+        let previous = std::env::var_os("ANTIGRAVITY_APP_DATA_DIR");
+        unsafe {
+            std::env::set_var("ANTIGRAVITY_APP_DATA_DIR", &path);
+        }
+        Self { path, previous }
+    }
+}
+
+impl Drop for ScopedAppDataDir {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => unsafe { std::env::set_var("ANTIGRAVITY_APP_DATA_DIR", value) },
+            None => unsafe { std::env::remove_var("ANTIGRAVITY_APP_DATA_DIR") },
+        }
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+async fn run_antigravity_subagent_fixture(mode: &str) -> Vec<serde_json::Value> {
+    let _env_guard = crate::tests::test_process_env_lock();
+    let _app_data = ScopedAppDataDir::new("xmatrix-acp-subagent-fixture");
+
+    let (config, agent, relay, frames, app, runtime_state) =
+        spawn_antigravity_fixture("antigravity-subagent", mode).await;
+    let mut run = start_settled_acp_run(app, &config, &relay, &agent, &runtime_state).await;
+
+    // At end_turn the subagent is still running: must stay `busy` (not `idle`
+    // or `waiting`) and keep polling ACP stdout for the reactive wakeup.
+    let busy_at_end_turn = wait_for_frame(&frames, 0, |frame| {
+        acp_waiting_report(frame)
+            && frame["status"] == "busy"
+            && frame["runtimeState"]["waiting"].is_null()
+    })
+    .await;
+    assert!(run.should_poll_background());
+    assert!(run.has_active_background_work());
+    assert!(runtime_state.waiting_snapshot().is_none());
+
+    drain_acp_background(&mut run).await;
+
+    wait_for_frame(&frames, busy_at_end_turn + 1, |frame| {
+        acp_waiting_report(frame)
+            && frame["status"] == "idle"
+            && frame["runtimeState"]["waiting"].is_null()
+    })
+    .await;
+
+    run.app.shutdown().await;
+    frames.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn antigravity_stays_busy_across_end_turn_while_subagent_runs_and_handles_wakeup() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let recorded = run_antigravity_subagent_fixture("antigravity-subagent").await;
+        // Must never flash `idle` between end_turn and the reactive wakeup.
+        let statuses: Vec<&str> = recorded
+            .iter()
+            .filter(|frame| acp_waiting_report(frame))
+            .filter_map(|frame| frame["status"].as_str())
+            .collect();
+        assert!(
+            statuses.len() >= 2 && statuses.last() == Some(&"idle"),
+            "expected busy -> ... -> idle statuses, saw {statuses:?}"
+        );
+        assert!(
+            statuses[..statuses.len() - 1].iter().all(|&s| s == "busy"),
+            "must stay busy without flashing idle while subagent runs and wakes parent: {statuses:?}"
+        );
+    })
+    .await
+    .expect("antigravity subagent wakeup fixture must not hang");
+}
+
+#[tokio::test]
+async fn antigravity_subagent_killed_without_wakeup_settles_back_to_idle() {
+    tokio::time::timeout(Duration::from_secs(15), async {
+        let recorded = run_antigravity_subagent_fixture("antigravity-subagent-killed").await;
+        let statuses: Vec<&str> = recorded
+            .iter()
+            .filter(|frame| acp_waiting_report(frame))
+            .filter_map(|frame| frame["status"].as_str())
+            .collect();
+        assert_eq!(statuses, vec!["busy", "idle"]);
+    })
+    .await
+    .expect("antigravity killed subagent fixture must not hang");
 }
