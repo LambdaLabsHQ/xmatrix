@@ -1,5 +1,45 @@
 # Release Updates
 
+## Unreleased: shrink the version-stamped CLI entrypoint and raise release kache budget
+
+Even with a warm `kache` store, bumping `packages/cli-rs/Cargo.toml` on a
+release tag still forced `rustc` to re-monomorphize `tokio`, `clap`, `rustls`,
+and the top-level async entrypoint inside the `xmatrix` binary crate (over 50s
+on Linux and ~4m on `macos-26-intel`), while the `640MiB` `kache` save budget
+evicted ~70 release crates from a ~740MiB store on every run. The top-level
+bootstrap now lives inside `xmatrix-cli-runtime::entrypoint`, leaving
+`packages/cli-rs/src/main.rs` as a thin wrapper that only forwards
+`env!("CARGO_PKG_VERSION")`, `cli-build.yml` and `cli-release-cache.yml` now
+build only `--bin xmatrix` (skipping the five unpackaged `windows-continuity`
+helper binaries), and `.github/actions/cli-release-kache-save` raises the
+default store cap to `960MiB` so a full release build fits without eviction.
+CLI binary packaging and CI cache infrastructure only; no protocol, schema, or
+user-visible CLI behavior change. Recovery is reverting this PR.
+
+## Unreleased: the daemon keeps unconfirmed results, not a command journal
+
+On 2026-11-20 one stored quota reading that 4.7.0 could not read back made two
+machines' daemons refuse every command for six hours: the daemon kept its own
+record of each command's phase in one checksummed file,
+`daemon-command-effects-v1.json`, and a file it could not verify vetoed
+everything. 4.7.1 fixed the verification and added a `.previous` image and a
+quarantine. The journal itself is now gone. Whether a command runs is the
+Hub's admission to decide, and the daemon already asks it before every
+execution; a `Received` or `Admitted` record was re-executed on redelivery
+anyway, and the payload digest check had refused real commands twice. The
+daemon keeps one thing: the result of a command it finished and the Hub has
+not confirmed, one file per command under `daemon-command-results/`, removed
+when the Hub confirms it. A redelivered command with a kept result is answered
+with it under the new lease; any other delivery runs. A result that cannot be
+written is still reported, and one that cannot be read is removed, so the cost
+of either is that one command running again if the Hub delivers it again.
+Removed with the journal: phases, payload digests and re-keying, the checksum,
+`.previous`, quarantine and size eviction, and the Windows update handoff's
+refusal while a `Received` or `Admitted` record remained (up to 31 days). The
+old file is deleted at daemon start and not migrated; the Hub redelivers what
+it had not confirmed. `BootJournal` and `ActivationJournal` are unchanged. CLI
+/ daemon only. Recovery is a CI-validated CLI release reverting this change;
+the reverted daemon starts from an empty journal.
 ## Unreleased: a message row scrolled into view costs its own style, not the app's
 
 Scrolling a conversation mounts message rows, and the main thread took long

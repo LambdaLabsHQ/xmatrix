@@ -604,21 +604,6 @@ mod harness_cli_tests {
         );
     }
     #[test]
-    fn completed_harness_replays_require_the_exact_preset_and_action() {
-        let command: MachineDaemonCommand = serde_json::from_value(serde_json::json!({
-            "type": "machine_harness_action", "requestId": "harness:test", "presetId": "codex", "action": "update"
-        })).unwrap();
-        let result = serde_json::json!({ "type": "machine_harness_action_result", "requestId": "harness:test",
-            "result": { "presetId": "codex", "action": "update", "status": "succeeded" }});
-        assert!(replay_result_matches_command(&command, &result).unwrap());
-        for (field, value) in [("presetId", "claude"), ("action", "install")] {
-            let mut mismatched = result.clone();
-            mismatched["result"][field] = value.into();
-            assert!(!replay_result_matches_command(&command, &mismatched).unwrap());
-        }
-    }
-
-    #[test]
     fn machine_names_never_resolve_across_two_identities() {
         let daemons = vec![
             serde_json::json!({"machineId":"a","hostName":"same","status":"online"}),
