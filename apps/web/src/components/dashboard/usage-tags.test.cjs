@@ -135,6 +135,27 @@ test("a model's own window is shown with its scope after the account's, and is n
   assert.equal(usageLimitSummary(cursor, { quotaScopes: ["API"] })?.severity, "limit");
   const autoLeft = { ...cursor, scopedQuotaUsages: [{ label: "1mo", percent: 40, scope: "Auto" }, cursor.scopedQuotaUsages[1]] };
   assert.equal(usageLimitSummary(autoLeft, { quotaScopes: ["Auto"] }), undefined, "an Auto model still has its pool");
+
+  // Antigravity reports four scoped windows (two pools x 5h/1w); the fourth
+  // window (`Gemini · 1w`) must survive display normalization and limit verdicts.
+  const antigravity = {
+    quotaSource: "provider_api",
+    quotaUsages: [],
+    scopedQuotaUsages: [
+      { label: "5h", percent: 38, scope: "Gemini" },
+      { label: "5h", percent: 0, scope: "Claude & GPT" },
+      { label: "1w", percent: 100, scope: "Gemini" },
+      { label: "1w", percent: 0, scope: "Claude & GPT" },
+    ],
+  };
+  assert.deepEqual(
+    providerQuotaUsages(antigravity).map(quotaLabel),
+    ["Claude & GPT · 5h", "Gemini · 5h", "Claude & GPT · 1w", "Gemini · 1w"],
+  );
+  const geminiLimit = usageLimitSummary(antigravity, { quotaScopes: ["Gemini"] });
+  assert.equal(geminiLimit?.severity, "limit");
+  assert.equal(geminiLimit?.window, "Gemini · 1w");
+  assert.equal(usageLimitSummary(antigravity, { quotaScopes: ["Claude & GPT"] }), undefined);
 });
 
 test("an instance's model is its catalog entry: exact selector first, else any name, else the default", () => {
