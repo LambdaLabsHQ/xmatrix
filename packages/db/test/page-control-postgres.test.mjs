@@ -335,7 +335,7 @@ integration("unlinking a page from a conversation keeps it out until someone lin
     const both = await pages.conversationPages({ requestId: crypto.randomUUID(), conversationId: ids.open, principal: member });
     assert.deepEqual(both.pages.map((item) => item.pageId), [pageId, looked.pageId]);
     assert.deepEqual(both.readOnlyPageIds, [looked.pageId]);
-    await call("unlinkPage", { principal: member, conversationId: ids.open, pageId: looked.pageId });
+    await call("remove", { principal: owner, pageId: looked.pageId });
 
     assert.deepEqual(await call("unlinkPage", { principal: member, pageId, conversationId: ids.open }), { removed: 2 },
       "every link between the page and the conversation goes, section links included");
