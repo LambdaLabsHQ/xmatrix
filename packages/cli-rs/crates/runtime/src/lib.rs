@@ -74,9 +74,11 @@ mod runtime_waiting;
 use runtime_channel_activity::{ChannelActivityReporter, observe_codex_activity};
 use runtime_channel_history_bootstrap::with_channel_history_bootstrap;
 mod runtime_channel_history_cache;
+mod runtime_daemon_command_results;
 #[cfg(unix)]
 mod runtime_daemon_fd_limit;
 mod runtime_daemon_message_send;
+use runtime_daemon_command_results::DaemonCommandResults;
 mod runtime_daemon_quota_probe;
 #[cfg(unix)]
 mod runtime_daemon_socket;

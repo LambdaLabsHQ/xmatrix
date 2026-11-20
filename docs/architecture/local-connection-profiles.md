@@ -40,7 +40,7 @@ validated `profile:<uuid>` ID:
     daemon-auth-broker.json
     daemon-request-broker.json
     daemon-run-registry.json
-    daemon-command-effects-v1.json
+    daemon-command-results/
     daemon-request-grants.json
     daemon-request-records.json
     runs/
