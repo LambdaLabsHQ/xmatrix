@@ -39,6 +39,16 @@ xmatrix page edit <page-id> --base <revision> -f page.md
 
 `--base` is the revision you read, not the newest one. xMatrix merges your edit with whatever others wrote in the meantime. If the two overlap, the edit is refused and you get the current text to merge into.
 
+A long page does not have to be read whole to change one part of it:
+
+```sh
+xmatrix page read <page-id> --outline             # its headings, each with its slug and size
+xmatrix page read <page-id> --section <slug>      # one section, deeper headings included
+xmatrix page edit <page-id> --base <revision> --section <slug> -f section.md
+```
+
+A section edit rewrites that section and leaves the rest of the page as it is, including what others changed elsewhere since you read. The text you give is the section with its heading line. What `page read --section` printed can be written back with `-f` as it is: its header names the section, so it is never taken for the whole page. To add, remove or reorder sections, read and edit the whole page.
+
 `xmatrix page read <page-id> --since <revision>` prints only what changed after a revision, and `xmatrix page history <page-id>` lists the revisions.
 
 To see who wrote a passage in the app, rest the pointer on its paragraph: the margin shows who wrote it and when. Select a passage and a note over it says the same, with the conversation it was written in; clicking that opens the conversation beside the page, at the message it had reached when the passage was written. Text being typed that is not saved yet reads "being written".

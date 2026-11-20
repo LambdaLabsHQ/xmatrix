@@ -7,7 +7,7 @@ import { authorityFailure, requestPrincipal, runPrincipalOf } from "./run-princi
 import { requireAuth } from "./index-shared";
 import { publishPreReviewVerdict } from "./github-pre-review";
 import { gitHubFileReferenceHref, gitHubFileReferences, immutableContentObjectKey, pageLineDiff, pageMediaFile,
-  pageMediaReferences, parseGitHubFileReference, SettledCache, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
+  pageMediaReferences, pageOutline, pageSection, parseGitHubFileReference, replacePageSection, SettledCache, spaceVisibilityScope, utf8ByteLength, type PageAwareness,
   type PageBlame, type PageChanges, type PageConversation, type PageLink, type PageLinkAnchor, type PageTreeActivity,
   type PublicPage } from "@xmatrix/protocol";
 import { canonicalPageMarkdown } from "@xmatrix/protocol/page-document";
@@ -120,6 +120,11 @@ const githubFiles = new SettledCache<string, GitHubFileContent>(200);
 
 /** The page named by the route, read as the caller, which is also its access check. */
 /** The caller's access to the page and its head, without its text. */
+function noSuchSection(sectionId: string): PageControlError {
+  return new PageControlError("page_section_not_found", 404,
+    `The page has no section \`${sectionId.slice(0, 200)}\` at that revision; read its outline for the sections it has`);
+}
+
 async function accessAsCaller(c: Context<{ Bindings: Env }>) {
   const spaceId = c.req.param("spaceId")!;
   const pageId = c.req.param("pageId")!;
@@ -376,6 +381,19 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
         principal: sessionPrincipal(authUser, conversationId), blockId: blockId ?? "",
       }).then(() => undefined, () => undefined));
     }
+    // A large page is read a level at a time: its headings and their sizes, then the one section the
+    // work is in. Neither is the page, so neither can be written back as it: a section goes back
+    // through the edit's `sectionId`.
+    if (c.req.query("outline")) {
+      return { page: { ...result.page, body: "" }, outline: pageOutline(result.page.body) };
+    }
+    const sectionId = c.req.query("section");
+    if (sectionId !== undefined) {
+      const section = pageSection(result.page.body, sectionId);
+      if (!section) throw noSuchSection(sectionId);
+      return { page: { ...result.page, body: result.page.body.slice(section.start, section.end) },
+        section: { id: sectionId, title: section.title } };
+    }
     return result;
   }));
 
@@ -388,9 +406,23 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
     // shows them anything, including the current text of a conflict.
     const { spaceId, pageId, authUser } = await accessAsCaller(c);
     const conversationIds = stringList(body.conversationIds);
+    const baseRevision = integer(body.baseRevision);
+    let text = typeof body.body === "string" ? body.body : "";
+    // An edit of one section is the revision it was read from with that section rewritten; it then
+    // goes the way of any edit, so what others changed elsewhere on the page since is merged in.
+    if (typeof body.sectionId === "string") {
+      if (body.sectionId && !/^ {0,3}#{1,6}(?:[ \t]|$)/mu.test(text.trimStart().split("\n", 1)[0] ?? "")) {
+        throw new PageControlError("invalid_request", 400,
+          "A section's text starts with its heading line; nothing was written");
+      }
+      const { page } = await repository(c.env).read({ requestId: crypto.randomUUID(), spaceId, pageId,
+        principal: runPrincipalOf(authUser), revision: baseRevision });
+      const written = replacePageSection(page.body, body.sectionId, text);
+      if (written === null) throw noSuchSection(body.sectionId);
+      text = written;
+    }
     return sessionCall(c.env, spaceId, pageId, "/internal/edit", {
-      principal: sessionPrincipal(authUser, conversationIds[0]), baseRevision: integer(body.baseRevision),
-      body: typeof body.body === "string" ? body.body : "", conversationIds,
+      principal: sessionPrincipal(authUser, conversationIds[0]), baseRevision, body: text, conversationIds,
     });
   }));
 
