@@ -87,7 +87,7 @@ function ChannelMenu({ channel, onChoose }: { channel: Channel; onChoose: (next:
       </button>
       {open && (
         <PaperPopover role="menu" aria-label="Release channel" onKeyDown={keys}
-          className="absolute left-1/2 top-full z-20 mt-1 flex w-64 -translate-x-1/2 flex-col border border-foreground/10 text-left sm:left-0 sm:translate-x-0">
+          className="absolute left-1/2 top-full z-20 mt-1 flex w-64 -translate-x-1/2 flex-col text-left sm:left-0 sm:translate-x-0">
           {channels.map(({ id, label, detail }) => (
             <button key={id} type="button" role="menuitemradio" aria-checked={id === channel}
               onClick={() => { onChoose(id); close(); }}
