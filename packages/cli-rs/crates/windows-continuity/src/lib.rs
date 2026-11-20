@@ -1476,7 +1476,7 @@ impl CommandEffectJournal {
             revision: 1,
             effects: BTreeMap::new(),
         };
-        match load_with_previous_image(&self.path, |path| self.load_path(path)) {
+        match self.load_path(&self.path) {
             Ok(payload) => Ok(payload),
             Err(ContinuityError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
                 Ok(empty())
@@ -1486,10 +1486,13 @@ impl CommandEffectJournal {
                 | ContinuityError::Json(_)
                 | ContinuityError::Invalid(_)
                 | ContinuityError::FrameTooLarge(_)),
-            ) => {
-                quarantine_corrupt_journal(&self.path, &error);
-                Ok(empty())
-            }
+            ) => match self.load_path(&previous_image_path(&self.path)) {
+                Ok(payload) => Ok(payload),
+                Err(_) => {
+                    quarantine_corrupt_journal(&self.path, &error);
+                    Ok(empty())
+                }
+            },
             Err(error) => Err(error),
         }
     }
@@ -2446,7 +2449,17 @@ mod tests {
                 .is_some()
         );
 
-        // 4) Unrecoverable corruption of both primary and `.previous` quarantines
+        // 4) Deleting the primary file explicitly resets the journal instead of
+        //    silently resurrecting `.previous`.
+        fs::remove_file(&path).unwrap();
+        assert!(
+            journal
+                .effect_for_control_id("spawn:keep")
+                .unwrap()
+                .is_none()
+        );
+
+        // 5) Unrecoverable corruption of both primary and `.previous` quarantines
         //    the bad files and starts fresh instead of wedging every command.
         fs::write(&path, b"not-json").unwrap();
         fs::write(previous_image_path(&path), b"also-bad").unwrap();
