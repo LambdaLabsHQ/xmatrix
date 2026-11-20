@@ -468,24 +468,37 @@ pub(crate) fn read_antigravity_subagent_state(
     }
 }
 
-fn read_alive_subagent_ids(subagents_dir: &Path) -> Vec<String> {
-    let Ok(entries) = std::fs::read_dir(subagents_dir) else {
-        return Vec::new();
+fn for_each_json_in_dir(
+    dir: &Path,
+    skip_read_json: bool,
+    mut visit: impl FnMut(&Path, Value),
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
     };
-    let mut ids = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+            || (skip_read_json
+                && path.file_name().and_then(|name| name.to_str()) == Some("read.json"))
+            || !path.is_file()
+        {
             continue;
         }
         let Ok(raw) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            visit(&path, value);
+        }
+    }
+}
+
+fn read_alive_subagent_ids(subagents_dir: &Path) -> Vec<String> {
+    let mut ids = Vec::new();
+    for_each_json_in_dir(subagents_dir, false, |_, value| {
         if value.get("state").and_then(Value::as_str) != Some("SUBAGENT_STATE_ALIVE") {
-            continue;
+            return;
         }
         if let Some(id) = value
             .get("conversationId")
@@ -495,7 +508,7 @@ fn read_alive_subagent_ids(subagents_dir: &Path) -> Vec<String> {
         {
             ids.push(id.to_string());
         }
-    }
+    });
     ids
 }
 
@@ -504,24 +517,11 @@ fn read_parent_subagent_reports<'a>(
     alive_ids: &HashSet<&'a str>,
 ) -> (HashMap<&'a str, (i128, bool)>, usize) {
     let read_ids = read_message_read_set(&messages_dir.join("read.json"));
-    let Ok(entries) = std::fs::read_dir(messages_dir) else {
-        return (HashMap::new(), 0);
-    };
     let mut latest: HashMap<&'a str, (i128, bool)> = HashMap::new();
     let mut report_count: usize = 0;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_message_json_file(&path) {
-            continue;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
+    for_each_json_in_dir(messages_dir, true, |path, value| {
         let Some(sender) = value.get("sender").and_then(Value::as_str) else {
-            continue;
+            return;
         };
         let matched_child = if let Some(&child_id) = alive_ids.get(sender) {
             Some(child_id)
@@ -538,9 +538,9 @@ fn read_parent_subagent_reports<'a>(
             None
         };
         let Some(child_id) = matched_child else {
-            continue;
+            return;
         };
-        let ts_nanos = message_timestamp_nanos(&value, &path);
+        let ts_nanos = message_timestamp_nanos(&value, path);
         let is_read = value
             .get("id")
             .and_then(Value::as_str)
@@ -556,33 +556,22 @@ fn read_parent_subagent_reports<'a>(
                 }
             })
             .or_insert((ts_nanos, is_read));
-    }
+    });
     (latest, report_count)
 }
 
 fn read_latest_assignment_nanos(child_messages_dir: &Path, parent_id: &str) -> Option<i128> {
-    let entries = std::fs::read_dir(child_messages_dir).ok()?;
     let mut latest: Option<i128> = None;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !is_message_json_file(&path) {
-            continue;
-        }
-        let Ok(raw) = std::fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-            continue;
-        };
+    for_each_json_in_dir(child_messages_dir, true, |path, value| {
         if value.get("sender").and_then(Value::as_str) != Some(parent_id) {
-            continue;
+            return;
         }
-        let ts_nanos = message_timestamp_nanos(&value, &path);
+        let ts_nanos = message_timestamp_nanos(&value, path);
         latest = Some(match latest {
             Some(existing) => existing.max(ts_nanos),
             None => ts_nanos,
         });
-    }
+    });
     latest
 }
 
@@ -596,12 +585,6 @@ fn read_message_read_set(path: &Path) -> HashSet<String> {
     map.into_iter()
         .filter_map(|(key, val)| (val.as_bool() == Some(true)).then_some(key))
         .collect()
-}
-
-fn is_message_json_file(path: &Path) -> bool {
-    path.extension().and_then(|ext| ext.to_str()) == Some("json")
-        && path.file_name().and_then(|name| name.to_str()) != Some("read.json")
-        && path.is_file()
 }
 
 fn dir_has_any_entry(dir: &Path) -> bool {

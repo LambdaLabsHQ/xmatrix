@@ -118,6 +118,16 @@ fn make_acp_run<'a>(
     }
 }
 
+async fn submit_and_settle_waiting_turn(run: &mut super::AcpRun<'_>) {
+    let mut runtime_turn = run.runtime_state.begin_turn(Some("channel-1"), None);
+    let turn = submit_acp_waiting_turn(&mut run.app, run.agent, run.relay, run.runtime_state).await;
+    let cancelled = run
+        .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
+        .await
+        .expect("settle turn");
+    assert!(!cancelled);
+}
+
 #[tokio::test]
 async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() {
     tokio::time::timeout(Duration::from_secs(15), async {
@@ -130,14 +140,7 @@ async fn acp_reports_long_tool_call_and_antigravity_background_tasks_as_waits() 
                 .await;
         let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
         let mut run = make_acp_run(app, &config, &relay, &agent, &runtime_state);
-
-        let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
-        let turn = submit_acp_waiting_turn(&mut run.app, &agent, &relay, &runtime_state).await;
-        let cancelled = run
-            .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
-            .await
-            .expect("settle turn");
-        assert!(!cancelled);
+        submit_and_settle_waiting_turn(&mut run).await;
 
         // 1. Long foreground command was reported as a tool wait, and the
         //    subagent call before it was never reported as a wait.
@@ -288,14 +291,7 @@ async fn run_antigravity_subagent_fixture(mode: &str) -> Vec<serde_json::Value> 
             .await;
     let runtime_state = AgentRuntimeStateTracker::new("antigravity_acp");
     let mut run = make_acp_run(app, &config, &relay, &agent, &runtime_state);
-
-    let mut runtime_turn = runtime_state.begin_turn(Some("channel-1"), None);
-    let turn = submit_acp_waiting_turn(&mut run.app, &agent, &relay, &runtime_state).await;
-    let cancelled = run
-        .settle_turn(turn, Some("channel-1"), None, Some(&mut runtime_turn))
-        .await
-        .expect("settle turn");
-    assert!(!cancelled);
+    submit_and_settle_waiting_turn(&mut run).await;
 
     // At end_turn the subagent is still running: must stay `busy` (not `idle`
     // or `waiting`) and keep polling ACP stdout for the reactive wakeup.
