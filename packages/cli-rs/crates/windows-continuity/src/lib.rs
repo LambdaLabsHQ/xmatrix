@@ -1090,6 +1090,21 @@ impl ActivationJournal {
             JournalPayload::validate,
         )
     }
+
+    /// Move a journal that cannot be read, and its previous image, aside as
+    /// `<name>.unreadable-<unix seconds>` so the files stay as evidence and a
+    /// first-start journal can take their place. Returns the paths kept.
+    pub fn set_aside_unreadable(&self) -> Vec<PathBuf> {
+        let stamp = current_unix_time().unwrap_or_default();
+        [self.path.clone(), previous_image_path(&self.path)]
+            .into_iter()
+            .filter_map(|path| {
+                let name = path.file_name()?.to_str()?;
+                let kept = path.with_file_name(format!("{name}.unreadable-{stamp}"));
+                fs::rename(&path, &kept).ok().map(|()| kept)
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1838,6 +1853,28 @@ mod tests {
             decode_frame(&mut oversized.as_slice()),
             Err(ContinuityError::FrameTooLarge(_))
         ));
+    }
+
+    #[test]
+    fn an_unreadable_activation_journal_is_kept_aside_for_a_first_start() {
+        let root =
+            std::env::temp_dir().join(format!("xmatrix-activation-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("activation-journal.json");
+        let journal = ActivationJournal::new(&path);
+        fs::write(&path, b"{\"schema\":").unwrap();
+        fs::write(previous_image_path(&path), b"also unreadable").unwrap();
+        assert!(matches!(journal.load(), Err(ContinuityError::Json(_))));
+        let kept = journal.set_aside_unreadable();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(fs::read(&kept[0]).unwrap(), b"{\"schema\":");
+        assert_eq!(fs::read(&kept[1]).unwrap(), b"also unreadable");
+        // What a first start sees: no journal at all.
+        assert!(matches!(
+            journal.load(),
+            Err(ContinuityError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound
+        ));
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
