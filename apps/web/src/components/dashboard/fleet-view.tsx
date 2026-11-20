@@ -19,10 +19,16 @@ import { AGENT_USAGE_REFRESH_MS } from "./agent-quota-usage";
 import { useNow } from "./agent-work-intent";
 import { BringAgentsIn } from "./bring-agents-in";
 import { channelTitle } from "./channel-links";
-import { ContentSkeleton } from "./content-skeleton";
 import { signedOutRegistrations } from "./harness-sign-in";
 import { FleetCellEditor } from "./fleet-cell-editor";
 import { FleetMatrix, type FleetMatrixCell, type FleetMatrixCellKey, type FleetMatrixEditor, type FleetMatrixRow } from "./fleet-matrix";
+import {
+  FLEET_HERO_TITLE_CLASS,
+  FLEET_MATRIX_MACHINE_FACTS_CLASS,
+  FLEET_MATRIX_MACHINE_HEADING_CLASS,
+  FLEET_MATRIX_MACHINE_NAME_CLASS,
+  MOBILE_FLEET_LIST_CONTAINER_CLASS,
+} from "./fleet-matrix-frames";
 import { MobileAvatarMatrix, mobileAttentionPhrase, type MobileMatrixRow } from "./fleet-mobile";
 import { MachineGlyph } from "./machine-glyph";
 import { machinePlatform, machineStateLine, machineUnresponsive } from "./machine-list-row";
@@ -35,6 +41,7 @@ import { FleetOverview, runtimeLine, useFleetStatus, type FleetRuntime } from ".
 import { ToolList, ToolPaperScroll, ToolSheet, ToolSplit } from "./tool-split";
 import { useViewSelection } from "./url-query-state";
 import { useInstalledHarnesses } from "./use-installed-harnesses";
+import { FleetMatrixSkeleton, MobileAvatarMatrixSkeleton, ToolDetailSkeleton } from "./view-skeletons";
 import {
   MachinePaper, THIS_MACHINE_SELECTION, ThisMachineTag, machineListModel, useMachineEdits, type ThisMachine,
 } from "./workspace-fleet-views";
@@ -239,7 +246,7 @@ export function FleetView({
     return [harness, busy && found.kind !== "unknown" && found.kind !== "unsupported" ? { ...found, busy } : found];
   }));
   // No `rounded` on what is not a button: a rounded span is drawn as a chip everywhere in the app.
-  const machineHeading = "flex w-full min-w-0 items-center gap-2.5 px-2 py-1.5 text-left";
+  const machineHeading = FLEET_MATRIX_MACHINE_HEADING_CLASS;
   /** What a row is for its cells' editors: the machine it is, and the agents on it. */
   type RowSubject = { name: string; machine?: MachineSummary; own: boolean; rowOf: (harness: string) => AgentRow | undefined };
   const subjects = new Map<string, RowSubject>();
@@ -300,8 +307,8 @@ export function FleetView({
               aria-label={`${name}: ${stalled ? "not responding" : online ? "online" : "offline"}`} role="img">
               <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.01em] text-foreground">{name}</span>
-              <span className="mt-0.5 block truncate text-xs leading-tight text-muted-foreground">
+              <span className={FLEET_MATRIX_MACHINE_NAME_CLASS}>{name}</span>
+              <span className={FLEET_MATRIX_MACHINE_FACTS_CLASS}>
                 {local && <ThisMachineTag label={model.thisLabel} />}{local && facts ? " · " : null}{facts}</span>
               {machine && <span className="mt-1.5 block empty:hidden"><MachineLoadGlance machine={machine} now={now} /></span>}
             </span>
@@ -337,8 +344,8 @@ export function FleetView({
             <span className="app-tool-state-icon shrink-0" data-state={up ? "running" : "offline"} aria-hidden="true">
               <MachineGlyph os={os} /></span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-[15px] font-semibold leading-snug tracking-[-0.01em] text-foreground">{section.name}</span>
-              <span className="mt-0.5 block truncate text-xs leading-tight text-muted-foreground">
+              <span className={FLEET_MATRIX_MACHINE_NAME_CLASS}>{section.name}</span>
+              <span className={FLEET_MATRIX_MACHINE_FACTS_CLASS}>
                 {[mine ? null : owners, up ? null : "Offline"].filter(Boolean).join(" · ")}</span>
             </span>
           </span>
@@ -437,14 +444,14 @@ export function FleetView({
 
   const list = (
     <ToolList title="Agents">
-      <div className="px-[var(--mobile-content-inset,1rem)] pt-2 pb-[calc(6.5rem+var(--app-safe-area-bottom))]">
+      <div className={MOBILE_FLEET_LIST_CONTAINER_CLASS}>
         {setup ? bringIn : (
           <div className="space-y-4">
             {notices}
             {catalogError}
             {turnOn}
             {mobileRows.length === 0 ? (loading
-              ? <ContentSkeleton label="Loading machines and agents" lines={4} />
+              ? <MobileAvatarMatrixSkeleton label="Loading machines and agents" />
               : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
               : <MobileAvatarMatrix columns={columns} rows={mobileRows} ownMachineCount={model.ordered.length}
                 attentionCount={attentionCount} workingCount={status.workingCount}
@@ -456,7 +463,9 @@ export function FleetView({
     </ToolList>
   );
 
-  const page = awaitingAgent ? <ToolPaperScroll><ContentSkeleton label="Loading agent" lines={4} /></ToolPaperScroll>
+  const page = awaitingAgent ? (
+    <ToolDetailSkeleton label="Loading agent" context="Agent" backLabel="Agents" backAlways={!phone} />
+  )
     : view === "agents" ? (
       <AgentPaper spaceId={spaceId} token={token} currentUserId={currentUserId} chosen={chosenRow} group={chosenGroup}
         now={now} working={status.workingInstanceIds} fleet={fleet} conversationTitle={conversationTitle}
@@ -486,21 +495,23 @@ export function FleetView({
       <ToolPaperScroll full>
         {setup ? (
           <div className="mx-auto max-w-3xl">
-            <h1 className="mb-6 text-2xl font-black tracking-[-0.02em] text-foreground">System Overview</h1>
+            <h1 className={cn("mb-6", FLEET_HERO_TITLE_CLASS)}>System Overview</h1>
             {bringIn}
           </div>
         ) : <>
           {notices}
           {/* The matrix shows each thing that waits on a person in its own cell, so no list repeats them here. */}
-          <FleetOverview status={status} attention={[]} note={attentionNote}>
+          <FleetOverview status={status} loading={loading && matrixRows.length === 0} attention={[]} note={attentionNote}>
             {catalogError}
             {turnOn}
             <section aria-label="Machines and agents" className="space-y-4">
               {matrixRows.length === 0 ? (loading
-                ? <ContentSkeleton label="Loading machines and agents" lines={4} />
+                ? <FleetMatrixSkeleton label="Loading machines and agents" />
                 : <p className="text-sm text-muted-foreground">{ready ? "No machines yet." : "Choose a Space to see its machines and agents."}</p>)
-                : <FleetMatrix columns={columns} rows={matrixRows} selected={cell} onSelect={setCell} editors={editors}
-                  addColumn={addColumnConfig} addRow={addRowConfig} />}
+                : loading && columns.length === 0
+                  ? <FleetMatrixSkeleton label="Loading machines and agents" knownRows={matrixRows} />
+                  : <FleetMatrix columns={columns} rows={matrixRows} selected={cell} onSelect={setCell} editors={editors}
+                    addColumn={addColumnConfig} addRow={addRowConfig} />}
               {matrixRows.length > 0 && columns.length > 0 && (
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-1.5 text-xs text-muted-foreground/80">
                   <span>Choose a cell to edit.</span>

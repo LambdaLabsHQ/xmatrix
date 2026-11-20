@@ -9,6 +9,7 @@ import {
 } from "@/lib/app-client-compatibility";
 import { xmatrixHubOrigin } from "@/lib/query/api-client";
 import { StartupShell } from "@/components/dashboard/workspace-channel-sidebar";
+import { appRouteInfo, currentBrowserLocation, type AppView } from "@/components/dashboard/workspace-shell-navigation";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { markStartup } from "@/lib/startup-timing";
 
@@ -48,8 +49,9 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
   }, admissionClient);
   const ready = compatibility.data === true || (compatibility.data === undefined && identity.data?.remembered === true);
 
-  // The server cannot see a native shell; its frame lands right after hydration.
+  // The server cannot see a native shell or the browser URL; both land right after hydration.
   const frame = useSyncExternalStore(noSubscription, nativeFrame, browserFrame);
+  const view = useSyncExternalStore(noSubscription, clientStartupView, serverStartupView);
 
   useEffect(() => {
     if (ready) markStartup("shell");
@@ -57,7 +59,15 @@ export function AppPreparationGate(props: { children: React.ReactNode }) {
 
   if (ready) return props.children;
   // The app's own first frame, waiting on the same screen it will open on.
-  return <StartupShell {...frame} />;
+  return <StartupShell {...frame} view={view} />;
+}
+
+function serverStartupView(): AppView {
+  return "messages";
+}
+
+function clientStartupView(): AppView {
+  return appRouteInfo(currentBrowserLocation()).view;
 }
 
 type StartupFrame = { desktopFrameClass?: string; showMobileTabDock: boolean };

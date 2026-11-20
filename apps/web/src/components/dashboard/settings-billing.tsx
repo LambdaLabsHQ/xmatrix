@@ -17,6 +17,7 @@ import { billingCheckoutReturn } from "@/lib/billing-checkout-return";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { cn } from "@/lib/utils";
 import { spacePlanMark } from "./space-plan-mark";
+import { SkeletonBar } from "./content-skeleton";
 import { allowanceUsed, SpaceUsage } from "./space-usage";
 import { replaceBrowserPath } from "./workspace-shell-navigation";
 import { spaceBillingKey, useSpaceBilling, type SpaceBilling, type SpaceCredits } from "./space-billing";
@@ -142,7 +143,7 @@ function StripeSpaceBillingSection({ userId, space }: {
       )}
       {returned.spaceNotice === "cancelled" && <p className={noticeClass("settled")}>Checkout was cancelled; nothing was changed.</p>}
       {!billing ? (
-        !error && <div className="flex items-center gap-2 text-sm text-muted-foreground"><AnimatedIcon icon={Loader2} className="size-4 animate-spin" />Loading plan…</div>
+        !error && <PlanCardSkeleton />
       ) : billing.plan === "pro" ? (
         <>
           <PlanCard
@@ -362,6 +363,34 @@ function PlanFeatures({ features }: { features: readonly string[] }) {
 }
 
 
+/** Placeholder plan card inside PlanCard's own classes while billing state loads. */
+function PlanCardSkeleton() {
+  return (
+    <section className="app-plan-card app-skeleton-inert" data-plan="free" role="status" aria-label="Loading plan">
+      <div className="app-plan-card-face" aria-hidden="true">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h3 className="app-plan-name"><SkeletonBar width="4.5rem" /></h3>
+          <span className="app-plan-aside"><SkeletonBar width="6.5rem" /></span>
+        </div>
+        <p className="app-plan-title mt-1"><SkeletonBar width="11rem" /></p>
+        <div className="app-plan-body mt-5 space-y-5">
+          <div className="app-plan-meter">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="app-plan-meter-label"><SkeletonBar width="8rem" /></span>
+              <span className="app-plan-meter-label"><SkeletonBar width="4.5rem" /></span>
+            </div>
+            <div className="app-plan-meter-track mt-2" />
+          </div>
+          <div className="flex items-center justify-between gap-4">
+            <span className="app-plan-meter-label"><SkeletonBar width="7rem" /></span>
+            <SkeletonBar width="4rem" />
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 /**
  * The store app a Space is bought through decides who charges: the iPhone and
  * Android apps sell through their own store, never Stripe checkout.
@@ -372,7 +401,13 @@ export function SpaceBillingSection(props: { userId: string; space: { id: string
     const platform = getDesktopBridge()?.platform;
     setStore(platform === "ios" ? "apple" : platform === "android" ? "google" : "web");
   }, []);
-  if (store === null) return <p>Loading plan…</p>;
+  if (store === null) {
+    return (
+      <div className="app-settings-section min-w-0 space-y-4">
+        <PlanCardSkeleton />
+      </div>
+    );
+  }
   return store === "apple" ? <AppleSpaceBillingSection {...props} />
     : store === "google" ? <GooglePlaySpaceBillingSection {...props} /> : <StripeSpaceBillingSection {...props} />;
 }

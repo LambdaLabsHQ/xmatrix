@@ -7,7 +7,7 @@ import { WEB_PROXY_ROUTES, type LaunchTargetRepo, type PageMigration, type PageM
 import Markdown from "react-markdown";
 import { markdownRemarkPlugins } from "@/lib/markdown-plugins";
 import { FileText, Lock } from "lucide-react";
-import { ContentSkeleton } from "@/components/dashboard/content-skeleton";
+import { SkeletonBar } from "@/components/dashboard/content-skeleton";
 import { Button } from "@/components/ui/button";
 import { GlassSelect } from "@/components/ui/glass-select";
 import { noticeClass } from "@/components/ui/status-tone";
@@ -48,7 +48,24 @@ export function PageMigrationReview({ spaceId, token, onApplying, onDone }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  if (migration.isLoading) return <ContentSkeleton label="Loading" lines={6} className="p-6" />;
+  if (migration.isLoading) {
+    return (
+      <div className="app-skeleton-inert mx-auto max-w-3xl space-y-4 p-6" role="status" aria-label="Loading">
+        <div aria-hidden="true">
+          <h1 className="text-2xl font-black"><SkeletonBar width="14rem" /></h1>
+          <p className="mt-1 text-sm text-muted-foreground"><SkeletonBar width="85%" /></p>
+        </div>
+        <ul className="divide-y rounded-md border" aria-hidden="true">
+          {["11rem", "8.5rem", "13rem", "9.5rem"].map((width, index) => (
+            <li key={index} className="flex items-center gap-2 px-3 py-2 text-sm">
+              <span className="app-list-skeleton-mark size-3.5 shrink-0" />
+              <SkeletonBar width={width} />
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
   if (migration.isError || !migration.data) return null;
   const data = migration.data;
   if (data.state === "applied" && data.report) return <MigrationReport report={data.report} onDone={onDone} />;

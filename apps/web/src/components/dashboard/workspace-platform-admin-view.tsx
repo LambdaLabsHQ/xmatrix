@@ -16,7 +16,7 @@ import type { AdminActivityPoint, AdminPlatformOverview } from "@xmatrix/protoco
 import { Loader2, RefreshCw, Shield } from "lucide-react";
 
 import { noticeClass } from "@/components/ui/status-tone";
-import { ContentSkeleton } from "./content-skeleton";
+import { SkeletonBar } from "./content-skeleton";
 import { EmptyToolState } from "./workspace-admin-views";
 import { isForbidden, useAdminParam, usePlatformOverview } from "./platform-admin-data";
 import {
@@ -49,13 +49,86 @@ import { ToolDetailSection } from "./tool-split";
 import { AdminPaperAction } from "./admin-paper";
 import { ErrorNotice } from "@/components/ui/error-notice";
 
+export type AdminSkeletonKind = "overview" | "table";
+
+const ADMIN_STAT_GRID_CLASS = "app-admin-stat-grid grid grid-cols-2 gap-x-6 gap-y-4 p-3 sm:grid-cols-3 lg:grid-cols-4";
+
+function AdminDataSkeleton({ kind }: { kind: AdminSkeletonKind }) {
+  if (kind === "table") {
+    return (
+      <div className="app-skeleton-inert space-y-3" role="status" aria-label="Loading platform data">
+        <div className="hidden overflow-x-auto md:block" aria-hidden="true">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-border/70">
+                {["6.5rem", "5.5rem", "4.5rem", "5rem", "4rem"].map((width, index) => (
+                  <th key={index} className="px-2 py-2 text-left text-xs font-medium text-muted-foreground">
+                    <SkeletonBar width={width} />
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border/50">
+              {[
+                ["10rem", "6rem", "3rem", "4.5rem", "3.5rem"],
+                ["8rem", "7.5rem", "2.5rem", "4rem", "3rem"],
+                ["11.5rem", "5rem", "3.5rem", "5rem", "3.5rem"],
+                ["9rem", "6.5rem", "3rem", "4rem", "2.75rem"],
+                ["7.5rem", "6rem", "2.5rem", "4.5rem", "3rem"],
+              ].map((widths, rowIndex) => (
+                <tr key={rowIndex}>
+                  {widths.map((width, cellIndex) => (
+                    <td key={cellIndex} className="px-2 py-2.5"><SkeletonBar width={width} /></td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <ul className="app-admin-row-list divide-y divide-border/60 border-b border-border/60 md:hidden" aria-hidden="true">
+          {["9rem", "7.5rem", "10.5rem", "8rem"].map((titleWidth, index) => (
+            <li key={index} className="px-3 py-3">
+              <div className="text-sm"><SkeletonBar width={titleWidth} /></div>
+              <dl className="app-admin-row-metrics mt-3 grid grid-cols-4 gap-x-2 py-2 text-xs">
+                {["3rem", "2.75rem", "3.25rem", "2.5rem"].map((width, metricIndex) => (
+                  <div key={metricIndex}>
+                    <dt className="text-[11px]"><SkeletonBar width={width} /></dt>
+                    <dd className="mt-0.5 text-base font-semibold leading-5"><SkeletonBar width="2rem" /></dd>
+                  </div>
+                ))}
+              </dl>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  return (
+    <div className="app-skeleton-inert space-y-6" role="status" aria-label="Loading platform data">
+      <div aria-hidden="true">
+        <dl className={ADMIN_STAT_GRID_CLASS}>
+          {["6.5rem", "7.5rem", "5rem", "6rem", "7rem", "5.5rem", "8rem", "5.5rem"].map((labelWidth, index) => (
+            <div key={index} className="min-w-0">
+              <dt className="text-xs text-muted-foreground"><SkeletonBar width={labelWidth} /></dt>
+              <dd className="my-0.5 text-2xl font-semibold leading-tight"><SkeletonBar width="4.25rem" /></dd>
+              <dd className="text-[11px] leading-4 text-muted-foreground"><SkeletonBar width="5.5rem" /></dd>
+            </div>
+          ))}
+        </dl>
+      </div>
+      <span className="app-media-skeleton block h-40 min-h-0 w-full" aria-hidden="true" />
+    </div>
+  );
+}
+
 /** The states every admin read shares: forbidden, failed, loading, empty. */
-export function AdminReadState({ error, loading, hasData, emptyTitle, emptyBody, children }: {
+export function AdminReadState({ error, loading, hasData, emptyTitle, emptyBody, skeleton = "overview", children }: {
   error: unknown;
   loading: boolean;
   hasData: boolean;
   emptyTitle: string;
   emptyBody: string;
+  skeleton?: AdminSkeletonKind;
   children: ReactNode;
 }) {
   if (isForbidden(error)) {
@@ -71,7 +144,7 @@ export function AdminReadState({ error, loading, hasData, emptyTitle, emptyBody,
     <>
       <ErrorNotice error={error} action="Couldn't load platform data" className={noticeClass("alert", "mb-4 rounded-lg px-4 py-3")} />
       {hasData ? children : loading ? (
-        <ContentSkeleton label="Loading platform data" lines={6} className="min-h-[240px] justify-center" />
+        <AdminDataSkeleton kind={skeleton} />
       ) : (
         <EmptyToolState icon={Shield} title={emptyTitle} body={emptyBody} />
       )}
@@ -103,7 +176,7 @@ export function AdminRefresh({ loading, onRefresh, generatedAt }: {
  * One admin read laid out the same way everywhere: refresh and its age on
  * top, then the shared read states, then the data.
  */
-export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTitle, emptyBody, children }: {
+export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTitle, emptyBody, skeleton, children }: {
   query: { data: Data | null | undefined; error: unknown; isFetching: boolean; refetch: () => unknown };
   generatedAt?: (data: Data) => string;
   title?: string;
@@ -111,6 +184,7 @@ export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTit
   lead?: ReactNode;
   emptyTitle: string;
   emptyBody: string;
+  skeleton?: AdminSkeletonKind;
   children: (data: Data) => ReactNode;
 }) {
   const data = query.data ?? null;
@@ -123,7 +197,7 @@ export function AdminQueryView<Data>({ query, generatedAt, title, lead, emptyTit
           generatedAt={data && generatedAt ? generatedAt(data) : undefined} />
       </div>
       <AdminReadState error={query.error} loading={query.isFetching} hasData={data !== null}
-        emptyTitle={emptyTitle} emptyBody={emptyBody}>
+        emptyTitle={emptyTitle} emptyBody={emptyBody} skeleton={skeleton}>
         {data !== null && children(data)}
       </AdminReadState>
     </div>
@@ -270,7 +344,7 @@ function glanceStats(
  */
 export function AdminStatGrid({ stats }: { stats: Array<Stat> }) {
   return (
-    <dl className="app-admin-stat-grid grid grid-cols-2 gap-x-6 gap-y-4 p-3 sm:grid-cols-3 lg:grid-cols-4">
+    <dl className={ADMIN_STAT_GRID_CLASS}>
       {stats.map((stat) => (
         <div key={stat.label} className="min-w-0">
           <dt className="text-xs text-muted-foreground">{stat.label}</dt>

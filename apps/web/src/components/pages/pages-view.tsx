@@ -25,7 +25,7 @@ import {
 } from "@/lib/pages/page-client";
 import type { PageBlameSource } from "./page-blame";
 import { cn } from "@/lib/utils";
-import { ListSkeleton } from "@/components/dashboard/content-skeleton";
+import { PageDocumentSkeleton, PageListSkeleton } from "@/components/dashboard/view-skeletons";
 import { CountPill } from "@/components/dashboard/count-pill";
 import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
@@ -410,7 +410,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   const contents = (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {tree.isLoading && <ListSkeleton label="Loading pages" rows={6} />}
+        {tree.isLoading && <PageListSkeleton label="Loading pages" rows={6} />}
         {tree.isError && <p className={`${inset} text-sm text-destructive`}>Pages are unavailable.</p>}
         {tree.data && roots.length === 0 && (
           <div className={`${inset} py-4 text-sm text-muted-foreground`}>
@@ -1755,6 +1755,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       // Where the editor's host holds its height.
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
+                    )}
+                    {!pending && !drawn && !document.data && !document.isError && (tree.isLoading || document.isLoading || Boolean(page)) && (
+                      <PageDocumentSkeleton label="Loading page" />
                     )}
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}
