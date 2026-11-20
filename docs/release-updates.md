@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: the download page carries fewer things
+
+After the channel picker the download page had grown back to six elements in
+its top block and a link in every row. The top is now the icon, the heading,
+the download with its channel picker, and one line under it that says what
+the build is for and links the other Mac build; the jump link to the list is
+gone, since the list starts right below. Rows are a platform, one line and
+its buttons; desktop and Android release notes and the two macOS ZIPs are one
+line of small links under the list. No download URL was removed. Web only.
+Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: the download page is one release channel at a time
 
 The download page offered stable builds as buttons and tucked preview builds

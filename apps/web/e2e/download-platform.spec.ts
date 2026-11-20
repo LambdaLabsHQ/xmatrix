@@ -37,8 +37,6 @@ for (const scenario of cases) {
       await expect(recommendation).toContainText(scenario.architecture === "x86" ? "Intel-based Macs" : "Apple Silicon");
       await expect(recommendation.getByRole("link", { name: scenario.architecture === "x86" ? "Apple Silicon Mac" : "Intel Mac" })).toHaveAttribute("href", scenario.other);
     }
-    await recommendation.getByRole("link", { name: "All platforms", exact: true }).click();
-    await expect(page).toHaveURL(/#all-downloads$/);
     // The list under the recommendation carries every build of one channel,
     // whatever the device; the switch moves the whole list to the other one.
     const builds = (channel: "stable" | "dev", suffix: string) => ({
@@ -46,8 +44,10 @@ for (const scenario of cases) {
       [`macOS Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.dmg`,
       [`Windows Installer${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.exe`,
       [`Android APK${suffix}`]: `/api/android/releases/${channel}/latest.apk`,
-      [`macOS ZIP Apple Silicon${suffix}`]: `/api/desktop/releases/${channel}/latest-arm64.zip`,
-      [`macOS ZIP Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.zip`,
+      [`macOS ZIP, Apple Silicon${suffix}`]: `/api/desktop/releases/${channel}/latest-arm64.zip`,
+      [`macOS ZIP, Intel${suffix}`]: `/api/desktop/releases/${channel}/latest-x64.zip`,
+      [`Desktop release notes${suffix}`]: `/releases?component=desktop&channel=${channel}`,
+      [`Android release notes${suffix}`]: `/releases?component=android&channel=${channel}`,
       [`Web Open${suffix}`]: channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app",
     });
     const expectBuilds = async (channel: "stable" | "dev", suffix: string) => {

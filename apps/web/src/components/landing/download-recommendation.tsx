@@ -66,9 +66,6 @@ export function DownloadRecommendation({ channel = "stable", channelSwitch }: { 
       <h1 className="site-display mt-8 text-5xl font-semibold leading-[1.02] text-foreground sm:text-6xl">
         {platform === "unknown" || download ? copy.getXMatrix : copy.useOnWeb}
       </h1>
-      <p className="mt-5 max-w-md text-base leading-7 text-muted-foreground">
-        {download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
-      </p>
       <div className="relative mt-9 flex w-full flex-col items-center gap-y-1 sm:w-auto">
         <WoodPanel as="a" href={download?.href ?? webApp(channel)} className="site-wood-pill inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
           {download && <Download className="size-4" />}
@@ -77,9 +74,10 @@ export function DownloadRecommendation({ channel = "stable", channelSwitch }: { 
         {/* Beside the button on desktop, without moving it off the page's centre line. */}
         {channelSwitch && <div className="sm:absolute sm:left-full sm:top-1/2 sm:ml-4 sm:-translate-y-1/2">{channelSwitch}</div>}
       </div>
-      <p className="mt-4 flex flex-wrap items-center justify-center gap-x-5 gap-y-2 text-sm">
-        {otherMac && <a href={otherMac.href} className="download-quiet-link">{copy.otherMac(otherMac.name)}</a>}
-        <a href="#all-downloads" className="download-quiet-link">{copy.allPlatforms}</a>
+      {/* One line under the action: what this build is for, and the other Mac build when there is one. */}
+      <p className="mt-5 max-w-md text-sm leading-6 text-muted-foreground">
+        {otherMac && download ? download.detail.replace(/[.。]$/, "") : download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
+        {otherMac && <> · <a href={otherMac.href} className="download-quiet-link">{copy.otherMac(otherMac.name)}</a></>}
       </p>
     </div>
   );

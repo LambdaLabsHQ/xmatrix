@@ -2,14 +2,13 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronDown, Globe, Smartphone } from "lucide-react";
-import Link from "next/link";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
 
 import { DownloadRecommendation, webApp, type Channel } from "./download-recommendation";
 
 type Build = { label: string; href: string };
-type PlatformRow = { name: string; icon: ReactNode; note: string; notes?: string; builds: Build[] };
+type PlatformRow = { name: string; icon: ReactNode; note: string; builds: Build[] };
 
 const desktop = (channel: Channel, file: string) => `/api/desktop/releases/${channel}/latest-${file}`;
 const notes = (component: "desktop" | "android", channel: Channel) => `/releases?component=${component}&channel=${channel}`;
@@ -22,15 +21,15 @@ const channels: { id: Channel; label: string; detail: string }[] = [
 
 const platforms = (channel: Channel): PlatformRow[] => [
   {
-    name: "macOS", icon: <MachineGlyph os="macos" />, note: "Desktop app", notes: notes("desktop", channel),
+    name: "macOS", icon: <MachineGlyph os="macos" />, note: "Desktop app",
     builds: [{ label: "Apple Silicon", href: desktop(channel, "arm64.dmg") }, { label: "Intel", href: desktop(channel, "x64.dmg") }],
   },
   {
-    name: "Windows", icon: <MachineGlyph os="windows" className="size-[18px]" />, note: "Desktop app, x64", notes: notes("desktop", channel),
+    name: "Windows", icon: <MachineGlyph os="windows" className="size-[18px]" />, note: "Desktop app, x64",
     builds: [{ label: "Installer", href: desktop(channel, "x64.exe") }],
   },
   {
-    name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: "Phone app", notes: notes("android", channel),
+    name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: "Phone app",
     builds: [{ label: "APK", href: `/api/android/releases/${channel}/latest.apk` }],
   },
   {
@@ -39,9 +38,12 @@ const platforms = (channel: Channel): PlatformRow[] => [
   },
 ];
 
-const zips = (channel: Channel): Build[] => [
-  { label: "Apple Silicon", href: desktop(channel, "arm64.zip") },
-  { label: "Intel", href: desktop(channel, "x64.zip") },
+/** The small print under the list: release notes and the macOS ZIPs, one quiet line. */
+const more = (channel: Channel): Build[] => [
+  { label: "Desktop release notes", href: notes("desktop", channel) },
+  { label: "Android release notes", href: notes("android", channel) },
+  { label: "macOS ZIP, Apple Silicon", href: desktop(channel, "arm64.zip") },
+  { label: "macOS ZIP, Intel", href: desktop(channel, "x64.zip") },
 ];
 
 export function DesktopDownload() {
@@ -79,18 +81,15 @@ export function DesktopDownload() {
       <div className="x-container">
         <DownloadRecommendation channel={channel} channelSwitch={channelSwitch} />
 
-        <div id="all-downloads" className="mx-auto mt-24 max-w-2xl scroll-mt-24 sm:mt-32">
+        <div id="all-downloads" className="mx-auto mt-16 max-w-2xl scroll-mt-24 sm:mt-20">
           <h2 className="download-list-heading">All platforms · {current.label}</h2>
           <ul className="download-list" data-channel={channel}>
-            {platforms(channel).map(({ name, icon, note, notes: releaseNotes, builds }) => (
+            {platforms(channel).map(({ name, icon, note, builds }) => (
               <li key={name} className="download-row">
                 <span className="download-row-icon">{icon}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-base font-semibold text-foreground">{name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    <span className="block sm:inline">{note}</span>
-                    {releaseNotes && <><span className="hidden sm:inline"> · </span><Link href={releaseNotes} className="download-quiet-link" aria-label={`${name}${suffix} release notes`}>Release notes</Link></>}
-                  </p>
+                  <p className="text-sm text-muted-foreground">{note}</p>
                 </div>
                 <div className="flex shrink-0 flex-wrap justify-end gap-2">
                   {builds.map((build) => (
@@ -101,15 +100,12 @@ export function DesktopDownload() {
             ))}
           </ul>
 
-          <div className="mt-5 flex flex-col gap-x-6 gap-y-2 text-sm text-muted-foreground sm:flex-row sm:justify-between">
-            <p aria-live="polite">{current.detail}</p>
-            <p className="flex shrink-0 gap-x-3">
-              <span>macOS as ZIP</span>
-              {zips(channel).map((zip) => (
-                <a key={zip.href} href={zip.href} className="download-quiet-link" aria-label={`macOS ZIP ${zip.label}${suffix}`}>{zip.label}</a>
-              ))}
-            </p>
-          </div>
+          <p className="mt-5 text-sm text-muted-foreground" aria-live="polite">{current.detail}</p>
+          <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
+            {more(channel).map((link) => (
+              <a key={link.href} href={link.href} className="download-quiet-link" aria-label={`${link.label}${suffix}`}>{link.label}</a>
+            ))}
+          </p>
         </div>
       </div>
     </section>
