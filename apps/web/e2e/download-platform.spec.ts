@@ -39,8 +39,23 @@ for (const scenario of cases) {
     }
     await recommendation.getByRole("link", { name: "All platforms and preview builds" }).click();
     await expect(page).toHaveURL(/#all-downloads$/);
-    await expect(page.getByRole("link", { name: "Stable EXE", exact: true })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Download APK", exact: true })).toBeVisible();
+    // The list under the recommendation carries every build, whatever the device.
+    const builds = {
+      "macOS Apple Silicon": "/api/desktop/releases/stable/latest-arm64.dmg",
+      "macOS Intel": "/api/desktop/releases/stable/latest-x64.dmg",
+      "Windows Installer": "/api/desktop/releases/stable/latest-x64.exe",
+      "Android APK": "/api/android/releases/stable/latest.apk",
+      "Preview builds: Windows": "/api/desktop/releases/dev/latest-x64.exe",
+      "macOS as ZIP: Preview Intel": "/api/desktop/releases/dev/latest-x64.zip",
+    };
+    for (const [name, href] of Object.entries(builds)) {
+      const link = page.getByRole("link", { name, exact: true });
+      await expect(link).toBeVisible();
+      await expect(link).toHaveAttribute("href", href);
+    }
+    // One primary action on the page, and no sideways scrolling on a phone.
+    await expect(page.locator(".download-page [data-material='wood-panel']")).toHaveCount(1);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     await context.close();
   });
 }
