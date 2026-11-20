@@ -34,3 +34,19 @@ test("Unix CLI artifacts and release cache use the same immutable compiler insta
   assert.equal(cache[0].uses, ci[0].uses);
   assert.equal(cache[0].with?.toolchain, ci[0].with?.toolchain);
 });
+
+// Setup Windows Rust CLI strips Git Bash from PATH so Cargo/MSVC never pick up
+// MSYS tools; any later `shell: bash` step on Windows falls back to WSL and fails.
+test("Windows CLI release build steps never invoke bash", () => {
+  const steps = readYaml(".github/workflows/cli-build.yml").jobs.build.steps;
+  const bad = steps.filter(
+    (step) =>
+      step.shell === "bash" &&
+      !(typeof step.if === "string" && /runner\.os\s*(?:!=\s*'Windows'|==\s*'(?:Linux|macOS)')/u.test(step.if)),
+  );
+  assert.deepEqual(
+    bad.map((step) => step.name ?? step.id ?? "<unnamed>"),
+    [],
+    "cli-build.yml build job has shell: bash step reachable on Windows",
+  );
+});

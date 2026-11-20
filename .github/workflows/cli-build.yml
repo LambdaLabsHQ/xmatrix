@@ -295,21 +295,35 @@ jobs:
       # concurrency throttling.
       - name: Locate PNPM lockfile verification record on a GitHub-hosted runner
         id: hosted-pnpm-verified
-        if: runner.environment == 'github-hosted'
+        if: runner.environment == 'github-hosted' && runner.os != 'Windows'
         shell: bash
         run: |
           if [ -n "${XDG_CACHE_HOME:-}" ]; then dir="$XDG_CACHE_HOME/pnpm"
           elif [ "$RUNNER_OS" = macOS ]; then dir="$HOME/Library/Caches/pnpm"
-          elif [ "$RUNNER_OS" = Windows ]; then dir="$LOCALAPPDATA/pnpm-cache"
           else dir="$HOME/.cache/pnpm"
           fi
           echo "path=$dir/lockfile-verified.jsonl" >> "$GITHUB_OUTPUT"
+
+      - name: Locate PNPM lockfile verification record on a GitHub-hosted Windows runner
+        id: hosted-pnpm-verified-windows
+        if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = if (-not [string]::IsNullOrWhiteSpace($env:XDG_CACHE_HOME)) {
+            Join-Path $env:XDG_CACHE_HOME 'pnpm'
+          } else {
+            Join-Path $env:LOCALAPPDATA 'pnpm-cache'
+          }
+          $path = Join-Path $dir 'lockfile-verified.jsonl'
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "path=$path`n", $utf8)
 
       - name: Restore PNPM lockfile verification record on a GitHub-hosted runner
         if: runner.environment == 'github-hosted'
         uses: actions/cache/restore@v6
         with:
-          path: ${{ steps.hosted-pnpm-verified.outputs.path }}
+          path: ${{ steps.hosted-pnpm-verified.outputs.path || steps.hosted-pnpm-verified-windows.outputs.path }}
           key: pnpm-lockfile-verified-${{ runner.os }}-pnpm-11.3.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc') }}
 
       - name: Install pinned release upload dependencies

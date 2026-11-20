@@ -42,16 +42,17 @@ runs:
         set -euo pipefail
         if [ -z "${RUSTC_WRAPPER:-}" ]; then exit 0; fi
         "$RUSTC_WRAPPER" gc
-        "$RUSTC_WRAPPER" daemon stop || true
         state_file="${KACHE_CACHE_DIR:-$HOME/.cache/kache}/daemon.state.json"
+        pid=""
         if [ -f "$state_file" ]; then
-          pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$state_file" | head -n 1)"
-          if [ -n "$pid" ]; then
-            for _ in $(seq 1 30); do
-              kill -0 "$pid" 2>/dev/null || break
-              sleep 0.5
-            done
-          fi
+          pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$state_file" 2>/dev/null | head -n 1 || true)"
+        fi
+        "$RUSTC_WRAPPER" daemon stop || true
+        if [ -n "$pid" ]; then
+          for _ in $(seq 1 30); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
         fi
 
     - name: Save the CLI release kache store (Windows)
