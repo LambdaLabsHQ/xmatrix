@@ -761,6 +761,8 @@ mod tests {
                     body
                 );
                 stream.write_all(response.as_bytes()).expect("write");
+                stream.flush().expect("flush");
+                let _ = stream.shutdown(std::net::Shutdown::Write);
             }
         });
 
