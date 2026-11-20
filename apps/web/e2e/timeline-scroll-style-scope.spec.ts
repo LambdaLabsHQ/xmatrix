@@ -80,6 +80,34 @@ for (const viewport of ["desktop", "phone"] as const) {
       // The rows a frame mounts cost less than restyling the app; a root `:has()`
       // made every such frame cost about one and a half times that.
       expect(Math.max(...scrolling)).toBeLessThan(wholeApp);
+
+      // And a row costs its own elements. Mounting one restyled every button in
+      // the app, through a `:has()` ahead of a bare `button`, and
+      // styled each of its elements five times over, once more for every
+      // selection and highlight rule that matched all elements.
+      const mounted = await timeline.evaluate((root) => {
+        const list = root.querySelector("[data-testid=virtuoso-item-list]")!;
+        const row = list.lastElementChild!.cloneNode(true) as HTMLElement;
+        row.removeAttribute("id");
+        return { list: list.childElementCount, elements: row.querySelectorAll("*").length + 1 };
+      });
+      expect(mounted.list).toBeGreaterThan(0);
+      const mounting = await restyledDuring(async () => {
+        await timeline.evaluate((root) => {
+          const list = root.querySelector<HTMLElement>("[data-testid=virtuoso-item-list]")!;
+          const row = list.lastElementChild!.cloneNode(true) as HTMLElement;
+          row.removeAttribute("id");
+          list.append(row);
+          void list.offsetHeight;
+          row.remove();
+        });
+      });
+      await testInfo.attach("restyled-per-row", {
+        body: JSON.stringify({ mounted, mounting }), contentType: "application/json",
+      });
+      // Not every element is styled: a phone does not display the hover toolbar.
+      expect(Math.max(...mounting)).toBeGreaterThan(mounted.elements / 3);
+      expect(Math.max(...mounting)).toBeLessThan(mounted.elements * 3);
     });
   });
 }
