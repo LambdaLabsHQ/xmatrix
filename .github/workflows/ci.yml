@@ -552,9 +552,9 @@ jobs:
       # runner without the right to change Defender keeps scanning and says so.
       # Default clean checkout; kache restores compile artifacts across jobs.
       - *checkout_selected_ref
-      - uses: ./.github/actions/disable-windows-defender
       - *setup_node
       - *select_ci_ref
+      - uses: ./.github/actions/disable-windows-defender
       # An ephemeral hosted runner keeps kache's store on the workspace volume
       # (hard links need one volume) and restores it from the Actions cache.
       # v2 archives only persistent payloads after the cache writer exits;
