@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: shrink the version-stamped CLI entrypoint and raise release kache budget
+
+Even with a warm `kache` store, bumping `packages/cli-rs/Cargo.toml` on a
+release tag still forced `rustc` to re-monomorphize `tokio`, `clap`, `rustls`,
+and the top-level async entrypoint inside the `xmatrix` binary crate (over 50s
+on Linux and ~4m on `macos-26-intel`), while the `640MiB` `kache` save budget
+evicted ~70 release crates from a ~740MiB store on every run. The top-level
+bootstrap now lives inside `xmatrix-cli-runtime::entrypoint`, leaving
+`packages/cli-rs/src/main.rs` as a thin wrapper that only forwards
+`env!("CARGO_PKG_VERSION")`, `cli-build.yml` and `cli-release-cache.yml` now
+build only `--bin xmatrix` (skipping the five unpackaged `windows-continuity`
+helper binaries), and `.github/actions/cli-release-kache-save` raises the
+default store cap to `960MiB` so a full release build fits without eviction.
+CLI binary packaging and CI cache infrastructure only; no protocol, schema, or
+user-visible CLI behavior change. Recovery is reverting this PR.
+
 ## Unreleased: the daemon keeps unconfirmed results, not a command journal
 
 On 2026-11-20 one stored quota reading that 4.7.0 could not read back made two

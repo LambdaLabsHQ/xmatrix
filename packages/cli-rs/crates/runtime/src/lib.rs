@@ -11,6 +11,8 @@ macro_rules! eprintln {
 
 // Domain-oriented include sections (same module scope via include!).
 // Self-contained helpers use mod; remaining include! peels still share crate-root scope.
+mod runtime_entrypoint;
+pub use runtime_entrypoint::entrypoint;
 include!("runtime_process_utf8.rs");
 mod runtime_utf8_shell;
 pub use runtime_utf8_shell::maybe_run_utf8_shell;
