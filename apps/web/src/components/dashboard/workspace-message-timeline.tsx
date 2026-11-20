@@ -1408,6 +1408,7 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
   discuss: boolean;
 }) {
   const [passage, setPassage] = useState<MessagePassageSelection | null>(null);
+  const shown = passage !== null;
   useEffect(() => {
     let frame = 0;
     const update = () => {
@@ -1418,7 +1419,10 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
       });
     };
     document.addEventListener("selectionchange", update);
-    // The button follows its passage while the timeline scrolls.
+    if (!shown) return () => { cancelAnimationFrame(frame); document.removeEventListener("selectionchange", update); };
+    // The button follows its passage while the timeline scrolls. Only while
+    // there is one: reading the selection lays the page out, in every frame
+    // of every scroll.
     window.addEventListener("scroll", update, { capture: true, passive: true });
     window.addEventListener("resize", update);
     return () => {
@@ -1427,7 +1431,7 @@ function MessagePassageActions({ rootRef, onAction, quote, discuss }: {
       window.removeEventListener("scroll", update, { capture: true });
       window.removeEventListener("resize", update);
     };
-  }, [rootRef]);
+  }, [rootRef, shown]);
   if (!passage || typeof document === "undefined") return null;
   // Above the passage, unless that is off the top or a phone's own selection menu sits there.
   const below = passage.rect.top < 56 || window.matchMedia("(pointer: coarse)").matches;

@@ -101,7 +101,11 @@ html[data-app-theme] .xmatrix-app .app-admin-view .app-glass-select-option {
   display: none;
 }
 
-.xmatrix-app .app-admin-view:has(.app-admin-user-detail) .app-tool-detail-scroll article > button {
+/* The open record comes from the address, not from `:has()`: a `:has()` ahead
+   of a bare `button` put every button in the app into the set the browser
+   restyles whenever a node is inserted under an ancestor it watches, which is
+   every row a scrolling timeline mounts. */
+.xmatrix-app .app-admin-view[data-record-open] .app-tool-detail-scroll article > button {
   display: none;
 }
 

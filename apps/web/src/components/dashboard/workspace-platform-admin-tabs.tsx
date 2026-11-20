@@ -14,11 +14,17 @@ import { PlatformAdminAudit, PlatformAdminSpaces } from "./platform-admin-lists"
 import { PlatformAdminUsers } from "./platform-admin-users";
 import { PlatformAdminOperations } from "./platform-admin-operations";
 import { PlatformAdminBilling } from "./platform-admin-billing";
+import { useAdminParam } from "./platform-admin-data";
 import { SectionedToolView } from "./tool-split";
+import { useViewSelection } from "./url-query-state";
 
 export function PlatformAdminTabs({ token }: { token?: string }) {
+  // A user's record replaces the section's own Back with one to its list.
+  const [section] = useViewSelection("admin");
+  const [openUserId] = useAdminParam("user");
   return (
-    <div className="app-admin-view flex min-h-0 min-w-0 flex-1">
+    <div className="app-admin-view flex min-h-0 min-w-0 flex-1"
+      data-record-open={section === "users" && openUserId ? "" : undefined}>
       <SectionedToolView title="Platform admin" view="admin" sections={[
         { key: "overview", label: "Overview", icon: BarChart3, summary: "Usage across the platform",
           content: <PlatformAdminView token={token} /> },

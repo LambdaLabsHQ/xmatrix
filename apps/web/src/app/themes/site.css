@@ -23,7 +23,8 @@ html:has(.site-page) {
   scroll-padding-top: 5.5rem;
 }
 
-.site-page ::selection {
+html[data-highlight-inherit] .site-page::selection,
+html:not([data-highlight-inherit]) .site-page ::selection {
   color: var(--site-ink);
   background: oklch(0.82 0.085 75 / 0.34);
 }
