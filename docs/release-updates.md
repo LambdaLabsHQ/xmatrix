@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: cross-compile macOS x64 CLI releases on Apple Silicon (`macos-26`)
+
+Hosted `macos-x64` (`x86_64-apple-darwin`) CLI release and cache-warm jobs
+previously ran on 3-core `macos-26-intel` runners (~4m02s even with a warm
+`kache` store, vs 1m27s for `macos-arm64`). Both `cli-build.yml` and
+`cli-release-cache.yml` now cross-compile `x86_64-apple-darwin` on `macos-26`
+(Apple Silicon), explicitly check the Mach-O architecture via `lipo -archs`,
+verify `--version` via Rosetta (`arch -x86_64`, installing Rosetta if absent),
+and keep the same Developer ID signing and R2 verification gates. CI / release
+infrastructure only; no binary format, signing, or client behavior change.
+Recovery is reverting the runner back to `macos-26-intel`.
+
 ## Unreleased: the download page carries fewer things
 
 After the channel picker the download page had grown back to six elements in

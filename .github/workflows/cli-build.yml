@@ -137,11 +137,11 @@ jobs:
             asset: xmatrix-macos-arm64
             binary: xmatrix
             part: macos-arm64
-          # Keep the native ARM version probe on Apple Silicon, but do not
-          # spend a second scarce ARM runner on a binary Intel can run itself.
-          # The self-hosted fleet retains its Apple Silicon cross-build.
+          # Cross-compile Intel macOS on Apple Silicon (`macos-26`) so release
+          # builds avoid the slower 3-core Intel runner; lipo + Rosetta verify
+          # the x86_64 Mach-O binary before upload.
           - target: x86_64-apple-darwin
-            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26-intel"' }}
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26"' }}
             asset: xmatrix-macos-x64
             binary: xmatrix
             part: macos-x64
@@ -448,8 +448,8 @@ jobs:
 
       # The bytes this machine uploads are the bytes users run, so they must
       # report exactly the release version: its channel and update source follow
-      # from it. Hosted macOS targets run natively; a self-hosted Apple Silicon
-      # runner executes the Intel binary under Rosetta.
+      # from it. On Apple Silicon, x86_64-apple-darwin is cross-compiled and
+      # verified via lipo plus Rosetta (`arch -x86_64`).
       - name: Verify the binary reports the release version
         if: runner.os != 'Windows'
         shell: bash
@@ -458,7 +458,21 @@ jobs:
         run: |
           set -euo pipefail
           run=("./${{ matrix.asset }}")
-          if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then run=(arch -x86_64 "./${{ matrix.asset }}"); fi
+          if [[ "${{ matrix.target }}" == *-apple-darwin ]]; then
+            expected_arch="arm64"
+            if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then expected_arch="x86_64"; fi
+            actual_arch="$(lipo -archs "./${{ matrix.asset }}")"
+            if [[ "$actual_arch" != "$expected_arch" ]]; then
+              echo "${{ matrix.asset }} architecture is '$actual_arch'; expected '$expected_arch'." >&2
+              exit 1
+            fi
+          fi
+          if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then
+            if [[ "$(uname -m)" == arm64 ]] && ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+              softwareupdate --install-rosetta --agree-to-license
+            fi
+            run=(arch -x86_64 "./${{ matrix.asset }}")
+          fi
           reported="$("${run[@]}" --version | head -n 1)"
           if [[ "$reported" != "xmatrix $RELEASE_VERSION" ]]; then
             echo "${{ matrix.asset }} reports '$reported'; expected 'xmatrix $RELEASE_VERSION'." >&2
