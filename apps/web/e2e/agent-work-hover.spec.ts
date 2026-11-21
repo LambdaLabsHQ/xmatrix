@@ -373,6 +373,112 @@ test.describe("mobile agent controls", () => {
     expect(avatarBox!.width).toBeGreaterThanOrEqual(48);
     expect(avatarBox!.y + avatarBox!.height).toBeLessThanOrEqual(composerBox!.y - 10);
   });
+
+  async function openMobileChannelWithSend(
+    page: Page,
+    key: string,
+    harnesses: readonly string[],
+    channels: (typeof ACTIVE_AGENT_CHANNEL)[] = [ACTIVE_AGENT_CHANNEL],
+  ) {
+    await openWorkspaceWithStubs(page, {
+      spaces: [E2E_SPACE],
+      channels,
+      registrations: harnesses.map((harness) => ({
+        key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness },
+      })),
+    });
+    await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen");
+    await fixtureJson(page, key, new RegExp(`/api/xmatrix/channels/${ACTIVE_AGENT_CHANNEL.id}/messages$`, "u"),
+      { message: { messageId: `m-${key}` } }, { method: "POST" });
+  }
+
+  test("Handoff and Stop second confirmation survive WebKit button blur before click", async ({ page }) => {
+    // WebKit (iOS WKWebView / Safari) does not focus `<button>` on touch:
+    // tapping a button while another inside the item holds focus blurs the
+    // focused button with `relatedTarget === null` before `click`.
+    await page.addInitScript(() => {
+      document.addEventListener("pointerdown", (event) => {
+        const target = event.target as HTMLElement | null;
+        if (target?.closest?.("button") && document.activeElement instanceof HTMLElement && document.activeElement !== document.body) {
+          document.activeElement.blur();
+        }
+      }, true);
+    });
+    await openMobileChannelWithSend(page, "mobile-confirm-send", ["claude", "codex", "gemini"]);
+
+    const avatar = page.getByRole("button", { name: /Open Codex.*codex:1/ });
+    const toolbar = page.getByRole("toolbar", { name: "Controls for codex:1" });
+    await avatar.tap();
+    await expect(toolbar).toBeVisible();
+
+    // Handoff focuses the first successor row; tapping @claude blurs it before click.
+    await toolbar.getByRole("button", { name: "Hand off codex:1" }).tap();
+    await expect(toolbar.getByText("Hand off codex:1 to")).toBeVisible();
+    await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).tap();
+    const confirmHandoff = toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" });
+    await expect(confirmHandoff).toHaveText("Confirm");
+    expect(await fixtureRequestBodies(page, "mobile-confirm-send")).toEqual([]);
+    await confirmHandoff.tap();
+    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body))
+      .toEqual(["@Codex:1:handoff:@claude"]);
+
+    // Close trace and long-press avatar: Stop opens armed & focused, and tapping Confirm still sends.
+    await page.locator(".composer-textarea").first().tap();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    const box = (await avatar.boundingBox())!;
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: [{ x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) }],
+    });
+    await page.waitForTimeout(550);
+    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    const confirmStop = toolbar.getByRole("button", { name: "Confirm stop codex:1" });
+    await expect(confirmStop).toBeVisible();
+    await confirmStop.tap();
+    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body))
+      .toEqual(["@Codex:1:handoff:@claude", expect.stringMatching(/^@codex:1:stop$/iu)]);
+  });
+
+  test("a second dock Agent stacks controls above its avatar so Handoff and Stop stay tappable", async ({ page }) => {
+    const base = ACTIVE_AGENT_CHANNEL.memberPresence["agent:codex"];
+    const first = base.instances[0];
+    await openMobileChannelWithSend(page, "mobile-second-send", ["claude", "codex"], [{
+      ...ACTIVE_AGENT_CHANNEL,
+      memberPresence: {
+        "agent:codex": {
+          ...base,
+          instances: [
+            { ...first, runtimeState: { status: "busy", waiting: { kind: "tool", label: "Running tests", sinceMillis: Date.now() - 20_000 } } },
+            { ...first, id: "instance-codex-2", channelInstanceId: "2", label: "codex:2" },
+          ],
+        },
+      },
+    }]);
+
+    const secondAvatar = page.getByRole("button", { name: /Open Codex.*codex:2/ });
+    const toolbar = page.getByRole("toolbar", { name: "Controls for codex:2" });
+    await secondAvatar.tap();
+    await expect(toolbar).toBeVisible();
+
+    const stopBtn = toolbar.getByRole("button", { name: "Stop codex:2" });
+    const handoffBtn = toolbar.getByRole("button", { name: "Hand off codex:2" });
+    for (const button of [handoffBtn, stopBtn]) {
+      const hitTarget = await button.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const top = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+        return Boolean(top && (el === top || el.contains(top)));
+      });
+      expect(hitTarget).toBe(true);
+    }
+
+    await stopBtn.tap();
+    const confirmStop = toolbar.getByRole("button", { name: "Confirm stop codex:2" });
+    await expect(confirmStop).toHaveText("Confirm");
+    await confirmStop.tap();
+    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-second-send")).map((body) => body.body))
+      .toEqual([expect.stringMatching(/^@codex:2:stop$/iu)]);
+  });
 });
 
 test("a stretching disc pushes the Instances after it aside", async ({ page }) => {

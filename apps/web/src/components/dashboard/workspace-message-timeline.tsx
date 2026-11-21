@@ -268,6 +268,7 @@ import {
 import { normalizeMessageBodyForDisplay } from "@/components/dashboard/message-text";
 
 import { MobileInlineActions } from "./mobile-inline-actions";
+import { listenForOverlayDismissal } from "./use-overlay-dismiss";
 import { useSystemBackHandler } from "./use-system-back";
 
 
@@ -3740,11 +3741,14 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
   // island's words have their own (what it waits on), the face the Instance's.
   const [hoverPart, setHoverPart] = useState<"instance" | "intent">("instance");
   const [actionToolbarPosition, setActionToolbarPosition] = useState<CSSProperties>({ left: 0, top: 0 });
+  const [stackAboveCapsule, setStackAboveCapsule] = useState(false);
   const [handoffPickerOpen, setHandoffPickerOpen] = useState(false);
   const handoffPickerToggledRef = useRef(false);
   // Reborn, Handoff and Stop ask in place: the first press arms the button,
   // the second sends. A handoff arms the successor row that was pressed.
   const [armedAction, setArmedAction] = useState<string | null>(null);
+  const controlsPinned = handoffPickerOpen || armedAction !== null;
+  const wasTraceOpenRef = useRef(false);
   const stopArmed = armedAction === "stop";
   const stopArmedByGestureRef = useRef(false);
   const { displayStatus, waiting, issue, notice } = item;
@@ -3827,11 +3831,29 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     // The panel grows up out of the capsule the pointer is on: the island,
     // or the bare disc when there is none.
     const capsule = avatar.closest(".app-agent-work-island") ?? avatar;
+    const isIsland = capsule !== avatar;
     // The Trace takes what the conversation column allows, up to a reading width.
     const traceSlot = content.querySelector<HTMLElement>(":scope > .app-agent-work-trace-slot");
+    const boundary = capsule.closest(".app-main")?.getBoundingClientRect().width ?? window.innerWidth;
+    const traceWidth = Math.max(240, Math.min(560, boundary - 24));
     if (traceSlot) {
-      const boundary = capsule.closest(".app-main")?.getBoundingClientRect().width ?? window.innerWidth;
-      traceSlot.style.width = `${Math.max(240, Math.min(560, boundary - 24))}px`;
+      traceSlot.style.width = `${traceWidth}px`;
+    }
+    // A bare disc keeps controls beside the face only while the panel sits on
+    // the disc's left edge and fits inside the column; otherwise the raised
+    // avatar (z-index: 21) covers the controls or pushes Stop past the edge.
+    // Measure each child's intrinsic width so toggling layout never oscillates.
+    if (isIsland) {
+      setStackAboveCapsule(false);
+    } else {
+      const row = actionToolbarRef.current?.querySelector<HTMLElement>(".app-agent-work-action-row");
+      const controlsWidth = row
+        ? Array.from(row.children).reduce((sum, child) => sum + child.getBoundingClientRect().width, 0)
+          + Math.max(0, row.children.length - 1) * 2 + 20
+        : stack.getBoundingClientRect().width;
+      const sideBySideWidth = Math.max(traceSlot ? traceWidth : 0, capsule.getBoundingClientRect().width + controlsWidth);
+      const rowMorph = morphPanelPosition(capsule, sideBySideWidth);
+      setStackAboveCapsule(rowMorph.capsuleLeft > 1 || sideBySideWidth > boundary - 24);
     }
     // The content keeps its final layout whatever size the glass is at, so
     // it measures the panel the glass grows into.
@@ -3873,10 +3895,32 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     </div>
   );
   const hoverCards = traceOpen ? instanceCards : hoverPart === "intent" && intentCard ? intentCard : instanceCards;
-  const morphShape = traceOpen ? (island ? "trace-panel" : "trace-row") : island ? "panel" : "row";
+  const stacked = island || stackAboveCapsule;
+  const morphShape = traceOpen ? (stacked ? "trace-panel" : "trace-row") : stacked ? "panel" : "row";
   const { left: actionLayerLeft, top: actionLayerTop, ...morphGeometry } = actionToolbarPosition;
   const actionLayerPosition = { left: actionLayerLeft, top: actionLayerTop };
   const hasHoverCards = Boolean(hoverCards);
+
+  useEffect(() => {
+    if (wasTraceOpenRef.current && !traceOpen) {
+      setHandoffPickerOpen(false);
+      setArmedAction(null);
+    }
+    wasTraceOpenRef.current = traceOpen;
+  }, [traceOpen]);
+
+  useEffect(() => {
+    if (!controlsPinned || !itemElement) return;
+    return listenForOverlayDismissal((event) => {
+      const target = event.target as Node | null;
+      if (target && itemElement.contains(target)) return;
+      setHandoffPickerOpen(false);
+      setArmedAction(null);
+    }, () => {
+      setHandoffPickerOpen(false);
+      setArmedAction(null);
+    });
+  }, [controlsPinned, itemElement]);
 
   useLayoutEffect(() => {
     const avatar = avatarButtonRef.current;
@@ -3891,7 +3935,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     const capsuleObserver = new ResizeObserver(() => positionActionToolbar());
     capsuleObserver.observe(capsule);
     const stopFollowingLayout = observeToolbarLayout(avatar, stack, layoutRoot, positionActionToolbar, true,
-      () => workItem.matches(":hover, :focus-within, [data-trace-open]"));
+      () => workItem.matches(":hover, :focus-within, [data-trace-open], [data-controls-open]"));
     return () => {
       capsuleObserver.disconnect();
       stopFollowingLayout();
@@ -3906,7 +3950,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     handoffPickerToggledRef.current = false;
     actionToolbarRef.current?.querySelector<HTMLButtonElement>(handoffPickerOpen
       ? '[data-action="handoff-successor"]' : '[data-action="handoff"]')?.focus();
-  }, [handoffPickerOpen, positionActionToolbar]);
+  }, [handoffPickerOpen, armedAction, stackAboveCapsule, positionActionToolbar]);
 
   useLayoutEffect(() => {
     if (!stopArmed || !stopArmedByGestureRef.current) return;
@@ -4004,6 +4048,7 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
     <div
       ref={setItemElement}
       data-trace-open={traceOpen || undefined}
+      data-controls-open={controlsPinned || undefined}
       className="app-agent-work-item group relative flex shrink-0 items-center"
       data-morph={hoverCards || traceOpen ? (traceOpen ? "trace" : morphShape) : undefined}
       // The capsule's geometry rides on the item, so a stretching disc can
@@ -4021,7 +4066,13 @@ export const AgentWorkAvatar = memo(function AgentWorkAvatar({
         setArmedAction(null);
       }}
       onBlur={(event) => {
-        if (event.currentTarget.contains(event.relatedTarget as Node | null)) return;
+        const next = event.relatedTarget as Node | null;
+        // WebKit (iOS WKWebView, Mobile Safari, macOS Safari) blurs a focused
+        // button with `relatedTarget === null` before `click` when tapping any
+        // button inside this item. Outside presses dismiss via
+        // `listenForOverlayDismissal`, so only reset on blur when focus moved
+        // to another element outside this item or left the window.
+        if (next ? event.currentTarget.contains(next) : document.hasFocus()) return;
         setHandoffPickerOpen(false);
         setArmedAction(null);
       }}
