@@ -101,14 +101,57 @@ pub async fn grant_give(
             return Err(CliError::Auth(format!("--{name} must not be empty")));
         }
     }
-    let url = protocol::with_route(hub, "/api/admin/billing-grants");
     let body = serde_json::json!({
         "userId": user.trim(), "spaceId": space.trim(), "reference": reference.trim(), "reason": reason.trim(),
     });
+    post_and_print(hub, token, "/api/admin/billing-grants", body).await
+}
+
+/// POST an operator request and print the Hub's JSON answer.
+async fn post_and_print(hub: &str, token: &str, path: &str, body: serde_json::Value) -> Result<()> {
+    let url = protocol::with_route(hub, path);
     let value: serde_json::Value =
         bounded(http::request_json(&url, "POST", Some(token), Some(body))).await?;
     println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
+}
+
+/// Send one campaign batch to people named by user id; the Hub skips the unsubscribed.
+pub async fn campaign_send(
+    hub: &str,
+    token: &str,
+    campaign: &str,
+    users: &[String],
+    dry_run: bool,
+) -> Result<()> {
+    let campaign = campaign.trim();
+    if campaign.is_empty()
+        || !campaign
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    {
+        return Err(CliError::Auth(
+            "Campaign id must be letters, digits and dashes".into(),
+        ));
+    }
+    let users: Vec<&str> = users
+        .iter()
+        .map(|u| u.trim())
+        .filter(|u| !u.is_empty())
+        .collect();
+    if users.is_empty() || users.len() > 50 || users.iter().any(|u| u.contains('@')) {
+        return Err(CliError::Auth(
+            "Pass 1–50 user ids (not email addresses)".into(),
+        ));
+    }
+    let body = serde_json::json!({ "userIds": users, "dryRun": dry_run });
+    post_and_print(
+        hub,
+        token,
+        &format!("/api/admin/email-campaigns/{campaign}/send"),
+        body,
+    )
+    .await
 }
 
 pub fn page_url(hub: &str) -> Result<&'static str> {
@@ -190,15 +233,13 @@ mod tests {
             "403 Forbidden",
             "500 Internal Server Error",
         ] {
-            assert!(
-                serve_once(
-                    status,
-                    r#"{"error":"billing unavailable"}"#,
-                    Query::SpaceStatus("space-1".into())
-                )
-                .await
-                .is_err()
-            );
+            assert!(serve_once(
+                status,
+                r#"{"error":"billing unavailable"}"#,
+                Query::SpaceStatus("space-1".into())
+            )
+            .await
+            .is_err());
         }
         assert!(
             serve_once("200 OK", "not json", Query::SpaceStatus("space-1".into()))
