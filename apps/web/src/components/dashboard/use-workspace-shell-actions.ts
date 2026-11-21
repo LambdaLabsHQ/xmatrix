@@ -1593,15 +1593,26 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
    * conversation, or opens a new conversation named by it whose draft holds
    * it with a link back to the page, as a passage of a message does.
    */
+  // Passages that came while the app was still signing in or choosing its Space.
+  const pendingWebPassagesRef = useRef<EmbedPassage[]>([]);
+  const webPassageTargetReady = Boolean(s.token && s.user && s.currentSpaceId);
+
   const handleWebPassage = useStableCallback(async (passage: EmbedPassage) => {
+    // The side panel often opens with the passage: it waits for the session and the Space.
+    if (!s.token || !s.user || !s.currentSpaceId) {
+      pendingWebPassagesRef.current = [...pendingWebPassagesRef.current.slice(-4), passage];
+      return;
+    }
     const quote = discussionQuote(passage.text.trim() || passage.label,
       { label: passage.label || new URL(passage.href).host, href: passage.href }, false);
-    if (passage.target === "current" && s.selectedChannelIdRef.current) {
+    const openChannelId = s.selectedChannelIdRef.current;
+    if (passage.target === "current" && openChannelId) {
       quoteIntoComposer(quote);
+      // In the narrow panel the list may be showing: the quote is seen in its conversation.
+      navigateToChannel(openChannelId);
       setComposerAutoFocusRequest((current) => current + 1);
       return;
     }
-    if (!s.token || !s.user || !s.currentSpaceId) return;
     try {
       const { channel } = await beginConversation({ spaceId: s.currentSpaceId,
         memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote.text), mode: "open",
@@ -1617,6 +1628,15 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   });
 
   useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
+
+  useEffect(() => {
+    if (!webPassageTargetReady || pendingWebPassagesRef.current.length === 0) return;
+    const pending = pendingWebPassagesRef.current;
+    pendingWebPassagesRef.current = [];
+    void (async () => {
+      for (const passage of pending) await handleWebPassage(passage);
+    })();
+  }, [webPassageTargetReady, handleWebPassage]);
 
   function openInternalAppLink(href: string): boolean {
     const pageLink = internalPageLink(href, window.location.href);
