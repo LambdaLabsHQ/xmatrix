@@ -1,5 +1,28 @@
 # Release Updates
 
+## Unreleased: mobile Handoff and Stop second confirmation no longer collapses on tap
+
+Opening Handoff or long-pressing Stop on an Agent dock item programmatically
+focused the first successor or Stop button, and `.app-agent-work-item`'s
+`onBlur` cleared `handoffPickerOpen` and `armedAction` whenever
+`relatedTarget` was outside the item. On iOS WebKit (WKWebView and Mobile
+Safari), tapping any `<button>` blurs the previously focused button with
+`relatedTarget === null` before `click`, so confirming Handoff or Stop
+immediately closed the picker or disarmed Stop without sending. Separately, on
+narrow mobile viewports or for a second Agent in the dock, bare-disc controls
+stayed on the avatar's row (`trace-row` / `row`), letting the raised avatar
+(`z-index: 21`) overlap Handoff/Stop (`z-index: 20`) and toggle the panel shut
+when tapped.
+
+`AgentWorkAvatar` now keeps armed controls and the Handoff picker explicitly
+pinned (`data-controls-open`), dismisses them on outside presses or `Escape`
+via `listenForOverlayDismissal` (and when its Trace folds), and ignores
+in-window `onBlur` with `relatedTarget === null`. Bare-disc items whose panel
+shifts left of the disc or would overflow the column stack their controls above
+the avatar (`panel` / `trace-panel`) so every button stays unobstructed and
+within the viewport. Web only. Recovery is a CI-validated beta reverting this
+change.
+
 ## Unreleased: the Chrome extension becomes a side panel
 
 The extension now opens the person's Space in Chrome's side panel instead of a
