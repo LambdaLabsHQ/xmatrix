@@ -157,6 +157,54 @@ integration("a Channel window is self-contained versioned records; its exact rea
   }
 });
 
+integration("each distinct catalog leaves PostgreSQL once per read, and every Instance still shows its own", async () => {
+  const f = await spaceSecretFixture();
+  const added = await addInstances(f);
+  try {
+    // Instances of one harness version report the same catalogs. A nested
+    // null is stripped exactly as the whole presentation was before.
+    const models = [{ id: "opus", displayName: "Opus", description: null }];
+    const commands = [{ token: "/review", description: "Review the diff" }];
+    const parameters = [{ id: "serviceTier", label: "Service tier", options: ["priority"] }];
+    const shared = { model: "opus", models, commands };
+    await f.client.query("UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=ANY($1::text[])",
+      [[f.ids.instance, added.sleeping.instanceId], JSON.stringify(shared)]);
+    await f.client.query("UPDATE data.instances SET presentation_json=$2::jsonb WHERE instance_id=$1",
+      [added.launching.instanceId, JSON.stringify({ ...shared, parameters, commands: null })]);
+    const transaction = boundedPostgresTransaction(f.client);
+    const shipped = [];
+    const window = await loadChannelInstanceRecords({ async query(input) {
+      const rows = await transaction.query(input);
+      shipped.push(...rows);
+      return rows;
+    } }, f.ids.space, [f.ids.channel]);
+    const records = window.get(f.ids.channel);
+    assert.deepEqual(records.map((record) => record.id).sort(),
+      [f.ids.instance, added.sleeping.instanceId, added.launching.instanceId].sort());
+    for (const record of records) {
+      assert.deepEqual(record.models, [{ id: "opus", model: "opus", displayName: "Opus" }]);
+      assert.equal(record.model, "opus");
+    }
+    const byId = new Map(records.map((record) => [record.id, record]));
+    assert.deepEqual(byId.get(f.ids.instance).commands, byId.get(added.sleeping.instanceId).commands);
+    assert.equal(byId.get(f.ids.instance).commands[0].token, "/review");
+    assert.equal(byId.get(added.launching.instanceId).commands, undefined, "a JSON null is no catalog");
+    assert.equal(byId.get(added.launching.instanceId).parameters[0].id, "serviceTier");
+    assert.equal(byId.get(f.ids.instance).parameters, undefined);
+    // The live read and the resting read each carry the shared model catalog
+    // once, however many of their rows name it.
+    assert.equal(shipped.filter((row) => row.catalog_models !== null).length, 2);
+    assert.equal(shipped.filter((row) => row.catalog_commands !== null).length, 2);
+    assert.equal(shipped.filter((row) => row.catalog_parameters !== null).length, 1);
+    assert.equal(new Set(shipped.map((row) => row.catalog_digest_models)).size, 1);
+    assert.ok(shipped.every((row) => !Object.hasOwn(row.instance_presentation, "models")),
+      "the presentation itself carries no catalog");
+  } finally {
+    await added.remove();
+    await f.close();
+  }
+});
+
 integration("a connection's reports are ordered by (version, sequence) and fenced to the row's current version", async () => {
   const f = await spaceSecretFixture();
   const runtime = new PostgresRuntimeRepository(f.database);
