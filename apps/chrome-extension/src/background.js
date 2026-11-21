@@ -153,11 +153,16 @@ function openPanel(tab) {
 
 // ---- Quick ask: a question about a passage, started straight through the Hub.
 
-/** The Space a quick question goes to: the one last used, or the person's first. */
-async function quickAskSpace(token) {
+/**
+ * The Space a quick question goes to: the one last used, or the person's
+ * first. Remembered, so a question costs no Space lookup once one was asked;
+ * a Space that is gone is looked up again.
+ */
+async function quickAskSpace(token, { fresh = false } = {}) {
+  const { lastSpace } = await chrome.storage.local.get("lastSpace");
+  if (lastSpace?.id && !fresh) return lastSpace;
   const spaces = await listSpaces(deps, token);
-  const { lastSpaceId } = await chrome.storage.local.get("lastSpaceId");
-  return spaces.find((space) => space.id === lastSpaceId) ?? spaces[0] ?? null;
+  return spaces.find((space) => space.id === lastSpace?.id) ?? spaces[0] ?? null;
 }
 
 /**
@@ -172,16 +177,26 @@ async function quickAsk(tab, { text, question }) {
   const session = await store.get();
   if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
   const result = await authed(async (scoped, token) => {
-    const space = await quickAskSpace(token);
-    if (!space) throw new Error("You are not in any Space yet.");
-    const channel = await createConversation(scoped, token, {
+    const create = (space) => createConversation(scoped, token, {
       spaceId: space.id, name: discussionTitle(passage.text), memberName: session.user?.name || "Human" });
+    let space = await quickAskSpace(token);
+    if (!space) throw new Error("You are not in any Space yet.");
+    let channel;
+    try {
+      channel = await create(space);
+    } catch (error) {
+      // The remembered Space may be gone or no longer ours: look the Spaces up once and retry.
+      if (!(error instanceof HubError) || ![403, 404].includes(error.status)) throw error;
+      space = await quickAskSpace(token, { fresh: true });
+      if (!space) throw new Error("You are not in any Space yet.");
+      channel = await create(space);
+    }
     await sendMessage(scoped, token, { channelId: channel.id,
       body: discussionHead(passage.text, { label: passage.label || new URL(passage.href).host, href: passage.href }) + asked,
       clientMessageId: crypto.randomUUID() });
     return { space, channel };
   });
-  await chrome.storage.local.set({ lastSpaceId: result.space.id });
+  await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   await chrome.storage.session.set({ openPath: {
     path: `/app/${encodeURIComponent(result.space.id)}/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
