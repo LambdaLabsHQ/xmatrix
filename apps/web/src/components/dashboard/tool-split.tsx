@@ -272,7 +272,7 @@ export function ToolPaperScroll({ wide, full, children }: {
       {/* On a phone the paper's text keeps to the plank's content line. */}
       <article className={cn(
         "px-[var(--mobile-content-inset,1rem)] pt-3 pb-[calc(env(safe-area-inset-bottom)+2.5rem)] md:pt-0",
-        full ? "w-full md:px-8 lg:px-10 2xl:px-12" : cn("mx-auto md:px-8", wide ? "max-w-6xl" : "max-w-3xl"),
+        full ? "w-full md:px-10 md:pt-5 lg:px-14 2xl:px-16" : cn("mx-auto md:px-8", wide ? "max-w-6xl" : "max-w-3xl"),
       )}>
         {children}
       </article>

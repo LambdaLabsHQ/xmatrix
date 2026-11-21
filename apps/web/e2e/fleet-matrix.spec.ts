@@ -277,7 +277,7 @@ test("full-panel desktop matrix uses panel width, aligns its left axis, and keep
     };
   });
   expect(layout.leftInset).toBeGreaterThanOrEqual(32);
-  expect(layout.leftInset).toBeLessThanOrEqual(56);
+  expect(layout.leftInset).toBeLessThanOrEqual(72);
   // All 11 agents and the trailing + column stay inside the 1440px desktop viewport.
   expect(layout.rightGap).toBeGreaterThanOrEqual(24);
   // Every major left edge aligns on one vertical axis.

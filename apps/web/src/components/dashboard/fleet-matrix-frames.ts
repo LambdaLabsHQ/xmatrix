@@ -4,7 +4,7 @@
 
 import type { CSSProperties } from "react";
 
-export const FLEET_HERO_CLASS = "app-status-hero mb-7";
+export const FLEET_HERO_CLASS = "app-status-hero mb-9";
 export const FLEET_HERO_TITLE_CLASS = "text-2xl font-black tracking-[-0.02em] text-foreground";
 export const FLEET_HERO_SUMMARY_CLASS = "mt-1.5 text-sm text-muted-foreground";
 
@@ -29,8 +29,8 @@ export const FLEET_MATRIX_MACHINE_NAME_CLASS =
   "block truncate text-[15px] font-semibold leading-snug tracking-[-0.01em] text-foreground";
 export const FLEET_MATRIX_MACHINE_FACTS_CLASS = "mt-0.5 block truncate text-xs leading-tight text-muted-foreground";
 
-export const FLEET_MATRIX_ROW_TH_CLASS = "border-b border-foreground/10 py-2 pr-3 text-left align-middle font-normal";
-export const FLEET_MATRIX_CELL_TD_CLASS = "border-b border-foreground/10 px-0.5 py-2 align-middle";
+export const FLEET_MATRIX_ROW_TH_CLASS = "border-b border-foreground/10 py-1 pr-3 text-left align-middle font-normal";
+export const FLEET_MATRIX_CELL_TD_CLASS = "border-b border-foreground/10 px-0.5 py-1 align-middle";
 export const FLEET_MATRIX_CELL_CLASS =
   "flex min-h-12 w-full min-w-0 flex-col justify-center gap-1 rounded-md px-2 py-1.5 text-left transition-colors";
 export const FLEET_MATRIX_CELL_LINE_CLASS = "flex w-full min-w-0 items-center gap-1.5 text-[12.5px] leading-snug";
