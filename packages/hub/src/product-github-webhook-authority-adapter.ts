@@ -20,7 +20,9 @@ import {
   type ChannelExposureReader,
 } from "./github-channel-exposure";
 import {
+  githubDeliveryExcepted,
   githubFeatureForWebhookEvent,
+  githubSubscriptionExceptions,
   githubRepositoryIsPublic,
   githubWebhookRepositoryIdentity,
   githubWebhookMessageBody,
@@ -145,6 +147,9 @@ export async function dispatchProductGitHubWebhook(input: {
       const number = route.sourceKind === "issue" ? issues.get(route.sourceRef) : undefined;
       if (route.sourceKind === "issue" &&
           (number === undefined || !githubIssueSubscriptionCurrent(input.event, input.payload, route.createdAt))) return 0;
+      /* A repository subscription may leave out an account's issues, pull requests and actions. */
+      if (route.sourceKind === "repository" &&
+          githubDeliveryExcepted(input.payload, githubSubscriptionExceptions(route.features))) return 0;
       if (settledSha && number !== undefined && !verdicts.has(number)) {
         const pullNumber = number;
         verdicts.set(number, readSettledCheckVerdict(

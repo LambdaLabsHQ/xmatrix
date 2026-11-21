@@ -163,8 +163,13 @@ function SubscriptionRow({
     ? current.map((feature) => GITHUB_REPOSITORY_FEATURE_LABELS[feature])
     : subscription.features.map((feature) =>
       providerFeatures?.find((candidate) => candidate.id === feature)?.label ?? feature);
+  /* `except:<login>` entries name accounts whose activity the subscription leaves out. */
+  const excepted = connection.providerId === "github"
+    ? subscription.features.filter((feature) => feature.startsWith("except:")).map((feature) => feature.slice(7))
+    : [];
   const summary = eventLabels.length > 0
-    ? eventLabels.join(" · ")
+    ? [eventLabels.join(" · "), excepted.length > 0 ? `not by ${excepted.join(", ")}` : ""]
+      .filter(Boolean).join(" — ")
     : "No events";
   const open = draft !== null;
   const selection = draft ?? current;

@@ -39,7 +39,7 @@ Subscribing a conversation to a source posts that source's events there:
 
 The words after the target select which kinds of event to post. Without them the app's defaults apply, and `all` means every kind.
 
-GitHub's kinds are `issues`, `pulls`, `comments`, `reviews`, `commits`, `checks`, `status` and `releases`. A pull request an agent opens is subscribed to the agent's conversation automatically, so its CI result, reviews and merge arrive where the work was asked for.
+GitHub's kinds are `issues`, `pulls`, `comments`, `reviews`, `commits`, `checks`, `status` and `releases`. `except:LOGIN` leaves out one GitHub account's activity: issues and pull requests it opened, and other events it caused. `@github:subscribe:acme/web issues pulls except:octocat` posts everyone else's issues and pull requests; `@github:unsubscribe:acme/web except:octocat` takes the exception back. A pull request an agent opens is subscribed to the agent's conversation automatically, so its CI result, reviews and merge arrive where the work was asked for.
 
 An event can also start an agent: a [program](programs.md#events-from-connected-apps) on a page waits on it.
 
