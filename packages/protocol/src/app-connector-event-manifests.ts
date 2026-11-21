@@ -111,7 +111,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Read app-authorized Google Docs and Sheets, create files, and write work results. Access is limited to files created by or explicitly opened with xMatrix.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/drive.file"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         { id: "read_sheet", label: "Read sheet range", description: "Read an explicit bounded A1 rectangle, including formula text.",
@@ -137,7 +137,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Manage Search Console properties and sitemaps, verify site ownership, and read search performance and URL inspection results.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/webmasters", "https://www.googleapis.com/auth/siteverification"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS, { id: "oauthScopes", label: "Granted scopes", managed: true, description: "Confirmed by Google at consent; reconnect an older grant to enable verification." }],
       actions: [
         readAction("get_site", "Get property", "Read the connected account's permission for one property.", "<property>"),
@@ -187,7 +187,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Read AdSense accounts, sites, ad units, earnings reports, payments, alerts and policy issues for the accounts the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/adsense.readonly"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_accounts", "List accounts", "List the AdSense accounts of the connected Google account with their state and time zone.", "*"),
@@ -209,7 +209,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Read calendars, events and availability; create, edit and delete events under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/calendar.events", "https://www.googleapis.com/auth/calendar.calendarlist.readonly", "https://www.googleapis.com/auth/calendar.events.freebusy"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_calendars", "List calendars", "List up to 100 subscribed calendars with their id, time zone and access role. Follow nextPageToken explicitly.", '* [{"pageToken":"…"}]'),
@@ -229,7 +229,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Read Google Analytics 4 properties and traffic reports for the properties the connected Google account can see. Read-only.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/analytics.readonly"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_properties", "List properties", "List the GA4 properties of the connected Google account with their account.", "*"),
@@ -246,7 +246,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Create and manage advertising campaigns, budgets, targeting and creatives; enable or pause campaigns and read spend and conversions for the selected advertiser account.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/adwords"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS,
         { id: "customerId", label: "Selected advertiser customer ID", required: true,
           description: "The ten-digit Google Ads advertiser account this connection may act on, with or without dashes. Every query and mutation is restricted to it." },
@@ -270,7 +270,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Read Business Profile accounts, locations, search and Maps performance and reviews, and reply to reviews under the app permission.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/business.manage"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_accounts", "List accounts", "List the Business Profile accounts of the connected Google account and your role in each.", "*"),
@@ -289,7 +289,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Release Android apps from a channel: read tracks, upload app bundles, roll versions out to internal, closed or production testing, and manage testers, store listings, subscriptions and reviews through Google's official Play Developer API.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/androidpublisher", "https://www.googleapis.com/auth/playdeveloperreporting"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS],
       actions: [
         readAction("list_apps", "List apps", "The apps of the Play developer accounts the connected Google account can see, with their package names.", "* [pageToken]"),
@@ -367,7 +367,7 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
       description: "Analyze project costs and billing exports, and investigate Google Cloud resources, Cloud Run status, logs, metrics and alert policies; route Monitoring incidents to channels and Automations.",
       oauth: { authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
         scopes: ["https://www.googleapis.com/auth/cloud-platform"], tokenField: "oauthToken",
-        extraAuthorizeParams: { access_type: "offline", prompt: "consent", include_granted_scopes: "false" } },
+        extraAuthorizeParams: { access_type: "offline", prompt: "select_account consent", include_granted_scopes: "false" } },
       credentials: [...OAUTH_TOKEN_CREDENTIALS,
         { id: "webhookSecret", label: "Monitoring webhook token", generated: true,
           description: "In Cloud Monitoring, append ?auth_token=<this token> to this connection's ingress URL. Keep the full URL private." }],
@@ -458,7 +458,9 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
     kind: "issue-tracker",
     description: "Route Linear issue, comment, and project updates into channels so agents pick up work where it is discussed.",
     oauth: { authorizeUrl: "https://linear.app/oauth/authorize", tokenUrl: "https://api.linear.app/oauth/token",
-      scopes: ["read", "write"], scopeSeparator: ",", tokenField: "oauthToken" },
+      scopes: ["read", "write"], scopeSeparator: ",", tokenField: "oauthToken",
+      // Always shows Linear's consent page, where the workspace can be switched.
+      extraAuthorizeParams: { prompt: "consent" } },
     credentials: [{ id: "signingSecret", label: "Signing secret",
       description: "For events: Settings → API → Webhooks → your webhook → Signing secret, with the ingress URL as the URL." },
       { id: "apiKey", label: "API key", description: "For actions: a Linear personal API key (Settings → Security & access)." },

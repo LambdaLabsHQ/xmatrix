@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "./fixtures";
-import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, fixtureRequestBodies, openWorkspaceWithStubs } from "./workspace-fixtures";
+import { E2E_DESKTOP_CONTEXT, E2E_SPACE, E2E_CHANNEL, E2E_NOW, fixtureJson, fixtureRequestBodies, fixtureRequests, openWorkspaceWithStubs } from "./workspace-fixtures";
 
 test.use(E2E_DESKTOP_CONTEXT);
 const connection = (providerId: string, providerName: string, status: string, authMode = "api-token") => ({
@@ -54,7 +54,7 @@ test("a credentials-only app leads with its form; the command reference stays fo
   expect(await page.getByTestId("connector-commands").locator("li").count()).toBeGreaterThan(4);
 });
 
-test("a connected app shows no call to action; Reconnect and Disconnect come before what it does", async ({ page }) => {
+test("a connected app shows no call to action; Switch account, Pause and Remove come before what it does", async ({ page }) => {
   await openApps(page, { providers: ["linear"], connections: [connection("linear", "Linear", "configured", "oauth")], app: "Linear" });
 
   await expect(page.getByTestId("connector-status")).toContainText("Connected · via Linear sign-in");
@@ -62,10 +62,10 @@ test("a connected app shows no call to action; Reconnect and Disconnect come bef
   await expect(page_(page).locator(".app-action-primary")).toHaveCount(0);
   const order = await page_(page).locator("section[aria-label]").evaluateAll((sections) =>
     sections.map((section) => section.getAttribute("aria-label")));
-  expect(order.indexOf("Disconnect")).toBeGreaterThanOrEqual(0);
-  expect(order.indexOf("Disconnect")).toBeLessThan(order.indexOf("Permissions"));
+  expect(order.indexOf("Account")).toBeGreaterThanOrEqual(0);
+  expect(order.indexOf("Account")).toBeLessThan(order.indexOf("Permissions"));
   expect(order.at(-1)).toBe("Commands");
-  await expect(page.getByRole("button", { name: "Reconnect Linear" })).toBeVisible();
+  for (const name of ["Switch Linear account", "Pause Linear", "Remove Linear"]) await expect(page.getByRole("button", { name })).toBeVisible();
   await expect(page.getByTestId("connector-policy")).toContainText("Agents read and make changes directly");
 });
 
@@ -83,4 +83,26 @@ test("Permissions are one choice for the app: read only, ask first, or read and 
   for (const label of ["Read only", "Ask first", "Read and write"]) await expect(page.getByRole("option", { name: label })).toBeVisible();
   await page.getByRole("option", { name: "Ask first" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "policy-put")).toEqual([{ mode: "ask" }]);
+});
+
+test("a Google sign-in is switched or signed out, never paused", async ({ page }) => {
+  await openApps(page, { providers: ["googlesearchconsole"],
+    connections: [connection("googlesearchconsole", "Google Search Console", "configured", "oauth")], app: "Google Search Console" });
+  await expect(page.getByRole("button", { name: "Switch Google Search Console account" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out of Google Search Console" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause Google Search Console" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Remove Google Search Console" })).toHaveCount(0);
+});
+
+test("Remove asks first, then deletes the connection with what it saved", async ({ page }) => {
+  await openApps(page, { providers: ["linear"], connections: [connection("linear", "Linear", "configured", "oauth")], app: "Linear" });
+  await fixtureJson(page, "remove", /\/app-connections\/linear$/, { ok: true }, { method: "DELETE" });
+  page.once("dialog", (dialog) => void dialog.dismiss());
+  await page.getByRole("button", { name: "Remove Linear" }).click();
+  expect(await fixtureRequests(page, "remove")).toHaveLength(0);
+  await fixtureJson(page, "connections", /\/api\/xmatrix\/spaces\/[^/]+\/app-connections$/, { connections: [] });
+  page.once("dialog", (dialog) => void dialog.accept());
+  await page.getByRole("button", { name: "Remove Linear" }).click();
+  await expect.poll(() => fixtureRequests(page, "remove")).toHaveLength(1);
+  await expect(page_(page).getByRole("button", { name: "Connect with Linear" })).toBeVisible();
 });

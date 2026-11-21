@@ -27,18 +27,19 @@ async function open(page: Page, credentialFields: string[], { status = "disconne
   await page.getByTestId("connector-row").filter({ hasText: "App Store Connect" }).click();
 }
 
-test("a disconnected app whose credentials are still saved reconnects by a check", async ({ page }) => {
+test("a paused app whose credentials are still saved resumes by a check", async ({ page }) => {
   await open(page, ["issuerId", "keyId", "privateKey", "webhookSecret"]);
-  await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+  await expect(page.getByTestId("connector-lead")).toContainText("App Store Connect is paused");
+  await page.getByRole("button", { name: "Resume", exact: true }).click();
   const connected = page.getByRole("region", { name: "Connected" }).getByTestId("connector-row");
   await expect(connected.filter({ hasText: "App Store Connect" })).toBeVisible();
   expect(await fixtureRequests(page, "check")).toHaveLength(1);
 });
 
-test("a disconnected app missing a required credential asks for it instead of offering Reconnect", async ({ page }) => {
+test("a disconnected app missing a required credential asks for it instead of offering Resume", async ({ page }) => {
   await open(page, ["keyId"]);
   await expect(page.getByTestId("connector-lead")).toContainText("Reconnect App Store Connect");
-  await expect(page.getByRole("button", { name: "Reconnect", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Resume", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Save and connect" })).toBeVisible();
   expect(await fixtureRequests(page, "check")).toHaveLength(0);
 });
@@ -106,12 +107,12 @@ test("a completed call is a log line: when, what ran, which Agent for whom, how 
   await expect(row).not.toContainText("6450000000");
 });
 
-test("a connected app shows both sign-ins and Disconnect before what it did and can do", async ({ page }) => {
+test("a connected app shows both sign-ins and its account actions before what it did and can do", async ({ page }) => {
   await open(page, signedIn, { status: "configured" });
   const order = await page.locator("section[aria-label]").evaluateAll((sections) =>
     sections.map((section) => section.getAttribute("aria-label")));
   const credentials = order.indexOf("Credentials");
-  const disconnect = order.indexOf("Disconnect");
+  const disconnect = order.indexOf("Account");
   expect(credentials).toBeGreaterThanOrEqual(0);
   expect(disconnect).toBeGreaterThan(credentials);
   for (const later of ["Recent activity", "Permissions", "Commands"]) {
@@ -120,5 +121,7 @@ test("a connected app shows both sign-ins and Disconnect before what it did and 
   const signIns = page.getByRole("region", { name: "Credentials" });
   await expect(signIns).toContainText("Private key");
   await expect(signIns).toContainText("Web session");
-  await expect(page.getByRole("button", { name: "Disconnect App Store Connect" })).toBeVisible();
+  for (const name of ["Switch App Store Connect account", "Pause App Store Connect", "Remove App Store Connect"]) {
+    await expect(page.getByRole("button", { name })).toBeVisible();
+  }
 });
