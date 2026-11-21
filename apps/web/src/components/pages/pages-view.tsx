@@ -329,8 +329,8 @@ const REVISION_REFRESH_MS = 1_000;
 
 // The editor and the preview are read ahead, so a page's first opening waits on neither.
 function preloadPageChunks() {
-  void import("./page-editor");
-  void import("./page-document-static");
+  void import("./page-editor").catch(() => undefined);
+  void import("./page-document-static").catch(() => undefined);
 }
 
 const PREFETCHED_PAGES = 40;

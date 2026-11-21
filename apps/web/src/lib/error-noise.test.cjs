@@ -6,6 +6,8 @@ const { earlyScriptLocation, isBrowserNotice, isBrowserNoticeReport, isClientDis
 test("a stale build is recognised from a failed chunk fetch or a module webpack no longer has", () => {
   const chunk = Object.assign(new Error("Loading chunk 925 failed."), { name: "ChunkLoadError" });
   assert.equal(isStaleBuild(chunk), true);
+  assert.equal(isStaleBuild(new TypeError("Importing a module script failed.")), true);
+  assert.equal(isStaleBuild(new TypeError("error loading dynamically imported module: https://xmatrix.sh/_next/static/chunks/1.js")), true);
   const missing = new TypeError("Cannot read properties of undefined (reading 'call')");
   missing.stack = `${missing.message}\n    at r (https://xmatrix.sh/_next/static/chunks/webpack-3f1c.js:1:123)`;
   assert.equal(isStaleBuild(missing), true);

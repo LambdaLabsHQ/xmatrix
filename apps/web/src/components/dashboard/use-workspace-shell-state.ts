@@ -69,10 +69,15 @@ import {
 } from "@/components/dashboard/channel-history";
 import { sameValue } from "../../lib/same-value";
 import {
+  hasChannelComposerAttachments,
+  hydrateChannelComposerDrafts,
+  persistChannelComposerDrafts,
   readChannelComposerDraft,
   writeChannelComposerDraft,
   type ChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
+import { NEW_PAGE_ID } from "@/components/pages/page-creation";
+import { startWebBuildMonitor } from "@/lib/stale-build-reload";
 import type { DiscussionQuote } from "@/components/dashboard/selection-discussion";
 import {
   purgeAgentTraceReplicas,
@@ -407,6 +412,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   // Track which channel owns the live composer state so switches can save/restore drafts.
   const draftChannelIdRef = useRef<string | null>(null);
+  const draftUserIdRef = useRef<string | null>(null);
+  const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const draftWorkspaceTargetValueRef = useRef<string | null>(null);
 
@@ -474,6 +481,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
 
   /** The page open in the Pages view; a shared page link names it with `?page=`. */
   const [selectedPageId, setSelectedPageId] = useState<string | null>(() => pagesViewSelection(currentBrowserLocation()).pageId);
+  const selectedPageIdRef = useRef(selectedPageId);
+  selectedPageIdRef.current = selectedPageId;
 
   const [pendingExplicitSpaceId, setPendingExplicitSpaceId] = useState<string | null>(null);
 
@@ -1400,6 +1409,85 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     clearChannelHistory();
   }, [clearChannelHistory, user?.id]);
 
+  const flushComposerDrafts = useCallback(() => {
+    if (draftPersistTimerRef.current !== null) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+    }
+    if (draftChannelIdRef.current) {
+      writeChannelComposerDraft(channelComposerDraftsRef.current, draftChannelIdRef.current, {
+        text: draftRef.current,
+        workspaceTarget: draftWorkspaceTargetValueRef.current,
+        attachments: draftAttachmentsRef.current,
+      });
+    }
+    persistChannelComposerDrafts(channelComposerDraftsRef.current, draftUserIdRef.current);
+  }, []);
+
+  const schedulePersistComposerDrafts = useCallback(() => {
+    if (draftPersistTimerRef.current !== null) clearTimeout(draftPersistTimerRef.current);
+    draftPersistTimerRef.current = setTimeout(() => {
+      draftPersistTimerRef.current = null;
+      persistChannelComposerDrafts(channelComposerDraftsRef.current, draftUserIdRef.current);
+    }, 250);
+  }, []);
+
+  // Account-scoped draft hydration: restore session-saved text drafts on mount/reload
+  // and clear in-memory drafts if the signed-in account changes.
+  useEffect(() => {
+    const nextUserId = user?.id ?? null;
+    const previousUserId = draftUserIdRef.current;
+    if (previousUserId && previousUserId !== nextUserId) {
+      channelComposerDraftsRef.current.clear();
+      draftWorkspaceTargetValueRef.current = null;
+      draftAttachmentsRef.current = [];
+      seedComposerDraftText("");
+      setDraftWorkspaceTarget(null);
+      setDraftAttachments([]);
+    }
+    draftUserIdRef.current = nextUserId;
+    if (!nextUserId) return;
+    hydrateChannelComposerDrafts(channelComposerDraftsRef.current, nextUserId);
+    const activeChannelId = draftChannelIdRef.current;
+    if (
+      activeChannelId &&
+      draftRef.current.length === 0 &&
+      draftWorkspaceTargetValueRef.current === null &&
+      draftAttachmentsRef.current.length === 0
+    ) {
+      const restored = readChannelComposerDraft(channelComposerDraftsRef.current, activeChannelId);
+      if (restored.text.length > 0 || restored.workspaceTarget !== null) {
+        draftWorkspaceTargetValueRef.current = restored.workspaceTarget;
+        seedComposerDraftText(restored.text);
+        setDraftWorkspaceTarget(restored.workspaceTarget);
+      }
+    }
+  }, [seedComposerDraftText, user?.id]);
+
+  // Flush the latest keystroke to sessionStorage before pagehide/hide so reloads keep unsent drafts.
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flushComposerDrafts();
+    };
+    window.addEventListener("pagehide", flushComposerDrafts);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flushComposerDrafts);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flushComposerDrafts();
+    };
+  }, [flushComposerDrafts]);
+
+  // Quietly refresh deployed Web builds while the tab rests in the background with nothing unsafe in flight.
+  useEffect(() => startWebBuildMonitor({
+    canReloadQuietly: () =>
+      outgoingMessagesRef.current.length === 0 &&
+      draftAttachmentsRef.current.length === 0 &&
+      !hasChannelComposerAttachments(channelComposerDraftsRef.current) &&
+      selectedPageIdRef.current !== NEW_PAGE_ID,
+    onBeforeReload: flushComposerDrafts,
+  }), [flushComposerDrafts]);
+
   useEffect(() => {
     const previousChannelId = draftChannelIdRef.current;
     if (previousChannelId && previousChannelId !== selectedChannelId) {
@@ -1408,6 +1496,7 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
         workspaceTarget: draftWorkspaceTargetValueRef.current,
         attachments: draftAttachmentsRef.current,
       });
+      persistChannelComposerDrafts(channelComposerDraftsRef.current, draftUserIdRef.current);
     }
 
     draftChannelIdRef.current = selectedChannelId;
@@ -3024,7 +3113,8 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
       workspaceTarget: draftWorkspaceTargetValueRef.current,
       attachments: draftAttachmentsRef.current,
     });
-  }, []);
+    schedulePersistComposerDrafts();
+  }, [schedulePersistComposerDrafts]);
 
   return {
     children,

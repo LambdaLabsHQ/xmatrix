@@ -35,6 +35,7 @@ import { getDesktopBridge } from "./desktop/bridge";
 import { handDesktopSessionToCli } from "./desktop/session-exchange";
 import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
+import { clearPersistedChannelComposerDrafts } from "@/components/dashboard/channel-composer-drafts";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 export { AUTH_TOKEN_REJECTED_EVENT };
@@ -343,6 +344,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const destination = logoutDestination(options?.redirectTo);
     // Recorded first: the person is leaving this account, whatever the sign-out below answers.
     rememberAppSignOut();
+    clearPersistedChannelComposerDrafts(state.user?.id);
     if (mockAuthState) {
       setState(mockAuthState || { session: null, user: null, loading: false });
       router.push(destination);
