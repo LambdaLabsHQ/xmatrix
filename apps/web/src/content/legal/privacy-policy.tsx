@@ -365,7 +365,8 @@ export function PrivacyPolicyContent() {
           message. It does not read pages in the background, record your browsing history, or contact
           any server other than xMatrix. It keeps your sign-in session, and text you picked until the
           panel takes it, in the browser&apos;s extension storage on that device; signing out ends the
-          session and removes it. The extension does not sell this data or use it for advertising.
+          session and removes it. The xMatrix app in the panel keeps the same local copies there as
+          it does in a browser tab. The extension does not sell this data or use it for advertising.
           What you send is handled as Customer Data under this Policy.
         </p>
         <p>

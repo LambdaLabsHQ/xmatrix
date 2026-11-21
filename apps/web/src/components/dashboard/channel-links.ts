@@ -1,4 +1,5 @@
 import type { ChannelSnapshot, SerializedSpace } from "@xmatrix/protocol";
+import { appAddressOrigin } from "../../lib/app-address";
 
 export type InternalChannelLink = {
   spaceKey: string | null;
@@ -9,7 +10,7 @@ export type InternalChannelLink = {
 export function absoluteChannelUrl(
   channel: ChannelSnapshot,
   spaces: SerializedSpace[],
-  origin = typeof window === "undefined" ? "https://xmatrix.sh" : window.location.origin
+  origin = appAddressOrigin()
 ): string {
   return new URL(channelAppPath(channel, spaces), origin).toString();
 }

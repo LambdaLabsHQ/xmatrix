@@ -3,32 +3,36 @@
 /**
  * The app inside the xMatrix Chrome extension's side panel.
  *
- * A frame in an extension page gets none of the site's cookies, so the panel
- * cannot use the browser's web session. The extension holds its own session
- * (the CLI device sign-in) and hands this frame only a short-lived access
- * token, on request, over `postMessage`. The token stays in memory; the
- * refresh token never leaves the extension. Every message is checked both
- * ways: this frame answers only the parent whose origin is on
- * EXTENSION_EMBED_ORIGINS and posts only to that origin.
+ * The extension ships this app in its own package (src/extension-app,
+ * apps/chrome-extension) and shows it in a frame of its side panel page, so
+ * opening the panel loads nothing from the Web. The app has no web session
+ * there: the extension holds its own (the CLI device sign-in) and hands this
+ * frame only a short-lived access token, on request, over `postMessage`. The
+ * token stays in memory; the refresh token never leaves the extension's
+ * service worker. Every message is checked both ways: this frame answers only
+ * a parent whose origin is on EXTENSION_EMBED_ORIGINS and is its own origin,
+ * and posts only to that origin. The Web itself allows no page to frame it.
  *
  * The extension also hands over what the person picked on the page they are
  * reading (a passage, or the page itself), to quote in the open conversation
  * or to start a new one with.
  */
-import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders } from "@xmatrix/protocol";
+import { CLIENT_COMPATIBILITY_POLICY, clientCompatibilityHeaders, type AuthUser } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { EXTENSION_EMBED_ORIGINS } from "./extension-embed-origins";
 
 const PROTOCOL = "xmatrix-embed/1";
+/** The platform this app names itself as when it runs in the extension. */
+export const EXTENSION_CLIENT_PLATFORM = "chrome-extension";
 const MAX_PASSAGE_CHARS = 20_000;
 const MAX_LABEL_CHARS = 300;
 const MAX_HREF_CHARS = 2_000;
 
-/** The extension origin framing this app, or null when it is not in the side panel. */
+/** The extension origin this app is packaged in and framed by, or null when it is not in the side panel. */
 export function extensionEmbedParent(): string | null {
   if (typeof window === "undefined" || window.parent === window) return null;
   const origin = window.location.ancestorOrigins?.[0];
-  return origin && EXTENSION_EMBED_ORIGINS.includes(origin) ? origin : null;
+  return origin && origin === window.location.origin && EXTENSION_EMBED_ORIGINS.includes(origin) ? origin : null;
 }
 
 /** Only the framing extension's own messages, in this protocol. */
@@ -43,33 +47,71 @@ function postToParent(parent: string, message: Record<string, unknown>) {
   window.parent.postMessage({ protocol: PROTOCOL, ...message }, parent);
 }
 
+/** The extension's session, as it hands it to the app: a current access token, and the account it signed in as. */
+export type EmbedSession = {
+  token: string;
+  /** The account the extension remembers from its sign-in; absent when it kept none. */
+  user?: AuthUser;
+};
+
+/** The account in a session answer, when it is whole: an id and an email, and bounded text. */
+function parseEmbedUser(value: unknown): AuthUser | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const { id, email, name, avatarUrl } = value as Record<string, unknown>;
+  const text = (field: unknown, max: number) => (typeof field === "string" && field.length <= max ? field : undefined);
+  const userId = text(id, 128);
+  const userEmail = text(email, 320);
+  if (!userId || !userEmail) return undefined;
+  const userName = text(name, MAX_LABEL_CHARS);
+  const userAvatar = text(avatarUrl, MAX_HREF_CHARS);
+  return { id: userId, email: userEmail, ...(userName ? { name: userName } : {}), ...(userAvatar ? { avatarUrl: userAvatar } : {}) };
+}
+
 /**
- * Asks the extension for a current access token. Null when the extension has
- * no session (the person signed out there) or does not answer in time.
+ * Asks the extension for its session. Null when the extension has none (the
+ * person signed out there) or does not answer in time. `renew` asks it to
+ * renew its access token first: the token names the account, so one issued
+ * before the account was renamed keeps saying the old name until it is renewed.
  */
-export function requestEmbedToken(parent: string, timeoutMs = 10_000): Promise<string | null> {
+export function requestEmbedSession(parent: string, { renew = false, timeoutMs = 10_000 }:
+  { renew?: boolean; timeoutMs?: number } = {}): Promise<EmbedSession | null> {
   return new Promise((resolve) => {
     const id = crypto.randomUUID();
-    const done = (token: string | null) => {
+    const done = (session: EmbedSession | null) => {
       window.removeEventListener("message", onMessage);
       window.clearTimeout(timer);
-      resolve(token);
+      resolve(session);
     };
     const onMessage = (event: MessageEvent) => {
       const data = fromParent(event, parent);
       if (!data || data.id !== id) return;
-      if (data.type === "session" && typeof data.token === "string" && data.token.length < 8_192) done(data.token);
-      else if (data.type === "signed-out") done(null);
+      if (data.type === "session" && typeof data.token === "string" && data.token.length < 8_192) {
+        const user = parseEmbedUser(data.user);
+        done({ token: data.token, ...(user ? { user } : {}) });
+      } else if (data.type === "signed-out") done(null);
     };
     const timer = window.setTimeout(() => done(null), timeoutMs);
     window.addEventListener("message", onMessage);
-    postToParent(parent, { type: "session-request", id });
+    postToParent(parent, { type: "session-request", id, ...(renew ? { renew: true } : {}) });
   });
+}
+
+/** Tells the extension the account as the Hub has it now, which it opens the app with next time. */
+export function announceEmbedAccount(parent: string, user: AuthUser) {
+  postToParent(parent, { type: "account", user: { id: user.id, email: user.email, name: user.name, avatarUrl: user.avatarUrl } });
 }
 
 /** Tells the extension the person signed out here, so it ends its own session too. */
 export function announceEmbedSignOut(parent: string) {
   postToParent(parent, { type: "signed-out" });
+}
+
+/**
+ * Tells the extension the Hub no longer admits this build of the app: the
+ * panel asks for the extension to be updated, where the Web shows its upgrade page.
+ */
+export function announceEmbedUpgradeRequired(parent: string) {
+  postToParent(parent, { type: "upgrade-required" });
 }
 
 /** The extension ended its session (the person signed out in the side panel). */
@@ -134,23 +176,39 @@ export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => voi
   return stop;
 }
 
-/** A conversation of this app, as `/app/<space>/<conversation>`; nothing else. */
-const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
+/** A conversation of this app, as `/app/<space>/channels/<conversation>`; nothing else. */
+const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/channels\/[A-Za-z0-9_-]{1,128}$/u;
+
+/** What shows an address of this app in the open app; false when it shows nothing for it. */
+type AddressOpener = (path: string) => boolean;
+const addressOpeners = new Set<AddressOpener>();
 
 /**
- * Conversations the extension started on its own (a question asked on the
- * page, sent straight to the Hub) and asks the panel to show.
+ * Shows addresses of this app in the open app: conversations the extension
+ * started on its own (a question asked on the page, sent straight to the Hub)
+ * and asks the panel to show, and addresses the packaged page is asked to
+ * navigate to (`openEmbedAddress`).
  */
-export function subscribeEmbedOpen(onOpen: (path: string) => void): () => void {
-  return subscribeParent("open", (data) => {
+export function subscribeEmbedOpen(onOpen: AddressOpener): () => void {
+  addressOpeners.add(onOpen);
+  const stop = subscribeParent("open", (data) => {
     if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) onOpen(data.path);
   });
+  return () => {
+    addressOpeners.delete(onOpen);
+    stop();
+  };
+}
+
+/** Shows `path`, an address of this app, in the open app; false when the app is not open or has no view for it. */
+export function openEmbedAddress(path: string): boolean {
+  for (const open of addressOpeners) if (open(path)) return true;
+  return false;
 }
 
 /**
- * The side panel's client identity, sent on the Web's own proxy calls: the
- * compatibility cookie the proxy reads elsewhere is never set in a frame
- * without cookies. The Hub still judges this identity on every call.
+ * The side panel's client identity, sent on its calls to the Hub
+ * (extension-app/hub-proxy.ts). The Hub judges it on every call.
  */
 export function embedClientCompatibilityHeaders(): Record<string, string> {
   if (!extensionEmbedParent()) return {};
@@ -158,6 +216,6 @@ export function embedClientCompatibilityHeaders(): Record<string, string> {
     component: "app",
     version: canonicalVersion.version,
     protocolVersion: CLIENT_COMPATIBILITY_POLICY.protocolVersion,
-    platform: "chrome-extension",
+    platform: EXTENSION_CLIENT_PLATFORM,
   });
 }

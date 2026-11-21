@@ -7,5 +7,12 @@
   "scripts": {
     "package": "node scripts/package.mjs",
     "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@tailwindcss/postcss": "4.2.2",
+    "babel-plugin-react-compiler": "1.0.0",
+    "esbuild": "0.28.1",
+    "postcss": "8.5.28"
   }
 }

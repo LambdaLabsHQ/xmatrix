@@ -1,16 +1,13 @@
-// The extension's only route to the Hub. Every function takes its `fetch` and
-// session store from the caller, so the same code runs in the service worker,
-// the popup and the Node tests.
+// The service worker's route to the Hub. Every function takes its `fetch` and
+// session store from the caller, so the same code runs in the service worker
+// and the Node tests.
 
-export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
 /**
- * The web app the side panel opens. A store build opens the stable Web; an
- * unpacked development build (its manifest still carries the store key, which
- * packaging removes) opens the beta Web, where Web changes land first. Both
- * allow this extension to frame them (apps/web extension-embed-origins.ts).
+ * The Hub this build talks to: the one host its manifest may reach. The app
+ * packaged beside it is built for the same Hub (scripts/package.mjs).
  */
-export function appOrigin(manifest) {
-  return manifest.key ? "https://beta.xmatrix.sh" : "https://xmatrix.sh";
+export function hubUrl(manifest) {
+  return new URL(manifest.host_permissions[0]).origin;
 }
 const PROTOCOL_VERSION = "2";
 
@@ -85,6 +82,16 @@ export async function startDeviceSignIn(deps) {
   };
 }
 
+/**
+ * The account a session belongs to, as the Hub names it at sign-in and at each
+ * renewal. The panel's app opens with it, instead of reading it first.
+ */
+export function accountFrom(user) {
+  if (!user || typeof user !== "object" || typeof user.id !== "string" || !user.id) return null;
+  const text = (value) => (typeof value === "string" && value ? value : undefined);
+  return { id: user.id, name: text(user.name) ?? text(user.email) ?? "", email: text(user.email), avatarUrl: text(user.avatarUrl) };
+}
+
 function sessionFrom(json, hubUrl) {
   if (typeof json.token !== "string" || typeof json.refreshToken !== "string") {
     throw new HubError(502, "xMatrix did not return a session.");
@@ -92,9 +99,7 @@ function sessionFrom(json, hubUrl) {
   return {
     token: json.token,
     refreshToken: json.refreshToken,
-    user: json.user && typeof json.user === "object"
-      ? { id: String(json.user.id ?? ""), name: String(json.user.name ?? json.user.email ?? "") }
-      : null,
+    user: accountFrom(json.user),
     hubUrl,
   };
 }
@@ -119,7 +124,9 @@ export async function refreshSession(deps, session) {
     method: "POST",
     body: { refreshToken: session.refreshToken },
   });
-  return sessionFrom(json, session.hubUrl);
+  const renewed = sessionFrom(json, session.hubUrl);
+  // A renewal that names no account keeps the one the sign-in named.
+  return renewed.user ? renewed : { ...renewed, user: session.user ?? null };
 }
 
 /** Ends the session on the Hub; the caller forgets it either way. */

@@ -12,6 +12,7 @@ import {
 } from "@xmatrix/protocol";
 import canonicalVersion from "../../../../version.json" with { type: "json" };
 import { getDesktopBridge } from "./desktop/bridge";
+import { EXTENSION_CLIENT_PLATFORM, extensionEmbedParent } from "./extension-embed";
 import { xmatrixHubOrigin } from "./query/api-client";
 import { ClientAdmissionCache } from "./client-admission-cache";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
@@ -80,7 +81,8 @@ export async function detectAppCompatibilityIdentity(): Promise<ClientCompatibil
       component: "app",
       version: canonicalVersion.version,
       protocolVersion: CLIENT_COMPATIBILITY_POLICY.protocolVersion,
-      platform: browserPlatform(),
+      // The app packaged in the Chrome extension is that client everywhere it names itself (extension-embed.ts).
+      platform: extensionEmbedParent() ? EXTENSION_CLIENT_PLATFORM : browserPlatform(),
     };
   }
   const context = await bridge.getContext();

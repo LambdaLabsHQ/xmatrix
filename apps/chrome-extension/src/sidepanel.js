@@ -1,20 +1,21 @@
-// The side panel: the xMatrix web app in a frame, signed in with the
-// extension's session, with a bar for the page beside it.
+// The side panel: the xMatrix app in a frame, signed in with the extension's
+// session, with a bar for the page beside it.
 //
-// The app asks for an access token over postMessage (apps/web
-// src/lib/extension-embed.ts); this page answers only the app's own origin and
-// frame, and posts only to that origin. Passages picked on a page (the context
-// menu, the selection button, this bar) are handed to the app once it says it
-// is ready.
+// The app is packaged with the extension (app/, built from apps/web by
+// scripts/build-app.mjs), so opening the panel loads nothing from the Web. It
+// asks for its session over postMessage (apps/web src/lib/extension-embed.ts);
+// this page answers only its own frame at the extension's origin, and posts
+// only to that origin. Passages picked on a page (the context menu, the
+// selection button, this bar) are handed to the app once it says it is ready.
 
-import { appOrigin } from "./hub-client.js";
 import { capturableUrl, pagePassage } from "./passage.js";
 
 const PROTOCOL = "xmatrix-embed/1";
-const APP_ORIGIN = appOrigin(chrome.runtime.getManifest());
+const APP_ORIGIN = window.location.origin;
+const APP_PAGE = "/app/index.html";
 const WEB_ORIGINS = ["https://*/*", "http://*/*"];
 const $ = (id) => document.getElementById(id);
-const views = ["view-signed-out", "view-signing-in", "view-app"];
+const views = ["view-signed-out", "view-signing-in", "view-update", "view-app"];
 
 function show(view) {
   for (const id of views) $(id).hidden = id !== view;
@@ -50,7 +51,7 @@ async function openApp() {
   opening = true;
   appReady = false;
   const path = await ask("takeOpenPath").catch(() => null);
-  $("app").src = `${APP_ORIGIN}${path ?? "/app"}`;
+  $("app").src = path ? `${APP_PAGE}?at=${encodeURIComponent(path)}` : APP_PAGE;
   opening = false;
 }
 
@@ -78,9 +79,17 @@ window.addEventListener("message", async (event) => {
   const data = event.data;
   if (!data || data.protocol !== PROTOCOL) return;
   if (data.type === "session-request" && typeof data.id === "string") {
-    const token = await ask("token").catch(() => null);
-    postToApp(token ? { type: "session", id: data.id, token } : { type: "signed-out", id: data.id });
-    if (!token) await render();
+    const session = await ask("session", { renew: data.renew === true }).catch(() => null);
+    postToApp(session
+      ? { type: "session", id: data.id, token: session.token, ...(session.user ? { user: session.user } : {}) }
+      : { type: "signed-out", id: data.id });
+    if (!session) await render();
+  } else if (data.type === "account") {
+    await ask("rememberAccount", { user: data.user }).catch(() => undefined);
+  } else if (data.type === "upgrade-required") {
+    // The Hub no longer takes this build of the app: only a newer extension has a newer one.
+    updateRequired = true;
+    await render();
   } else if (data.type === "ready") {
     appReady = true;
     await deliverPassages();
@@ -153,7 +162,14 @@ chrome.tabs.onUpdated.addListener((_id, change, tab) => {
 
 // ---- Signing in.
 
+let updateRequired = false;
+
 async function render() {
+  if (updateRequired) {
+    closeApp();
+    show("view-update");
+    return;
+  }
   const state = await ask("state");
   if (state.signedIn) {
     show("view-app");
@@ -188,6 +204,11 @@ $("sign-in").addEventListener("click", async () => {
 $("cancel-sign-in").addEventListener("click", async () => {
   await ask("cancelSignIn");
   await render();
+});
+
+// Chrome fetches a newer version when there is one and restarts the extension onto it.
+$("update").addEventListener("click", () => {
+  chrome.runtime.requestUpdateCheck(() => chrome.runtime.reload());
 });
 
 render().catch((error) => {

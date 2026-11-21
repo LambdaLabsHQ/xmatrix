@@ -7,7 +7,6 @@ import {
   configuredHubConnectSources,
   configuredHubOrigin,
 } from "./next-config-environment.mjs";
-import { EXTENSION_EMBED_ORIGINS } from "./src/lib/extension-embed-origins";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const hubOrigin = configuredHubOrigin();
@@ -65,10 +64,9 @@ const nextConfig: NextConfig = {
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
-      // Only the xMatrix Chrome extension's side panel may frame the app
-      // (src/lib/extension-embed.ts). Browsers that honour frame-ancestors
-      // ignore the X-Frame-Options: DENY below, which still covers the rest.
-      `frame-ancestors ${EXTENSION_EMBED_ORIGINS.join(" ")}`,
+      // No page frames the app. The Chrome extension's side panel shows the app
+      // from its own package (src/extension-app), not from here.
+      "frame-ancestors 'none'",
       "form-action 'self'",
       `script-src 'self' 'unsafe-inline'${development ? " 'unsafe-eval'" : ""} https://static.cloudflareinsights.com https://accounts.google.com/gsi/client https://apis.google.com`,
       "style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style",

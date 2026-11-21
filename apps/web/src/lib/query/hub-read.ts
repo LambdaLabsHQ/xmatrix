@@ -2,17 +2,19 @@
 
 import { clientCompatibilityHeaders } from "@xmatrix/protocol";
 import { requireAcceptedAppCompatibilityIdentity } from "@/lib/app-client-compatibility";
+import { extensionEmbedParent } from "@/lib/extension-embed";
 import { appUrl } from "@/lib/site-url";
 import { requireJson, xmatrixHubOrigin, xmatrixRawResponse } from "./api-client";
 
 /**
  * Whether this page reads from the Hub straight, as it already opens live page sessions and signs in: it runs
- * at the app's own origin, the one the Hub answers (packages/hub/src/direct-read-cors.ts). An app shell at any
- * other origin, or a build that turns it off, reads through the Web as before.
+ * at the app's own origin, the one the Hub answers (packages/hub/src/direct-read-cors.ts), or in the Chrome
+ * extension, which may ask the Hub from its own pages (its host permission) and has no Web in between at all.
+ * An app shell at any other origin, or a build that turns it off, reads through the Web as before.
  */
 function readsFromHub(): boolean {
   if (process.env.NEXT_PUBLIC_XMATRIX_DIRECT_HUB_READS === "0" || typeof window === "undefined") return false;
-  return window.location.origin === appUrl.origin;
+  return window.location.origin === appUrl.origin || extensionEmbedParent() !== null;
 }
 
 function admittedIdentity() {

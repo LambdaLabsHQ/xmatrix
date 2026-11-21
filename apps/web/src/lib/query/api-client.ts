@@ -2,7 +2,6 @@ import { DEFAULT_HUB_URL, normalizeHubUrl } from "@xmatrix/protocol";
 
 import { noteRejectedToken } from "../auth-events";
 import { isTransientNetworkSessionError } from "../auth-session-policy";
-import { embedClientCompatibilityHeaders } from "../extension-embed";
 
 export interface XMatrixErrorPayload {
   error?: string;
@@ -171,7 +170,6 @@ export async function xmatrixApiRequest<T>(input: {
       headers: {
         ...(input.token ? { Authorization: `Bearer ${input.token}` } : {}),
         ...(input.body === undefined ? {} : { "content-type": "application/json" }),
-        ...embedHeadersFor(input.url),
         ...input.headers,
       },
       ...(input.body === undefined
@@ -197,10 +195,7 @@ export async function xmatrixRawResponse(
   init?: RequestInit,
 ): Promise<Response> {
   try {
-    const embedHeaders = input instanceof Request ? {} : embedHeadersFor(input);
-    const response = await fetch(input, Object.keys(embedHeaders).length
-      ? { cache: "no-store", ...init, headers: mergeHeaders(embedHeaders, init?.headers) }
-      : { cache: "no-store", ...init });
+    const response = await fetch(input, { cache: "no-store", ...init });
     noteRejectedToken(response.status, sendsBearer(input, init));
     return response;
   } catch (cause) {
@@ -223,27 +218,6 @@ export async function xmatrixQueryRawResponse(
     }
   }
   return response;
-}
-
-/**
- * In the extension's side panel the Web's proxy has no compatibility cookie
- * (the frame gets no cookies), so its own calls name the client in headers.
- */
-function embedHeadersFor(url: string | URL): Record<string, string> {
-  if (typeof window === "undefined") return {};
-  let target: URL;
-  try {
-    target = new URL(url, window.location.href);
-  } catch {
-    return {};
-  }
-  return target.origin === window.location.origin ? embedClientCompatibilityHeaders() : {};
-}
-
-function mergeHeaders(extra: Record<string, string>, headers?: HeadersInit): Headers {
-  const merged = new Headers(headers);
-  for (const [key, value] of Object.entries(extra)) if (!merged.has(key)) merged.set(key, value);
-  return merged;
 }
 
 function sendsBearer(input: RequestInfo | URL, init?: RequestInit): boolean {

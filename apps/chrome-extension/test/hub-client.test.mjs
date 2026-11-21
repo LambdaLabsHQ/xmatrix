@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   countNeedsYou,
   freshAccessToken,
+  hubUrl,
   pollDeviceSignIn,
   withSession,
 } from "../src/hub-client.js";
@@ -81,8 +82,10 @@ test("device sign-in reports waiting, then the session, and ends on a declined r
   const { deps } = fakeHub({ "POST /api/auth/cli/device/token": () => ({ json: answers.shift() }) });
   assert.deepEqual(await pollDeviceSignIn(deps, "dc"), { pending: true, intervalMs: 7000 });
   const approved = await pollDeviceSignIn(deps, "dc");
+  // The account is kept as the Hub names it: the panel's app opens with it.
   assert.deepEqual(approved.session, {
-    token: "t", refreshToken: "r", user: { id: "u1", name: "d@example.test" }, hubUrl: "https://hub.test",
+    token: "t", refreshToken: "r", hubUrl: "https://hub.test",
+    user: { id: "u1", name: "d@example.test", email: "d@example.test", avatarUrl: undefined },
   });
   await assert.rejects(pollDeviceSignIn(deps, "dc"), /Declined in the browser/u);
 });
@@ -113,6 +116,26 @@ test("the side panel gets the current token while it has life left, and a renewe
   await store.set({ ...session, token: jwt(now + 60) });
   assert.equal(await freshAccessToken(deps, store), renewed);
   assert.equal(store.peek().refreshToken, "refresh-2");
+});
+
+test("a renewal keeps the account it was signed in as, and takes the Hub's when it names one", async () => {
+  const account = { id: "u1", name: "Dana", email: "d@example.test", avatarUrl: undefined };
+  const answers = [{ token: jwt(1), refreshToken: "refresh-2" },
+    { token: jwt(2), refreshToken: "refresh-3", user: { id: "u1", name: "Dana Scully", email: "d@example.test" } }];
+  const { deps } = fakeHub({ "POST /api/auth/refresh": () => ({ json: answers.shift() }) });
+  const store = memoryStore({ ...session, token: jwt(0), user: account });
+  await freshAccessToken(deps, store);
+  assert.deepEqual(store.peek().user, account);
+  // Asked for outright (the account was renamed under the token), whatever life the token has left.
+  await store.set({ ...store.peek(), token: jwt(Math.floor(Date.now() / 1000) + 3600) });
+  await freshAccessToken(deps, store, Infinity);
+  assert.equal(store.peek().user.name, "Dana Scully");
+  assert.equal(store.peek().refreshToken, "refresh-3");
+});
+
+test("the Hub a build talks to is the one host its manifest may reach", () => {
+  assert.equal(hubUrl({ host_permissions: ["https://xmatrix-hub.xmatrix.sh/*"] }), "https://xmatrix-hub.xmatrix.sh");
+  assert.equal(hubUrl({ host_permissions: ["http://localhost:8787/*"] }), "http://localhost:8787");
 });
 
 test("a refused renewal for the side panel signs it out", async () => {

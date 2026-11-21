@@ -1,10 +1,9 @@
 /**
- * The only pages allowed to frame the app: the xMatrix Chrome extension's side
- * panel (apps/chrome-extension). Its ID is fixed by the Chrome Web Store item's
- * key, which the unpacked development build carries too. The CSP
- * `frame-ancestors` (next.config.ts) and the embed handshake
- * (extension-embed.ts) both read this list; any other page still cannot frame
- * the app.
+ * The xMatrix Chrome extension (apps/chrome-extension), which packages the
+ * app and shows it in its side panel. Its ID is fixed by the Chrome Web Store
+ * item's key, which the unpacked development build carries too. The app
+ * behaves as the panel's app (extension-embed.ts) only in a page of this
+ * origin that this origin frames.
  */
 export const EXTENSION_EMBED_ORIGINS: readonly string[] = [
   "chrome-extension://kaickfjmldmlelnfijaahialjpnebnak",

@@ -1,5 +1,4 @@
 import {
-  CLIENT_COMPATIBILITY_HEADERS,
   evaluateClientCompatibility,
   parseClientCompatibilityIdentity,
   type ClientCompatibilityIdentity,
@@ -33,23 +32,6 @@ export function parseAppCompatibilityCookie(value: string | undefined): ClientCo
   } catch {
     return undefined;
   }
-}
-
-/**
- * The identity a request names in its own headers. The extension's side panel
- * gets no cookies, so its calls carry the identity the cookie would; it must
- * be a compatible app, as the cookie must.
- */
-export function parseAppCompatibilityHeaders(headers: Pick<Headers, "get">): ClientCompatibilityIdentity | undefined {
-  const component = headers.get(CLIENT_COMPATIBILITY_HEADERS.component);
-  if (!component) return undefined;
-  const identity = parseClientCompatibilityIdentity({
-    component,
-    version: headers.get(CLIENT_COMPATIBILITY_HEADERS.version) ?? "",
-    protocolVersion: headers.get(CLIENT_COMPATIBILITY_HEADERS.protocol) ?? "",
-    platform: headers.get(CLIENT_COMPATIBILITY_HEADERS.platform) ?? "",
-  });
-  return identity?.component === "app" && evaluateClientCompatibility(identity).compatible ? identity : undefined;
 }
 
 export function appCompatibilityRequiredForProxyRoute(route: string): boolean {
