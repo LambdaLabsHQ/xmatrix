@@ -49,7 +49,7 @@ async function seatAdmission(
     message: "Complete the pending single-seat App Store purchase before adding billable members" };
   const subscription = (await transaction.query<SubscriptionRow>({
     name: "official_space_seat_subscription_v1",
-    text: `SELECT CASE WHEN billing_provider='apple' AND
+    text: `SELECT CASE WHEN billing_provider IN ('apple','grant') AND
         (current_period_end IS NULL OR current_period_end <= $2::timestamptz)
         THEN 'canceled' ELSE status END AS status,grace_until,seat_quantity
       FROM data.space_billing_subscriptions
@@ -77,7 +77,7 @@ async function seatAdmission(
  * ended is over even before the provider says so. */
 function subscriptionCte(space: string, now: string): string {
   return `subscription AS MATERIALIZED (
-        SELECT CASE WHEN billing_provider='apple' AND
+        SELECT CASE WHEN billing_provider IN ('apple','grant') AND
           (current_period_end IS NULL OR current_period_end <= ${now})
           THEN 'canceled' ELSE status END AS status,grace_until,seat_quantity
         FROM data.space_billing_subscriptions
@@ -261,7 +261,7 @@ async function spaceCreation(
         AND NOT EXISTS (SELECT 1 FROM data.space_deletions deletion WHERE deletion.space_id=space.space_id)
         AND NOT EXISTS (SELECT 1 FROM data.space_billing_subscriptions subscription
           WHERE subscription.space_id=space.space_id AND subscription.status IN ('active','trialing')
-            AND NOT (subscription.billing_provider='apple' AND (subscription.current_period_end IS NULL
+            AND NOT (subscription.billing_provider IN ('apple','grant') AND (subscription.current_period_end IS NULL
               OR subscription.current_period_end <= $3::timestamptz)))`,
     values: [ownerUserId, [...personalSpaceIds], now], maxRows: 1,
   });
@@ -293,12 +293,14 @@ export const spaceBilling: SpaceBillingPolicy = {
   },
 
   async spaceDeletion(transaction, { spaceId, now, intent }) {
-    const subscriptions = await transaction.query<{ status: string }>({
+    const subscriptions = await transaction.query<{ status: string; billing_provider: string | null }>({
       name: "official_space_delete_subscription_v1",
-      text: "SELECT status FROM data.space_billing_subscriptions WHERE space_id=$1 FOR UPDATE",
+      text: "SELECT status,billing_provider FROM data.space_billing_subscriptions WHERE space_id=$1 FOR UPDATE",
       values: [spaceId], maxRows: 1,
     });
-    if (intent !== "account-deletion" && subscriptions[0] && !["canceled", "incomplete_expired"].includes(subscriptions[0].status)) {
+    // Complimentary Pro has nothing to cancel: it never charges, so it never blocks deletion.
+    if (intent !== "account-deletion" && subscriptions[0] && subscriptions[0].billing_provider !== "grant" &&
+        !["canceled", "incomplete_expired"].includes(subscriptions[0].status)) {
       return {
         code: "conflict", status: 409,
         message: "Cancel the Space subscription and wait for provider confirmation before deletion",

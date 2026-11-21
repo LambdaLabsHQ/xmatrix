@@ -141,6 +141,8 @@ try {
     "packages/db/test/app-credential-postgres.test.mjs",
     // App Store ownership and organization seats bind for good under concurrent claims.
     "packages/db/test/apple-billing-postgres.test.mjs",
+    // Complimentary Pro: one per person, never over a paid plan, ends on its own.
+    "packages/db/test/billing-grants-postgres.test.mjs",
     "packages/db/test/credit-pack-postgres.test.mjs",
     "packages/db/test/paid-call-postgres.test.mjs",
     // The official plan's Free allowance, credits and grace against the real schema.

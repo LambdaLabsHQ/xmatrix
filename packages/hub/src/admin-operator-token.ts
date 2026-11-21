@@ -13,7 +13,15 @@ export async function operatorTokenAuthorizes(
   request: Request,
   env: Pick<Env, "CONTROL_PLANE_OPERATOR_TOKEN">,
 ): Promise<boolean> {
-  const expected = env.CONTROL_PLANE_OPERATOR_TOKEN?.trim() ?? "";
+  return bearerMatchesSecret(request, env.CONTROL_PLANE_OPERATOR_TOKEN);
+}
+
+/**
+ * A bearer that equals a deployment secret. Each operator surface keeps its
+ * own secret, so one leaked credential never opens another surface.
+ */
+export async function bearerMatchesSecret(request: Request, secret: string | undefined): Promise<boolean> {
+  const expected = secret?.trim() ?? "";
   if (expected.length < CONTROL_PLANE_OPERATOR_TOKEN_MIN_LENGTH) return false;
   const header = request.headers.get("authorization") ?? "";
   if (!header.startsWith("Bearer ")) return false;

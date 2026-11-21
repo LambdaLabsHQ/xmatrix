@@ -343,7 +343,9 @@ export type AdminAuditAction =
   | "operations.read"
   | "audit.read"
   | "handles.backfill"
-  | "agent-senders.repair";
+  | "agent-senders.repair"
+  | "billing-grant.read"
+  | "billing-grant.give";
 
 export interface AdminAuditEvent {
   eventId: string;

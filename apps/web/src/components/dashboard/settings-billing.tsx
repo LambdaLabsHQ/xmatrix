@@ -132,6 +132,7 @@ function StripeSpaceBillingSection({ userId, space }: {
   const mark = spacePlanMark(billing);
   const subscription = billing?.subscription ?? null;
   const periodEnd = subscription?.currentPeriodEnd ? formatPlanDate(subscription.currentPeriodEnd) : null;
+  const complimentary = subscription?.billingProvider === "grant";
   const price = PRO_SEAT_PRICE_USD[interval];
   return (
     <div className="app-settings-section min-w-0 space-y-4" data-testid="space-billing">
@@ -148,7 +149,7 @@ function StripeSpaceBillingSection({ userId, space }: {
         <>
           <PlanCard
             plan="pro"
-            name="Pro"
+            name={complimentary ? "Pro · complimentary" : "Pro"}
             aside={periodEnd ? `${subscription?.cancelAtPeriodEnd ? "Ends" : "Renews"} ${periodEnd}` : undefined}
             title={space.name}
             state={mark && mark.state !== "active" ? { label: mark.state === "blocked" ? "Blocked" : capitalized(subscription?.status ?? "Ending"), title: mark.title, alert: mark.state === "blocked" } : null}
@@ -159,8 +160,17 @@ function StripeSpaceBillingSection({ userId, space }: {
             <PlanFeatures features={PRO_PLAN_FEATURES} />
           </PlanCard>
           <BillingWarnings billing={billing} spaceName={space.name} />
+          {complimentary && <p className="text-sm text-muted-foreground">Thanks for helping improve xMatrix. Nothing is charged: this Space returns to Free when the month ends, and its owner can buy Pro here then.</p>}
           {!billing.canManage ? (
             <p className="text-sm text-muted-foreground">Only the Space owner can change its plan.</p>
+          ) : complimentary ? (
+            billing.credits ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <button type="button" className={actionClass({ variant: "secondary", size: "md" })}
+                disabled={busy !== null} onClick={() => void run("credits/checkout")}>
+                {busy === "credits/checkout" && <AnimatedIcon icon={Loader2} className="size-4 animate-spin" />}
+                Buy {billing.credits.packCredits.toLocaleString("en-US")} credits · $10
+              </button>
+            </div> : null
           ) : (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {subscription?.billingProvider === "apple" ? <a className={actionClass({ variant: "secondary", size: "md" })} href="https://apps.apple.com/account/subscriptions">Manage in App Store</a>

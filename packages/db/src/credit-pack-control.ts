@@ -43,7 +43,7 @@ export class PostgresCreditPackRepository {
       });
       const subscription = await tx.query({ name: "credit_pack_subscription_v1", text: `SELECT space_id
         FROM data.space_billing_subscriptions WHERE space_id=$1 AND status IN ('active','trialing')
-          AND (billing_provider<>'apple' OR current_period_end>now()) LIMIT 1`, values: [spaceId], maxRows: 1 });
+          AND (billing_provider NOT IN ('apple','grant') OR current_period_end>now()) LIMIT 1`, values: [spaceId], maxRows: 1 });
       if (!subscription[0]) throw new BillingControlError("credit_pack_pro_required", 409, "Credit packs require an active Pro plan");
       const existing = (await tx.query({ name: "credit_pack_existing_v1", text: `SELECT * FROM data.space_credit_purchases
         WHERE space_id=$1 AND (command_id=$2 OR (status IN ('pending','created') AND expires_at>now()))

@@ -170,6 +170,7 @@ export const HUB_ENVIRONMENT = {
   // Official hosted operations.
   XMATRIX_ADMIN_TOKEN: operator("secret", "Legacy internal admin bearer."),
   CONTROL_PLANE_OPERATOR_TOKEN: operator("secret", "Machine credential for control-plane partition operator routes."),
+  BILLING_GRANT_OPERATOR_TOKEN: operator("secret", "Machine credential for ONLY the complimentary-Pro grant routes."),
 
   // Local and test deployments.
   XMATRIX_MOCK_AUTH_TOKEN: test("secret", "Bearer token that signs in the mock user; never set in production."),

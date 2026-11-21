@@ -25,6 +25,14 @@ const STRIPE_SUBSCRIPTION_STATUSES = ["trialing", "active", "past_due", "incompl
 export type BillingProvider = "stripe" | "apple" | "google";
 /** Store-managed providers bound their entitlement by the store's period end. */
 const STORE_PROVIDERS: readonly string[] = ["apple", "google"];
+/** An operator's complimentary Pro: it ends at its period end and never renews or charges. */
+export const GRANT_PROVIDER = "grant";
+/** Providers whose entitlement ends at current_period_end whatever the status says. */
+const PERIOD_BOUNDED_PROVIDERS: readonly string[] = [...STORE_PROVIDERS, GRANT_PROVIDER];
+/** Days of Pro one grant gives. */
+export const BILLING_GRANT_DAYS = 30;
+/** The most seats one grant covers. */
+export const BILLING_GRANT_MAX_SEATS = 10;
 
 /** A verified provider snapshot, keyed to the Space it bills. */
 export interface BillingSubscriptionFact {
@@ -108,7 +116,7 @@ async function requireOwner(tx: DatabaseTransaction, spaceId: string, userId: st
 }
 
 function subscriptionEntitled(row: QueryResultRow | undefined, now: number): boolean {
-  if (STORE_PROVIDERS.includes(String(row?.billing_provider)) && (!row?.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
+  if (PERIOD_BOUNDED_PROVIDERS.includes(String(row?.billing_provider)) && (!row?.current_period_end || new Date(row.current_period_end as string | Date).getTime() <= now)) return false;
   return row?.status === "active" || row?.status === "trialing" ||
     (row?.status === "past_due" && row.grace_until &&
       new Date(row.grace_until as Date | string).getTime() > now);
@@ -340,6 +348,8 @@ export class PostgresBillingRepository {
         "apple_managed_subscription", 409, "Manage this subscription in the App Store");
       if (rows[0].billing_provider === "google") throw new BillingControlError(
         "google_play_managed_subscription", 409, "Manage this subscription in Google Play");
+      if (rows[0].billing_provider === GRANT_PROVIDER) throw new BillingControlError(
+        "complimentary_subscription", 409, "This Space has complimentary Pro; it ends on its own and is never charged");
       return { customerId: rows[0].provider_customer_id,
         subscriptionId: rows[0].provider_subscription_id };
     });
@@ -406,7 +416,9 @@ export class PostgresBillingRepository {
         text: "SELECT billing_provider,status,grace_until,current_period_end FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
         values: [spaceId], maxRows: 1,
       });
-      if (subscriptionEntitled(subscriptions[0], Date.parse(now)) || (subscriptions[0] && !["canceled", "incomplete_expired"].includes(String(subscriptions[0].status)))) throw new BillingControlError(
+      // Complimentary Pro never blocks buying Pro: the purchase replaces it.
+      const current = subscriptions[0]?.billing_provider === GRANT_PROVIDER ? undefined : subscriptions[0];
+      if (subscriptionEntitled(current, Date.parse(now)) || (current && !["canceled", "incomplete_expired"].includes(String(current.status)))) throw new BillingControlError(
         "billing_subscription_active", 409, "This Space already has an active Pro subscription",
       );
       const seats = await tx.query<QueryResultRow & { count: string | number }>({
@@ -661,6 +673,7 @@ export class PostgresBillingRepository {
       const existing = existingRows[0];
       const incomingCanEntitle = ["active", "trialing", "past_due"].includes(subscription.status);
       if (existing && existing.provider_subscription_id !== subscriptionId &&
+          existing.billing_provider !== GRANT_PROVIDER &&
           subscriptionEntitled(existing, Date.parse(now)) && incomingCanEntitle) {
         throw new BillingControlError(
           "billing_subscription_conflict", 409,
@@ -724,6 +737,76 @@ export class PostgresBillingRepository {
       }
       await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-provider-event",
         requestDigest, result, aggregateId: providerEventId, now });
+      return result;
+    });
+  }
+
+  /**
+   * Give a Space complimentary Pro until `periodEnd`. The recipient must own
+   * the Space, and a Space already on any live subscription is refused, so a
+   * grant never shortens or replaces something someone paid for. Re-applying
+   * the same grant returns the Space's billing unchanged.
+   */
+  async applyGrant(input: {
+    requestId: string; grantId: string; spaceId: string; userId: string; periodEnd: string;
+  }): Promise<{ seatQuantity: number; billing: Record<string, unknown> }> {
+    const requestId = text(input.requestId, "requestId", 200);
+    const spaceId = text(input.spaceId, "spaceId");
+    const userId = text(input.userId, "userId");
+    const grantId = text(input.grantId, "grantId");
+    const periodEnd = text(input.periodEnd, "periodEnd");
+    if (!Number.isFinite(Date.parse(periodEnd))) throw new BillingControlError("invalid_billing_request", 400, "periodEnd is invalid");
+    const subscriptionId = `grant:${grantId}`;
+    const commandId = subscriptionId;
+    const requestDigest = await hash({ grantId, spaceId, userId, periodEnd });
+    const now = new Date().toISOString();
+    return this.spaces.transaction(requestId, "billing.grant.apply", spaceId, async (tx) => {
+      await lockBillingSpace(tx, spaceId);
+      await requireOwner(tx, spaceId, userId);
+      const prior = await replay(tx, spaceId, commandId, "billing-apply-grant", requestDigest);
+      if (prior) return prior as { seatQuantity: number; billing: Record<string, unknown> };
+      const existing = (await tx.query<QueryResultRow>({
+        name: "billing_grant_subscription_lock_v1",
+        text: "SELECT * FROM data.space_billing_subscriptions WHERE space_id = $1 FOR UPDATE",
+        values: [spaceId], maxRows: 1,
+      }))[0];
+      if (existing && existing.provider_subscription_id !== subscriptionId &&
+          (subscriptionEntitled(existing, Date.parse(now)) ||
+            (existing.billing_provider !== GRANT_PROVIDER && !["canceled", "incomplete_expired"].includes(String(existing.status))))) {
+        throw new BillingControlError("billing_subscription_active", 409, "This Space already has an active Pro subscription");
+      }
+      const seats = await tx.query<QueryResultRow & { count: string | number }>({
+        name: "billing_grant_seats_v1",
+        text: `SELECT COUNT(*) AS count FROM data.space_members
+          WHERE space_id = $1 AND role IN ('owner','admin','member')`,
+        values: [spaceId], maxRows: 1,
+      });
+      const seatQuantity = Math.max(1, Number(seats[0]?.count ?? 0));
+      if (seatQuantity > BILLING_GRANT_MAX_SEATS) throw new BillingControlError(
+        "billing_grant_too_many_seats", 409, `A grant covers at most ${BILLING_GRANT_MAX_SEATS} seats`);
+      await tx.query({
+        name: "billing_grant_subscription_upsert_v1",
+        text: `INSERT INTO data.space_billing_subscriptions
+          (space_id,billing_owner_user_id,provider_customer_id,provider_subscription_id,
+           provider_price_id,plan,status,seat_quantity,current_period_end,cancel_at_period_end,
+           grace_until,provider_event_created_at,version,created_at,updated_at,billing_provider)
+          VALUES ($1,$2,$2,$3,'grant','pro','active',$4,$5,true,NULL,$6,1,$6,$6,'grant')
+          ON CONFLICT (space_id) DO UPDATE SET
+            billing_owner_user_id = EXCLUDED.billing_owner_user_id,
+            billing_provider = EXCLUDED.billing_provider,
+            provider_customer_id = EXCLUDED.provider_customer_id,
+            provider_subscription_id = EXCLUDED.provider_subscription_id,
+            provider_price_id = EXCLUDED.provider_price_id,status = EXCLUDED.status,
+            seat_quantity = EXCLUDED.seat_quantity,current_period_end = EXCLUDED.current_period_end,
+            cancel_at_period_end = EXCLUDED.cancel_at_period_end,grace_until = NULL,
+            provider_event_created_at = EXCLUDED.provider_event_created_at,
+            version = data.space_billing_subscriptions.version + 1,
+            updated_at = EXCLUDED.updated_at`,
+        values: [spaceId, userId, subscriptionId, seatQuantity, periodEnd, now], maxRows: 0,
+      });
+      const result = { seatQuantity, billing: await summary(tx, spaceId, userId) };
+      await commitBillingMutation(tx, { spaceId, commandId, kind: "billing-apply-grant",
+        requestDigest, result, aggregateId: subscriptionId, now });
       return result;
     });
   }

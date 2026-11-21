@@ -52,3 +52,15 @@ test("the legacy admin bearer needs an exact match of a strong configured token"
     assert.throws(() => requireAdmin(request(bearer(env.XMATRIX_ADMIN_TOKEN ?? "")), env), /admin token/u);
   }
 });
+
+test("each operator surface has its own secret, so one credential never opens another", async () => {
+  const grantToken = `grant-${"fedcba9876543210".repeat(4)}`;
+  const env = { CONTROL_PLANE_OPERATOR_TOKEN: TOKEN, BILLING_GRANT_OPERATOR_TOKEN: grantToken };
+  assert.equal(await operator.bearerMatchesSecret(request(bearer(grantToken)), env.BILLING_GRANT_OPERATOR_TOKEN), true);
+  assert.equal(await operator.bearerMatchesSecret(request(bearer(TOKEN)), env.BILLING_GRANT_OPERATOR_TOKEN), false,
+    "the partition operator token cannot give complimentary Pro");
+  assert.equal(await operator.operatorTokenAuthorizes(request(bearer(grantToken)), env), false,
+    "the grant token cannot run partition operations");
+  assert.equal(await operator.bearerMatchesSecret(request(bearer(grantToken)), undefined), false,
+    "an unset grant secret disables the grant path");
+});
