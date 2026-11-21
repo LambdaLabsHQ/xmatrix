@@ -117,7 +117,7 @@ test("a failed status read offers recovery without issuing a second sign-in", as
     result: { presetId: "codex", action: "login_start", status: "failed", exitCode: 0, outputTail: "unexpected command output\n" } });
   await section.getByRole("button", { name: "Check status again" }).click();
   await expect(section).toContainText("No sign-in link was returned.");
-  await section.getByText("Command output").click();
+  await section.getByText("Command output", { exact: true }).click();
   await expect(section).toContainText("unexpected command output");
   await expect(section.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
   expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
