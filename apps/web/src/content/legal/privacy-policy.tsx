@@ -357,14 +357,16 @@ export function PrivacyPolicyContent() {
           clients request device permissions only for a feature you choose.
         </p>
         <p>
-          The xMatrix Chrome extension reads a web page only when you click it, use its menu item, or
-          press its shortcut. It then shows you the page title, address, and any text you selected, and
-          sends them to the conversation you choose, as your message, only when you press Send. It does
-          not read pages in the background, record your browsing history, or contact any server other
-          than xMatrix. It keeps your sign-in session and the last conversation you sent to in the
-          browser&apos;s extension storage on that device; signing out ends the session and removes it.
-          The extension does not sell this data or use it for advertising. What you send is handled
-          as Customer Data under this Policy.
+          The xMatrix Chrome extension opens xMatrix in Chrome&apos;s side panel. It reads a web page
+          only when you act on it: its menu item, its panel buttons, or its shortcut. If you turn on
+          its optional selection button, which asks for access to web pages first, it reads the text
+          you selected only when you click that button. It then passes the page title, address, and
+          selected text to xMatrix in the panel, where you discuss it; nothing is posted until you send a
+          message. It does not read pages in the background, record your browsing history, or contact
+          any server other than xMatrix. It keeps your sign-in session, and text you picked until the
+          panel takes it, in the browser&apos;s extension storage on that device; signing out ends the
+          session and removes it. The extension does not sell this data or use it for advertising.
+          What you send is handled as Customer Data under this Policy.
         </p>
         <p>
           The{" "}
