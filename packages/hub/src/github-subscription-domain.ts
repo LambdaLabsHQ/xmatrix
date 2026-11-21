@@ -98,10 +98,6 @@ export function githubSubscriptionSelectionFromCommand(body: string): GitHubSubs
   };
 }
 
-export function githubRepositoryFeaturesFromCommand(body: string): GitHubRepositoryFeature[] {
-  return githubSubscriptionSelectionFromCommand(body).features;
-}
-
 /** The excepted logins a stored relation's features carry. */
 export function githubSubscriptionExceptions(stored: unknown): string[] {
   if (!Array.isArray(stored)) return [];
