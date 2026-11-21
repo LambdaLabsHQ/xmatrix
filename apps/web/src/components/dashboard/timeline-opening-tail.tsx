@@ -181,6 +181,13 @@ export function TimelineOpeningTail({ scrollRoot, complete, header, footerClassN
       if (!hidden || list.childElementCount === 0) return;
       landing.disconnect();
       landed = true;
+      /* The tail draws the last screen, so the list takes over at its end.
+         A scroll while the list was hidden (a reader who scrolled before it
+         landed) and a landing that stopped short of a total height still
+         settling moved nothing on screen, yet place the list's rows away
+         from these: at the handover the reader's message jumped that far. */
+      const end = scrollRoot.scrollHeight - scrollRoot.clientHeight;
+      if (Math.abs(scrollRoot.scrollTop - end) >= 1) scrollRoot.scrollTop = end;
       settleBy = performance.now() + SETTLE_WITHIN_MS;
       onListLanded();
       awaitQuietFrame();
