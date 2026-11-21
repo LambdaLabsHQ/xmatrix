@@ -111,6 +111,42 @@ export function pageRemovedSections(before: string, after: string): string[] {
   return [...new Set(top(before).map((block) => block.title.trim()).filter((title) => !kept.has(title)))];
 }
 
+/** One heading of a page with the size of what stands under it, deeper headings included. */
+export interface PageOutlineEntry { id: string; title: string; depth: number; chars: number }
+
+/**
+ * A section as a reader means it: its heading and everything under it, deeper headings included, up
+ * to the next heading of its depth or shallower. '' is the text before the first heading.
+ */
+export function pageSection(markdown: string, id: string): { start: number; end: number; title: string; depth: number } | null {
+  const blocks = pageBlocks(markdown);
+  const index = blocks.findIndex((block) => block.id === id);
+  if (index < 0) return null;
+  const block = blocks[index]!;
+  const next = blocks.slice(index + 1).find((later) => block.depth === 0 || later.depth <= block.depth);
+  return { start: block.start, end: next ? next.start : markdown.length, title: block.title, depth: block.depth };
+}
+
+/** The page's headings in order, each with the characters its section holds. */
+export function pageOutline(markdown: string): PageOutlineEntry[] {
+  return pageBlocks(markdown).map((block) => {
+    const section = pageSection(markdown, block.id)!;
+    return { id: block.id, title: block.title, depth: block.depth, chars: Array.from(markdown.slice(section.start, section.end)).length };
+  });
+}
+
+/**
+ * `markdown` with one section rewritten and every other character as it was; null when the page has no
+ * such section. The blank lines that set the section off from the next one are kept.
+ */
+export function replacePageSection(markdown: string, id: string, text: string): string | null {
+  const section = pageSection(markdown, id);
+  if (!section) return null;
+  const tail = /\s*$/u.exec(markdown.slice(section.start, section.end))![0];
+  const written = trimEnd(text, " \t\r\n");
+  return `${markdown.slice(0, section.start)}${written}${tail || (section.end < markdown.length ? "\n" : "")}${markdown.slice(section.end)}`;
+}
+
 /** The block containing a character offset, or '' before the first heading. */
 export function pageBlockAt(markdown: string, offset: number): string {
   let id = "";

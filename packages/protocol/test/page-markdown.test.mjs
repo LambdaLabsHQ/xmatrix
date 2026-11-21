@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 
-import { gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageRemovedSections, parseGitHubFileReference } from "../dist/index.js";
+import { gitHubFileReferenceFrom, gitHubFileReferenceHref, gitHubFileReferences, gitHubFileUrl, mergePageText, mergePageWords, pageBlockAt, pageBlocks, pageChangeGist, pageChangedBlocks, pageHeadingSlug, pageOutline, pageRemovedSections, pageSection, parseGitHubFileReference, replacePageSection } from "../dist/index.js";
 
 const page = `Intro line
 # Relay Storage
@@ -204,4 +204,30 @@ test("unchanged text and syntax-only changes show nothing", async () => {
   assert.deepEqual(pageEditGlimpses("a\n\nb\n", "a\n\nb\n"), []);
   assert.deepEqual(pageEditGlimpses("- item\n", "* item\n"), []);
   assert.deepEqual(pageEditGlimpses("keep\n\ngone line\n", "keep\n").map((glimpse) => glimpse.kind), ["removed"]);
+});
+
+test("a section is its heading and everything under it, up to the next heading of its depth", () => {
+  const text = "lead\n\n# Plan\n\n## Now\n\nship\n\n### Risks\n\nnone\n\n## Next\n\nrest\n";
+  const slice = (id) => { const section = pageSection(text, id); return text.slice(section.start, section.end); };
+  assert.equal(slice("now"), "## Now\n\nship\n\n### Risks\n\nnone\n\n");
+  assert.equal(slice("risks"), "### Risks\n\nnone\n\n");
+  assert.equal(slice("next"), "## Next\n\nrest\n");
+  assert.equal(slice(""), "lead\n\n");
+  assert.equal(slice("plan"), text.slice(text.indexOf("# Plan")));
+  assert.equal(pageSection(text, "absent"), null);
+  assert.deepEqual(pageOutline(text).map((entry) => [entry.id, entry.depth, entry.chars]),
+    [["", 0], ["plan", 1], ["now", 2], ["risks", 3], ["next", 2]].map(([id, depth]) => [id, depth, slice(id).length]));
+});
+
+test("rewriting a section leaves every other character of the page as it was", () => {
+  const text = "# Plan\n\n## Now\n\nship\n\n## Next\n\nrest\n";
+  assert.equal(replacePageSection(text, "now", "## Now\n\nshipped on Friday\n\n\n"),
+    "# Plan\n\n## Now\n\nshipped on Friday\n\n## Next\n\nrest\n");
+  assert.equal(replacePageSection(text, "next", "## Later\n\nmore"), "# Plan\n\n## Now\n\nship\n\n## Later\n\nmore\n");
+  assert.equal(replacePageSection("# Plan\n## Now\nship", "now", "## Now\ndone"), "# Plan\n## Now\ndone");
+  assert.equal(replacePageSection(text, "absent", "x"), null);
+  // A heading inside fenced code is not a section, so it cannot be addressed or cut at.
+  const fenced = "# A\n\n```\n## not a heading\n```\n\n## B\n\nb\n";
+  assert.equal(pageSection(fenced, "not-a-heading"), null);
+  assert.equal(replacePageSection(fenced, "b", "## B\n\nc"), "# A\n\n```\n## not a heading\n```\n\n## B\n\nc\n");
 });

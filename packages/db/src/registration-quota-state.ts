@@ -99,6 +99,7 @@ function presentedQuotaReading(row: QueryResultRow): RegistrationQuotaReading {
   const hold = row.source === "daemon" && new Date(row.expires_at as string).getTime() > now;
   const shown = hold ? routingQuotaUsageWindows(currentRoutingQuotaWindows(row.windows_json, now)) : [];
   const quotaUsages = shown.length ? shown : usage.quotaUsages ?? [];
-  const { scopedQuotaObservedAt: _scopedAt, ...presented } = usage;
-  return { registration, usage: { ...presented, quotaUsages, quotaState: hold ? "exhausted" : "observed" } };
+  const { scopedQuotaObservedAt: _scopedAt, scopedQuotaUsages, billingHolds: _holds, ...presented } = usage;
+  return { registration, usage: { ...presented, quotaUsages, ...(scopedQuotaUsages ? { scopedQuotaUsages } : {}),
+    quotaState: hold ? "exhausted" : "observed" } };
 }

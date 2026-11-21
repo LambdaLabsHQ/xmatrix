@@ -23,6 +23,17 @@ const HARNESS_MISSING = "harness_missing";
  * the machine knows it, the process holding it. */
 export const HARNESS_SESSION_IN_USE = "harness_session_in_use";
 
+/** The code a start ends with when its machine, connected to the Hub, was
+ * handed the start command and never answered it: the Hub ends the start in
+ * the machine's place, so the Channel hears what a silent machine cannot say. */
+const MACHINE_NOT_ANSWERING = "machine_not_answering";
+
+/** What the Hub records when it ends a start in a silent machine's place. */
+export function machineNotAnsweringDetail(deliveries: number): string {
+  return `${MACHINE_NOT_ANSWERING}: the machine is connected but did not answer the start command, ` +
+    `sent to it ${deliveries} times. Nothing was started.`;
+}
+
 const REPOSITORY_NAME = /^[A-Za-z0-9_.-]{1,100}\/[A-Za-z0-9_.-]{1,100}$/u;
 
 /** The refusal text the Hub's repository-token mint answers with; the daemon
@@ -39,6 +50,7 @@ export function publicMachineStartupFailure(detail: unknown): PublicMachineStart
   const text = detail.toLowerCase();
   let code = "startup_failed";
   if (/\brepository_access_unavailable\b/u.test(text)) code = REPOSITORY_ACCESS_UNAVAILABLE;
+  else if (/\bmachine_not_answering\b/u.test(text)) code = MACHINE_NOT_ANSWERING;
   // The daemon found the harness's launcher missing before starting anything.
   else if (/\bharness_missing\b/u.test(text)) code = HARNESS_MISSING;
   else if (/\bharness_session_in_use\b/u.test(text)) code = HARNESS_SESSION_IN_USE;

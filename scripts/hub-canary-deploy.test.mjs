@@ -102,6 +102,38 @@ test("the uploaded version carries the selected secrets before any traffic", asy
   assert.ok(view > -1 && deploy > view, "the version is read before its first traffic split");
 });
 
+// beta.20 and beta.21 failed on 2026-11-20: Cloudflare had not yet listed the uploaded version, then could not view it.
+test("a version Cloudflare has not caught up on yet is looked up again before any traffic", async () => {
+  const parts = harness();
+  let lists = 0;
+  let views = 0;
+  const run = parts.run;
+  parts.run = async (args) => {
+    if (args[0] === "versions" && args[1] === "list" && ++lists <= 3) {
+      parts.calls.push(args.join(" "));
+      return { stdout: JSON.stringify([{ id: PREVIOUS }]) };
+    }
+    if (args[0] === "versions" && args[1] === "view" && ++views <= 2) {
+      parts.calls.push(args.join(" "));
+      throw Object.assign(new Error("wrangler versions view failed (1)"),
+        { stderr: "The requested Worker version could not be found, please check the ID being passed and try again. [code: 100146]" });
+    }
+    return run(args);
+  };
+  const result = await deployWithCanary(options(parts));
+  assert.equal(result.mode, "canary");
+  assert.equal(result.versionId, NEXT);
+  assert.equal(lists, 4);
+  assert.equal(views, 3);
+});
+
+test("a version view failing for another reason fails before any deployment", async () => {
+  const parts = harness({ failOn: (call) => call.startsWith("versions view") });
+  await assert.rejects(deployWithCanary(options(parts)), /injected failure/u);
+  assert.equal(parts.calls.filter((call) => call.startsWith("versions view")).length, 1);
+  assert.equal(parts.calls.some((call) => call.startsWith("versions deploy")), false);
+});
+
 test("a version missing a selected secret fails before any deployment", async () => {
   const parts = harness({ secretNames: ["XMATRIX_SECRET_CATALOG_KEY"] });
   await assert.rejects(

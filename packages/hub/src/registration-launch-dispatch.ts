@@ -382,7 +382,7 @@ async function newestMessageFor(env: Env, input: { channelId: string; instanceId
 /** Records what a source Instance's refused turn used up of its provider quota. */
 export function holdRegistrationUsageLimit(env: Env, input: {
   commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string; resetsAt?: string;
-  quotaScope?: string; usage?: unknown; billingRefusal?: boolean;
+  quotaScope?: string; usage?: unknown; billingRefusal?: boolean; scopedBillingRefusal?: boolean;
 }) {
   return executeRegistrationUsageLimitHold({ ...runtimePlacement(env), ...input });
 }
@@ -584,7 +584,8 @@ export async function executeRestingInstanceWake(input: {
  * Moving its work (a `handoff:@auto`, or a quota retry) is separate. */
 export async function executeRegistrationUsageLimitHold(input: {
   env?: AppConnectorEnv; database: AuthorityDatabase; directory: AuthorityDatabase; commandId: string; actorUserId: string;
-  channelId: string; sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean;
+  channelId: string; sourceInstanceId: string; resetsAt?: string; quotaScope?: string; usage?: unknown;
+  billingRefusal?: boolean; scopedBillingRefusal?: boolean;
 }) {
   return (await placedRebornRepository(input, "handoff")).holdUsageLimit(input);
 }

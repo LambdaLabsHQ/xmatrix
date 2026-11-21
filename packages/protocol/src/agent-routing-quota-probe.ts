@@ -1,6 +1,6 @@
 import { utf8ByteLength } from "./hex.js";
-import { ROUTING_QUOTA_MAX_AGE_MS, routingQuotaObservation, routingQuotaResetTime, routingScopedQuotaExpiry,
-  type RoutingObservation } from "./agent-routing.js";
+import { clampRoutingQuotaObservedTime, ROUTING_QUOTA_MAX_AGE_MS, routingQuotaObservation, routingQuotaResetTime,
+  routingScopedQuotaExpiry, type RoutingObservation } from "./agent-routing.js";
 import { parseLlmQuotaAccount, quotaAccountBalance, type LlmQuotaAccount } from "./authority-runtime.js";
 
 /** A bounded read of already registered environments, never a launch or an access grant.
@@ -98,8 +98,9 @@ export interface RoutingQuotaRecord {
 export function routingQuotaRecord(usage: unknown, now: number): RoutingQuotaRecord | undefined {
   if (!usage || typeof usage !== "object" || Array.isArray(usage)) return undefined;
   const row = usage as Record<string, unknown>;
-  const observed = typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN;
-  if (row.quotaSource !== "provider_api" || !Number.isFinite(observed) || observed > now) return undefined;
+  const observed = clampRoutingQuotaObservedTime(
+    typeof row.quotaObservedAt === "string" ? Date.parse(row.quotaObservedAt) : NaN, now);
+  if (row.quotaSource !== "provider_api" || observed === undefined) return undefined;
   const account = routingQuotaObservation(usage, now);
   const complete = Array.isArray(row.scopedQuotaUsages);
   const scopedExpiresAt = complete ? routingScopedQuotaExpiry(usage, now) : undefined;
@@ -323,9 +324,11 @@ export function parseRoutingQuotaProbeResponse(value: unknown, expected: Routing
     if (result.status !== "observed" || result.quotaSource !== "provider_api" || "reason" in result) {
       throw new Error("Invalid quota probe source");
     }
-    const quotaObservedAt = text(result.quotaObservedAt, 40);
-    const observed = Date.parse(quotaObservedAt);
-    if (!Number.isFinite(observed) || observed > now) throw new Error("Invalid quota probe observation time");
+    const rawQuotaObservedAt = text(result.quotaObservedAt, 40);
+    const parsedObserved = Date.parse(rawQuotaObservedAt);
+    const observed = clampRoutingQuotaObservedTime(parsedObserved, now);
+    if (observed === undefined) throw new Error("Invalid quota probe observation time");
+    const quotaObservedAt = observed < parsedObserved ? new Date(observed).toISOString() : rawQuotaObservedAt;
     const quotaAccount = result.quotaAccount === undefined ? undefined
       : quotaProbeAccount(result.quotaAccount, request.accountBalance === true);
     const quotaUsages = result.quotaUsages === undefined ? []

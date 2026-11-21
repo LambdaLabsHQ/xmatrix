@@ -2174,6 +2174,7 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
         last_channel_id: auto_join_channel_id.clone(),
         pending_bg_message: None,
         reactive_wakeup: None,
+        subagent_wakeup_grace_deadline: None,
     };
     let mut events = RunLoopEvents::new(event_rx, &relay, auto_join_channel_id.as_deref(), &agent);
     // Every message's local attachment copies stay for the whole Run: its
@@ -2419,7 +2420,10 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
                     break;
                 }
                 if reconnected {
-                    let status = if run.reactive_wakeup.is_some() {
+                    let status = if run.reactive_wakeup.is_some()
+                        || run.app.has_active_subagents()
+                        || run.subagent_wakeup_grace_deadline.is_some()
+                    {
                         "busy"
                     } else {
                         "idle"
@@ -2470,6 +2474,7 @@ struct AcpRun<'a> {
     last_channel_id: Option<String>,
     pending_bg_message: Option<Option<Value>>,
     reactive_wakeup: Option<AcpReactiveWakeup>,
+    subagent_wakeup_grace_deadline: Option<Instant>,
 }
 
 impl AcpRun<'_> {
@@ -2503,6 +2508,7 @@ impl AcpRun<'_> {
 
     async fn restart(&mut self) -> error::Result<()> {
         self.reactive_wakeup = None;
+        self.subagent_wakeup_grace_deadline = None;
         self.pending_bg_message = None;
         self.app.clear_background_tasks();
         self.runtime_state.set_waiting(None);
@@ -2566,6 +2572,8 @@ impl AcpRun<'_> {
                 } else {
                     "completed"
                 });
+                self.subagent_wakeup_grace_deadline = None;
+                let subagents_active = !cancelled && !turn.failed && self.app.has_active_subagents();
                 if cancelled {
                     write_current_run_status(
                         "turn_interrupted",
@@ -2582,10 +2590,13 @@ impl AcpRun<'_> {
                         failure_detail,
                         turn.restart_after_turn,
                     );
+                } else if subagents_active {
+                    write_current_run_status("turn_running", false, message_id);
                 } else {
                     write_current_run_status("turn_completed", true, message_id);
                 }
-                send_presence(self.relay, Some("idle"), self.presence());
+                let presence_status = if subagents_active { "busy" } else { "idle" };
+                send_presence(self.relay, Some(presence_status), self.presence());
                 report_local_turn_output(&self.config.display_name, &turn.local_output, channel_id);
                 if turn.restart_after_turn {
                     self.restart().await?;
@@ -2749,27 +2760,72 @@ impl ChannelControlledRuntime for AcpRun<'_> {
         };
         if settle_now {
             self.finish_reactive_wakeup(false).await;
+        } else if self.reactive_wakeup.is_none()
+            && (self.app.has_active_subagents() || self.subagent_wakeup_grace_deadline.is_some())
+        {
+            self.reconcile_between_turn_subagents();
         }
     }
 }
 
 impl AcpRun<'_> {
     fn should_poll_background(&self) -> bool {
-        self.config.supports_background_tasks
-            && !self.app.inbox_closed
-            && (!self.app.background_tasks.is_empty() || self.reactive_wakeup.is_some())
+        self.config.supports_background_tasks && !self.app.inbox_closed
+    }
+
+    #[cfg(test)]
+    fn has_active_background_work(&self) -> bool {
+        !self.app.background_tasks.is_empty()
+            || self.app.has_active_subagents()
+            || self.subagent_wakeup_grace_deadline.is_some()
+            || self.reactive_wakeup.is_some()
     }
 
     fn background_deadline(&self, now: Instant) -> Option<Instant> {
-        let wakeup = self.reactive_wakeup.as_ref()?;
-        [
-            wakeup.tool_waits.deadline(now),
-            wakeup.settle_deadline,
-            wakeup.safety_idle_deadline,
-        ]
-        .into_iter()
-        .flatten()
-        .min()
+        if let Some(wakeup) = self.reactive_wakeup.as_ref() {
+            return [
+                wakeup.tool_waits.deadline(now),
+                wakeup.settle_deadline,
+                wakeup.safety_idle_deadline,
+            ]
+            .into_iter()
+            .flatten()
+            .min();
+        }
+        if let Some(grace) = self.subagent_wakeup_grace_deadline {
+            return Some(grace);
+        }
+        if self.app.has_active_subagents() {
+            return Some(now + self.app.subagent_poll_interval);
+        }
+        None
+    }
+
+    fn reconcile_between_turn_subagents(&mut self) {
+        let refresh = self.app.refresh_active_subagents();
+        if refresh.changed {
+            self.app.publish_background_tasks();
+        }
+        if refresh.active > 0 {
+            self.subagent_wakeup_grace_deadline = None;
+            return;
+        }
+        let now = Instant::now();
+        if refresh.dropped_to_zero_with_report {
+            self.subagent_wakeup_grace_deadline = Some(now + self.app.subagent_wakeup_grace);
+            return;
+        }
+        if self
+            .subagent_wakeup_grace_deadline
+            .is_some_and(|deadline| now < deadline)
+        {
+            return;
+        }
+        self.subagent_wakeup_grace_deadline = None;
+        self.runtime_state
+            .set_waiting(self.app.background_tasks.waiting());
+        write_current_run_status("turn_completed", true, None);
+        send_presence(self.relay, Some("idle"), self.presence());
     }
 
     async fn send_background_trace(
@@ -2805,6 +2861,7 @@ impl AcpRun<'_> {
     }
 
     async fn ensure_reactive_wakeup(&mut self, received: Instant) -> &mut AcpReactiveWakeup {
+        self.subagent_wakeup_grace_deadline = None;
         if self.reactive_wakeup.is_none() {
             let id = self.app.next_id;
             self.app.next_id += 1;
@@ -3004,9 +3061,6 @@ impl AcpRun<'_> {
                     wakeup.safety_idle_deadline = None;
                     wakeup.turn_id.clone()
                 };
-                if let Some(channel_id) = channel_id.as_deref() {
-                    observe_acp_plan(&mut self.app.activity, self.relay, channel_id, update);
-                }
                 self.send_background_trace(
                     &session_id,
                     &turn_id,
@@ -3047,6 +3101,7 @@ impl AcpRun<'_> {
     }
 
     async fn finish_reactive_wakeup(&mut self, for_new_turn: bool) {
+        self.subagent_wakeup_grace_deadline = None;
         let Some(mut wakeup) = self.reactive_wakeup.take() else {
             return;
         };
@@ -3056,11 +3111,9 @@ impl AcpRun<'_> {
                 &wakeup.daemon_tool_ids,
                 &mut self.app.background_tasks,
             );
-            self.app.publish_background_tasks();
         }
-        if let Some(channel_id) = self.last_channel_id.as_deref() {
-            finish_acp_turn(&mut self.app.activity, self.relay, channel_id);
-        }
+        self.app.refresh_active_subagents();
+        self.app.publish_background_tasks();
         if let Some(session_id) = self.app.session_id.clone() {
             self.send_background_trace(
                 &session_id,
@@ -3072,16 +3125,26 @@ impl AcpRun<'_> {
             )
             .await;
         }
-        self.runtime_state
-            .set_waiting(self.app.background_tasks.waiting());
+        let subagents_active = !for_new_turn && self.app.has_active_subagents();
+        self.runtime_state.set_waiting(if subagents_active {
+            None
+        } else {
+            self.app.background_tasks.waiting()
+        });
         wakeup.turn_guard.finish_as("completed");
         if !for_new_turn {
-            write_current_run_status("turn_completed", true, None);
-            send_presence(self.relay, Some("idle"), self.presence());
+            if subagents_active {
+                write_current_run_status("turn_running", false, None);
+                send_presence(self.relay, Some("busy"), self.presence());
+            } else {
+                write_current_run_status("turn_completed", true, None);
+                send_presence(self.relay, Some("idle"), self.presence());
+            }
         }
     }
 
     fn abort_background_activity(&mut self) {
+        self.subagent_wakeup_grace_deadline = None;
         if let Some(mut wakeup) = self.reactive_wakeup.take() {
             wakeup.turn_guard.finish_as("failed");
         }
@@ -3633,17 +3696,24 @@ struct AcpSession {
     prompt_images: bool,
     presentation: AgentPresentationFacts,
     config: AcpVendorConfig,
-    /// The plan outlives a turn, so what it already reported does too.
-    activity: ChannelActivityReporter,
     /// elicitation/create requests parked until their card is answered: the
     /// JSON-RPC id and params, by request key.
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
     /// Non-daemon tool calls still running after their turn ended (Antigravity).
     background_tasks: crate::runtime_waiting::AcpBackgroundTasks,
+    /// Active Antigravity subagents detected from local session files.
+    active_subagents: u32,
+    /// Number of subagent report messages already marked read for this session.
+    subagent_read_reports: usize,
     /// How long an in-turn tool call must stay open before reading as a wait.
     tool_wait_threshold: Duration,
     /// Quiet window after a reactive wakeup's `usage_update` before settling.
     reactive_wakeup_settle: Duration,
+    /// Poll interval for re-checking active Antigravity subagents between turns.
+    subagent_poll_interval: Duration,
+    /// Grace window after a subagent's report is read before settling if no
+    /// reactive wakeup arrives.
+    subagent_wakeup_grace: Duration,
     /// True once the child's stdout stream returned EOF.
     inbox_closed: bool,
 }

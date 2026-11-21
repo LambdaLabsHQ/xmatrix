@@ -95,24 +95,15 @@ name = "xmatrix"
 path = "src/main.rs"
 
 [dependencies]
-# Async runtime
-tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-
-# CLI
-clap = { workspace = true, features = ["derive", "env"] }
-
-rustls = { workspace = true, features = ["ring", "std", "tls12"] }
-
-colored = { workspace = true }
-xmatrix-cli-args = { path = "crates/args" }
-# Registers the release version (xmatrix_cli_core::version). The credential
-# helper integration test also builds the helper command with the same
-# function the daemon uses, so the two cannot drift apart.
-xmatrix-cli-core = { path = "crates/core" }
+# Keep the version-stamped binary crate minimal so release version bumps do
+# not re-monomorphize clap, tokio, or rustls on every beta/stable tag.
+# The runtime crate registers the version passed from `main` via
+# `xmatrix_cli_core::version::register`.
 xmatrix-cli-runtime = { path = "crates/runtime" }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+xmatrix-cli-core = { path = "crates/core" }
 
 # Line tables keep file:line in our backtraces; full debug info only made the
 # test build and its Windows PDB link slower. Dependencies carry none.

@@ -95,6 +95,8 @@ test("a quote's remove button follows edits before the quote", async ({ page }) 
   await page.keyboard.press("Shift+Enter");
   await selectFrom(text, "Quoted words.");
   await page.getByTestId("message-selection-menu").getByRole("button", { name: "Quote", exact: true }).click();
+  // The quote enters the draft on the composer's next render; a key typed before then lands in the old draft.
+  await expect(page.getByTestId("composer-quote")).toHaveCount(1);
   await page.keyboard.type("End");
   await setDraftSelection(composer, 0);
   await page.keyboard.type("Added ");

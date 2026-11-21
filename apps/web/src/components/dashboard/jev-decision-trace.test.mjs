@@ -133,6 +133,10 @@ test("the placement reason names the trade-off routing made", () => {
   const silent = item => ({ ...item, unansweredAt: "2026-11-13T09:10:00.000Z" });
   assert.equal(placementReason([at("claude", "warm", 1 / 3, 0.4), silent(at("cursor", "studio", 1 / 3, 0.9))], true),
     "cursor on studio ended its last summons without a reply, so it goes last");
+  const quiet = item => ({ ...item, machineUnansweredAt: "2026-11-20T10:23:00.000Z" });
+  assert.equal(placementReason([at("opencode", "desk", 1 / 3, 0.4), quiet(at("claude", "server", 1 / 3, 0.9))], true),
+    "server left the last command sent to it unanswered, so claude there goes last");
+  assert.equal(placementReason([quiet(at("claude", "server", 1 / 3, 0.9))], false), "Most room for claude: 90% room");
   assert.deepEqual([fitLevel(0.32), fitLevel(0.68), fitLevel(0), fitLevel(1)], ["Capable", "Strong fit", "Unsuitable", "Asked for"]);
   assert.deepEqual([roomText(undefined), roomText(-0.2), roomText(0.414)], ["room unknown", "overloaded", "41% room"]);
 });

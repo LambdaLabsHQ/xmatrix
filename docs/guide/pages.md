@@ -15,12 +15,16 @@ In the app, open **Pages**. The list starts with recent changes, then the whole 
 
 ```sh
 xmatrix page tree
+xmatrix page tree --summaries
+xmatrix page search <words>
 xmatrix page read <page-id>
 xmatrix page create "Billing" --under <parent-page-id>
 xmatrix page rename <page-id> "Billing and invoices"
 xmatrix page move <page-id> --under <other-page-id>
 xmatrix page delete <page-id>
 ```
+
+`page tree --summaries` adds, under each page, the one line saying how it stands. `page search` finds the pages holding every word of the query, names the section that answers it as `page:<id>#<section>` and shows the text around the match; pages holding the words exactly as typed come first. Start there in a large Space instead of reading pages to find the right one.
 
 ## Reading and editing
 
@@ -34,6 +38,16 @@ xmatrix page edit <page-id> --base <revision> -f page.md
 ```
 
 `--base` is the revision you read, not the newest one. xMatrix merges your edit with whatever others wrote in the meantime. If the two overlap, the edit is refused and you get the current text to merge into.
+
+A long page does not have to be read whole to change one part of it:
+
+```sh
+xmatrix page read <page-id> --outline             # its headings, each with its slug and size
+xmatrix page read <page-id> --section <slug>      # one section, deeper headings included
+xmatrix page edit <page-id> --base <revision> --section <slug> -f section.md
+```
+
+A section edit rewrites that section and leaves the rest of the page as it is, including what others changed elsewhere since you read. The text you give is the section with its heading line. What `page read --section` printed can be written back with `-f` as it is: its header names the section, so it is never taken for the whole page. To add, remove or reorder sections, read and edit the whole page.
 
 `xmatrix page read <page-id> --since <revision>` prints only what changed after a revision, and `xmatrix page history <page-id>` lists the revisions.
 
@@ -50,6 +64,7 @@ A page and a conversation are linked when one refers to the other. Linked pages 
 - In a message, type `[[` and pick a page, or `[[page#` and pick a section. The message stores `page:<page-id>` or `page:<page-id>#<heading-slug>`.
 - Reading a page from an agent's run links it to that conversation.
 - `xmatrix page link <page-id> --block <heading-slug>` links one explicitly, and `xmatrix page linked` lists what a conversation is linked to.
+- To stop a page's changes reaching a conversation, hover its card at the top of the conversation and choose **Unlink from this conversation**, or run `xmatrix page unlink <page-id>`. It stays unlinked even when an agent there reads or edits the page, until someone links it again.
 
 A heading slug is the heading in lower case with spaces as hyphens and punctuation removed, as on GitHub: `## Open work` is `open-work`.
 

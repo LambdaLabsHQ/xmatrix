@@ -33,6 +33,59 @@ pub(crate) struct PageSummary {
     /// The page that states how the Space is run.
     #[serde(default)]
     pub governance: bool,
+    /// One line saying how the page stands.
+    #[serde(default)]
+    pub summary: Option<PageSummaryLine>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PageSummaryLine {
+    pub text: String,
+}
+
+/// One page a search found, at the section that answers it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PageSearchHit {
+    pub page_id: String,
+    pub title: String,
+    #[serde(default)]
+    pub block_id: String,
+    #[serde(default)]
+    pub block_title: String,
+    #[serde(default)]
+    pub snippet: String,
+}
+
+#[derive(Deserialize)]
+struct SearchResponse {
+    results: Vec<PageSearchHit>,
+}
+
+/// Each hit as the reference that names it, then the text around the match.
+pub(crate) fn render_page_search(hits: &[PageSearchHit]) -> String {
+    let mut out = String::new();
+    for hit in hits {
+        let section = if hit.block_id.is_empty() {
+            String::new()
+        } else {
+            format!(" › {}", hit.block_title)
+        };
+        let anchor = if hit.block_id.is_empty() {
+            String::new()
+        } else {
+            format!("#{}", hit.block_id)
+        };
+        out.push_str(&format!(
+            "- {}{} (page:{}{})\n",
+            hit.title, section, hit.page_id, anchor
+        ));
+        let snippet = hit.snippet.split_whitespace().collect::<Vec<_>>().join(" ");
+        if !snippet.is_empty() && snippet != hit.title {
+            out.push_str(&format!("  {snippet}\n"));
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -127,6 +180,106 @@ struct PageResponse {
     page: PageDocument,
 }
 
+/// One heading of a page and the characters its section holds.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct PageOutlineEntry {
+    pub id: String,
+    pub title: String,
+    pub depth: usize,
+    pub chars: usize,
+}
+
+#[derive(Deserialize)]
+struct PageSectionMark {
+    id: String,
+}
+
+/// A read of part of a page. A Hub that does not serve parts answers with the whole page and
+/// neither field, which must never be taken for the part.
+#[derive(Deserialize)]
+struct PagePartResponse {
+    page: PageDocument,
+    #[serde(default)]
+    outline: Option<Vec<PageOutlineEntry>>,
+    #[serde(default)]
+    section: Option<PageSectionMark>,
+}
+
+const NO_PARTS: &str =
+    "This Hub does not serve a page's outline or sections yet; read the whole page.";
+
+/// The header every read of a page opens with, without its closing line.
+fn read_header_open(page: &PageDocument) -> String {
+    format!(
+        "---\npageId: {}\ntitle: {}\nrevision: {}\nheadRevision: {}\ncanEdit: {}\n",
+        page.summary.page_id,
+        page.summary.title,
+        page.revision_info.revision,
+        page.summary.head_revision,
+        page.summary.can_edit
+    )
+}
+
+/// A page's headings, nested, each with its slug and size: what to read next, not the page.
+pub(crate) fn render_page_outline(page: &PageDocument, outline: &[PageOutlineEntry]) -> String {
+    let mut out = read_header_open(page);
+    out.push_str("outline: headings only; read one with --section <slug>\n---\n");
+    for entry in outline {
+        if entry.id.is_empty() {
+            out.push_str(&format!(
+                "- (text before the first heading) · {} chars\n",
+                entry.chars
+            ));
+            continue;
+        }
+        out.push_str(&format!(
+            "{}- {} (#{}) · {} chars\n",
+            "  ".repeat(entry.depth.saturating_sub(1)),
+            entry.title,
+            entry.id,
+            entry.chars
+        ));
+    }
+    out
+}
+
+/// One section under a header that names it, so writing the read back rewrites that section only.
+pub(crate) fn render_page_section(page: &PageDocument, section: &str) -> String {
+    let mut out = read_header_open(page);
+    out.push_str(&format!(
+        "{SECTION_HEADER}{section}\nedit: xmatrix page edit {} --base {} --section {section} -f <file>\n---\n{}",
+        page.summary.page_id, page.revision_info.revision, page.body
+    ));
+    if !page.body.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+const SECTION_HEADER: &str = "section: ";
+
+/// The section a read's header names, when `text` opens with the header of a section read.
+fn read_header_section(text: &str) -> Option<String> {
+    let end = read_header_end(text)?;
+    text[..end]
+        .lines()
+        .find_map(|line| line.strip_prefix(SECTION_HEADER))
+        .map(|section| section.trim().to_string())
+}
+
+async fn read_page_part(
+    hub_url: &str,
+    token: &str,
+    route: &str,
+) -> error::Result<PagePartResponse> {
+    let part: PagePartResponse =
+        http::request_json(&with_route(hub_url, route), "GET", Some(token), None).await?;
+    if part.outline.is_none() && part.section.is_none() {
+        return Err(CliError::Launch(NO_PARTS.into()));
+    }
+    Ok(part)
+}
+
 #[derive(Deserialize)]
 struct PageSummaryResponse {
     page: PageSummary,
@@ -207,6 +360,20 @@ fn run_conversation() -> Option<String> {
         .filter(|value| !value.trim().is_empty())
 }
 
+/// The Space and conversation a link or unlink names: by default this Run's.
+async fn link_target(
+    hub_url: &str,
+    token: &str,
+    space: Option<String>,
+    conversation: Option<String>,
+) -> error::Result<(String, String)> {
+    let space = resolve_space(hub_url, token, space).await?;
+    let conversation = conversation
+        .or_else(run_conversation)
+        .ok_or_else(|| CliError::Launch("pass --conversation <channel-id>".into()))?;
+    Ok((space, conversation))
+}
+
 pub(crate) async fn resolve_space(
     hub_url: &str,
     token: &str,
@@ -234,7 +401,22 @@ pub(crate) fn page_route(space: &str, page: &str) -> String {
 }
 
 /// Children listed under their parent, in sibling order.
-pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
+/// A page's one line, indented under it; nothing for a page that has none yet.
+fn push_summary(out: &mut String, page: &PageSummary, depth: usize) {
+    let Some(summary) = &page.summary else {
+        return;
+    };
+    let text = summary
+        .text
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+    if !text.is_empty() {
+        out.push_str(&format!("{}{}\n", "  ".repeat(depth), text));
+    }
+}
+
+pub(crate) fn render_page_tree(pages: &[PageSummary], summaries: bool) -> String {
     let mut children: BTreeMap<Option<String>, Vec<&PageSummary>> = BTreeMap::new();
     for page in pages {
         children
@@ -252,6 +434,7 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
         children: &BTreeMap<Option<String>, Vec<&PageSummary>>,
         parent: Option<String>,
         depth: usize,
+        summaries: bool,
     ) {
         let Some(list) = children.get(&parent) else {
             return;
@@ -275,12 +458,21 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
                 page.head_revision,
                 marks
             ));
+            if summaries {
+                push_summary(out, page, depth + 1);
+            }
             if depth < 64 {
-                walk(out, children, Some(page.page_id.clone()), depth + 1);
+                walk(
+                    out,
+                    children,
+                    Some(page.page_id.clone()),
+                    depth + 1,
+                    summaries,
+                );
             }
         }
     }
-    walk(&mut out, &children, None, 0);
+    walk(&mut out, &children, None, 0, summaries);
     // A page whose parent this reader cannot open is shown at the top level.
     for (parent, list) in &children {
         if let Some(parent) = parent
@@ -291,7 +483,16 @@ pub(crate) fn render_page_tree(pages: &[PageSummary]) -> String {
                     "- {} ({} · r{})\n",
                     page.title, page.page_id, page.head_revision
                 ));
-                walk(&mut out, &children, Some(page.page_id.clone()), 1);
+                if summaries {
+                    push_summary(&mut out, page, 1);
+                }
+                walk(
+                    &mut out,
+                    &children,
+                    Some(page.page_id.clone()),
+                    1,
+                    summaries,
+                );
             }
         }
     }
@@ -718,14 +919,34 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             print!("{}", render_linked_pages(&pages));
             Ok(())
         }
-        PageCommand::Tree { space } => {
+        PageCommand::Tree { space, summaries } => {
             let space = resolve_space(hub_url, token, space).await?;
             let url = with_route(hub_url, &format!("/api/spaces/{}/pages", enc(&space)));
             let response: TreeResponse = http::request_json(&url, "GET", Some(token), None).await?;
             if response.pages.is_empty() {
                 println!("(no pages yet)");
             } else {
-                print!("{}", render_page_tree(&response.pages));
+                print!("{}", render_page_tree(&response.pages, summaries));
+            }
+            Ok(())
+        }
+        PageCommand::Search { query, space } => {
+            let query = query.join(" ");
+            if query.trim().is_empty() {
+                return Err(CliError::Launch("page search needs words to find".into()));
+            }
+            let space = resolve_space(hub_url, token, space).await?;
+            let route = format!(
+                "/api/spaces/{}/pages/search?query={}",
+                enc(&space),
+                enc(query.trim())
+            );
+            let response: SearchResponse =
+                http::request_json(&with_route(hub_url, &route), "GET", Some(token), None).await?;
+            if response.results.is_empty() {
+                println!("(no page holds every word of that; try fewer words)");
+            } else {
+                print!("{}", render_page_search(&response.results));
             }
             Ok(())
         }
@@ -735,9 +956,45 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             revision,
             since,
             block,
+            outline,
+            section,
             no_link,
         } => {
             let space = resolve_space(hub_url, token, space).await?;
+            if outline || section.is_some() {
+                let mut query = Vec::new();
+                if let Some(revision) = revision {
+                    query.push(format!("revision={revision}"));
+                }
+                match &section {
+                    Some(section) => query.push(format!("section={}", enc(section))),
+                    None => query.push("outline=1".into()),
+                }
+                if !no_link && let Some(conversation) = run_conversation() {
+                    query.push(format!("conversationId={}", enc(&conversation)));
+                    if let Some(section) = section.as_ref().filter(|section| !section.is_empty()) {
+                        query.push(format!("blockId={}", enc(section)));
+                    }
+                }
+                let route = format!("{}?{}", page_route(&space, &page), query.join("&"));
+                let mut part = read_page_part(hub_url, token, &route).await?;
+                match (&part.outline, &part.section) {
+                    (Some(outline), _) => print!("{}", render_page_outline(&part.page, outline)),
+                    (None, Some(mark)) => {
+                        part.page.body = page_text_for_agent(
+                            hub_url,
+                            token,
+                            &space,
+                            &part.page.summary.page_id,
+                            &part.page.body,
+                        )
+                        .await;
+                        print!("{}", render_page_section(&part.page, &mark.id));
+                    }
+                    (None, None) => {}
+                }
+                return Ok(());
+            }
             if let Some(since) = since {
                 let route = format!("{}/changes?since={since}", page_route(&space, &page));
                 let changes: PageChanges =
@@ -808,11 +1065,26 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             body,
             file,
             stdin,
-            blocks,
+            mut blocks,
+            section,
             conversation,
         } => {
             let space = resolve_space(hub_url, token, space).await?;
             let text = read_body(body, file, stdin)?;
+            // What a section read printed is written back as that section, never as the page.
+            let section = section.or_else(|| read_header_section(&text));
+            if let Some(section) = &section {
+                // A Hub that ignored the section would take its text for the whole page: ask first.
+                let route = format!(
+                    "{}?revision={base}&section={}",
+                    page_route(&space, &page),
+                    enc(section)
+                );
+                read_page_part(hub_url, token, &route).await?;
+                if blocks.is_empty() && !section.is_empty() {
+                    blocks.push(section.clone());
+                }
+            }
             let text =
                 page_text_from_agent(hub_url, token, &space, Some((&page, base)), &text).await?;
             let conversations: Vec<String> =
@@ -822,12 +1094,21 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 &url,
                 "PUT",
                 Some(token),
-                Some(json!({
-                    "baseRevision": base,
-                    "body": text,
-                    "conversationIds": conversations,
-                    "blockIds": blocks,
-                })),
+                Some(match &section {
+                    Some(section) => json!({
+                        "baseRevision": base,
+                        "body": text,
+                        "conversationIds": conversations,
+                        "blockIds": blocks,
+                        "sectionId": section,
+                    }),
+                    None => json!({
+                        "baseRevision": base,
+                        "body": text,
+                        "conversationIds": conversations,
+                        "blockIds": blocks,
+                    }),
+                }),
             )
             .await;
             match result {
@@ -1003,10 +1284,7 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
             space,
             conversation,
         } => {
-            let space = resolve_space(hub_url, token, space).await?;
-            let conversation = conversation
-                .or_else(run_conversation)
-                .ok_or_else(|| CliError::Launch("pass --conversation <channel-id>".into()))?;
+            let (space, conversation) = link_target(hub_url, token, space, conversation).await?;
             let url = with_route(hub_url, &format!("/api/spaces/{}/page-links", enc(&space)));
             let _: serde_json::Value = http::request_json(
                 &url,
@@ -1024,6 +1302,31 @@ pub async fn cmd_page(hub_url: &str, token: &str, command: PageCommand) -> error
                 "{} Linked {} to this conversation",
                 "✓".green().bold(),
                 page
+            );
+            Ok(())
+        }
+        PageCommand::Unlink {
+            page,
+            space,
+            conversation,
+        } => {
+            let (space, conversation) = link_target(hub_url, token, space, conversation).await?;
+            let url = with_route(
+                hub_url,
+                &format!(
+                    "/api/spaces/{}/page-links?pageId={}&conversationId={}",
+                    enc(&space),
+                    enc(&page),
+                    enc(&conversation)
+                ),
+            );
+            let _: serde_json::Value =
+                http::request_json(&url, "DELETE", Some(token), None).await?;
+            println!(
+                "{} Unlinked {} from conversation {}; reading or editing it there does not link it again",
+                "✓".green().bold(),
+                page,
+                conversation
             );
             Ok(())
         }
@@ -1299,7 +1602,98 @@ mod page_tests {
             agent_suggest_only: false,
             can_edit: true,
             governance: false,
+            summary: None,
         }
+    }
+
+    fn document(id: &str, body: &str) -> PageDocument {
+        PageDocument {
+            summary: page(id, None, "V"),
+            body: body.into(),
+            revision_info: PageRevision {
+                revision: 7,
+                kind: "edit".into(),
+                authors: vec![],
+                conversation_ids: vec![],
+                created_at: "2026-09-30T00:00:00Z".into(),
+            },
+        }
+    }
+
+    #[test]
+    fn an_outline_lists_headings_by_depth_with_their_slug_and_size() {
+        let entry = |id: &str, title: &str, depth, chars| PageOutlineEntry {
+            id: id.into(),
+            title: title.into(),
+            depth,
+            chars,
+        };
+        let rendered = render_page_outline(
+            &document("plan", ""),
+            &[
+                entry("", "", 0, 12),
+                entry("plan", "Plan", 1, 900),
+                entry("now", "Now", 2, 400),
+            ],
+        );
+        assert!(rendered.starts_with("---\npageId: plan\ntitle: PLAN\nrevision: 7\n"));
+        assert!(rendered.ends_with(
+            "---\n- (text before the first heading) · 12 chars\n- Plan (#plan) · 900 chars\n  - Now (#now) · 400 chars\n"
+        ));
+    }
+
+    #[test]
+    fn a_section_read_written_back_names_its_section_and_leaves_its_header_out() {
+        let rendered = render_page_section(&document("plan", "## Now\n\nship\n"), "now");
+        assert!(rendered.contains(
+            "section: now\nedit: xmatrix page edit plan --base 7 --section now -f <file>\n---\n## Now\n\nship\n"
+        ));
+        assert_eq!(read_header_section(&rendered).as_deref(), Some("now"));
+        assert_eq!(page_text(&rendered).unwrap(), "## Now\n\nship\n");
+        // A whole-page read names no section, and a page that merely says `section:` is not a header.
+        let whole = render_page_document_with(&document("plan", "# Plan\n"), None);
+        assert_eq!(read_header_section(&whole), None);
+        assert_eq!(read_header_section("section: now\n## Now\n"), None);
+    }
+
+    #[test]
+    fn tree_shows_each_page_s_line_only_when_asked() {
+        let pages = [
+            PageSummary {
+                summary: Some(PageSummaryLine {
+                    text: "Ships\nFriday".into(),
+                }),
+                ..page("plan", None, "V")
+            },
+            page("notes", Some("plan"), "V"),
+        ];
+        assert_eq!(
+            render_page_tree(&pages, true),
+            "- PLAN (plan · r1)\n  Ships Friday\n  - NOTES (notes · r1)\n"
+        );
+        assert_eq!(
+            render_page_tree(&pages, false),
+            "- PLAN (plan · r1)\n  - NOTES (notes · r1)\n"
+        );
+    }
+
+    #[test]
+    fn search_names_each_hit_by_its_reference_and_shows_the_text_around_it() {
+        let hit = |block: &str, snippet: &str| PageSearchHit {
+            page_id: "p1".into(),
+            title: "Plan".into(),
+            block_id: block.into(),
+            block_title: if block.is_empty() {
+                String::new()
+            } else {
+                "Goals".into()
+            },
+            snippet: snippet.into(),
+        };
+        assert_eq!(
+            render_page_search(&[hit("goals", "…ship the\nledger…"), hit("", "Plan")]),
+            "- Plan › Goals (page:p1#goals)\n  …ship the ledger…\n- Plan (page:p1)\n"
+        );
     }
 
     #[test]
@@ -1310,19 +1704,22 @@ mod page_tests {
             ..page("rules", None, "V")
         };
         assert_eq!(
-            render_page_tree(&[rules]),
+            render_page_tree(&[rules], false),
             "- RULES (rules · r1) [governance] [read-only]\n"
         );
     }
 
     #[test]
     fn tree_lists_children_under_their_parent_in_sibling_order() {
-        let rendered = render_page_tree(&[
-            page("b", Some("root"), "W"),
-            page("root", None, "V"),
-            page("a", Some("root"), "V"),
-            page("orphan", Some("hidden"), "V"),
-        ]);
+        let rendered = render_page_tree(
+            &[
+                page("b", Some("root"), "W"),
+                page("root", None, "V"),
+                page("a", Some("root"), "V"),
+                page("orphan", Some("hidden"), "V"),
+            ],
+            false,
+        );
         assert_eq!(
             rendered,
             "- ROOT (root · r1)\n  - A (a · r1)\n  - B (b · r1)\n- ORPHAN (orphan · r1)\n"

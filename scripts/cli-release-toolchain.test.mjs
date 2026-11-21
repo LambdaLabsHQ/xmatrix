@@ -21,12 +21,32 @@ function compilerInstalls(steps) {
   });
 }
 
-test("Unix CLI artifacts use the same immutable compiler installation as PR Clippy", () => {
+test("Unix CLI artifacts and release cache use the same immutable compiler installation as PR Clippy", () => {
   const ci = compilerInstalls(readYaml(".github/workflows/ci.yml").jobs["rust-cli"].steps);
   const release = compilerInstalls(readYaml(".github/workflows/cli-build.yml").jobs.build.steps);
+  const cache = compilerInstalls(readYaml(".github/workflows/cli-release-cache.yml").jobs.warm.steps);
   assert.equal(ci.length, 1, "PR must install one explicit compiler");
   assert.equal(release.length, 1, "release must install one explicit compiler");
+  assert.equal(cache.length, 1, "release cache must install one explicit compiler");
   assert.match(ci[0].uses, /@[a-f0-9]{40}$/u, "compiler action must be immutable");
   assert.equal(release[0].uses, ci[0].uses);
   assert.equal(release[0].with?.toolchain, ci[0].with?.toolchain);
+  assert.equal(cache[0].uses, ci[0].uses);
+  assert.equal(cache[0].with?.toolchain, ci[0].with?.toolchain);
+});
+
+// Setup Windows Rust CLI strips Git Bash from PATH so Cargo/MSVC never pick up
+// MSYS tools; any later `shell: bash` step on Windows falls back to WSL and fails.
+test("Windows CLI release build steps never invoke bash", () => {
+  const steps = readYaml(".github/workflows/cli-build.yml").jobs.build.steps;
+  const bad = steps.filter(
+    (step) =>
+      step.shell === "bash" &&
+      !(typeof step.if === "string" && /runner\.os\s*(?:!=\s*'Windows'|==\s*'(?:Linux|macOS)')/u.test(step.if)),
+  );
+  assert.deepEqual(
+    bad.map((step) => step.name ?? step.id ?? "<unnamed>"),
+    [],
+    "cli-build.yml build job has shell: bash step reachable on Windows",
+  );
 });

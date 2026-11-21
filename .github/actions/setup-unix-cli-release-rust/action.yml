@@ -1,0 +1,19 @@
+name: Setup Unix Rust toolchain and kache for CLI release
+description: >-
+  Install the reviewed Unix Rust compiler for the requested target triple and
+  enable the pinned kache compile cache.
+inputs:
+  target:
+    description: Target triple to build (for example x86_64-apple-darwin)
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install reviewed Unix Rust toolchain
+      uses: ./.github/actions/setup-unix-rust-toolchain
+      with:
+        targets: ${{ inputs.target }}
+
+    - name: Set up kache
+      shell: bash
+      run: bash .github/scripts/setup-kache.sh

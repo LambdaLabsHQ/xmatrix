@@ -177,10 +177,19 @@ pub(crate) fn read_fixture_http_request(
         request.push(byte[0]);
         assert!(request.len() < 8192);
     }
-    (
-        stream,
-        String::from_utf8(request).unwrap().to_ascii_lowercase(),
-    )
+    let headers = String::from_utf8(request).unwrap().to_ascii_lowercase();
+    // Drain any declared request body before writing and closing: on Windows,
+    // closing a TCP socket with unread bytes in its receive buffer sends RST
+    // and aborts the client's response read.
+    if let Some(content_length) = headers.lines().find_map(|line| {
+        line.strip_prefix("content-length:")
+            .and_then(|value| value.trim().parse::<usize>().ok())
+    }) {
+        assert!(content_length <= 65_536);
+        let mut body = vec![0u8; content_length];
+        stream.read_exact(&mut body).unwrap();
+    }
+    (stream, headers)
 }
 
 #[cfg(test)]

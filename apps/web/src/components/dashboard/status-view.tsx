@@ -12,7 +12,9 @@ import {
 import { cn } from "@/lib/utils";
 import { statusInkClass } from "@/components/ui/status-tone";
 
+import { SkeletonBar } from "./content-skeleton";
 import { Face } from "./face";
+import { FLEET_HERO_CLASS, FLEET_HERO_SUMMARY_CLASS, FLEET_HERO_TITLE_CLASS } from "./fleet-matrix-frames";
 import { MachineGlyph } from "./machine-glyph";
 import { registrationListed } from "./my-agents-registrations";
 import { ToolDetailSection } from "./tool-split";
@@ -72,32 +74,38 @@ export type FleetOverviewLine = {
  * matrix on a desktop, the agents across their machines above the list on a
  * phone.
  */
-export function FleetOverview({ title = "Agents", status, attention, note, children }: {
+export function FleetOverview({ title = "System Overview", status, attention, note, loading = false, children }: {
   title?: string;
   status: FleetStatus;
   /** Said after the count's own line: what waits on a person, where no list of it follows. */
   note?: ReactNode;
   /** What cannot take work until someone acts: signed out, out of quota, unconfirmed access, a machine not answering. */
   attention: FleetOverviewLine[];
+  /** While the Space's machines and agents are still arriving, hold the summary line's height without guessing counts. */
+  loading?: boolean;
   children?: ReactNode;
 }) {
   const { online, busy, workingCount } = status;
   return (
     <>
-      <header className="app-status-hero mb-9" data-testid="status-hero">
-        <h1 className="text-2xl font-black tracking-[-0.02em] text-foreground">{title}</h1>
-        <p className="mt-1.5 text-sm text-muted-foreground">
-          <span className={cn("tabular-nums", workingCount > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80")}
-            data-testid="status-working">{workingCount}</span>{" "}
-          <span className={workingCount > 0 ? "font-medium text-foreground" : undefined}>
-            {workingCount === 1 ? "agent working" : "agents working"}
-          </span>
-          {workingCount > 0 && " "}
-          <span data-testid="status-summary">
-            {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
-              : online > 0 ? null : " · No machine online"}
-            {note}
-          </span>
+      <header className={FLEET_HERO_CLASS} data-testid="status-hero">
+        <h1 className={FLEET_HERO_TITLE_CLASS}>{title}</h1>
+        <p className={FLEET_HERO_SUMMARY_CLASS}>
+          {loading ? <SkeletonBar width="11rem" /> : (
+            <>
+              <span className={cn("tabular-nums", workingCount > 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80")}
+                data-testid="status-working">{workingCount}</span>{" "}
+              <span className={workingCount > 0 ? "font-medium text-foreground" : undefined}>
+                {workingCount === 1 ? "agent working" : "agents working"}
+              </span>
+              {workingCount > 0 && " "}
+              <span data-testid="status-summary">
+                {workingCount > 0 ? `on ${busy} ${busy === 1 ? "machine" : "machines"}`
+                  : online > 0 ? null : " · No machine online"}
+                {note}
+              </span>
+            </>
+          )}
         </p>
       </header>
 

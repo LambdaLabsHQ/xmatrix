@@ -965,92 +965,36 @@ fn daemon_control_http_fallback_is_bounded() {
     assert_eq!(super::DAEMON_CONTROL_FALLBACK_BATCH_MAX_COMMANDS, 5);
 }
 
-#[test]
-fn daemon_effect_is_durable_before_network_admission() {
-    let root =
-        std::env::temp_dir().join(format!("xmatrix-runtime-effect-{}", uuid::Uuid::new_v4()));
-    let path = root.join("effects.json");
-    let journal: super::DaemonEffectJournal = std::sync::Arc::new(std::sync::Mutex::new(
-        xmatrix_windows_continuity::CommandEffectJournal::new(path.clone()),
-    ));
-    let command: super::MachineDaemonCommand = serde_json::from_value(serde_json::json!({
-        "type": "machine_stop_agent",
-        "requestId": "control-journal-1",
-        "relayLease": {
-            "leaseOwner": "owner-1",
-            "leaseGeneration": 1,
-            "entityVersion": 2,
-            "daemonEpoch": 3
-        }
-    }))
-    .expect("stop command");
-    assert!(matches!(
-        super::prepare_command_effect(&journal, &command).expect("durable prepare"),
-        super::CommandEffectDispatch::Execute(_)
-    ));
-    let persisted = std::fs::read_to_string(&path).expect("persisted journal");
-    assert!(persisted.contains("admitted"));
-    let _ = std::fs::remove_dir_all(root);
+fn test_command_results(label: &str) -> (super::DaemonCommandResults, std::path::PathBuf) {
+    let root = std::env::temp_dir().join(format!("xmatrix-runtime-{label}-{}", uuid::Uuid::new_v4()));
+    (super::DaemonCommandResults::new(root.clone()), root)
 }
 
-/// A daemon self-update between receipt and redelivery changes how the same
-/// command serializes. The successor must execute a command that never ran,
-/// not strand its Run as a conflict (2026-09-27: a summon admitted by 0.16.478
-/// and redelivered to 0.16.479 stayed `starting`).
+/// Whether a command runs is Hub's admission to decide. Receiving one leaves
+/// nothing on disk, so nothing local can refuse it or its redelivery.
 #[test]
-fn an_unexecuted_effect_from_an_older_cli_runs_after_the_daemon_update() {
-    let root = std::env::temp_dir().join(format!("xmatrix-runtime-rekey-{}", uuid::Uuid::new_v4()));
-    let journal: super::DaemonEffectJournal = std::sync::Arc::new(std::sync::Mutex::new(
-        xmatrix_windows_continuity::CommandEffectJournal::new(root.join("effects.json")),
-    ));
+fn a_delivered_command_runs_without_leaving_local_state() {
+    let (results, root) = test_command_results("deliver");
     let command: super::MachineDaemonCommand = serde_json::from_value(serde_json::json!({
         "type": "machine_stop_agent",
-        "requestId": "control-rekey-1",
+        "requestId": "control-deliver-1",
         "relayLease": {
             "leaseOwner": "owner-1", "leaseGeneration": 1, "entityVersion": 2, "daemonEpoch": 3
         }
     }))
     .expect("stop command");
-    let command_type = super::config::active_profile_context()
-        .map(|profile| format!("{}:stop", profile.id))
-        .unwrap_or_else(|| "stop".to_string());
-    for admitted in [false, true] {
-        {
-            let journal = journal.lock().expect("journal lock");
-            let _ = std::fs::remove_file(root.join("effects.json"));
-            let effect = journal
-                .receive("control-rekey-1", &command_type, &"b".repeat(64))
-                .expect("older CLI receive");
-            if admitted {
-                journal.admit(&effect.stable_id()).expect("older CLI admit");
-            }
-        }
+    for _ in 0..2 {
         assert!(matches!(
-            super::prepare_command_effect(&journal, &command).expect("rekeyed prepare"),
-            super::CommandEffectDispatch::Execute(_)
+            super::dispatch_daemon_command(&results, &command).expect("dispatch"),
+            super::CommandResultDispatch::Execute(control_id) if control_id == "control-deliver-1"
         ));
-        let effect = journal
-            .lock()
-            .expect("journal lock")
-            .effect_for_control_id("control-rekey-1")
-            .expect("journal read")
-            .expect("effect kept");
-        assert_ne!(effect.payload_digest, "b".repeat(64));
-        assert_eq!(
-            effect.phase,
-            xmatrix_windows_continuity::EffectPhase::Admitted
-        );
     }
-    let _ = std::fs::remove_dir_all(root);
+    assert!(!root.exists());
 }
 
 #[test]
-fn committed_daemon_effect_replay_uses_the_new_claim_lease() {
-    let root =
-        std::env::temp_dir().join(format!("xmatrix-runtime-replay-{}", uuid::Uuid::new_v4()));
-    let journal: super::DaemonEffectJournal = std::sync::Arc::new(std::sync::Mutex::new(
-        xmatrix_windows_continuity::CommandEffectJournal::new(root.join("effects.json")),
-    ));
+fn an_unconfirmed_result_answers_a_redelivery_under_the_new_claim_lease() {
+    let (results, root) = test_command_results("replay");
     let old_command: super::MachineDaemonCommand = serde_json::from_value(serde_json::json!({
         "type": "machine_spawn_agent",
         "requestId": "control-replay-1",
@@ -1064,15 +1008,6 @@ fn committed_daemon_effect_replay_uses_the_new_claim_lease() {
         }
     }))
     .expect("old spawn command");
-    let stable_id = {
-        let journal = journal.lock().expect("journal lock");
-        let effect = journal
-            .receive("control-replay-1", "spawn", &"a".repeat(64))
-            .expect("legacy effect receive");
-        let stable_id = effect.stable_id();
-        journal.admit(&stable_id).expect("legacy effect admit");
-        stable_id
-    };
     let old_result: super::MachineDaemonReport = serde_json::from_value(serde_json::json!({
         "type": "machine_spawn_result",
         "requestId": "control-replay-1",
@@ -1085,51 +1020,69 @@ fn committed_daemon_effect_replay_uses_the_new_claim_lease() {
         }
     }))
     .expect("old result");
-    super::commit_command_effect_result(&journal, &stable_id, &old_result)
-        .expect("committed local result");
+    super::keep_command_result(&results, "control-replay-1", &old_result);
     let mut new_value = serde_json::to_value(old_command).expect("old command value");
     new_value["relayLease"] = serde_json::json!({
         "leaseOwner": "owner:new", "leaseGeneration": 8,
         "entityVersion": 19, "daemonEpoch": 230
     });
     let new_command = serde_json::from_value(new_value).expect("reclaimed spawn command");
-    let (rebound_stable_id, expected_result_digest, rebound) =
-        match super::prepare_command_effect(&journal, &new_command).expect("effect replay") {
-            super::CommandEffectDispatch::Replay {
-                stable_id,
-                expected_result_digest,
-                report,
-                persist_rebind: true,
-            } => (stable_id, expected_result_digest, report),
-            super::CommandEffectDispatch::Replay {
-                persist_rebind: false,
-                ..
-            } => panic!("unacknowledged completion must persist its rebound envelope"),
-            super::CommandEffectDispatch::Execute(_) => panic!("committed effect must replay"),
-        };
-    let value = serde_json::to_value(rebound).expect("encoded result");
+    let rebound = match super::dispatch_daemon_command(&results, &new_command).expect("dispatch") {
+        super::CommandResultDispatch::Replay { control_id, report } => {
+            assert_eq!(control_id, "control-replay-1");
+            report
+        }
+        super::CommandResultDispatch::Execute(_) => panic!("an unconfirmed result must replay"),
+    };
+    let value = serde_json::to_value(&rebound).expect("encoded result");
+    assert_eq!(value["error"], "connection epoch changed before agent spawn");
     assert_eq!(value["relayLease"]["leaseOwner"], "owner:new");
     assert_eq!(value["relayLease"]["leaseGeneration"], 8);
     assert_eq!(value["relayLease"]["entityVersion"], 19);
     assert_eq!(value["relayLease"]["daemonEpoch"], 230);
-    super::persist_rebound_command_effect_result(
-        &journal,
-        &rebound_stable_id,
-        &expected_result_digest,
-        &serde_json::from_value(value.clone()).expect("rebound report"),
-    )
-    .expect("persist rebound result");
-    let persisted = journal
-        .lock()
-        .expect("journal lock")
-        .pending_completion_results()
-        .expect("pending result");
-    assert_eq!(persisted[0]["relayLease"]["daemonEpoch"], 230);
-    let mut conflicting_value = serde_json::to_value(new_command).expect("new command value");
-    conflicting_value["channelId"] = serde_json::json!("channel-2");
-    let conflicting_command =
-        serde_json::from_value(conflicting_value).expect("conflicting command");
-    assert!(super::prepare_command_effect(&journal, &conflicting_command).is_err());
+    // What is kept for the next reconnect is the answer under the new lease.
+    super::keep_command_result(&results, "control-replay-1", &rebound);
+    assert_eq!(results.all_unconfirmed()[0]["relayLease"]["daemonEpoch"], 230);
+    // Once Hub confirms the result, a later delivery is Hub asking again.
+    results.confirmed("control-replay-1");
+    assert!(matches!(
+        super::dispatch_daemon_command(&results, &new_command).expect("dispatch"),
+        super::CommandResultDispatch::Execute(_)
+    ));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+/// 2026-11-20: one stored quota reading the daemon could not read back made
+/// two machines refuse every command for six hours. A stored result this CLI
+/// cannot use costs that one command a second run, and nothing else.
+#[test]
+fn an_unusable_stored_result_reruns_its_own_command_only() {
+    let (results, root) = test_command_results("unusable");
+    let command = |id: &str| -> super::MachineDaemonCommand {
+        serde_json::from_value(serde_json::json!({
+            "type": "machine_stop_agent",
+            "requestId": id,
+            "relayLease": {
+                "leaseOwner": "owner-1", "leaseGeneration": 1, "entityVersion": 2, "daemonEpoch": 3
+            }
+        }))
+        .expect("stop command")
+    };
+    results
+        .keep("control-good", &serde_json::json!({ "type": "machine_stop_result", "requestId": "control-good", "ok": true }))
+        .expect("kept");
+    results
+        .keep("control-foreign", &serde_json::json!({ "type": "a_report_this_cli_does_not_know" }))
+        .expect("kept");
+    assert!(matches!(
+        super::dispatch_daemon_command(&results, &command("control-foreign")).expect("dispatch"),
+        super::CommandResultDispatch::Execute(_)
+    ));
+    assert!(results.unconfirmed("control-foreign").is_none());
+    assert!(matches!(
+        super::dispatch_daemon_command(&results, &command("control-good")).expect("dispatch"),
+        super::CommandResultDispatch::Replay { .. }
+    ));
     let _ = std::fs::remove_dir_all(root);
 }
 

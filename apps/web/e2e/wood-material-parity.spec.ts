@@ -36,7 +36,9 @@ for (const view of ['profile', 'activity', 'more']) {
     await page.setViewportSize({ width: 390, height: 844 });
     await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], channels: [E2E_CHANNEL] });
     await page.goto(`/app/${E2E_SPACE.id}/${view}`);
-    const paper = page.locator('.app-mobile-dock-page:not([inert]) .app-tool-paper');
+    // The loading skeleton shares the view's paper frame (#1889) and is swapped
+    // out when the view mounts; read the loaded paper, not a detached skeleton.
+    const paper = page.locator('.app-mobile-dock-page:not([inert]) .app-tool-paper:not(:has(.app-skeleton-inert))');
     await expect(paper).toBeVisible();
     const surfaces = await paper.evaluate((root) => [root, ...Array.from(root.querySelectorAll('*'))]
       .filter((element) => !element.closest('button, a, input, textarea, [data-slot="button"]'))

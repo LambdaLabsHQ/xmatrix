@@ -171,6 +171,35 @@ automatically:
 | A pasted page or block reference | Renders as a live card and becomes a link |
 | A human drags or removes a link | Manual correction, always allowed |
 
+Jev is put every page the author can read, each as its path in the tree and the
+one line saying how it stands. A Space whose pages do not fit one question is
+asked in batches, each naming its best page, and a last question chooses among
+those; past six batches the pages changed longest ago go unasked.
+
+A new Run of a conversation is given its linked pages whole, except a page that
+was only read there: one Run looking a page up is not the conversation working
+on it, so later Runs get that page as a line (its name, how it stands, the read
+that fetches it) and read it when they need it. A page becomes one the
+conversation works on when it is linked, referenced or edited there.
+
+A page is read a level at a time: the tree with each page's one line, a search
+that names the section holding the words, a page's outline (headings with their
+sizes), one section, the whole page. A part of a page is never written back as
+the page: a section goes back through an edit that names it, which the Hub
+applies to the revision it was read from and then merges like any other edit.
+What reaches a Run without its asking (the launch context) is still whole pages
+or a line naming one, never a cut page.
+
+Unlinking a page from a conversation (a bookmark's **Unlink from this
+conversation**, or `xmatrix page unlink <page-id>`) removes every link between
+them, stops co-writing between them, and records the unlink in
+`data.page_unlinks`. The page then no longer reaches the conversation: new Runs
+there do not get it as launch context, it leaves the header cards, and typing on
+it does not wake the conversation's Agent. Reading, editing or mentioning the
+page from that conversation afterwards does not link it again; only an explicit
+link (`xmatrix page link`, a human's link, an attachment) does, and it clears
+the unlink. Whoever may read the page and post in the conversation may unlink.
+
 A conversation inherits context from its linked pages and their ancestors. This
 replaces today's inheritance through ancestor Channels.
 

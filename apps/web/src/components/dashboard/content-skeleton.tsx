@@ -33,6 +33,28 @@ const LIST_SKELETON_ROWS = [
   ["7rem", "40%"],
 ] as const;
 
+/** Inline bar occupying the text slot of its host line without altering line height. */
+export function SkeletonBar({
+  width,
+  className,
+}: {
+  width?: string;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn("app-skeleton-bar", className)}
+      style={width ? { width } : undefined}
+      aria-hidden="true"
+    />
+  );
+}
+
+/** Matte circular placeholder matching an avatar or round badge slot. */
+export function SkeletonCircle({ className }: { className?: string }) {
+  return <span className={cn("app-skeleton-circle", className)} aria-hidden="true" />;
+}
+
 /** Stacked text bars for a panel that has nothing to show yet. */
 export function ContentSkeleton({
   label,
@@ -84,9 +106,9 @@ export function ListSkeleton({
             )}
             <span className={LIST_ROW_COPY_CLASS_NAME}>
               <span className={LIST_ROW_TITLE_LINE_CLASS_NAME}>
-                <span className={LIST_ROW_TITLE_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: title }} /></span>
+                <span className={LIST_ROW_TITLE_CLASS_NAME}><SkeletonBar width={title} /></span>
               </span>
-              <span className={LIST_ROW_META_CLASS_NAME}><span className="app-skeleton-bar" style={{ width: meta }} /></span>
+              <span className={LIST_ROW_META_CLASS_NAME}><SkeletonBar width={meta} /></span>
             </span>
           </div>
         );

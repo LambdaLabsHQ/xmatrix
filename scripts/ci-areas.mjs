@@ -62,7 +62,11 @@ const androidJavaActionPaths = [".github/actions/setup-android-java"];
 const linuxCommonActionPaths = [".github/actions/clear-linux-proxy"];
 const webWorkflowPaths = [".github/workflows/server-release.yml"];
 const hubWorkflowPaths = [".github/workflows/server-release.yml"];
-const rustWorkflowPaths = [".github/workflows/cli-build.yml", ".github/workflows/client-publish.yml"];
+const rustWorkflowPaths = [
+  ".github/workflows/cli-build.yml",
+  ".github/workflows/cli-release-cache.yml",
+  ".github/workflows/client-publish.yml",
+];
 const androidWorkflowPaths = [".github/workflows/android-deploy.yml", ".github/workflows/client-publish.yml"];
 const androidPaths = [
   "apps/android",
@@ -102,8 +106,12 @@ const hubDeployPolicyPaths = [
 
 const rustToolchainPaths = [
   "scripts/ci-cargo-fetch.mjs",
+  ".github/actions/cli-release-kache-restore",
+  ".github/actions/cli-release-kache-save",
   ".github/actions/configure-windows-runner",
+  ".github/actions/disable-windows-defender",
   ".github/actions/setup-rust-kache",
+  ".github/actions/setup-unix-cli-release-rust",
   ".github/actions/setup-unix-rust-toolchain",
   ".github/actions/setup-windows-rust-cli",
   ".github/scripts/kache-cache.ps1",
@@ -198,6 +206,7 @@ export function affectedPartitions(changedFiles) {
     android ||
     touches(
       files,
+      "apps/chrome-extension",
       "packages/mock-agent",
       "packages/decision-model",
       "scripts/hub-network-e2e",

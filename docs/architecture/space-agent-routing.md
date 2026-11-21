@@ -299,6 +299,26 @@ unrecoverably, the same message is handed once to the next-ranked environment
 conditions still apply, and the retry gets no fallback of its own. An Agent the
 author named is never replaced.
 
+A machine can also be connected and answer nothing: its daemon takes the start
+command and never admits, runs or fails it. No report arrives, so the Hub ends
+the start itself. A spawn command handed out three times, each lease left to
+lapse, fails as `machine_not_answering` (other commands keep ten deliveries);
+of 2,336 starts that succeeded in the three weeks to 2026-11-20, two needed
+more than three. In the transaction that ends it, the Hub records the
+failed-spawn report the machine never made
+(`data.machine_run_terminal_reports`, event `machine_spawn_result`), and the
+coordinator finalizes it like any terminal report: the failure is written on
+the summon, an `@auto` summon goes to the next environment, and the Run counts
+as a failed start. A reborn or wake has no Launch; its intent reads the
+command's failure as before.
+
+From that verdict every environment on the machine ranks last, in every Space,
+until the machine answers any command (a quota reading, a stop, a start) or 30
+minutes pass (`machineUnansweredAtSql`). If it is the only option it still
+gets the work, and the summon reason says its machine left the last command
+unanswered. Nothing is stored about the machine: placement reads the commands
+the Hub sent it, so the next one it answers ends the mark.
+
 A harness can also start, connect and do nothing: its turn ends with no
 reply and no error, in seconds or after half an hour, so nothing above
 notices. An environment whose last three summons in the Space all went that
@@ -313,20 +333,30 @@ reply (`recordAgentLaunchFirstReply`), as a message in the conversation
 does.
 
 Explicit summons (`@<harness>` or `@auto harness:...`) are never blocked on
-cached sign-in state or account-level billing refusals: only the program knows
+cached sign-in state or billing refusals: only the program knows
 whether its provider accepts it now, so a named summon is always given to its
 machine (and a stale copy never refuses a summon when the user signed in outside
-xMatrix). For a named summon the billing refusal's usage-limit hold, which reads as
-one used-up account window, also takes none of its models away; scoped windows
-the provider measured used up still refuse their models. Unnamed `@auto` routing, however, excludes candidates whose harness
+xMatrix). For a named summon both an account billing refusal and a scoped billing
+refusal take none of its models away; windows the provider measured used up
+still refuse their models. That is one call to `routingQuotaVerdict` with
+`summon: "named"`. The holds travel on the registration reading as
+`billingHolds` (an account expiry, or one expiry per quota scope), not as
+fabricated quota windows, so a hold keeps its own expiry instead of a
+window's max age. Unnamed `@auto` routing, however, excludes candidates whose harness
 is reported uninstalled, signed out (by daemon inventory `login === "signed_out"`
 or an unrecovered runtime `harness_signed_out` / `turnSignedOutAt` refusal), or
-under an account-level billing/payment refusal (such as missing payment method or
-insufficient balance). A signed-out candidate returns to unnamed `@auto` once a
+under an account-level billing/payment refusal (such as insufficient balance).
+When a payment-method refusal applies to one model's quota scope (such as Cursor's
+`API` pool refusing `"Add a payment method to continue"` while `Auto` stays
+included), xMatrix holds only that scope: unnamed `@auto` excludes models in
+the refused scope while keeping the registration routable on its other models,
+the Agents page keeps showing the open pool rather than
+`"Out of quota · window unavailable"`, and a successful reply clears only
+the scope that Run actually ran. A signed-out candidate returns to unnamed `@auto` once a
 newer harness inventory check reports `signed_in` or a Run on that registration
-replies; an account-level billing refusal holds without a time-based 1-hour
-expiry and clears only when an explicit Run on that registration replies
-successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
+replies; a billing refusal holds without a time-based 1-hour
+expiry and clears only when a Run on that registration (or on the refused scope)
+replies successfully (`clearRegistrationAccountHold`). A start or turn refused as signed
 out (`AGENT_SIGNED_OUT_LIFECYCLE_REASON`) is answered where it failed with a
 sign-in notice (`HARNESS_SIGNED_OUT_NOTICE_KIND`): when an `@auto` summon never
 answered, the message still falls back once (`dispatchStartupFallback`) or via

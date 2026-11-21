@@ -19,7 +19,7 @@ import {
 
 import { harnessSpaceSwitch } from "./harness-space-switch";
 import type { useInstalledHarnesses } from "./use-installed-harnesses";
-import { ContentSkeleton } from "./content-skeleton";
+import { SkeletonBar } from "./content-skeleton";
 import type { MachineSummary } from "./workspace-shell-helpers";
 import { actionClass } from "@/components/ui/action-tone";
 import { Button } from "@/components/ui/button";
@@ -328,7 +328,19 @@ function RegistrationSettings({
   }
   if (!details.data) {
     return (
-      <ContentSkeleton label="Loading settings" lines={3} className="mt-2" />
+      <div className="app-skeleton-inert mt-3 space-y-3" role="status" aria-label="Loading settings">
+        <div aria-hidden="true">
+          <ToolFacts>
+            <ToolFact label="Name"><SkeletonBar width="7rem" /></ToolFact>
+            <ToolFact label="Default model"><SkeletonBar width="9rem" /></ToolFact>
+            <ToolFact label="Working mode"><SkeletonBar width="5.5rem" /></ToolFact>
+          </ToolFacts>
+          <div className="mt-3 space-y-1 text-sm">
+            <p className="text-muted-foreground">Instructions</p>
+            <p><SkeletonBar width="65%" /></p>
+          </div>
+        </div>
+      </div>
     );
   }
   const server: RegistrationSettingsValues = {

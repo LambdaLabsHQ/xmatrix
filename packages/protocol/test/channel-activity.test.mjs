@@ -12,40 +12,23 @@ const plan = {
   kind: "plan",
   completed: ["Run e2e regression"],
   inProgress: "Open PR 2",
-  steps: [
-    { text: "Run e2e regression", status: "completed" },
-    { text: "Open PR 2", status: "in_progress" },
-    { text: "Write the CLI", status: "pending" },
-  ],
+  steps: [{ text: "Open PR 2", status: "in_progress" }],
 };
 
-test("a plan report reads back exactly as validated and renders one line", () => {
-  assert.deepEqual(normalizeChannelActivity(plan), plan);
-  assert.equal(channelActivityLine(plan), "✓ Run e2e regression · → Open PR 2");
-  const fresh = normalizeChannelActivity({ kind: "plan", completed: [], steps: plan.steps });
-  assert.equal(channelActivityLine(fresh), "Plan: 3 steps");
+test("a runtime plan is retired: a report of one is refused", () => {
+  assert.throws(() => normalizeChannelActivity(plan),
+    (error) => error instanceof ChannelActivityInvalid && error.reason === "plan_retired");
 });
 
-test("step titles are one bounded line and never an address", () => {
-  const long = "x".repeat(500);
-  const normalized = normalizeChannelActivity({ kind: "plan", completed: [`  ping\n@claude:2  ${long}`], steps: [] });
-  assert.equal([...normalized.completed[0]].length, 200);
-  assert.ok(normalized.completed[0].startsWith("ping @claude:2 x"));
-  const line = channelActivityLine({ kind: "plan", completed: ["Reply to @alice and ＠bob"], steps: [] });
-  assert.equal(line, "✓ Reply to alice and bob");
+test("an activity line never carries an address", () => {
+  const line = channelActivityLine({ kind: "pull_request", repository: "a@b/c", number: 1, url: "https://github.com/a/c/pull/1" });
   assert.doesNotMatch(line, /[@＠]/u);
 });
 
 test("malformed reports are refused rather than trimmed into something else", () => {
   const refused = [
     null, [], "plan", { kind: "note" },
-    { kind: "plan", completed: [], steps: [] },
-    { ...plan, extra: true },
-    { ...plan, steps: [{ text: "a", status: "done" }] },
-    { ...plan, steps: [{ text: "a", status: "pending", owner: "x" }] },
-    { ...plan, completed: [""] },
-    { ...plan, steps: Array.from({ length: 31 }, (_, index) => ({ text: `s${index}`, status: "pending" })) },
-    { ...plan, completed: Array.from({ length: 11 }, (_, index) => `s${index}`) },
+    { kind: "pull_request", url: "https://github.com/a/b/pull/1", extra: true },
     { kind: "pull_request", url: "https://gitlab.com/a/b/pull/1" },
     { kind: "pull_request", url: "https://github.com/a/b/pull/0" },
     { kind: "pull_request", url: "https://github.com/a/b/pull/1?x=1" },
@@ -69,8 +52,11 @@ test("a pull request report derives its coordinates from the URL", () => {
 });
 
 test("only an activity entry's own metadata yields an activity", () => {
-  assert.deepEqual(channelActivityOf({ xmatrixProvenance: "activity", xmatrixActivity: plan }), plan);
-  assert.equal(channelActivityOf({ xmatrixProvenance: "system_fact", xmatrixActivity: plan }), undefined);
+  const pull = { kind: "pull_request", repository: "a/b", number: 1, url: "https://github.com/a/b/pull/1" };
+  assert.deepEqual(channelActivityOf({ xmatrixProvenance: "activity", xmatrixActivity: pull }), pull);
+  assert.equal(channelActivityOf({ xmatrixProvenance: "system_fact", xmatrixActivity: pull }), undefined);
+  // A stored entry of the retired plan is still activity, but carries none.
+  assert.equal(channelActivityOf({ xmatrixProvenance: "activity", xmatrixActivity: plan }), undefined);
   assert.equal(channelActivityOf({ xmatrixProvenance: "activity", xmatrixActivity: { kind: "x" } }), undefined);
   assert.equal(channelActivityOf(undefined), undefined);
 });

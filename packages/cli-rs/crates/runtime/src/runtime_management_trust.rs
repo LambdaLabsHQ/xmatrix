@@ -1771,7 +1771,9 @@ pub(crate) fn spawn_daemon_handoff_request_watch() -> Option<tokio::task::JoinHa
                 "○ Daemon runs xMatrix CLI {}; handing this idle run to it",
                 request.version
             );
-            let failure = match tokio::process::Command::new(&request.executable)
+            let mut update_command = tokio::process::Command::new(&request.executable);
+            crate::process_tree::hide_tokio_console_window(&mut update_command);
+            let failure = match update_command
                 .arg("update-self")
                 .stdin(Stdio::null())
                 .output()
@@ -2546,7 +2548,7 @@ struct DaemonSpawnRuntime {
     run_registry: DaemonRunRegistry,
     spawn_inflight: DaemonSpawnInflight,
     relay: SharedMachineDaemonConnection,
-    effect_journal: DaemonEffectJournal,
+    command_results: DaemonCommandResults,
 }
 
 impl DaemonSpawnRuntime {
@@ -2607,7 +2609,7 @@ fn spawn_daemon_spawn_intent_poll_task(runtime: DaemonSpawnRuntime) -> tokio::ta
             host_id,
             run_registry,
             relay,
-            effect_journal,
+            command_results,
             request_broker,
             auth_broker,
             ..
@@ -2686,7 +2688,7 @@ fn spawn_daemon_spawn_intent_poll_task(runtime: DaemonSpawnRuntime) -> tokio::ta
                             hub_url.clone(),
                             token.clone(),
                             relay.clone(),
-                            effect_journal.clone(),
+                            command_results.clone(),
                             request_broker.clone(),
                             command,
                         );
@@ -2697,19 +2699,16 @@ fn spawn_daemon_spawn_intent_poll_task(runtime: DaemonSpawnRuntime) -> tokio::ta
                         }));
                     }
                     command @ MachineDaemonCommand::MachineStopAgent { .. } => {
-                        let control_id = polled_daemon_command_control_id(&command)
-                            .unwrap_or_default()
-                            .to_string();
-                        let effect_id = match prepare_polled_daemon_command(
+                        let control_id = match prepare_polled_daemon_command(
                             &hub_url,
                             &token,
                             &relay,
-                            &effect_journal,
+                            &command_results,
                             &command,
                         )
                         .await
                         {
-                            Ok(Some((effect_id, _))) => effect_id,
+                            Ok(Some((control_id, _))) => control_id,
                             Ok(None) => continue,
                             Err(err) => {
                                 eprintln!(
@@ -2731,12 +2730,11 @@ fn spawn_daemon_spawn_intent_poll_task(runtime: DaemonSpawnRuntime) -> tokio::ta
                         )
                         .await;
                         let message = request.into_report(result, handoff_export);
-                        if let Err(err) = report_polled_command_effect_result_http(
+                        if let Err(err) = report_polled_command_result_http(
                             &hub_url,
                             &token,
                             &relay,
-                            &effect_journal,
-                            &effect_id,
+                            &command_results,
                             &control_id,
                             message,
                         )
@@ -2785,13 +2783,11 @@ async fn prepare_polled_daemon_command(
     hub_url: &str,
     token: &str,
     relay: &SharedMachineDaemonConnection,
-    effect_journal: &DaemonEffectJournal,
+    command_results: &DaemonCommandResults,
     command: &MachineDaemonCommand,
 ) -> error::Result<Option<(String, Option<String>)>> {
-    let control_id = polled_daemon_command_control_id(command)
-        .ok_or_else(|| CliError::Launch("Polled daemon command has no control ID".into()))?;
-    match prepare_command_effect(effect_journal, command)? {
-        CommandEffectDispatch::Execute(stable_id) => {
+    match dispatch_daemon_command(command_results, command)? {
+        CommandResultDispatch::Execute(control_id) => {
             let initial_agent_token = if daemon_spawn_has_combined_admission_authority(command) {
                 match admit_and_authorize_daemon_spawn_http(hub_url, token, command).await? {
                     DaemonSpawnAdmission::Authorized(token) => Some(token),
@@ -2810,13 +2806,12 @@ async fn prepare_polled_daemon_command(
                             None,
                             &intent,
                         );
-                        report_polled_command_effect_result_http(
+                        report_polled_command_result_http(
                             hub_url,
                             token,
                             relay,
-                            effect_journal,
-                            &stable_id,
-                            control_id,
+                            command_results,
+                            &control_id,
                             report,
                         )
                         .await?;
@@ -2827,31 +2822,13 @@ async fn prepare_polled_daemon_command(
                 admit_daemon_command_http(hub_url, token, command).await?;
                 None
             };
-            Ok(Some((stable_id, initial_agent_token)))
+            Ok(Some((control_id, initial_agent_token)))
         }
-        CommandEffectDispatch::Replay {
-            stable_id,
-            expected_result_digest,
-            report,
-            persist_rebind,
-        } => {
+        CommandResultDispatch::Replay { control_id, report } => {
             let report = relay.bind_claimed_command_registry_causality(report)?;
-            if persist_rebind {
-                persist_rebound_command_effect_result(
-                    effect_journal,
-                    &stable_id,
-                    &expected_result_digest,
-                    &report,
-                )?;
-            }
+            keep_command_result(command_results, &control_id, &report);
             report_daemon_control_result_http(hub_url, token, report).await?;
-            effect_journal
-                .lock()
-                .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-                .acknowledge(control_id)
-                .map_err(|error| {
-                    CliError::Launch(format!("Daemon command completion ack failed: {error}"))
-                })?;
+            command_results.confirmed(&control_id);
             Ok(None)
         }
     }
@@ -2865,16 +2842,16 @@ async fn handle_polled_daemon_spawn(
     let DaemonSpawnRuntime {
         hub_url,
         relay,
-        effect_journal,
+        command_results,
         ..
     } = &runtime;
     let control_id = polled_daemon_command_control_id(&command)
         .unwrap_or_default()
         .to_string();
-    let effect_id =
-        match prepare_polled_daemon_command(hub_url, &token, relay, effect_journal, &command).await
+    let initial_agent_token =
+        match prepare_polled_daemon_command(hub_url, &token, relay, command_results, &command).await
         {
-            Ok(Some(prepared)) => prepared,
+            Ok(Some((_, initial_agent_token))) => initial_agent_token,
             Ok(None) => return,
             Err(err) => {
                 eprintln!(
@@ -2884,19 +2861,17 @@ async fn handle_polled_daemon_spawn(
                 return;
             }
         };
-    let (effect_id, initial_agent_token) = effect_id;
     let Some(intent) = DaemonSpawnRequest::from_command(command) else {
         return;
     };
     let claim_key = match runtime.claim(&intent).await {
         DaemonSpawnClaim::Existing(existing) => {
             let message = existing.into_report(&intent);
-            if let Err(err) = report_polled_command_effect_result_http(
+            if let Err(err) = report_polled_command_result_http(
                 hub_url,
                 &token,
                 relay,
-                effect_journal,
-                &effect_id,
+                command_results,
                 &control_id,
                 message,
             )
@@ -2911,12 +2886,11 @@ async fn handle_polled_daemon_spawn(
         }
         DaemonSpawnClaim::Conflict => {
             let message = conflicting_daemon_spawn_result(&intent);
-            if let Err(err) = report_polled_command_effect_result_http(
+            if let Err(err) = report_polled_command_result_http(
                 hub_url,
                 &token,
                 relay,
-                effect_journal,
-                &effect_id,
+                command_results,
                 &control_id,
                 message,
             )
@@ -2942,12 +2916,11 @@ async fn handle_polled_daemon_spawn(
             None,
         )
         .await;
-    if let Err(err) = report_polled_command_effect_result_http(
+    if let Err(err) = report_polled_command_result_http(
         hub_url,
         &token,
         relay,
-        effect_journal,
-        &effect_id,
+        command_results,
         &control_id,
         message,
     )

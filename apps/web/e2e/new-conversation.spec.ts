@@ -100,14 +100,15 @@ test("an open draft gives way to every other rail destination and does not come 
   await page.goto("/app/personal-sspaceperso/channels/general-cchannelgen", { waitUntil: "domcontentloaded" });
   const composer = page.getByTestId("new-conversation");
   const rail = page.locator(".app-rail");
-  for (const label of ["Agents", "Settings"]) {
+  // The Agents destination's page is headed System Overview (#1841).
+  for (const [label, heading] of [["Agents", "System Overview"], ["Settings", "Settings"]] as const) {
     // A destination with a list of its own shows it in the conversation list's place.
     await rail.getByRole("button", { name: "Channels", exact: true }).click();
     await page.locator(".app-sidebar .app-list-create").click();
     await expect(composer).toBeVisible();
     await rail.getByRole("button", { name: label, exact: true }).click();
     await expect(composer).toBeHidden();
-    await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: label, exact: true })).toBeVisible();
+    await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: heading, exact: true })).toBeVisible();
   }
   await rail.getByRole("button", { name: "Channels", exact: true }).click();
   await expect(composer).toBeHidden();

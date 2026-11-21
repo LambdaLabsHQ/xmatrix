@@ -20,6 +20,14 @@ import {
   type FleetMatrixColumn,
   type FleetMatrixEditor,
 } from "./fleet-matrix";
+import {
+  MOBILE_MATRIX_CELL_CLASS,
+  MOBILE_MATRIX_HEADING_CLASS,
+  MOBILE_MATRIX_MACHINE_NAME_CLASS,
+  MOBILE_MATRIX_ROOT_CLASS,
+  MOBILE_MATRIX_SECTION_CLASS,
+  mobileMatrixGridStyle,
+} from "./fleet-matrix-frames";
 import { MachineGlyph } from "./machine-glyph";
 import { meterTone, type MachineGlanceReading } from "./machine-load";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
@@ -96,9 +104,7 @@ export function MobileAvatarMatrix({
   const showInlineAdd = columns.length < 3 && hasAddableColumn;
   const slotCount = columns.length + (showInlineAdd ? 1 : 0);
   const scrollable = slotCount > 8;
-  const gridStyle = scrollable
-    ? { gridTemplateColumns: `repeat(${slotCount}, 2.75rem)` }
-    : { gridTemplateColumns: `repeat(${Math.max(slotCount, 1)}, min(2.75rem, calc(100% / ${Math.max(slotCount, 1)})))` };
+  const gridStyle = mobileMatrixGridStyle(slotCount);
   // A missing agent is a quiet dot. It is drawn as the agent's outline only where most of the reader's own machines
   // have it (two at least): there it reads as the one that is missing, and the grid is not filled with outlines.
   const ownRows = rows.filter((row) => row.own);
@@ -109,7 +115,7 @@ export function MobileAvatarMatrix({
   let inlineAddAssigned = false;
 
   return (
-    <div data-testid="fleet-matrix" className="space-y-1">
+    <div data-testid="fleet-matrix" className={MOBILE_MATRIX_ROOT_CLASS}>
       {(attentionCount > 0 || workingCount > 0 || (hasAddableColumn && !showInlineAdd)) && (
         <div className="flex min-h-7 items-center justify-between gap-2 pb-1">
           <div className="flex min-w-0 items-center gap-2.5 text-sm">
@@ -147,7 +153,7 @@ export function MobileAvatarMatrix({
               <MachineGlyph os={row.os} className="size-4" />
             </span>
             {/* The name keeps its room: what is said after it gives way first. */}
-            <span className="max-w-[62%] shrink-0 truncate text-[15px] font-bold tracking-tight text-foreground">{row.name}</span>
+            <span className={MOBILE_MATRIX_MACHINE_NAME_CLASS}>{row.name}</span>
             {row.localTag}
             {row.exception && (
               <span data-testid="fleet-machine-exception" className={cn("min-w-0 truncate text-xs font-semibold", statusInkClass("attention"))}>
@@ -168,18 +174,18 @@ export function MobileAvatarMatrix({
               <h2 className="pt-4 pb-1 text-xs font-bold text-muted-foreground">{groupLabel}</h2>
             )}
             <section aria-label={row.name} data-testid="fleet-machine"
-              className={cn("py-2.5", index > 0 && !groupLabel && "border-t border-foreground/[0.08]", row.dimmed && "opacity-60")}>
+              className={cn(MOBILE_MATRIX_SECTION_CLASS, index > 0 && !groupLabel && "border-t border-foreground/[0.08]", row.dimmed && "opacity-60")}>
               {row.onOpenMachine ? (
                 <button type="button" data-testid="machine-row" onClick={row.onOpenMachine}
-                  className="flex w-full min-w-0 items-center gap-2 pb-1.5 text-left">
+                  className={MOBILE_MATRIX_HEADING_CLASS}>
                   {headingCopy}
                   <ChevronRight className="ml-auto size-3.5 shrink-0 text-muted-foreground/45" aria-hidden="true" />
                 </button>
               ) : (
-                <div className="flex w-full min-w-0 items-center gap-2 pb-1.5">{headingCopy}</div>
+                <div className={MOBILE_MATRIX_HEADING_CLASS}>{headingCopy}</div>
               )}
 
-              <div className={cn(scrollable && "-mx-[var(--mobile-content-inset,1rem)] overflow-x-auto px-[var(--mobile-content-inset,1rem)] snap-x")}>
+              <div className={cn(scrollable && "-mx-[var(--mobile-content-inset,1rem)] overflow-x-auto px-[var(--mobile-content-inset,1rem)] scroll-px-[var(--mobile-content-inset,1rem)] snap-x")}>
                 <div className="grid items-center" style={gridStyle}>
                   {columns.map((column) => {
                     const id = cellId({ row: row.key, harness: column.harness });
@@ -275,7 +281,8 @@ function MobileAvatarCell({ cell, harness, machine, id, selected, offline, ghost
 
   const edits = { type: "button" as const, onClick: onSelect, "data-cell": id, "aria-expanded": selected, "aria-haspopup": "dialog" as const };
   const buttonClass = cn(
-    "flex flex-col items-center justify-center gap-1 rounded-xl py-1 transition-colors snap-start",
+    MOBILE_MATRIX_CELL_CLASS,
+    "transition-colors snap-start",
     selected && "bg-foreground/[0.05] ring-2 ring-foreground/65",
   );
 

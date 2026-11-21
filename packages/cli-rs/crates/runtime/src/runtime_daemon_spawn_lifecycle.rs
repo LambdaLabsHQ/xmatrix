@@ -1661,25 +1661,18 @@ async fn report_daemon_control_result_http(
     }
 }
 
-async fn report_polled_command_effect_result_http(
+async fn report_polled_command_result_http(
     hub_url: &str,
     token: &str,
     relay: &SharedMachineDaemonConnection,
-    journal: &DaemonEffectJournal,
-    stable_id: &str,
+    journal: &DaemonCommandResults,
     control_id: &str,
     message: MachineDaemonReport,
 ) -> error::Result<()> {
     let message = relay.bind_claimed_command_registry_causality(message)?;
-    commit_command_effect_result(journal, stable_id, &message)?;
+    keep_command_result(journal, control_id, &message);
     report_daemon_control_result_http(hub_url, token, message).await?;
-    journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-        .acknowledge(control_id)
-        .map_err(|error| {
-            CliError::Launch(format!("Daemon command completion ack failed: {error}"))
-        })?;
+    journal.confirmed(control_id);
     Ok(())
 }
 

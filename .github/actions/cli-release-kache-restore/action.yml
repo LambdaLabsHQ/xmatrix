@@ -1,0 +1,50 @@
+name: Restore hosted CLI release kache
+description: >-
+  On ephemeral GitHub-hosted runners, place kache on the workspace volume (on
+  Windows) and restore the per-target CLI release kache store from Actions cache.
+inputs:
+  part:
+    description: CLI release part name (linux-x64, macos-arm64, macos-x64, windows-x64)
+    required: true
+outputs:
+  cache-hit:
+    description: Whether the exact commit key matched
+    value: ${{ runner.os == 'Windows' && steps.restore-windows.outputs.cache-hit || steps.restore-unix.outputs.cache-hit }}
+  cache-matched-key:
+    description: The matched Actions cache key, if any
+    value: ${{ runner.os == 'Windows' && steps.restore-windows.outputs.cache-matched-key || steps.restore-unix.outputs.cache-matched-key }}
+runs:
+  using: composite
+  steps:
+    - name: Place the kache store on a GitHub-hosted Windows runner
+      if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $utf8 = [System.Text.UTF8Encoding]::new($false)
+        [System.IO.File]::AppendAllText($env:GITHUB_ENV, "KACHE_CACHE_DIR=$env:RUNNER_TEMP\kache`n", $utf8)
+
+    - name: Restore the CLI release kache store (Windows)
+      id: restore-windows
+      if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ${{ runner.temp }}\kache\store
+          ${{ runner.temp }}\kache\index.db*
+        key: kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+        restore-keys: |
+          kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
+          kache-cli-release-v1-${{ inputs.part }}-
+
+    - name: Restore the CLI release kache store (Unix)
+      id: restore-unix
+      if: runner.environment == 'github-hosted' && runner.os != 'Windows'
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          ~/.cache/kache/store
+          ~/.cache/kache/index.db*
+        key: kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+        restore-keys: |
+          kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-
+          kache-cli-release-v1-${{ inputs.part }}-

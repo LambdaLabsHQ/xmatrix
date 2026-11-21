@@ -45,7 +45,7 @@ test("rail destinations reuse the chat list resize handle", async ({ page }) => 
 
   // Agents is a matrix with no list beside it, so it has no column to resize.
   await page.goto("/app/personal-sspaceperso/status");
-  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "Agents" })).toBeVisible();
+  await expect(page.locator(".app-main").getByRole("heading", { level: 1, name: "System Overview" })).toBeVisible();
   await expect(handle).toHaveCount(0);
   await expect(page.locator(".app-tool-list")).toHaveCount(0);
 

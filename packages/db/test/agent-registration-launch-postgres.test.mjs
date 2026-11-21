@@ -59,6 +59,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
       CREATE TABLE data.first_message_launch_choices (space_id text,channel_id text,message_id text,author_user_id text,choice text,source_input_version bigint,source_body_hash text,failure_code text);
       CREATE TABLE data.machine_daemons (daemon_id text,owner_user_id text,machine_id text,hostname text,status text,
         capabilities_json jsonb,connection_epoch bigint,updated_at timestamptz NOT NULL DEFAULT now());
+      CREATE TABLE data.machine_daemon_commands (command_id text PRIMARY KEY,owner_user_id text,machine_id text,
+        status text,result_json jsonb,completed_at timestamptz);
       CREATE TABLE data.machine_run_routes (run_id text,owner_user_id text,machine_id text,terminal_at timestamptz);
       CREATE TABLE data.space_control_heads (space_id text PRIMARY KEY,commit_sequence bigint,updated_at timestamptz);
       CREATE TABLE data.outbox (outbox_id text PRIMARY KEY,space_id text,topic text,aggregate_kind text,aggregate_id text,
@@ -370,6 +372,10 @@ integration("launch survives a hostname change with stale Workspace metadata and
         observedAt: new Date(Date.now() - 1000).toISOString(), target: "cloudflare-speed", protocol: "https",
         attempts: 10, failures: 0, latencyMedianMs: 20, latencyP95Ms: 30, jitterMs: 3 } }]);
     await sql(`INSERT INTO data.space_harness_profiles VALUES ('space','codex','Reviews and audits.',2,now())`);
+    // The machine left the Hub's last command unanswered a minute ago and has answered none since.
+    await sql(`INSERT INTO data.machine_daemon_commands VALUES ('answered','owner','machine','completed','{"ok":true}',
+        statement_timestamp()-interval '2 minutes'),
+      ('silent','owner','machine','failed','{"ok":false,"unanswered":true}',statement_timestamp()-interval '1 minute')`);
     const routed = await launches.dispatchFromMessage({ commandId: "capability", actorUserId: "caller",
       channelId: "channel", sourceMessageId: "capability", body: capabilityBody }, async ({ candidates, tags }) => {
         assert.equal(Object.hasOwn(tags, "oneshot"), false);
@@ -383,6 +389,8 @@ integration("launch survives a hostname change with stale Workspace metadata and
         assert.equal(candidates[0].observations.machineResources.cpuUsagePercent, 97);
         assert.equal(candidates[0].observations.machineResources.network.latencyP95Ms, 30);
         assert.ok(candidates[0].observations.outstandingMachineAllocations >= 3);
+        const quietFor = Date.now() - Date.parse(candidates[0].machineUnansweredAt);
+        assert.ok(quietFor > 30_000 && quietFor < 5 * 60_000, `${candidates[0].machineUnansweredAt}`);
         assert.deepEqual(candidates[0].modelCatalog, [{ model: "provider/model", description: "Observed model",
           efforts: [{ value: "high", description: "Thorough" }] }]);
         assert.deepEqual(candidates[0].workspaces, [{ reference: "workspace", canonicalCwd: "/repo", machineId: "machine", description: "Repo" }]);

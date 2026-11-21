@@ -1,0 +1,27 @@
+name: Keep Windows Defender off build directories
+description: >-
+  Exclude workspace, temp, Cargo, rustup, and kache directories from Windows
+  Defender real-time scanning; on ephemeral GitHub-hosted VMs, disable
+  real-time scanning for the job.
+runs:
+  using: composite
+  steps:
+    - name: Keep Defender off the build directories
+      if: runner.os == 'Windows'
+      shell: powershell
+      run: |
+        $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
+        $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { Join-Path $HOME '.rustup' }
+        $paths = @(
+          $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP,
+          (Join-Path $env:LOCALAPPDATA 'kache-runners'), $cargoHome, $rustupHome
+        ) | Where-Object { $_ } | Select-Object -Unique
+        try {
+          Add-MpPreference -ExclusionPath $paths -ErrorAction Stop
+          if ($env:RUNNER_ENVIRONMENT -eq 'github-hosted') {
+            Set-MpPreference -DisableRealtimeMonitoring $true -DisableBehaviorMonitoring $true -DisableIOAVProtection $true -ErrorAction Stop
+          }
+          Write-Host "Defender skips: $($paths -join '; ')"
+        } catch {
+          Write-Host "Defender settings unchanged on this runner: $($_.Exception.Message)"
+        }

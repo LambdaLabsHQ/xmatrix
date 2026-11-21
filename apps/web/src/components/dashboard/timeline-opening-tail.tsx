@@ -28,11 +28,21 @@ import { cn } from "@/lib/utils";
 export const TimelineRowSlot = memo(function TimelineRowSlot({ host, ...attributes }: { host: HTMLElement } & HTMLAttributes<HTMLDivElement>) {
   const adopt = useCallback((slot: HTMLDivElement | null) => {
     if (!slot || host.parentElement === slot) return;
-    // A move keeps the row's focus, selection and running animations; where
-    // the browser has none, or the host is not in the page yet, it is appended.
+    // A move keeps the row's focus, selection, hover and running animations;
+    // where the browser has none, or the host is not in the page yet, it is
+    // appended.
     const movable = slot as HTMLDivElement & { moveBefore?: (node: Node, before: Node | null) => void };
-    if (movable.moveBefore && host.isConnected && slot.isConnected) movable.moveBefore(host, null);
-    else slot.appendChild(host);
+    if (movable.moveBefore && host.isConnected && slot.isConnected) {
+      // The virtual list drops its `invisible` class in the same commit that
+      // mounts these slots. Resolve the slot's visibility before moving a live
+      // row into it: landing `moveBefore` inside an ancestor whose cached
+      // style is still `visibility: hidden` makes Chromium drop `:hover` for a
+      // frame, flashing the row highlight and restarting the hover bar's fade.
+      void slot.ownerDocument.defaultView?.getComputedStyle(slot).visibility;
+      movable.moveBefore(host, null);
+    } else {
+      slot.appendChild(host);
+    }
   }, [host]);
   return <div ref={adopt} {...attributes} />;
 });
@@ -171,6 +181,13 @@ export function TimelineOpeningTail({ scrollRoot, complete, header, footerClassN
       if (!hidden || list.childElementCount === 0) return;
       landing.disconnect();
       landed = true;
+      /* The tail draws the last screen, so the list takes over at its end.
+         A scroll while the list was hidden (a reader who scrolled before it
+         landed) and a landing that stopped short of a total height still
+         settling moved nothing on screen, yet place the list's rows away
+         from these: at the handover the reader's message jumped that far. */
+      const end = scrollRoot.scrollHeight - scrollRoot.clientHeight;
+      if (Math.abs(scrollRoot.scrollTop - end) >= 1) scrollRoot.scrollTop = end;
       settleBy = performance.now() + SETTLE_WITHIN_MS;
       onListLanded();
       awaitQuietFrame();

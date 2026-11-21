@@ -52,3 +52,32 @@ test('no package outside protocol decides used up from a headroom number', () =>
   }
   assert.deepEqual(offenders, [], 'ask routingQuotaVerdict (or registrationQuotaVerdict) instead');
 });
+
+test('a billing hold is used up until its own expiry, and a named summon ignores it', () => {
+  const until = '2027-06-01T00:00:00.000Z';
+  const stale = '2026-10-01T00:00:00Z';
+  const usage = reading({ quotaObservedAt: stale, quotaUsages: [], billingHolds: { accountUntil: until } });
+  const held = routingQuotaVerdict(usage, now);
+  assert.equal(held.state, 'usedUp');
+  assert.equal(held.until, until, 'a payment hold is not capped at a quota window\'s max age');
+  assert.equal(routingQuotaVerdict(usage, now, { summon: 'named' }).state, 'unknown',
+    'a named summon reads the provider windows alone');
+  const open = reading({ quotaUsages: [{ percent: 20, reset_at: '2026-11-20T00:00:00Z' }],
+    billingHolds: { scopes: [{ scope: 'API', until }] } });
+  assert.equal(routingQuotaVerdict(open, now).state, 'open', 'a scope hold does not use the account up');
+  assert.equal(routingQuotaVerdict(open, now, { model: { quotaScopes: ['Auto'] } }).state, 'open');
+  assert.equal(routingQuotaVerdict(open, now, { model: { quotaScopes: ['API'] } }).state, 'usedUp');
+  assert.equal(routingQuotaVerdict(open, now, { model: { quotaScopes: ['API'] }, summon: 'named' }).state, 'open');
+  const measured = reading({ scopedQuotaUsages: [{ percent: 100, scope: 'API', reset_at: '2026-11-19T00:00:00Z' }] });
+  assert.equal(routingQuotaVerdict(measured, now, { model: { quotaScopes: ['API'] }, summon: 'named' }).state, 'usedUp',
+    'a provider window still refuses a named summon');
+});
+
+test('launch choice does not keep a second billing-hold policy', () => {
+  const source = readFileSync(new URL('../../hub/src/registration-launch-choice.ts', import.meta.url), 'utf8');
+  assert.equal(source.includes('liftBillingHold'), false);
+  assert.equal(source.includes('billingHeldScope'), false);
+  assert.equal(source.includes('billingRefusalScopes'), false);
+  const probe = readFileSync(new URL('../../db/src/agent-registration-quota-probe.ts', import.meta.url), 'utf8');
+  assert.equal(probe.includes('billingRefusal: true'), false, 'a billing hold is not stored as a quota window');
+});

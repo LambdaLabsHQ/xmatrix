@@ -2129,6 +2129,17 @@ pub enum PageCommand {
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,
+        /// Under each page, the one line saying how it stands
+        #[arg(long)]
+        summaries: bool,
+    },
+    /// Find the pages and sections whose text holds every word of a query
+    Search {
+        /// Words to find; several words may be apart, and the pages holding them as typed come first
+        query: Vec<String>,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
     },
     /// Print a page as markdown with its revision header
     Read {
@@ -2146,6 +2157,12 @@ pub enum PageCommand {
         /// Heading slug you are reading (recorded as a link from this conversation)
         #[arg(long)]
         block: Option<String>,
+        /// Print the page's headings with the size of each section, not its text
+        #[arg(long, conflicts_with_all = ["since", "section"])]
+        outline: bool,
+        /// Print one section only: a heading slug from --outline or `page search`, deeper headings included
+        #[arg(long, conflicts_with_all = ["since", "block"])]
+        section: Option<String>,
         /// Do not record a link from this conversation
         #[arg(long = "no-link")]
         no_link: bool,
@@ -2172,6 +2189,9 @@ pub enum PageCommand {
         /// Heading slugs this edit changes (repeatable)
         #[arg(long = "block")]
         blocks: Vec<String>,
+        /// Rewrite one section only: the markdown is that section, heading included, and the rest of the page stays
+        #[arg(long)]
+        section: Option<String>,
         /// Conversation this edit comes from (defaults to this Run's conversation)
         #[arg(long)]
         conversation: Option<String>,
@@ -2269,6 +2289,17 @@ pub enum PageCommand {
         /// Heading slug
         #[arg(long)]
         block: Option<String>,
+        /// Space ID (defaults to this Run's conversation's Space)
+        #[arg(long)]
+        space: Option<String>,
+        /// Conversation (defaults to this Run's conversation)
+        #[arg(long)]
+        conversation: Option<String>,
+    },
+    /// Unlink a page from a conversation; its changes stop reaching it until it is linked again
+    Unlink {
+        /// Page ID
+        page: String,
         /// Space ID (defaults to this Run's conversation's Space)
         #[arg(long)]
         space: Option<String>,

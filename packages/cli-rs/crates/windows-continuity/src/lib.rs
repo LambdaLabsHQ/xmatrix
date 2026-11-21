@@ -5,7 +5,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
 #[cfg(windows)]
@@ -501,32 +503,18 @@ impl BootJournal {
     }
 
     pub fn load(&self) -> Result<BootPayload, ContinuityError> {
-        load_with_previous_image(&self.path, |path| self.load_path(path))
-    }
-
-    fn load_path(&self, path: &Path) -> Result<BootPayload, ContinuityError> {
-        let bytes = read_bounded(path, MAX_CONTROL_FRAME_BYTES)?;
-        let envelope: BootEnvelope = serde_json::from_slice(&bytes)?;
-        verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-        envelope.payload.selected()?;
-        Ok(envelope.payload)
+        load_with_previous_image(&self.path, |path| {
+            load_checked_journal(path, MAX_CONTROL_FRAME_BYTES, |payload: &BootPayload| {
+                payload.selected().map(|_| ())
+            })
+        })
     }
 
     pub fn store(&self, payload: &BootPayload) -> Result<(), ContinuityError> {
-        payload.selected()?;
-        let envelope = BootEnvelope {
-            checksum_sha256: payload_checksum(payload)?,
-            payload: payload.clone(),
-        };
-        store_with_previous_image(&self.path, &envelope, || self.load_path(&self.path).is_ok())
+        store_checked_journal(&self.path, payload, MAX_CONTROL_FRAME_BYTES, |value| {
+            value.selected().map(|_| ())
+        })
     }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BootEnvelope {
-    payload: BootPayload,
-    checksum_sha256: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1079,13 +1067,6 @@ pub fn insert_bounded_quarantine(quarantine: &mut BTreeSet<String>, digest: Stri
     quarantine.insert(digest);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct JournalEnvelope {
-    payload: JournalPayload,
-    checksum_sha256: String,
-}
-
 pub struct ActivationJournal {
     path: PathBuf,
 }
@@ -1096,24 +1077,33 @@ impl ActivationJournal {
     }
 
     pub fn load(&self) -> Result<JournalPayload, ContinuityError> {
-        load_with_previous_image(&self.path, |path| self.load_path(path))
-    }
-
-    fn load_path(&self, path: &Path) -> Result<JournalPayload, ContinuityError> {
-        let bytes = read_bounded(path, MAX_CONTROL_FRAME_BYTES)?;
-        let envelope: JournalEnvelope = serde_json::from_slice(&bytes)?;
-        verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-        envelope.payload.validate()?;
-        Ok(envelope.payload)
+        load_with_previous_image(&self.path, |path| {
+            load_checked_journal(path, MAX_CONTROL_FRAME_BYTES, JournalPayload::validate)
+        })
     }
 
     pub fn store(&self, payload: &JournalPayload) -> Result<(), ContinuityError> {
-        payload.validate()?;
-        let envelope = JournalEnvelope {
-            payload: payload.clone(),
-            checksum_sha256: payload_checksum(payload)?,
-        };
-        store_with_previous_image(&self.path, &envelope, || self.load_path(&self.path).is_ok())
+        store_checked_journal(
+            &self.path,
+            payload,
+            MAX_CONTROL_FRAME_BYTES,
+            JournalPayload::validate,
+        )
+    }
+
+    /// Move a journal that cannot be read, and its previous image, aside as
+    /// `<name>.unreadable-<unix seconds>` so the files stay as evidence and a
+    /// first-start journal can take their place. Returns the paths kept.
+    pub fn set_aside_unreadable(&self) -> Vec<PathBuf> {
+        let stamp = current_unix_time().unwrap_or_default();
+        [self.path.clone(), previous_image_path(&self.path)]
+            .into_iter()
+            .filter_map(|path| {
+                let name = path.file_name()?.to_str()?;
+                let kept = path.with_file_name(format!("{name}.unreadable-{stamp}"));
+                fs::rename(&path, &kept).ok().map(|()| kept)
+            })
+            .collect()
     }
 }
 
@@ -1156,444 +1146,6 @@ impl RunEvidence {
         }
         Ok(())
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum EffectPhase {
-    Received,
-    Admitted,
-    EffectCommitted,
-    HubCompletionAcked,
-    Quarantined,
-}
-
-fn process_monotonic_millis() -> u64 {
-    static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    ORIGIN
-        .get_or_init(std::time::Instant::now)
-        .elapsed()
-        .as_millis()
-        .try_into()
-        .unwrap_or(u64::MAX)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CommandEffect {
-    pub control_id: String,
-    pub command_type: String,
-    pub payload_digest: String,
-    pub phase: EffectPhase,
-    pub result_digest: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub result: Option<serde_json::Value>,
-    /// Process-monotonic timing evidence. These values are deliberately not
-    /// wall clocks: subtracting two values recorded by the same daemon process
-    /// gives an admission/effect duration that cannot jump with NTP. A replay
-    /// after process restart may leave a later field absent and Hub remains the
-    /// cross-process wall-clock authority.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub received_monotonic_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub admitted_monotonic_ms: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effect_committed_monotonic_ms: Option<u64>,
-    /// Wall-clock receipt (Unix milliseconds). It only ages an effect out of
-    /// the bounded journal; Hub stays the authority on command expiry.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub received_unix_ms: Option<u64>,
-}
-
-impl CommandEffect {
-    pub fn stable_id(&self) -> String {
-        hex_sha256(
-            format!(
-                "{}\0{}\0{}",
-                self.control_id, self.command_type, self.payload_digest
-            )
-            .as_bytes(),
-        )
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EffectJournalPayload {
-    schema: u32,
-    revision: u64,
-    effects: BTreeMap<String, CommandEffect>,
-}
-
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct EffectJournalEnvelope {
-    payload: EffectJournalPayload,
-    checksum_sha256: String,
-}
-
-pub struct CommandEffectJournal {
-    path: PathBuf,
-}
-
-impl CommandEffectJournal {
-    pub fn new(path: impl Into<PathBuf>) -> Self {
-        Self { path: path.into() }
-    }
-
-    pub fn effect_for_control_id(
-        &self,
-        control_id: &str,
-    ) -> Result<Option<CommandEffect>, ContinuityError> {
-        let payload = self.load_or_empty()?;
-        Ok(payload
-            .effects
-            .values()
-            .find(|effect| effect.control_id == control_id)
-            .cloned())
-    }
-
-    pub fn receive(
-        &self,
-        control_id: &str,
-        command_type: &str,
-        payload_digest: &str,
-    ) -> Result<CommandEffect, ContinuityError> {
-        if control_id.trim().is_empty()
-            || command_type.trim().is_empty()
-            || payload_digest.len() != 64
-        {
-            return Err(ContinuityError::Invalid(
-                "command effect identity is invalid",
-            ));
-        }
-        let mut payload = self.load_or_empty()?;
-        let candidate = CommandEffect {
-            control_id: control_id.to_string(),
-            command_type: command_type.to_string(),
-            payload_digest: payload_digest.to_string(),
-            phase: EffectPhase::Received,
-            result_digest: None,
-            result: None,
-            received_monotonic_ms: Some(process_monotonic_millis()),
-            admitted_monotonic_ms: None,
-            effect_committed_monotonic_ms: None,
-            received_unix_ms: Some(unix_millis()),
-        };
-        let stable_id = candidate.stable_id();
-        if let Some(existing) = payload.effects.get(&stable_id) {
-            return Ok(existing.clone());
-        }
-        if payload
-            .effects
-            .values()
-            .any(|effect| effect.control_id == control_id)
-        {
-            return Err(ContinuityError::RunConflict);
-        }
-        payload.effects.insert(stable_id, candidate.clone());
-        payload.revision = payload.revision.saturating_add(1);
-        self.store(&payload)?;
-        Ok(candidate)
-    }
-
-    /// Re-key a command that has not produced a physical effect yet to the
-    /// payload digest this CLI computes for it.
-    ///
-    /// The digest is taken over the command as the receiving CLI serializes
-    /// it, so the same redelivered command hashes differently once a daemon
-    /// self-update changes the command's fields. A Received or Admitted effect
-    /// is re-executed on redelivery anyway, so re-keying it keeps the command
-    /// alive across the update instead of stranding its Run. A committed or
-    /// quarantined effect is never re-keyed.
-    pub fn rekey_unexecuted(
-        &self,
-        control_id: &str,
-        command_type: &str,
-        payload_digest: &str,
-    ) -> Result<CommandEffect, ContinuityError> {
-        if payload_digest.len() != 64 {
-            return Err(ContinuityError::Invalid(
-                "command effect identity is invalid",
-            ));
-        }
-        let mut payload = self.load_or_empty()?;
-        let (stable_id, existing) = payload
-            .effects
-            .iter()
-            .find(|(_, effect)| effect.control_id == control_id)
-            .map(|(id, effect)| (id.clone(), effect.clone()))
-            .ok_or(ContinuityError::Invalid("command effect is missing"))?;
-        if existing.command_type != command_type
-            || !matches!(
-                existing.phase,
-                EffectPhase::Received | EffectPhase::Admitted
-            )
-        {
-            return Err(ContinuityError::RunConflict);
-        }
-        let rekeyed = CommandEffect {
-            payload_digest: payload_digest.to_string(),
-            ..existing
-        };
-        payload.effects.remove(&stable_id);
-        payload.effects.insert(rekeyed.stable_id(), rekeyed.clone());
-        payload.revision = payload.revision.saturating_add(1);
-        self.store(&payload)?;
-        Ok(rekeyed)
-    }
-
-    pub fn admit(&self, stable_id: &str) -> Result<CommandEffect, ContinuityError> {
-        self.transition(stable_id, EffectPhase::Admitted, None)
-    }
-
-    pub fn commit_result(
-        &self,
-        stable_id: &str,
-        result: serde_json::Value,
-    ) -> Result<CommandEffect, ContinuityError> {
-        let digest = hex_sha256(&serde_json::to_vec(&result)?);
-        self.transition(
-            stable_id,
-            EffectPhase::EffectCommitted,
-            Some((digest, result)),
-        )
-    }
-
-    /// Replace only the transport envelope of an already committed effect
-    /// before replaying it under a newly claimed Authority lease. The caller
-    /// must provide the digest it observed, so an unrelated concurrent rewrite
-    /// cannot silently change durable physical-effect evidence.
-    pub fn rebind_committed_result(
-        &self,
-        stable_id: &str,
-        expected_result_digest: &str,
-        result: serde_json::Value,
-    ) -> Result<CommandEffect, ContinuityError> {
-        let mut payload = self.load_or_empty()?;
-        let effect = payload
-            .effects
-            .get_mut(stable_id)
-            .ok_or(ContinuityError::Invalid("command effect is missing"))?;
-        if effect.phase != EffectPhase::EffectCommitted {
-            return Err(ContinuityError::Invalid(
-                "only a committed command effect can be rebound",
-            ));
-        }
-        let digest = hex_sha256(&serde_json::to_vec(&result)?);
-        if effect.result_digest.as_deref() == Some(digest.as_str()) {
-            return Ok(effect.clone());
-        }
-        if effect.result_digest.as_deref() != Some(expected_result_digest) {
-            return Err(ContinuityError::RunConflict);
-        }
-        effect.result_digest = Some(digest);
-        effect.result = Some(result);
-        let rebound = effect.clone();
-        payload.revision = payload.revision.saturating_add(1);
-        self.store(&payload)?;
-        Ok(rebound)
-    }
-
-    pub fn acknowledge(&self, control_id: &str) -> Result<CommandEffect, ContinuityError> {
-        let payload = self.load_or_empty()?;
-        let stable_id = payload
-            .effects
-            .iter()
-            .find_map(|(id, effect)| (effect.control_id == control_id).then_some(id.clone()))
-            .ok_or(ContinuityError::Invalid("command effect is missing"))?;
-        drop(payload);
-        let acknowledged = self.transition(&stable_id, EffectPhase::HubCompletionAcked, None)?;
-        let mut payload = self.load_or_empty()?;
-        if payload.effects.len() > 16 {
-            let remove = payload
-                .effects
-                .iter()
-                .filter_map(|(id, effect)| {
-                    (effect.phase == EffectPhase::HubCompletionAcked).then_some(id.clone())
-                })
-                .take(payload.effects.len() - 16)
-                .collect::<Vec<_>>();
-            for id in remove {
-                payload.effects.remove(&id);
-            }
-            payload.revision = payload.revision.saturating_add(1);
-            self.store(&payload)?;
-        }
-        Ok(acknowledged)
-    }
-
-    pub fn phase_counts(&self) -> Result<BTreeMap<String, usize>, ContinuityError> {
-        let payload = self.load_or_empty()?;
-        let mut counts = BTreeMap::new();
-        for effect in payload.effects.values() {
-            *counts.entry(format!("{:?}", effect.phase)).or_insert(0) += 1;
-        }
-        Ok(counts)
-    }
-
-    pub fn pending_completion_results(&self) -> Result<Vec<serde_json::Value>, ContinuityError> {
-        self.load_or_empty()?
-            .effects
-            .into_values()
-            // Hub refuses an expired command's result; replaying it after a
-            // restart is only refused again.
-            .filter(|effect| {
-                effect.phase == EffectPhase::EffectCommitted
-                    && !expired_effect(effect, unix_millis())
-            })
-            .map(|effect| {
-                effect.result.ok_or(ContinuityError::Invalid(
-                    "committed command effect has no result",
-                ))
-            })
-            .collect()
-    }
-
-    fn transition(
-        &self,
-        stable_id: &str,
-        next: EffectPhase,
-        result: Option<(String, serde_json::Value)>,
-    ) -> Result<CommandEffect, ContinuityError> {
-        let mut payload = self.load_or_empty()?;
-        let effect = payload
-            .effects
-            .get_mut(stable_id)
-            .ok_or(ContinuityError::Invalid("command effect is missing"))?;
-        let valid = effect.phase == next
-            || matches!(
-                (effect.phase, next),
-                (EffectPhase::Received, EffectPhase::Admitted)
-                    | (EffectPhase::Admitted, EffectPhase::EffectCommitted)
-                    | (
-                        EffectPhase::EffectCommitted,
-                        EffectPhase::HubCompletionAcked
-                    )
-            );
-        if !valid {
-            return Err(ContinuityError::Invalid(
-                "command effect transition is invalid",
-            ));
-        }
-        if effect.phase != next {
-            effect.phase = next;
-            if next == EffectPhase::Admitted {
-                effect.admitted_monotonic_ms = Some(process_monotonic_millis());
-            } else if next == EffectPhase::EffectCommitted {
-                effect.effect_committed_monotonic_ms = Some(process_monotonic_millis());
-            }
-            if let Some((digest, value)) = result {
-                effect.result_digest = Some(digest);
-                effect.result = Some(value);
-            }
-            payload.revision = payload.revision.saturating_add(1);
-            self.store(&payload)?;
-        }
-        Ok(payload
-            .effects
-            .get(stable_id)
-            .expect("effect remains")
-            .clone())
-    }
-
-    fn load_or_empty(&self) -> Result<EffectJournalPayload, ContinuityError> {
-        match read_bounded(&self.path, MAX_EFFECT_JOURNAL_BYTES) {
-            Ok(bytes) => {
-                let envelope: EffectJournalEnvelope = serde_json::from_slice(&bytes)?;
-                verify_payload_checksum(&envelope.payload, &envelope.checksum_sha256)?;
-                Ok(envelope.payload)
-            }
-            Err(ContinuityError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {
-                Ok(EffectJournalPayload {
-                    schema: JOURNAL_SCHEMA,
-                    revision: 1,
-                    effects: BTreeMap::new(),
-                })
-            }
-            Err(error) => Err(error),
-        }
-    }
-
-    /// Write the journal within its size budget. Every effect rolls out once
-    /// Hub can no longer deliver its command again (see `effect_retention_ms`);
-    /// one an older CLI wrote without a receipt time is dated from the first
-    /// write that sees it. Over budget, acknowledged effects and quota probes
-    /// (a probe only reads, so answering it again is harmless) go next, oldest
-    /// first. Any other unacknowledged effect stays until it rolls out: it
-    /// fences a redelivery against running twice.
-    fn store(&self, payload: &EffectJournalPayload) -> Result<(), ContinuityError> {
-        let mut payload = payload.clone();
-        let now = unix_millis();
-        payload
-            .effects
-            .retain(|_, effect| !expired_effect(effect, now));
-        loop {
-            let mut dated = payload.clone();
-            for effect in dated.effects.values_mut() {
-                effect.received_unix_ms.get_or_insert(now);
-            }
-            let envelope = EffectJournalEnvelope {
-                checksum_sha256: payload_checksum(&dated)?,
-                payload: dated,
-            };
-            let bytes = serde_json::to_vec_pretty(&envelope)?;
-            if bytes.len() <= MAX_EFFECT_JOURNAL_BYTES {
-                return atomic_replace(&self.path, &bytes);
-            }
-            let mut evictable = payload
-                .effects
-                .iter()
-                .filter(|(_, effect)| {
-                    effect.phase == EffectPhase::HubCompletionAcked || quota_probe(effect)
-                })
-                .map(|(id, effect)| (effect.received_unix_ms.unwrap_or(0), id.clone()))
-                .collect::<Vec<_>>();
-            if evictable.is_empty() {
-                return Err(ContinuityError::FrameTooLarge(bytes.len()));
-            }
-            evictable.sort();
-            let evict = (evictable.len() / 8).max(1);
-            for (_, id) in evictable.into_iter().take(evict) {
-                payload.effects.remove(&id);
-            }
-        }
-    }
-}
-
-const HOUR_MS: u64 = 60 * 60 * 1000;
-const DAY_MS: u64 = 24 * HOUR_MS;
-
-/// How long an effect is kept after receipt. Hub never delivers a command
-/// again once it expires: a quota probe within a minute, a harness, text or
-/// worktree action within 10 minutes, anything else within 30 days. The
-/// margin past that covers an action still renewing its lease to report.
-fn effect_retention_ms(effect: &CommandEffect) -> u64 {
-    // A profile daemon journals `<profile>:<type>`.
-    match effect.command_type.rsplit(':').next() {
-        Some("quota_probe") => HOUR_MS,
-        Some("harness_action" | "text_task" | "worktree_action") => DAY_MS,
-        _ => 31 * DAY_MS,
-    }
-}
-
-fn quota_probe(effect: &CommandEffect) -> bool {
-    // A profile daemon journals `<profile>:<type>`.
-    effect.command_type.rsplit(':').next() == Some("quota_probe")
-}
-
-fn expired_effect(effect: &CommandEffect, now_unix_ms: u64) -> bool {
-    effect
-        .received_unix_ms
-        .is_some_and(|at| now_unix_ms.saturating_sub(at) > effect_retention_ms(effect))
-}
-
-fn unix_millis() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| {
-            elapsed.as_millis().try_into().unwrap_or(u64::MAX)
-        })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1953,6 +1505,69 @@ impl From<serde_json::Error> for ContinuityError {
     }
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RawEnvelopeRef<'a> {
+    payload: &'a RawValue,
+    checksum_sha256: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawEnvelopeOwned {
+    payload: Box<RawValue>,
+    checksum_sha256: String,
+}
+
+fn encode_checked_envelope(payload: &impl Serialize) -> Result<Vec<u8>, ContinuityError> {
+    let payload_json = serde_json::to_string(payload)?;
+    let checksum_sha256 = hex_sha256(payload_json.as_bytes());
+    let raw = RawValue::from_string(payload_json)?;
+    Ok(serde_json::to_vec_pretty(&RawEnvelopeRef {
+        payload: raw.as_ref(),
+        checksum_sha256,
+    })?)
+}
+
+fn decode_checked_envelope<T: Serialize + DeserializeOwned>(
+    bytes: &[u8],
+) -> Result<T, ContinuityError> {
+    let envelope: RawEnvelopeOwned = serde_json::from_slice(bytes)?;
+    let raw_digest = hex_sha256(envelope.payload.get().as_bytes());
+    if constant_time_eq(raw_digest.as_bytes(), envelope.checksum_sha256.as_bytes()) {
+        return Ok(serde_json::from_str(envelope.payload.get())?);
+    }
+    // Legacy compatibility for journals written before raw-byte checksumming:
+    // older CLIs pretty-printed the payload while hashing its compact encoding.
+    let payload: T = serde_json::from_str(envelope.payload.get())?;
+    verify_payload_checksum(&payload, &envelope.checksum_sha256)?;
+    Ok(payload)
+}
+
+fn load_checked_journal<T: Serialize + DeserializeOwned>(
+    path: &Path,
+    max_bytes: usize,
+    validate: impl Fn(&T) -> Result<(), ContinuityError>,
+) -> Result<T, ContinuityError> {
+    let bytes = read_bounded(path, max_bytes)?;
+    let payload: T = decode_checked_envelope(&bytes)?;
+    validate(&payload)?;
+    Ok(payload)
+}
+
+fn store_checked_journal<T: Serialize + DeserializeOwned>(
+    path: &Path,
+    payload: &T,
+    max_bytes: usize,
+    validate: impl Fn(&T) -> Result<(), ContinuityError>,
+) -> Result<(), ContinuityError> {
+    validate(payload)?;
+    let bytes = encode_checked_envelope(payload)?;
+    store_bytes_with_previous_image(path, &bytes, max_bytes, || {
+        load_checked_journal(path, max_bytes, &validate).is_ok()
+    })
+}
+
 fn load_with_previous_image<T>(
     path: &Path,
     load: impl Fn(&Path) -> Result<T, ContinuityError>,
@@ -1960,21 +1575,21 @@ fn load_with_previous_image<T>(
     load(path).or_else(|primary_error| load(&previous_image_path(path)).map_err(|_| primary_error))
 }
 
-fn store_with_previous_image(
+fn store_bytes_with_previous_image(
     path: &Path,
-    envelope: &impl Serialize,
+    bytes: &[u8],
+    max_bytes: usize,
     primary_valid: impl FnOnce() -> bool,
 ) -> Result<(), ContinuityError> {
-    let bytes = serde_json::to_vec_pretty(envelope)?;
-    if bytes.len() > MAX_CONTROL_FRAME_BYTES {
+    if bytes.len() > max_bytes {
         return Err(ContinuityError::FrameTooLarge(bytes.len()));
     }
-    if let Ok(existing) = read_bounded(path, MAX_CONTROL_FRAME_BYTES)
+    if let Ok(existing) = read_bounded(path, max_bytes)
         && primary_valid()
     {
         atomic_replace(&previous_image_path(path), &existing)?;
     }
-    atomic_replace(path, &bytes)
+    atomic_replace(path, bytes)
 }
 
 /// Read a required process argument used by continuity entrypoints.
@@ -2241,252 +1856,25 @@ mod tests {
     }
 
     #[test]
-    fn effect_journal_replays_committed_result_without_reexecuting() {
+    fn an_unreadable_activation_journal_is_kept_aside_for_a_first_start() {
         let root =
-            std::env::temp_dir().join(format!("xmatrix-effect-journal-{}", uuid::Uuid::new_v4()));
-        let journal = CommandEffectJournal::new(root.join("effects.json"));
-        let received = journal
-            .receive("control-1", "spawn", &"a".repeat(64))
-            .unwrap();
-        let stable_id = received.stable_id();
-        journal.admit(&stable_id).unwrap();
-        let committed = journal
-            .commit_result(&stable_id, serde_json::json!({"ok": true, "pid": 7}))
-            .unwrap();
-        assert_eq!(committed.phase, EffectPhase::EffectCommitted);
-        assert!(committed.received_monotonic_ms.is_some());
-        assert!(committed.admitted_monotonic_ms >= committed.received_monotonic_ms);
-        assert!(committed.effect_committed_monotonic_ms >= committed.admitted_monotonic_ms);
-        assert_eq!(
-            journal
-                .receive("control-1", "spawn", &"a".repeat(64))
-                .unwrap()
-                .result,
-            Some(serde_json::json!({"ok": true, "pid": 7}))
-        );
-        assert_eq!(
-            journal.pending_completion_results().unwrap(),
-            vec![serde_json::json!({"ok": true, "pid": 7})]
-        );
-        assert!(
-            journal
-                .receive("control-1", "stop", &"b".repeat(64))
-                .is_err()
-        );
-        assert_eq!(
-            journal.acknowledge("control-1").unwrap().phase,
-            EffectPhase::HubCompletionAcked
-        );
-        assert!(journal.pending_completion_results().unwrap().is_empty());
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    /// Write a journal as an older CLI left it: no dating, no budget.
-    fn write_as_older_cli(path: &Path, payload: EffectJournalPayload) {
-        let envelope = EffectJournalEnvelope {
-            checksum_sha256: payload_checksum(&payload).unwrap(),
-            payload,
-        };
-        fs::write(path, serde_json::to_vec(&envelope).unwrap()).unwrap();
-    }
-
-    #[test]
-    fn effect_journal_rolls_each_effect_out_after_hub_can_no_longer_deliver_it() {
-        let root = std::env::temp_dir().join(format!(
-            "xmatrix-effect-journal-roll-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let journal = CommandEffectJournal::new(root.join("effects.json"));
-        let commit = |control_id: &str, command_type: &str| {
-            let effect = journal
-                .receive(control_id, command_type, &"a".repeat(64))
-                .unwrap();
-            journal.admit(&effect.stable_id()).unwrap();
-            journal
-                .commit_result(&effect.stable_id(), serde_json::json!({"id": control_id}))
-                .unwrap();
-        };
-        for (control_id, command_type) in [
-            ("probe-2h", "p:quota_probe"),
-            ("harness-2h", "harness_action"),
-            ("harness-2d", "harness_action"),
-            ("spawn-2d", "spawn"),
-            ("spawn-32d", "spawn"),
-            ("legacy-spawn", "spawn"),
-        ] {
-            commit(control_id, command_type);
-        }
-        let now = unix_millis();
-        let mut payload = journal.load_or_empty().unwrap();
-        for effect in payload.effects.values_mut() {
-            effect.received_unix_ms = match effect.control_id.as_str() {
-                "probe-2h" | "harness-2h" => Some(now - 2 * HOUR_MS),
-                "harness-2d" | "spawn-2d" => Some(now - 2 * DAY_MS),
-                "spawn-32d" => Some(now - 32 * DAY_MS),
-                _ => None,
-            };
-        }
-        // Written without dating, as an older CLI left it.
-        write_as_older_cli(&root.join("effects.json"), payload);
-        commit("fresh", "quota_probe");
-        let kept = journal.load_or_empty().unwrap().effects;
-        let ids = kept
-            .values()
-            .map(|effect| effect.control_id.clone())
-            .collect::<BTreeSet<_>>();
-        assert_eq!(
-            ids,
-            BTreeSet::from([
-                "harness-2h".to_string(),
-                "spawn-2d".to_string(),
-                "legacy-spawn".to_string(),
-                "fresh".to_string(),
-            ])
-        );
-        // An undated effect is dated from this write and rolls out on schedule.
-        assert!(
-            kept.values()
-                .all(|effect| effect.received_unix_ms.is_some())
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn a_full_effect_journal_drops_quota_probes_but_keeps_other_fences() {
-        let root = std::env::temp_dir().join(format!(
-            "xmatrix-effect-journal-full-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let journal = CommandEffectJournal::new(root.join("effects.json"));
-        let bulk = "x".repeat(MAX_EFFECT_JOURNAL_BYTES / 5);
-        let commit = |control_id: &str, command_type: &str| {
-            let effect = journal.receive(control_id, command_type, &"a".repeat(64))?;
-            journal.admit(&effect.stable_id())?;
-            journal.commit_result(&effect.stable_id(), serde_json::json!({"bulk": bulk}))
-        };
-        commit("spawn-1", "spawn").unwrap();
-        commit("spawn-2", "spawn").unwrap();
-        for index in 0..2 {
-            commit(&format!("probe-{index}"), "quota_probe").unwrap();
-        }
-        // Journaled by an older CLI: no wall-clock receipt.
-        let mut payload = journal.load_or_empty().unwrap();
-        for effect in payload.effects.values_mut() {
-            if effect.command_type == "quota_probe" {
-                effect.received_unix_ms = None;
-            }
-        }
-        // Older-CLI actions of unknown age may have acted; they stay.
-        for (control_id, command_type) in [
-            ("harness-old", "harness_action"),
-            ("worktree-old", "worktree_action"),
-        ] {
-            let effect = CommandEffect {
-                control_id: control_id.into(),
-                command_type: command_type.into(),
-                payload_digest: "c".repeat(64),
-                phase: EffectPhase::Admitted,
-                result_digest: None,
-                result: None,
-                received_monotonic_ms: None,
-                admitted_monotonic_ms: None,
-                effect_committed_monotonic_ms: None,
-                received_unix_ms: None,
-            };
-            payload.effects.insert(effect.stable_id(), effect);
-        }
-        write_as_older_cli(&root.join("effects.json"), payload);
-        commit("probe-new", "quota_probe").unwrap();
-        commit("probe-newer", "quota_probe").unwrap();
-        let kept = journal
-            .load_or_empty()
-            .unwrap()
-            .effects
-            .into_values()
-            .map(|effect| effect.control_id)
-            .collect::<BTreeSet<_>>();
-        assert!(kept.contains("spawn-1") && kept.contains("spawn-2"));
-        assert!(kept.contains("harness-old") && kept.contains("worktree-old"));
-        assert!(kept.contains("probe-newer"));
-        assert!(!kept.contains("probe-0"));
-        // A probe gives way to a spawn; with only fences left, a command is
-        // refused and no fence is lost.
-        commit("spawn-3", "spawn").unwrap();
-        let refused = (4..8)
-            .map(|index| commit(&format!("spawn-{index}"), "spawn"))
-            .find(Result::is_err);
+            std::env::temp_dir().join(format!("xmatrix-activation-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("activation-journal.json");
+        let journal = ActivationJournal::new(&path);
+        fs::write(&path, b"{\"schema\":").unwrap();
+        fs::write(previous_image_path(&path), b"also unreadable").unwrap();
+        assert!(matches!(journal.load(), Err(ContinuityError::Json(_))));
+        let kept = journal.set_aside_unreadable();
+        assert_eq!(kept.len(), 2);
+        assert_eq!(fs::read(&kept[0]).unwrap(), b"{\"schema\":");
+        assert_eq!(fs::read(&kept[1]).unwrap(), b"also unreadable");
+        // What a first start sees: no journal at all.
         assert!(matches!(
-            refused,
-            Some(Err(ContinuityError::FrameTooLarge(_)))
+            journal.load(),
+            Err(ContinuityError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound
         ));
-        let kept = journal.load_or_empty().unwrap().effects;
-        assert!(
-            !kept
-                .values()
-                .any(|effect| effect.command_type == "quota_probe")
-        );
-        for fence in [
-            "spawn-1",
-            "spawn-2",
-            "spawn-3",
-            "harness-old",
-            "worktree-old",
-        ] {
-            assert!(
-                kept.values().any(|effect| effect.control_id == fence),
-                "{fence}"
-            );
-        }
-        let replayed = journal
-            .receive("spawn-1", "spawn", &"a".repeat(64))
-            .unwrap();
-        assert_eq!(replayed.phase, EffectPhase::EffectCommitted);
-        assert!(
-            fs::metadata(root.join("effects.json")).unwrap().len()
-                <= MAX_EFFECT_JOURNAL_BYTES as u64
-        );
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn effect_journal_persists_a_fenced_replay_envelope_before_network_retry() {
-        let root = std::env::temp_dir().join(format!(
-            "xmatrix-effect-journal-rebind-{}",
-            uuid::Uuid::new_v4()
-        ));
-        let journal = CommandEffectJournal::new(root.join("effects.json"));
-        let effect = journal
-            .receive("control-1", "spawn", &"a".repeat(64))
-            .unwrap();
-        let stable_id = effect.stable_id();
-        journal.admit(&stable_id).unwrap();
-        let committed = journal
-            .commit_result(
-                &stable_id,
-                serde_json::json!({"ok": false, "relayLease": {"daemonEpoch": 1}}),
-            )
-            .unwrap();
-        let rebound = serde_json::json!({
-            "ok": false, "relayLease": {"daemonEpoch": 2}
-        });
-        journal
-            .rebind_committed_result(
-                &stable_id,
-                committed.result_digest.as_deref().unwrap(),
-                rebound.clone(),
-            )
-            .unwrap();
-        assert_eq!(journal.pending_completion_results().unwrap(), vec![rebound]);
-        assert!(
-            journal
-                .rebind_committed_result(
-                    &stable_id,
-                    &"b".repeat(64),
-                    serde_json::json!({"ok": true})
-                )
-                .is_err()
-        );
-        let _ = std::fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]

@@ -1,6 +1,7 @@
 # Conversation activity
 
-Status: accepted and built (2026-09-27; see §8). Owner: Yiming Hu. Refines §4.3 of
+Status: accepted and built (2026-09-27; see §8); the runtime plan entry and
+the intent line drawn from it are retired (2026-11-19, §3.6). Owner: Yiming Hu. Refines §4.3 of
 [`pages-and-conversations.md`](pages-and-conversations.md) (what a
 conversation shows besides messages).
 
@@ -43,9 +44,8 @@ progress to where it belongs: an ordered, compact activity record, a live
    written, however soon its sender writes again. Only activity entries, the
    facts a runtime recorded, fold; an Instance's current state is on its card
    in the work dock (§4.2).
-3. **Facts are recorded by their source.** A step completed in an Agent's own
-   plan is reported by the runtime that saw the plan change; a pull request is
-   reported by the Run that opened it. The Agent does not restate them
+3. **Facts are recorded by their source.** A pull request is reported by the
+   Run that opened it. The Agent does not restate them
    (parent design §2.4: facts with an authority are referenced, not restated).
 4. **People and Agents read the same structure.** The web timeline and
    `xmatrix channel history` fold the same entries the same way.
@@ -71,7 +71,6 @@ by supplying metadata (§6).
 
 | Kind | Reported by | Carries |
 |---|---|---|
-| `plan` | The Run's runtime, when its plan tool (Claude Code `TodoWrite`, which the runtime turns on for every Claude it starts, Codex `turn/plan/updated`, ACP `plan`) completes steps or replaces the plan | Newly completed steps, the step now in progress, and the plan snapshot (at most 30 steps) |
 | `pull_request` | The Run's runtime, when a command it ran created a pull request | Repository, number, URL |
 
 - **Sender.** The entry is authored by the reporting Run's Agent Instance
@@ -101,10 +100,9 @@ ignored.
 
 ### 3.4 Now
 
-Each live Instance publishes one **intent line**: the step in progress in its
-own plan (the presence `intent` field, already carried by the Hub and cleared
-when no step is in progress). The work dock shows it beside the Instance's
-state. Pages already use the same line for heading avatars
+Each live Instance may publish one **intent line** (the presence `intent`
+field). No runtime derives it from a plan any more (§3.6). The work dock shows
+it beside the Instance's state. Pages already use the same line for heading avatars
 (`pages-live-document.md` §3).
 
 ### 3.5 Since
@@ -195,6 +193,22 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 - **Privacy.** A private repository's events reach only conversations people
   outside the Space cannot read, as for repository subscriptions.
 
+### 3.6 Retired: the runtime plan
+
+Runtimes used to report the Agent's own plan tool (Claude Code `TodoWrite`,
+Codex `turn/plan/updated`, ACP `plan`) as `plan` entries and its step in
+progress as the intent line. Retired on 2026-11-19: Claude Code no longer
+offers its todo tools to current models (v2.1.233), since newer models keep
+track of multi-step work without a written checklist, so only some Runs ever
+had a plan and readers asked why the others showed none. Progress is the
+Agent's own edited status message plus the facts a runtime does observe (pull
+requests, and GitHub's CI and merge facts).
+
+A Hub refuses a `plan` report as ordinary (`channel_activity_retired`), so an
+older runtime's report changes nothing. Plan entries already stored keep their
+activity provenance: they stay context and never unread, history and launch
+context fold each to its stored line, and the web timeline leaves them out.
+
 ## 4. Rendering
 
 ### 4.1 Web timeline
@@ -227,11 +241,6 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
   stretch; GitHub's messages moments apart share one header like any
   sender's. A person's review or comment is GitHub's message with a slip
   headed `yiming requested changes on #121` over their words.
-- **Folding.** Consecutive activity entries from the same Instance merge into
-  one row with a time range and a count; the newest items are shown inline.
-  Any entry from anyone else, or any message, ends the fold, so interleaving
-  between participants always stays visible. Opening a fold shows each entry
-  in place.
 - **Header continuation.** A message from the same sender as the entry above
   it, within ten minutes and with the same identity tags, drops the avatar
   and header. Identity tags reappear only when they change, and a header that
@@ -262,15 +271,14 @@ The shared contract requires explicit updates for accepted tasks:
 > explaining the cause, chosen fix and why; send a final result before
 > ending the turn. Follow the user's reporting preferences. Context-only
 > messages and other Agents' progress are not new tasks and need no
-> acknowledgement. Keep multi-step plans current with the runtime's plan
-> or todo tool as well.
+> acknowledgement.
 
 Invocation state records startup evidence. A status message tells the reader
 what the Agent accepted and what remains; editing it keeps that information
 current without a sequence of progress messages. Findings and decisions stay
 in separate messages so editing the status does not erase the explanation.
 The final reply states the change, validation, live status and remaining work.
-Completed steps and PRs continue to appear as activity. Local runtime output,
+PRs continue to appear as activity. Local runtime output,
 including Codex commentary and Claude/ACP assistant text, is execution output
 and is published to a Channel only through an explicit send. The shared
 contract and Codex's compact reminder make that distinction explicit; no
@@ -319,6 +327,7 @@ Built:
    folding; the new contract.
 3. Web (#3068): folded runs, header continuation, work-dock intent line, the
    Since divider, late supersession judgments.
+4. Plan entries and the plan-derived intent line retired (§3.6).
 
 Open:
 

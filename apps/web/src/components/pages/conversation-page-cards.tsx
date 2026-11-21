@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { pageBlocks, pageLineDiff, pageAuthorLabel } from "@xmatrix/protocol";
 import { FileText } from "lucide-react";
 import { formatRelativeAge } from "@/components/dashboard/time-display";
@@ -147,17 +147,26 @@ export function ConversationPageCards({ spaceId, conversationId, conversationNam
     <nav aria-label="Pages" className="conversation-page-bookmarks hidden shrink-0 items-start gap-1 overflow-x-auto px-2 py-1.5 md:flex"
       data-testid="conversation-page-cards">
       {pages.map((entry) => (
-        <ConversationPageBookmark key={entry.pageId} spaceId={spaceId} token={token} entry={entry}
-          conversationName={conversationName} onOpen={() => onOpenPage(entry.pageId)} />
+        <ConversationPageBookmark key={entry.pageId} spaceId={spaceId} conversationId={conversationId} token={token}
+          entry={entry} conversationName={conversationName} onOpen={() => onOpenPage(entry.pageId)} />
       ))}
     </nav>
   );
 }
 
-function ConversationPageBookmark({ spaceId, token, entry: { page, section, blockId, quote: passage }, conversationName,
-  onOpen }: {
-  spaceId: string; token: string; entry: ConversationPage; conversationName: string | null; onOpen: () => void;
+function ConversationPageBookmark({ spaceId, conversationId, token, entry: { page, section, blockId, quote: passage },
+  conversationName, onOpen }: {
+  spaceId: string; conversationId: string; token: string; entry: ConversationPage; conversationName: string | null;
+  onOpen: () => void;
 }) {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  // Unlinked, the page's changes stop reaching this conversation; reading or editing it here does not link it again.
+  const unlink = useMutation({
+    mutationFn: () => pageApi.unlinkPage(spaceId, token, { conversationId, pageId: page.pageId }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: xmatrixQueryKeys.domain(
+      { userId: user?.id ?? "anonymous" }, "conversation-page-links", [spaceId, conversationId]) }),
+  });
   const change = useSectionChange({ spaceId, page, blockId, token });
   const heading = section ? `${page.title} › ${section.title}` : page.title;
   const now = pageStatusLine(page, blockId);
@@ -185,6 +194,10 @@ function ConversationPageBookmark({ spaceId, token, entry: { page, section, bloc
       ariaLabel={`Open page ${heading}`}
       testId="conversation-page"
       data={{ "data-page-id": page.pageId }}
-      onOpen={onOpen} />
+      onOpen={onOpen}
+      action={<button type="button" className="app-page-reference-popup-unlink" data-testid="conversation-page-unlink"
+        disabled={unlink.isPending} onClick={() => unlink.mutate()}>
+        {unlink.isError ? "Could not unlink — retry" : unlink.isPending ? "Unlinking…" : "Unlink from this conversation"}
+      </button>} />
   );
 }

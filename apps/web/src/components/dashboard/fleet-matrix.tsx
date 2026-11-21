@@ -10,6 +10,22 @@ import { PaperPopover } from "@/components/ui/material-surfaces";
 import { cn } from "@/lib/utils";
 
 import { Face } from "./face";
+import {
+  FLEET_MATRIX_CELL_CLASS,
+  FLEET_MATRIX_CELL_LINE_CLASS,
+  FLEET_MATRIX_CELL_TD_CLASS,
+  FLEET_MATRIX_COLUMN_COMPACT_WIDTH_CLASS,
+  FLEET_MATRIX_COLUMN_FILLER_WIDTH_CLASS,
+  FLEET_MATRIX_COLUMN_HEADING_CLASS,
+  FLEET_MATRIX_COLUMN_NAME_CLASS,
+  FLEET_MATRIX_COLUMN_TH_CLASS,
+  FLEET_MATRIX_MACHINE_LABEL_CLASS,
+  FLEET_MATRIX_MACHINE_TH_CLASS,
+  FLEET_MATRIX_ROW_TH_CLASS,
+  FLEET_MATRIX_SCROLL_CLASS,
+  FLEET_MATRIX_TABLE_CLASS,
+  FLEET_MATRIX_WRAPPER_CLASS,
+} from "./fleet-matrix-frames";
 import { MachineLoadGlanceBars } from "./machine-load-panel";
 import { ToolStateDot, type ToolState } from "./tool-split";
 import { listenForOverlayDismissal } from "./use-overlay-dismiss";
@@ -81,7 +97,7 @@ export function FleetCellAgentReadout({ cell }: { cell: Extract<FleetMatrixCell,
   const meter = tightest(cell.usage);
   return (
     <>
-      <span className={cn("flex w-full min-w-0 items-center gap-1.5 text-[12.5px] leading-snug",
+      <span className={cn(FLEET_MATRIX_CELL_LINE_CLASS,
         cell.state === "attention" ? "font-semibold text-[var(--m-ink-attention,var(--accent))]"
           : cell.working > 0 ? "font-semibold text-foreground"
             : cell.state === "offline" ? "text-muted-foreground" : "font-medium text-foreground/80")}>
@@ -147,36 +163,35 @@ export function FleetMatrix({ columns, rows, selected, onSelect, editors, addCol
   }, [columns.length, rows.length]);
 
   return (
-    <div className="relative -mx-2">
-      <div className="app-fleet-matrix overflow-x-auto" data-testid="fleet-matrix" ref={table}>
-        <table className="w-full border-separate border-spacing-0 text-sm">
+    <div className={FLEET_MATRIX_WRAPPER_CLASS}>
+      <div className={FLEET_MATRIX_SCROLL_CLASS} data-testid="fleet-matrix" ref={table}>
+        <table className={FLEET_MATRIX_TABLE_CLASS}>
           <thead>
             <tr>
-              <th scope="col" className={cn(sticky, "w-56 min-w-[12.5rem] max-w-[16rem] border-b border-foreground/10 pb-2.5 pl-2 pr-3 text-left align-bottom")}>
-                <span className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground/80">Machine</span>
+              <th scope="col" className={cn(sticky, FLEET_MATRIX_MACHINE_TH_CLASS)}>
+                <span className={FLEET_MATRIX_MACHINE_LABEL_CLASS}>Machine</span>
               </th>
               {columns.map((column) => {
                 const heading = (
                   <>
                     <Face of={{ kind: "agent", name: column.harness, harness: column.harness }} size="sm"
                       showKindBadge={false} className={cn("shrink-0", !column.onOpen && "opacity-60")} />
-                    <span className="block w-full truncate text-[13px] font-semibold tracking-[-0.01em]">{column.harness}</span>
+                    <span className={FLEET_MATRIX_COLUMN_NAME_CLASS}>{column.harness}</span>
                   </>
                 );
-                const headingClass = "flex w-full min-w-0 flex-col items-start gap-1.5 px-2 py-1.5";
                 return (
                   <th key={column.harness} scope="col" className={cn(
-                    "border-b border-foreground/10 px-0.5 pb-1.5 text-left align-bottom font-normal",
-                    hasFiller ? "w-[7.5rem] min-w-[6.75rem]" : "min-w-[5.75rem]",
+                    FLEET_MATRIX_COLUMN_TH_CLASS,
+                    hasFiller ? FLEET_MATRIX_COLUMN_FILLER_WIDTH_CLASS : FLEET_MATRIX_COLUMN_COMPACT_WIDTH_CLASS,
                   )}>
                     {column.onOpen ? (
                       <button type="button" onClick={column.onOpen} data-testid="fleet-agent-column" title={column.summary}
                         aria-label={`${column.harness}: ${column.summary}`}
-                        className={cn(headingClass, "rounded-md text-left transition-colors hover:bg-foreground/5")}>
+                        className={cn(FLEET_MATRIX_COLUMN_HEADING_CLASS, "rounded-md text-left transition-colors hover:bg-foreground/5")}>
                         {heading}
                       </button>
                     ) : (
-                      <span data-testid="fleet-agent-column" title={column.summary} className={cn(headingClass, "text-muted-foreground")}>
+                      <span data-testid="fleet-agent-column" title={column.summary} className={cn(FLEET_MATRIX_COLUMN_HEADING_CLASS, "text-muted-foreground")}>
                         {heading}
                       </span>
                     )}
@@ -264,14 +279,15 @@ function FleetMatrixRowLines({ row, columns, sticky, span, hasAddColumn, hasFill
       <tr aria-label={row.name} data-testid="fleet-machine" className="group/row transition-colors hover:bg-foreground/[0.025]">
         <th scope="row" className={cn(
           sticky,
-          "border-b border-foreground/10 py-1 pr-3 text-left align-middle font-normal group-hover/row:bg-[color-mix(in_oklab,var(--foreground)_2.5%,var(--app-panel-paper,var(--background)))]",
+          FLEET_MATRIX_ROW_TH_CLASS,
+          "group-hover/row:bg-[color-mix(in_oklab,var(--foreground)_2.5%,var(--app-panel-paper,var(--background)))]",
         )}>
           {row.heading}
         </th>
         {columns.map((column) => {
           const id = cellId({ row: row.key, harness: column.harness });
           return (
-            <td key={column.harness} className={cn("border-b border-foreground/10 px-0.5 py-1 align-middle", row.dimmed && "opacity-55")}>
+            <td key={column.harness} className={cn(FLEET_MATRIX_CELL_TD_CLASS, row.dimmed && "opacity-55")}>
               <FleetMatrixCellView cell={row.cells[column.harness] ?? { kind: "unknown" }} harness={column.harness} machine={row.name}
                 id={id} selected={id === selectedId}
                 onSelect={() => onSelect(id === selectedId ? null : { row: row.key, harness: column.harness })} />
@@ -285,7 +301,7 @@ function FleetMatrixRowLines({ row, columns, sticky, span, hasAddColumn, hasFill
   );
 }
 
-const CELL = "flex min-h-12 w-full min-w-0 flex-col justify-center gap-1 rounded-md px-2 py-1.5 text-left transition-colors";
+const CELL = FLEET_MATRIX_CELL_CLASS;
 /** The chosen cell is ringed, as a spreadsheet rings the cell being edited. */
 const CHOSEN = "bg-foreground/5 outline outline-2 -outline-offset-2 outline-foreground/40";
 

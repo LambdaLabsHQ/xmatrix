@@ -52,7 +52,7 @@ export function PlatformAdminSpaces({ token }: { token?: string }) {
 
 function SpacesList({ token, onOpen }: { token?: string; onOpen: (spaceId: string) => void }) {
   return (
-    <AdminQueryView title="Spaces" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
+    <AdminQueryView title="Spaces" skeleton="table" query={usePlatformOverview(token)} generatedAt={(overview) => overview.generatedAt}
       emptyTitle="No Spaces yet" emptyBody="Spaces appear here once someone creates one.">
       {(overview) => (
         <AdminTable
@@ -98,7 +98,7 @@ const AUDIT_COLUMNS: AdminColumn<AdminAuditEvent>[] = [
 
 export function PlatformAdminAudit({ token }: { token?: string }) {
   return (
-    <AdminQueryView title="Audit" query={useAdminAudit(token)}
+    <AdminQueryView title="Audit" skeleton="table" query={useAdminAudit(token)}
       emptyTitle="Nothing recorded yet" emptyBody="Operator reads are recorded here as they happen.">
       {(events) => (
         <AdminTable

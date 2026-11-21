@@ -43,3 +43,16 @@ test("every page the sitemap lists is served at the site origin, not redirected 
   assert.ok(paths.length > 5, "publicPaths lists the site's pages");
   for (const path of paths) assert.equal(isSitePath(path), true, path);
 });
+
+test("robots.ts allows mainstream AI search and training crawlers while blocking high-volume scrapers", () => {
+  const source = readFileSync(new URL("./src/app/robots.ts", import.meta.url), "utf8");
+  const list = source.match(/const blockedScrapers = \[([^\]]*)\]/u)?.[1];
+  assert.ok(list, "robots.ts names blockedScrapers");
+  const blocked = new Set([...list.matchAll(/"([^"]+)"/gu)].map((match) => match[1]));
+  for (const scraper of ["Amazonbot", "Bytespider", "TikTokSpider"]) {
+    assert.equal(blocked.has(scraper), true, `${scraper} should stay blocked`);
+  }
+  for (const allowed of ["GPTBot", "ClaudeBot", "CCBot", "Google-Extended", "PerplexityBot", "OAI-SearchBot"]) {
+    assert.equal(blocked.has(allowed), false, `${allowed} should be allowed`);
+  }
+});

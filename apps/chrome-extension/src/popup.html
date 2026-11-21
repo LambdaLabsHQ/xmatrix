@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xMatrix</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../icons/icon-32.png" alt="" width="20" height="20">
+    <strong>xMatrix</strong>
+    <span id="who" class="muted"></span>
+    <button id="sign-out" class="link" type="button" hidden>Sign out</button>
+  </header>
+
+  <section id="view-signed-out" hidden>
+    <p>Send pages, links and selected text from Chrome to a conversation in your xMatrix Space.</p>
+    <p id="signed-out-error" class="error" hidden></p>
+    <button id="sign-in" type="button" class="primary">Sign in to xMatrix</button>
+  </section>
+
+  <section id="view-signing-in" hidden>
+    <p>Approve the sign-in in the tab that opened. Check that it shows this code:</p>
+    <p id="user-code" class="code"></p>
+    <p id="sign-in-error" class="error" hidden></p>
+    <button id="cancel-sign-in" type="button">Cancel</button>
+  </section>
+
+  <form id="view-compose" hidden>
+    <label>Space
+      <select id="space" required></select>
+    </label>
+    <label>Conversation
+      <select id="channel" required></select>
+    </label>
+    <label>Message
+      <textarea id="note" rows="4" placeholder="Add a note. Mention an Agent, for example @claude, to hand it the work."></textarea>
+    </label>
+    <div id="capture" class="capture">
+      <label class="inline"><input id="include-page" type="checkbox" checked> Include this page</label>
+      <div id="capture-title" class="capture-title"></div>
+      <blockquote id="capture-selection" hidden></blockquote>
+    </div>
+    <p class="muted small">Page text is sent as a quote. Agents treat it as content, not as instructions.</p>
+    <p id="compose-error" class="error" hidden></p>
+    <button id="send" type="submit" class="primary">Send</button>
+  </form>
+
+  <section id="view-sent" hidden>
+    <p>Sent.</p>
+    <a id="open-channel" href="#" target="_blank" rel="noopener">Open the conversation</a>
+  </section>
+
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

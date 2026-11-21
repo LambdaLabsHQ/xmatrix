@@ -373,4 +373,27 @@ test.describe("mobile agents grid and bottom sheets", () => {
     await expect(matrix.getByTestId("add-machine")).not.toContainText("bash -s --");
     await expect(add).toHaveAttribute("aria-expanded", "true");
   });
+
+  test("a scrolling row of agents starts on the content line, not at the screen's edge", async ({ page }) => {
+    // Past eight agents the row scrolls and its cells snap; the snap must keep the row's inset, not pull the first face to the edge.
+    const harnesses = ["codex", "claude", "cursor", "opencode", "gemini", "kimi", "deepseek", "amp", "qwen", "grok"];
+    await openWorkspaceWithStubs(page, { spaces: [E2E_SPACE], machineDaemons: [{ ...daemon, metadata: { ...daemon.metadata,
+      harnesses: { schemaVersion: 1, capturedAt: E2E_NOW,
+        items: harnesses.map((id) => ({ id, installed: true, probeStatus: "ok", version: "1.0.0", autoUpdate: "disabled" })) } } }] });
+    const live = { machine: { online: true, lastSeenAt: new Date().toISOString(), platform: "linux" }, running: [] };
+    const registrations = harnesses.map((harness) => ({ ...registration(harness), live }));
+    await fixtureJson(page, "catalog", CATALOG, { registrations,
+      capabilities: harnesses.map((harness, index) => ({ harness, models: [], locations: [registrations[index]] })) });
+    await fixtureJson(page, "harness-recent", /\/api\/xmatrix\/machine-daemons\/harness-actions\?machineId=/u, { actions: [] });
+    await page.goto("/app/personal-sspaceperso/status");
+    const machine = page.getByTestId("fleet-matrix").getByRole("region", { name: "Workbench" });
+    await expect(machine.getByTestId("agent-row")).toHaveCount(harnesses.length);
+
+    // Measured together: the page slides in, so the two are compared in one frame.
+    await expect.poll(async () => {
+      const [heading, face] = await Promise.all([machine.getByTestId("machine-row").boundingBox(),
+        machine.getByTestId("agent-row").first().boundingBox()]);
+      return heading && face ? Math.round(face.x - heading.x) : null;
+    }).toBe(0);
+  });
 });

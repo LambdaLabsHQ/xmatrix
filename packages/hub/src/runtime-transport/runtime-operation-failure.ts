@@ -251,12 +251,14 @@ const CLIENT_FAILURES = {
   agent_channel_scope_mismatch: ["Agent Instance operation is outside its run-bound channel", "authority.access"],
   invalid_agent_message_fields: ["Agent message contains unsupported fields", "request.validate"],
   invalid_channel_activity: ["Channel activity report is malformed", "request.validate"],
+  /* A runtime from before plans were retired still reports them; it is refused, not a fault. */
+  channel_activity_retired: ["Plan activity is no longer recorded", "request.validate"],
 } as const;
 
 // An expired sign-in or run credential, or a redial over the limit, is the
 // client's ordinary state, not a Hub fault.
 const ORDINARY_CLIENT_FAILURES = new Set<keyof typeof CLIENT_FAILURES>([
-  "human_auth_invalid", "human_rate_limited", "agent_run_credential_invalid",
+  "human_auth_invalid", "human_rate_limited", "agent_run_credential_invalid", "channel_activity_retired",
 ]);
 
 /** Only an owning boundary may choose this finite code; no exception text is public copy. */

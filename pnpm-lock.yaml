@@ -85,6 +85,8 @@ importers:
         specifier: 2.9.0
         version: 2.9.0
 
+  apps/chrome-extension: {}
+
   apps/desktop:
     dependencies:
       '@xmatrix/protocol':
