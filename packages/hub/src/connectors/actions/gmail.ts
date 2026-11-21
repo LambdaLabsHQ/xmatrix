@@ -8,6 +8,7 @@ import { quoteRetrievedText, requireText, titleAndBody } from "./common";
 import { mailboxCredentials, mayUseMailbox, parseMailboxes, type GmailMailbox } from "../gmail-mailboxes";
 import { gmailReadPhase } from "../gmail-read-failure";
 import { MAX_MAIL_ATTACHMENT_BYTES, MAX_MAIL_ATTACHMENTS, validMailAttachment, type MailAttachment } from "../gmail-attachments";
+import type { MailSnapshotLinks } from "../mail-snapshot-link";
 
 /*
  * Gmail (API v1) through Composio: the Google account signs in to Composio's
@@ -302,6 +303,22 @@ async function gmailSend(credentials: Readonly<Record<string, string>>, path: "/
   return line(sent.id, 32);
 }
 
+/** Composio fetches large uploads from the short-lived snapshot URL. */
+async function sendSnapshot(staging: MailSnapshotLinks, credentials: Readonly<Record<string, string>>,
+  path: "/messages/send" | "/drafts/send", upload: ReturnType<typeof gmailUpload>, meter: UpstreamMeter | undefined): Promise<string> {
+  const staged = await staging.stage(upload.bytes, upload.contentType);
+  try {
+    return await gmailSend(credentials, path, { query: { uploadType: "multipart" },
+      binary: { url: staged.url, contentType: upload.contentType } }, meter, MAIL_SNAPSHOT);
+  } finally {
+    try {
+      await staged.remove();
+    } catch {
+      console.warn("Gmail upload snapshot cleanup failed");
+    }
+  }
+}
+
 function sendRaw(credentials: Readonly<Record<string, string>>, raw: string, threadId: string | undefined,
   meter: UpstreamMeter | undefined): Promise<string> {
   return gmailSend(credentials, "/messages/send", { raw, ...(threadId ? { threadId } : {}) }, meter);
@@ -533,14 +550,7 @@ async function sendPrepared(context: Context, input: Record<string, string>): Pr
   for (const file of files) read.push({ file, bytes: await context.mailAttachments.read(file) });
   const upload = gmailUpload(input.threadId ? { threadId: input.threadId } : {}, gmailMixed(input.raw!, read));
   await context.authorizeWrite?.();
-  /* Composio refuses an inline body of a few MB, so it fetches the message from a short-lived Hub URL. */
-  const staged = await context.mailSnapshot.stage(upload.bytes, upload.contentType);
-  try {
-    return await gmailSend(mailboxCredentials(context.credentials, mailbox), "/messages/send",
-      { query: { uploadType: "multipart" }, binary: { url: staged.url, contentType: upload.contentType } }, context.usage, MAIL_SNAPSHOT);
-  } finally {
-    await staged.remove();
-  }
+  return sendSnapshot(context.mailSnapshot, mailboxCredentials(context.credentials, mailbox), "/messages/send", upload, context.usage);
 }
 
 /**
@@ -644,14 +654,7 @@ async function sendDraftPrepared(context: Context, input: Record<string, string>
   const threadId = typeof message.threadId === "string" && MESSAGE_ID.test(message.threadId) ? message.threadId : undefined;
   if (!context.mailSnapshot) throw new ProviderRequestError(503, "the Hub has no staging for large Gmail drafts (ATTACHMENT_BUCKET and HUB_URL)");
   const upload = draftUpload({ id: input.draftId!, message: threadId ? { threadId } : {} }, message.raw);
-  /* Composio refuses an inline body of a few MB, so it fetches the snapshot from a short-lived Hub URL. */
-  const staged = await context.mailSnapshot.stage(upload.bytes, upload.contentType);
-  try {
-    return await gmailSend(credentials, "/drafts/send", { query: { uploadType: "multipart" },
-      binary: { url: staged.url, contentType: upload.contentType } }, context.usage, MAIL_SNAPSHOT);
-  } finally {
-    await staged.remove();
-  }
+  return sendSnapshot(context.mailSnapshot, credentials, "/drafts/send", upload, context.usage);
 }
 
 /**
