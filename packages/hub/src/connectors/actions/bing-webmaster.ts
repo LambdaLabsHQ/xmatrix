@@ -8,9 +8,9 @@ import { quoteRetrievedText } from "./common";
 
 /*
  * Bing Webmaster Tools (JSON API) and IndexNow. The Bing credential is the
- * account's API key from Settings → API access; Bing accepts it only as the
- * `apikey` query parameter, so request URLs are never echoed into a summary or
- * an error. A site is the exact URL Bing lists for it (`https://example.com/`).
+ * sign-in's OAuth access token, sent as a bearer token, or else the account's
+ * API key from Settings → API access, which Bing accepts only as the `apikey`
+ * query parameter, so request URLs are never echoed into a summary or an error. A site is the exact URL Bing lists for it (`https://example.com/`).
  * When the deployment configures a relay (`deploy/bing-relay`), Bing calls go
  * through it, because Bing throttles Cloudflare's egress addresses; the key
  * then travels as a header and the relay adds it for Bing.
@@ -24,10 +24,18 @@ const INDEXNOW = "https://api.indexnow.org/indexnow";
 const MAX_ROWS = 50;
 const MAX_URLS = 100;
 
-function bingKey(credentials: Readonly<Record<string, string>>): string {
+type BingAuth = { token: string } | { key: string };
+
+/** The sign-in's access token when there is one, else the saved API key. */
+function bingAuth(credentials: Readonly<Record<string, string>>): BingAuth {
+  const token = credentials.oauthToken?.trim();
+  if (token) {
+    if (token.length > 4096 || /[\s"\\]/u.test(token)) throw new ProviderRequestError(401, "Sign in to Bing Webmaster Tools again");
+    return { token };
+  }
   const key = credentials.apiKey?.trim();
-  if (!key || key.length > 200 || !/^[A-Za-z0-9]+$/u.test(key)) throw new ProviderRequestError(401, "Save a Bing Webmaster API key first");
-  return key;
+  if (!key || key.length > 200 || !/^[A-Za-z0-9]+$/u.test(key)) throw new ProviderRequestError(401, "Sign in to Bing Webmaster Tools or save an API key first");
+  return { key };
 }
 
 const describeError = (payload: Record<string, unknown>) => typeof payload.Message === "string" ? payload.Message.replace(/^ERROR!+\s*/u, "") : undefined;
@@ -35,12 +43,16 @@ const describeError = (payload: Record<string, unknown>) => typeof payload.Messa
 /** One Bing method; the reply's `d` member is the answer. */
 async function bing(credentials: Readonly<Record<string, string>>, egress: ProviderEgress | undefined, method: string,
   query: Record<string, string> = {}, json?: unknown): Promise<unknown> {
-  const key = bingKey(credentials);
+  const auth = bingAuth(credentials);
   const url = new URL(`${API_PATH}/${method}`, egress?.origin ?? BING);
-  if (!egress) url.searchParams.set("apikey", key);
+  if (!egress && "key" in auth) url.searchParams.set("apikey", auth.key);
   for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
-  const headers = egress ? { authorization: `Bearer ${egress.token}`, "x-bing-apikey": key } : undefined;
-  const result = await providerJson(url, { ...(json === undefined ? {} : { method: "POST", json }), ...(headers ? { headers } : {}), describeError });
+  // Through the relay, its own token takes `authorization`; Bing's credential rides in its own header.
+  const headers: Record<string, string> = {};
+  if ("token" in auth) headers[egress ? "x-bing-authorization" : "authorization"] = `Bearer ${auth.token}`;
+  else if (egress) headers["x-bing-apikey"] = auth.key;
+  if (egress) headers.authorization = `Bearer ${egress.token}`;
+  const result = await providerJson(url, { ...(json === undefined ? {} : { method: "POST", json }), headers, describeError });
   return result.d;
 }
 
@@ -85,16 +97,16 @@ function table(header: string, lines: string[], empty: string): string {
 
 export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   list_sites: {
-    effect: "read", requires: ["apiKey"],
+    effect: "read", requires: ["oauthToken|apiKey"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @bingwebmaster:list_sites:*",
     async execute({ credentials, egress }) {
       const sites = rows(await bing(credentials, egress, "GetUserSites"), "a site list");
       const lines = sites.slice(0, 250).map(site => [cell(site.Url), site.IsVerified === true ? "verified" : "not verified"].join("\t"));
-      return { summary: "Bing Webmaster sites:\n" + table("site\tverification", lines, "(no sites for this API key)") };
+      return { summary: "Bing Webmaster sites:\n" + table("site\tverification", lines, "(no sites for this account)") };
     },
   },
   traffic: {
-    effect: "read", requires: ["apiKey"],
+    effect: "read", requires: ["oauthToken|apiKey"],
     parse: siteOnly,
     async execute({ credentials, egress }, input) {
       const days = rows(await bing(credentials, egress, "GetRankAndTrafficStats", { siteUrl: input.site! }), "traffic statistics");
@@ -105,7 +117,7 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   ...Object.fromEntries((["queries", "pages"] as const).map(kind => [kind, {
-    effect: "read", requires: ["apiKey"],
+    effect: "read", requires: ["oauthToken|apiKey"],
     parse: siteOnly,
     async execute({ credentials, egress }, input) {
       const method = kind === "queries" ? "GetQueryStats" : "GetPageStats";
@@ -118,7 +130,7 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
     },
   } satisfies ConnectorAction])),
   crawl_stats: {
-    effect: "read", requires: ["apiKey"],
+    effect: "read", requires: ["oauthToken|apiKey"],
     parse: siteOnly,
     async execute({ credentials, egress }, input) {
       const days = rows(await bing(credentials, egress, "GetCrawlStats", { siteUrl: input.site! }), "crawl statistics");
@@ -130,7 +142,7 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   submit_urls: {
-    effect: "write", requires: ["apiKey"],
+    effect: "write", requires: ["oauthToken|apiKey"],
     parse: siteUrls,
     async execute({ credentials, egress }, input) {
       const urls = JSON.parse(input.urls!) as string[];
@@ -141,7 +153,7 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
     },
   },
   submit_sitemap: {
-    effect: "write", requires: ["apiKey"],
+    effect: "write", requires: ["oauthToken|apiKey"],
     parse(statement) {
       const parsed = siteUrls(statement);
       return typeof parsed !== "string" && (JSON.parse(parsed.urls!) as string[]).length === 1
@@ -169,6 +181,6 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
 
 /** Confirm the key with a real read; the site list is not stored. */
 export async function verifyBingWebmaster(credentials: Readonly<Record<string, string>>, _meter?: unknown, egress?: ProviderEgress): Promise<void> {
-  if (!credentials.apiKey) return;
-  rows(await bing(credentials, egress, "GetUserSites"), "a site list for this API key");
+  if (!credentials.apiKey && !credentials.oauthToken) return;
+  rows(await bing(credentials, egress, "GetUserSites"), "a site list for this account");
 }

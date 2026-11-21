@@ -275,9 +275,13 @@ through the AdSense Management API v2 and has no writes or inbound events. The
 contract, including what the API cannot read, is in
 [the AdSense connector document](../connectors/google-adsense.md).
 
-Bing Webmaster Tools (`bingwebmaster`) saves the account's API key (Settings →
-API access); Bing accepts it only as the `apikey` query parameter of its JSON
-API, so the Hub never echoes a request URL into a summary or error. A site is
+Bing Webmaster Tools (`bingwebmaster`) signs in with the company OAuth client
+(`CONNECTOR_BINGWEBMASTER_CLIENT_ID` / `_SECRET`, registered under Bing Webmaster
+Tools → Settings → API access → OAuth Client; scope `webmaster.manage`), so any
+Bing user connects their own account in one click; calls carry the access token
+as a bearer token. An account's API key still works instead; Bing accepts it
+only as the `apikey` query parameter of its JSON API, so the Hub never echoes a
+request URL into a summary or error. A site is
 the exact URL Bing lists (`https://example.com/`). Reads: `list_sites:*`,
 `traffic:<site>` (daily clicks and impressions), `queries:<site>` and
 `pages:<site>` (top 50 by clicks), `crawl_stats:<site>`. Writes, under the
@@ -288,8 +292,7 @@ the site's own IndexNow key, which the site publishes at `/<key>.txt`; the
 Hub posts the URLs to `api.indexnow.org`, which shares them with Bing, Yandex,
 Naver, Seznam and the other participating engines. Either credential may be
 saved alone; Check reads the site list when an API key is saved. Bing also
-offers OAuth for Webmaster Tools, but a company app needs its own registration;
-the API key keeps the connection per account without one.
+sign-in wins when both are saved.
 
 Bing answers every Webmaster API call from Cloudflare Workers' shared egress
 addresses with `ThrottleIP` (ErrorCode 17), whatever the key or call volume,

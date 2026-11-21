@@ -35,6 +35,20 @@ test("an authorized Bing method is forwarded to ssl.bing.com with the key added 
   assert.equal(new TextDecoder().decode(posted.calls[0].init.body), body);
 });
 
+test("a sign-in's access token is forwarded as Bing's authorization, with no apikey", async () => {
+  const { handler, calls } = relay();
+  const response = await handler(new Request(method, { headers: { authorization: `Bearer ${token}`,
+    "x-bing-authorization": "Bearer access-token-abc" } }));
+  assert.equal(response.status, 200);
+  assert.equal(new URL(calls[0].url).searchParams.has("apikey"), false);
+  assert.equal(calls[0].init.headers.authorization, "Bearer access-token-abc");
+  const both = await handler(new Request(method, { headers: { ...authorized(), "x-bing-authorization": "Bearer access-token-abc" } }));
+  assert.equal(both.status, 400, "one credential, not two");
+  const bad = await handler(new Request(method, { headers: { authorization: `Bearer ${token}`, "x-bing-authorization": "access-token-abc" } }));
+  assert.equal(bad.status, 400);
+  assert.equal(calls.length, 1);
+});
+
 test("anything but an authorized Bing Webmaster JSON method is refused without an outbound call", async () => {
   const { handler, calls } = relay();
   const refusals = [

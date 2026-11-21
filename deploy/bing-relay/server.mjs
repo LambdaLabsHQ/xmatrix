@@ -7,9 +7,11 @@
  * It forwards only `https://ssl.bing.com/webmaster/api.svc/json/<Method>`,
  * GET or POST, to a caller that presents the Hub's bearer token. The service
  * holds only the token's SHA-256 (`BING_RELAY_TOKEN_SHA256`), so deploying it
- * never moves a secret. The Bing API key arrives as the `x-bing-apikey`
- * header and is put in Bing's `apikey` query parameter here, so it never
- * appears in a request URL this service is sent or logs.
+ * never moves a secret. Bing's credential arrives in its own header: a
+ * sign-in's access token as `x-bing-authorization: Bearer …`, forwarded as
+ * Bing's `authorization`, or an API key as `x-bing-apikey`, put in Bing's
+ * `apikey` query parameter here, so it never appears in a request URL this
+ * service is sent or logs.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
@@ -18,6 +20,7 @@ import { pathToFileURL } from "node:url";
 const BING = "https://ssl.bing.com";
 const METHOD_PATH = /^\/webmaster\/api\.svc\/json\/[A-Za-z]{1,64}$/u;
 const API_KEY = /^[A-Za-z0-9]{1,200}$/u;
+const BEARER = /^Bearer [\x21-\x7e]{1,4096}$/u;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_REPLY_BYTES = 4 * 1024 * 1024;
 const TIMEOUT_MS = 9_000;
@@ -39,15 +42,19 @@ export function bingRelay({ tokenSha256, fetch = globalThis.fetch }) {
       return refuse(404, "only Bing Webmaster JSON API methods are forwarded");
     }
     const key = request.headers.get("x-bing-apikey") ?? "";
-    if (!API_KEY.test(key) || url.searchParams.has("apikey")) return refuse(400, "send the Bing API key only as x-bing-apikey");
+    const signIn = request.headers.get("x-bing-authorization") ?? "";
+    if (url.searchParams.has("apikey") || (key ? signIn || !API_KEY.test(key) : !BEARER.test(signIn))) {
+      return refuse(400, "send Bing's credential only as x-bing-apikey or x-bing-authorization");
+    }
     const body = request.method === "POST" ? new Uint8Array(await request.arrayBuffer()) : undefined;
     if (body && body.byteLength > MAX_BODY_BYTES) return refuse(413, "request body is too large");
     const target = new URL(url.pathname + url.search, BING);
-    target.searchParams.set("apikey", key);
+    if (key) target.searchParams.set("apikey", key);
     let upstream;
     try {
       upstream = await fetch(target, { method: request.method, redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS),
-        headers: { accept: "application/json", "user-agent": "xMatrix-Connectors", ...(body ? { "content-type": "application/json" } : {}) },
+        headers: { accept: "application/json", "user-agent": "xMatrix-Connectors", ...(key ? {} : { authorization: signIn }),
+          ...(body ? { "content-type": "application/json" } : {}) },
         ...(body ? { body } : {}) });
     } catch {
       return refuse(502, "Bing could not be reached");

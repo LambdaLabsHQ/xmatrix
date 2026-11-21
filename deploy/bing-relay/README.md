@@ -11,8 +11,10 @@ small Cloud Run service instead. IndexNow is not relayed.
 - The Hub authenticates with `Authorization: Bearer <CONNECTOR_BING_RELAY_TOKEN>`.
   The service holds only that token's SHA-256 (`BING_RELAY_TOKEN_SHA256`), which
   is not a secret, so deploying moves no credential.
-- The Bing API key arrives as `x-bing-apikey` and is added to Bing's `apikey`
-  query parameter here, so it never appears in a URL Cloud Run logs.
+- Bing's credential has its own header: a sign-in's access token as
+  `x-bing-authorization: Bearer …` (forwarded as Bing's `authorization`), or an
+  API key as `x-bing-apikey`, added to Bing's `apikey` query parameter here, so
+  neither appears in a URL Cloud Run logs.
 
 ## Deploy
 

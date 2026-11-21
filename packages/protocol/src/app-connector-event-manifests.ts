@@ -164,9 +164,13 @@ export const EVENT_CONNECTOR_MANIFESTS: AppConnectorProviderManifest[] = [
   actionConnector({
     id: "bingwebmaster", name: "Bing Webmaster Tools", kind: "observability",
     description: "Read Bing search traffic, top queries and pages and crawl statistics for your verified sites; submit URLs and sitemaps to Bing, or URLs to every IndexNow engine.",
+    // Sign in with Bing (the company OAuth client); an API key still works instead.
+    oauth: { authorizeUrl: "https://www.bing.com/webmasters/OAuth/authorize", tokenUrl: "https://www.bing.com/webmasters/oauth/token",
+      scopes: ["webmaster.manage"], tokenField: "oauthToken" },
     credentials: [
+      ...OAUTH_TOKEN_CREDENTIALS,
       { id: "apiKey", label: "Bing Webmaster API key",
-        description: "For Bing reads and submissions: Bing Webmaster Tools → Settings → API access → API key." },
+        description: "Instead of signing in: Bing Webmaster Tools → Settings → API access → API key." },
       { id: "indexNowKey", label: "IndexNow key",
         description: "For indexnow: the site's IndexNow key, published at https://<site>/<key>.txt." },
     ],

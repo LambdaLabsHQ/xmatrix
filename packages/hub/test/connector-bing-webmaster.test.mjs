@@ -63,8 +63,8 @@ test("submissions post to Bing and IndexNow with the site's own key", async () =
 });
 
 test("a bad key, Bing errors and malformed answers fail closed", async () => {
-  await assert.rejects(ACTIONS.list_sites.execute({ credentials: {} }, {}), /Bing Webmaster API key/u);
-  await assert.rejects(ACTIONS.list_sites.execute({ credentials: { apiKey: "has space" } }, {}), /Bing Webmaster API key/u);
+  await assert.rejects(ACTIONS.list_sites.execute({ credentials: {} }, {}), /Bing Webmaster Tools or save an API key/u);
+  await assert.rejects(ACTIONS.list_sites.execute({ credentials: { apiKey: "has space" } }, {}), /Bing Webmaster Tools or save an API key/u);
   const refused = fetched([{ status: 400, body: { ErrorCode: 3, Message: "ERROR!!! InvalidApiKey" } }], () => verifyBingWebmaster(key));
   await assert.rejects(refused, error => /Provider returned 400: InvalidApiKey/u.test(error.message) && !error.message.includes(key.apiKey));
   await fetched([{ body: { d: { Url: site } } }], () => assert.rejects(ACTIONS.traffic.execute({ credentials: key }, { site }), /traffic statistics/u));
@@ -101,4 +101,20 @@ test("only a complete, public https relay configuration is used; otherwise Bing 
     { CONNECTOR_BING_RELAY_URL: "https://user@relay.example.com" }, { CONNECTOR_BING_RELAY_URL: "not a url" }]) {
     assert.equal(providerEgress({ ...good, ...change }, "bingwebmaster"), undefined, JSON.stringify(change));
   }
+});
+
+test("a Bing sign-in sends its access token as a bearer token, directly or through the relay", async () => {
+  const signedIn = { oauthToken: "access-token-abc", apiKey: key.apiKey };
+  const direct = await fetched([{ body: { d: [] } }], () => ACTIONS.list_sites.execute({ credentials: signedIn }, {}));
+  const call = new URL(direct.calls[0].url);
+  assert.equal(call.origin, "https://ssl.bing.com");
+  assert.equal(call.searchParams.has("apikey"), false, "the sign-in wins over a saved key");
+  assert.equal(direct.calls[0].headers.get("authorization"), "Bearer access-token-abc");
+
+  const egress = { origin: "https://bing-relay-abc.a.run.app", token: relayToken };
+  const relayed = await fetched([{ body: { d: [] } }], () => ACTIONS.list_sites.execute({ credentials: signedIn, egress }, {}));
+  assert.equal(relayed.calls[0].headers.get("authorization"), `Bearer ${relayToken}`);
+  assert.equal(relayed.calls[0].headers.get("x-bing-authorization"), "Bearer access-token-abc");
+  assert.equal(relayed.calls[0].headers.get("x-bing-apikey"), null);
+  await assert.rejects(ACTIONS.list_sites.execute({ credentials: { oauthToken: "has space" } }, {}), /Sign in to Bing Webmaster Tools again/u);
 });
