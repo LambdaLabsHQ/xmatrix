@@ -86,7 +86,7 @@ test('test-mode keys, invalid price references, and whitespace cannot reach prod
   }
 });
 
-const connectorProviders = ['NOTION', 'X', 'SLACK', 'LINEAR', 'SENTRY', 'GITLAB', 'JIRA', 'NETLIFY', 'VERCEL', 'GOOGLE', 'BITBUCKET', 'PAGERDUTY', 'CLOUDFLARE'];
+const connectorProviders = ['NOTION', 'X', 'SLACK', 'LINEAR', 'SENTRY', 'GITLAB', 'JIRA', 'NETLIFY', 'VERCEL', 'GOOGLE', 'BITBUCKET', 'PAGERDUTY', 'CLOUDFLARE', 'BINGWEBMASTER'];
 
 test('registered connector applications rotate complete pairs through the deployment payload', () => {
   const connectors = Object.fromEntries(connectorProviders.flatMap((provider) => [
