@@ -6,7 +6,7 @@
 export function isStaleBuild(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   return error.name === "ChunkLoadError" ||
-    /Loading (?:CSS )?chunk [\w-]+ failed|Failed to fetch dynamically imported module/u.test(error.message) ||
+    /Loading (?:CSS )?chunk [\w-]+ failed|Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module/iu.test(error.message) ||
     (error instanceof TypeError && /reading 'call'/u.test(error.message) && /\/chunks\/webpack-/u.test(error.stack ?? ""));
 }
 

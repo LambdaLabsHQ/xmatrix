@@ -54,7 +54,10 @@ export function loadHighlighter(): Promise<HLJSApi> {
     for (const [name, grammar] of grammars) hljs.registerLanguage(name, grammar);
     highlighter = hljs;
     return hljs;
-  })();
+  })().catch((error) => {
+    loading = null;
+    throw error;
+  });
   return loading;
 }
 
@@ -97,9 +100,11 @@ export function useHighlightedCode(text: string, language: string): string | nul
   useEffect(() => {
     if (hljs) return;
     let live = true;
-    void loadHighlighter().then((loaded) => {
-      if (live) setHljs(() => loaded);
-    });
+    void loadHighlighter()
+      .then((loaded) => {
+        if (live) setHljs(() => loaded);
+      })
+      .catch(() => undefined);
     return () => {
       live = false;
     };

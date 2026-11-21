@@ -55,6 +55,7 @@ import {
 import {
   clearChannelComposerDraft,
   emptyChannelComposerDraft,
+  persistChannelComposerDrafts,
   writeChannelComposerDraft,
 } from "@/components/dashboard/channel-composer-drafts";
 import { useAgentTraceHistorySync } from "@/components/dashboard/use-agent-trace-history-sync";
@@ -1555,6 +1556,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       const passage = messagePassageQuote(source, message, messageId, quote);
       writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, { ...emptyChannelComposerDraft(),
         text: discussionHead(passage.text, passage) });
+      persistChannelComposerDrafts(s.channelComposerDraftsRef.current, s.user?.id);
       // Beside a page it opens beside the page, as a discussion of the page does.
       if (s.viewRef.current === "pages" && s.selectedPageId) openPageConversation(channel.id, { focus: true });
       else navigateToChannel(channel.id);
@@ -2514,6 +2516,7 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       // The composer wrote the discussion's passage into this message.
       dropDiscussionQuote(channelId);
       clearChannelComposerDraft(s.channelComposerDraftsRef.current, channelId);
+      persistChannelComposerDrafts(s.channelComposerDraftsRef.current, s.user?.id);
       s.draftWorkspaceTargetValueRef.current = null;
       s.draftAttachmentsRef.current = [];
       s.replyTargetRef.current = null;

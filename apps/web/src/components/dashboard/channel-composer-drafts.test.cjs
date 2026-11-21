@@ -10,8 +10,12 @@ const { parseAgentInvocationSelections, staticFace } = require("@xmatrix/protoco
 
 const {
   clearChannelComposerDraft,
+  clearPersistedChannelComposerDrafts,
   emptyChannelComposerDraft,
+  hasChannelComposerAttachments,
+  hydrateChannelComposerDrafts,
   isChannelComposerDraftEmpty,
+  persistChannelComposerDrafts,
   readChannelComposerDraft,
   writeChannelComposerDraft,
 } = require("./channel-composer-drafts.ts");
@@ -267,4 +271,73 @@ test("picked references go out as id tokens and Agent spans are measured against
   // Editing a picked name sends what was typed, with no id behind it.
   const edited = updateComposerInvocationDraft(draft, draft.body.replace("#发布", "#发"));
   assert.match(composerSendDraft(edited, edited.body).body, /^see #发 then/u);
+});
+
+function draftMemoryStorage() {
+  const entries = new Map();
+  return {
+    entries,
+    getItem: (key) => (entries.has(key) ? entries.get(key) : null),
+    setItem: (key, value) => { entries.set(key, String(value)); },
+    removeItem: (key) => { entries.delete(key); },
+  };
+}
+
+test("session persistence restores unsent drafts and picks per user without leaking across accounts", () => {
+  const storage = draftMemoryStorage();
+  const first = new Map();
+  const invocationDraft = selectComposerInvocation(undefined, "@codex ship it", selection);
+  writeChannelComposerDraft(first, "channel-1", {
+    text: invocationDraft.body,
+    invocationDraft,
+    workspaceTarget: "/work/repo",
+    attachments: [{ id: "att-1" }],
+  });
+  assert.equal(hasChannelComposerAttachments(first), true);
+  persistChannelComposerDrafts(first, "user-a", storage);
+
+  // Another account cannot read user-a's saved drafts.
+  const otherUser = new Map();
+  assert.equal(hydrateChannelComposerDrafts(otherUser, "user-b", storage), 0);
+  assert.equal(otherUser.size, 0);
+
+  // Reloading for user-a restores text, workspace target and picked Agent binding (never binary attachments).
+  const reloaded = new Map();
+  assert.equal(hydrateChannelComposerDrafts(reloaded, "user-a", storage), 1);
+  const restored = readChannelComposerDraft(reloaded, "channel-1");
+  assert.equal(restored.text, "@codex ship it");
+  assert.equal(restored.workspaceTarget, "/work/repo");
+  assert.deepEqual(restored.attachments, []);
+  assert.deepEqual(composerSendDraft(restored.invocationDraft, restored.text).selections, [selection]);
+
+  // Existing in-memory edits win over stored copies on hydration.
+  const edited = new Map();
+  writeChannelComposerDraft(edited, "channel-1", { text: "newer draft", workspaceTarget: null, attachments: [] });
+  assert.equal(hydrateChannelComposerDrafts(edited, "user-a", storage), 0);
+  assert.equal(readChannelComposerDraft(edited, "channel-1").text, "newer draft");
+
+  // Clearing drafts on logout removes persisted storage.
+  clearPersistedChannelComposerDrafts("user-a", storage);
+  assert.equal(storage.entries.size, 0);
+});
+
+test("session persistence bounds stored channels and survives corrupted storage", () => {
+  const storage = draftMemoryStorage();
+  const store = new Map();
+  for (let index = 0; index < 25; index += 1) {
+    writeChannelComposerDraft(store, `channel-${index}`, {
+      text: `draft ${index}`,
+      workspaceTarget: null,
+      attachments: [],
+    });
+  }
+  persistChannelComposerDrafts(store, "user-a", storage);
+  const restored = new Map();
+  assert.equal(hydrateChannelComposerDrafts(restored, "user-a", storage), 20);
+  assert.equal(restored.has("channel-0"), false);
+  assert.equal(restored.has("channel-24"), true);
+
+  storage.setItem("xmatrix:composer-drafts:v1:user-a", "{corrupt");
+  const fromCorrupt = new Map();
+  assert.equal(hydrateChannelComposerDrafts(fromCorrupt, "user-a", storage), 0);
 });

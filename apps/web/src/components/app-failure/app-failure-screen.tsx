@@ -1,16 +1,35 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isStaleBuild } from "@/lib/error-noise";
+import { canAutoReloadStaleBuild, tryReloadStaleBuild } from "@/lib/stale-build-reload";
 
 /**
  * What a person sees when a screen fails to render: what happened in plain
- * words and a way back. The error itself stays in the console, with Next's
- * digest as the reference a report can quote.
+ * words and a way back. A stale build reloads itself once without showing a
+ * blocking card; only a repeated failure falls back to the manual reload card.
+ * The error itself stays in the console, with Next's digest as the reference a
+ * report can quote.
  */
 export function AppFailureScreen({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
-  useEffect(() => { console.error("[xmatrix] screen failed to render", error); }, [error]);
   const stale = isStaleBuild(error);
+  const [autoReloading, setAutoReloading] = useState(() => stale && canAutoReloadStaleBuild());
+  const reloadAttemptedRef = useRef(false);
+
+  useEffect(() => {
+    console.error("[xmatrix] screen failed to render", error);
+  }, [error]);
+
+  useEffect(() => {
+    if (!autoReloading || reloadAttemptedRef.current) return;
+    reloadAttemptedRef.current = true;
+    if (!tryReloadStaleBuild()) setAutoReloading(false);
+  }, [autoReloading]);
+
+  if (autoReloading) {
+    return <main className="site-page site-login min-h-dvh" aria-busy="true" />;
+  }
+
   return (
     <main className="site-page site-login flex min-h-dvh items-center justify-center px-6 py-12 text-[#241f19]">
       <section role="alert" className="site-login-panel w-full max-w-lg rounded-2xl border border-black/10 bg-white p-8 shadow-sm sm:p-10">

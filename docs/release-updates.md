@@ -1,5 +1,22 @@
 # Release Updates
 
+## Unreleased: reload stale Web builds automatically and preserve unsent composer drafts
+
+When a new Web deploy replaced static chunks, an already-open tab hitting a lazy
+chunk (`ChunkLoadError` or browser dynamic-import failure) showed the blocking
+full-screen "xMatrix was updated" card with a single Reload button, and reloading
+dropped unsent composer drafts. `AppFailureScreen` now reloads automatically once
+without showing the card (guarded in `sessionStorage` per build id for 60 seconds
+so a broken deploy cannot loop; repeated failure falls back to the manual card),
+and deployed builds also check `/api/web-build` at low frequency and silently
+reload after resting in the background for 15 seconds when online with no
+in-flight sends, queued attachments, or unsaved new page. Per-channel text drafts,
+picked `@` bindings, and workspace selections are mirrored into account-scoped
+`sessionStorage` (bounded to 20 channels / 64 KiB and cleared on sign-out) so
+reloads keep unsent text. Stale `highlight.js` and page-tree hover chunk prefetches
+now catch rejections quietly instead of raising unhandled rejections. Web only.
+Recovery is a CI-validated beta Web release reverting this change.
+
 ## Unreleased: a late unanswered start does not fail a launch that connected
 
 The Hub ends a spawn command the machine never answers and records that as a
