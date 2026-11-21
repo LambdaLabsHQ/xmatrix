@@ -8,6 +8,7 @@ import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
+import { subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
@@ -1585,6 +1586,37 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     quoteIntoComposer(messagePassageQuote(source, message, message.messageId, quote));
     setComposerAutoFocusRequest((current) => current + 1);
   });
+
+  /**
+   * A passage of the web page the person is reading, handed over by the
+   * extension's side panel (lib/extension-embed.ts). It is quoted in the open
+   * conversation, or opens a new conversation named by it whose draft holds
+   * it with a link back to the page, as a passage of a message does.
+   */
+  const handleWebPassage = useStableCallback(async (passage: EmbedPassage) => {
+    const quote = discussionQuote(passage.text.trim() || passage.label,
+      { label: passage.label || new URL(passage.href).host, href: passage.href }, false);
+    if (passage.target === "current" && s.selectedChannelIdRef.current) {
+      quoteIntoComposer(quote);
+      setComposerAutoFocusRequest((current) => current + 1);
+      return;
+    }
+    if (!s.token || !s.user || !s.currentSpaceId) return;
+    try {
+      const { channel } = await beginConversation({ spaceId: s.currentSpaceId,
+        memberName: s.user.name || s.user.email || "Human", name: discussionTitle(quote.text), mode: "open",
+        metadata: { autoName: true } });
+      writeChannelComposerDraft(s.channelComposerDraftsRef.current, channel.id, { ...emptyChannelComposerDraft(),
+        text: discussionHead(quote.text, quote) });
+      persistChannelComposerDrafts(s.channelComposerDraftsRef.current, s.user?.id);
+      navigateToChannel(channel.id);
+      setComposerAutoFocusRequest((current) => current + 1);
+    } catch (err) {
+      setHistoryError(userErrorMessage(err, "Couldn't start the conversation"));
+    }
+  });
+
+  useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
 
   function openInternalAppLink(href: string): boolean {
     const pageLink = internalPageLink(href, window.location.href);
