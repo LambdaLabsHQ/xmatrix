@@ -1,5 +1,14 @@
 # Release Updates
 
+## Unreleased: Chrome Web Store listing for the extension; privacy policy covers it
+
+The privacy policy (section 11) now says what the xMatrix Chrome extension
+reads, when, where it sends it, and what it keeps on the device, as the Chrome
+Web Store requires of a listing's policy. `apps/chrome-extension/store` holds
+the listing text, permission justifications, privacy answers, screenshots and
+promo tile for the first submission. Web only (policy text). Recovery is a
+CI-validated beta reverting this change.
+
 ## Unreleased: reload stale Web builds automatically and preserve unsent composer drafts
 
 When a new Web deploy replaced static chunks, an already-open tab hitting a lazy
