@@ -101,10 +101,15 @@ pub async fn grant_give(
             return Err(CliError::Auth(format!("--{name} must not be empty")));
         }
     }
-    let url = protocol::with_route(hub, "/api/admin/billing-grants");
     let body = serde_json::json!({
         "userId": user.trim(), "spaceId": space.trim(), "reference": reference.trim(), "reason": reason.trim(),
     });
+    post_and_print(hub, token, "/api/admin/billing-grants", body).await
+}
+
+/// POST an operator request and print the Hub's JSON answer.
+async fn post_and_print(hub: &str, token: &str, path: &str, body: serde_json::Value) -> Result<()> {
+    let url = protocol::with_route(hub, path);
     let value: serde_json::Value =
         bounded(http::request_json(&url, "POST", Some(token), Some(body))).await?;
     println!("{}", serde_json::to_string_pretty(&value)?);
@@ -139,12 +144,14 @@ pub async fn campaign_send(
             "Pass 1–50 user ids (not email addresses)".into(),
         ));
     }
-    let url = protocol::with_route(hub, &format!("/api/admin/email-campaigns/{campaign}/send"));
     let body = serde_json::json!({ "userIds": users, "dryRun": dry_run });
-    let value: serde_json::Value =
-        bounded(http::request_json(&url, "POST", Some(token), Some(body))).await?;
-    println!("{}", serde_json::to_string_pretty(&value)?);
-    Ok(())
+    post_and_print(
+        hub,
+        token,
+        &format!("/api/admin/email-campaigns/{campaign}/send"),
+        body,
+    )
+    .await
 }
 
 pub fn page_url(hub: &str) -> Result<&'static str> {
