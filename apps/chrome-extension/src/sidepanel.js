@@ -43,10 +43,23 @@ function postToApp(message) {
   appWindow()?.postMessage({ protocol: PROTOCOL, ...message }, APP_ORIGIN);
 }
 
-function openApp() {
-  if ($("app").getAttribute("src")) return;
+/** Loads the app, straight onto a conversation the extension just started when there is one. */
+let opening = false;
+async function openApp() {
+  if (opening || $("app").getAttribute("src")) return;
+  opening = true;
   appReady = false;
-  $("app").src = `${APP_ORIGIN}/app`;
+  const path = await ask("takeOpenPath").catch(() => null);
+  $("app").src = `${APP_ORIGIN}${path ?? "/app"}`;
+  opening = false;
+}
+
+/** A conversation the extension started (a quick question on the page): shown in the loaded app. */
+async function showOpenPath() {
+  if (!$("app").getAttribute("src")) return openApp();
+  if (!appReady) return;
+  const path = await ask("takeOpenPath");
+  if (path) postToApp({ type: "open", path });
 }
 
 function closeApp() {
@@ -71,6 +84,7 @@ window.addEventListener("message", async (event) => {
   } else if (data.type === "ready") {
     appReady = true;
     await deliverPassages();
+    await showOpenPath();
   } else if (data.type === "signed-out") {
     await ask("signOut");
     await render();
@@ -79,6 +93,7 @@ window.addEventListener("message", async (event) => {
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area === "session" && changes.passages?.newValue?.length) deliverPassages().catch(() => undefined);
+  if (area === "session" && changes.openPath?.newValue && !$("view-app").hidden) showOpenPath().catch(() => undefined);
   if ((area === "local" && changes.session) || (area === "session" && changes.signIn)) render().catch(() => undefined);
 });
 
@@ -142,7 +157,7 @@ async function render() {
   const state = await ask("state");
   if (state.signedIn) {
     show("view-app");
-    openApp();
+    await openApp();
     await renderContext();
     return;
   }

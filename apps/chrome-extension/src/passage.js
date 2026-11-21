@@ -29,3 +29,24 @@ export function pagePassage({ text, title, url, target }) {
   if (!href || (target !== "current" && target !== "new")) return null;
   return { text: clip(text, MAX_TEXT), label: clip(String(title ?? "").replace(/\s+/gu, " "), MAX_LABEL), href, target };
 }
+
+/** A discussion is named by its passage until its first message names it (apps/web selection-discussion.ts). */
+export function discussionTitle(quote) {
+  const line = quote.trim().replace(/\s+/gu, " ");
+  return `“${line.length > 60 ? `${line.slice(0, 59)}…` : line}”`;
+}
+
+function linkDestination(href) {
+  return /[\s()<>]/u.test(href) ? `<${href.replace(/[<>\n]/gu, encodeURIComponent)}>` : href;
+}
+
+/**
+ * The quoted passage and where it came from, as the first lines of a
+ * discussion's first message; the same Markdown the web app writes
+ * (`discussionHead` in @xmatrix/protocol), so it shows as a quote there.
+ */
+export function discussionHead(quote, source) {
+  const quoted = quote.split(/\r?\n/u).map((line) => (line.trim() ? `> ${line.trimEnd()}` : ">")).join("\n");
+  const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
+  return `${quoted}\n\n— [${label}](${linkDestination(source.href)})\n\n`;
+}

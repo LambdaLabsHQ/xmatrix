@@ -207,3 +207,38 @@ export async function freshAccessToken(deps, store, minLifeMs = 10 * 60 * 1000) 
     throw error;
   }
 }
+
+export async function listSpaces(deps, token) {
+  const json = await request(deps, "/api/spaces", { token });
+  return (Array.isArray(json.spaces) ? json.spaces : [])
+    .filter((space) => space && typeof space.id === "string")
+    .map((space) => ({ id: space.id, name: typeof space.name === "string" && space.name ? space.name : space.id }));
+}
+
+/**
+ * Starts a conversation in a Space, as the web app's passage discussion does:
+ * named by the passage until its first message names it.
+ */
+export async function createConversation(deps, token, { spaceId, name, memberName }) {
+  const json = await request(deps, "/api/channels", {
+    method: "POST",
+    token,
+    body: { spaceId, name, mode: "open", metadata: { createdBy: "chrome-extension", autoName: true }, memberName },
+  });
+  if (typeof json.channel?.id !== "string") throw new HubError(502, "xMatrix did not start the conversation.");
+  return { id: json.channel.id, spaceId: json.channel.spaceId ?? spaceId };
+}
+
+/**
+ * Posts a message as the signed-in person. `clientMessageId` makes a retry of
+ * the same send land once; `launch` starts the Agents it mentions, as the web
+ * composer does.
+ */
+export async function sendMessage(deps, token, { channelId, body, clientMessageId }) {
+  const json = await request(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
+    method: "POST",
+    token,
+    body: { body, clientMessageId, launch: true },
+  });
+  return { messageId: json.message?.messageId ?? clientMessageId };
+}
