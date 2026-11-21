@@ -8,7 +8,7 @@ import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
-import { subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
@@ -1628,6 +1628,11 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   });
 
   useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
+
+  const handleEmbedOpen = useStableCallback((path: string) => {
+    openInternalAppLink(new URL(path, window.location.origin).toString());
+  });
+  useEffect(() => subscribeEmbedOpen(handleEmbedOpen), [handleEmbedOpen]);
 
   useEffect(() => {
     if (!webPassageTargetReady || pendingWebPassagesRef.current.length === 0) return;

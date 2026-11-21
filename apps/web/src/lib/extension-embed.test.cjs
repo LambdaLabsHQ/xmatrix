@@ -98,3 +98,17 @@ test("the proxy takes a request's own client identity only from a compatible app
   assert.equal(parseAppCompatibilityHeaders(headers({ ...app, protocol: "1" })), undefined);
   assert.equal(parseAppCompatibilityHeaders(new Headers()), undefined);
 });
+
+test("the extension may only open a conversation path of this app", (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  const opened = [];
+  const stop = embed.subscribeEmbedOpen((path) => opened.push(path));
+  const send = (path, origin = EXTENSION) => win.dispatch({ source: win.parent, origin, data: { protocol: "xmatrix-embed/1", type: "open", path } });
+  send("/app/space-1/channel_2");
+  send("https://evil.example/app/a/b");
+  send("/app/a/b/../../login");
+  send("//evil.example/app/a/b");
+  send("/app/a/b", "https://evil.example");
+  stop();
+  assert.deepEqual(opened, ["/app/space-1/channel_2"]);
+});

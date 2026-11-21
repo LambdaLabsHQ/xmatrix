@@ -126,6 +126,24 @@ export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => voi
   return () => window.removeEventListener("message", onMessage);
 }
 
+/** A conversation of this app, as `/app/<space>/<conversation>`; nothing else. */
+const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128}$/u;
+
+/**
+ * Conversations the extension started on its own (a question asked on the
+ * page, sent straight to the Hub) and asks the panel to show.
+ */
+export function subscribeEmbedOpen(onOpen: (path: string) => void): () => void {
+  const parent = extensionEmbedParent();
+  if (!parent) return () => undefined;
+  const onMessage = (event: MessageEvent) => {
+    const data = fromParent(event, parent);
+    if (data?.type === "open" && typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) onOpen(data.path);
+  };
+  window.addEventListener("message", onMessage);
+  return () => window.removeEventListener("message", onMessage);
+}
+
 /**
  * The side panel's client identity, sent on the Web's own proxy calls: the
  * compatibility cookie the proxy reads elsewhere is never set in a frame
