@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
-  githubRepositoryFeaturesFromCommand,
+  githubSubscriptionSelectionFromCommand,
   githubFeatureForWebhookEvent,
   githubWebhookMessageBody,
   githubWebhookRepositoryIdentity,
@@ -12,15 +12,15 @@ import {
 
 test("repository subscription commands preserve explicit and all feature selections", () => {
   assert.deepEqual(
-    githubRepositoryFeaturesFromCommand("@\u200Bgithub:subscribe:LambdaLabsHQ/xmatrix all"),
+    githubSubscriptionSelectionFromCommand("@\u200Bgithub:subscribe:LambdaLabsHQ/xmatrix all").features,
     ["issues", "pulls", "comments", "reviews", "commits", "checks", "status", "releases", "code-scanning"],
   );
   assert.deepEqual(
-    githubRepositoryFeaturesFromCommand("@github:subscribe:LambdaLabsHQ/xmatrix commits,checks"),
+    githubSubscriptionSelectionFromCommand("@github:subscribe:LambdaLabsHQ/xmatrix commits,checks").features,
     ["commits", "checks"],
   );
   assert.deepEqual(
-    githubRepositoryFeaturesFromCommand("@github:subscribe:LambdaLabsHQ/xmatrix"),
+    githubSubscriptionSelectionFromCommand("@github:subscribe:LambdaLabsHQ/xmatrix").features,
     ["issues", "comments"],
   );
 });
