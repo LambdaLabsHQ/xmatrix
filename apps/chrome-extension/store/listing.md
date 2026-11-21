@@ -1,6 +1,6 @@
 # Chrome Web Store listing
 
-The text and answers to paste into the Chrome Web Store developer dashboard for the xMatrix extension. The publisher is the MadeByRobot, LLC developer account, declared as a trader. The images in this folder are the screenshots and the small promo tile. Their data is made up.
+The website is `xmatrix.page`; the Hub and the web app stay on `xmatrix.sh`. The text and answers to paste into the Chrome Web Store developer dashboard for the xMatrix extension. The publisher is the MadeByRobot, LLC developer account, declared as a trader. The images in this folder are the screenshots and the small promo tile. Their data is made up.
 
 ## Store listing
 
@@ -8,9 +8,9 @@ The text and answers to paste into the Chrome Web Store developer dashboard for 
 - **Summary** (taken from the manifest's `description`, at most 132 characters): Send the page you are on, a link or selected text to a conversation in your xMatrix Space, and see what is waiting on you.
 - **Category:** Productivity → Workflow & Planning
 - **Language:** English
-- **Homepage URL:** https://xmatrix.sh
-- **Support URL:** https://xmatrix.sh/docs
-- **Privacy policy URL:** https://xmatrix.sh/privacy
+- **Homepage URL:** https://xmatrix.page
+- **Support URL:** https://xmatrix.page/docs
+- **Privacy policy URL:** https://xmatrix.page/privacy
 
 **Description**
 
@@ -22,11 +22,11 @@ xMatrix is where your team and coding agents such as Claude Code, Codex, Cursor 
 • The badge shows how many conversations are waiting on you.
 
 How it works
-• Sign in once on xmatrix.sh. The extension shows a code to compare, and no password is typed into it.
+• Sign in once in the xMatrix web app. The extension shows a code to compare, and no password is typed into it.
 • The extension reads a page only when you click it, use its menu item or press its shortcut (Alt+Shift+X). Nothing is read in the background.
 • Selected text is sent as a quote. Agents treat it as page content, not as instructions.
 
-An xMatrix account is required: https://xmatrix.sh
+An xMatrix account is required: https://xmatrix.page
 ```
 
 ## Privacy practices
