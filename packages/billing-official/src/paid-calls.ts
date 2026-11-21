@@ -29,7 +29,7 @@ async function balance(tx: BillingTransaction, spaceId: string, now: string): Pr
     c.period_start::text AS period_start,c.included_used,c.grace_used,c.pack_balance
     FROM data.space_billing_subscriptions s LEFT JOIN data.space_credit_state c USING (space_id)
     WHERE s.space_id=$1 AND s.status IN ('active','trialing')
-      AND (s.billing_provider<>'apple' OR s.current_period_end>$2::timestamptz) LIMIT 1`,
+      AND (s.billing_provider NOT IN ('apple','grant') OR s.current_period_end>$2::timestamptz) LIMIT 1`,
   values: [spaceId, now], maxRows: 1 }))[0];
   if (!row) return 0;
   const rolled = !row.period_start || String(row.period_start) < period(now);
@@ -49,7 +49,7 @@ export const paidCalls: PaidCallPolicy = {
     const subscription = (await tx.query({ name: "paid_call_subscription_v1", text: `SELECT seat_quantity,
       (SELECT count(*) FROM data.space_members WHERE space_id=$1 AND role IN ('owner','admin','member')) AS members
       FROM data.space_billing_subscriptions WHERE space_id=$1 AND status IN ('active','trialing')
-        AND (billing_provider<>'apple' OR current_period_end>$2::timestamptz) LIMIT 1`,
+        AND (billing_provider NOT IN ('apple','grant') OR current_period_end>$2::timestamptz) LIMIT 1`,
     values: [spaceId, now], maxRows: 1 }))[0];
     if (!subscription) return { code: "paid_x_pro_required", status: 402,
       message: "X API actions require an active Pro plan. The Space owner can upgrade in Settings → Billing" };

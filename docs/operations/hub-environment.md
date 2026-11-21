@@ -141,6 +141,7 @@ Used only by the operators of the hosted xMatrix deployment. Leave unset.
 
 | Name | Kind | What it does |
 | --- | --- | --- |
+| `BILLING_GRANT_OPERATOR_TOKEN` | secret | Machine credential for ONLY the complimentary-Pro grant routes. |
 | `CONTROL_PLANE_OPERATOR_TOKEN` | secret | Machine credential for control-plane partition operator routes. |
 | `XMATRIX_ADMIN_TOKEN` | secret | Legacy internal admin bearer. |
 

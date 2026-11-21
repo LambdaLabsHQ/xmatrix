@@ -192,6 +192,8 @@ export interface Env {
    * disabled and those routes require an interactive platform admin.
    */
   CONTROL_PLANE_OPERATOR_TOKEN?: string;
+  /** Machine credential for ONLY the complimentary-Pro grant routes. */
+  BILLING_GRANT_OPERATOR_TOKEN?: string;
   /**
    * Production Space whose signed-in members may enter the hosted Test app.
    * The deployment pins the id; clients and Spaces cannot widen this grant.

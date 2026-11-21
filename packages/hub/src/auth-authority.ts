@@ -274,6 +274,27 @@ export interface AuthDirectoryAdminUsers {
  * Session timestamps are the closest existing access signal. IP addresses,
  * user agents, tokens, and account credentials deliberately stay in Auth.
  */
+/** The registered user with this email, matched case-insensitively. */
+export async function authDirectoryUserIdByEmail(env: Env, email: string): Promise<string | null> {
+  const normalized = email.trim();
+  if (!normalized || normalized.length > 320) return null;
+  if (authAuthority(env) === "d1") {
+    const row = await requireAuthD1(env)
+      .prepare(`SELECT "id" FROM "user" WHERE lower("email") = lower(?) LIMIT 1`)
+      .bind(normalized)
+      .first<{ id: string }>();
+    return row?.id ?? null;
+  }
+  return authPostgresTransaction(env, "auth.directory.user-by-email", async (transaction) => {
+    const rows = await transaction.query<QueryResultRow & { id: string }>({
+      name: "auth_directory_user_by_email_v1",
+      text: "SELECT id FROM control.auth_users WHERE lower(email) = lower($1) LIMIT 1",
+      values: [normalized], maxRows: 1,
+    });
+    return rows[0]?.id ?? null;
+  }, { statement: "single_read" });
+}
+
 export async function authDirectoryAdminUsers(
   env: Env,
   now: string,

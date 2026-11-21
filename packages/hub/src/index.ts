@@ -74,6 +74,7 @@ export { RelayRuntimeLive } from "./relay-runtime";
 import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-delivery";
 export { DeviceAuthBroker } from "./device-auth";
 import { registerIndexRoutesAdmin } from "./index-routes-admin";
+import { registerIndexRoutesBillingGrants } from "./index-routes-billing-grants";
 import { registerIndexRoutesAuthSpace } from "./index-routes-auth-space";
 import { registerIndexRoutesAutomation } from "./index-routes-automation";
 import { registerIndexRoutesSpaceJoinRequests } from "./index-routes-space-join-requests";
@@ -111,6 +112,7 @@ registerDirectReadCors(app);
 registerClientCompatibilityGate(app);
 registerIndexRoutesPostgresReadiness(app);
 registerIndexRoutesAdmin(app);
+registerIndexRoutesBillingGrants(app);
 // Before the sign-in library's own /api/auth/* routes.
 registerAppSignInRoutes(app);
 registerIndexRoutesAuthSpace(app);

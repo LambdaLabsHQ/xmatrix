@@ -49,6 +49,9 @@ test("a Space with a live subscription or checkout cannot be deleted", async () 
   assert.equal((await spaceBilling.spaceDeletion(subscribed, { spaceId: "space-1", now: NOW }))?.code, "conflict");
   const canceled = transaction({ official_space_delete_subscription_v1: [{ status: "canceled" }] });
   assert.equal(await spaceBilling.spaceDeletion(canceled, { spaceId: "space-1", now: NOW }), null);
+  const complimentary = transaction({ official_space_delete_subscription_v1: [{ status: "active", billing_provider: "grant" }] });
+  assert.equal(await spaceBilling.spaceDeletion(complimentary, { spaceId: "space-1", now: NOW }), null,
+    "complimentary Pro has nothing to cancel");
   const checkout = transaction({ official_space_delete_checkout_v1: [{ checkout_intent_id: "c-1" }] });
   assert.equal((await spaceBilling.spaceDeletion(checkout, { spaceId: "space-1", now: NOW }))?.code, "conflict");
 });

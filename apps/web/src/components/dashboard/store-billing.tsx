@@ -120,7 +120,8 @@ export function StoreBillingFrame({ testId, storeName, provider, userId, space, 
       {storePlanLabel(product)}
     </button>)}</div>}
     {!canPurchase && !active && <p>Only the owner of a Space with one human seat and no existing subscription can purchase {storeName} Pro.</p>}
-    {active && billing?.subscription?.billingProvider !== provider && <p>This Space already has a subscription managed by its owner.</p>}
+    {active && billing?.subscription?.billingProvider === "grant" && <p>This Space has complimentary Pro. Nothing is charged, and it returns to Free when it ends.</p>}
+    {active && billing?.subscription?.billingProvider !== provider && billing?.subscription?.billingProvider !== "grant" && <p>This Space already has a subscription managed by its owner.</p>}
     <div className="flex flex-wrap gap-2">{actions}</div>
     <p className="text-xs text-muted-foreground">{terms}</p>
     <div className="flex flex-wrap gap-4 text-sm" data-testid={`${testId}-legal`}>{storeLegalLinks(provider).map((link) => link.external
