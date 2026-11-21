@@ -178,3 +178,23 @@ integration("a Run reads its secrets while a launch holds its Channel and Run ro
     await f.close();
   }
 });
+
+integration("an admin fills an app credential from a saved secret, audited; a member cannot", async () => {
+  const f = await spaceSecretFixture();
+  try {
+    await f.secret.put({ spaceId: f.ids.space, userId: f.ids.admin, secretRef: "bing-key", value: "bing-value" });
+    const values = await f.secret.adminReadForConnection({ spaceId: f.ids.space, userId: f.ids.admin,
+      providerId: "bingwebmaster", secretRefs: ["bing-key"] });
+    assert.equal(values.get("bing-key"), "bing-value", "an ask secret too: Agent access plays no part");
+    await assert.rejects(f.secret.adminReadForConnection({ spaceId: f.ids.space, userId: f.ids.owner,
+      providerId: "bingwebmaster", secretRefs: ["bing-key"] }), (error) => error.code === "forbidden");
+    await assert.rejects(f.secret.adminReadForConnection({ spaceId: f.ids.space, userId: f.ids.admin,
+      providerId: "bingwebmaster", secretRefs: ["missing"] }), (error) => error.code === "secret_not_found");
+    await assert.rejects(f.secret.adminReadForConnection({ spaceId: f.ids.space, userId: f.ids.admin,
+      providerId: "bingwebmaster", secretRefs: [] }), (error) => error.code === "invalid_request");
+    const audit = await f.client.query(`SELECT grant_id, secret_refs_json FROM data.secret_grant_audit
+      WHERE owner_user_id=$1 AND action='connection_fill'`, [f.ids.admin]);
+    assert.deepEqual(audit.rows.map((row) => [row.grant_id, row.secret_refs_json]),
+      [[`connection:${f.ids.space}:bingwebmaster`, ["bing-key"]]]);
+  } finally { await f.close(); }
+});

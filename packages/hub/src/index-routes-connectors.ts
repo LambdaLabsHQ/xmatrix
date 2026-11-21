@@ -33,6 +33,7 @@ import { connectorUsage } from "./connectors/usage";
 import { connectorHubOrigin, readBoundedRequestBody, requestErrorStatus, requireAuth, requireHumanAuth, requireLiveAgentRun } from "./index-shared";
 import type { AuthUser } from "./auth";
 import type { Env } from "./types";
+import { spaceSecretRepository } from "./index-routes-secrets";
 
 /*
  * Connector credentials and event ingress (docs/design/connector-platform.md
@@ -176,7 +177,7 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
       async ({ user, policy, readGenerated, view }) => {
         const bytes = await readBoundedRequestBody(c.req.raw, MAX_CREDENTIAL_REQUEST_BYTES);
         if (!bytes) return c.json({ error: "Connector credential request is too large" }, 413);
-        let body: { fields?: unknown; regenerate?: unknown };
+        let body: { fields?: unknown; fromSecrets?: unknown; regenerate?: unknown };
         try { body = JSON.parse(new TextDecoder().decode(bytes)) as typeof body; } catch {
           return c.json({ error: "Invalid connector credential request" }, 400);
         }
@@ -189,6 +190,23 @@ export function registerConnectorRoutes(app: Hono<{ Bindings: Env }>): void {
             if (!policy.writable.includes(name)) return c.json({ error: `${name} cannot be written` }, 400);
             if (value !== null && typeof value !== "string") return c.json({ error: `${name} is invalid` }, 400);
             fields[name] = typeof value === "string" ? value.trim() || null : null;
+          }
+        }
+        // A field may instead take the value of a secret the Space holds; it is read here and never returned.
+        if (body.fromSecrets !== undefined) {
+          if (!body.fromSecrets || typeof body.fromSecrets !== "object" || Array.isArray(body.fromSecrets)) {
+            return c.json({ error: "fromSecrets is invalid" }, 400);
+          }
+          const named = Object.entries(body.fromSecrets as Record<string, unknown>);
+          for (const [name, ref] of named) {
+            if (!policy.writable.includes(name)) return c.json({ error: `${name} cannot be written` }, 400);
+            if (name in fields) return c.json({ error: `${name} is given twice` }, 400);
+            if (typeof ref !== "string" || !ref.trim()) return c.json({ error: `${name} names no secret` }, 400);
+          }
+          if (named.length) {
+            const values = await spaceSecretRepository(c.env).adminReadForConnection({ spaceId: c.req.param("spaceId"),
+              userId: user.id, providerId: policy.manifest.id, secretRefs: named.map(([, ref]) => String(ref).trim()) });
+            for (const [name, ref] of named) fields[name] = values.get(String(ref).trim())?.trim() || null;
           }
         }
         const regenerate = Array.isArray(body.regenerate) ? body.regenerate.map(String) : [];

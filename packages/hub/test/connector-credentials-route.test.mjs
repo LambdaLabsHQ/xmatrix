@@ -8,7 +8,7 @@ import * as shared from "../src/index-shared.ts";
 import { compileCommonJsSourceModule } from "./support/commonjs-source-module.mjs";
 
 /** The connector routes over a credential repository double, for a Space admin. */
-async function credentialRoutes(repository) {
+async function credentialRoutes(repository, extra = {}) {
   const route = await compileCommonJsSourceModule(new URL("../src/index-routes-connectors.ts", import.meta.url));
   const policy = await compileCommonJsSourceModule(new URL("../src/connectors/credential-policy.ts", import.meta.url));
   const noop = () => {};
@@ -19,6 +19,7 @@ async function credentialRoutes(repository) {
     "./connectors/credentials": store,
     "./connectors/credential-policy": policy((name) => ({ "../app-connectors": connectors, "./credentials": store })[name]),
     "./index-shared": { ...shared, requireAuth: async () => ({ id: "admin", email: "admin@example.test" }) },
+    ...extra,
   };
   const app = new Hono();
   route((name) => imports[name] ?? new Proxy({}, { get: () => noop })).registerConnectorRoutes(app);
@@ -91,4 +92,30 @@ test("app permission HTTP exposes one mode and rejects legacy Channel bodies and
   f.agent(); assert.equal((await f.request("GET")).status, 403);
   assert.equal((await f.request("PUT", { mode: "write" })).status, 403); assert.equal(f.calls.length, writes);
   assert.equal((await permissionFixture("github").request("PUT", { mode: "ask" })).status, 400, "provider without approval execution cannot promise Ask");
+});
+
+test("a credential filled from a saved secret is read by the Hub as the admin and never returned", async () => {
+  const puts = [], reads = [];
+  const secrets = { spaceSecretRepository: () => ({ adminReadForConnection: async (input) => {
+    reads.push(input); return new Map([["bing-yiming", " secret-value "]]); } }) };
+  const app = await credentialRoutes({
+    readGenerated: async () => ({}),
+    put: async (input) => { puts.push(input); return { credentialFields: ["apiKey"] }; },
+  }, { "./index-routes-secrets": secrets });
+  const put = (body) => app.fetch(new Request("https://hub.example/api/spaces/space-1/app-connections/bingwebmaster/credentials", {
+    method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), {});
+  const response = await put({ fromSecrets: { apiKey: "bing-yiming" } });
+  assert.equal(response.status, 200, await response.clone().text());
+  assert.doesNotMatch(await response.text(), /secret-value/u);
+  assert.deepEqual(reads, [{ spaceId: "space-1", userId: "admin", providerId: "bingwebmaster", secretRefs: ["bing-yiming"] }]);
+  assert.deepEqual(puts[0].fields, { apiKey: "secret-value" });
+
+  for (const [body, error] of [[{ fromSecrets: { notAField: "bing-yiming" } }, /cannot be written/u],
+    [{ fields: { apiKey: "typed" }, fromSecrets: { apiKey: "bing-yiming" } }, /given twice/u],
+    [{ fromSecrets: { apiKey: "" } }, /names no secret/u], [{ fromSecrets: ["bing-yiming"] }, /fromSecrets is invalid/u]]) {
+    const refused = await put(body);
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).error, error);
+  }
+  assert.equal(reads.length, 1, "a refused request reads no secret");
 });
