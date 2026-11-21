@@ -5,6 +5,7 @@ import type { XActionCapability } from "./x-accounts";
 import type { XMediaCapability } from "./x-media";
 import type { StripeActionCapability } from "./stripe-accounts";
 import type { UpstreamMeter } from "../usage-cost-metering";
+import type { ProviderEgress } from "./provider-egress";
 
 /**
  * One provider's Hub-side behavior (docs/design/connector-platform.md §3.1).
@@ -24,7 +25,7 @@ export interface ConnectorProvider {
   /** Provider-side configuration that follows the Space's subscriptions, if the provider keeps any. */
   subscriptions?: ConnectorSubscriptionSync;
   /** One cheap authenticated provider call proving the stored credentials work; throws when they do not. */
-  verify?: (credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter) => Promise<void>;
+  verify?: (credentials: Readonly<Record<string, string>>, meter?: UpstreamMeter, egress?: ProviderEgress) => Promise<void>;
 }
 
 /**
@@ -67,6 +68,8 @@ export interface ConnectorActionContext {
   authorizeWrite?: () => Promise<void>;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** The relay this provider's calls go through, when the deployment configures one. */
+  egress?: ProviderEgress;
   /** Meters the operator-paid upstream calls (Composio) this action makes, to its Space. */
   usage?: UpstreamMeter;
   /**
@@ -152,6 +155,8 @@ export interface ConnectorDelivery {
   url: URL;
   /** The connection's decrypted credential values. */
   credentials: Readonly<Record<string, string>>;
+  /** The relay this provider's calls go through, when the deployment configures one. */
+  egress?: ProviderEgress;
 }
 
 /** A provider event in the one shape routing, messages and programs read. */

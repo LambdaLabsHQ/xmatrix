@@ -285,6 +285,8 @@ section, and none is ever shown again.
 | Gmail (via Composio) | `search:*\|<mailbox> [Gmail search]`, `read:<message id>` (reads; links are listed, never fetched by the Hub); `send:<address> [from:<mailbox>] <subject>\n<body>`, `reply:<message id> <body>` (ask for a Space admin’s approval each time by default). Each Connect adds a mailbox; mailboxes are not counted (the `mailboxes` field is stored up to 256 KiB). Each mailbox is used only by its owner, a member or an Agent, set in Apps → Gmail |
 | Microsoft Teams (manual), Google Chat, DingTalk, WeCom | `post <text>`, sent to the configured webhook on the provider's own host |
 
+Bing Webmaster API calls go through the Cloud Run relay in `deploy/bing-relay` (Bing throttles Cloudflare egress with `ThrottleIP`); see its README for deploying it and the `CONNECTOR_BING_RELAY_URL` / `CONNECTOR_BING_RELAY_TOKEN` production secrets. Without both, the Hub calls Bing directly.
+
 xmatrix.sh publishes its own IndexNow key at `https://xmatrix.sh/71d38a28828cfa8a824127e9320a4668.txt` (`apps/web/public`), so the company's `bingwebmaster` connection can push xmatrix.sh URLs with that key. The key is public by design; a new key needs a new file.
 
 ### Search Console onboarding

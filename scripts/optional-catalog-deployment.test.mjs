@@ -387,3 +387,20 @@ test('native Gmail notification rotation is atomic and validates the same-projec
   assert.notEqual(wrongProject.status, 0);
   assert.equal(wrongProject.stdout, '');
 });
+
+test('the Bing egress relay deploys only as a complete https URL and token pair', () => {
+  const relay = { CONNECTOR_BING_RELAY_URL: 'https://bing-relay-fixture-uc.a.run.app',
+    CONNECTOR_BING_RELAY_TOKEN: 'fixture_relay_token_0123456789abcdef' };
+  const valid = run(relay);
+  assert.equal(valid.status, 0, valid.stderr);
+  assert.deepEqual(JSON.parse(valid.stdout), { ...base, ...relay });
+  for (const key of Object.keys(relay)) assert.ok(workflow.includes(key + ': ${{ secrets.' + key + ' }}'));
+  assertNoPartialPayload(Object.entries(relay), /production connector secret CONNECTOR_BING_RELAY/);
+  for (const change of [{ CONNECTOR_BING_RELAY_URL: 'http://bing-relay.example.com' }, { CONNECTOR_BING_RELAY_URL: 'https://relay.example.com/path' },
+    { CONNECTOR_BING_RELAY_TOKEN: 'short' }, { CONNECTOR_BING_RELAY_TOKEN: 'has space in it 0123456789abcdef0123' }]) {
+    const rejected = run({ ...relay, ...change });
+    assert.notEqual(rejected.status, 0);
+    assert.equal(rejected.stdout, '');
+    assert.ok(!rejected.stderr.includes(relay.CONNECTOR_BING_RELAY_TOKEN));
+  }
+});

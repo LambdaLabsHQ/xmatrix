@@ -1,6 +1,7 @@
 import { providerJson, ProviderRequestError } from "../http";
 import { record } from "../command-support";
 import type { ConnectorAction } from "../provider";
+import type { ProviderEgress } from "../provider-egress";
 import { cell } from "./google-report";
 import { pageUrl } from "./google-search-console-site";
 import { quoteRetrievedText } from "./common";
@@ -10,11 +11,15 @@ import { quoteRetrievedText } from "./common";
  * account's API key from Settings → API access; Bing accepts it only as the
  * `apikey` query parameter, so request URLs are never echoed into a summary or
  * an error. A site is the exact URL Bing lists for it (`https://example.com/`).
+ * When the deployment configures a relay (`deploy/bing-relay`), Bing calls go
+ * through it, because Bing throttles Cloudflare's egress addresses; the key
+ * then travels as a header and the relay adds it for Bing.
  * IndexNow needs the site's own key, which the site must publish at
  * `https://<host>/<key>.txt`; it tells Bing, Yandex, Naver, Seznam and others.
  */
 
-const API = "https://ssl.bing.com/webmaster/api.svc/json";
+const BING = "https://ssl.bing.com";
+const API_PATH = "/webmaster/api.svc/json";
 const INDEXNOW = "https://api.indexnow.org/indexnow";
 const MAX_ROWS = 50;
 const MAX_URLS = 100;
@@ -28,11 +33,14 @@ function bingKey(credentials: Readonly<Record<string, string>>): string {
 const describeError = (payload: Record<string, unknown>) => typeof payload.Message === "string" ? payload.Message.replace(/^ERROR!+\s*/u, "") : undefined;
 
 /** One Bing method; the reply's `d` member is the answer. */
-async function bing(credentials: Readonly<Record<string, string>>, method: string, query: Record<string, string> = {}, json?: unknown): Promise<unknown> {
-  const url = new URL(`${API}/${method}`);
-  url.searchParams.set("apikey", bingKey(credentials));
+async function bing(credentials: Readonly<Record<string, string>>, egress: ProviderEgress | undefined, method: string,
+  query: Record<string, string> = {}, json?: unknown): Promise<unknown> {
+  const key = bingKey(credentials);
+  const url = new URL(`${API_PATH}/${method}`, egress?.origin ?? BING);
+  if (!egress) url.searchParams.set("apikey", key);
   for (const [name, value] of Object.entries(query)) url.searchParams.set(name, value);
-  const result = await providerJson(url, { ...(json === undefined ? {} : { method: "POST", json }), describeError });
+  const headers = egress ? { authorization: `Bearer ${egress.token}`, "x-bing-apikey": key } : undefined;
+  const result = await providerJson(url, { ...(json === undefined ? {} : { method: "POST", json }), ...(headers ? { headers } : {}), describeError });
   return result.d;
 }
 
@@ -79,8 +87,8 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   list_sites: {
     effect: "read", requires: ["apiKey"],
     parse: statement => statement.target === "*" && !statement.text.trim() ? {} : "use @bingwebmaster:list_sites:*",
-    async execute({ credentials }) {
-      const sites = rows(await bing(credentials, "GetUserSites"), "a site list");
+    async execute({ credentials, egress }) {
+      const sites = rows(await bing(credentials, egress, "GetUserSites"), "a site list");
       const lines = sites.slice(0, 250).map(site => [cell(site.Url), site.IsVerified === true ? "verified" : "not verified"].join("\t"));
       return { summary: "Bing Webmaster sites:\n" + table("site\tverification", lines, "(no sites for this API key)") };
     },
@@ -88,8 +96,8 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   traffic: {
     effect: "read", requires: ["apiKey"],
     parse: siteOnly,
-    async execute({ credentials }, input) {
-      const days = rows(await bing(credentials, "GetRankAndTrafficStats", { siteUrl: input.site! }), "traffic statistics");
+    async execute({ credentials, egress }, input) {
+      const days = rows(await bing(credentials, egress, "GetRankAndTrafficStats", { siteUrl: input.site! }), "traffic statistics");
       const lines = days.map(day => ({ date: bingDate(day.Date), clicks: Number(day.Clicks ?? 0), impressions: Number(day.Impressions ?? 0) }))
         .sort((a, b) => b.date.localeCompare(a.date)).slice(0, 30)
         .map(day => [day.date, day.clicks, day.impressions].join("\t"));
@@ -99,9 +107,9 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   ...Object.fromEntries((["queries", "pages"] as const).map(kind => [kind, {
     effect: "read", requires: ["apiKey"],
     parse: siteOnly,
-    async execute({ credentials }, input) {
+    async execute({ credentials, egress }, input) {
       const method = kind === "queries" ? "GetQueryStats" : "GetPageStats";
-      const stats = rows(await bing(credentials, method, { siteUrl: input.site! }), `${kind} statistics`);
+      const stats = rows(await bing(credentials, egress, method, { siteUrl: input.site! }), `${kind} statistics`);
       const lines = stats.sort((a, b) => Number(b.Clicks ?? 0) - Number(a.Clicks ?? 0)).slice(0, MAX_ROWS).map(row => [cell(row.Query),
         Number(row.Clicks ?? 0), Number(row.Impressions ?? 0), Number(row.AvgClickPosition ?? 0) > 0 ? Number(row.AvgClickPosition).toFixed(1) : "-",
         Number(row.AvgImpressionPosition ?? 0) > 0 ? Number(row.AvgImpressionPosition).toFixed(1) : "-"].join("\t"));
@@ -112,8 +120,8 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   crawl_stats: {
     effect: "read", requires: ["apiKey"],
     parse: siteOnly,
-    async execute({ credentials }, input) {
-      const days = rows(await bing(credentials, "GetCrawlStats", { siteUrl: input.site! }), "crawl statistics");
+    async execute({ credentials, egress }, input) {
+      const days = rows(await bing(credentials, egress, "GetCrawlStats", { siteUrl: input.site! }), "crawl statistics");
       const fields = ["CrawledPages", "InIndex", "CrawlErrors", "Code4xx", "Code5xx", "BlockedByRobotsTxt", "ConnectionTimeout", "DnsFailures"];
       const lines = days.map(day => ({ date: bingDate(day.Date), day })).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 14)
         .map(({ date, day }) => [date, ...fields.map(field => Number(day[field] ?? 0))].join("\t"));
@@ -124,10 +132,10 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
   submit_urls: {
     effect: "write", requires: ["apiKey"],
     parse: siteUrls,
-    async execute({ credentials }, input) {
+    async execute({ credentials, egress }, input) {
       const urls = JSON.parse(input.urls!) as string[];
-      await bing(credentials, "SubmitUrlBatch", {}, { siteUrl: input.site, urlList: urls });
-      const quota = record(await bing(credentials, "GetUrlSubmissionQuota", { siteUrl: input.site! }));
+      await bing(credentials, egress, "SubmitUrlBatch", {}, { siteUrl: input.site, urlList: urls });
+      const quota = record(await bing(credentials, egress, "GetUrlSubmissionQuota", { siteUrl: input.site! }));
       return { summary: `Submitted ${urls.length} URL(s) of ${input.site} to Bing; Bing crawls them asynchronously. ` +
         `Remaining quota today: ${cell(quota.DailyQuota ?? "?")}, this month: ${cell(quota.MonthlyQuota ?? "?")}.` };
     },
@@ -139,8 +147,8 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
       return typeof parsed !== "string" && (JSON.parse(parsed.urls!) as string[]).length === 1
         ? { site: parsed.site!, feed: (JSON.parse(parsed.urls!) as string[])[0]! } : "name a site and one sitemap URL inside it: <https://example.com/> <https://example.com/sitemap.xml>";
     },
-    async execute({ credentials }, input) {
-      await bing(credentials, "SubmitFeed", {}, { siteUrl: input.site, feedUrl: input.feed });
+    async execute({ credentials, egress }, input) {
+      await bing(credentials, egress, "SubmitFeed", {}, { siteUrl: input.site, feedUrl: input.feed });
       return { summary: `Submitted sitemap ${input.feed} to Bing for ${input.site}; Bing fetches it asynchronously.` };
     },
   },
@@ -160,7 +168,7 @@ export const BING_WEBMASTER_ACTIONS: Record<string, ConnectorAction> = {
 };
 
 /** Confirm the key with a real read; the site list is not stored. */
-export async function verifyBingWebmaster(credentials: Readonly<Record<string, string>>): Promise<void> {
+export async function verifyBingWebmaster(credentials: Readonly<Record<string, string>>, _meter?: unknown, egress?: ProviderEgress): Promise<void> {
   if (!credentials.apiKey) return;
-  rows(await bing(credentials, "GetUserSites"), "a site list for this API key");
+  rows(await bing(credentials, egress, "GetUserSites"), "a site list for this API key");
 }

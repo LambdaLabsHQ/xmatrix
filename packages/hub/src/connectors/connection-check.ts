@@ -7,6 +7,7 @@ import type { Env } from "../types";
 import { upstreamMeter } from "../usage-cost-metering";
 import { connectionCredentials } from "./connection-credentials";
 import { ProviderRequestError } from "./http";
+import { providerEgress } from "./provider-egress";
 import { connectorProvider } from "./registry";
 import { verifyDiscordNativeConnection } from "./discord-native";
 import { verifyFeishuNativeConnection } from "./feishu-native";
@@ -42,7 +43,7 @@ export async function verifyConnectorConnection(env: Env, spaceId: string, provi
   }
   try {
     await connectorProvider(providerId)?.verify?.(credentials,
-      upstreamMeter(env, { spaceId, connector: providerId, action: "verify" }));
+      upstreamMeter(env, { spaceId, connector: providerId, action: "verify" }), providerEgress(env, providerId));
   } catch (error) {
     if (error instanceof ProviderRequestError) throw new Error(`${manifest.name} refused the credentials: ${error.message}`);
     throw new Error(error instanceof DOMException && error.name === "TimeoutError"

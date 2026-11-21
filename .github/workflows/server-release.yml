@@ -202,6 +202,8 @@ jobs:
           GMAIL_WATCH_PUSH_AUDIENCE: ${{ secrets.GMAIL_WATCH_PUSH_AUDIENCE }}
           GMAIL_WATCH_SUBSCRIPTION: ${{ secrets.GMAIL_WATCH_SUBSCRIPTION }}
           CONNECTOR_GOOGLE_PICKER_API_KEY: ${{ secrets.CONNECTOR_GOOGLE_PICKER_API_KEY }}
+          CONNECTOR_BING_RELAY_URL: ${{ secrets.CONNECTOR_BING_RELAY_URL }}
+          CONNECTOR_BING_RELAY_TOKEN: ${{ secrets.CONNECTOR_BING_RELAY_TOKEN }}
           CONNECTOR_GOOGLE_PICKER_APP_ID: ${{ secrets.CONNECTOR_GOOGLE_PICKER_APP_ID }}
           CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON: ${{ secrets.CONNECTOR_GOOGLECHAT_SERVICE_ACCOUNT_JSON }}
           CONNECTOR_GOOGLECHAT_APP_ID: ${{ secrets.CONNECTOR_GOOGLECHAT_APP_ID }}
@@ -466,6 +468,19 @@ jobs:
             if (!/^cli_[A-Za-z0-9]{8,64}$/.test(payload.CONNECTOR_FEISHU_APP_ID) ||
                 feishu.some(key => !/^[A-Za-z0-9_-]{8,256}$/.test(payload[key]))) {
               throw new Error("Invalid Feishu company store application configuration");
+            }
+          }
+          // Bing throttles Cloudflare egress; its calls go through the deploy/bing-relay service as a complete pair.
+          const bingRelay = ["CONNECTOR_BING_RELAY_URL", "CONNECTOR_BING_RELAY_TOKEN"];
+          if (bingRelay.some((key) => process.env[key])) {
+            for (const key of bingRelay) {
+              const value = process.env[key];
+              if (!value?.trim() || value !== value.trim()) throw new Error(`Missing production connector secret ${key}`);
+              payload[key] = value;
+            }
+            if (!/^https:\/\/[a-z0-9.-]+\.[a-z]{2,}$/.test(payload.CONNECTOR_BING_RELAY_URL) ||
+                !/^[A-Za-z0-9_-]{32,256}$/.test(payload.CONNECTOR_BING_RELAY_TOKEN)) {
+              throw new Error("Invalid production Bing relay configuration");
             }
           }
           const picker = ["CONNECTOR_GOOGLE_PICKER_API_KEY", "CONNECTOR_GOOGLE_PICKER_APP_ID"];

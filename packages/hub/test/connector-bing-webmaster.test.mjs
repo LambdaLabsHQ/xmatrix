@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { BING_WEBMASTER_ACTIONS as ACTIONS, bingSite, verifyBingWebmaster } from "../src/connectors/actions/bing-webmaster.ts";
 import { statementParser } from "./support/google-read-grant.mjs";
+import { providerEgress } from "../src/connectors/provider-egress.ts";
 
 const key = { apiKey: "0123456789abcdef0123456789abcdef" };
 const statement = statementParser("bingwebmaster", ACTIONS);
@@ -68,4 +69,36 @@ test("a bad key, Bing errors and malformed answers fail closed", async () => {
   await assert.rejects(refused, error => /Provider returned 400: InvalidApiKey/u.test(error.message) && !error.message.includes(key.apiKey));
   await fetched([{ body: { d: { Url: site } } }], () => assert.rejects(ACTIONS.traffic.execute({ credentials: key }, { site }), /traffic statistics/u));
   await verifyBingWebmaster({ indexNowKey: "abcdef12-3456" });
+});
+
+const relayToken = "relay_token_0123456789abcdef0123456789";
+
+test("a configured relay carries Bing calls, with the key as a header instead of in the URL", async () => {
+  const egress = providerEgress({ CONNECTOR_BING_RELAY_URL: "https://bing-relay-abc.a.run.app", CONNECTOR_BING_RELAY_TOKEN: relayToken }, "bingwebmaster");
+  assert.deepEqual(egress, { origin: "https://bing-relay-abc.a.run.app", token: relayToken });
+  const listed = await fetched([{ body: { d: [{ Url: site, IsVerified: true }] } }],
+    () => ACTIONS.list_sites.execute({ credentials: key, egress }, {}));
+  const call = new URL(listed.calls[0].url);
+  assert.equal(call.origin + call.pathname, "https://bing-relay-abc.a.run.app/webmaster/api.svc/json/GetUserSites");
+  assert.equal(call.searchParams.has("apikey"), false);
+  assert.equal(listed.calls[0].headers.get("x-bing-apikey"), key.apiKey);
+  assert.equal(listed.calls[0].headers.get("authorization"), `Bearer ${relayToken}`);
+
+  const submitted = await fetched([{ body: { d: null } }, { body: { d: { DailyQuota: 1, MonthlyQuota: 2 } } }],
+    () => ACTIONS.submit_urls.execute({ credentials: key, egress }, { site, urls: JSON.stringify(["https://example.com/a"]) }));
+  assert.ok(submitted.calls.every(entry => entry.url.startsWith("https://bing-relay-abc.a.run.app/") && !entry.url.includes(key.apiKey)));
+  await fetched([{ body: { d: [] } }], calls => verifyBingWebmaster(key, undefined, egress).then(() =>
+    assert.equal(new URL(calls[0].url).origin, "https://bing-relay-abc.a.run.app")));
+});
+
+test("only a complete, public https relay configuration is used; otherwise Bing is called directly", () => {
+  const good = { CONNECTOR_BING_RELAY_URL: "https://relay.example.com", CONNECTOR_BING_RELAY_TOKEN: relayToken };
+  assert.ok(providerEgress(good, "bingwebmaster"));
+  assert.equal(providerEgress(good, "googlesearchconsole"), undefined);
+  for (const change of [{ CONNECTOR_BING_RELAY_URL: undefined }, { CONNECTOR_BING_RELAY_TOKEN: undefined },
+    { CONNECTOR_BING_RELAY_TOKEN: "short" }, { CONNECTOR_BING_RELAY_URL: "http://relay.example.com" },
+    { CONNECTOR_BING_RELAY_URL: "https://127.0.0.1" }, { CONNECTOR_BING_RELAY_URL: "https://relay.example.com/path" },
+    { CONNECTOR_BING_RELAY_URL: "https://user@relay.example.com" }, { CONNECTOR_BING_RELAY_URL: "not a url" }]) {
+    assert.equal(providerEgress({ ...good, ...change }, "bingwebmaster"), undefined, JSON.stringify(change));
+  }
 });
