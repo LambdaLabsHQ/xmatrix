@@ -55,10 +55,10 @@ test("only a Human in a Pro Space is read, and input is bounded before any model
 
 test("each Human's reorderings are bounded even while request limits only log", async () => {
   const counts = new Map();
-  const env = { RATE_LIMIT_SEARCH_RERANK: { async limit({ key }) {
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-    return { success: counts.get(key) <= 1 };
-  } } };
+  const env = { RELAY_REQUEST_ALLOWANCE: { idFromName: (name) => name, get: (name) => ({ async take() {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    return counts.get(name) <= 1 ? 0 : 60;
+  } }) } };
   assert.equal((await post({ input: valid, env })).status, 503);
   const refused = await post({ input: valid, env });
   assert.equal(refused.status, 429);

@@ -65,10 +65,10 @@ test("each owner's evaluations are bounded before the body is read, whatever RAT
     return Response.json({ answers: { passed: { type: "boolean", probability: 0.9 } }, usage: { inputTokens: 1, outputTokens: 1 } });
   });
   const counts = new Map();
-  const limited = { ...env, RATE_LIMIT_ENFORCED: "false", RATE_LIMIT_JEV_EVALUATE: { async limit({ key }) {
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-    return { success: counts.get(key) <= 1 };
-  } } };
+  const limited = { ...env, RATE_LIMIT_ENFORCED: "false", RELAY_REQUEST_ALLOWANCE: { idFromName: (name) => name, get: (name) => ({ async take() {
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    return counts.get(name) <= 1 ? 0 : 60;
+  } }) } };
   assert.equal((await evaluateJevRequest(request(), limited, async () => scope(), readBody)).status, 200);
   const refused = await evaluateJevRequest(request(), limited, async () => scope(),
     async () => assert.fail("must not read a refused caller's body"));

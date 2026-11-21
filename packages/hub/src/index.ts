@@ -47,6 +47,7 @@ export { RelayPostgresAgentLaunchChannel } from "./postgres-agent-launch-channel
 export { GitHubSubscriptionIndex } from "./github-subscription-index";
 export { RelayXUploadExecutor } from "./connectors/x-upload-executor-do";
 export { RelayPostgresBackgroundAdmission } from "./postgres-background-admission-do";
+export { RelayRequestAllowance } from "./request-allowance-do";
 export {
   RelayAgentAppPolicyAuthority,
   RelayAgentAppPolicyLocator,

@@ -1,4 +1,3 @@
-import type { RequestRateLimiter } from "./request-rate-limit";
 
 export interface Env {
   /** Dedicated native Gmail metadata notification application, separate from Composio. */
@@ -119,15 +118,11 @@ export interface Env {
    * id. Absent binding means metering is off.
    */
   XMATRIX_USAGE_COST_AE?: AnalyticsEngineDataset;
-  /** Per-credential request allowance (Workers Rate Limiting). Absent: unlimited. */
-  RATE_LIMIT_CREDENTIAL?: RequestRateLimiter;
-  /** Per-client-IP allowance for requests without a credential. */
-  RATE_LIMIT_ANONYMOUS?: RequestRateLimiter;
-  /** Per-user allowance of Human socket sign-ins. */
-  RATE_LIMIT_HUMAN_CONNECT?: RequestRateLimiter;
-  RATE_LIMIT_SEARCH_RERANK?: RequestRateLimiter;
-  /** Per-owner allowance of open Jev evaluations. Always enforced. */
-  RATE_LIMIT_JEV_EVALUATE?: RequestRateLimiter;
+  /**
+   * Exact request allowances, one object per counted key
+   * (request-allowance.ts). Absent: unlimited.
+   */
+  RELAY_REQUEST_ALLOWANCE?: DurableObjectNamespace;
   /** Over-limit requests are refused only when this is exactly "true"; otherwise only logged. */
   RATE_LIMIT_ENFORCED?: string;
   /** Observation writes only when this is exactly "true". */

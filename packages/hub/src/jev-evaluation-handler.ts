@@ -4,7 +4,7 @@ import type { Env } from "./types";
 import { meterJev, type UsageCostEnv } from "./usage-cost-metering";
 import type { JevEvaluationScope } from "./jev-evaluation-access";
 
-type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RATE_LIMIT_JEV_EVALUATE"> & UsageCostEnv;
+type JevEnv = Pick<Env, "JEV_AI_GATEWAY_API_KEY" | "RELAY_REQUEST_ALLOWANCE" | "RATE_LIMIT_ENFORCED"> & UsageCostEnv;
 const headers = { "cache-control": "private, no-store" };
 const failure = (error: string, status: number) => Response.json({ error }, { status, headers });
 

@@ -41,6 +41,8 @@ const RETAINED_DO_BINDINGS = Object.freeze([
   "GITHUB_SUBSCRIPTION_INDEX",
   // Scoped upload scheduling and recovery; frozen actions and outcomes stay in PostgreSQL.
   "RELAY_X_UPLOAD_EXECUTOR",
+  // Request allowances held in memory, one object per counted key; no facts.
+  "RELAY_REQUEST_ALLOWANCE",
 ]);
 
 function parseConfig(source) {

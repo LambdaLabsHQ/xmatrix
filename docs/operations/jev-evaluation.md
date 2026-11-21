@@ -62,14 +62,14 @@ allowlist. Caller-supplied owner ids, keys, model names and endpoints remain
 rejected. The provider key stays deployment-owned.
 
 Each admitted call spends both its owner's and its Space's allowance of 10
-evaluations a minute (`RATE_LIMIT_JEV_EVALUATE`). Multiple owners or Runs cannot
+evaluations a minute (`request-allowance.ts`). Multiple owners or Runs cannot
 multiply one Space's allowance. Both counters are checked before the body is
 read or a provider is called. Usage is attributed to the verified Space.
 The 11th answers `429` with `{ "code": "rate_limited", "retryable": true }`
 and `Retry-After: 60`, before the body is read or the provider is called. Both
-Jev allowances are Workers Rate Limiting bindings refused whatever
-`RATE_LIMIT_ENFORCED` says, because they bound the operator's provider spend;
-like every such binding they count per Cloudflare location, not exactly.
+Jev allowances are refused whatever `RATE_LIMIT_ENFORCED` says, because they
+bound the operator's provider spend. Each counted key has its own Durable
+Object, so the count is exact.
 There is no daily cap. The Hub's one exact counter (`auth-attempt-limit.ts`)
 keeps one-minute windows in the single sign-in broker object and prunes any
 counter idle for a minute, so a day's count cannot live there, and routing
