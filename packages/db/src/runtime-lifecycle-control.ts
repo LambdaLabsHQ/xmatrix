@@ -34,6 +34,9 @@ const registrationNameJoinSql = (spaceParam: string) => `LEFT JOIN data.run_agen
         AND registration.owner_user_id=binding.owner_user_id AND registration.machine_id=binding.machine_id
         AND registration.harness=binding.harness`;
 const REGISTRATION_AGENT_NAME_SQL = "COALESCE(registration.display_name,r.metadata_json->>'agentName')";
+/** A launch the Agent's own connection already reached. That fact outlives the Run's `running` status. */
+const launchConnectedSql = (alias: string) =>
+  `(${alias}.state='connected' OR ${alias}.connected_at IS NOT NULL)`;
 
 const REPLAY_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 /**
@@ -319,10 +322,12 @@ export class PostgresMachineLifecycleRepository {
         input.repositoryBaseline?.relationship === "diverged" && input.repositoryBaseline.noticeKey !== undefined;
       if ((eventType === "machine_run_exited" || spawnFailure || stopNotice || baselineNotice) &&
           typeof payload.runId === "string" && (spawnFailure || stopNotice || changedRunIds.includes(payload.runId))) {
-        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v10", text: `SELECT
+        const contexts = await tx.query<QueryResultRow>({ name: "machine_lifecycle_notice_context_v11", text: `SELECT
           r.run_id,r.channel_id,r.owner_user_id,r.status,r.metadata_json,
           EXISTS (SELECT 1 FROM data.registration_launch_intents intent WHERE intent.run_id=r.run_id
             AND intent.state='committed' AND intent.command_id LIKE '${SUMMON_LAUNCH_COMMAND}') AS summoned,
+          EXISTS (SELECT 1 FROM data.agent_launches connected_launch WHERE connected_launch.run_id=r.run_id
+            AND ${launchConnectedSql("connected_launch")}) AS start_connected,
           (SELECT message.message_id FROM data.agent_launches launch
             JOIN data.messages message ON message.space_id=launch.space_id AND message.channel_id=launch.channel_id
               AND message.message_id=launch.trigger_id AND message.deleted_at IS NULL
@@ -363,7 +368,8 @@ export class PostgresMachineLifecycleRepository {
           ...(context.machine_name ? { machineName: String(context.machine_name) } : {}) };
         if (!notice ||
             spawnFailure && (context!.status !== "failed" ||
-              metadata(context!).executionCancellation !== undefined) ||
+              metadata(context!).executionCancellation !== undefined ||
+              context!.start_connected === true) ||
             // A start someone stopped did not fail: its stop answers for it.
             eventType === "machine_run_exited" && (metadata(context!).stopRequest !== undefined ||
               metadata(context!).executionCancellation !== undefined)) { /* no Channel notice */ }
@@ -446,6 +452,17 @@ export class PostgresMachineLifecycleRepository {
         (typeof input.payload.executionKey !== "string" ||
          input.payload.executionKey !== body.executionKey)) throw new RuntimeControlError(
       "conflict", 409, "Machine lifecycle execution key does not match the Run");
+    // The Hub's own verdict that a machine never answered a start is about a
+    // start nobody saw happen. A launch the Agent connected did start, whether
+    // or not its Run is still `running`: the connection outlives that status,
+    // and a late unanswered verdict must not record the start as failed.
+    if (input.eventType === "machine_spawn_result" && input.payload.unanswered === true) {
+      if (run.status === "running" || run.status === "stopping") return undefined;
+      const connected = await tx.query<QueryResultRow>({ name: "machine_lifecycle_connected_launch_v1", text: `SELECT
+        launch_id FROM data.agent_launches launch WHERE launch.run_id=$1 AND ${launchConnectedSql("launch")} LIMIT 1`,
+        values: [runId], maxRows: 1 });
+      if (connected.length > 0) return undefined;
+    }
     const terminal = isTerminalRunStatus(run.status);
     let status: string | undefined;
     let finishedAt: string | null | undefined;

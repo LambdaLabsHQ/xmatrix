@@ -1,5 +1,5 @@
 //! Pending execution evidence. Local persistence is not a Hub acknowledgement.
-use super::runtime_private_journal::{lock_with_deadline, private, stage_bytes};
+use super::runtime_private_journal::{lock_with_deadline, private, release_lock, stage_bytes};
 use super::runtime_send_journal::fingerprint;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};

@@ -1003,7 +1003,7 @@ fn cmd_daemon_doctor(cleanup: bool) -> error::Result<()> {
 #[cfg(windows)]
 fn print_windows_continuity_doctor() {
     use xmatrix_windows_continuity::{
-        ActivationJournal, ArtifactIdentity, BootJournal, CommandEffectJournal, ContinuityEventLog,
+        ActivationJournal, ArtifactIdentity, BootJournal, ContinuityEventLog,
         current_unix_time, verify_signed_artifact,
     };
 
@@ -1107,14 +1107,12 @@ fn print_windows_continuity_doctor() {
         }
         Err(error) => println!("  activation journal: unavailable ({error})"),
     }
-    match CommandEffectJournal::new(
-        config::profile_state_dir().join("daemon-command-effects-v1.json"),
-    )
-    .phase_counts()
-    {
-        Ok(counts) => println!("  command effects: {counts:?}"),
-        Err(error) => println!("  command effects: invalid ({error})"),
-    }
+    println!(
+        "  unconfirmed command results: {}",
+        DaemonCommandResults::new(config::profile_state_dir().join("daemon-command-results"))
+            .all_unconfirmed()
+            .len()
+    );
     match ContinuityEventLog::new(root.join("continuity-events.json")).read() {
         Ok(events) => println!(
             "  continuity events: {} last={}",

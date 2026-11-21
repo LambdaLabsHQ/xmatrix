@@ -15,15 +15,11 @@ fn daemon_auth_broker_reachable(url: &str) -> Result<(), String> {
         .map_err(|err| err.to_string())
 }
 
-type DaemonEffectJournal = Arc<std::sync::Mutex<xmatrix_windows_continuity::CommandEffectJournal>>;
-
-enum CommandEffectDispatch {
+enum CommandResultDispatch {
     Execute(String),
     Replay {
-        stable_id: String,
-        expected_result_digest: String,
+        control_id: String,
         report: MachineDaemonReport,
-        persist_rebind: bool,
     },
 }
 
@@ -52,99 +48,6 @@ fn rebind_replayed_command_result(
     }
     report = serde_json::from_value(value)?;
     Ok(report)
-}
-
-fn json_identity_field<'a>(value: &'a Value, field: &str) -> Option<&'a Value> {
-    value.get(field).filter(|value| !value.is_null())
-}
-
-fn replay_result_matches_command(
-    command: &MachineDaemonCommand,
-    result: &Value,
-) -> error::Result<bool> {
-    let command = serde_json::to_value(command)?;
-    let command_type = command.get("type").and_then(Value::as_str);
-    let result_type = result.get("type").and_then(Value::as_str);
-    let (expected_result_type, identity_fields): (&str, &[&str]) = match command_type {
-        Some("machine_spawn_agent") => (
-            "machine_spawn_result",
-            &[
-                "requestId",
-                "launchId",
-                "runId",
-                "executionKey",
-                "instanceId",
-                "channelId",
-                "agentName",
-                "identityId",
-            ],
-        ),
-        Some("machine_stop_agent") => (
-            "machine_stop_result",
-            &[
-                "requestId",
-                "runId",
-                "executionKey",
-                "agentId",
-                "instanceId",
-                "resumeSessionKey",
-                "repoIdentity",
-                "repoKeyId",
-                "slotId",
-                "worktreeDisposition",
-            ],
-        ),
-        Some("machine_recover_reply") => (
-            "machine_recover_reply_result",
-            &[
-                "requestId",
-                "runId",
-                "instanceId",
-                "executionKey",
-                "channelId",
-                "executionId",
-            ],
-        ),
-        Some("machine_request_resolve") => (
-            "machine_request_resolve_result",
-            &["requestId", "daemonRequestId"],
-        ),
-        Some("machine_worktree_cleanup") => (
-            "machine_worktree_cleanup_result",
-            &["requestId", "workspace", "channelId", "scopeChannelId"],
-        ),
-        Some("machine_quota_probe") => ("machine_quota_probe_result", &["requestId"]),
-        Some("machine_harness_action") => ("machine_harness_action_result", &["requestId"]),
-        Some("machine_text_task") => ("machine_text_task_result", &["requestId"]),
-        Some("machine_sleep_agent") => (
-            "machine_sleep_result",
-            &["requestId", "runId", "executionKey", "instanceId"],
-        ),
-        Some("machine_worktree_action") => ("machine_worktree_action_result", &["requestId"]),
-        _ => return Ok(false),
-    };
-    if result_type != Some(expected_result_type)
-        || identity_fields
-            .iter()
-            .any(|field| json_identity_field(&command, field) != json_identity_field(result, field))
-    {
-        return Ok(false);
-    }
-    if command_type == Some("machine_harness_action") {
-        let outcome = result.get("result").unwrap_or(&Value::Null);
-        return Ok(["presetId", "action"].iter().all(|field| {
-            json_identity_field(&command, field).is_some()
-                && json_identity_field(&command, field) == json_identity_field(outcome, field)
-        }));
-    }
-    if command_type == Some("machine_spawn_agent") {
-        let workspace = command.get("workspace").unwrap_or(&Value::Null);
-        return Ok(json_identity_field(workspace, "machineId")
-            == json_identity_field(result, "machineId")
-            && json_identity_field(workspace, "canonicalCwd")
-                == json_identity_field(result, "canonicalCwd"));
-    }
-    Ok(true)
 }
 
 fn command_admission_report(command: &MachineDaemonCommand) -> error::Result<MachineDaemonReport> {
@@ -223,7 +126,7 @@ const SPAWN_HANDOFF_WAIT: std::time::Duration = std::time::Duration::from_secs(9
 /// it exits for a self-update; the successor would otherwise see them only on
 /// redelivery, a minute or more later. Bounded, so a stuck spawn cannot pin an
 /// old daemon: whatever is left is redelivered to the successor, which runs an
-/// unexecuted command (see `CommandEffectJournal::rekey_unexecuted`).
+/// unexecuted command.
 async fn wait_for_spawn_commands_before_handoff(counter: &std::sync::atomic::AtomicUsize) {
     let deadline = tokio::time::Instant::now() + SPAWN_HANDOFF_WAIT;
     while counter.load(std::sync::atomic::Ordering::SeqCst) > 0
@@ -233,191 +136,69 @@ async fn wait_for_spawn_commands_before_handoff(counter: &std::sync::atomic::Ato
     }
 }
 
-fn prepare_command_effect(
-    journal: &DaemonEffectJournal,
+/// A delivered command either runs, under Hub's admission, or is answered
+/// with the result this daemon finished and Hub has not confirmed. The stored
+/// result is answered under the lease this delivery carries.
+fn dispatch_daemon_command(
+    results: &DaemonCommandResults,
     command: &MachineDaemonCommand,
-) -> error::Result<CommandEffectDispatch> {
-    let (control_id, command_type) = match command {
-        MachineDaemonCommand::MachineSpawnAgent { request_id, .. } => (request_id, "spawn"),
-        MachineDaemonCommand::MachineStopAgent { request_id, .. } => (request_id, "stop"),
-        MachineDaemonCommand::MachineRecoverReply { request_id, .. } => {
-            (request_id, "recover_reply")
-        }
-        MachineDaemonCommand::MachineRequestResolve { request_id, .. } => (
-            request_id.as_ref().ok_or_else(|| {
-                CliError::Launch("Machine request resolution has no control ID".into())
-            })?,
-            "resolve",
-        ),
-        MachineDaemonCommand::MachineWorktreeCleanup { request_id, .. } => (request_id, "cleanup"),
-        MachineDaemonCommand::MachineQuotaProbe { request_id, .. } => (request_id, "quota_probe"),
-        MachineDaemonCommand::MachineHarnessAction { request_id, .. } => {
-            (request_id, "harness_action")
-        }
-        MachineDaemonCommand::MachineTextTask { request_id, .. } => (request_id, "text_task"),
-        MachineDaemonCommand::MachineSleepAgent { request_id, .. } => (request_id, "sleep"),
-        MachineDaemonCommand::MachineWorktreeAction { request_id, .. } => {
-            (request_id, "worktree_action")
-        }
+) -> error::Result<CommandResultDispatch> {
+    let control_id = polled_daemon_command_control_id(command)
+        .ok_or_else(|| CliError::Launch("Daemon command has no control ID".into()))?
+        .to_string();
+    let Some(result) = results.unconfirmed(&control_id) else {
+        return Ok(CommandResultDispatch::Execute(control_id));
     };
-    let mut payload = serde_json::to_value(command)?;
-    if let Some(object) = payload.as_object_mut() {
-        object.remove("relayLease");
-        if let Some(profile) = config::active_profile_context() {
-            object.insert(
-                "localProfileId".into(),
-                serde_json::Value::String(profile.id.as_str().to_string()),
-            );
-        }
-    }
-    let command_type = config::active_profile_context()
-        .map(|profile| format!("{}:{command_type}", profile.id))
-        .unwrap_or_else(|| command_type.to_string());
-    let payload_digest = lowercase_hex(&Sha256::digest(serde_json::to_vec(&payload)?));
-    let journal = journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?;
-    let effect = match journal
-        .effect_for_control_id(control_id)
-        .map_err(|error| CliError::Launch(format!("Daemon command effect conflict: {error}")))?
+    match serde_json::from_value(result)
+        .map_err(CliError::from)
+        .and_then(|report| rebind_replayed_command_result(report, command))
     {
-        Some(effect) if effect.payload_digest == payload_digest => effect,
-        Some(effect)
-            if matches!(
-                effect.phase,
-                xmatrix_windows_continuity::EffectPhase::EffectCommitted
-                    | xmatrix_windows_continuity::EffectPhase::HubCompletionAcked
-            ) =>
-        {
-            // Older CLIs hashed their full deserialized command. Additive
-            // optional protocol fields therefore changed the digest after an
-            // upgrade. A committed physical effect must never execute again;
-            // accept only a closed, exact identity match against its result.
-            let identity_matches = match effect.result.as_ref() {
-                Some(result) => replay_result_matches_command(command, result)?,
-                None => false,
-            };
-            if !identity_matches {
-                return Err(CliError::Launch(
-                    "Daemon command effect conflict: Run evidence is quarantined or conflicting"
-                        .into(),
-                ));
-            }
-            effect
+        Ok(report) => Ok(CommandResultDispatch::Replay { control_id, report }),
+        Err(error) => {
+            eprintln!(
+                "{} unconfirmed result of daemon command {control_id} is unusable ({error}); running the command again",
+                "⚠".yellow().bold()
+            );
+            results.confirmed(&control_id);
+            Ok(CommandResultDispatch::Execute(control_id))
         }
-        // Not executed yet, but journaled by a CLI that serialized the command
-        // differently (a daemon self-update between receipt and redelivery).
-        Some(effect)
-            if matches!(
-                effect.phase,
-                xmatrix_windows_continuity::EffectPhase::Received
-                    | xmatrix_windows_continuity::EffectPhase::Admitted
-            ) =>
-        {
-            journal
-                .rekey_unexecuted(control_id, &command_type, &payload_digest)
-                .map_err(|error| {
-                    CliError::Launch(format!("Daemon command effect conflict: {error}"))
-                })?
-        }
-        Some(_) => {
-            return Err(CliError::Launch(
-                "Daemon command effect conflict: Run evidence is quarantined or conflicting".into(),
-            ));
-        }
-        None => journal
-            .receive(control_id, &command_type, &payload_digest)
-            .map_err(|error| {
-                CliError::Launch(format!("Daemon command effect conflict: {error}"))
-            })?,
-    };
-    match effect.phase {
-        xmatrix_windows_continuity::EffectPhase::Received => {
-            journal.admit(&effect.stable_id()).map_err(|error| {
-                CliError::Launch(format!(
-                    "Daemon command admission could not commit: {error}"
-                ))
-            })?;
-            Ok(CommandEffectDispatch::Execute(effect.stable_id()))
-        }
-        xmatrix_windows_continuity::EffectPhase::Admitted => {
-            Ok(CommandEffectDispatch::Execute(effect.stable_id()))
-        }
-        xmatrix_windows_continuity::EffectPhase::EffectCommitted => {
-            let stable_id = effect.stable_id();
-            let expected_result_digest = effect.result_digest.clone().ok_or_else(|| {
-                CliError::Launch("Committed daemon command effect has no result digest".into())
-            })?;
-            let report = effect.result.ok_or_else(|| {
-                CliError::Launch("Committed daemon command effect has no replay result".into())
-            })?;
-            Ok(CommandEffectDispatch::Replay {
-                stable_id,
-                expected_result_digest,
-                report: rebind_replayed_command_result(serde_json::from_value(report)?, command)?,
-                persist_rebind: true,
-            })
-        }
-        xmatrix_windows_continuity::EffectPhase::HubCompletionAcked => {
-            let stable_id = effect.stable_id();
-            let expected_result_digest = effect.result_digest.clone().unwrap_or_default();
-            let report = effect.result.ok_or_else(|| {
-                CliError::Launch("Acknowledged daemon command effect has no replay result".into())
-            })?;
-            // Hub redelivering an acknowledged command means it does not hold
-            // that completion under the lease it just issued; answer under
-            // this lease, not the one the old acknowledgement carried.
-            Ok(CommandEffectDispatch::Replay {
-                stable_id,
-                expected_result_digest,
-                report: rebind_replayed_command_result(serde_json::from_value(report)?, command)?,
-                persist_rebind: false,
-            })
-        }
-        xmatrix_windows_continuity::EffectPhase::Quarantined => Err(CliError::Launch(
-            "Daemon command effect is quarantined".into(),
-        )),
     }
 }
 
-fn persist_rebound_command_effect_result(
-    journal: &DaemonEffectJournal,
-    stable_id: &str,
-    expected_result_digest: &str,
+/// Keep a finished command's result until Hub confirms it. A result that
+/// cannot be written is still reported; Hub delivering the command again then
+/// runs it again under its admission.
+fn keep_command_result(
+    results: &DaemonCommandResults,
+    control_id: &str,
     report: &MachineDaemonReport,
-) -> error::Result<()> {
-    journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-        .rebind_committed_result(
-            stable_id,
-            expected_result_digest,
-            serde_json::to_value(report)?,
-        )
-        .map_err(|error| {
-            CliError::Launch(format!(
-                "Daemon command replay could not be rebound: {error}"
-            ))
-        })?;
-    Ok(())
+) {
+    let kept = serde_json::to_value(report)
+        .map_err(|error| error.to_string())
+        .and_then(|value| results.keep(control_id, &value));
+    if let Err(error) = kept {
+        eprintln!(
+            "{} result of daemon command {control_id} was not kept for redelivery: {error}",
+            "⚠".yellow().bold()
+        );
+    }
 }
 
-fn send_command_effect_result(
-    journal: &DaemonEffectJournal,
-    stable_id: &str,
+fn send_command_result(
+    results: &DaemonCommandResults,
+    control_id: &str,
     relay: &SharedMachineDaemonConnection,
     report: MachineDaemonReport,
 ) -> error::Result<()> {
     let report = relay.bind_registry_causality(report)?;
-    commit_command_effect_result(journal, stable_id, &report)?;
+    keep_command_result(results, control_id, &report);
     relay.send_report(report)
 }
 
 /// Admit a pushed non-spawn command from the task that will execute it.
 ///
-/// The physical effect stays journaled as `admitted`, so a failed admission
-/// leaves Hub free to re-lease the same command to this daemon later; the
-/// caller only logs and returns. Spawn keeps its own combined admission.
+/// A failed admission leaves Hub free to re-lease the same command to this
+/// daemon later; the caller only logs and returns. Spawn keeps its own combined admission.
 async fn admit_deferred_daemon_command(
     hub_url: &str,
     relay: &SharedMachineDaemonConnection,
@@ -436,15 +217,15 @@ async fn admit_deferred_daemon_command(
 struct DeferredDaemonCommandContext {
     hub_url: String,
     relay: SharedMachineDaemonConnection,
-    effect_journal: DaemonEffectJournal,
-    effect_id: String,
+    command_results: DaemonCommandResults,
+    control_id: String,
 }
 
 fn spawn_admitted_daemon_command<F, Fut>(
     hub_url: &str,
     relay: &SharedMachineDaemonConnection,
-    effect_journal: &DaemonEffectJournal,
-    effect_id: String,
+    command_results: &DaemonCommandResults,
+    control_id: String,
     command: MachineDaemonCommand,
     execute: F,
 ) -> tokio::task::JoinHandle<()>
@@ -455,8 +236,8 @@ where
     let context = DeferredDaemonCommandContext {
         hub_url: hub_url.to_string(),
         relay: relay.clone(),
-        effect_journal: effect_journal.clone(),
-        effect_id,
+        command_results: command_results.clone(),
+        control_id,
     };
     config::spawn_profile_task(async move {
         if admit_deferred_daemon_command(&context.hub_url, &context.relay, &command)
@@ -495,15 +276,18 @@ async fn hold_owner_action_lease(
     match heartbeat {
         Ok(heartbeat) => Some(heartbeat),
         Err(error) => {
-            eprintln!("{} {label} lease could not be held: {error}", "⚠".yellow().bold());
+            eprintln!(
+                "{} {label} lease could not be held: {error}",
+                "⚠".yellow().bold()
+            );
             None
         }
     }
 }
 
 /// An install may outlive the short admission lease. Renew it for the whole
-/// action, or the Hub would redeliver the command and the still-`Admitted`
-/// effect would run the recipe a second time. A redelivery that arrives while
+/// action, or the Hub would redeliver the command and the recipe would run a
+/// second time. A redelivery that arrives while
 /// the same request is still running is ignored rather than answered.
 async fn execute_leased_harness_action(
     hub_url: &str,
@@ -523,7 +307,8 @@ async fn execute_leased_harness_action(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "harness action").await?;
     // Re-reading inventory or a registry changes nothing a redelivery could repeat.
     let result = if matches!(
         action,
@@ -552,9 +337,10 @@ async fn execute_leased_harness_action(
         }
     };
     if let Some(inventory) = result.inventory.clone()
-        && let Err(error) = relay.report_harness_inventory(inventory) {
-            eprintln!("Harness inventory report deferred: {error}");
-        }
+        && let Err(error) = relay.report_harness_inventory(inventory)
+    {
+        eprintln!("Harness inventory report deferred: {error}");
+    }
     Some(MachineDaemonReport::MachineHarnessActionResult {
         request_id,
         result,
@@ -582,9 +368,11 @@ async fn execute_leased_text_task(
     };
     let _in_flight = runtime_daemon_harness_action::claim_request(&request_id)?;
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "text task").await?;
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "text task").await?;
     let result =
-        crate::runtime_daemon_text_task::execute(&request_id, &preset_id, &instruction, &input).await;
+        crate::runtime_daemon_text_task::execute(&request_id, &preset_id, &instruction, &input)
+            .await;
     Some(MachineDaemonReport::MachineTextTaskResult {
         request_id,
         result,
@@ -648,15 +436,23 @@ async fn execute_leased_worktree_action(
         return None;
     };
     let lease = relay_lease.as_ref()?;
-    let _heartbeat = hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
-    use xmatrix_repo_pool::machine_worktree_actions::{WorktreeActionKind, execute_worktree_action};
+    let _heartbeat =
+        hold_owner_action_lease(hub_url, relay, &request_id, lease, "worktree action").await?;
+    use xmatrix_repo_pool::machine_worktree_actions::{
+        WorktreeActionKind, execute_worktree_action,
+    };
     let kind = match action {
         machine_daemon_connection::WorktreeAction::List => WorktreeActionKind::List,
         machine_daemon_connection::WorktreeAction::Reclaim => WorktreeActionKind::Reclaim,
-        machine_daemon_connection::WorktreeAction::AutoReclaimOn => WorktreeActionKind::AutoReclaimOn,
-        machine_daemon_connection::WorktreeAction::AutoReclaimOff => WorktreeActionKind::AutoReclaimOff,
+        machine_daemon_connection::WorktreeAction::AutoReclaimOn => {
+            WorktreeActionKind::AutoReclaimOn
+        }
+        machine_daemon_connection::WorktreeAction::AutoReclaimOff => {
+            WorktreeActionKind::AutoReclaimOff
+        }
     };
-    let result = execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
+    let result =
+        execute_worktree_action(kind, paths.as_deref().unwrap_or_default(), &live_cwds).await;
     Some(MachineDaemonReport::MachineWorktreeActionResult {
         request_id,
         result,
@@ -664,47 +460,50 @@ async fn execute_leased_worktree_action(
     })
 }
 
-fn commit_command_effect_result(
-    journal: &DaemonEffectJournal,
-    stable_id: &str,
-    report: &MachineDaemonReport,
-) -> error::Result<()> {
-    let value = serde_json::to_value(report)?;
-    journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-        .commit_result(stable_id, value)
-        .map_err(|error| {
-            CliError::Launch(format!("Daemon command effect could not commit: {error}"))
-        })?;
-    Ok(())
+/// The single-file effect journal this store replaced. Its unconfirmed
+/// results are not carried over: Hub delivers those commands again.
+fn remove_retired_command_effect_journal() {
+    let state = config::profile_state_dir();
+    let Ok(entries) = std::fs::read_dir(&state) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|name| name.starts_with("daemon-command-effects-v1.json"))
+        {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
 }
 
-fn replay_pending_command_effect_completions(
-    journal: &DaemonEffectJournal,
+fn replay_unconfirmed_command_results(
+    results: &DaemonCommandResults,
     relay: &SharedMachineDaemonConnection,
 ) -> error::Result<usize> {
-    let values = journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-        .pending_completion_results()
-        .map_err(|error| {
-            CliError::Launch(format!(
-                "Daemon command completion recovery failed: {error}"
-            ))
-        })?;
     let mut count = 0;
-    for value in values {
+    for value in results.all_unconfirmed() {
         // A lease names the connection epoch that claimed it, and Hub accepts
-        // a completion only from that epoch. A result committed under an
-        // earlier connection is refused as a stale lease every time, so
-        // resending it on each reconnect only repeats the 409. Hub either
-        // redelivers the command, whose replay rebinds this result to the
-        // new lease, or has already settled it.
+        // a completion only from that epoch. A result kept under an earlier
+        // connection is refused as a stale lease every time, so resending it
+        // on each reconnect only repeats the 409. Hub either redelivers the
+        // command, whose replay rebinds this result to the new lease, or has
+        // already settled it.
         if !completion_lease_is_current(&value, |epoch| relay.owns_connection_epoch(epoch)) {
+            // A quota probe is bound to a single connection epoch: Hub never
+            // redelivers or accepts it on a later connection, so drop it now.
+            if runtime_daemon_command_results::is_quota_probe_result(&value)
+                && let Some(control_id) = value.get("requestId").and_then(Value::as_str)
+            {
+                results.confirmed(control_id);
+            }
             continue;
         }
-        relay.send_report(serde_json::from_value(value)?)?;
+        let Ok(report) = serde_json::from_value(value) else {
+            continue;
+        };
+        relay.send_report(report)?;
         count += 1;
     }
     Ok(count)
@@ -1720,22 +1519,9 @@ async fn handoff_windows_daemon_candidate(
     relay: &SharedMachineDaemonConnection,
     registry: &DaemonRunRegistry,
     request_broker: Option<&DaemonRequestBroker>,
-    effect_journal: &DaemonEffectJournal,
     control: &mut SupervisorControlSession,
     candidate: WindowsStagedDaemonCandidate,
 ) -> error::Result<()> {
-    let counts = effect_journal
-        .lock()
-        .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))?
-        .phase_counts()
-        .map_err(|error| CliError::Launch(format!("Daemon effect accounting failed: {error}")))?;
-    if counts.get("Received").copied().unwrap_or(0) > 0
-        || counts.get("Admitted").copied().unwrap_or(0) > 0
-    {
-        return Err(CliError::Launch(
-            "in-flight daemon command effects have not reached a durable result".into(),
-        ));
-    }
     let source_hub_epoch = relay.connection_epoch().ok_or_else(|| {
         CliError::RelayTransient("Daemon update has no active source Hub epoch".into())
     })?;
@@ -1951,7 +1737,8 @@ async fn register_long_lived_relay(
     // second refusal with a fresh one is the failure it says.
     let mut refreshed_after_refusal = false;
     loop {
-        if next_daemon_auth_refresh.is_some_and(|deadline| std::time::SystemTime::now() >= deadline) {
+        if next_daemon_auth_refresh.is_some_and(|deadline| std::time::SystemTime::now() >= deadline)
+        {
             match resolve_local_daemon_auth_token_for_refresh().await {
                 Ok(Some(token)) => {
                     relay.update_auth_token(token)?;
@@ -1970,7 +1757,8 @@ async fn register_long_lived_relay(
                     write_current_run_error_status("relay_auth_refresh_retrying", false, &err);
                     eprintln!("{} {detail}", "⚠".yellow().bold());
                     next_daemon_auth_refresh = Some(
-                        std::time::SystemTime::now() + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS),
+                        std::time::SystemTime::now()
+                            + Duration::from_secs(DAEMON_AUTH_REFRESH_RETRY_SECS),
                     );
                 }
             }
@@ -2301,18 +2089,21 @@ async fn run_daemon_connection(
         metadata["parentMachineId"] = serde_json::json!(parent);
     }
     if let Ok(app_version) = std::env::var("XMATRIX_APP_VERSION")
-        && !app_version.trim().is_empty() {
-            metadata["xmatrixAppVersion"] = serde_json::json!(app_version);
-        }
+        && !app_version.trim().is_empty()
+    {
+        metadata["xmatrixAppVersion"] = serde_json::json!(app_version);
+    }
     // Only the profile that runs this machine's self-update asks the Hub for
     // CLI release notices; a daemon with self-update turned off asks for none.
-    let cli_release_capability =
-        (update_authority && !daemon_self_update_disabled()).then_some(CLI_RELEASE_NOTICE_CAPABILITY);
+    let cli_release_capability = (update_authority && !daemon_self_update_disabled())
+        .then_some(CLI_RELEASE_NOTICE_CAPABILITY);
     // The same profile takes requests to check for an update now. With
     // self-update off it still says it can check, so the Hub can tell the
     // owner exactly why it will not (no release capability beside it).
     let cli_update_check_capability = update_authority.then_some(CLI_UPDATE_CHECK_CAPABILITY);
-    let daemon_capabilities: Vec<String> = DAEMON_CAPABILITIES.iter().copied()
+    let daemon_capabilities: Vec<String> = DAEMON_CAPABILITIES
+        .iter()
+        .copied()
         .chain(cli_release_capability)
         .chain(cli_update_check_capability)
         .map(str::to_string)
@@ -2350,19 +2141,17 @@ async fn run_daemon_connection(
 
     let mut event_rx = relay.event_rx.take().unwrap();
     let relay = Arc::new(relay);
-    let effect_journal: DaemonEffectJournal = Arc::new(std::sync::Mutex::new(
-        xmatrix_windows_continuity::CommandEffectJournal::new(
-            config::profile_state_dir().join("daemon-command-effects-v1.json"),
-        ),
-    ));
-    match replay_pending_command_effect_completions(&effect_journal, &relay) {
+    let command_results =
+        DaemonCommandResults::new(config::profile_state_dir().join("daemon-command-results"));
+    remove_retired_command_effect_journal();
+    match replay_unconfirmed_command_results(&command_results, &relay) {
         Ok(count) if count > 0 => println!(
-            "{} replayed {count} committed daemon command completion(s)",
+            "{} replayed {count} unconfirmed daemon command result(s)",
             "✓".green().bold()
         ),
         Ok(_) => {}
         Err(error) => eprintln!(
-            "{} failed to replay committed daemon command completions: {error}",
+            "{} failed to replay unconfirmed daemon command results: {error}",
             "⚠".yellow().bold()
         ),
     }
@@ -2448,7 +2237,7 @@ async fn run_daemon_connection(
         run_registry: run_registry.clone(),
         spawn_inflight: spawn_inflight.clone(),
         relay: relay.clone(),
-        effect_journal: effect_journal.clone(),
+        command_results: command_results.clone(),
     };
     let _spawn_intent_poll_handle = spawn_daemon_spawn_intent_poll_task(spawn_runtime.clone());
     if let Err(err) = persist_daemon_ready_state(profile_manager) {
@@ -2495,42 +2284,27 @@ async fn run_daemon_connection(
                         "Daemon ProfileRuntime event channel closed unexpectedly".into(),
                     ));
                 };
-                let command_effect = if let MachineDaemonConnectionEvent::Command(command) = &event {
-                    match prepare_command_effect(&effect_journal, command) {
-                        Ok(CommandEffectDispatch::Execute(stable_id)) => {
-                            // Admission is a Hub round trip that must finish
-                            // inside the pushed command's lease. Every command
-                            // arm below awaits it on its own task, so this
-                            // socket loop never queues a batch (a `/kill all`
-                            // is one stop per Instance) behind one slow
-                            // acknowledgement until the later leases expire.
-                            Some((stable_id, None::<String>))
-                        },
-                        Ok(CommandEffectDispatch::Replay {
-                            stable_id,
-                            expected_result_digest,
-                            report,
-                            persist_rebind,
-                        }) => {
-                            let result = (|| {
-                                let report = relay.bind_registry_causality(report)?;
-                                if persist_rebind {
-                                    persist_rebound_command_effect_result(
-                                        &effect_journal,
-                                        &stable_id,
-                                        &expected_result_digest,
-                                        &report,
-                                    )?;
-                                }
-                                relay.send_report(report)
-                            })();
-                            if let Err(error) = result {
-                                eprintln!("{} failed to replay committed daemon command result: {error}", "⚠".yellow().bold());
+                let command_dispatch = if let MachineDaemonConnectionEvent::Command(command) = &event {
+                    match dispatch_daemon_command(&command_results, command) {
+                        // Admission is a Hub round trip that must finish
+                        // inside the pushed command's lease. Every command
+                        // arm below awaits it on its own task, so this
+                        // socket loop never queues a batch (a `/kill all`
+                        // is one stop per Instance) behind one slow
+                        // acknowledgement until the later leases expire.
+                        Ok(CommandResultDispatch::Execute(control_id)) => {
+                            Some((control_id, None::<String>))
+                        }
+                        Ok(CommandResultDispatch::Replay { control_id, report }) => {
+                            if let Err(error) =
+                                send_command_result(&command_results, &control_id, &relay, report)
+                            {
+                                eprintln!("{} failed to replay unconfirmed daemon command result: {error}", "⚠".yellow().bold());
                             }
                             continue;
                         }
                         Err(error) => {
-                            eprintln!("{} daemon command effect rejected: {error}", "⚠".yellow().bold());
+                            eprintln!("{} daemon command has no control ID: {error}", "⚠".yellow().bold());
                             continue;
                         }
                     }
@@ -2540,12 +2314,12 @@ async fn run_daemon_connection(
                 match event {
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineSpawnAgent { .. }) => {
                         let runtime = spawn_runtime.clone();
-                        let (effect_id, _) =
-                            command_effect.expect("command has admitted effect");
+                        let (control_id, _) =
+                            command_dispatch.expect("command has a control ID");
                         let in_flight = SpawnCommandInFlight::enter(&spawn_commands_in_flight);
                         config::spawn_profile_task(async move {
                             let _in_flight = in_flight;
-                            let DaemonSpawnRuntime { hub_url, relay, effect_journal, .. } = &runtime;
+                            let DaemonSpawnRuntime { hub_url, relay, command_results, .. } = &runtime;
                             let admission = if daemon_spawn_has_combined_admission_authority(&command) {
                                 match relay.machine_credential() {
                                     Ok(credential) => admit_and_authorize_daemon_spawn_http(
@@ -2572,8 +2346,8 @@ async fn run_daemon_connection(
                                     let report = daemon_spawn_result_message(
                                         false, None, None, Some(error), None, &intent,
                                     );
-                                    if let Err(report_error) = send_command_effect_result(
-                                        effect_journal, &effect_id, relay, report,
+                                    if let Err(report_error) = send_command_result(
+                                        command_results, &control_id, relay, report,
                                     ) {
                                         eprintln!(
                                             "{} failed to report terminal daemon admission: {report_error}",
@@ -2595,9 +2369,9 @@ async fn run_daemon_connection(
                                 DaemonSpawnClaim::Existing(existing) => {
                                     let message = existing.into_report(&intent);
                                     let relay = relay.clone();
-                                    if let Err(err) = send_command_effect_result(
-                                        effect_journal,
-                                        &effect_id,
+                                    if let Err(err) = send_command_result(
+                                        command_results,
+                                        &control_id,
                                         &relay,
                                         message,
                                     ) {
@@ -2611,9 +2385,9 @@ async fn run_daemon_connection(
                                 DaemonSpawnClaim::Conflict => {
                                     let message = conflicting_daemon_spawn_result(&intent);
                                     let relay = relay.clone();
-                                    if let Err(err) = send_command_effect_result(
-                                        effect_journal,
-                                        &effect_id,
+                                    if let Err(err) = send_command_result(
+                                        command_results,
+                                        &control_id,
                                         &relay,
                                         message,
                                     ) {
@@ -2636,9 +2410,9 @@ async fn run_daemon_connection(
                                 &intent, initial_agent_token, DaemonSpawnDelivery::Socket, claim_key, Some(log),
                             ).await;
                             let relay = relay.clone();
-                            if let Err(err) = send_command_effect_result(
-                                effect_journal,
-                                &effect_id,
+                            if let Err(err) = send_command_result(
+                                command_results,
+                                &control_id,
                                 &relay,
                                 message,
                             ) {
@@ -2653,9 +2427,9 @@ async fn run_daemon_connection(
                         let hub_url = hub_url.to_string();
                         let relay = relay.clone();
                         let run_registry = run_registry.clone();
-                        let effect_journal = effect_journal.clone();
+                        let command_results = command_results.clone();
                         let auth_broker = auth_broker.clone();
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
                         config::spawn_profile_task(async move {
                             let Some(request) = DaemonStopRequest::from_command(command.clone()) else {
                                 return;
@@ -2718,9 +2492,9 @@ async fn run_daemon_connection(
                             )
                             .await;
                             let report = request.into_report(result, handoff_export);
-                            if let Err(err) = send_command_effect_result(
-                                &effect_journal,
-                                &effect_id,
+                            if let Err(err) = send_command_result(
+                                &command_results,
+                                &control_id,
                                 &relay,
                                 report,
                             ) {
@@ -2732,15 +2506,15 @@ async fn run_daemon_connection(
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineRecoverReply { .. }) => {
-                        let Some((effect_id, _)) = command_effect else { continue; };
+                        let Some((control_id, _)) = command_dispatch else { continue; };
                         let hub_url = hub_url.to_string();
-                        let broker = request_broker.clone(); let relay = relay.clone(); let journal = effect_journal.clone();
+                        let broker = request_broker.clone(); let relay = relay.clone(); let journal = command_results.clone();
                         config::spawn_profile_task(async move {
                             if admit_deferred_daemon_command(&hub_url, &relay, &command).await.is_err() {
                                 return;
                             }
                             if let Ok(report) = runtime_reply_recovery::execute(broker.as_ref(), command).await
-                                && let Err(error) = send_command_effect_result(&journal, &effect_id, &relay, report) {
+                                && let Err(error) = send_command_result(&journal, &control_id, &relay, report) {
                                     eprintln!("Reply recovery result remains pending: {error}");
                                 }
                         });
@@ -2749,9 +2523,9 @@ async fn run_daemon_connection(
                         let Some(broker) = request_broker.clone() else {
                             continue;
                         };
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, command_results, control_id, .. } = context;
                             let MachineDaemonCommand::MachineRequestResolve {
                                 request_id,
                                 daemon_request_id,
@@ -2785,9 +2559,9 @@ async fn run_daemon_connection(
                                 error,
                                 relay_lease,
                             };
-                            if let Err(err) = send_command_effect_result(
-                                &effect_journal,
-                                &effect_id,
+                            if let Err(err) = send_command_result(
+                                &command_results,
+                                &control_id,
                                 &relay,
                                 report,
                             ) {
@@ -2799,9 +2573,9 @@ async fn run_daemon_connection(
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineWorktreeCleanup { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, command_results, control_id, .. } = context;
                             let MachineDaemonCommand::MachineWorktreeCleanup {
                                 request_id,
                                 workspace,
@@ -2840,9 +2614,9 @@ async fn run_daemon_connection(
                                 error,
                                 relay_lease,
                             };
-                            if let Err(error) = send_command_effect_result(
-                                &effect_journal,
-                                &effect_id,
+                            if let Err(error) = send_command_result(
+                                &command_results,
+                                &control_id,
                                 &relay,
                                 report,
                             ) {
@@ -2851,9 +2625,9 @@ async fn run_daemon_connection(
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineQuotaProbe { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, command_results, control_id, .. } = context;
                             let MachineDaemonCommand::MachineQuotaProbe { request_id, probe, relay_lease } = command else {
                                 return;
                             };
@@ -2863,63 +2637,63 @@ async fn run_daemon_connection(
                                 relay_lease,
                             )
                             .await;
-                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report quota probe result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineHarnessAction { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
                         let run_registry = run_registry.clone();
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, command_results, control_id } = context;
                             let Some(report) = execute_leased_harness_action(&hub_url, &relay, &run_registry, command).await else {
                                 return;
                             };
-                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report harness action result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineTextTask { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, command_results, control_id } = context;
                             let Some(report) = execute_leased_text_task(&hub_url, &relay, command).await else {
                                 return;
                             };
-                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report text task result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineSleepAgent { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
                         let registry = run_registry.clone();
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { relay, effect_journal, effect_id, .. } = context;
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { relay, command_results, control_id, .. } = context;
                             let Some(report) = execute_sleep_on_hub_word(&registry, command).await else {
                                 return;
                             };
-                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report sleep result: {error}", "⚠".yellow().bold());
                             }
                         });
                     }
                     MachineDaemonConnectionEvent::Command(command @ MachineDaemonCommand::MachineWorktreeAction { .. }) => {
-                        let (effect_id, _) = command_effect.expect("command has admitted effect");
+                        let (control_id, _) = command_dispatch.expect("command has a control ID");
                         let live_cwds: std::collections::HashSet<std::path::PathBuf> = run_registry
                             .lock()
                             .await
                             .values()
                             .filter_map(|child| child.cwd.clone())
                             .collect();
-                        spawn_admitted_daemon_command(hub_url, &relay, &effect_journal, effect_id, command, move |context, command| async move {
-                            let DeferredDaemonCommandContext { hub_url, relay, effect_journal, effect_id } = context;
+                        spawn_admitted_daemon_command(hub_url, &relay, &command_results, control_id, command, move |context, command| async move {
+                            let DeferredDaemonCommandContext { hub_url, relay, command_results, control_id } = context;
                             let Some(report) = execute_leased_worktree_action(&hub_url, &relay, live_cwds, command).await else {
                                 return;
                             };
-                            if let Err(error) = send_command_effect_result(&effect_journal, &effect_id, &relay, report) {
+                            if let Err(error) = send_command_result(&command_results, &control_id, &relay, report) {
                                 eprintln!("{} failed to report worktree action result: {error}", "⚠".yellow().bold());
                             }
                         });
@@ -2958,12 +2732,12 @@ async fn run_daemon_connection(
                             )?;
                             persist_daemon_ready_state(profile_manager)?;
                         }
-                        if let Err(error) = replay_pending_command_effect_completions(
-                            &effect_journal,
+                        if let Err(error) = replay_unconfirmed_command_results(
+                            &command_results,
                             &relay,
                         ) {
                             eprintln!(
-                                "{} failed to replay committed daemon command completions: {error}",
+                                "{} failed to replay unconfirmed daemon command results: {error}",
                                 "⚠".yellow().bold()
                             );
                         }
@@ -2992,7 +2766,10 @@ async fn run_daemon_connection(
                         relay.disconnect();
                         break ProfileRuntimeExit::HubShutdown(reason);
                     }
-                    MachineDaemonConnectionEvent::Error { message, correlation } => {
+                    MachineDaemonConnectionEvent::Error { message, correlation, terminal_request_id } => {
+                        if let Some(control_id) = terminal_request_id {
+                            command_results.drop_if_quota_probe(&control_id);
+                        }
                         match correlation {
                             Some(correlation) => eprintln!(
                                 "{} daemon control message rejected: {message} ({correlation})",
@@ -3027,15 +2804,7 @@ async fn run_daemon_connection(
                         }
                     }
                     MachineDaemonConnectionEvent::CommandCompletionAcked { control_id } => {
-                        if let Err(error) = effect_journal
-                            .lock()
-                            .map_err(|_| CliError::Launch("Daemon command effect journal is poisoned".into()))
-                            .and_then(|journal| journal.acknowledge(&control_id).map_err(|error| {
-                                CliError::Launch(format!("Daemon command completion ack failed: {error}"))
-                            }))
-                        {
-                            eprintln!("{} {error}", "⚠".yellow().bold());
-                        }
+                        command_results.confirmed(&control_id);
                     }
                     _ => {}
                 }
@@ -3066,7 +2835,6 @@ async fn run_daemon_connection(
                             &relay,
                             &run_registry,
                             request_broker.as_ref(),
-                            &effect_journal,
                             control,
                             candidate,
                         ).await {

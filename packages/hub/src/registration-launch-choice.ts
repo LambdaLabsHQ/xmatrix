@@ -101,16 +101,17 @@ function catalogRow(candidate: RegistrationModelFacts, option: Pick<ModelPair, "
 /** The provider's reading of one model of this environment (its catalog
  * row): the account's windows and the scoped windows that constrain it.
  * Without a row, the account's alone. */
-function modelQuota(candidate: RegistrationModelFacts, model: RoutingModelOption | undefined, now: number) {
-  return routingQuotaVerdict(candidate.observations?.quota?.usage, now, model ? { model } : undefined);
+function modelQuota(candidate: RegistrationModelFacts, model: RoutingModelOption | undefined, now: number,
+  summon: "automatic" | "named" = "automatic") {
+  return routingQuotaVerdict(candidate.observations?.quota?.usage, now, { ...(model ? { model } : {}), summon });
 }
 
 /** True while the provider's own reading says this environment (or one model
  * of it) has no quota left: a measured, never assumed, zero whose reset has
  * not yet passed. */
 export function providerQuotaExhausted(candidate: RegistrationModelFacts, now: number,
-  model?: RoutingModelOption): boolean {
-  return modelQuota(candidate, model, now).state === "usedUp";
+  model?: RoutingModelOption, summon: "automatic" | "named" = "automatic"): boolean {
+  return modelQuota(candidate, model, now, summon).state === "usedUp";
 }
 
 /**
@@ -198,8 +199,9 @@ export type PlacedEnvironment<T> = { candidate: T; fit: number; headroom: number
  * is lost unless it is spent, so it is the cheaper to use. Then a sliver of
  * complete bandwidth and the utility sum break ties, then the fewest outstanding
  * Runs on the machine, whose load may not show yet, then candidate order.
- * An environment that failed to start within the breaker window ranks after
- * every one that did not, and is weighed only against its own kind.
+ * An environment that failed to start within the breaker window, or whose
+ * machine left the Hub's last command unanswered, ranks after every one that
+ * did not, and is weighed only against its own kind.
  * Every environment is ranked.
  */
 export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: readonly T[],
@@ -234,8 +236,10 @@ export function jointRanking<T extends RegistrationLaunchCandidate>(candidates: 
     return { candidate, index, fit, headroom, room, quotaPace, network, networkQuality, responseQuality, transferQuality,
       sides, balance, utility: balance + 0.001 * (fit + room) };
   });
-  // The breakers: an environment that just failed to start, is unavailable, or whose last summons all ended without a reply.
+  // The breakers: an environment that just failed to start, is unavailable, whose last summons all ended
+  // without a reply, or whose machine left the Hub's last command unanswered.
   const tripped = (candidate: T) => candidate.startupFailedAt !== undefined || candidate.unansweredAt !== undefined
+    || candidate.machineUnansweredAt !== undefined
     || candidate.uninstalled === true || candidate.signedOut === true || candidate.accountBillingRefusal === true;
   const dominated = (item: typeof weighed[number]) => weighed.some(other =>
     tripped(other.candidate) === tripped(item.candidate) && other.fit >= item.fit &&
@@ -266,25 +270,16 @@ function choiceAnswer(answer: RoutingAnswer | undefined): RoutingChoice {
 /** A message that summons nobody and that Jev reads as not asking for work. */
 export const START_INTENT_DECLINED = "start_intent_declined";
 
-/** The candidate without its billing refusal's hold: a refused account's
- * reading is the daemon's hold alone (`registrationQuotaUsage`), one used-up
- * account window, so dropping the account windows leaves its scoped ones. */
-function liftBillingHold<T extends RegistrationLaunchCandidate>(candidate: T): T {
-  const usage = candidate.observations?.quota?.usage;
-  if (!candidate.accountBillingRefusal || !usage || typeof usage !== "object") return candidate;
-  return { ...candidate, observations: { ...candidate.observations!, quota: { ...candidate.observations!.quota!,
-    usage: { ...usage, quotaUsages: [] } } } };
-}
-
 /** Jev's opaque handles resolve to listed values only, and the environment that
  * runs the work is a whole registered key offering all of them. */
 export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContext?: (sourceSequence: number) => Promise<Record<string, unknown>>): RegistrationLaunchChooser {
   return async ({ message, sourceSequence, tags, candidates, blocked: blockedRegistrations, managedWorkspace, managedOnly, summon,
     automaticHarness, askToStart, onHarness }) => {
-    // A summon that names its harness reaches a billing-refused account (#1630):
-    // the refusal's usage-limit hold, which stands in for the account's windows,
-    // then refuses none of its models either. Scoped windows still count.
-    let eligible = automaticHarness ? candidates : candidates.map(liftBillingHold);
+    // A summon that names its harness reaches a billing-refused account (#1630).
+    // Whether a model is used up is `routingQuotaVerdict`: a named summon
+    // ignores billing holds, and provider windows still count.
+    const quotaSummon = automaticHarness === true ? "automatic" as const : "named" as const;
+    let eligible = candidates;
     const blocked = blockedRegistrations ?? [];
     const narrow = (code: string, matches: (candidate: RegistrationLaunchCandidate) => boolean) => {
       eligible = eligible.filter(matches);
@@ -327,17 +322,19 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
     // to weigh. A used-up model is no option; an environment is out only when
     // its account is used up, or every model it could run is.
     const now = Date.now();
-    const modelExhausted = (candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">) =>
-      providerQuotaExhausted(candidate, now, catalogRow(candidate, option));
+    const modelExhausted = (candidate: RegistrationLaunchCandidate, option: Pick<ModelPair, "model">) => {
+      const row = catalogRow(candidate, option);
+      return providerQuotaExhausted(candidate, now, row, quotaSummon);
+    };
     const parameterPairs = (candidate: RegistrationLaunchCandidate) => modelPairs(candidate, tags).filter(option =>
       !tags.parameters || !candidate.parameterModel ||
       (candidate.modelAliases?.[option.model] ?? option.model) === candidate.parameterModel);
     const runsDefault = (candidate: RegistrationLaunchCandidate) => usesRuntimeDefaults(candidate, tags) &&
       !modelExhausted(candidate, runtimeDefaultPair(tags));
-    const usedUp = (candidate: RegistrationLaunchCandidate) =>
-      automaticHarness === true && candidate.accountBillingRefusal === true || providerQuotaExhausted(candidate, now) ||
-        [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []]
-          .every(option => modelExhausted(candidate, option));
+    const usedUp = (candidate: RegistrationLaunchCandidate) => {
+      const options = [...parameterPairs(candidate), ...usesRuntimeDefaults(candidate, tags) ? [runtimeDefaultPair(tags)] : []];
+      return providerQuotaExhausted(candidate, now, undefined, quotaSummon) || options.every(option => modelExhausted(candidate, option));
+    };
     if (eligible.every(usedUp)) {
       // The earliest reading this refusal rested on: any reading of these
       // pools newer than it is one the refusal never saw.
@@ -347,7 +344,7 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
       // when the first environment's is.
       const named = tags.model;
       const back = named ? eligible.flatMap(candidate => {
-        const verdict = modelQuota(candidate, catalogRow(candidate, { model: named }), now);
+        const verdict = modelQuota(candidate, catalogRow(candidate, { model: named }), now, quotaSummon);
         return verdict.state === "usedUp" ? [Date.parse(verdict.until)] : [];
       }) : [];
       // Its retry waits on that model, or without one on the runtime's
@@ -521,7 +518,8 @@ export function registrationLaunchChooser(evaluate: RoutingEvaluator, readContex
           responseQuality: round(item.responseQuality!) } : {}),
         described: Boolean(item.candidate.description),
         ...(item.candidate.startupFailedAt ? { startupFailedAt: item.candidate.startupFailedAt } : {}),
-        ...(item.candidate.unansweredAt ? { unansweredAt: item.candidate.unansweredAt } : {}) })) },
+        ...(item.candidate.unansweredAt ? { unansweredAt: item.candidate.unansweredAt } : {}),
+        ...(item.candidate.machineUnansweredAt ? { machineUnansweredAt: item.candidate.machineUnansweredAt } : {}) })) },
       ...(intent ? { intent: { source: "jev" as const, selected: "summon" as const, probabilities: intent.probabilities } }
         : summon ? { intent: { source: "author" as const } } : {}),
       selections: { ...(model ? { model: model.model } : {}), ...(effort ? { effort } : {}),

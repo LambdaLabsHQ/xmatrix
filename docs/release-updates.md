@@ -1,5 +1,429 @@
 # Release Updates
 
+## Unreleased: a late unanswered start does not fail a launch that connected
+
+The Hub ends a spawn command the machine never answers and records that as a
+failed start. That verdict used to be ignored only while the Run was still
+`running` or `stopping`. A launch that had already connected, and whose Run
+had then finished, was still stamped `spawnResult.ok: false`. For the next 30
+minutes the startup breaker ranks that harness behind every other, so the next
+summon skips the environment that did start. An unanswered start is now
+ignored once the launch has connected (`state='connected'` or `connected_at`),
+and that same fact suppresses the startup-failure notice. A start that never
+connected is still failed and still said on its summon. Hub only. Recovery is
+a CI-validated beta Hub release reverting this change.
+
+## Unreleased: Gmail snapshot cleanup preserves the send result
+
+Sending an approved draft, a new message with attachments, or a reply with
+attachments reports the original Gmail result even if deleting the temporary
+upload fails. The Hub logs a fixed cleanup warning without including the
+snapshot URL or provider error details. Access still expires after ten minutes.
+Durable cleanup after a failed deletion or interrupted execution remains open
+in [#1418](https://github.com/LambdaLabsHQ/xmatrix/issues/1418). Hub only. Recovery
+is a CI-validated beta Hub release reverting the change.
+
+## Unreleased: Chrome extension to send pages to a Channel
+
+New `apps/chrome-extension` (Manifest V3). From the toolbar popup
+(Alt+Shift+X) or the context menu, a person sends the current page, a link or
+the selected text, with a note, to a conversation in their Space as
+themselves. The selected text goes as a quote, and mentioning an Agent hands it
+the work. The badge shows how many conversations are waiting on them. Sign-in
+uses the existing CLI device flow. Requests declare an `app` client identity
+on platform `chrome-extension`. No Hub, protocol, Web or client release
+component changes. The extension ships outside the release train until a
+Chrome Web Store listing and its publish workflow exist; until then it loads
+unpacked. Recovery is reverting the directory.
+
+## Unreleased: show all scoped quota windows in Web instead of truncating at three
+
+Web's `normalizeQuotaUsageList` sliced deduplicated quota windows to three
+entries (`.slice(0, 3)`). For providers with two scoped pools and both 5h and
+weekly windows (such as Antigravity's `Claude & GPT` and `Gemini` 5h/1w pools),
+sorting placed `Gemini · 1w` fourth and silently dropped it from both the
+rendered agent quota chips and `usageLimitSummary`. The arbitrary display slice
+is removed so every deduplicated window renders and participates in limit
+verdicts. Web only. Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: tolerate small clock skew on quota probes and prune dead probe results
+
+Provider quota probe reports carried `quotaObservedAt` from the host's wall
+clock, while Hub validation (`parseRoutingQuotaProbeResponse`,
+`routingQuotaRecord`, `providerQuotaReading`, and PostgreSQL
+`upsertRegistrationQuotaObservation`) rejected any timestamp even a few
+milliseconds ahead of the Worker's `Date.now()` or `statement_timestamp()`.
+Because Cloudflare Workers' `Date.now()` and host NTP clocks can differ by
+tens to hundreds of milliseconds, valid `quota_probe` completions were rejected
+with `machine_command_result_mismatch` (409, surfaced as
+`runtime.authority_rejected`), leaving commands in `leased` and stranding their
+files in `~/.config/xmatrix/daemon-command-results/` for an hour. Protocol and
+DB validation now accept bounded forward clock skew up to 5 seconds and clamp
+it to `now` (while still rejecting timestamps beyond 5 seconds in the future),
+and the daemon drops kept `machine_quota_probe_result` files immediately on
+non-retryable rejection or connection-epoch change (with a 5-minute fallback
+sweep window). Protocol, DB, Hub, and CLI. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: the download page's channel picker is a paper menu
+
+The channel picker beside the main download was the system select: opened, it
+drew a wood-coloured focus ring and the platform's blue list, the loudest
+thing on the page. It is now quiet text that opens a paper slip listing
+Stable and Preview with one line on what each is and a check on the chosen
+one, with no border around it; Escape, arrow keys and a click outside work,
+and focus returns to the text. The sentence under the platform list that described the channel moved
+into that menu. Web only. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: cross-compile macOS x64 CLI releases on Apple Silicon (`macos-26`)
+
+Hosted `macos-x64` (`x86_64-apple-darwin`) CLI release and cache-warm jobs
+previously ran on 3-core `macos-26-intel` runners (~4m02s even with a warm
+`kache` store, vs 1m27s for `macos-arm64`). Both `cli-build.yml` and
+`cli-release-cache.yml` now cross-compile `x86_64-apple-darwin` on `macos-26`
+(Apple Silicon), explicitly check the Mach-O architecture via `lipo -archs`,
+verify `--version` via Rosetta (`arch -x86_64`, installing Rosetta if absent),
+and keep the same Developer ID signing and R2 verification gates. CI / release
+infrastructure only; no binary format, signing, or client behavior change.
+Recovery is reverting the runner back to `macos-26-intel`.
+
+## Unreleased: the download page carries fewer things
+
+After the channel picker the download page had grown back to six elements in
+its top block and a link in every row. The top is now the icon, the heading,
+the download with its channel picker, and one line under it that says what
+the build is for and links the other Mac build; the jump link to the list is
+gone, since the list starts right below. Rows are a platform, one line and
+its buttons; desktop and Android release notes and the two macOS ZIPs are one
+line of small links under the list. No download URL was removed. Web only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a page is found, read and written a level at a time
+
+An Agent had the title tree and whole-page reads, with nothing between, and a
+conversation carried every page any of its Runs had opened. Two changes (#1873
+and #1875):
+
+Finding the page. Jev attaches a new conversation to a page chosen among every
+page its author can read, each put as its path and the one line saying how it
+stands; it was the first 60 of the tree by title alone, and the tree's order
+made that an arbitrary 60 (in a Space of 111 pages, 51 could never be
+attached). A Space that does not fit one question is asked in up to six
+batches, then among each batch's choice. Page search (Web, the MCP
+`search_pages` tool and the new `xmatrix page search`) matches every word of
+the query wherever each stands, with pages holding it as typed first, and
+names the section holding the most of the words; a query without spaces
+matches as before. `xmatrix page tree --summaries` prints each page's line.
+
+Carrying and reading it. A page that was only read from a conversation, never
+linked, referenced or edited there, is no longer put whole into each later
+Run's launch context: it is named with its line and its read. The link itself
+stays. `xmatrix page read --outline` prints a page's headings with their sizes
+and `--section <slug>` one section; `xmatrix page edit --section <slug>`
+rewrites that section, which the Hub applies to the revision it was read from
+and merges like any edit. What a section read printed is written back as that
+section, never as the page, and the CLI refuses a section edit against a Hub
+that does not serve sections.
+
+Hub and CLI; Web only through the search results it shows. No schema change.
+Recovery is a CI-validated beta reverting these changes; a reverted Hub makes
+the newer CLI's `--outline`, `--section` and section edits refuse with a
+message and write nothing.
+## Unreleased: the download page is one release channel at a time
+
+The download page offered stable builds as buttons and tucked preview builds
+into a line of text links under the list, so the two channels did not read as
+the same choice. A quiet Stable / Preview picker now sits beside the main
+download (under it on phones) and decides the whole page: the main button, the other-Mac link, every row
+(macOS, Windows, Android, Web), its release notes and the macOS ZIP links are
+the selected channel; the list heading names it and one sentence under the
+list says what it is. Preview adds the Android preview APK and the beta Web,
+which the page did not link before. `/download?channel=preview` opens on
+Preview. The sentences under the heading no longer say "stable". Web only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a Windows Supervisor with an unreadable journal starts its own release
+
+The Windows Supervisor starts the daemon its `activation-journal.json` names.
+When neither that file nor its `.previous` image could be read (bad JSON, a
+checksum mismatch, a payload that fails validation), the Supervisor exited, so
+the machine had no daemon; a daemon is the only way a fixed release reaches a
+machine, which left a person running `install.ps1` by hand. The Supervisor now
+moves both files aside as `activation-journal.json*.unreadable-<unix seconds>`,
+writes the journal a first start writes (its own Authenticode-verified
+executable as the committed release) and starts that daemon, which updates
+itself as usual; it records `supervisor / activation_journal_unreadable` in
+`continuity-events.json`. An I/O error other than a missing file still stops
+the Supervisor. Nothing reports this to the Hub yet: `xmatrix daemon doctor`
+shows the event on the machine. Windows CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+## Unreleased: shrink the version-stamped CLI entrypoint and raise release kache budget
+
+Even with a warm `kache` store, bumping `packages/cli-rs/Cargo.toml` on a
+release tag still forced `rustc` to re-monomorphize `tokio`, `clap`, `rustls`,
+and the top-level async entrypoint inside the `xmatrix` binary crate (over 50s
+on Linux and ~4m on `macos-26-intel`), while the `640MiB` `kache` save budget
+evicted ~70 release crates from a ~740MiB store on every run. The top-level
+bootstrap now lives inside `xmatrix-cli-runtime::entrypoint`, leaving
+`packages/cli-rs/src/main.rs` as a thin wrapper that only forwards
+`env!("CARGO_PKG_VERSION")`, `cli-build.yml` and `cli-release-cache.yml` now
+build only `--bin xmatrix` (skipping the five unpackaged `windows-continuity`
+helper binaries), and `.github/actions/cli-release-kache-save` raises the
+default store cap to `960MiB` so a full release build fits without eviction.
+CLI binary packaging and CI cache infrastructure only; no protocol, schema, or
+user-visible CLI behavior change. Recovery is reverting this PR.
+
+## Unreleased: the daemon keeps unconfirmed results, not a command journal
+
+On 2026-11-20 one stored quota reading that 4.7.0 could not read back made two
+machines' daemons refuse every command for six hours: the daemon kept its own
+record of each command's phase in one checksummed file,
+`daemon-command-effects-v1.json`, and a file it could not verify vetoed
+everything. 4.7.1 fixed the verification and added a `.previous` image and a
+quarantine. The journal itself is now gone. Whether a command runs is the
+Hub's admission to decide, and the daemon already asks it before every
+execution; a `Received` or `Admitted` record was re-executed on redelivery
+anyway, and the payload digest check had refused real commands twice. The
+daemon keeps one thing: the result of a command it finished and the Hub has
+not confirmed, one file per command under `daemon-command-results/`, removed
+when the Hub confirms it. A redelivered command with a kept result is answered
+with it under the new lease; any other delivery runs. A result that cannot be
+written is still reported, and one that cannot be read is removed, so the cost
+of either is that one command running again if the Hub delivers it again.
+Removed with the journal: phases, payload digests and re-keying, the checksum,
+`.previous`, quarantine and size eviction, and the Windows update handoff's
+refusal while a `Received` or `Admitted` record remained (up to 31 days). The
+old file is deleted at daemon start and not migrated; the Hub redelivers what
+it had not confirmed. `BootJournal` and `ActivationJournal` are unchanged. CLI
+/ daemon only. Recovery is a CI-validated CLI release reverting this change;
+the reverted daemon starts from an empty journal.
+## Unreleased: a message row scrolled into view costs its own style, not the app's
+
+Scrolling a conversation mounts message rows, and the main thread took long
+enough over each batch that the timeline showed blank where rows had not yet
+been drawn. Style recalculation was the largest part, and most of it was not
+the rows' own. One admin rule, `.app-admin-view:has(...) ... article > button`,
+made the browser restyle every button in the app whenever a node was inserted;
+the open user record is now read from the address instead. One `::selection`
+and three `::highlight()` rules matched every element, so each element was
+styled five times over; where highlight styles inherit (Chromium, detected
+before first paint as `data-highlight-inherit` on `<html>`) they are named
+once on an ancestor, and other engines keep the previous rules unchanged. The
+passage toolbar no longer reads the selection on every scroll frame unless a
+passage is selected. On 300 mixed rows at 4x CPU throttle, elements restyled
+over a scroll fell from 74-82 thousand to 12-13 thousand and style time from
+5.0-5.9 s to 2.3-2.8 s; mounting the rows in React is unchanged and is now the
+larger share. `app-style-scope.test.mjs` holds the two selector shapes out and
+lets the stylesheets' rule count only fall (`css-rule-budget.json`): new
+styling goes on the element as utility classes. Web only. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: the download page is one action and a ruled list of platforms
+
+The download page was five wood slabs carrying fourteen liquid-glass buttons,
+two competing headings and a sideways card scroller on phones. It is now the
+app icon, `Get xMatrix`, a line naming the build this device gets and one wood
+pill to download it; the other Mac architecture and the jump to every platform
+are text links under it. macOS, Windows, Android and Web follow as rows on the
+same paper, each with its system glyph, release notes and white pill buttons
+for its builds; preview builds and ZIPs are two lines of links under the list.
+Every download URL, device detection and copy key is unchanged. Web only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: a start its machine never answered is ended in its place
+
+A connected daemon that took a start command and never admitted, ran or failed
+it left the Hub to end the start after ten deliveries, about five minutes, and
+then only in the database: nothing was written on the summon, an `@auto` summon
+went to nobody else, and the start breaker never saw it, because all three
+hang off the failure report a daemon sends. On 2026-11-20 two machines'
+daemons refused every command for six hours and twenty starts ended that way;
+six more had since 2026-10-31. A spawn command now fails as
+`machine_not_answering` after three silent deliveries (other commands keep
+ten), and in the same transaction the Hub records the failed-spawn report the
+machine never made, which the coordinator finalizes like any terminal report:
+the failure is said on the summon, an `@auto` summon goes to the next Agent,
+and the Run counts as a failed start. Every environment on that machine then
+ranks last, in every Space, until the machine answers any command or 30
+minutes pass; the fact is read from the commands the Hub sent, and nothing is
+stored about the machine. Hub and Web (the summon reason names the machine).
+Migration `0261` lets `data.machine_run_terminal_reports` hold a
+`machine_spawn_result`; an older Hub finalizes such a row the same way and
+never writes one. Recovery is a CI-validated beta reverting this change; the
+relaxed constraint is harmless to keep.
+
+## Unreleased: stop message hover flicker across channel switches and hide Windows background consoles
+
+Switching channels painted the last screen of messages immediately in
+`TimelineOpeningTail` while the virtual list measured behind it with
+`visibility: hidden`, then dropped `invisible` and called `slot.moveBefore(host, null)`
+in the same commit. Because the newly mounted destination slot still resolved
+as `visibility: hidden` until style recalculation, Chromium dropped `:hover`
+for a painted frame during handover — flashing the hovered message row's
+background highlight off and back on and restarting the action toolbar's
+opacity fade on both macOS and Windows. In addition, a legacy
+`:root:not(.dark) .app-agent-work-dock > div` rule in `globals.css` outranked
+the wood theme's `pointer-events: none` on `.app-agent-work-scroller`, letting
+the transparent band above the work dock steal hover from scrolled messages.
+Separately on Windows, several periodic background commands in the Desktop App
+and CLI/daemon ran without hiding their console window (`powershell` daemon
+heartbeat, 100 `ping.exe` network probes, `gh auth status`, `codex` parameter
+discovery, `update-self`, `git cat-file`, `gh api`, and the one-shot
+update-handoff PowerShell task), and the Desktop App rebroadcast unchanged
+daemon heartbeat status every 30 seconds and re-sent unchanged window titles.
+
+`TimelineRowSlot` now resolves the destination slot's `visibility` style before
+calling `moveBefore`, keeping `:hover`, the row background highlight, and the
+hover action toolbar steady across channel-switch handover; the light-mode
+`.app-agent-work-dock > div` rule now keeps `pointer-events: none` so only
+agent dock items capture pointers; all Windows background spawns pass
+`windowsHide: true` / `CREATE_NO_WINDOW` / `-WindowStyle Hidden`; unchanged
+daemon heartbeat status is deduplicated; and desktop window titles only update
+when the title text changes. Web, Desktop, and CLI / daemon. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: delivered execution reports release their lock files
+
+Each execution report in a machine's `execution-outbox/` has a lock file of its
+own. A confirmed report was removed; its lock file never was, and admission
+counts every entry against the 2049-entry bound. After 1024 delivered reports a
+machine's outbox held only lock files and refused every new report with
+`Execution outbox is full` (seen on a production machine from 2026-11-16: 2048
+lock files, no reports). The daemon's drain pass now removes a lock file that
+has no report beside it, while holding that lock, and a lock taken on a file
+released that way is not treated as the lock. An outbox already in that state
+empties on the first pass after the update. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
+## Unreleased: Antigravity quota reads the Gemini weekly window
+
+Google's Cloud Code `retrieveUserQuotaSummary` endpoint omits the native
+`Gemini Models` group (both 5-hour and weekly buckets) unless the request
+carries a versioned CLI `User-Agent` (`antigravity/cli/1.2.0+`). The quota
+reader previously sent `antigravity/xmatrix`, so only `Claude & GPT` (`5h` and
+`1w`) came back from the summary and the fallback `fetchAvailableModels` path
+filled in only `Gemini · 5h`, leaving `Gemini · 1w` missing everywhere. The
+reader now sends `antigravity/cli/<version>` from the installed `agy` CLI (or a
+`1.5.13` floor when unavailable), restoring both `Gemini · 5h` and `Gemini · 1w`
+alongside `Claude & GPT`. CLI / daemon only. Recovery is a CI-validated CLI
+release reverting this change.
+
+## Unreleased: hosted CLI release builds reuse warm per-target kache stores
+
+Hosted CLI releases (`cli-build.yml`) previously compiled all 400+ Rust crates
+cold on every beta and stable tag (5–14 minutes per platform, with
+`macos-26-intel` at 14m11s), ran Windows release builds with Defender real-time
+scanning enabled, and throttled hosted PNPM upload-dependency installs without
+reusing the `lockfile-verified.jsonl` cache. A new `cli-release-cache.yml`
+workflow on `main` now maintains bounded per-target `kache` stores (`linux-x64`,
+`macos-arm64`, `macos-x64`, `windows-x64`) using the same pinned compiler as PR
+CI and `cli-build.yml`; `cli-build.yml` restores those stores on release tags,
+excludes build directories from Windows Defender, and reuses the hosted PNPM
+verification cache. CI / release infrastructure only; no client or schema
+change. Recovery is reverting the workflow PR.
+
+## Unreleased: harden continuity journal checksums and self-healing
+
+`BootJournal`, `ActivationJournal`, and `CommandEffectJournal` previously
+verified `checksumSha256` by deserializing the JSON payload into structs and
+re-serializing it, so any 1-ULP float shift (such as an Antigravity quota
+reading `(1.0 - 0.9004436) * 100.0 = 9.955639999999999`) or future serialization
+difference tripped `activation journal checksum mismatch` and permanently
+rejected every daemon command. Journals now hash and verify exact raw payload
+bytes via `serde_json::value::RawValue` (keeping a `float_roundtrip`-backed
+legacy fallback so existing pre-fix journals recover automatically on upgrade),
+and `CommandEffectJournal` now maintains a `.previous` image and quarantines
+unrecoverably corrupt files (`*.corrupt-*`, bounded) so a broken local effect
+journal can no longer wedge a machine's daemon. CLI / daemon only. Recovery is a
+CI-validated CLI release reverting this change.
+
+## Unreleased: a billing refusal is a hold, read once
+
+A payment refusal (an empty prepaid balance, or Cursor asking for a payment
+method on one model pool) was stored as a used-up quota window and also as
+side flags. Launch then stripped the window for a named summon and checked
+the flags again, and the window's max age cut a year-long hold down to 31
+days. The registration reading now carries `billingHolds`, and
+`routingQuotaVerdict` is the only decision: unnamed `@auto` treats a hold as
+used up until the hold's own expiry, a named summon ignores holds, and a
+provider window that is actually used up still refuses both. Hub only.
+Recovery is a CI-validated beta reverting this change.
+
+## Unreleased: Antigravity stays busy while its subagents run
+
+Antigravity's ACP v1 server marks `invoke_subagent` `completed` as soon as the
+subagent starts and emits no ACP events while it runs, so an Instance dropped
+to `idle` (green) right after spawning a subagent, left the idle-sleep counter
+at zero, and did not listen to ACP stdout for the subagent's reactive wakeup.
+Antigravity Runs now read the session's local `.system_generated/subagents/`
+and message state to keep the Instance `busy` (and count active subagents
+against idle sleep) until every launched subagent reports back or is killed,
+and always listen to the ACP stream between turns so unsolicited wakeups
+transition into `busy` and stream traces without waiting for a new message.
+CLI / daemon only. Recovery is a CI-validated CLI release reverting this
+change.
+
+## Unreleased: the Hub canary waits for Cloudflare to know its new version
+
+Two Hub betas in a row failed before any traffic moved: right after the upload,
+Cloudflare had not yet listed the new version, and then could not view a
+version it had just listed (code 100146). The canary now looks the version up
+up to six times with growing waits (about 75 s in all) and retries only that
+not-found answer when it views it; any other failure still stops the release
+before a deployment. Release tooling only. Recovery is a CI-validated change
+reverting this one.
+
+## Unreleased: the comment card's @ list sits on its paper, and never folds one Agent
+
+The @ list in a page's comment card was the glass composer's list dropped
+onto paper. On the card it now reads as the page's paper menus: flat rows
+from edge to edge, faces in the comment's text column, names at the text's
+weight, a fold row as one more quiet line without an arrow. In every
+composer, an open section shows its last candidate rather than spending a
+"Show 1 more" row to hide it. Web only. Recovery is a CI-validated beta
+reverting this change.
+
+## Unreleased: unlink a page from a conversation
+
+A page linked to a conversation kept reaching it (new Runs read it at launch,
+it sat in the header cards, typing on it woke a co-writing Agent) and there was
+no way to stop that: deleting a link was undone by the next read, edit or
+mention from the conversation. A page's card at the top of a conversation now
+offers **Unlink from this conversation**, and `xmatrix page unlink <page-id>`
+does the same. It removes every link between the two, stops co-writing, and
+records the unlink (expand migration 0260, `data.page_unlinks`); reads, edits
+and mentions there no longer link the page again until someone links it
+explicitly. Hub, DB, Web and CLI. Older Hubs ignore the record while they
+drain. Recovery is a CI-validated beta reverting this change; the new table is
+left unused.
+
+## Unreleased: a page comment's @ lists every Agent the Space can start
+
+The comment box on a selected passage used the conversation composer but was
+given no Space, so `@` offered nothing and a new Agent had to be typed out by
+name. It now gets the same context as a new conversation's composer: `@`
+lists every Agent and machine the Space can start and the launch conditions,
+`#` channels and pages. A picked Agent, `@auto` or `@machine:…` starts a new
+discussion of the passage, its first message carrying the pick, instead of
+going to the Agent already at work on the page. Web only. Recovery is a
+CI-validated beta reverting this change.
+
+## Unreleased: Agents no longer report a plan; conversations show talk and pull requests
+
+Grok and Codex Runs showed their runtime's plan (completed steps, the step in
+progress) as a collapsible line in the conversation and as the work dock's
+intent line; Claude Runs showed none, because Claude Code no longer offers its
+todo tools to current models (v2.1.233: newer models keep track of multi-step
+work without a written checklist). Rather than force the checklist back onto
+Claude (#1836, reverted here), the plan is retired for every runtime: no
+runtime reports it, the Hub refuses a report of one from an older CLI, the
+conversation leaves out plan entries already stored, and history folds each
+to its stored line. Progress is the Agent's own status message plus pull
+request, CI and merge facts. The channel contract no longer asks Agents to
+keep a plan current. Hub, Web and CLI. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: a summon naming a billing-refused harness runs its model
 
 `@cursor machine:Workstation` with the Default model gemini-4-neon failed at

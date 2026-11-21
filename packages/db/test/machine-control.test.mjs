@@ -136,7 +136,7 @@ test("Quota completion records each reading in its registration's pool without a
       principal: machinePrincipal() }).then(() => db);
   };
   const db = await run(true);
-  const writes = db.calls.filter(call => call.name === "registration_quota_observe_v7");
+  const writes = db.calls.filter(call => call.name === "registration_quota_observe_v9");
   assert.equal(writes.length, 1, "only the target still at its issued configuration is recorded");
   assert.deepEqual(writes[0].values.slice(0, 4), ["user-1", "registration:machine-1:codex", 0, observedAt]);
   assert.equal(writes[0].values[4], resetAt, "an exhausted reading holds until the provider reset");
@@ -145,7 +145,7 @@ test("Quota completion records each reading in its registration's pool without a
   assert.equal(writes[0].values[6], null, "a reading without the provider's verdict stores none");
   assert.deepEqual(writes[0].values.slice(7), [null, null, null, false, 0],
     "a probe that did not ask for scoped windows renews only the account part");
-  assert.equal((await run(false)).calls.some(call => call.name === "registration_quota_observe_v7"), false,
+  assert.equal((await run(false)).calls.some(call => call.name === "registration_quota_observe_v9"), false,
     "a failed probe records nothing");
 });
 

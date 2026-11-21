@@ -1,5 +1,5 @@
 import {
-  channelActivityOf, githubPullRequestFactOf, messageExternalAppSource, type ChannelActivity,
+  channelActivityOf, githubPullRequestFactOf, isRetiredPlanActivity, messageExternalAppSource, type ChannelActivity,
   type GitHubPullRequestFact,
 } from "@xmatrix/protocol";
 import type { TimelineItem } from "./workspace-shell-message-model";
@@ -7,10 +7,9 @@ import type { TimelineItem } from "./workspace-shell-message-model";
 /**
  * How a conversation reads (docs/design/conversation-activity.md §4.1).
  *
- * Talk stays whole. Activity entries fold into one row per run of the same
- * Instance; anything from anyone else
- * ends the run, so who did what in which order stays visible. A message that
- * directly follows its sender's own message drops the repeated header.
+ * Talk stays whole. A stretch of bare pull request facts reads as one slip.
+ * A message that directly follows its sender's own message drops the
+ * repeated header.
  */
 
 /** Messages from one sender this close together read as one turn of talk. */
@@ -60,10 +59,12 @@ function actorKey(item: TimelineItem): string | undefined {
     : `${item.senderKind ?? "user"}:${item.senderId}`;
 }
 
-/** A plan entry: folds with its own Instance's run. */
-function foldable(item: TimelineItem): boolean {
-  if (!item.messageId || item.recalledAt || item.sendStatus || item.isEvent) return false;
-  return timelineItemActivity(item)?.kind === "plan";
+/**
+ * A runtime plan entry stored before plans were retired: stale progress the
+ * Agent's own messages already say, so the timeline leaves it out.
+ */
+function retiredActivity(item: TimelineItem): boolean {
+  return Boolean(item.messageId) && isRetiredPlanActivity(item.metadata);
 }
 
 /** The header tags a message carries, by the key its tag is drawn with. */
@@ -113,7 +114,7 @@ function sameTurn(previous: TimelineItem, item: TimelineItem): boolean {
 
 /** Whether a message can drop its avatar and header under the row above. */
 export function continuesPrevious(previous: TimelineItem | undefined, item: TimelineItem): boolean {
-  if (!previous || (previous.folded && !previous.pullRequests)) return false;
+  if (!previous) return false;
   return sameTurn(previous, item) && changedTags(previous, item).length === 0;
 }
 
@@ -165,7 +166,6 @@ function foldRow(items: TimelineItem[]): TimelineItem {
  */
 export function buildConversationRows(timeline: readonly TimelineItem[]): TimelineItem[] {
   const rows: TimelineItem[] = [];
-  let run: TimelineItem[] = [];
   const pushMessage = (item: TimelineItem) => {
     const previous = rows[rows.length - 1];
     if (continuesPrevious(previous, item)) {
@@ -182,8 +182,6 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
   // A pull request is named by the latest title GitHub said, in any stretch so far.
   const titles = new Map<string, string>();
   const flush = () => {
-    if (run.length > 0) rows.push(foldRow(run));
-    run = [];
     if (pulls.size > 0) {
       pushMessage(pullRequestStretch([...pulls].map(([key, line]) => {
         const title = titles.get(key);
@@ -193,20 +191,15 @@ export function buildConversationRows(timeline: readonly TimelineItem[]): Timeli
     pulls = new Map();
   };
   for (const item of timeline) {
+    if (retiredActivity(item)) continue;
     const pull = timelineItemPullRequest(item);
     if (pull) {
-      if (run.length > 0) flush();
       const key = pullRequestKey(pull);
       const fact = timelineItemGitHubFact(item);
       if (fact && "title" in fact && fact.title) titles.set(key, fact.title);
       const line = pulls.get(key);
       if (line) line.items.push(item);
       else pulls.set(key, { ref: pull, items: [item] });
-      continue;
-    }
-    if (foldable(item)) {
-      if (pulls.size > 0 || (run.length > 0 && actorKey(run[0]!) !== actorKey(item))) flush();
-      run.push(item);
       continue;
     }
     flush();
@@ -228,30 +221,18 @@ function pullRequestStretch(lines: NonNullable<TimelineItem["pullRequests"]>): T
 }
 
 export type FoldSummary = {
-  /** One segment per fact, oldest first: `✓ step`, `↗ owner/repo#1`. */
+  /** One segment per fact, oldest first: `↗ owner/repo#1`. */
   segments: string[];
-  steps: number;
   pullRequests: { repository: string; number: number; url: string }[];
-  /** The step in progress at the fold's newest plan entry. */
-  inProgress?: string;
 };
 
 export function foldSummary(items: readonly TimelineItem[]): FoldSummary {
-  const summary: FoldSummary = { segments: [], steps: 0, pullRequests: [] };
+  const summary: FoldSummary = { segments: [], pullRequests: [] };
   for (const item of items) {
     const activity = timelineItemActivity(item);
     if (!activity) continue;
-    if (activity.kind === "pull_request") {
-      summary.pullRequests.push({ repository: activity.repository, number: activity.number, url: activity.url });
-      summary.segments.push(`↗ ${activity.repository}#${activity.number}`);
-      continue;
-    }
-    summary.steps += activity.completed.length;
-    summary.segments.push(...activity.completed.map((step) => `✓ ${step}`));
-    summary.inProgress = activity.inProgress;
-    if (activity.completed.length === 0 && !activity.inProgress) {
-      summary.segments.push(`Plan · ${activity.steps.length} step${activity.steps.length === 1 ? "" : "s"}`);
-    }
+    summary.pullRequests.push({ repository: activity.repository, number: activity.number, url: activity.url });
+    summary.segments.push(`↗ ${activity.repository}#${activity.number}`);
   }
   return summary;
 }

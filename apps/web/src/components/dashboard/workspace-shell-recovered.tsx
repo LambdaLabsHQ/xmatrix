@@ -2112,8 +2112,10 @@ export const StatusChipBadge = memo(function StatusChipBadge({
   const Icon = registryIcon ? STATUS_TAG_ICON_COMPONENTS[registryIcon] : Zap;
   // Round once so 89.6% and 90.2% both read "90%" and pick the same fill,
   // instead of flickering across the threshold.
-  const percent =
-    chip.percent === undefined ? undefined : Math.round(Math.max(0, Math.min(100, chip.percent)));
+  // The text keeps the unrounded value: `formatPercent` shows one decimal
+  // below 10%, which a pre-rounded value would fake (4.65% as "5.0%").
+  const exactPercent = chip.percent === undefined ? undefined : Math.max(0, Math.min(100, chip.percent));
+  const percent = exactPercent === undefined ? undefined : Math.round(exactPercent);
   const fillPercent = percent ?? (chip.busy ? Math.round(Math.max(0, Math.min(100, chip.busy.percent))) : undefined);
   const rawValue = (staged || chip.value)?.trim();
   const displayValue =
@@ -2124,13 +2126,13 @@ export const StatusChipBadge = memo(function StatusChipBadge({
           .join(" ")
       : rawValue;
   const value = displayValue;
-  const text = percent === undefined ? value : `${chip.label} ${formatPercent(percent)}${chip.note ? ` · ${chip.note}` : ""}`;
+  const text = exactPercent === undefined ? value : `${chip.label} ${formatPercent(exactPercent)}${chip.note ? ` · ${chip.note}` : ""}`;
   const title = [
     `${chip.label}${value ? `: ${value}` : ""}`,
     // Staged, not live: the instance has not confirmed this selection yet.
     staged ? `Pending: ${staged}${chip.value ? ` (now ${chip.value})` : ""}` : undefined,
-    percent === undefined ? undefined : `${formatPercent(percent)} used`,
-    chip.busy ? `Load: ${chip.busy.glance.map((reading) => `${reading.label} ${formatPercent(reading.percent)}`).join(" · ")}` : undefined,
+    exactPercent === undefined ? undefined : `${formatPercent(exactPercent)} used`,
+    chip.busy ? `Load: ${chip.busy.glance.map((reading) => `${reading.label} ${reading.percent}%`).join(" · ")}` : undefined,
     chip.resetAt ? `Resets ${formatQuotaResetAt(chip.resetAt, "long") || chip.resetAt}` : undefined,
     onToggleEditor ? `Change ${chip.label.toLowerCase()}` : undefined,
   ]

@@ -30,6 +30,7 @@ import {
 } from "lucide-react";
 import type { ChannelMessage } from "@xmatrix/protocol";
 import { Face } from "@/components/dashboard/face";
+import { SkeletonBar } from "@/components/dashboard/content-skeleton";
 import { actionClass } from "@/components/ui/action-tone";
 import { noticeClass } from "@/components/ui/status-tone";
 import { cn } from "@/lib/utils";
@@ -539,17 +540,26 @@ function traceScrollAnchor(scroller: HTMLElement): TraceScrollAnchor | null {
   return null;
 }
 
-/** Placeholder rows shaped like trace cards while the first page loads. */
+/** Placeholder rows inside AgentTraceTimelineCard's own boxes while the first page loads. */
 function AgentTraceTimelineSkeleton() {
   return (
-    <div className="space-y-3 p-3" role="status" aria-label="Loading trace">
-      {["w-2/3", "w-5/6", "w-1/2", "w-3/4"].map((width, index) => (
-        <div key={width} className="flex gap-1.5" style={{ opacity: 1 - index * 0.18 }}>
-          <span className="mt-0.5 size-5 shrink-0 animate-pulse rounded-md bg-foreground/10" />
-          <span className="flex min-w-0 flex-1 flex-col gap-1.5 pt-1">
-            <span className="block h-2.5 w-28 animate-pulse rounded-full bg-foreground/10" />
-            <span className={cn("block h-2 animate-pulse rounded-full bg-foreground/10", width)} />
-          </span>
+    <div className="app-skeleton-inert space-y-2" role="status" aria-label="Loading trace">
+      {[
+        ["6.5rem", "68%"],
+        ["8rem", "84%"],
+        ["5.5rem", "52%"],
+        ["7rem", "74%"],
+      ].map(([titleWidth, bodyWidth], index) => (
+        <div key={index} className="flex gap-1.5 text-sm" style={{ opacity: 1 - index * 0.16 }} aria-hidden="true">
+          <span className="app-list-skeleton-mark mt-0.5 size-5 shrink-0" />
+          <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="flex min-w-0 items-baseline leading-5">
+              <SkeletonBar width={titleWidth} />
+            </div>
+            <div className="text-xs leading-5">
+              <SkeletonBar width={bodyWidth} />
+            </div>
+          </div>
         </div>
       ))}
     </div>

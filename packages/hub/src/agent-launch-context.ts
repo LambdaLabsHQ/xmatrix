@@ -1,4 +1,4 @@
-import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, type ChannelMessage,
+import { channelActivityOf, channelActivityLine, isAddressableAgentInstance, isRetiredPlanActivity, type ChannelMessage,
   type ChannelSummarySource, type InstanceRecord, type PageDocument } from "@xmatrix/protocol";
 import { renderAgentTurnMessage, type AgentTurnReader } from "./agent-turn-message";
 
@@ -60,6 +60,10 @@ function renderHistoryEntry(message: ChannelMessage, readAt: string | undefined)
   // Activity folds to one line, as it does on the web.
   const activity = message.recalledAt ? undefined : channelActivityOf(message.metadata);
   if (activity) return `${head}: ▸ ${channelActivityLine(activity)}\n`;
+  // A retired runtime plan entry still folds, as the line the Hub stored.
+  if (!message.recalledAt && isRetiredPlanActivity(message.metadata)) {
+    return `${head}: ▸ ${message.body.replace(/\s+/gu, " ").trim()}\n`;
+  }
   let entry = `${head}:\n`;
   if (message.recalledAt) return `${entry}  (recalled)\n`;
   for (const line of message.body.split(/\r?\n/u)) entry += `  ${line}\n`;
@@ -112,15 +116,26 @@ function renderAbout(about: { summary?: string; summarySource?: ChannelSummarySo
  * The pages the conversation is linked to, whole, at the revision read here, so a Run (a schedule's
  * occurrence above all, whose conversation holds only its line) starts from its page instead of
  * spending its first step reading it. Each names the revision an edit is based on.
+ *
+ * A page in `readOnly` was only read from this conversation, never linked, referenced or edited in
+ * it: it is named with its one line and the read that gets it. One Run looking a page up must not
+ * make every later Run of the conversation carry that page whole.
  */
-export function renderLinkedPages(pages: readonly Pick<PageDocument, "pageId" | "title" | "headRevision" | "body">[],
-  maxChars = LAUNCH_PAGES_MAX_CHARS): string | undefined {
+export function renderLinkedPages(
+  pages: readonly Pick<PageDocument, "pageId" | "title" | "headRevision" | "body" | "summary">[],
+  maxChars = LAUNCH_PAGES_MAX_CHARS, readOnly: ReadonlySet<string> = new Set()): string | undefined {
   if (!pages.length) return undefined;
   const whole: string[] = [];
   const left: string[] = [];
+  const looked: string[] = [];
   let used = 0;
   for (const page of pages) {
     const title = page.title.replace(/\s+/gu, " ").trim() || "Untitled";
+    if (readOnly.has(page.pageId)) {
+      const about = page.summary?.text.replace(/\s+/gu, " ").trim();
+      looked.push(`- ${title}${about ? `: ${about}` : ""} — \`xmatrix page read ${page.pageId}\``);
+      continue;
+    }
     const entry = `### ${title} (page ${page.pageId} · r${page.headRevision})\n\n${page.body.trimEnd()}\n\n` +
       `End of page ${page.pageId}.\n`;
     const length = [...entry].length;
@@ -131,10 +146,16 @@ export function renderLinkedPages(pages: readonly Pick<PageDocument, "pageId" | 
     used += length;
     whole.push(entry);
   }
-  let out = "## Pages linked to this conversation (read at launch)\n\n" +
-    "Each is whole, at the revision named; edit one with `xmatrix page edit <page-id> --base <revision>`, " +
-    "and reread it with `xmatrix page read <page-id>` when its current state matters.\n\n" + whole.join("\n");
+  let out = "## Pages linked to this conversation (read at launch)\n\n";
+  if (whole.length || left.length) {
+    out += "Each is whole, at the revision named; edit one with `xmatrix page edit <page-id> --base <revision>`, " +
+      "and reread it with `xmatrix page read <page-id>` when its current state matters.\n\n" + whole.join("\n");
+  }
   if (left.length) out += `\nLeft out to fit; read them when needed:\n${left.join("\n")}\n`;
+  if (looked.length) {
+    out += `${whole.length || left.length ? "\n" : ""}Read earlier in this conversation, not carried here; ` +
+      `read one when the work needs it:\n${looked.join("\n")}\n`;
+  }
   return out;
 }
 
@@ -300,11 +321,11 @@ export async function readLaunchContext(input: {
   history: (page: { beforeSequence?: number; limit: number }) => Promise<{ messages: ChannelMessage[]; hasMore: boolean }>;
   about: () => Promise<{ summary?: string; summarySource?: ChannelSummarySource } | null>;
   /** The conversation's linked pages as the reader may open them; a failed read leaves them out. */
-  pages?: () => Promise<PageDocument[]>;
+  pages?: () => Promise<{ pages: PageDocument[]; readOnlyPageIds?: readonly string[] }>;
   /** Other live/starting/resting Instances already in the Channel; a failed read leaves them out. */
   peers?: () => Promise<ChannelPeerInstance[]>;
 }): Promise<LaunchContext> {
-  const pages = input.pages?.().catch(() => [] as PageDocument[]);
+  const pages = input.pages?.().catch(() => undefined);
   const peers = input.peers?.().catch(() => [] as ChannelPeerInstance[]);
   const messages: ChannelMessage[] = [];
   let beforeSequence: number | undefined;
@@ -331,9 +352,10 @@ export async function readLaunchContext(input: {
   const rendered = render();
   // The About is derived from the transcript; it is worth its read only when part of it was left out.
   const context = rendered.cut ? render(await input.about().catch(() => null)).context : rendered.context;
+  const linked = await pages;
   const sections = [
     renderPeerInstances(await peers ?? []),
-    renderLinkedPages(await pages ?? []),
+    renderLinkedPages(linked?.pages ?? [], undefined, new Set(linked?.readOnlyPageIds ?? [])),
     context.text,
   ].filter((part): part is string => Boolean(part));
   if (sections.length) context.text = sections.join("\n");

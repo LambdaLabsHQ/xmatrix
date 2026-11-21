@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Download } from "lucide-react";
-import { LiquidGlassPill, WoodPanel } from "@/components/ui/material-surfaces";
+import Image from "next/image";
+import { WoodPanel } from "@/components/ui/material-surfaces";
 import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
 import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
 
+export type Channel = "stable" | "dev";
 export type Platform = "macOS" | "Windows" | "Android" | "iOS" | "Linux" | "unknown";
 
 export function detectPlatform(): Platform {
@@ -31,17 +33,21 @@ export async function detectIntelMac() {
   return architecture === "x86";
 }
 
-export const macDownloads = (copy: OnboardingCopy) => ({
-  arm64: { name: "Apple Silicon", href: "/api/desktop/releases/stable/latest-arm64.dmg", label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
-  x64: { name: "Intel", href: "/api/desktop/releases/stable/latest-x64.dmg", label: copy.downloadFor("macOS"), detail: copy.intelDetail },
+export const macDownloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+  arm64: { name: "Apple Silicon", href: `/api/desktop/releases/${channel}/latest-arm64.dmg`, label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
+  x64: { name: "Intel", href: `/api/desktop/releases/${channel}/latest-x64.dmg`, label: copy.downloadFor("macOS"), detail: copy.intelDetail },
 });
 
-export const downloads = (copy: OnboardingCopy) => ({
-  Windows: { href: "/api/desktop/releases/stable/latest-x64.exe", label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
-  Android: { href: "/api/android/releases/stable/latest.apk", label: copy.downloadFor("Android"), detail: copy.androidDetail },
+export const downloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+  Windows: { href: `/api/desktop/releases/${channel}/latest-x64.exe`, label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
+  Android: { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
 
-export function DownloadRecommendation() {
+/** Where the web app of a channel lives: Preview is the beta Web. */
+export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
+
+/** The page's one action. `channelSwitch` sits beside the button it decides. */
+export function DownloadRecommendation({ channel = "stable", channelSwitch }: { channel?: Channel; channelSwitch?: ReactNode }) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [intelMac, setIntelMac] = useState(false);
   const copy = ONBOARDING_COPY[useBrowserOnboardingLocale()];
@@ -50,26 +56,29 @@ export function DownloadRecommendation() {
     setPlatform(detected);
     if (detected === "macOS") detectIntelMac().then(setIntelMac).catch(() => {});
   }, []);
-  const download = platform === "macOS" ? macDownloads(copy)[intelMac ? "x64" : "arm64"]
-    : platform === "Windows" || platform === "Android" ? downloads(copy)[platform] : null;
-  const otherMac = platform === "macOS" ? macDownloads(copy)[intelMac ? "arm64" : "x64"] : null;
+  const download = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "x64" : "arm64"]
+    : platform === "Windows" || platform === "Android" ? downloads(copy, channel)[platform] : null;
+  const otherMac = platform === "macOS" ? macDownloads(copy, channel)[intelMac ? "arm64" : "x64"] : null;
 
   return (
-    <WoodPanel className="mb-10 min-w-0 p-5 sm:p-7" data-testid="download-recommendation">
-      <h3 className="text-2xl font-semibold tracking-tight">
-        {download ? download.label : platform === "unknown" ? copy.getXMatrix : copy.useOnWeb}
-      </h3>
-      <p className="mt-3 text-sm leading-6 text-muted-foreground">
-        {download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
-      </p>
-      <div className="mt-5 flex flex-wrap items-center gap-4">
-        <LiquidGlassPill as="a" href={download?.href ?? "/app"} className="inline-flex min-h-11 items-center justify-center gap-2 px-5 text-sm font-semibold">
+    <div className="mx-auto flex max-w-2xl flex-col items-center text-center" data-testid="download-recommendation">
+      <Image src="/brand/xmatrix-icon-128.png" alt="" width={72} height={72} priority className="download-app-icon" />
+      <h1 className="site-display mt-8 text-5xl font-semibold leading-[1.02] text-foreground sm:text-6xl">
+        {platform === "unknown" || download ? copy.getXMatrix : copy.useOnWeb}
+      </h1>
+      <div className="relative mt-9 flex w-full flex-col items-center gap-y-1 sm:w-auto">
+        <WoodPanel as="a" href={download?.href ?? webApp(channel)} className="site-wood-pill inline-flex h-12 w-full items-center justify-center gap-2 px-7 text-sm sm:w-auto">
           {download && <Download className="size-4" />}
           {download ? download.label : copy.openWebApp}
-        </LiquidGlassPill>
-        {otherMac && <a href={otherMac.href} className="text-sm font-semibold text-primary underline underline-offset-4">{copy.otherMac(otherMac.name)}</a>}
-        <a href="#all-downloads" className="text-sm font-semibold text-primary underline underline-offset-4">{copy.allPlatforms}</a>
+        </WoodPanel>
+        {/* Beside the button on desktop, without moving it off the page's centre line. */}
+        {channelSwitch && <div className="sm:absolute sm:left-full sm:top-1/2 sm:ml-4 sm:-translate-y-1/2">{channelSwitch}</div>}
       </div>
-    </WoodPanel>
+      {/* One line under the action: what this build is for, and the other Mac build when there is one. */}
+      <p className="mt-5 max-w-md text-sm leading-6 text-muted-foreground">
+        {otherMac && download ? download.detail.replace(/[.。]$/, "") : download ? download.detail : platform === "unknown" ? copy.chooseBelow : copy.noNative(platform)}
+        {otherMac && <> · <a href={otherMac.href} className="download-quiet-link">{copy.otherMac(otherMac.name)}</a></>}
+      </p>
+    </div>
   );
 }

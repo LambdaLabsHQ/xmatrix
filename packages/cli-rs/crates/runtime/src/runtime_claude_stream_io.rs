@@ -19,8 +19,7 @@ use tokio::process::ChildStdin;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::runtime_channel_activity::{
-    ChannelActivityReporter, claude_todo_steps, creates_pull_request, publish_channel_activity,
-    publish_effects, publish_intent,
+    ChannelActivityReporter, creates_pull_request, publish_channel_activity,
 };
 use crate::runtime_claude_messages::claude_assistant_delta_for_message;
 use crate::runtime_claude_messages::claude_assistant_text;
@@ -51,9 +50,7 @@ use crate::runtime_harness_questions::{
     claude_questions, publish_questionnaire, questionnaire_message,
 };
 use crate::runtime_trusted_role_prompt::trusted_role_system_prompt_from_env;
-use crate::runtime_trusted_role_prompt::{
-    claude_stream_extra_args, enable_claude_todo_plan, label_claude_entrypoint,
-};
+use crate::runtime_trusted_role_prompt::{claude_stream_extra_args, label_claude_entrypoint};
 use crate::runtime_usage_limit::claude_rate_limit_rejection;
 use crate::runtime_waiting::{ToolWaits, background_wait, claude_tool_wait};
 use crate::{
@@ -268,7 +265,6 @@ pub(crate) fn start_claude_stream_process(
         command.env(crate::GOAL_INBOX_ENV, inbox);
     }
     label_claude_entrypoint(&mut command);
-    enable_claude_todo_plan(&mut command);
     command
         .args(&spawn_args)
         .stdin(Stdio::piped())
@@ -1328,12 +1324,12 @@ pub(crate) struct ClaudeStreamTraceState {
     seen_tool_results: HashSet<String>,
     /// Bash commands that create pull requests, by tool use id, until their result.
     pull_request_commands: HashMap<String, String>,
-    /// The plan outlives a turn, so the reporter does too (`next_turn`).
+    /// Pull requests already reported outlive a turn, so the reporter does too (`next_turn`).
     activity: ChannelActivityReporter,
 }
 
 impl ClaudeStreamTraceState {
-    /// A fresh turn's trace state that keeps what the plan already reported.
+    /// A fresh turn's trace state that keeps what was already reported.
     pub(crate) fn next_turn(&mut self) {
         let activity = std::mem::take(&mut self.activity);
         *self = Self {
@@ -1342,7 +1338,7 @@ impl ClaudeStreamTraceState {
         };
     }
 
-    /// Hand the plan reporter to another turn's state (a self-started turn).
+    /// Hand the activity reporter to another turn's state (a self-started turn).
     pub(crate) fn take_activity(&mut self) -> ChannelActivityReporter {
         std::mem::take(&mut self.activity)
     }
@@ -1368,7 +1364,7 @@ fn claude_tool_result_text(result: &Value) -> String {
     }
 }
 
-/// Feed the plan reporter from one stream event and publish what it produced
+/// Report the pull requests one stream event shows the Agent opened
 /// (docs/design/conversation-activity.md §3.2).
 fn observe_claude_activity(
     relay: &agent_instance_connection::AgentInstanceConnectionClient,
@@ -1376,28 +1372,17 @@ fn observe_claude_activity(
     value: &Value,
     state: &mut ClaudeStreamTraceState,
 ) {
-    let now = Instant::now();
     match value.get("type").and_then(Value::as_str) {
         Some("assistant") => {
             for tool in claude_tool_use_blocks(value) {
                 let input = tool.get("input").cloned().unwrap_or(Value::Null);
-                match claude_tool_name(&tool).as_deref() {
-                    Some("TodoWrite") => {
-                        if let Some(steps) = claude_todo_steps(&input) {
-                            let effects = state.activity.observe_plan(steps, now);
-                            publish_effects(relay, channel_id, effects);
-                        }
-                    }
-                    Some("Bash") => {
-                        if let Some(command) = input.get("command").and_then(Value::as_str)
-                            && creates_pull_request(command)
-                        {
-                            state
-                                .pull_request_commands
-                                .insert(claude_tool_item_key(&tool), command.to_string());
-                        }
-                    }
-                    _ => {}
+                if claude_tool_name(&tool).as_deref() == Some("Bash")
+                    && let Some(command) = input.get("command").and_then(Value::as_str)
+                    && creates_pull_request(command)
+                {
+                    state
+                        .pull_request_commands
+                        .insert(claude_tool_item_key(&tool), command.to_string());
                 }
             }
         }
@@ -1415,14 +1400,6 @@ fn observe_claude_activity(
                 {
                     publish_channel_activity(relay, channel_id, activity);
                 }
-            }
-        }
-        Some("result") => {
-            for activity in state.activity.flush(now) {
-                publish_channel_activity(relay, channel_id, activity);
-            }
-            if let Some(intent) = state.activity.turn_ended() {
-                publish_intent(relay, intent);
             }
         }
         _ => {}

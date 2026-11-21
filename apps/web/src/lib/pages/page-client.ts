@@ -164,6 +164,10 @@ export const pageApi = {
     anchor?: PageLinkAnchor }) =>
     xmatrixApiRequest<{ link: PageLink }>({ url: WEB_PROXY_ROUTES.space_page_links(spaceId), token,
       method: "POST", body: { ...input, source: "manual" } }),
+  /** Unlinks a page from a conversation: its changes stop reaching it until it is linked again. */
+  unlinkPage: (spaceId: string, token: string, input: { conversationId: string; pageId: string }) =>
+    xmatrixApiRequest<{ removed: number }>({
+      url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}?${new URLSearchParams(input)}`, token, method: "DELETE" }),
   resolveLink: (spaceId: string, token: string, linkId: string, resolved: boolean) =>
     xmatrixApiRequest<{ link: PageLink }>({
       url: `${WEB_PROXY_ROUTES.space_page_links(spaceId)}/${encodeURIComponent(linkId)}/resolution`, token,

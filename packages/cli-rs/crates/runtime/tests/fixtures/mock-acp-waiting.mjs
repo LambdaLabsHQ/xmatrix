@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import readline from "node:readline";
 
 const mode = process.argv[2] ?? "antigravity";
@@ -8,7 +10,89 @@ const notify = (update) =>
   emit({ jsonrpc: "2.0", method: "session/update", params: { sessionId, update } });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function writeJson(filePath, value) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value));
+}
+
 async function runPrompt(req) {
+  if (mode === "antigravity-subagent" || mode === "antigravity-subagent-killed") {
+    const brainDir = path.join(process.env.ANTIGRAVITY_APP_DATA_DIR, "brain");
+    const childId = "subagent-child-1";
+    const subagentFile = path.join(
+      brainDir,
+      sessionId,
+      ".system_generated",
+      "subagents",
+      `${childId}.json`,
+    );
+    notify({
+      sessionUpdate: "tool_call",
+      toolCallId: "call-subagent-async",
+      name: "invoke_subagent",
+      title: "Run invoke_subagent",
+      status: "in_progress",
+      rawInput: { TypeName: "self", Role: "Researcher", Prompt: "Write report" },
+    });
+    writeJson(subagentFile, {
+      conversationId: childId,
+      subagentDescriptor: { typeName: "self", role: "Researcher" },
+      state: "SUBAGENT_STATE_ALIVE",
+    });
+    writeJson(
+      path.join(brainDir, childId, ".system_generated", "messages", "assign-1.json"),
+      {
+        id: "assign-1",
+        sender: sessionId,
+        recipient: childId,
+        timestamp: "2026-11-20T09:10:00Z",
+      },
+    );
+    // Real agy acp marks invoke_subagent completed immediately upon spawn.
+    notify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call-subagent-async",
+      name: "invoke_subagent",
+      status: "completed",
+    });
+    notify({
+      sessionUpdate: "agent_message_chunk",
+      content: { type: "text", text: "Launched subagent." },
+    });
+    respond(req, { stopReason: "end_turn" });
+
+    if (mode === "antigravity-subagent-killed") {
+      setTimeout(() => {
+        writeJson(subagentFile, {
+          conversationId: childId,
+          subagentDescriptor: { typeName: "self", role: "Researcher" },
+          state: "SUBAGENT_STATE_KILLED",
+        });
+      }, 140);
+      return;
+    }
+
+    setTimeout(() => {
+      const parentMessages = path.join(brainDir, sessionId, ".system_generated", "messages");
+      writeJson(path.join(parentMessages, "rep-1.json"), {
+        id: "rep-1",
+        sender: childId,
+        recipient: sessionId,
+        timestamp: "2026-11-20T09:10:15Z",
+        content: "Report complete.",
+      });
+      writeJson(path.join(parentMessages, "read.json"), { "rep-1": true });
+      // Delay the first reactive token slightly to exercise the wakeup grace window.
+      setTimeout(() => {
+        notify({
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text: "\n\nSubagent report ready." },
+        });
+        notify({ sessionUpdate: "usage_update", used: 9600, size: 1048576 });
+      }, 90);
+    }, 150);
+    return;
+  }
   if (mode === "unclosed-tool") {
     notify({
       sessionUpdate: "tool_call",

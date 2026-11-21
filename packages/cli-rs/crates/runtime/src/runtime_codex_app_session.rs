@@ -71,7 +71,7 @@ struct CodexAppSession {
     /// requestUserInput requests parked until their card is answered: the
     /// JSON-RPC id to answer, by item id.
     questions: crate::runtime_harness_questions::PendingQuestions<Value>,
-    /// The plan outlives a turn, so what it already reported does too.
+    /// Pull requests already reported outlive a turn, so the reporter does too.
     activity: ChannelActivityReporter,
 }
 

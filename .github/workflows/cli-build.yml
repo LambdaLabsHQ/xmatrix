@@ -137,11 +137,11 @@ jobs:
             asset: xmatrix-macos-arm64
             binary: xmatrix
             part: macos-arm64
-          # Keep the native ARM version probe on Apple Silicon, but do not
-          # spend a second scarce ARM runner on a binary Intel can run itself.
-          # The self-hosted fleet retains its Apple Silicon cross-build.
+          # Cross-compile Intel macOS on Apple Silicon (`macos-26`) so release
+          # builds avoid the slower 3-core Intel runner; lipo + Rosetta verify
+          # the x86_64 Mach-O binary before upload.
           - target: x86_64-apple-darwin
-            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26-intel"' }}
+            runner: ${{ vars.XMATRIX_RUNNER_FLEET == 'self-hosted' && '["self-hosted","xmatrix-macos-release"]' || '"macos-26"' }}
             asset: xmatrix-macos-x64
             binary: xmatrix
             part: macos-x64
@@ -168,6 +168,17 @@ jobs:
       # Do not inject a macOS proxy endpoint here; its runner service owns it.
       # Windows retains its separately configured system TUN route.
       - uses: actions/checkout@v6
+
+      - if: runner.os == 'Windows'
+        uses: ./.github/actions/disable-windows-defender
+
+      # Hosted CLI releases run on immutable version tags (`refs/tags/xmatrix-v*`),
+      # which restore the warm per-target kache store maintained on `main`
+      # (`cli-release-cache.yml`). Library crates stay at 0.0.0 so a release
+      # version stamp only recompiles the top-level binary crate.
+      - uses: ./.github/actions/cli-release-kache-restore
+        with:
+          part: ${{ matrix.part }}
 
       # One Windows path shared with rust-cli-windows CI: native MSVC + kache.
       # validate-kache-contract is CI-only; release still uses the same
@@ -279,9 +290,44 @@ jobs:
       # Every builder invokes the repository R2 uploader after producing its
       # binary. Clean self-hosted checkouts cannot rely on another job's
       # node_modules, so install the root package that owns the pinned S3 SDK
-      # before the release part can be uploaded.
+      # before the release part can be uploaded. On hosted VMs, reuse the
+      # lockfile verification cache maintained on `main` and skip self-hosted
+      # concurrency throttling.
+      - name: Locate PNPM lockfile verification record on a GitHub-hosted runner
+        id: hosted-pnpm-verified
+        if: runner.environment == 'github-hosted' && runner.os != 'Windows'
+        shell: bash
+        run: |
+          if [ -n "${XDG_CACHE_HOME:-}" ]; then dir="$XDG_CACHE_HOME/pnpm"
+          elif [ "$RUNNER_OS" = macOS ]; then dir="$HOME/Library/Caches/pnpm"
+          else dir="$HOME/.cache/pnpm"
+          fi
+          echo "path=$dir/lockfile-verified.jsonl" >> "$GITHUB_OUTPUT"
+
+      - name: Locate PNPM lockfile verification record on a GitHub-hosted Windows runner
+        id: hosted-pnpm-verified-windows
+        if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dir = if (-not [string]::IsNullOrWhiteSpace($env:XDG_CACHE_HOME)) {
+            Join-Path $env:XDG_CACHE_HOME 'pnpm'
+          } else {
+            Join-Path $env:LOCALAPPDATA 'pnpm-cache'
+          }
+          $path = Join-Path $dir 'lockfile-verified.jsonl'
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText($env:GITHUB_OUTPUT, "path=$path`n", $utf8)
+
+      - name: Restore PNPM lockfile verification record on a GitHub-hosted runner
+        if: runner.environment == 'github-hosted'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.hosted-pnpm-verified.outputs.path || steps.hosted-pnpm-verified-windows.outputs.path }}
+          key: pnpm-lockfile-verified-${{ runner.os }}-pnpm-11.3.0-${{ hashFiles('pnpm-lock.yaml', 'pnpm-workspace.yaml', '.npmrc') }}
+
       - name: Install pinned release upload dependencies
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS' && runner.environment != 'github-hosted'
         timeout-minutes: 20
         uses: ./.github/actions/macos-pnpm-install
         with:
@@ -289,7 +335,7 @@ jobs:
           args: install --frozen-lockfile --filter xmatrix --child-concurrency=1
 
       - name: Install pinned release upload dependencies
-        if: runner.os != 'macOS'
+        if: runner.os != 'macOS' && runner.environment != 'github-hosted'
         timeout-minutes: 20
         run: >-
           npx --yes pnpm@11.3.0 install
@@ -298,24 +344,24 @@ jobs:
           --child-concurrency=1
           --network-concurrency=4
 
+      - name: Install pinned release upload dependencies (hosted)
+        if: runner.environment == 'github-hosted'
+        timeout-minutes: 20
+        run: npx --yes pnpm@11.3.0 install --frozen-lockfile --filter xmatrix --prefer-offline
+
       # Use the same immutable compiler as PR Clippy. Runner image updates
       # must not change which diagnostics or compiler build a release receives.
-      - name: Install reviewed Unix Rust toolchain
+      - name: Setup Unix Rust toolchain and kache
         if: runner.os != 'Windows'
-        uses: ./.github/actions/setup-unix-rust-toolchain
+        uses: ./.github/actions/setup-unix-cli-release-rust
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Set up kache
-        if: runner.os != 'Windows'
-        shell: bash
-        run: bash .github/scripts/setup-kache.sh
+          target: ${{ matrix.target }}
 
       - name: Build release binary
         if: runner.os != 'Windows'
         working-directory: packages/cli-rs
         shell: bash
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --target ${{ matrix.target }} --bin xmatrix
 
       - name: Build release binary
         if: runner.os == 'Windows'
@@ -329,7 +375,7 @@ jobs:
           if ($env:PATH -match '(?i)\\Git\\(?:[^;\\]+\\)*(?:bin|usr\\bin)(?:;|$)|\\(?:mingw(?:32|64)|msys[^\\]*)\\bin(?:;|$)') {
             throw 'Windows CLI build PATH still contains Git Bash or MSYS bin directories'
           }
-          cargo build --release --target ${{ matrix.target }}
+          cargo build --release --target ${{ matrix.target }} --bin xmatrix
           if ($LASTEXITCODE -ne 0) { throw 'cargo build failed' }
 
       - name: Rename binary on Windows
@@ -402,8 +448,8 @@ jobs:
 
       # The bytes this machine uploads are the bytes users run, so they must
       # report exactly the release version: its channel and update source follow
-      # from it. Hosted macOS targets run natively; a self-hosted Apple Silicon
-      # runner executes the Intel binary under Rosetta.
+      # from it. On Apple Silicon, x86_64-apple-darwin is cross-compiled and
+      # verified via lipo plus Rosetta (`arch -x86_64`).
       - name: Verify the binary reports the release version
         if: runner.os != 'Windows'
         shell: bash
@@ -412,7 +458,21 @@ jobs:
         run: |
           set -euo pipefail
           run=("./${{ matrix.asset }}")
-          if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then run=(arch -x86_64 "./${{ matrix.asset }}"); fi
+          if [[ "${{ matrix.target }}" == *-apple-darwin ]]; then
+            expected_arch="arm64"
+            if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then expected_arch="x86_64"; fi
+            actual_arch="$(lipo -archs "./${{ matrix.asset }}")"
+            if [[ "$actual_arch" != "$expected_arch" ]]; then
+              echo "${{ matrix.asset }} architecture is '$actual_arch'; expected '$expected_arch'." >&2
+              exit 1
+            fi
+          fi
+          if [[ "${{ matrix.target }}" == x86_64-apple-darwin ]]; then
+            if [[ "$(uname -m)" == arm64 ]] && ! arch -x86_64 /usr/bin/true >/dev/null 2>&1; then
+              softwareupdate --install-rosetta --agree-to-license
+            fi
+            run=(arch -x86_64 "./${{ matrix.asset }}")
+          fi
           reported="$("${run[@]}" --version | head -n 1)"
           if [[ "$reported" != "xmatrix $RELEASE_VERSION" ]]; then
             echo "${{ matrix.asset }} reports '$reported'; expected 'xmatrix $RELEASE_VERSION'." >&2

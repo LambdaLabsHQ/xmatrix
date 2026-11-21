@@ -233,9 +233,9 @@ test('with equal fit the work runs where the most headroom is; then the fewest o
 });
 
 /** A stored provider reading as a launch candidate carries it (`RegistrationQuotaUsage`). */
-function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed } = {}) {
+function reading({ observedAt = new Date(Date.now() - 60_000).toISOString(), account = [], scoped, assumed, billingHolds } = {}) {
   const usage = { quotaSource: 'provider_api', quotaObservedAt: observedAt, quotaUsages: account,
-    ...(scoped ? { scopedQuotaUsages: scoped } : {}) };
+    ...(scoped ? { scopedQuotaUsages: scoped } : {}), ...(billingHolds ? { billingHolds } : {}) };
   return { quota: { remainingPercent: assumed ? 0 : 100, assumed: assumed === true, observedAt, usage } };
 }
 
@@ -922,6 +922,29 @@ test('an environment whose latest summons all ended without a reply goes after e
   assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
 });
 
+test('every environment on a machine that left the Hub\'s last command unanswered goes after every other', async () => {
+  // 2026-11-20: two daemons refused every command for six hours while connected, and `@auto`
+  // kept sending work to them: the harness that had just failed there, then the next one.
+  const on = (machineId, harness, machineUnansweredAt) => ({ ...candidates[0],
+    key: { ...candidates[0].key, machineId, harness }, ...(machineUnansweredAt ? { machineUnansweredAt } : {}),
+    observations: { evaluatedAt: 'now', outstandingMachineAllocations: 0, outstandingRegistrationAllocations: 0,
+      quota: { remainingPercent: 100, assumed: true } } });
+  const at = '2026-11-20T10:23:00.000Z';
+  const quiet = [on('quiet', 'antigravity', at), on('quiet', 'claude', at)], answering = on('answering', 'opencode');
+  // A better fit on the quiet machine still goes last, whichever of its harnesses it is.
+  assert.deepEqual(jointRanking([...quiet, answering], candidate => candidate === answering ? 1 / 3 : 1)
+    .map(item => item.candidate.key.harness), ['opencode', 'antigravity', 'claude']);
+  // With no other machine, the work still goes there: its answer is what ends the mark.
+  assert.deepEqual(jointRanking(quiet, () => 1).map(item => item.candidate.key.machineId), ['quiet', 'quiet']);
+  const chosen = await registrationLaunchChooser(async input => answer(input))({ message: '@codex', tags: {},
+    candidates: [{ ...candidates[0], ...quiet[0], key: candidates[0].key }, { ...candidates[1], observations: answering.observations }] });
+  assert.deepEqual(chosen.key, candidates[1].key);
+  assert.equal(chosen.parameterEvidence.placement.ranking[1].machineUnansweredAt, at);
+  assert.equal(chosen.parameterEvidence.placement.ranking[0].machineUnansweredAt, undefined);
+  const { parseLaunchParameterEvidence } = await import('@xmatrix/protocol');
+  assert.deepEqual(parseLaunchParameterEvidence(chosen.parameterEvidence), chosen.parameterEvidence);
+});
+
 test('equally fit, the harness that measurably replies sooner runs the work; a strong fit may still be slower', async () => {
   // 2026-10-17 production medians, connected Run to first reply: Claude 22 s, Grok 60 s, OpenCode 160 s.
   const harness = (name, responseLatencyMs) => ({ ...candidates[0],
@@ -1009,7 +1032,14 @@ test('unnamed @auto excludes uninstalled, signed-out, and billing-refused candid
     accountBillingRefusal: true,
     observations: {
       ...candidates[0].observations,
-      quota: { remainingPercent: 0, assumed: false, source: 'daemon', expiresAt: new Date(Date.now() + 86_400_000).toISOString() },
+      quota: {
+        remainingPercent: 0, assumed: false, source: 'daemon',
+        expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+        usage: {
+          quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [],
+          billingHolds: { accountUntil: new Date(Date.now() + 365 * 86_400_000).toISOString() },
+        },
+      },
     },
   };
   const chosen = await choose({
@@ -1044,8 +1074,10 @@ test("a summon naming a billing-refused harness runs its Space's model; the refu
   // 2026-11-19: `@cursor machine:Workstation` with the Space's model gemini-4-neon failed
   // registration_selection_invalid: the hold read as a used-up account window took every model away.
   const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
-  const held = reading({ account: [{ percent: 100, resetAt: back }],
-    scoped: [{ label: '1mo', percent: 4, resetAt: back, scope: 'Auto' }] });
+  const held = reading({
+    scoped: [{ label: '1mo', percent: 4, resetAt: back, scope: 'Auto' }],
+    billingHolds: { accountUntil: back },
+  });
   const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
     catalogModels: ['gemini-4-neon'], supportsNativeModel: true, accountBillingRefusal: true, observations: held,
     modelCatalog: [{ model: 'gemini-4-neon', description: '', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] }] };
@@ -1064,5 +1096,52 @@ test("a summon naming a billing-refused harness runs its Space's model; the refu
     candidates: [{ ...cursor, observations: apiUsed }] }), error => error.code === 'registration_quota_exhausted');
   // Unnamed @auto still leaves the refused account out.
   await assert.rejects(choose({ message: '@auto test', tags: {}, automaticHarness: true, candidates: [cursor] }),
+    error => error.code === 'registration_quota_exhausted');
+});
+
+test('a scoped billing refusal holds only that scope for unnamed @auto while keeping other models and explicit summons open (#1837)', async () => {
+  const back = new Date(Date.now() + 30 * 86_400_000).toISOString();
+  const heldUntil = new Date(Date.now() + 365 * 86_400_000).toISOString();
+  const scopedObs = (scopedQuotaUsages, billingHolds) => ({
+    evaluatedAt: new Date().toISOString(),
+    quota: {
+      remainingPercent: 100, assumed: true,
+      usage: { quotaSource: 'provider_api', quotaObservedAt: new Date().toISOString(), quotaUsages: [],
+        scopedQuotaUsages, ...(billingHolds ? { billingHolds } : {}) },
+    },
+  });
+  const apiHold = { scopes: [{ scope: 'API', until: heldUntil }] };
+  const scopedHeld = scopedObs([
+    { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
+  ], apiHold);
+  const catalog = [
+    { model: 'default', description: 'Auto', efforts: [], names: ['Auto'], isDefault: true, quotaScopes: ['Auto'] },
+    { model: 'gemini-4-neon', description: 'API model', efforts: [], names: ['Gemini 4 Neon'], quotaScopes: ['API'] },
+  ];
+  const cursor = { ...candidates[0], key: { ...candidates[0].key, harness: 'cursor' }, models: [],
+    supportsNativeModel: true, observations: scopedHeld, modelCatalog: catalog };
+  const choose = registrationLaunchChooser(async input => answer(input));
+
+  // Unnamed @auto stays routable on Cursor's Auto pool and does not offer API models.
+  const autoChosen = await choose({ message: '@auto fix this', tags: {}, automaticHarness: true, candidates: [cursor] });
+  assert.deepEqual([autoChosen.key.harness, autoChosen.useRuntimeDefaultModel, autoChosen.preferredModel], ['cursor', true, undefined]);
+
+  // Unnamed @auto with a Space pinned exclusively to an API model excludes Cursor.
+  const apiOnly = { ...cursor, catalogModels: ['gemini-4-neon'] };
+  await assert.rejects(choose({ message: '@auto fix this', tags: {}, automaticHarness: true, candidates: [apiOnly] }),
+    error => error.code === 'registration_quota_exhausted');
+
+  // Explicit @cursor still reaches the API model so a user can retry after adding a payment method.
+  const explicit = await choose({ message: '@cursor fix this', tags: { harness: 'cursor' },
+    automaticHarness: false, candidates: [apiOnly] });
+  assert.deepEqual([explicit.key.harness, explicit.useRuntimeDefaultModel, explicit.preferredModel], ['cursor', true, 'gemini-4-neon']);
+
+  // A provider-measured 100% API window still refuses the explicit summon even when the billing hold is lifted.
+  const providerApiUsed = scopedObs([
+    { label: '1mo', percent: 4, resetAt: back, scope: 'Auto' },
+    { label: '1mo', percent: 100, resetAt: back, scope: 'API' },
+  ], apiHold);
+  await assert.rejects(choose({ message: '@cursor fix this', tags: { harness: 'cursor' },
+    automaticHarness: false, candidates: [{ ...apiOnly, observations: providerApiUsed }] }),
     error => error.code === 'registration_quota_exhausted');
 });

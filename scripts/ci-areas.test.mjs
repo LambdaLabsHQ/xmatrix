@@ -14,6 +14,10 @@ test("documentation-only changes do not run unrelated build partitions", () => {
   assert.deepEqual(affectedPartitions(["docs/architecture.md"]), ["duplicates"]);
 });
 
+test("Chrome extension changes run the Node checks containing its tests", () => {
+  assert.deepEqual(affectedPartitions(["apps/chrome-extension/src/hub-client.js"]), ["node-checks", "duplicates"]);
+});
+
 test("decision-model changes run the Node checks containing the evaluation tests", () => {
   assert.deepEqual(affectedPartitions(["packages/decision-model/src/jev.mjs"]), ["node-checks", "duplicates"]);
   assert.ok(discoverScriptTests(process.cwd()).includes("scripts/jev-evaluate.test.mjs"));

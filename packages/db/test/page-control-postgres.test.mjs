@@ -92,7 +92,8 @@ async function addSleepingInstance(client, ids) {
 }
 
 async function cleanup(client, ids) {
-  for (const table of ["page_reads", "page_co_writing", "page_links", "page_access", "page_revisions", "pages"]) {
+  for (const table of ["page_reads", "page_co_writing", "page_links", "page_unlinks", "page_access", "page_revisions",
+    "pages"]) {
     await client.query(`DELETE FROM data.${table} WHERE space_id=$1`, [ids.space]).catch(() => {});
   }
   await client.query("DELETE FROM control.entity_space_routes WHERE entity_id=$1", [ids.run]).catch(() => {});
@@ -314,6 +315,58 @@ integration("co-writing: a person starts it from a linked conversation, and the 
   }
 });
 
+// An Agent reading or editing a page from a conversation links it there, so deleting the links alone was undone by the
+// next read: the page came back into every new Run's launch context.
+integration("unlinking a page from a conversation keeps it out until someone links it again", async () => {
+  const { client, ids, pages, owner, member, agent } = await pageTest("page-unlink");
+  try {
+    const call = (method, input) => pages[method]({ spaceId: ids.space, ...input, requestId: crypto.randomUUID() });
+    const linked = async () => (await pages.conversationPages({ requestId: crypto.randomUUID(),
+      conversationId: ids.open, principal: member })).pages.map((page) => page.pageId);
+    const { page } = await call("create", { principal: owner, title: "Plan", body: "# Plan\n\n## Status\n\nOne\n" });
+    const pageId = page.pageId;
+    await call("read", { principal: agent, pageId, conversationId: ids.open, blockId: "status" });
+    await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
+    await call("startCoWriting", { principal: member, pageId, conversationId: ids.open });
+    assert.deepEqual(await linked(), [pageId]);
+    // A page only read from the conversation comes after the ones it works on, and is named as read only.
+    const { page: looked } = await call("create", { principal: owner, title: "Background", body: "# Background\n" });
+    await call("read", { principal: agent, pageId: looked.pageId, conversationId: ids.open });
+    const both = await pages.conversationPages({ requestId: crypto.randomUUID(), conversationId: ids.open, principal: member });
+    assert.deepEqual(both.pages.map((item) => item.pageId), [pageId, looked.pageId]);
+    assert.deepEqual(both.readOnlyPageIds, [looked.pageId]);
+    await call("remove", { principal: owner, pageId: looked.pageId });
+
+    assert.deepEqual(await call("unlinkPage", { principal: member, pageId, conversationId: ids.open }), { removed: 2 },
+      "every link between the page and the conversation goes, section links included");
+    assert.deepEqual(await linked(), []);
+    assert.deepEqual(await call("coWritersToWake", { pageId }), [], "typing on the page no longer wakes its Agent");
+
+    await call("read", { principal: agent, pageId, conversationId: ids.open });
+    await call("edit", { principal: agent, pageId, baseRevision: 1, body: "# Plan\n\n## Status\n\nTwo\n",
+      conversationIds: [ids.open], blockIds: ["status"] });
+    assert.deepEqual(await pages.linkReferences({ requestId: crypto.randomUUID(), conversationId: ids.open,
+      principal: agent, pageIds: [pageId] }), { linked: [] });
+    assert.deepEqual(await linked(), [], "reading, editing or mentioning it there does not link it again");
+
+    await call("link", { principal: member, conversationId: ids.open, pageId, source: "manual" });
+    assert.deepEqual(await linked(), [pageId], "an explicit link brings it back");
+    await call("read", { principal: agent, pageId, conversationId: ids.open, blockId: "status" });
+    assert.equal((await call("links", { principal: member, conversationId: ids.open })).links.length, 2,
+      "and reads link it as before");
+
+    await assert.rejects(call("unlinkPage", { principal: member, pageId, conversationId: ids.closed }),
+      code("channel_not_found"), "only someone in the conversation unlinks a page from it");
+    await call("unlinkPage", { principal: agent, pageId, conversationId: ids.open });
+    await call("remove", { principal: owner, pageId });
+    assert.equal((await client.query("SELECT 1 FROM data.page_unlinks WHERE space_id=$1", [ids.space])).rows.length, 0,
+      "removing the page removes its unlinks");
+  } finally {
+    await cleanup(client, ids);
+    await client.end();
+  }
+});
+
 integration("pages: recent changes are the readable pages that changed last, each with its section and what it added", async () => {
   const { client, ids, pages, owner, member } = await pageTest("page-recent");
   try {
@@ -372,6 +425,15 @@ integration("pages: search reads titles and section text, and skips pages the re
       ["Notes", "title", ""],
     ]);
     assert.deepEqual((await call("search", { principal: member, query: "finance" })).results, []);
+    // Words that are apart find the page that holds them all, at the section holding the most of them;
+    // a page holding the query as typed comes first.
+    await call("create", { principal: owner, title: "Roadmap",
+      body: "# Roadmap\n\n## Now\nthe ledger is late\n\n## Next\nwe ship in May, ledger first\n" });
+    assert.deepEqual((await call("search", { principal: member, query: "ledger  SHIP" })).results
+      .map((hit) => [hit.title, hit.blockId]), [["Roadmap", "next"], ["Plan", "goals"]]);
+    assert.deepEqual((await call("search", { principal: member, query: "ship the ledger" })).results
+      .map((hit) => [hit.title, hit.blockId]), [["Plan", "goals"], ["Roadmap", "now"]]);
+    assert.deepEqual((await call("search", { principal: member, query: "ledger absent" })).results, []);
     await assert.rejects(call("search", { principal: member, query: "  " }), code("invalid_request"));
   } finally {
     await cleanup(client, ids);

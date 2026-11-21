@@ -1325,7 +1325,8 @@ export function groupedMentionCandidates(
       });
       const expanded = expandedKinds.has(section.kind);
       const open = expanded || !openKinds || openKinds.has(section.kind);
-      const visibleCandidates = expanded
+      // A fold row is a row: folding a single candidate behind it would hide nothing worth its line.
+      const visibleCandidates = expanded || open && sectionCandidates.length <= limitPerKind + 1
         ? sectionCandidates
         : open
           ? sectionCandidates.slice(0, limitPerKind)

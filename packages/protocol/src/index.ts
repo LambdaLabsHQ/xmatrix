@@ -1,7 +1,7 @@
 export { agentFailureEvidence, safeAgentFailureDetail } from "./agent-failure-detail.js";
 export type { AgentFailureEvidence } from "./agent-failure-detail.js";
 export {
-  ACTIVE_RUN_STATUS_SQL, ACTIVE_RUN_STATUSES, ADDRESSABLE_AGENT_INSTANCE_RESTS, AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA, AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA, AGENT_INSTANCE_OFFLINE_REASONS, AGENT_INSTANCE_RESTS, AGENT_PRESETS, AGENT_RUNTIME_ISSUE_KINDS, AGENT_RUNTIME_NOTICE_SEVERITIES, AGENT_RUNTIME_WAITING_KINDS, AGENT_STATUSES, AGENT_TURN_FAILURE_LIFECYCLE_LAYER, AGENT_TURN_FAILURE_LIFECYCLE_REASON, AGENT_TURN_FAILURE_LIFECYCLE_STATUS, AGENT_USAGE_LIMIT_LIFECYCLE_REASON, AGENT_SIGNED_OUT_LIFECYCLE_REASON, agentAvatarUrlFromMetadata, agentAccessGrant, agentAccessModes, REGISTRATION_ACCESS_ASK_CAPABILITY, agentHarnessSpec, agentLaunchExecutable, agentPresetById, agentPresetForLauncher, agentTurnFailureNoticeBody, agentUsageLimitFromError, isAccountBillingRefusalError, boundAgentTurnFailureDetail, APP_SIGN_IN_FINISH_PATH, DEFAULT_HUB_URL, deriveHumanConnectionUrl, HUB_ROUTES, isActiveRunStatus, isAddressableAgentInstance, isAgentInstanceOfflineReason, isAgentInstanceRest, isAgentRuntimeIssueKind, isAgentRuntimeNoticeSeverity, isAgentRuntimeWaitingKind, isAgentStatus, isAgentTurnFailureLifecycle, isAgentUsageLimitLifecycle, isChannelResidentInstance, isLiveAgentStatus, isRunStatus, isSpaceSecretAccess, isTerminalRunStatus, LIVE_AGENT_STATUS_SQL, LIVE_AGENT_STATUSES, localLlmUsage, MENTION_COMMAND_COMPLETION_SCHEMA, normalizeAgentPresetRuntime, normalizeHubUrl, formatQuotaBalance, parseLlmQuotaAccount, parseQuotaObservedAt, quotaAccountBalance, parseSecretAccessRequestCard, parseSecretRequestCard, RUN_STATUSES, SECRET_ENV_NAME_PATTERN, SECRET_ACCESS_REQUEST_MAX, SECRET_ACCESS_REQUEST_MESSAGE_KIND, SECRET_REQUEST_MESSAGE_KIND, SPACE_SECRET_ACCESS, TERMINAL_RUN_STATUS_SQL, TERMINAL_RUN_STATUSES, WEB_PROXY_ROUTES, withMachineSpawnHarness, withRegistrationQuota, withRoute,
+  ACTIVE_RUN_STATUS_SQL, ACTIVE_RUN_STATUSES, ADDRESSABLE_AGENT_INSTANCE_RESTS, AGENT_HANDOFF_ACTION_COMPLETION_SCHEMA, AGENT_INSTANCE_COMMAND_COMPLETION_SCHEMA, AGENT_INSTANCE_OFFLINE_REASONS, AGENT_INSTANCE_RESTS, AGENT_PRESETS, AGENT_RUNTIME_ISSUE_KINDS, AGENT_RUNTIME_NOTICE_SEVERITIES, AGENT_RUNTIME_WAITING_KINDS, AGENT_STATUSES, AGENT_TURN_FAILURE_LIFECYCLE_LAYER, AGENT_TURN_FAILURE_LIFECYCLE_REASON, AGENT_TURN_FAILURE_LIFECYCLE_STATUS, AGENT_USAGE_LIMIT_LIFECYCLE_REASON, AGENT_SIGNED_OUT_LIFECYCLE_REASON, agentAvatarUrlFromMetadata, agentAccessGrant, agentAccessModes, REGISTRATION_ACCESS_ASK_CAPABILITY, agentHarnessSpec, agentLaunchExecutable, agentPresetById, agentPresetForLauncher, agentTurnFailureNoticeBody, agentUsageLimitFromError, isAccountBillingRefusalError, isScopedBillingRefusalError, boundAgentTurnFailureDetail, APP_SIGN_IN_FINISH_PATH, DEFAULT_HUB_URL, deriveHumanConnectionUrl, HUB_ROUTES, isActiveRunStatus, isAddressableAgentInstance, isAgentInstanceOfflineReason, isAgentInstanceRest, isAgentRuntimeIssueKind, isAgentRuntimeNoticeSeverity, isAgentRuntimeWaitingKind, isAgentStatus, isAgentTurnFailureLifecycle, isAgentUsageLimitLifecycle, isChannelResidentInstance, isLiveAgentStatus, isRunStatus, isSpaceSecretAccess, isTerminalRunStatus, LIVE_AGENT_STATUS_SQL, LIVE_AGENT_STATUSES, localLlmUsage, MENTION_COMMAND_COMPLETION_SCHEMA, normalizeAgentPresetRuntime, normalizeHubUrl, formatQuotaBalance, parseLlmQuotaAccount, parseQuotaObservedAt, quotaAccountBalance, parseSecretAccessRequestCard, parseSecretRequestCard, RUN_STATUSES, SECRET_ENV_NAME_PATTERN, SECRET_ACCESS_REQUEST_MAX, SECRET_ACCESS_REQUEST_MESSAGE_KIND, SECRET_REQUEST_MESSAGE_KIND, SPACE_SECRET_ACCESS, TERMINAL_RUN_STATUS_SQL, TERMINAL_RUN_STATUSES, WEB_PROXY_ROUTES, withMachineSpawnHarness, withRegistrationQuota, withRoute,
 } from "./authority.js";
 export type {
   ActiveRunStatus, AgentAccessGrant, AgentAccessMode, AgentGoalStatus, AgentHarnessSpec, AgentInstanceCommand, AgentInstanceCommandMode, AgentInstanceOfflineReason, AgentInstanceRest, AgentLifecycleLayer, AgentLifecycleReason, AgentLifecycleSnapshot, AgentLifecycleStatus, AgentLifetime, AgentModelInfo, AgentModelReasoningEffort, AgentPresentationSnapshot, AgentPreset, AgentPresetBackend, AgentPresetId, AgentRuntimeExecutionEvidence, AgentRuntimeIssue, AgentRuntimeIssueKind, AgentRuntimeMessageSource, AgentRuntimeNotice, AgentRuntimeNoticeSeverity, AgentRuntimeState, AgentRuntimeWaiting, AgentRuntimeWaitingKind, AgentRuntimeWorkStatus, AgentSandboxMode, AgentSkill, AgentStatus, AgentStatusChip, AnnotationTarget, AnnotationTargetKind, AppConnectorCompletionDynamicSource, AppConnectorCompletionOption, AppConnectorCompletionResponse, AppConnectorConnectionStatus, AppConnectorExecutionStatus, AppConnectorRemedy, AppConnectorProviderId, AppConnectorProviderKind, AppConnectorProviderStatus, AuthProvider, AuthResponse, AuthUser, ChannelAgentMemberPresence, ChannelAppMention, ChannelAttachment, ChannelAttentionBroadcastScope, ChannelAttentionSnapshot, ChannelAttentionSnapshotSpace, ChannelAttentionSummary, ChannelAttentionTargetKind, ChannelAttentionTriggerKind, ChannelCatalogPage, ChannelCatalogPageCounts, ChannelCatalogPageFilter, ChannelCatalogPageRow, ChannelCatalogPageView, ChannelCatalogResolveResult, ChannelCatalogSyncMetadata, ChannelHumanMemberPresence, ChannelMemberPresence, ChannelMentionReadState, ChannelMentionReadStatus, ChannelMentionReadTargetKind, ChannelMessageNotification, ChannelMessageNotificationReason, ChannelMode, ChannelProjectionCacheAuthority, ChannelProjectionCacheManifest, ChannelProjectionCacheScope, ChannelReaction, ChannelReactionActor, ChannelReplyContext, ClientNetworkSample, ClientNetworkSampleKind, ClientNetworkSampleMode, ClientNetworkSampleResult, ClientNetworkState, CommandCompletionArgumentSchema, CommandCompletionDelimiter, CommandCompletionDynamicSource, CommandCompletionSchemaNode, EvalExpression, EvalExpressionKind, EvalLanguage, LaunchTargetRepo, LaunchTargetRepoStatus, LiveAgentStatus, LlmQuotaAccount, LlmQuotaUsage, LlmUsage, MachineRequestNoticeAcceptedMessage, MachineRequestNoticeMessage, MachineRequestRememberPolicy, MessageSender, ObservabilityEvent, ObservabilityEventType, RunStatus, SecretAccessRequestCard, SecretRequestCard, SerializedAgent, SerializedAgentInstance, SerializedAppConnectorChannelState, SerializedAppConnectorChannelSubscription, SerializedAppConnectorConnection, SerializedAppConnectorExecution, SerializedChannel, SerializedChannelCreatorAgent, SerializedMachineDaemon, SerializedSpace, SerializedSpaceInvite, SerializedWorkspace, SpaceLaunchTargetsResponse, SpaceMember, SpaceMemberCreationPolicy, SpaceMemberPermissions, SpaceRole, SpaceSecretAccess, SpaceSecretEntry, TerminalRunStatus, TraceAccessDuration, TraceAccessGrant, TraceAccessStatus, TraceInstanceHistoryAvailability, UpsertAppConnectorConnectionRequest, WorkspaceRef, WorkspaceVisibility,
@@ -61,16 +61,15 @@ export type {
   ChannelMessage, ChannelMessageThreadSummary,
 } from "./channel-message.js";
 export {
-  callerMessageMetadata, CHANNEL_ACTIVITY_MAX_COMPLETED, CHANNEL_ACTIVITY_MAX_STEP_TEXT,
-  CHANNEL_ACTIVITY_MAX_STEPS, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
-  activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isReservedAnnotationNamespace,
+  callerMessageMetadata, CHANNEL_ACTIVITY_MESSAGE_KIND, CHANNEL_ACTIVITY_PROVENANCE,
+  activityMessageKind, ChannelActivityInvalid, channelActivityLine, channelActivityOf, isAgentContextMessage, isChannelActivity, isRetiredPlanActivity, isReservedAnnotationNamespace,
   isReservedMessageMetadataKey, normalizeChannelActivity,
   SYSTEM_ANNOTATION_AUTHOR, QUESTIONNAIRE_STATE_ANNOTATION_NAMESPACE, questionnaireStateOf,
   COMMAND_RESULT_ANNOTATION_NAMESPACE, commandResultOf, mergeCommandResult, mergeCommandResults,
   AGENT_INSTRUCTION_MESSAGE_KINDS, isAgentInstruction, NORN_ASK_MESSAGE_PREFIX, isNornAskProgramMessage, NORN_DELEGATED_NOTE,
 } from "./channel-activity.js";
 export type {
-  ChannelActivity, ChannelActivityPlanStep, ChannelActivityPlanStepStatus, QuestionnaireState,
+  ChannelActivity, QuestionnaireState,
   CommandResult, CommandResultNote,
 } from "./channel-activity.js";
 export {
@@ -223,12 +222,12 @@ export type {
   DecisionAnswerFailure, DecisionAnswerIssue, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
 } from "./invocation-failure.js";
 export {
-  boundedRoutingLabel, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
+  boundedRoutingLabel, clampRoutingQuotaObservedTime, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, ROUTING_QUOTA_MAX_CLOCK_SKEW_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
 } from "./agent-routing.js";
 export type {
   AgentRoutingDeclaration, AgentRoutingExclusion, AgentRoutingRequirements,
   MachineResourceObservation, PresentedRoutingDecision, RoutingBoundMachine, RoutingChoiceRow, RoutingDecisionSource,
-  RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions, RoutingQuotaVerdict,
+  RoutingBillingHolds, RoutingModelOption, RoutingObservation, RoutingQuotaObservationOptions, RoutingQuotaVerdict,
 } from "./agent-routing.js";
 export { MACHINE_RESOURCE_HISTORY_RANGES } from "./machine-resource-history.js";
 export type {
@@ -275,7 +274,7 @@ export {
   machineExecutionCompleted, scheduledMachineExecutionCompleted,
 } from "./machine-execution-outcome.js";
 export {
-  HARNESS_SESSION_IN_USE, publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
+  HARNESS_SESSION_IN_USE, machineNotAnsweringDetail, publicMachineStartupFailure, REPOSITORY_ACCESS_UNAVAILABLE, repositoryAccessUnavailableDetail,
   RUN_PHASES_BEFORE_READY, runPhaseBeforeReady,
 } from "./machine-startup-failure.js";
 export type {
@@ -502,7 +501,8 @@ export {
   PAGE_MEDIA_OWNER_KIND, PAGE_MEDIA_SCHEME, pageMediaFile, pageMediaReference, pageMediaReferences,
   pageMediaRefId, parsePageMedia,
   pageBlockAt, pageBlocks, pageChangedBlocks, pageChangeGist, pageEditGlimpses, pageHeadingSlug, pageLineDiff,
-  pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageTitleLine,
+  pageOutline, pageReferencesIn, pageReferenceSpans, pageReferenceToken, pageRemovedSections, pageSection, pageTitleLine,
+  replacePageSection,
   parseGitHubFileReference,
 } from "./page-markdown.js";
 export {
@@ -510,7 +510,7 @@ export {
 } from "./media-types.js";
 export type { AttachmentKind } from "./media-types.js";
 export type {
-  GitHubFileReference, PageBlock, PageEditGlimpse, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
+  GitHubFileReference, PageBlock, PageEditGlimpse, PageOutlineEntry, PageEditSegment, PageLineDiff, PageMedia, PageMergeResult, PageReferenceSpan,
 } from "./page-markdown.js";
 export {
   pageSchedules,

@@ -5,10 +5,13 @@
 // the description the model gave it, else the command, URL, query or tool
 // name; and between turns the descriptions of the background tasks.
 
-use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::collections::{HashMap, HashSet};
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use serde_json::Value;
+use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
 
 use crate::protocol;
 
@@ -385,6 +388,226 @@ impl AcpBackgroundTasks {
     }
 }
 
+/// Snapshot of direct Antigravity (`agy`) subagent activity for one ACP
+/// session, read from `<app_data_dir>/brain/<session_id>/.system_generated/`.
+///
+/// Antigravity's ACP v1 server marks `invoke_subagent` `completed` as soon as
+/// the subagent conversation is spawned and emits no ACP events while the
+/// subagent runs. Its on-disk `.system_generated/subagents/*.json` and
+/// parent/child `.system_generated/messages/*.json` files record the live
+/// assignment/report state without touching `agy`'s shared SQLite summary DB.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct AntigravitySubagentState {
+    /// Count of `SUBAGENT_STATE_ALIVE` subagents whose latest assignment from
+    /// this session has not yet produced a read report back to the parent.
+    pub(crate) active_count: u32,
+    /// Number of report messages from alive subagents already marked read in
+    /// the parent's `.system_generated/messages/read.json` (distinguishes a
+    /// completed subagent about to wake the parent from a killed subagent).
+    pub(crate) read_report_count: usize,
+}
+
+/// Resolve Antigravity's local brain directory (`$ANTIGRAVITY_APP_DATA_DIR/brain`
+/// or `~/.gemini/antigravity-cli/brain`).
+pub(crate) fn antigravity_brain_dir() -> Option<PathBuf> {
+    if let Ok(app_data_dir) = std::env::var("ANTIGRAVITY_APP_DATA_DIR") {
+        let trimmed = app_data_dir.trim();
+        if !trimmed.is_empty() {
+            return Some(PathBuf::from(trimmed).join("brain"));
+        }
+    }
+    Some(
+        dirs::home_dir()?
+            .join(".gemini")
+            .join("antigravity-cli")
+            .join("brain"),
+    )
+}
+
+pub(crate) fn read_antigravity_subagent_state(
+    brain_dir: &Path,
+    session_id: &str,
+) -> AntigravitySubagentState {
+    if session_id.trim().is_empty() {
+        return AntigravitySubagentState::default();
+    }
+    let parent_sys = brain_dir.join(session_id).join(".system_generated");
+    let alive_ids = read_alive_subagent_ids(&parent_sys.join("subagents"));
+    if alive_ids.is_empty() {
+        return AntigravitySubagentState::default();
+    }
+    let alive_set: HashSet<&str> = alive_ids.iter().map(String::as_str).collect();
+    let (latest_reports, read_report_count) =
+        read_parent_subagent_reports(&parent_sys.join("messages"), &alive_set);
+
+    let mut active_count: u32 = 0;
+    for child_id in &alive_ids {
+        let child_messages = brain_dir
+            .join(child_id)
+            .join(".system_generated")
+            .join("messages");
+        if dir_has_any_entry(&child_messages.join("undelivered")) {
+            active_count = active_count.saturating_add(1);
+            continue;
+        }
+        let Some(assigned_nanos) = read_latest_assignment_nanos(&child_messages, session_id) else {
+            continue;
+        };
+        let still_active = match latest_reports.get(child_id.as_str()) {
+            None => true,
+            Some(&(reported_nanos, is_read)) => reported_nanos < assigned_nanos || !is_read,
+        };
+        if still_active {
+            active_count = active_count.saturating_add(1);
+        }
+    }
+
+    AntigravitySubagentState {
+        active_count,
+        read_report_count,
+    }
+}
+
+fn for_each_json_in_dir(
+    dir: &Path,
+    skip_read_json: bool,
+    mut visit: impl FnMut(&Path, Value),
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+            || (skip_read_json
+                && path.file_name().and_then(|name| name.to_str()) == Some("read.json"))
+            || !path.is_file()
+        {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        if let Ok(value) = serde_json::from_str::<Value>(&raw) {
+            visit(&path, value);
+        }
+    }
+}
+
+fn read_alive_subagent_ids(subagents_dir: &Path) -> Vec<String> {
+    let mut ids = Vec::new();
+    for_each_json_in_dir(subagents_dir, false, |_, value| {
+        if value.get("state").and_then(Value::as_str) != Some("SUBAGENT_STATE_ALIVE") {
+            return;
+        }
+        if let Some(id) = value
+            .get("conversationId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+        {
+            ids.push(id.to_string());
+        }
+    });
+    ids
+}
+
+fn read_parent_subagent_reports<'a>(
+    messages_dir: &Path,
+    alive_ids: &HashSet<&'a str>,
+) -> (HashMap<&'a str, (i128, bool)>, usize) {
+    let read_ids = read_message_read_set(&messages_dir.join("read.json"));
+    let mut latest: HashMap<&'a str, (i128, bool)> = HashMap::new();
+    let mut report_count: usize = 0;
+    for_each_json_in_dir(messages_dir, true, |path, value| {
+        let Some(sender) = value.get("sender").and_then(Value::as_str) else {
+            return;
+        };
+        let matched_child = if let Some(&child_id) = alive_ids.get(sender) {
+            Some(child_id)
+        } else if sender == "system" {
+            let content = value
+                .get("content")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            alive_ids
+                .iter()
+                .copied()
+                .find(|child_id| content.contains(*child_id))
+        } else {
+            None
+        };
+        let Some(child_id) = matched_child else {
+            return;
+        };
+        let ts_nanos = message_timestamp_nanos(&value, path);
+        let is_read = value
+            .get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| read_ids.contains(id));
+        if is_read {
+            report_count += 1;
+        }
+        latest
+            .entry(child_id)
+            .and_modify(|existing| {
+                if ts_nanos > existing.0 || (ts_nanos == existing.0 && !is_read) {
+                    *existing = (ts_nanos, is_read);
+                }
+            })
+            .or_insert((ts_nanos, is_read));
+    });
+    (latest, report_count)
+}
+
+fn read_latest_assignment_nanos(child_messages_dir: &Path, parent_id: &str) -> Option<i128> {
+    let mut latest: Option<i128> = None;
+    for_each_json_in_dir(child_messages_dir, true, |path, value| {
+        if value.get("sender").and_then(Value::as_str) != Some(parent_id) {
+            return;
+        }
+        let ts_nanos = message_timestamp_nanos(&value, path);
+        latest = Some(match latest {
+            Some(existing) => existing.max(ts_nanos),
+            None => ts_nanos,
+        });
+    });
+    latest
+}
+
+fn read_message_read_set(path: &Path) -> HashSet<String> {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return HashSet::new();
+    };
+    let Ok(Value::Object(map)) = serde_json::from_str::<Value>(&raw) else {
+        return HashSet::new();
+    };
+    map.into_iter()
+        .filter_map(|(key, val)| (val.as_bool() == Some(true)).then_some(key))
+        .collect()
+}
+
+fn dir_has_any_entry(dir: &Path) -> bool {
+    std::fs::read_dir(dir)
+        .ok()
+        .and_then(|mut entries| entries.next())
+        .is_some()
+}
+
+fn message_timestamp_nanos(value: &Value, path: &Path) -> i128 {
+    if let Some(raw) = value.get("timestamp").and_then(Value::as_str)
+        && let Ok(parsed) = OffsetDateTime::parse(raw.trim(), &Rfc3339)
+    {
+        return parsed.unix_timestamp_nanos();
+    }
+    std::fs::metadata(path)
+        .ok()
+        .and_then(|meta| meta.modified().ok())
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_nanos() as i128)
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,5 +927,152 @@ mod tests {
         assert_eq!(bg.count(), 1);
         assert!(bg.remove("c2"));
         assert_eq!(bg.waiting(), None);
+    }
+
+    #[test]
+    fn antigravity_subagent_state_tracks_active_read_followup_and_killed_children() {
+        let root = std::env::temp_dir().join(format!(
+            "xmatrix-agy-subagent-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let brain = root.join("brain");
+        let parent = "parent-session";
+        let child_a = "child-a";
+        let child_b = "child-b";
+        let write_json = |path: PathBuf, body: Value| {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, serde_json::to_string(&body).unwrap()).unwrap();
+        };
+
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState::default()
+        );
+
+        // Spawn two alive subagents with initial assignments from parent.
+        for child in [child_a, child_b] {
+            write_json(
+                brain.join(parent).join(".system_generated/subagents").join(format!("{child}.json")),
+                json!({
+                    "conversationId": child,
+                    "subagentDescriptor": { "typeName": "self", "role": "Worker" },
+                    "state": "SUBAGENT_STATE_ALIVE"
+                }),
+            );
+            write_json(
+                brain.join(child).join(".system_generated/messages/assign-1.json"),
+                json!({
+                    "id": "assign-1",
+                    "sender": parent,
+                    "recipient": child,
+                    "timestamp": "2026-11-20T09:10:00Z"
+                }),
+            );
+        }
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState {
+                active_count: 2,
+                read_report_count: 0,
+            }
+        );
+
+        // Child A reports back via send_message, not yet read by parent -> still active.
+        write_json(
+            brain.join(parent).join(".system_generated/messages/rep-a1.json"),
+            json!({
+                "id": "rep-a1",
+                "sender": child_a,
+                "recipient": parent,
+                "timestamp": "2026-11-20T09:10:05Z",
+                "content": "done"
+            }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState {
+                active_count: 2,
+                read_report_count: 0,
+            }
+        );
+
+        // Once parent reads rep-a1, only Child B remains active.
+        write_json(
+            brain.join(parent).join(".system_generated/messages/read.json"),
+            json!({ "rep-a1": true }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState {
+                active_count: 1,
+                read_report_count: 1,
+            }
+        );
+
+        // Child B finishes without send_message -> system idle report, marked read.
+        write_json(
+            brain.join(parent).join(".system_generated/messages/rep-b1.json"),
+            json!({
+                "id": "rep-b1",
+                "sender": "system",
+                "recipient": parent,
+                "timestamp": "2026-11-20T09:10:10Z",
+                "content": format!("Subagent {child_b} has gone idle.")
+            }),
+        );
+        write_json(
+            brain.join(parent).join(".system_generated/messages/read.json"),
+            json!({ "rep-a1": true, "rep-b1": true }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState {
+                active_count: 0,
+                read_report_count: 2,
+            }
+        );
+
+        // A follow-up assignment to Child A reactivates it.
+        write_json(
+            brain.join(child_a).join(".system_generated/messages/assign-2.json"),
+            json!({
+                "id": "assign-2",
+                "sender": parent,
+                "recipient": child_a,
+                "timestamp": "2026-11-20T09:10:20Z"
+            }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent).active_count,
+            1
+        );
+
+        // Killing Child A clears it without bumping read_report_count.
+        write_json(
+            brain.join(parent).join(".system_generated/subagents").join(format!("{child_a}.json")),
+            json!({
+                "conversationId": child_a,
+                "state": "SUBAGENT_STATE_KILLED"
+            }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent),
+            AntigravitySubagentState {
+                active_count: 0,
+                read_report_count: 1,
+            }
+        );
+
+        // An undelivered message to Child B also counts as active.
+        write_json(
+            brain.join(child_b).join(".system_generated/messages/undelivered/u1.json"),
+            json!({ "id": "u1" }),
+        );
+        assert_eq!(
+            read_antigravity_subagent_state(&brain, parent).active_count,
+            1
+        );
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

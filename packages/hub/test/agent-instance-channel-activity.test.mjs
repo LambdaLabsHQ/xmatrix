@@ -22,25 +22,31 @@ function harness(options = {}) {
   return { commands, port, session };
 }
 
-test("a plan report becomes a Hub-written activity entry under the Run's proof", async () => {
+test("a pull request report becomes a Hub-written activity entry under the Run's proof", async () => {
   const { commands, port, session } = harness();
   const reply = await port.execute(session, {
     type: "channel_activity", requestId: "r-1", channelId: "channel",
-    activity: { kind: "plan", completed: ["Run the e2e regression"], inProgress: "Open PR 2",
-      steps: [{ text: "Run the e2e regression", status: "completed" },
-        { text: "Open PR 2", status: "in_progress" }] },
+    activity: { kind: "pull_request", url: "https://github.com/a/b/pull/1" },
   });
   assert.equal(reply.type, "channel_message_dispatched");
   assert.equal(reply.messageId, "activity:r-1");
   const [{ family, input }] = commands;
   assert.equal(family, "append-message");
   assert.equal(input.messageKind, "xmatrix.activity");
-  assert.equal(input.body, "✓ Run the e2e regression · → Open PR 2");
   assert.deepEqual(input.principal, { kind: "agent", id: "agent-1" });
   assert.deepEqual(input.agentRunProof,
     { runId: "run-1", executionKey: "execution-1", instanceId: "instance-1" });
   assert.equal(input.residual.appMetadata.xmatrixProvenance, "activity");
-  assert.equal(input.residual.appMetadata.xmatrixActivity.kind, "plan");
+  assert.equal(input.residual.appMetadata.xmatrixActivity.kind, "pull_request");
+});
+
+test("a runtime that still reports its plan is refused as ordinary, and nothing is written", async () => {
+  const { commands, port, session } = harness();
+  await assert.rejects(port.execute(session, {
+    type: "channel_activity", requestId: "r-2", channelId: "channel",
+    activity: { kind: "plan", completed: ["Run the e2e regression"], steps: [] },
+  }), (error) => error.failure?.code === "channel_activity_retired" && error.ordinary === true);
+  assert.equal(commands.length, 0);
 });
 
 test("an opened pull request subscribes the conversation it was opened in, as the Run's owner", async () => {
@@ -53,11 +59,7 @@ test("an opened pull request subscribes the conversation it was opened in, as th
   assert.equal(commands[0].input.body, "↗ Opened pull request LambdaLabsHQ/xmatrix#189");
   assert.deepEqual(opened, [{ spaceId: "space", channelId: "channel", ownerUserId: "owner",
     repository: "LambdaLabsHQ/xmatrix", number: 189, commandId: "activity:r-3" }]);
-  await port.execute(session, {
-    type: "channel_activity", requestId: "r-4", channelId: "channel",
-    activity: { kind: "plan", completed: ["Open the pull request"], steps: [] },
-  });
-  assert.equal(opened.length, 1, "a plan report subscribes nothing");
+  assert.equal(opened.length, 1);
 });
 
 test("a failed subscription still records the pull request", async () => {
@@ -73,7 +75,7 @@ test("a failed subscription still records the pull request", async () => {
 test("a malformed or padded report is refused before anything is written", async () => {
   const { commands, port, session } = harness();
   await assert.rejects(port.execute(session, {
-    type: "channel_activity", channelId: "channel", activity: { kind: "plan", completed: [], steps: [] },
+    type: "channel_activity", channelId: "channel", activity: { kind: "pull_request", url: "https://github.com/a/b/pull/0" },
   }), (error) => error.failure?.code === "invalid_channel_activity");
   await assert.rejects(port.execute(session, {
     type: "channel_activity", channelId: "channel", body: "extra",

@@ -1,7 +1,10 @@
 import type { QueryResultRow } from "pg";
 import type { AuthorityDatabase, DatabaseTransaction } from "./contracts.js";
 
-export type MachineRunTerminalEvent = "machine_run_exited" | "machine_stop_result";
+/** What ends a Run on its machine, as the daemon reports it. A
+ * `machine_spawn_result` is the Hub's own: the failed start of a machine that
+ * was handed the command and never answered (machine-control `claim`). */
+export type MachineRunTerminalEvent = "machine_run_exited" | "machine_stop_result" | "machine_spawn_result";
 
 /** A committed terminal report the coordinator still has to finalize. */
 export interface MachineRunTerminalReport {

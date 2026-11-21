@@ -83,7 +83,14 @@ import { useChannelAsTimelineShows } from "./presented-channel-tail";
 import { MentionMark } from "./mention-mark";
 import { CONVERSATION_QUERY, INTAKE_QUERY, type SpaceChannelCatalog } from "./use-channel-catalog-paging";
 
-import { AppView, MOBILE_CHANNEL_ACTION_LONG_PRESS_MS, MOBILE_CHANNEL_ACTION_MOVE_TOLERANCE_PX } from "./workspace-shell-navigation";
+import {
+  dockTabOf,
+  MOBILE_CHANNEL_ACTION_LONG_PRESS_MS,
+  MOBILE_CHANNEL_ACTION_MOVE_TOLERANCE_PX,
+  SPLIT_TOOL_VIEWS,
+  viewLabels,
+  type AppView,
+} from "./workspace-shell-navigation";
 
 import {
   channelFocusedHumanMembers,
@@ -139,6 +146,7 @@ import { channelTitle, spaceAppPath } from "@/components/dashboard/channel-links
 import { ChannelListSkeleton, useEmptySurfaceSkeleton } from "@/components/dashboard/content-skeleton";
 import { subscribeToNetwork } from "./connection-status";
 import { channelRowsForPaint } from "./channel-list-paint";
+import { PageDocumentSkeleton, PageListSkeleton, ToolSurfaceSkeleton } from "./view-skeletons";
 
 import { getDesktopBridge } from "@/lib/desktop/bridge";
 
@@ -927,11 +935,14 @@ const STARTUP_PENDING_SPACE = "startup-pending";
 
 export function StartupShell({
   channels = [],
+  view = "messages",
   desktopFrameClass,
   showMobileTabDock,
 }: {
   /** The account's last list on this device; empty paints the skeleton. */
   channels?: ChannelSnapshot[];
+  /** The destination the browser URL names, so the startup frame matches its layout. */
+  view?: AppView;
   /** `xmatrix-desktop-macos` / `xmatrix-desktop-windows` under Electron. */
   desktopFrameClass?: string;
   /** False under the iOS shell, whose tab bar is native. */
@@ -946,12 +957,17 @@ export function StartupShell({
   const rows = (row: (channel: ChannelSnapshot) => ReactNode) => channels.length > 0
     ? <ChannelSectionRows channels={channels} row={row} />
     : <ChannelListSkeleton />;
+  const hidesDesktopSidebar = SPLIT_TOOL_VIEWS.includes(view);
+  const isToolLayout = view !== "messages" && view !== "pages";
+  const dockView = dockTabOf(view);
+  const mobileTitle = view === "messages" ? "Workspace" : viewLabels[view];
 
   return (
     <div
       className={cn(
         "xmatrix-app xmatrix-app-shell relative isolate m-0 flex h-dvh w-screen max-w-[100dvw] justify-start overflow-hidden bg-background text-foreground",
-        desktopFrameClass
+        desktopFrameClass,
+        isToolLayout && "app-tool-layout",
       )}
       aria-busy="true"
     >
@@ -960,7 +976,7 @@ export function StartupShell({
       )}
       <LiquidGlassFilter />
       <div className="app-ambient pointer-events-none fixed inset-0" />
-      {showMobileTabDock && <MobileTabDock activeView="messages" disabled onChangeView={inert} />}
+      {showMobileTabDock && <MobileTabDock activeView={dockView} disabled onChangeView={inert} />}
       {/* Rail and sidebar keep the desktop silhouette so the signed-in
           shell drops in without a layout jump. */}
       <aside
@@ -968,71 +984,120 @@ export function StartupShell({
         aria-hidden
       />
       {/* The same workspace panel the signed-in shell renders. */}
-      <div className="app-workspace-panel">
+      <div
+        className="app-workspace-panel"
+        style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}
+      >
         <aside
-          className="app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground md:flex"
-          style={{ "--app-desktop-sidebar-width": `${desktopSidebarWidth}px` } as CSSProperties}
+          className={cn(
+            "app-sidebar hidden w-[var(--app-desktop-sidebar-width)] flex-col bg-sidebar text-sidebar-foreground",
+            !hidesDesktopSidebar && "md:flex",
+          )}
         >
-          {/* The signed-in sidebar's own header and + row, waiting and inert,
-              so the list below sits where it will stay. */}
-          <div className="pointer-events-none" aria-hidden>
-            <SidebarSpaceHeader spaces={[]} currentSpaceId={STARTUP_PENDING_SPACE} renamingSpaceId={null}
-              error={null} currentUserId="" onSelectSpace={inert} onRenameSpace={inert} onManageSpaces={inert} />
-            <ListCreate action={{ label: "New conversation", onCreate: inert, disabled: true }} />
-          </div>
-          <div className="app-material-scroll-viewport app-sidebar-pane-body min-h-0 flex-1 overflow-y-auto">
-            <div className="app-material-scroll-content pointer-events-none min-h-full py-2 text-[15px] md:pt-0">
-              {rows((channel) => (
-                <ChannelNavItem
-                  key={channel.id}
-                  channel={channel}
-                  events={NO_EVENTS}
-                  active={false}
-                  isPinnedRoot={false}
-                  onSelect={inert}
-                  onTogglePinned={inert}
-                  onOpenContextMenu={inert}
-                />
-              ))}
+          {view === "pages" ? (
+            <div className="flex min-h-0 flex-1 flex-col" data-testid="page-tree">
+              <div className="app-band-header flex items-center px-5 pt-3 pb-2">
+                <span className="text-xs font-black uppercase tracking-wide text-muted-foreground">Pages</span>
+              </div>
+              <div className="pointer-events-none" aria-hidden>
+                <ListCreate action={{ label: "New page", onCreate: inert, disabled: true }} />
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto pb-4">
+                <PageListSkeleton label="Loading pages" rows={6} />
+              </div>
             </div>
-          </div>
+          ) : (
+            <>
+              {/* The signed-in sidebar's own header and + row, waiting and inert,
+                  so the list below sits where it will stay. */}
+              <div className="pointer-events-none" aria-hidden>
+                <SidebarSpaceHeader spaces={[]} currentSpaceId={STARTUP_PENDING_SPACE} renamingSpaceId={null}
+                  error={null} currentUserId="" onSelectSpace={inert} onRenameSpace={inert} onManageSpaces={inert} />
+                <ListCreate action={{ label: "New conversation", onCreate: inert, disabled: true }} />
+              </div>
+              <div className="app-material-scroll-viewport app-sidebar-pane-body min-h-0 flex-1 overflow-y-auto">
+                <div className="app-material-scroll-content pointer-events-none min-h-full py-2 text-[15px] md:pt-0">
+                  {rows((channel) => (
+                    <ChannelNavItem
+                      key={channel.id}
+                      channel={channel}
+                      events={NO_EVENTS}
+                      active={false}
+                      isPinnedRoot={false}
+                      onSelect={inert}
+                      onTogglePinned={inert}
+                      onOpenContextMenu={inert}
+                    />
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </aside>
         <main className="app-main relative flex min-w-0 max-w-full flex-1 flex-col overflow-hidden bg-card/80">
           <header className="app-topbar flex h-12 shrink-0 items-center gap-2 bg-background px-3 text-foreground sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,36rem)_minmax(0,1fr)]">
             <div className="relative min-w-0 flex-1 md:hidden">
               <div className="app-mobile-title min-w-0">
-                <p className="truncate text-sm font-black">Workspace</p>
+                <p className="truncate text-sm font-black">{mobileTitle}</p>
               </div>
             </div>
           </header>
-          <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
-            <div className="app-material-scroll-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
-              <div className="app-material-scroll-content min-h-full shrink-0">
-                <div className="app-mobile-chat-list pointer-events-none">
-                  {rows((channel) => (
-                    <MobileChannelChatRow
-                      key={channel.id}
-                      displayChannel={channel}
-                      events={NO_EVENTS}
-                      active={false}
-                      badgeCount={0}
-                      hasMention={false}
-                      onOpen={inert}
-                      onOpenActions={inert}
-                    />
-                  ))}
+          {view === "messages" ? (
+            <>
+              <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
+                <div className="app-material-scroll-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+                  <div className="app-material-scroll-content min-h-full shrink-0">
+                    <div className="app-mobile-chat-list pointer-events-none">
+                      {rows((channel) => (
+                        <MobileChannelChatRow
+                          key={channel.id}
+                          displayChannel={channel}
+                          events={NO_EVENTS}
+                          active={false}
+                          badgeCount={0}
+                          hasMention={false}
+                          onOpen={inert}
+                          onOpenActions={inert}
+                        />
+                      ))}
+                    </div>
+                    <StartupStatus />
+                  </div>
                 </div>
-                <StartupStatus />
               </div>
-            </div>
-          </div>
-          {/* The desktop reading slab, present so the message surface does not
-              pop in over bare ambient when the shell lands. */}
-          <div className="hidden min-h-0 min-w-0 flex-1 overflow-hidden md:flex">
-            <section className="app-message-surface relative flex min-w-0 flex-1 flex-col items-center justify-center overflow-hidden">
-              <StartupStatus />
-            </section>
-          </div>
+              {/* The desktop reading slab, present so the message surface does not
+                  pop in over bare ambient when the shell lands. */}
+              <div className="hidden min-h-0 min-w-0 flex-1 overflow-hidden md:flex">
+                <section className="app-message-surface relative flex min-w-0 flex-1 flex-col items-center justify-center overflow-hidden">
+                  <StartupStatus />
+                </section>
+              </div>
+            </>
+          ) : view === "pages" ? (
+            <>
+              <div className="app-mobile-chat-pane app-mobile-channel-list-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden md:hidden">
+                <div className="app-material-scroll-viewport flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+                  <div className="app-material-scroll-content app-mobile-page-list min-h-full shrink-0 pb-1 text-base">
+                    <PageListSkeleton label="Loading pages" rows={6} />
+                    <StartupStatus />
+                  </div>
+                </div>
+              </div>
+              <div className="hidden min-h-0 min-w-0 flex-1 flex-col md:flex">
+                <div className="app-page-band shrink-0 px-6 lg:px-12">
+                  <header className="mx-auto max-w-3xl app-band-header flex items-center" aria-hidden="true" />
+                </div>
+                <article className="app-page-article min-h-0 min-w-0 flex-1 overflow-y-auto px-6 pt-4 pb-6 lg:px-12">
+                  <div className="mx-auto max-w-3xl">
+                    <PageDocumentSkeleton label="Loading page" />
+                    <StartupStatus />
+                  </div>
+                </article>
+              </div>
+            </>
+          ) : (
+            <ToolSurfaceSkeleton view={view} status={<StartupStatus />} />
+          )}
         </main>
       </div>
     </div>

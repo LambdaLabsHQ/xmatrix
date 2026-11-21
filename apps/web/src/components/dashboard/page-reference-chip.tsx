@@ -91,7 +91,7 @@ export function MessageReferenceChip({ span }: { span: MessageReferenceSpan }) {
 }
 
 /** The chip and its hover preview, shared by page and channel references. */
-export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, testId, data, onOpen,
+export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, testId, data, onOpen, action = null,
   className = "app-page-reference-chip", popupClassName = "" }: {
   icon: ReactNode;
   label: ReactNode;
@@ -102,6 +102,8 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
   testId: "page-reference" | "channel-reference" | "conversation-page" | "request-reference";
   data: Record<`data-${string}`, string | undefined>;
   onOpen: () => void;
+  /** A control under the preview, such as unlinking a page from its conversation; it does not open the target. */
+  action?: ReactNode;
   className?: string;
   /** Added to the preview's panel, for a reference whose preview is more than a status line. */
   popupClassName?: string;
@@ -151,6 +153,9 @@ export function ReferenceChip({ icon, label, title, badge, preview, ariaLabel, t
               {badge && <span className="app-page-reference-popup-rev">{badge}</span>}
             </div>
             <Popover.Description className="app-page-reference-popup-body">{preview}</Popover.Description>
+            {action && (
+              <div className="app-page-reference-popup-action" onClick={(event) => event.stopPropagation()}>{action}</div>
+            )}
           </Popover.Popup>
         </Popover.Positioner>
       </Popover.Portal>

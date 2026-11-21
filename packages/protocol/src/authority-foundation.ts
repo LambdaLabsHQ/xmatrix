@@ -926,19 +926,31 @@ export function isAgentUsageLimitLifecycle(message: {
  * "rate limit", "overloaded") is retried by the provider CLIs and is not a
  * usage limit.
  */
+const SCOPED_BILLING_REFUSAL_PHRASES = [
+  // Cursor CLI refuses non-Auto (API) models with this message while Auto
+  // stays included on the same account.
+  "add a payment method to continue",
+] as const;
+
 const ACCOUNT_BILLING_REFUSAL_PHRASES = [
   // A prepaid API account with nothing left (DeepSeek and Moonshot "Insufficient Balance",
   // OpenRouter "Insufficient credits", Anthropic "credit balance is too low").
   "insufficient balance", "insufficient credits", "credit balance is too low", "余额不足",
-  // Cursor CLI's whole reply when its account has no payment method or credit left.
-  "add a payment method to continue",
+  ...SCOPED_BILLING_REFUSAL_PHRASES,
 ] as const;
 
-/** Whether a provider error refuses the whole account for billing/payment until
- * fixed (no time-based reset). */
+/** Whether a provider error refuses billing/payment until fixed (no time-based reset). */
 export function isAccountBillingRefusalError(error: string | undefined | null): boolean {
   const lower = (error ?? "").toLowerCase();
   return ACCOUNT_BILLING_REFUSAL_PHRASES.some((phrase) => lower.includes(phrase));
+}
+
+/** Whether a billing refusal can apply to one model's quota scope alone
+ * (e.g. Cursor's `API` pool requiring a payment method while `Auto` runs
+ * included) rather than an empty prepaid account balance. */
+export function isScopedBillingRefusalError(error: string | undefined | null): boolean {
+  const lower = (error ?? "").toLowerCase();
+  return SCOPED_BILLING_REFUSAL_PHRASES.some((phrase) => lower.includes(phrase));
 }
 
 export function agentUsageLimitFromError(error: string | undefined | null): { resetsAt?: string } | undefined {

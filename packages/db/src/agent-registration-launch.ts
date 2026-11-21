@@ -73,6 +73,7 @@ import { MessageAuthorityError } from "./message-authority-error.js";
 import { lockChannelLifecycle } from "./channel-capability-policy.js";
 import { instanceOrdinalFor, reserveNaturalKey } from "./natural-keys.js";
 import { commitRuntime } from "./runtime-control.js";
+import { machineUnansweredAtSql } from "./machine-control.js";
 
 interface LaunchRequest {
   quotaRetry?: AgentQuotaRetryAdmission;
@@ -158,6 +159,10 @@ export interface RegistrationLaunchCandidate {
    * no reply, within SILENT_SUMMON_WINDOW_HOURS, each of its last
    * SILENT_SUMMONS summons in the Space having gone that way; routing ranks it last. */
   unansweredAt?: string;
+  /** When the Machine last left a command the Hub sent it unanswered to the
+   * end, and has answered none since (machineUnansweredAtSql); routing ranks
+   * every environment on it last. */
+  machineUnansweredAt?: string;
   /** The harness's median time from a connected Run to its first reply,
    * across every launch in the last RESPONSE_LATENCY_WINDOW_DAYS; absent with
    * fewer than RESPONSE_LATENCY_MIN_SAMPLES. Routing prefers the faster. */
@@ -166,7 +171,9 @@ export interface RegistrationLaunchCandidate {
   uninstalled?: boolean;
   /** Daemon inventory or a recent unrecovered runtime refusal shows this harness signed out. */
   signedOut?: boolean;
-  /** Account-level billing/payment refusal is held until a direct Run succeeds on this registration. */
+  /** Account-level billing/payment refusal is held until a direct Run succeeds
+   * on this registration. Ranking only: whether a model is used up is
+   * `routingQuotaVerdict` on `observations.quota.usage` (`billingHolds`). */
   accountBillingRefusal?: boolean;
 }
 
@@ -1346,9 +1353,10 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         if (workspaces.length > 100) throw new RegistrationAccessError("registration_workspaces_limit", 409);
         // The daemons preparation can route to (see workspace()): online, or
         // in the reconnect grace, and taking launch settings from the Hub registration.
-        const daemons = await tx.query({ name: "registration_launch_daemon_facts_v8",
+        const daemons = await tx.query({ name: "registration_launch_daemon_facts_v9",
           text: `SELECT hostname,capabilities_json,metadata_json,connection_epoch,status,
             status='offline' AND updated_at>=statement_timestamp()-interval '${MACHINE_RECONNECT_GRACE_SECONDS} seconds' AS reconnecting,
+            ${machineUnansweredAtSql("$1", "$2")} AS machine_unanswered_at,
             (SELECT name FROM data.machines machine
             WHERE machine.owner_user_id=$1 AND machine.machine_id=$2) AS machine_name,(SELECT auto_assign FROM data.machines machine
             WHERE machine.owner_user_id=$1 AND machine.machine_id=$2) AS auto_assign
@@ -1428,6 +1436,8 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
               observation?.parameter_model, models.map(model => environment.modelAliases?.[model] ?? model), Date.now()) : undefined;
         const startupFailedAt = observation?.startup_failed_at ? new Date(observation.startup_failed_at).toISOString() : undefined;
         const unansweredAt = observation?.unanswered_at ? new Date(observation.unanswered_at).toISOString() : undefined;
+        const machineUnansweredAt = daemon.machine_unanswered_at
+          ? new Date(daemon.machine_unanswered_at as string | Date).toISOString() : undefined;
         const harnessInventory = daemonHarnessInventory(daemon);
         const harnessEntry = harnessInventory?.items.find(item => item.id === candidate.key.harness);
         const uninstalled = harnessEntry?.installed === false;
@@ -1446,6 +1456,7 @@ export class PostgresRegistrationLaunchRepository extends RegistrationPreparatio
         offered.push({ ...candidate, workspaceReferences, models, modelCatalog, ...parameterObservation,
           ...(catalogModels ? { catalogModels } : {}),
           ...(startupFailedAt ? { startupFailedAt } : {}), ...(unansweredAt ? { unansweredAt } : {}),
+          ...(machineUnansweredAt ? { machineUnansweredAt } : {}),
           ...(uninstalled ? { uninstalled: true } : {}),
           ...(signedOut ? { signedOut: true } : {}),
           ...(accountBillingRefusal ? { accountBillingRefusal: true } : {}),

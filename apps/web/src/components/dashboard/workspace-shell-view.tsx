@@ -113,18 +113,19 @@ import { channelTitle } from "@/components/dashboard/channel-links";
 import { WorkspaceSearchDialog } from "./workspace-search";
 import type { SearchFilters } from "./workspace-search-model";
 import { ConversationPageCards, useConversationPages } from "@/components/pages/conversation-page-cards";
-import { ContentSkeleton } from "./content-skeleton";
+import { ToolPaper } from "./tool-split";
+import { ActiveToolSurfaceLoading, ActiveToolViewContext, ToolDetailSkeleton } from "./view-skeletons";
 
 // Views the first screen does not draw load when first shown, so their code is
-// not downloaded and parsed before the app opens. A view panel shows the
-// skeleton while it loads; the trace window opens over the app once loaded.
+// not downloaded and parsed before the app opens. A view panel shows its own
+// layout skeleton while it loads; the trace window opens over the app once loaded.
 const ToolSurface = dynamic(() => import("./workspace-tool-surface").then((module) => module.ToolSurface), {
   ssr: false,
-  loading: () => <ContentSkeleton label="Loading" lines={6} className="flex-1 p-6" />,
+  loading: () => <ActiveToolSurfaceLoading />,
 });
 const AgentConfigPage = dynamic(() => import("./agent-config-page").then((module) => module.AgentConfigPage), {
   ssr: false,
-  loading: () => <ContentSkeleton label="Loading" lines={6} className="flex-1 p-6" />,
+  loading: () => <ToolPaper label="Agent"><ToolDetailSkeleton label="Loading" /></ToolPaper>,
 });
 const AgentInstanceDetailWindow = dynamic(() => import("./agent-trace-window").then((module) => module.AgentInstanceDetailWindow), {
   ssr: false,
@@ -1080,6 +1081,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
     return (
       <StartupShell
         channels={cachedCatalogChannels}
+        view={routeInfo.view}
         desktopFrameClass={desktopFrameClass}
         showMobileTabDock={!isIOSNativeShell}
       />
@@ -1402,6 +1404,9 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   const pagesViewSurface = (
     <PagesView spaceId={currentSpaceId} token={token ?? ""} selectedPageId={selectedPageId} creation={pageCreation}
       members={currentSpace?.members}
+      commentComposer={{ space: currentSpace, token: token ?? null, workspaces: projects,
+        localContext: localMentionContext, onOpenAppsForSpace: openAppsForSpace,
+        onEditHarnessProfile: openHarnessProfile }}
       onSelectPage={openPage} onOpenSection={openPageAt} onPageDeleted={closePage} conversation={pageConversation} onSend={sendInConversation} focusSection={pageSectionRequest}
       onReturnToMessage={(from) => navigateToChannel(from.channelId, from.messageId)}
       activeConversationId={selectedPageId ? selectedChannelId : null}
@@ -1412,10 +1417,11 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onExpandConversation={(conversationId) => navigateToChannel(conversationId)}
       onOpenConversation={(conversationId, at) => openPageConversation(conversationId, at ? { at } : {})}
       onConversationIntent={resolvePageConversation} onResolveConversation={readPageConversation}
-      onDiscuss={({ firstMessage, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
+      onDiscuss={({ firstMessage, firstSelections, quote, open, coWrite, planned, sent, existing, ...input }) => startPageConversation(input,
         { ...(firstMessage ? { firstMessage } : {}), ...(quote ? { quote } : {}),
           ...(open === false ? { open } : {}), ...(coWrite ? { coWrite } : {}), ...(planned ? { planned } : {}),
-          ...(sent ? { sent } : {}), ...(existing ? { existing } : {}) })}
+          ...(sent ? { sent } : {}), ...(existing ? { existing } : {}),
+          ...(firstSelections ? { firstSelections } : {}) })}
       canMigrate={canMovePages}
       layout={isMobileViewport ? "phone" : "desktop"} />
   );
@@ -1424,6 +1430,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
   // More tab holds the current tool view. Building it from a function keeps
   // the prop list in one place while letting each pane mount independently.
   const renderToolSurface = (surfaceView: Exclude<AppView, "messages">) => (
+    <ActiveToolViewContext.Provider value={surfaceView}>
     <ToolSurface
       // ToolSurface has no "messages" or "pages" surface. Only the offscreen
       // fallback below uses a non-tool view, so it is never displayed.
@@ -1495,6 +1502,7 @@ export function WorkspaceShellView({ model }: { model: WorkspaceShellModel }) {
       onOpenLocalManagedAgentEdit={openLocalManagedAgentEdit}
       onDeleteAgent={(agent) => void deleteAgent(agent)}
     />
+    </ActiveToolViewContext.Provider>
   );
   const toolSurface = renderToolSurface(view === "messages" || view === "pages" ? "more" : view as Exclude<AppView, "messages">);
   // The Agents tab's pane is whichever of its addresses is open, so a machine or an agent opens over its list in place.

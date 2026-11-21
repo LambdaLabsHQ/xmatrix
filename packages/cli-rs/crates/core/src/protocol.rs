@@ -808,22 +808,6 @@ pub struct ChannelMessage {
 /// Metadata provenance of an activity entry (docs/design/conversation-activity.md).
 pub(crate) const CHANNEL_ACTIVITY_PROVENANCE: &str = "activity";
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum ChannelActivityPlanStepStatus {
-    Pending,
-    InProgress,
-    Completed,
-}
-
-/// One step of the reporting Run's own plan.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ChannelActivityPlanStep {
-    pub text: String,
-    pub status: ChannelActivityPlanStepStatus,
-}
-
 /// A fact a Run's runtime observed about its own work, reported with
 /// `channel_activity` and kept in the timeline as a compact entry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -833,13 +817,6 @@ pub struct ChannelActivityPlanStep {
     rename_all_fields = "camelCase"
 )]
 pub enum ChannelActivity {
-    Plan {
-        /// Steps completed since the previous plan entry, oldest first.
-        completed: Vec<String>,
-        #[serde(skip_serializing_if = "Option::is_none", default)]
-        in_progress: Option<String>,
-        steps: Vec<ChannelActivityPlanStep>,
-    },
     PullRequest {
         url: String,
         #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -852,10 +829,27 @@ pub enum ChannelActivity {
 /// The activity an activity entry carries, from its metadata.
 pub(crate) fn channel_activity_of(metadata: Option<&serde_json::Value>) -> Option<ChannelActivity> {
     let metadata = metadata?;
-    if metadata.get("xmatrixProvenance")?.as_str()? != CHANNEL_ACTIVITY_PROVENANCE {
+    if !is_channel_activity(Some(metadata)) {
         return None;
     }
     serde_json::from_value(metadata.get("xmatrixActivity")?.clone()).ok()
+}
+
+fn is_channel_activity(metadata: Option<&serde_json::Value>) -> bool {
+    metadata
+        .and_then(|metadata| metadata.get("xmatrixProvenance"))
+        .and_then(serde_json::Value::as_str)
+        == Some(CHANNEL_ACTIVITY_PROVENANCE)
+}
+
+/// A runtime plan entry stored before plans were retired.
+fn is_retired_plan(metadata: Option<&serde_json::Value>) -> bool {
+    is_channel_activity(metadata)
+        && metadata
+            .and_then(|metadata| metadata.get("xmatrixActivity"))
+            .and_then(|activity| activity.get("kind"))
+            .and_then(serde_json::Value::as_str)
+            == Some("plan")
 }
 
 /// How history prints an entry nobody needs to read in full
@@ -866,8 +860,20 @@ pub fn folded_history_line(message: &ChannelMessage) -> Option<String> {
     if message.recalled_at.is_some() {
         return None;
     }
-    channel_activity_of(message.metadata.as_ref())
-        .map(|activity| format!("▸ {}", channel_activity_line(&activity)))
+    if let Some(activity) = channel_activity_of(message.metadata.as_ref()) {
+        return Some(format!("▸ {}", channel_activity_line(&activity)));
+    }
+    // A retired runtime plan entry still folds, as the line the Hub stored.
+    is_retired_plan(message.metadata.as_ref()).then(|| {
+        format!(
+            "▸ {}",
+            message
+                .body
+                .split_whitespace()
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    })
 }
 
 /// One plain line for an activity entry, the same glyphs the web shows.
@@ -883,26 +889,6 @@ pub(crate) fn channel_activity_line(activity: &ChannelActivity) -> String {
             }
             _ => format!("↗ Opened pull request {url}"),
         },
-        ChannelActivity::Plan {
-            completed,
-            in_progress,
-            steps,
-        } => {
-            let parts: Vec<String> = completed
-                .iter()
-                .map(|step| format!("✓ {step}"))
-                .chain(in_progress.iter().map(|step| format!("→ {step}")))
-                .collect();
-            if parts.is_empty() {
-                format!(
-                    "Plan: {} step{}",
-                    steps.len(),
-                    if steps.len() == 1 { "" } else { "s" }
-                )
-            } else {
-                parts.join(" · ")
-            }
-        }
     }
 }
 
@@ -1876,6 +1862,7 @@ mod tests {
 
     #[test]
     fn activity_entries_fold_to_one_history_line() {
+        // A retired `plan` entry still folds, as the line the Hub stored.
         let activity = history_entry(serde_json::json!({
             "body": "✓ Run e2e · → Open PR 2",
             "metadata": { "xmatrixProvenance": "activity", "xmatrixActivity": {
@@ -1900,6 +1887,12 @@ mod tests {
             folded_history_line(&history_entry(serde_json::json!({}))),
             None
         );
+        // An App's activity that is no plan (GitHub following a pull request) stays whole.
+        let following = history_entry(serde_json::json!({
+            "metadata": { "xmatrixProvenance": "activity",
+                "xmatrixGitHubPullRequest": { "event": "subscribed" } },
+        }));
+        assert_eq!(folded_history_line(&following), None);
         // A Hub that still sends a supersession leaves the message whole.
         assert_eq!(
             folded_history_line(&history_entry(serde_json::json!({ "supersededBy": "m-9" }))),
@@ -1924,21 +1917,17 @@ mod tests {
         let message = AgentInstanceClientMessage::ChannelActivity {
             request_id: Some("r-1".into()),
             channel_id: "c-1".into(),
-            activity: ChannelActivity::Plan {
-                completed: vec!["a".into()],
-                in_progress: Some("b".into()),
-                steps: vec![ChannelActivityPlanStep {
-                    text: "b".into(),
-                    status: ChannelActivityPlanStepStatus::InProgress,
-                }],
+            activity: ChannelActivity::PullRequest {
+                url: "https://github.com/a/b/pull/1".into(),
+                repository: None,
+                number: None,
             },
         };
         assert_eq!(
             serde_json::to_value(&message).unwrap(),
             serde_json::json!({
                 "type": "channel_activity", "requestId": "r-1", "channelId": "c-1",
-                "activity": { "kind": "plan", "completed": ["a"], "inProgress": "b",
-                    "steps": [{ "text": "b", "status": "in_progress" }] },
+                "activity": { "kind": "pull_request", "url": "https://github.com/a/b/pull/1" },
             })
         );
         let pull_request = serde_json::to_value(ChannelActivity::PullRequest {

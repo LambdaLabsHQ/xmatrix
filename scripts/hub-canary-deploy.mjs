@@ -97,6 +97,23 @@ function assertHoldMs(value) {
   return value;
 }
 
+// A version just listed can still be unknown to `versions view` for a few seconds (Cloudflare code 100146).
+const VERSION_LOOKUP_ATTEMPTS = 6;
+const VERSION_LOOKUP_DELAY_MS = 5_000;
+const VERSION_NOT_FOUND = /version could not be found|code: 100146/iu;
+
+async function viewVersion(run, workerArgs, versionId, sleep) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await run(["versions", "view", versionId, ...workerArgs, "--json"]);
+    } catch (error) {
+      const detail = `${error?.stderr ?? ""}\n${error?.message ?? ""}`;
+      if (attempt >= VERSION_LOOKUP_ATTEMPTS || !VERSION_NOT_FOUND.test(detail)) throw error;
+      await sleep(VERSION_LOOKUP_DELAY_MS * attempt);
+    }
+  }
+}
+
 async function runWithRetry(run, args, attempts, sleep) {
   for (let attempt = 1; ; attempt += 1) {
     try {
@@ -160,10 +177,11 @@ export async function deployWithCanary({
   let versionId;
   try {
     await runWithRetry(run, uploadArgs, uploadAttempts, sleep);
-    for (let attempt = 1; attempt <= 3 && versionId === undefined; attempt += 1) {
+    // Cloudflare lists a new version some seconds after its upload returns.
+    for (let attempt = 1; attempt <= VERSION_LOOKUP_ATTEMPTS && versionId === undefined; attempt += 1) {
       const versions = JSON.parse((await run(["versions", "list", ...workerArgs, "--json"])).stdout);
       versionId = versionIdForTag(versions, tag) ?? undefined;
-      if (versionId === undefined && attempt < 3) await sleep(2_000);
+      if (versionId === undefined && attempt < VERSION_LOOKUP_ATTEMPTS) await sleep(VERSION_LOOKUP_DELAY_MS * attempt);
     }
     if (versionId === undefined) fail(`uploaded version tagged ${tag} was not found`);
   } catch (error) {
@@ -177,7 +195,7 @@ export async function deployWithCanary({
   // Prove the version itself carries the selected secrets before the first
   // byte of traffic reaches it. No deployment has happened yet, so a failure
   // here leaves the running version untouched.
-  const version = JSON.parse((await run(["versions", "view", versionId, ...workerArgs, "--json"])).stdout);
+  const version = JSON.parse((await viewVersion(run, [...workerArgs], versionId, sleep)).stdout);
   assertVersionSecrets(version, expectedSecretNames);
   log(`[hub-canary] uploaded version carries the ${expectedSecretNames.length} selected secret name(s)`);
 

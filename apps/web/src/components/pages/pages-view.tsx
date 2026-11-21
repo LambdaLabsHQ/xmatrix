@@ -1,5 +1,6 @@
 "use client";
-import { automaticConversationName, channelPresenceInstances, pageReferenceToken, pageTitleLine } from "@xmatrix/protocol";
+import { automaticConversationName, channelPresenceInstances, pageReferenceToken, pageTitleLine,
+  type AgentInvocationSelection } from "@xmatrix/protocol";
 
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
@@ -24,7 +25,7 @@ import {
 } from "@/lib/pages/page-client";
 import type { PageBlameSource } from "./page-blame";
 import { cn } from "@/lib/utils";
-import { ListSkeleton } from "@/components/dashboard/content-skeleton";
+import { PageDocumentSkeleton, PageListSkeleton } from "@/components/dashboard/view-skeletons";
 import { CountPill } from "@/components/dashboard/count-pill";
 import { Face } from "@/components/dashboard/face";
 import { MobileInlineActions } from "@/components/dashboard/mobile-inline-actions";
@@ -63,6 +64,7 @@ import {
 import { refetchUnlessHumanPush } from "@/components/dashboard/workspace-resource-push";
 import { PageMigrationReview, usePageMigration } from "./page-migration-review";
 import { commentBody, commentTaker } from "./page-comment";
+import type { PageCommentComposerContext } from "./page-comment-box";
 import { instanceCall, pageInstances, type PageInstance } from "./page-instances";
 import { NEW_PAGE_ID, NEW_PAGE_TITLE, type PageCreation } from "./page-creation";
 import { PageTreeRow } from "./page-tree-row";
@@ -408,7 +410,7 @@ export function PageTreePanel({ spaceId, token, selectedPageId, onSelectPage, on
   const contents = (
     <>
       <div className="min-h-0 flex-1 overflow-y-auto pb-4">
-        {tree.isLoading && <ListSkeleton label="Loading pages" rows={6} />}
+        {tree.isLoading && <PageListSkeleton label="Loading pages" rows={6} />}
         {tree.isError && <p className={`${inset} text-sm text-destructive`}>Pages are unavailable.</p>}
         {tree.data && roots.length === 0 && (
           <div className={`${inset} py-4 text-sm text-muted-foreground`}>
@@ -566,8 +568,10 @@ const NO_MEMBERS: readonly SpaceMember[] = [];
 export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpenSection, onPageDeleted, conversation, onSend, activeConversationId = null,
   renderConversation, onConversationDockChange, onCloseConversation, onExpandConversation, onOpenConversation,
   onConversationIntent, onResolveConversation, onDiscuss, canMigrate, layout = "desktop", focusSection = null, onReturnToMessage,
-  creation, members = NO_MEMBERS }: {
+  creation, members = NO_MEMBERS, commentComposer }: {
   spaceId: string | null;
+  /** What a comment's box completes from: the Space's Agents, conditions, apps, as a conversation's composer. */
+  commentComposer?: PageCommentComposerContext;
   token: string;
   /** The Space's members, whom an `@` in a page names. */
   members?: readonly SpaceMember[];
@@ -599,6 +603,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   onResolveConversation: (conversationId: string) => Promise<ChannelSnapshot | null>;
   onDiscuss: (input: { spaceId: string; pageId: string; blockId: string; name: string; restricted: boolean;
     anchor?: PageLinkAnchor; firstMessage?: string; quote?: DiscussionQuote; open?: boolean; coWrite?: boolean;
+    /** The Agents picked in the first message, measured against it. */
+    firstSelections?: AgentInvocationSelection[];
     /** Hears the conversation's id as soon as it is known, before the Hub has made or linked it. */
     planned?: (conversationId: string) => void;
     /** Hears the first message's stored id once it is sent, or null when it was not confirmed. */
@@ -1221,24 +1227,25 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     const agent = takerOf(blockId);
     return agent && listedAgents([agent])[0];
   };
-  const comment: NonNullable<PageSectionActions["comment"]> = async (blockId, anchor, text) => {
+  const comment: NonNullable<PageSectionActions["comment"]> = async (blockId, anchor, { body: text, selections }) => {
     const origins = [...new Set(awareness.data?.blocks.find((block) => block.blockId === blockId)
       ?.updated?.conversationIds ?? [])];
     const knownOrigins = origins.filter((id) => conversation(id));
     const origin = knownOrigins.length === 1 ? knownOrigins[0] : origins.length === 1 ? origins[0] : undefined;
-    const { body, taker, conversationId } = commentBody(text, writers.agents.map((agent) => agent.harness),
-      takerOf(blockId) ?? commentTaker(liveOnPage, blockId, () => true), liveOnPage, origin);
+    const { body, selections: picks, taker, conversationId } = commentBody(text,
+      writers.agents.map((agent) => agent.harness),
+      takerOf(blockId) ?? commentTaker(liveOnPage, blockId, () => true), liveOnPage, origin, selections);
     const target = taker?.conversationId ?? conversationId;
     try {
       const home = target ? conversation(target) ?? await onResolveConversation(target) : null;
       if (target && !home) throw new UserFacingProblem("This conversation is no longer available.");
-      startDiscussion(blockId, anchor, { body, ...(home ? { existing: home } : {}) });
+      startDiscussion(blockId, anchor, { body, selections: picks ?? [], ...(home ? { existing: home } : {}) });
     } catch (cause) {
       setNotice(userErrorMessage(cause, "Couldn't send the message"));
     }
   };
   const startDiscussion = (blockId: string, anchor?: Parameters<NonNullable<PageSectionActions["discuss"]>>[1],
-    said?: { body: string; existing?: ChannelSnapshot }) => {
+    said?: { body: string; selections: AgentInvocationSelection[]; existing?: ChannelSnapshot }) => {
     if (!page) return;
     const title = blocks.find((block) => block.id === blockId)?.title;
     // A discussion of a section is named by the section; of a passage, by what was written about it, and by the
@@ -1252,12 +1259,14 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
         pageId: page.pageId, blockId, source: "manual", createdAt: now, lastSeenAt: now, anchor: anchor ?? null }]);
     };
     const quote = anchor ? discussionQuote(anchor.quote, { label: place, href: blockLink(blockId) }, true) : undefined;
-    const firstMessage = said && (quote ? quotedMessage(quote, { body: said.body, selections: [] }).body : said.body);
+    const first = said && (quote ? quotedMessage(quote, said) : said);
+    const firstMessage = first?.body;
     void onDiscuss({ spaceId, pageId: page.pageId, blockId,
       name: !anchor ? place
         : firstMessage !== undefined ? automaticConversationName(firstMessage) : discussionTitle(anchor.quote),
       restricted, planned, ...(anchor ? { anchor } : {}),
-      ...(firstMessage !== undefined ? { firstMessage, open: false } : quote ? { quote } : {}),
+      ...(first ? { firstMessage: first.body, open: false,
+        ...(first.selections.length ? { firstSelections: first.selections } : {}) } : quote ? { quote } : {}),
       ...(said?.existing ? { existing: said.existing } : {}) })
       .then(() => links.refetch(), (cause: Error) => setNotice(cause.message))
       .finally(() => setStartedLinks((current) => current.filter((link) => link.conversationId !== started)));
@@ -1341,7 +1350,8 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
     setMode("history");
   };
   // What selecting text offers, for the section the selection is in.
-  const sectionActions: PageSectionActions = { discuss, comment, commentTaker: commentTakerFace };
+  const sectionActions: PageSectionActions = { discuss, comment, commentTaker: commentTakerFace,
+    ...(commentComposer ? { commentComposer } : {}) };
   // What a heading offers, beside it (§3.2).
   const headingActions: HeadingActions = {
     canEdit,
@@ -1745,6 +1755,9 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
                       // Where the editor's host holds its height.
                       <div className="min-h-[50vh]"><PageDocumentStatic body={document.data.body} testId="page-preview"
                         references={references} mediaUrl={mediaUrl} onAnchorOffsets={setPreviewTops} /></div>
+                    )}
+                    {!pending && !drawn && !document.data && !document.isError && (tree.isLoading || document.isLoading || Boolean(page)) && (
+                      <PageDocumentSkeleton label="Loading page" />
                     )}
                     <div className={drawn ? undefined : "hidden"}>
                       {session && <PageEditor key={session.doc.guid} session={session} canEdit={canEdit} writeOn={writeOn}

@@ -9,6 +9,7 @@ import { SegmentedTabs } from "@/components/ui/segmented-tabs";
 import { useAuth } from "@/lib/auth-context";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
+import { SkeletonBar } from "./content-skeleton";
 
 import {
   MACHINE_LOAD_SERIES, formatLoadValue, formatPointTime,
@@ -54,7 +55,17 @@ export function MachineLoadHistoryChart({ machineId, token }: { machineId: strin
       {history.isError ? (
         <p className="text-sm text-muted-foreground">Load history is unavailable right now.</p>
       ) : !data ? (
-        <p className="text-sm text-muted-foreground">Loading load history…</p>
+        <div className="app-skeleton-inert space-y-3" role="status" aria-label="Loading load history">
+          {MACHINE_LOAD_SERIES.map((item) => (
+            <figure key={item.key} className="m-0 space-y-1" aria-hidden="true">
+              <figcaption className="flex items-baseline justify-between gap-3 text-sm">
+                <span className="text-muted-foreground">{item.label}</span>
+                <span><SkeletonBar width="5rem" /></span>
+              </figcaption>
+              <span className="app-media-skeleton block h-14 min-h-0 w-full" />
+            </figure>
+          ))}
+        </div>
       ) : series.length === 0 ? (
         <p className="text-sm text-muted-foreground">No load samples in this range yet.</p>
       ) : (

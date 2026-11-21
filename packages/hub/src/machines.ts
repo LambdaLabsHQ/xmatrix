@@ -19,10 +19,12 @@ import {
 } from "./relay-authority-machine-daemon-wake";
 import { machineDaemonReachable } from "./runtime-transport/machine-daemon-deliverable";
 import { wakeRegistrationChannels } from "./registration-authority-wake";
+import { wakeAgentLaunchChannel } from "./agent-launch-coordinator-wake";
 
 export interface MachineCommandEnv extends PostgresAuthorityBindingEnv {
   MACHINE_NAME_REQUIRED?: string;
   XMATRIX_RUNTIME_LOCATION_HINT?: string;
+  RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL?: DurableObjectNamespace;
   RELAY_RUNTIME?: {
     idFromName(name: string): unknown;
     get(id: unknown): { fetch(request: Request): Promise<Response> };
@@ -141,6 +143,21 @@ function runtimeIssueWake(env: MachineCommandEnv): MachineIssueWake | undefined 
  * as failed delivery and that connection reads as offline. A wake that never
  * got an answer, or a daemon that has since reconnected, is left alone.
  */
+/**
+ * A claim that ended starts its machine never answered recorded their
+ * reports; their Channels' coordinators are told now. The report is already
+ * durable and a Channel with a start outstanding looks again within seconds,
+ * so a wake that fails costs those seconds and must not fail the claim.
+ */
+async function wakeUnansweredRunChannels(env: MachineCommandEnv, channelIds: unknown): Promise<void> {
+  if (!Array.isArray(channelIds)) return;
+  await Promise.all(channelIds.filter((id): id is string => typeof id === "string" && id.length > 0).map(channelId =>
+    wakeAgentLaunchChannel(env.RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL, { channelId, work: ["runTerminal", "launch"] })
+      .then(response => { if (!response.ok) throw new Error(`wake answered ${response.status}`); })
+      .catch((error: unknown) => console.warn("Unanswered start wake failed", { channelId,
+        error: error instanceof Error ? error.message : String(error) }))));
+}
+
 export async function machineDaemonCommand(
   env: MachineCommandEnv,
   input: Record<string, unknown>,
@@ -157,6 +174,7 @@ export async function machineDaemonCommand(
     ? input.daemonId.trim() : current?.daemon?.id ?? stableMachineDaemonId(ownerUserId, machineId, hostId);
   let value = await repository.command({ ...input, requireMachineName: env.MACHINE_NAME_REQUIRED === "true",
     daemonId });
+  if (input.action === "claim") await wakeUnansweredRunChannels(env, value.unansweredRunChannelIds);
   if (input.action !== "issue" && input.action !== "issue_batch") return value;
   const wake = dependencies.wake ?? runtimeIssueWake(env);
   const woken = wake ? await wake(input, value) : undefined;

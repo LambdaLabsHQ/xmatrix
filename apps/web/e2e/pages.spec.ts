@@ -1428,6 +1428,43 @@ for (const target of ["live", "mentioned", "edited", "uncatalogued", "edited-unc
   });
 }
 
+test("a comment's @ lists the Agents the Space can start, as a conversation's composer does; a picked one starts a new discussion", async ({ page: browser }) => {
+  await browser.setViewportSize({ width: 1600, height: 900 });
+  await stubPages(browser, [page("p-relay", null, "Relay", "V")]);
+  await stubWriters(browser, ["grok", "codex"]);
+  // grok is at work on the page, so a comment naming nobody would go to it.
+  await fixtureJson(browser, "page-agents", /\/api\/xmatrix\/spaces\/[^/]+\/page-links\/agents$/u, {
+    pages: [{ pageId: "p-relay", agents: [{ instanceId: "i-grok", name: "grok:1", status: "busy",
+      conversationId: E2E_CHANNEL.id, activity: "thinking", blockId: "status", harness: "grok" }] }],
+  });
+  const discussion = { ...E2E_CHANNEL, name: "Check the numbers" };
+  await stubPageConversation(browser, discussion, { linkId: "l-new", blockId: "status" });
+  await fixtureChannelCreate(browser, "channel-create", discussion);
+  await fixtureJson(browser, "comment-message", /\/api\/xmatrix\/channels\/[^/]+\/messages$/u, { message: {} },
+    { method: "POST" });
+  await openLivePage(browser);
+  await commentOn(browser, "In progress");
+  const box = browser.getByTestId("page-comment-box");
+  await expect(box.getByRole("textbox", { name: "Comment" })).toBeFocused();
+  await browser.keyboard.type("@cod");
+  const candidate = box.getByRole("option").filter({ hasText: /^codex$/u });
+  await expect(candidate).toHaveCount(1);
+  await expect.poll(() => box.locator(".app-composer-box").evaluate((glass) => glass.getAnimations().length)).toBe(0);
+  await browser.screenshot({ path: test.info().outputPath("pages-comment-mention.png") });
+  await candidate.click();
+  await browser.keyboard.type("check the numbers");
+  await browser.keyboard.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(browser, "channel-create")).length).toBe(1);
+  await expect.poll(async () => (await fixtureRequestRecords(browser, "comment-message"))
+    .map((request) => new URL(request.url).pathname)).toEqual([
+    expect.stringMatching(new RegExp(`^/api/xmatrix/channels/${CREATED_CHANNEL_ID}/messages$`, "u"))]);
+  const [sent] = await fixtureRequestBodies(browser, "comment-message");
+  expect(sent!.body).toMatch(/^> In progress\n\n— \[Relay › Status\]\([^)]*\)\n\n@codex check the numbers$/u);
+  const at = sent!.body.indexOf("@codex");
+  expect(sent!.invocationSelections).toMatchObject({ schemaVersion: 1, sourceRevision: 1,
+    selections: [{ start: at, end: at + 6, text: "@codex", target: { kind: "capability", harness: "codex" } }] });
+});
+
 test("selecting a passage opens a comment box beside it in the margin; sent, the comment is a discussion anchored there", async ({ page: browser }) => {
   await browser.setViewportSize({ width: 1600, height: 900 });
   await stubPages(browser, [page("p-relay", null, "Relay", "V")]);

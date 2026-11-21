@@ -25,8 +25,10 @@ import {
   PAGE_ASSISTANT_OUTPUT_CAPABILITY,
   PAGE_COWRITE_OUTPUT_CAPABILITY,
   PAGE_COWRITE_INPUT_CAPABILITY,
+  agentModelEntry,
   agentUsageLimitFromError,
   isAccountBillingRefusalError,
+  isScopedBillingRefusalError,
   boundAgentTurnFailureDetail,
   safeAgentFailureDetail,
   callerMessageMetadata,
@@ -889,6 +891,13 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
   ): Promise<RegistrationUsageLimit | undefined> {
     const ids = await usageLimitHandoffIds(sourceMessageId);
     const billingRefusal = isAccountBillingRefusalError(message.detail);
+    const scopedBillingRefusal = billingRefusal && isScopedBillingRefusalError(message.detail);
+    const explicitScope = typeof message.quotaScope === "string" ? message.quotaScope.slice(0, 64) : undefined;
+    const inferredScope = !explicitScope && scopedBillingRefusal
+      ? agentModelEntry(session.presentation?.models, session.presentation?.model)?.quotaScopes
+          ?.map(scope => scope.trim()).find(Boolean)?.slice(0, 64)
+      : undefined;
+    const quotaScope = explicitScope ?? inferredScope;
     try {
       return await this.dependencies.runtime.holdUsageLimit({
         commandId: ids.commandId,
@@ -896,9 +905,10 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         channelId: session.run.channelId,
         sourceInstanceId: session.run.instanceId,
         ...(typeof message.resetsAt === "string" ? { resetsAt: message.resetsAt.slice(0, 64) } : {}),
-        ...(typeof message.quotaScope === "string" ? { quotaScope: message.quotaScope.slice(0, 64) } : {}),
+        ...(quotaScope ? { quotaScope } : {}),
         ...(message.usage && typeof message.usage === "object" ? { usage: message.usage } : {}),
         ...(billingRefusal ? { billingRefusal: true } : {}),
+        ...(scopedBillingRefusal ? { scopedBillingRefusal: true } : {}),
       });
     } catch (error) {
       console.error("Agent usage limit could not be recorded", error);
@@ -1014,7 +1024,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
       activity = normalizeChannelActivity(message.activity);
     } catch (error) {
       if (error instanceof ChannelActivityInvalid) {
-        throw new RuntimeClientOperationError("invalid_channel_activity");
+        throw new RuntimeClientOperationError(
+          error.reason === "plan_retired" ? "channel_activity_retired" : "invalid_channel_activity");
       }
       throw error;
     }

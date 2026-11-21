@@ -1156,8 +1156,11 @@
     scrollbar-color: oklch(0.4 0 0 / 0.4) transparent;
   }
 
-  /* Avatars cannot be selected; skip their animated dots' highlight styles. */
-  .light .xmatrix-app :not(:where(.identity-avatar, .identity-avatar *))::selection {
+  /* Named once where the selection's style inherits (highlight-inheritance-mode.ts):
+     matching every element costs each one a second style. Elsewhere on every
+     element but avatars, which cannot be selected and have animated dots. */
+  .light[data-highlight-inherit] .xmatrix-app::selection,
+  .light:not([data-highlight-inherit]) .xmatrix-app :not(:where(.identity-avatar, .identity-avatar *))::selection {
     background: oklch(0.3 0 0 / 0.18);
   }
 
@@ -2320,7 +2323,7 @@ html[data-app-theme="wood"] .xmatrix-app :is(.app-sidebar, .app-mobile-chat-pane
 }
 
 :root:not(.dark) .xmatrix-app .app-agent-work-dock > div {
-  pointer-events: auto !important;
+  pointer-events: none !important;
   background: transparent !important;
   background-color: transparent !important;
   border: 0 !important;
@@ -2968,15 +2971,20 @@ html[data-app-theme] .xmatrix-app .app-search-panel .app-search-panel-input.app-
 }
 .xmatrix-app .message-citation-composer { padding-left: 44px; }
 .xmatrix-app .message-citation-composer::before { left: 12px; top: 10px; width: 22px; height: 14px; }
-::highlight(cited-passage) {
+/* Where highlights inherit, on the elements that set the colours they mix; on
+   every element elsewhere (highlight-inheritance-mode.ts). */
+html[data-highlight-inherit] :is(body, .xmatrix-app, .public-page)::highlight(cited-passage),
+html:not([data-highlight-inherit]) ::highlight(cited-passage) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 55%, transparent);
 }
 
 /* Find in page (PageFind): every match washed in the cited passage's wood, the current one in full. */
-::highlight(page-find) {
+html[data-highlight-inherit] :is(body, .xmatrix-app, .public-page)::highlight(page-find),
+html:not([data-highlight-inherit]) ::highlight(page-find) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 45%, transparent);
 }
-::highlight(page-find-current) {
+html[data-highlight-inherit] :is(body, .xmatrix-app, .public-page)::highlight(page-find-current),
+html:not([data-highlight-inherit]) ::highlight(page-find-current) {
   background-color: color-mix(in oklch, var(--app-wood-panel-base, oklch(0.83 0.07 76)) 100%, var(--foreground) 12%);
 }
 
@@ -4873,6 +4881,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 
 .app-content-skeleton-line,
 .app-skeleton-bar,
+.app-skeleton-circle,
 .app-list-skeleton-mark,
 .app-message-skeleton-avatar,
 .app-media-skeleton {
@@ -5010,13 +5019,15 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
   border-radius: 4px !important;
 }
 
-/* A placeholder row is not a row to point at. */
+/* A placeholder row or surface is not interactive. */
 .app-list-skeleton,
-.app-message-timeline-skeleton {
+.app-message-timeline-skeleton,
+.app-skeleton-inert {
   pointer-events: none;
 }
 
-.xmatrix-app .app-message-skeleton-avatar.app-message-skeleton-avatar {
+.xmatrix-app .app-message-skeleton-avatar.app-message-skeleton-avatar,
+.xmatrix-app .app-skeleton-circle.app-skeleton-circle {
   border-radius: 999px !important;
 }
 
@@ -5185,6 +5196,7 @@ html[data-app-theme="wood"] .xmatrix-app .app-rail button.bg-primary {
 @media (prefers-reduced-motion: reduce) {
   .app-content-skeleton-line,
   .app-skeleton-bar,
+  .app-skeleton-circle,
   .app-list-skeleton-mark,
   .app-message-skeleton-avatar,
   .app-media-skeleton {
@@ -9210,6 +9222,22 @@ html[data-app-theme] .xmatrix-app.xmatrix-app .app-tool-detail .app-liquid-glass
   color: var(--muted-foreground);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+}
+
+.xmatrix-app .app-page-reference-popup-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.xmatrix-app .app-page-reference-popup-unlink {
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.xmatrix-app .app-page-reference-popup-unlink:hover:not(:disabled) {
+  color: var(--foreground);
+  text-decoration: underline;
 }
 
 .xmatrix-app .app-page-reference-popup-body {

@@ -22,7 +22,7 @@ import { prepareReborn, prepareHandoff, advanceReborn } from "./runtime-reborn.j
 import { naturalInstanceOrdinal, reserveNaturalKey } from "./natural-keys.js";
 import { readContinuationSource } from "./runtime-continuation-source.js";
 import { handoffResumeSource } from "./handoff-resume-source.js";
-import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
+import { currentRegistrationQuotaJoin, isRegistrationBillingRefusalRow, modelQuotaScopes, recordRegistrationUsageLimit, REGISTRATION_QUOTA_POOL_SQL,
   registrationQuotaColumns, registrationQuotaReading, registrationQuotaUsage, registrationQuotaVerdict,
   type RegistrationUsageLimit } from "./agent-registration-quota-probe.js";
 
@@ -790,14 +790,20 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * off, anything narrower waits for a quota retry. Only the Instance's owner,
    * acting through that Instance's own Run, gets here. */
   async holdUsageLimit(raw: { commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string;
-    resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean }): Promise<RegistrationUsageLimit | undefined> {
+    resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean;
+    scopedBillingRefusal?: boolean }): Promise<RegistrationUsageLimit | undefined> {
     const input = continuationInput({ ...raw, sourceMessageId: raw.commandId, prompt: "" });
     const located = await this.locate(input, "handoff");
     if (located.key.ownerUserId !== input.actorUserId) throw new RegistrationAccessError("forbidden", 403);
+    let quotaScope = raw.quotaScope?.trim() || undefined;
+    if (raw.billingRefusal && raw.scopedBillingRefusal && !quotaScope) {
+      const model = located.instanceModel ?? located.preferredRuntimeModel ?? located.requestedRuntimeModel;
+      quotaScope = modelQuotaScopes(located.instanceModels, model)[0];
+    }
     return this.directory.transaction({ requestId: `${input.commandId}:limit`,
       operation: "registration.usage-limit.record" }, tx => recordRegistrationUsageLimit(tx, {
       ownerUserId: located.key.ownerUserId, machineId: located.key.machineId, harness: located.key.harness,
-      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(raw.quotaScope ? { quotaScope: raw.quotaScope } : {}),
+      ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(quotaScope ? { quotaScope } : {}),
       ...(raw.usage !== undefined ? { usage: raw.usage } : {}),
       ...(raw.billingRefusal ? { billingRefusal: true } : {}) }));
   }
@@ -1090,10 +1096,12 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
 
   /** The predecessor's registration tuple, Workspace and session. */
   private async predecessor(tx: DatabaseTransaction, instanceId: string, channelId: string) {
-    const row = (await tx.query<QueryResultRow>({ name: "registration_reborn_predecessor_v2", text: `SELECT
+    const row = (await tx.query<QueryResultRow>({ name: "registration_reborn_predecessor_v3", text: `SELECT
         instance.run_id,instance.channel_instance_id,run.owner_user_id,run.metadata_json,
         run.workspace_canonical_cwd,binding.space_id AS b_space,binding.owner_user_id AS b_owner,
-        binding.machine_id AS b_machine,binding.harness AS b_harness
+        binding.machine_id AS b_machine,binding.harness AS b_harness,
+        instance.presentation_json->>'model' AS instance_model,
+        instance.presentation_json->'models' AS instance_models
       FROM data.instances instance JOIN data.runs run ON run.run_id=instance.run_id
       JOIN data.run_agent_registrations binding ON binding.run_id=run.run_id
       WHERE instance.instance_id=$1 AND instance.channel_id=$2 AND run.channel_id=instance.channel_id`,
@@ -1107,6 +1115,8 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       : `resume:${row.owner_user_id}:${channelId}:${instanceId}`;
     return { key, runId: String(row.run_id), channelInstanceId: Number(row.channel_instance_id), resumeSessionKey,
       canonicalCwd: row.workspace_canonical_cwd ? String(row.workspace_canonical_cwd) : undefined,
+      instanceModel: typeof row.instance_model === "string" && row.instance_model.trim() ? row.instance_model : undefined,
+      instanceModels: row.instance_models,
       useRuntimeDefaultModel: metadata.useRuntimeDefaultModel === true,
       requestedRuntimeModel: typeof metadata.requestedRuntimeModel === "string" ? metadata.requestedRuntimeModel : undefined,
       preferredRuntimeModel: metadata.useRuntimeDefaultModel === true && typeof metadata.preferredRuntimeModel === "string"

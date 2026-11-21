@@ -365,6 +365,13 @@ const nodeTestLanes = [
     parallelGroup: nodeTestParallelGroup,
     parallelLane: "billing-test",
   },
+  {
+    label: "Test the Chrome extension",
+    command: pnpm,
+    args: ["--filter", "@xmatrix/chrome-extension", "test"],
+    parallelGroup: nodeTestParallelGroup,
+    parallelLane: "chrome-extension-test",
+  },
   ...nodeTestStages({ allFiles: scriptTests }),
 ];
 const nodeStaticParallelGroup = "node-static-checks";

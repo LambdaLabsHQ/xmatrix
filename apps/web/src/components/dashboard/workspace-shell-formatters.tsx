@@ -535,8 +535,9 @@ export function normalizeQuotaUsageList(value: LlmQuotaUsage[] | undefined): Llm
       // Grok consumer-style short windows are often 2h.
       return label === "5h" || label === "1w" || label === "2h" || label === "1mo";
     });
-  return dedupeQuotaUsagesByLabel(selected.sort(compareQuotaUsageForDisplay))
-    .slice(0, 3);
+  // Keep every deduplicated window: slicing here would hide scoped pools from
+  // both rendered chips and `usageLimitSummary` limit verdicts.
+  return dedupeQuotaUsagesByLabel(selected.sort(compareQuotaUsageForDisplay));
 }
 
 /** A provider may report the same semantic window through label and window forms. */
@@ -552,7 +553,7 @@ export function dedupeQuotaUsagesByLabel(value: LlmQuotaUsage[]): LlmQuotaUsage[
 
 const QUOTA_DISPLAY_ORDER = ["5h", "1w", "2h", "1mo"] as const;
 
-/** Provider array order is transport detail; the visible three are
+/** Provider array order is transport detail; the visible order is
  * deterministic. A window's account form comes before its scoped ones. */
 export function compareQuotaUsageForDisplay(left: LlmQuotaUsage, right: LlmQuotaUsage): number {
   const leftRank = QUOTA_DISPLAY_ORDER.indexOf(quotaWindowLabel(left).toLowerCase() as typeof QUOTA_DISPLAY_ORDER[number]);

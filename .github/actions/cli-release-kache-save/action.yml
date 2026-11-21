@@ -1,0 +1,74 @@
+name: Save hosted CLI release kache
+description: >-
+  Trim the kache store, stop the kache background writer cleanly, and save the
+  persistent store and SQLite index back to the GitHub Actions cache.
+inputs:
+  part:
+    description: CLI release part name (linux-x64, macos-arm64, macos-x64, windows-x64)
+    required: true
+  max-size:
+    description: Maximum retained kache size before saving
+    required: false
+    default: 960MiB
+runs:
+  using: composite
+  steps:
+    - name: Trim and stop the kache cache writer (Windows)
+      if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+      shell: powershell
+      env:
+        KACHE_MAX_SIZE: ${{ inputs.max-size }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        & $env:RUSTC_WRAPPER gc
+        if ($LASTEXITCODE -ne 0) { throw 'kache gc failed' }
+        $statePath = Join-Path $env:KACHE_CACHE_DIR 'daemon.state.json'
+        if (Test-Path -LiteralPath $statePath) {
+          $daemonState = Get-Content -LiteralPath $statePath -Raw | ConvertFrom-Json
+          $cacheWriter = Get-Process -Id $daemonState.pid -ErrorAction SilentlyContinue
+          & $env:RUSTC_WRAPPER daemon stop
+          if ($LASTEXITCODE -ne 0) { throw 'kache daemon stop failed' }
+          if ($cacheWriter) {
+            if (-not $cacheWriter.WaitForExit(45000)) { throw 'kache cache writer did not exit within 45 seconds' }
+          }
+        }
+
+    - name: Trim and stop the kache cache writer (Unix)
+      if: runner.environment == 'github-hosted' && runner.os != 'Windows'
+      shell: bash
+      env:
+        KACHE_MAX_SIZE: ${{ inputs.max-size }}
+      run: |
+        set -euo pipefail
+        if [ -z "${RUSTC_WRAPPER:-}" ]; then exit 0; fi
+        "$RUSTC_WRAPPER" gc
+        state_file="${KACHE_CACHE_DIR:-$HOME/.cache/kache}/daemon.state.json"
+        pid=""
+        if [ -f "$state_file" ]; then
+          pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$state_file" 2>/dev/null | head -n 1 || true)"
+        fi
+        "$RUSTC_WRAPPER" daemon stop || true
+        if [ -n "$pid" ]; then
+          for _ in $(seq 1 30); do
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.5
+          done
+        fi
+
+    - name: Save the CLI release kache store (Windows)
+      if: runner.environment == 'github-hosted' && runner.os == 'Windows'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ${{ runner.temp }}\kache\store
+          ${{ runner.temp }}\kache\index.db*
+        key: kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}
+
+    - name: Save the CLI release kache store (Unix)
+      if: runner.environment == 'github-hosted' && runner.os != 'Windows'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          ~/.cache/kache/store
+          ~/.cache/kache/index.db*
+        key: kache-cli-release-v1-${{ inputs.part }}-${{ hashFiles('packages/cli-rs/Cargo.lock') }}-${{ github.sha }}

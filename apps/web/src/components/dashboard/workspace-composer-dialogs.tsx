@@ -8,11 +8,9 @@ import { ImageGalleryLightbox } from "./attachment-lightbox";
 import { useSystemBackHandler } from "./use-system-back";
 import { useComposerHint } from "./composer-hints";
 import { updateComposerInvocationDraft, selectComposerInvocation, selectComposerReference, composerSendDraft,
-  isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
+  invocationSelectionsEnvelope, isAgentBinding, type ComposerInvocationDraft, type ComposerReferenceBinding } from "./composer-invocation-bindings";
 import {
   agentModelLabel,
-  digestCanonicalCloneCborV1,
-  parseAgentInvocationSelections,
   type AgentInvocationSelection,
 } from "@xmatrix/protocol";
 
@@ -938,11 +936,8 @@ export const Composer = memo(function Composer({
     let handedOver = false;
     try {
       const { body, selections } = sendDraft();
-      const sourceBodyHash = selections.length ? await digestCanonicalCloneCborV1(body) : undefined;
-      const invocationSelections = sourceBodyHash ? parseAgentInvocationSelections({ schemaVersion: 1,
-        sourceRevision: 1, sourceBodyHash, selections }, {
-        spaceId: space?.id ?? channel?.spaceId ?? "", body, bodyHash: sourceBodyHash, revision: 1,
-      }) : undefined;
+      const invocationSelections = await invocationSelectionsEnvelope(body, selections,
+        space?.id ?? channel?.spaceId ?? "");
       if (invocationScopeRef.current !== sendScope) {
         // The composer moved to another conversation, which ends its uploads.
         for (const upload of uploads) {
@@ -2048,8 +2043,11 @@ export function MeterTag({
 }) {
   const clamped =
     percent === undefined ? undefined : Math.max(0, Math.min(100, percent));
-  // Use the same rounded value for color and text so 89.6% and 90.2% both
-  // display as "90%" and use the >=90 threshold, avoiding red/amber flicker.
+  // Color and fill use the rounded value so 89.6% and 90.2% both cross the
+  // >=90 threshold together, avoiding red/amber flicker. The text formats the
+  // unrounded value: `formatPercent` already rounds at 10% and above (so both
+  // still read "90%"), and below 10% it keeps one decimal, which a pre-rounded
+  // value would fake (4.65% read as "5.0%", 0.4% as "0.0%").
   const displayPercent = clamped === undefined ? undefined : Math.round(clamped);
   const fillTone =
     displayPercent === undefined
@@ -2114,8 +2112,8 @@ export function MeterTag({
         {showReset ? (
           <span className="shrink-0 text-muted-foreground">· {resetLabel}</span>
         ) : null}
-        {displayPercent !== undefined ? (
-          <span className="shrink-0 tabular-nums">{formatPercent(displayPercent)}</span>
+        {clamped !== undefined ? (
+          <span className="shrink-0 tabular-nums">{formatPercent(clamped)}</span>
         ) : null}
         {note ? <span className="shrink-0 tabular-nums">· {note}</span> : null}
       </span>
