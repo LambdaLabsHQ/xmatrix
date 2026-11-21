@@ -1,27 +1,14 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("../components/dashboard/typescript-require.cjs").installTypeScriptRequire();
+const { frameWindow } = require("./extension-embed-test-frame.cjs");
 
-// The side panel's frame trades an access token with its parent over
-// postMessage. These are the boundary's guarantees: only the allowed extension
-// is recognised, only its own messages are believed, and the token request is
-// posted to that origin alone.
+// The app packaged in the extension trades its session with the side panel
+// page that frames it, over postMessage. These are the boundary's guarantees:
+// the app is the panel's app only inside the allowed extension's own package,
+// only that parent's messages are believed, and the session request is posted
+// to that origin alone.
 const EXTENSION = "chrome-extension://kaickfjmldmlelnfijaahialjpnebnak";
-
-function frameWindow(ancestor) {
-  const listeners = new Set();
-  const parent = { posted: [], postMessage(message, origin) { this.posted.push({ message, origin }); } };
-  const win = {
-    parent,
-    location: { ancestorOrigins: [ancestor], href: "https://xmatrix.sh/app", origin: "https://xmatrix.sh" },
-    addEventListener: (type, listener) => type === "message" && listeners.add(listener),
-    removeEventListener: (type, listener) => listeners.delete(listener),
-    setTimeout: (fn, ms) => setTimeout(fn, ms),
-    clearTimeout: (id) => clearTimeout(id),
-    dispatch: (event) => { for (const listener of Array.from(listeners)) listener(event); },
-  };
-  return win;
-}
 
 function load(t, ancestor) {
   const win = frameWindow(ancestor);
@@ -30,18 +17,21 @@ function load(t, ancestor) {
   return { win, embed: require("./extension-embed.ts") };
 }
 
-test("only the allowed extension is a side-panel parent", (t) => {
+test("the app is the side panel's only inside the allowed extension's own package", (t) => {
   const { embed } = load(t, EXTENSION);
   assert.equal(embed.extensionEmbedParent(), EXTENSION);
   globalThis.window = frameWindow("chrome-extension://someoneelse");
   assert.equal(embed.extensionEmbedParent(), null);
   globalThis.window = frameWindow("https://evil.example");
   assert.equal(embed.extensionEmbedParent(), null);
+  // The Web's own pages are never the panel's app, whoever frames them.
+  globalThis.window = frameWindow(EXTENSION, "https://xmatrix.sh");
+  assert.equal(embed.extensionEmbedParent(), null);
 });
 
-test("a token request goes to the extension only and believes only its answer", async (t) => {
+test("a session request goes to the extension only and believes only its answer", async (t) => {
   const { win, embed } = load(t, EXTENSION);
-  const pending = embed.requestEmbedToken(EXTENSION, 1_000);
+  const pending = embed.requestEmbedSession(EXTENSION, { timeoutMs: 1_000 });
   const [{ message, origin }] = win.parent.posted;
   assert.equal(origin, EXTENSION);
   assert.equal(message.type, "session-request");
@@ -51,12 +41,31 @@ test("a token request goes to the extension only and believes only its answer", 
   win.dispatch({ source: win.parent, origin: "https://evil.example", data: { ...answer, token: "forged-origin" } });
   win.dispatch({ source: win.parent, origin: EXTENSION, data: { ...answer, id: "other", token: "other-request" } });
   win.dispatch({ source: win.parent, origin: EXTENSION, data: { ...answer, token: "real" } });
-  assert.equal(await pending, "real");
+  assert.deepEqual(await pending, { token: "real" });
+});
+
+test("a session answer's account is taken only when it is whole", async (t) => {
+  const { win, embed } = load(t, EXTENSION);
+  const ask = async (user, renew = false) => {
+    const pending = embed.requestEmbedSession(EXTENSION, { timeoutMs: 1_000, renew });
+    const { message } = win.parent.posted.at(-1);
+    assert.equal(message.renew === true, renew);
+    win.dispatch({ source: win.parent, origin: EXTENSION,
+      data: { protocol: "xmatrix-embed/1", type: "session", id: message.id, token: "t", user } });
+    return (await pending).user;
+  };
+  assert.deepEqual(await ask({ id: "u1", email: "a@example.com", name: "Ada", avatarUrl: "https://a.example/a.png", role: "admin" }),
+    { id: "u1", email: "a@example.com", name: "Ada", avatarUrl: "https://a.example/a.png" });
+  assert.deepEqual(await ask({ id: "u1", email: "a@example.com" }, true), { id: "u1", email: "a@example.com" });
+  // Without an id or an email there is no account to open with: the app reads it from the Hub.
+  assert.equal(await ask({ id: "u1", name: "Ada" }), undefined);
+  assert.equal(await ask({ id: 7, email: "a@example.com" }), undefined);
+  assert.equal(await ask("u1"), undefined);
 });
 
 test("a signed-out extension answers no token", async (t) => {
   const { win, embed } = load(t, EXTENSION);
-  const pending = embed.requestEmbedToken(EXTENSION, 1_000);
+  const pending = embed.requestEmbedSession(EXTENSION, { timeoutMs: 1_000 });
   const { id } = win.parent.posted[0].message;
   win.dispatch({ source: win.parent, origin: EXTENSION, data: { protocol: "xmatrix-embed/1", type: "signed-out", id } });
   assert.equal(await pending, null);
@@ -87,28 +96,27 @@ test("passages from anyone but the framing extension are ignored", (t) => {
   assert.deepEqual(seen, ["hello"]);
 });
 
-test("the proxy takes a request's own client identity only from a compatible app", () => {
-  const { parseAppCompatibilityHeaders } = require("./client-compatibility-server.ts");
-  const { CLIENT_COMPATIBILITY_POLICY } = require("@xmatrix/protocol");
-  const headers = (values) => new Headers(Object.entries(values).map(([key, value]) => [`x-xmatrix-client-${key}`, value]));
-  const app = { component: "app", version: "99.0.0", protocol: String(CLIENT_COMPATIBILITY_POLICY.protocolVersion), platform: "chrome-extension" };
-  assert.equal(parseAppCompatibilityHeaders(headers(app))?.platform, "chrome-extension");
-  assert.equal(parseAppCompatibilityHeaders(headers({ ...app, component: "cli" })), undefined);
-  assert.equal(parseAppCompatibilityHeaders(headers({ ...app, version: "0.0.1" })), undefined);
-  assert.equal(parseAppCompatibilityHeaders(headers({ ...app, protocol: "1" })), undefined);
-  assert.equal(parseAppCompatibilityHeaders(new Headers()), undefined);
-});
-
 test("the extension may only open a conversation path of this app", (t) => {
   const { win, embed } = load(t, EXTENSION);
   const opened = [];
-  const stop = embed.subscribeEmbedOpen((path) => opened.push(path));
+  const stop = embed.subscribeEmbedOpen((path) => opened.push(path) > 0);
   const send = (path, origin = EXTENSION) => win.dispatch({ source: win.parent, origin, data: { protocol: "xmatrix-embed/1", type: "open", path } });
-  send("/app/space-1/channel_2");
-  send("https://evil.example/app/a/b");
-  send("/app/a/b/../../login");
-  send("//evil.example/app/a/b");
-  send("/app/a/b", "https://evil.example");
+  send("/app/space-1/channels/channel_2");
+  send("https://evil.example/app/a/channels/b");
+  send("/app/a/channels/b/../../login");
+  send("//evil.example/app/a/channels/b");
+  send("/app/a/settings/b");
+  send("/app/a/channels/b", "https://evil.example");
   stop();
-  assert.deepEqual(opened, ["/app/space-1/channel_2"]);
+  assert.deepEqual(opened, ["/app/space-1/channels/channel_2"]);
+});
+
+test("an address the page is asked to navigate to goes to the open app, which says whether it shows it", (t) => {
+  const { embed } = load(t, EXTENSION);
+  assert.equal(embed.openEmbedAddress("/app/s/channels/c"), false);
+  const stop = embed.subscribeEmbedOpen((path) => path.startsWith("/app/s/channels/"));
+  assert.equal(embed.openEmbedAddress("/app/s/channels/c"), true);
+  assert.equal(embed.openEmbedAddress("/app/s/settings"), false);
+  stop();
+  assert.equal(embed.openEmbedAddress("/app/s/channels/c"), false);
 });

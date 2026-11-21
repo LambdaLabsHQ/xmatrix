@@ -22,6 +22,7 @@ import { agentState } from "./page-margin";
 import { PenContent } from "./page-pen";
 import type { MarginConversation } from "./page-margin-model";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { appAddressOrigin } from "@/lib/app-address";
 
 /**
  * Around a page (pages-live-document.md §3.2, §7): who is on it, its menu,
@@ -265,7 +266,7 @@ export function ShareDialog({ open, anchor, onClose, canPublish, canEdit, publis
     onClose();
   }, onClose) : undefined, [anchor, onClose, open]);
   if (!open || typeof document === "undefined") return null;
-  const publicLink = publicUrl && typeof window !== "undefined" ? `${window.location.origin}${publicUrl}` : null;
+  const publicLink = publicUrl && typeof window !== "undefined" ? `${appAddressOrigin()}${publicUrl}` : null;
   const editing = (canEdit && suggestOnly !== undefined) || (canPublish && rulesPage !== undefined);
   return createPortal(
     <div ref={panel} className={cn("xmatrix-app fixed z-[var(--z-popover)]", !place && "invisible")}

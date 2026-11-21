@@ -9,6 +9,7 @@ import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
 import { subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { appAddressHref, appAddressOrigin } from "@/lib/app-address";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
 
@@ -1629,9 +1630,8 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
 
   useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
 
-  const handleEmbedOpen = useStableCallback((path: string) => {
-    openInternalAppLink(new URL(path, window.location.origin).toString());
-  });
+  const handleEmbedOpen = useStableCallback((path: string) =>
+    openInternalAppLink(new URL(path, appAddressOrigin()).toString()));
   useEffect(() => subscribeEmbedOpen(handleEmbedOpen), [handleEmbedOpen]);
 
   useEffect(() => {
@@ -1644,12 +1644,12 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   }, [webPassageTargetReady, handleWebPassage]);
 
   function openInternalAppLink(href: string): boolean {
-    const pageLink = internalPageLink(href, window.location.href);
+    const pageLink = internalPageLink(href, appAddressHref());
     if (pageLink) {
       openPage(pageLink);
       return true;
     }
-    const internalLink = parseInternalChannelLink(href, window.location.href);
+    const internalLink = parseInternalChannelLink(href, appAddressHref());
     if (internalLink) {
       void openInternalChannelLink(internalLink);
       return true;

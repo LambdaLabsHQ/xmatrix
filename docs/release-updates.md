@@ -1,31 +1,39 @@
 # Release Updates
 
+## Unreleased: the Chrome extension packages the app instead of framing the Web
+
+The extension's side panel showed the Web (`/app`) in a frame, so every open
+downloaded the page and its scripts and ran each request through the Web's
+Worker: several serial round trips before anything showed. The extension now
+ships the workspace app in its own package, built from `apps/web`
+(`src/extension-app`, `apps/chrome-extension/scripts/build-app.mjs`): the same
+providers, gate and shell, with the Web's Hub proxy routes bundled to answer in
+the page and send straight to the Hub. Opening the panel loads nothing from the
+Web; the last conversation list paints from the app's local copy while the Hub
+is asked. The panel hands the app its session over `postMessage` as before,
+now with the account, so the app does not wait on a read of it; the refresh
+token stays in the service worker. The package's content security policy is
+the Web's without the Web (packaged scripts only, requests to the Hub only, no
+picture loaded from an address a message names).
+
+The Web no longer allows the extension to frame it: CSP `frame-ancestors` is
+`'none'` again, and its proxy no longer takes a client identity from request
+headers. That allowance reached only the beta Web. Addresses the app writes
+for other people (a copied conversation or page link, an invite) are the Web's
+in the extension, where the page itself lives at the extension's origin.
+Web (the policy and the address helper) and the extension, which ships outside
+the release train. Recovery is a CI-validated beta reverting this change; an
+extension build from before it then frames the beta Web again.
+
 ## Unreleased: the Chrome extension becomes a side panel
 
 The extension now opens the person's Space in Chrome's side panel instead of a
-send-to-conversation popup: the real web app in a frame, signed in with the
-extension's session (the panel hands the app short-lived access tokens; the
-refresh token stays in the extension). Selected text can start a new
-conversation or be quoted into the open one, from the context menu, the panel's
-page bar or an optional button beside the selection (asks for web-page access
-first). The unpacked build opens the beta Web, the store build the stable Web.
-Needs the Web change that lets the extension frame the app. Ships outside the
+send-to-conversation popup, signed in with the extension's session (the panel
+hands the app short-lived access tokens; the refresh token stays in the
+extension). Selected text can start a new conversation or be quoted into the
+open one, from the context menu, the panel's page bar or an optional button
+beside the selection (asks for web-page access first). Ships outside the
 release train; recovery is reverting the directory.
-## Unreleased: the app can open in the xMatrix Chrome extension's side panel
-
-The Web may now be framed by one page only: the xMatrix Chrome extension's
-side panel (`chrome-extension://kaickfjmldmlelnfijaahialjpnebnak`, CSP
-`frame-ancestors`; `X-Frame-Options: DENY` still covers browsers without it).
-A frame in an extension page gets no site cookies, so in the panel the app
-signs in with a short-lived access token it asks the extension for over
-`postMessage`; the refresh token stays in the extension and nothing is stored
-in the frame. Messages are accepted only from that parent origin and frame,
-and posted only to it. The Web proxy accepts the client identity from request
-headers when its compatibility cookie is absent; the Hub still judges it. The
-extension can hand the app a passage of the page being read, which the app
-quotes in the open conversation or starts a new conversation with, as a
-passage of a message does. Web only. Recovery is a CI-validated beta
-reverting this change.
 
 ## Unreleased: Chrome Web Store listing for the extension; privacy policy covers it
 

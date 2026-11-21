@@ -57,6 +57,11 @@
         "src/middleware.ts",
         "src/app/**/*.{ts,tsx}",
         "src/components/dashboard/agent-trace-stream.ts",
+        // The app the Chrome extension packages: apps/chrome-extension/scripts/build-app.mjs
+        // bundles main.tsx, and resolves the Next modules the shell imports to the files beside it.
+        // They are production code of the extension, so the production pass starts from them too.
+        "src/extension-app/*.{ts,tsx}!",
+        "src/extension-app/*.{cjs,css}",
         "src/components/**/*.test.cjs",
         "src/lib/relay-v2/*.test.cjs",
         // Playwright's global setup spawns it by path to hold the shared browser.
@@ -66,7 +71,8 @@
         // Run by hand (`pnpm exec node scripts/...`).
         "scripts/*.mjs",
       ],
-      "ignoreDependencies": ["eslint", "eslint-config-next", "shadcn", "tailwindcss", "tw-animate-css"],
+      // `xmatrix-extension:api-routes` is a module the extension's build writes (src/extension-app/build-modules.d.ts).
+      "ignoreDependencies": ["eslint", "eslint-config-next", "shadcn", "tailwindcss", "tw-animate-css", "xmatrix-extension"],
     },
     // Internal libraries: every consumer lives in this repository, so an
     // export no workspace imports is dead even though package.json exports it.

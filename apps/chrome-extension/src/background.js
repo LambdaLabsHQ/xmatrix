@@ -1,15 +1,17 @@
 // The service worker owns the extension's session: the side panel's app asks
-// it for a current access token (the refresh token never leaves here), and it
-// queues what the person picks on a page until the panel hands it over.
+// it for a current access token and the account (the refresh token never
+// leaves here), and it queues what the person picks on a page until the panel
+// hands it over.
 
 import {
-  DEFAULT_HUB_URL,
   HubError,
+  accountFrom,
   countNeedsYou,
   createConversation,
   listSpaces,
   sendMessage,
   freshAccessToken,
+  hubUrl,
   pollDeviceSignIn,
   signOut,
   startDeviceSignIn,
@@ -26,7 +28,7 @@ const SELECTION_SCRIPT = "selection-chip";
 const WEB_ORIGINS = ["https://*/*", "http://*/*"];
 
 const manifest = chrome.runtime.getManifest();
-const deps = { fetch: (...args) => fetch(...args), hubUrl: DEFAULT_HUB_URL, version: manifest.version };
+const deps = { fetch: (...args) => fetch(...args), hubUrl: hubUrl(manifest), version: manifest.version };
 
 let pendingWrite = Promise.resolve();
 const store = {
@@ -199,7 +201,7 @@ async function quickAsk(tab, { text, question }) {
   await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
   // The panel shows it: at once if its app is loaded, or opening straight onto it.
   await chrome.storage.session.set({ openPath: {
-    path: `/app/${encodeURIComponent(result.space.id)}/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
+    path: `/app/${encodeURIComponent(result.space.id)}/channels/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
   return { spaceName: result.space.name };
 }
 
@@ -231,11 +233,28 @@ const panelHandlers = {
     await chrome.alarms.clear(SIGN_IN_ALARM);
   },
   signOut: endSession,
-  async token() {
+  /** The app's session: a current access token and the account, never the refresh token. */
+  async session({ renew = false }) {
     // The usual case answers from storage at once; only a renewal takes the queue.
-    const session = await store.get();
-    if (session && tokenExpiresAt(session.token) - Date.now() > 10 * 60 * 1000) return session.token;
-    return serial(() => freshAccessToken(deps, store));
+    let session = await store.get();
+    if (!session) return null;
+    // The app asks for a renewal when the account changed under the token (its name is a claim of the token).
+    if (renew || tokenExpiresAt(session.token) - Date.now() <= 10 * 60 * 1000) {
+      if (!(await serial(() => freshAccessToken(deps, store, renew ? Infinity : undefined)))) return null;
+      session = await store.get();
+    }
+    return session ? { token: session.token, user: session.user ?? null } : null;
+  },
+  /** The account as the app just read it from the Hub: what the panel opens with next time. */
+  rememberAccount({ user }) {
+    const account = accountFrom(user);
+    // In the renewal's queue: a write here must not put back a token a renewal just replaced.
+    return serial(async () => {
+      const session = await store.get();
+      // Only the session's own account: the app cannot make this session someone else's.
+      if (!session || !account || (session.user?.id && session.user.id !== account.id)) return;
+      await store.set({ ...session, user: account });
+    });
   },
   takePassages,
   async takeOpenPath() {
