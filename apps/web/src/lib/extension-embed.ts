@@ -110,20 +110,28 @@ export function parseEmbedPassage(data: Record<string, unknown>): EmbedPassage |
   return { text, label, href: url.toString(), target };
 }
 
-/** Passages the extension hands over, while the app is open in its side panel. */
-export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => void): () => void {
+/** The framing extension's messages of one type, while the app is open in its side panel. */
+function subscribeParent(type: string, onData: (data: Record<string, unknown>) => void): () => void {
   const parent = extensionEmbedParent();
   if (!parent) return () => undefined;
   const onMessage = (event: MessageEvent) => {
     const data = fromParent(event, parent);
-    if (data?.type !== "passage") return;
-    const passage = parseEmbedPassage(data);
-    if (passage) onPassage(passage);
+    if (data?.type === type) onData(data);
   };
   window.addEventListener("message", onMessage);
-  // The extension waits for this before it sends a passage picked while the app was loading.
-  postToParent(parent, { type: "ready" });
   return () => window.removeEventListener("message", onMessage);
+}
+
+/** Passages the extension hands over, while the app is open in its side panel. */
+export function subscribeEmbedPassages(onPassage: (passage: EmbedPassage) => void): () => void {
+  const stop = subscribeParent("passage", (data) => {
+    const passage = parseEmbedPassage(data);
+    if (passage) onPassage(passage);
+  });
+  // The extension waits for this before it sends a passage picked while the app was loading.
+  const parent = extensionEmbedParent();
+  if (parent) postToParent(parent, { type: "ready" });
+  return stop;
 }
 
 /** A conversation of this app, as `/app/<space>/<conversation>`; nothing else. */
@@ -134,14 +142,9 @@ const APP_CONVERSATION_PATH = /^\/app\/[A-Za-z0-9_-]{1,128}\/[A-Za-z0-9_-]{1,128
  * page, sent straight to the Hub) and asks the panel to show.
  */
 export function subscribeEmbedOpen(onOpen: (path: string) => void): () => void {
-  const parent = extensionEmbedParent();
-  if (!parent) return () => undefined;
-  const onMessage = (event: MessageEvent) => {
-    const data = fromParent(event, parent);
-    if (data?.type === "open" && typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) onOpen(data.path);
-  };
-  window.addEventListener("message", onMessage);
-  return () => window.removeEventListener("message", onMessage);
+  return subscribeParent("open", (data) => {
+    if (typeof data.path === "string" && APP_CONVERSATION_PATH.test(data.path)) onOpen(data.path);
+  });
 }
 
 /**
