@@ -34,7 +34,7 @@ through `xmatrix secret exec`, never on a command line or in a message.
 
 ## Routes
 
-`GET /api/admin/billing-grants/candidate?email=<address>` (or `?userId=`)
+`GET /api/admin/billing-grants/candidate?email=<address>` (or `?handle=`, `?userId=`)
 returns the user id, the Spaces they own with members, messages and billing,
 and any grant they already received.
 

@@ -274,21 +274,30 @@ export interface AuthDirectoryAdminUsers {
  * Session timestamps are the closest existing access signal. IP addresses,
  * user agents, tokens, and account credentials deliberately stay in Auth.
  */
-/** The registered user with this email, matched case-insensitively. */
-export async function authDirectoryUserIdByEmail(env: Env, email: string): Promise<string | null> {
-  const normalized = email.trim();
+/** The registered user with this email or handle, matched case-insensitively. */
+export async function authDirectoryUserIdBy(
+  env: Env, key: "email" | "handle", value: string,
+): Promise<string | null> {
+  const trimmed = value.trim();
+  const normalized = key === "handle" ? trimmed.replace(/^@/u, "") : trimmed;
   if (!normalized || normalized.length > 320) return null;
   if (authAuthority(env) === "d1") {
     const row = await requireAuthD1(env)
-      .prepare(`SELECT "id" FROM "user" WHERE lower("email") = lower(?) LIMIT 1`)
+      .prepare(key === "email"
+        ? `SELECT "id" FROM "user" WHERE lower("email") = lower(?) LIMIT 1`
+        : `SELECT "id" FROM "user" WHERE lower("handle") = lower(?) LIMIT 1`)
       .bind(normalized)
       .first<{ id: string }>();
     return row?.id ?? null;
   }
-  return authPostgresTransaction(env, "auth.directory.user-by-email", async (transaction) => {
-    const rows = await transaction.query<QueryResultRow & { id: string }>({
+  return authPostgresTransaction(env, `auth.directory.user-by-${key}`, async (transaction) => {
+    const rows = await transaction.query<QueryResultRow & { id: string }>(key === "email" ? {
       name: "auth_directory_user_by_email_v1",
       text: "SELECT id FROM control.auth_users WHERE lower(email) = lower($1) LIMIT 1",
+      values: [normalized], maxRows: 1,
+    } : {
+      name: "auth_directory_user_by_handle_v1",
+      text: "SELECT id FROM control.auth_users WHERE lower(handle) = lower($1) LIMIT 1",
       values: [normalized], maxRows: 1,
     });
     return rows[0]?.id ?? null;

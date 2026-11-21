@@ -14,7 +14,7 @@ import type { AdminAuditAction } from "@xmatrix/protocol";
 
 import { bearerMatchesSecret } from "./admin-operator-token";
 import { recordAdminAudit } from "./admin-audit";
-import { authDirectoryEmails, authDirectoryUserIdByEmail } from "./auth-authority";
+import { authDirectoryEmails, authDirectoryUserIdBy } from "./auth-authority";
 import { platformAdminForRequest } from "./index-routes-admin";
 import { PermissionFailure, jsonErrors, readBoundedRequestBody, requireAuth, requireHumanAuth } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -55,17 +55,19 @@ async function grantOperator(
 }
 
 export function registerIndexRoutesBillingGrants(app: Hono<{ Bindings: Env }>): void {
-  /* Who a feedback email belongs to: their user id, the Spaces they own with
+  /* Who a piece of feedback belongs to, by email or xMatrix handle: their user id, the Spaces they own with
      plan and activity, and any grant they already received. */
   app.get(BILLING_GRANT_CANDIDATE_ROUTE, (c) => jsonErrors(c, async () => {
     const email = c.req.query("email")?.trim() ?? "";
+    const handle = c.req.query("handle")?.trim() ?? "";
     const userIdQuery = c.req.query("userId")?.trim() ?? "";
-    if ((!email && !userIdQuery) || email.length > 320 || userIdQuery.length > 300) {
-      return c.json({ error: "Pass email or userId", code: "invalid_billing_grant" }, 400, PRIVATE);
+    if ((!email && !handle && !userIdQuery) || email.length > 320 || handle.length > 320 || userIdQuery.length > 300) {
+      return c.json({ error: "Pass email, handle or userId", code: "invalid_billing_grant" }, 400, PRIVATE);
     }
-    await grantOperator(c.req.raw, c.env, "billing-grant.read",
-      userIdQuery ? { kind: "user", id: userIdQuery } : { kind: "email", id: email });
-    const userId = userIdQuery || await authDirectoryUserIdByEmail(c.env, email);
+    await grantOperator(c.req.raw, c.env, "billing-grant.read", userIdQuery ? { kind: "user", id: userIdQuery }
+      : email ? { kind: "email", id: email } : { kind: "handle", id: handle });
+    const userId = userIdQuery ||
+      await authDirectoryUserIdBy(c.env, email ? "email" : "handle", email || handle);
     if (!userId) return c.json({ error: "No registered user", code: "billing_grant_user_not_found" }, 404, PRIVATE);
     const now = new Date().toISOString();
     const [detail, grant, emails] = await Promise.all([
