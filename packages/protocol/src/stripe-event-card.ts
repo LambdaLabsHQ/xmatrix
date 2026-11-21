@@ -56,10 +56,10 @@ const CODES_ZH: Record<string, string> = {
 const ZERO_DECIMAL = new Set(["BIF", "CLP", "DJF", "GNF", "JPY", "KMF", "KRW", "MGA", "PYG", "RWF", "VND", "VUV", "XAF", "XOF", "XPF"]);
 const THREE_DECIMAL = new Set(["BHD", "JOD", "KWD", "OMR", "TND"]);
 const DASHBOARD_SECTION: Record<string, string> = { pi: "payments", ch: "payments", py: "payments", in: "invoices",
-  sub: "subscriptions", dp: "disputes", du: "disputes" };
+  sub: "subscriptions", dp: "disputes", du: "disputes", evt: "events" };
 
 /** `1000` + `usd` reads `10.00 USD`: Stripe sends an integer in the currency's smallest unit. */
-function amountText(value: unknown, currency: unknown): string | undefined {
+export function stripeAmountText(value: unknown, currency: unknown): string | undefined {
   const code = typeof currency === "string" ? currency.trim().toUpperCase() : "";
   if (typeof value !== "number" || !Number.isSafeInteger(value) || !/^[A-Z]{3}$/u.test(code)) return undefined;
   const digits = ZERO_DECIMAL.has(code) ? 0 : THREE_DECIMAL.has(code) ? 3 : 2;
@@ -68,7 +68,7 @@ function amountText(value: unknown, currency: unknown): string | undefined {
 }
 
 /** The object's page in the Stripe Dashboard of the account that owns it. */
-function dashboardUrl(id: string, account: string | undefined, livemode: unknown): string | undefined {
+export function stripeDashboardUrl(id: string, account: string | undefined, livemode: unknown): string | undefined {
   const section = DASHBOARD_SECTION[/^([a-z]+)_[A-Za-z0-9]+$/u.exec(id)?.[1] ?? ""];
   if (!section) return undefined;
   return `https://dashboard.stripe.com/${account ? `${account}/` : ""}${livemode === false ? "test/" : ""}${section}/${id}`;
@@ -98,10 +98,10 @@ export function stripeEventWords(facts: StripeEventFacts): {
   const { type, id, account } = facts;
   const pair = LABELS[type];
   const label = pair ? { en: pair[0], zh: pair[1] } : { en: type, zh: type };
-  const amount = amountText(facts.amount, facts.currency);
+  const amount = stripeAmountText(facts.amount, facts.currency);
   const status = facts.status && facts.status !== IMPLIED_STATUS[type] ? codeWords(facts.status) : undefined;
   const reason = facts.reason ? codeWords(facts.reason) : undefined;
-  const url = dashboardUrl(id, account, facts.livemode);
+  const url = stripeDashboardUrl(id, account, facts.livemode);
   const same = (value: string) => ({ en: value, zh: value });
   // On a card a status or reason stands alone, so it starts as a sentence does.
   const line = (value: EventCardWords) => ({ en: value.en.charAt(0).toUpperCase() + value.en.slice(1), zh: value.zh });

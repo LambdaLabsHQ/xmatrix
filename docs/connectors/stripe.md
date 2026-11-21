@@ -50,6 +50,27 @@ native grants in the Space. Pasting manual webhook credentials explicitly
 replaces native mode. Stripe-side uninstall retires that account's older grants
 across Spaces and leaves other merchants and newer authorizations alone.
 
+## Read-only inspection actions
+
+Channels and Agents can query any retained OAuth merchant account using the
+App's five granted read permissions (`event_read`, `payment_intent_read`,
+`invoice_read`, `subscription_read`, `dispute_read`). Tokens stay inside the
+Hub and use the same per-account leased refresh path as webhook confirmation.
+Every read except `accounts` names an explicit `acct_…` account ID; there is
+no default account.
+
+- `@stripe:accounts:*` — list active OAuth-connected Stripe account IDs in the Space.
+- `@stripe:list_events:<acct_…> [type=…] [limit=1-50] [starting_after=evt_…] [created_gte=…] [created_lte=…]` and `@stripe:get_event:<acct_…>/<evt_…>`
+- `@stripe:list_payment_intents:<acct_…> [customer=cus_…] [limit=1-50] [starting_after=pi_…] [created_gte=…] [created_lte=…]` and `@stripe:get_payment_intent:<acct_…>/<pi_…>` (includes `last_payment_error` code, `decline_code`, and embedded payment method summary)
+- `@stripe:list_invoices:<acct_…> [status=…] [customer=cus_…] [subscription=sub_…] [limit=1-50] [starting_after=in_…] [created_gte=…] [created_lte=…]` and `@stripe:get_invoice:<acct_…>/<in_…>`
+- `@stripe:list_subscriptions:<acct_…> [status=…] [customer=cus_…] [limit=1-50] [starting_after=sub_…] [created_gte=…] [created_lte=…]` and `@stripe:get_subscription:<acct_…>/<sub_…>`
+- `@stripe:list_disputes:<acct_…> [payment_intent=pi_…] [limit=1-50] [starting_after=dp_…] [created_gte=…] [created_lte=…]` and `@stripe:get_dispute:<acct_…>/<dp_…>`
+
+All eleven actions are read-only and callable via `xmatrix call` (public or
+`--private`) as well as Channel commands. Endpoints outside those five
+permissions (such as Checkout Sessions, which require `checkout_session_read`
+in a future Stripe App version) are rejected by the Hub's path allowlist.
+
 ## Authority and migration
 
 `data.app_stripe_account_grants` is the native account authority. Each envelope
