@@ -757,8 +757,14 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Whoami) => cmd_whoami(&hub_url).await,
         Some(Commands::Billing { command }) => {
             use xmatrix_cli_account::billing::{self, Query};
-            use xmatrix_cli_args::{BillingCommand, BillingGrantCommand, SpaceBillingCommand};
+            use xmatrix_cli_args::{BillingCampaignCommand, BillingCommand, BillingGrantCommand, SpaceBillingCommand};
             match command {
+                BillingCommand::Campaign {
+                    command: BillingCampaignCommand::Send { campaign, users, dry_run },
+                } => {
+                    let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
+                    billing::campaign_send(&hub_url, &token, &campaign, &users, dry_run).await
+                }
                 BillingCommand::Grant { command } => {
                     let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
                     match command {
