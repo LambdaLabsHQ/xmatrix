@@ -11,7 +11,8 @@ import { getChannel } from "./spaces";
 import { connectionActionRefusal } from "./connectors/connector-commands";
 import { publishCommandStatus } from "./connectors/command-support";
 import {
-  githubRepositoryFeaturesFromCommand,
+  githubSubscriptionExceptions,
+  githubSubscriptionSelectionFromCommand,
   githubRequiredCapabilities,
   nextGitHubRepositoryFeatures,
 } from "./github-subscription-domain";
@@ -293,7 +294,8 @@ async function runGitHubConnectorStatement(
     return;
   }
 
-  const requestedFeatures = githubRepositoryFeaturesFromCommand(input.body);
+  const { features: requestedFeatures, exceptions: requestedExceptions } =
+    githubSubscriptionSelectionFromCommand(input.body);
   // Subscription features require the installation's effective permissions,
   // never a capability retained on the connection before a permission change.
   const capabilities = new Set(result.capabilities);
@@ -317,6 +319,7 @@ async function runGitHubConnectorStatement(
     currentRelation?.features,
     requestedFeatures,
     action,
+    requestedExceptions,
   );
   if (nextFeatures.length > 0) {
     await appCommand(input.env, "put-relation", {
@@ -339,10 +342,17 @@ async function runGitHubConnectorStatement(
   }
 
   const repositoryName = `${result.repository.owner}/${result.repository.repo}`;
+  const excepted = githubSubscriptionExceptions(nextFeatures);
+  const selected = [
+    nextFeatures.filter((feature) => !feature.startsWith("except:")).join(", "),
+    excepted.length > 0 ? `except ${excepted.join(", ")}` : "",
+  ].filter(Boolean).join("; ");
   const summary = action === "subscribe"
-    ? `Subscribed to ${repositoryName} (${nextFeatures.join(", ")})`
+    ? nextFeatures.length > 0
+      ? `Subscribed to ${repositoryName} (${selected})`
+      : `Not subscribed to ${repositoryName}: no kind of event is selected`
     : nextFeatures.length > 0
-      ? `Updated ${repositoryName} subscription (${nextFeatures.join(", ")})`
+      ? `Updated ${repositoryName} subscription (${selected})`
       : `Unsubscribed from ${repositoryName}`;
   await finalizeExecution(executionId, input, "completed", undefined, summary);
   input.status(`GitHub ${action}: completed; ${summary}.`);

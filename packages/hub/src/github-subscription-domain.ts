@@ -47,11 +47,34 @@ export function githubWebhookRepositoryIdentity(
   };
 }
 
-export function githubRepositoryFeaturesFromCommand(body: string): GitHubRepositoryFeature[] {
+/**
+ * `except:<login>` after a subscription's target names a GitHub account whose
+ * activity it leaves out: issues and pull requests that account opened, and
+ * any other event it caused. It is stored beside the features.
+ */
+const GITHUB_EXCEPT_PREFIX = "except:";
+const GITHUB_LOGIN = /^[a-z0-9](?:[a-z0-9-]{0,38})(?:\[bot\])?$/u;
+
+export interface GitHubSubscriptionSelection {
+  features: GitHubRepositoryFeature[];
+  /** Lowercase GitHub logins the subscription leaves out. */
+  exceptions: string[];
+}
+
+function githubException(token: string): string | undefined {
+  const normalized = token.trim().toLowerCase().replace(/^except:@?/u, GITHUB_EXCEPT_PREFIX);
+  if (!normalized.startsWith(GITHUB_EXCEPT_PREFIX)) return undefined;
+  const login = normalized.slice(GITHUB_EXCEPT_PREFIX.length);
+  return GITHUB_LOGIN.test(login) ? login : undefined;
+}
+
+/** The features and excepted accounts a subscribe or unsubscribe command names. */
+export function githubSubscriptionSelectionFromCommand(body: string): GitHubSubscriptionSelection {
   const match = body.match(
     /(?:^|\s)[@＠][\u200B-\u200D\uFEFF]*github:(?:subscribe|unsubscribe):[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\b([\s\S]*)$/iu,
   );
   const features: GitHubRepositoryFeature[] = [];
+  const exceptions: string[] = [];
   for (const token of (match?.[1] || "").split(/[\s,]+/u)) {
     const normalized = token.trim().toLowerCase();
     if (!normalized) continue;
@@ -59,17 +82,40 @@ export function githubRepositoryFeaturesFromCommand(body: string): GitHubReposit
       features.push(...GITHUB_REPOSITORY_FEATURES);
       continue;
     }
+    const exception = githubException(normalized);
+    if (exception) {
+      exceptions.push(exception);
+      continue;
+    }
     if (!(GITHUB_REPOSITORY_FEATURES as readonly string[]).includes(normalized)) break;
     features.push(normalized as GitHubRepositoryFeature);
   }
-  return features.length > 0 ? [...new Set(features)] : [...GITHUB_DEFAULT_REPOSITORY_FEATURES];
+  return {
+    // Naming only exceptions changes them and leaves the features as they are.
+    features: features.length > 0 ? [...new Set(features)]
+      : exceptions.length > 0 ? [] : [...GITHUB_DEFAULT_REPOSITORY_FEATURES],
+    exceptions: [...new Set(exceptions)].sort(),
+  };
 }
 
+/** The excepted logins a stored relation's features carry. */
+export function githubSubscriptionExceptions(stored: unknown): string[] {
+  if (!Array.isArray(stored)) return [];
+  return stored.flatMap((value) => typeof value === "string" ? [githubException(value)] : [])
+    .filter((value): value is string => value !== undefined);
+}
+
+/**
+ * A relation's next stored features: its kinds of event, then an
+ * `except:<login>` entry per excepted account. A relation left with no kind
+ * of event is empty, whatever it excepted.
+ */
 export function nextGitHubRepositoryFeatures(
   current: unknown,
   requested: GitHubRepositoryFeature[],
   action: "subscribe" | "unsubscribe",
-): GitHubRepositoryFeature[] {
+  requestedExceptions: readonly string[] = [],
+): string[] {
   const existing = new Set(
     Array.isArray(current)
       ? current.filter((value): value is GitHubRepositoryFeature =>
@@ -77,11 +123,33 @@ export function nextGitHubRepositoryFeatures(
           (GITHUB_REPOSITORY_FEATURES as readonly string[]).includes(value))
       : [],
   );
+  const exceptions = new Set(githubSubscriptionExceptions(current));
   for (const feature of requested) {
     if (action === "subscribe") existing.add(feature);
     else existing.delete(feature);
   }
-  return GITHUB_REPOSITORY_FEATURES.filter((feature) => existing.has(feature));
+  for (const login of requestedExceptions) {
+    if (action === "subscribe") exceptions.add(login);
+    else exceptions.delete(login);
+  }
+  const features = GITHUB_REPOSITORY_FEATURES.filter((feature) => existing.has(feature));
+  if (features.length === 0) return [];
+  return [...features, ...[...exceptions].sort().map((login) => `${GITHUB_EXCEPT_PREFIX}${login}`)];
+}
+
+/**
+ * Whether a subscription that excepts these logins leaves this delivery out:
+ * an issue or pull request event (comments and reviews included) by the
+ * subject's opener, any other event by its sender.
+ */
+export function githubDeliveryExcepted(payload: Record<string, unknown>, exceptions: readonly string[]): boolean {
+  if (exceptions.length === 0) return false;
+  const pull = record(payload.pull_request);
+  const subject = Object.keys(pull).length > 0 ? pull : record(payload.issue);
+  const actor = Object.keys(subject).length > 0
+    ? text(record(subject.user).login)
+    : text(record(payload.sender).login);
+  return actor !== "" && exceptions.includes(actor.toLowerCase());
 }
 
 export function githubFeatureForWebhookEvent(

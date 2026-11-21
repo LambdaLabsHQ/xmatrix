@@ -12,6 +12,8 @@ export interface GitHubSubscriptionRoute {
   channelId: string;
   connectionId: string;
   authorityRootUserId: string;
+  /** Its kinds of event and any `except:<login>` entries. */
+  features?: string[];
 }
 
 type DirectoryEnv = Pick<

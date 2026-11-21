@@ -283,6 +283,8 @@ export interface PostgresGitHubSubscriptionRoute {
   channelId: string;
   connectionId: string;
   authorityRootUserId: string;
+  /** The relation's stored features: its kinds of event and any `except:<login>` entries. */
+  features: string[];
 }
 
 type AppPrincipal = { kind: "user" | "agent"; id: string };
@@ -566,8 +568,9 @@ export class PostgresAppRepository {
     const { limit } = routeRead({ sourceRef: sourceRefs[0]!, limit: input.limit });
     return this.database.transaction({ requestId: text(input.requestId, "requestId", 200),
       operation: "app.github-subscription-routes", statement: "single_read" }, async (tx) => {
-      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v8", text: `SELECT
-        r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref
+      const rows = await tx.query<QueryResultRow>({ name: "app_github_subscription_routes_v9", text: `SELECT
+        r.relation_id,r.space_id,r.channel_id,r.connection_id,r.created_by,r.created_at,r.source_kind,lower(r.source_ref) AS source_ref,
+        r.features_json
         FROM data.app_source_relations r JOIN data.app_connector_connections c
           ON c.connection_id=r.connection_id AND c.space_id=r.space_id
         JOIN data.channels channel ON channel.channel_id=r.channel_id
@@ -582,7 +585,8 @@ export class PostgresAppRepository {
         sourceKind: row.source_kind === "issue" ? "issue" as const : "repository" as const,
         createdAt: iso(row.created_at as string | Date),
         spaceId: String(row.space_id), channelId: String(row.channel_id),
-        connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by) }));
+        connectionId: String(row.connection_id), authorityRootUserId: String(row.created_by),
+        features: Array.isArray(row.features_json) ? (row.features_json as unknown[]).map(String) : [] }));
     });
   }
 

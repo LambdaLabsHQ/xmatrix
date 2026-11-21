@@ -373,7 +373,7 @@ export const APP_CONNECTOR_PROVIDER_MANIFESTS: AppConnectorProviderManifest[] = 
            current Channel access are still required. */
         effect: "read",
         label: "Subscribe repository, issue, or PR",
-        description: "Link the current channel or thread to repository-wide commit, issue, and pull request updates, or to one issue or PR. Use all for every repository feature; each feature requires its matching read access.",
+        description: "Link the current channel or thread to repository-wide commit, issue, and pull request updates, or to one issue or PR. Use all for every repository feature; each feature requires its matching read access. Add except:<login> to leave out one account's issues, pull requests and actions.",
         completion: {
           trailingDelimiter: ":",
           arguments: GITHUB_ORGANIZATION_REPOSITORY_ARGUMENT,

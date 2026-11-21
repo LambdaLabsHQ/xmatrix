@@ -53,10 +53,10 @@ test("Slack approval keeps its token encrypted on the session until it is consum
 });
 
 test("GitHub webhook routes are derived from PostgreSQL connector relations", async () => {
-  const db = database((query) => query.name === "app_github_subscription_routes_v8"
+  const db = database((query) => query.name === "app_github_subscription_routes_v9"
     ? [{ relation_id: "imported-repository", space_id: "space-1", channel_id: "channel-1", connection_id: "connection-1",
         created_by: "user-1", created_at: "2026-10-01T00:00:00.000Z", source_kind: "repository",
-        source_ref: "github:repo:lambdalabshq/xmatrix" },
+        source_ref: "github:repo:lambdalabshq/xmatrix", features_json: ["pulls", "except:octocat"] },
       { relation_id: "imported-pull-request", space_id: "space-1", channel_id: "channel-2", connection_id: "connection-1",
         created_by: "user-2", created_at: "2026-10-08T00:00:00.000Z", source_kind: "issue",
         source_ref: "github:issue:lambdalabshq/xmatrix#7" }]
@@ -69,11 +69,11 @@ test("GitHub webhook routes are derived from PostgreSQL connector relations", as
   assert.deepEqual(routes, [{ relationId: "imported-repository", installationId: "42", sourceRef: "github:repo:lambdalabshq/xmatrix",
     sourceKind: "repository", createdAt: "2026-10-01T00:00:00.000Z", spaceId: "space-1", channelId: "channel-1",
     connectionId: "connection-1",
-    authorityRootUserId: "user-1" }, { relationId: "imported-pull-request", installationId: "42", sourceRef: "github:issue:lambdalabshq/xmatrix#7",
+    authorityRootUserId: "user-1", features: ["pulls", "except:octocat"] }, { relationId: "imported-pull-request", installationId: "42", sourceRef: "github:issue:lambdalabshq/xmatrix#7",
     sourceKind: "issue", createdAt: "2026-10-08T00:00:00.000Z", spaceId: "space-1", channelId: "channel-2",
     connectionId: "connection-1",
-    authorityRootUserId: "user-2" }]);
-  const query = db.calls.find((call) => call.name === "app_github_subscription_routes_v8");
+    authorityRootUserId: "user-2", features: [] }]);
+  const query = db.calls.find((call) => call.name === "app_github_subscription_routes_v9");
   assert.deepEqual(query.values, ["42",
     ["github:repo:lambdalabshq/xmatrix", "github:issue:lambdalabshq/xmatrix#7"], 1001, "pulls"]);
   assert.match(query.text, /features_json \? \$4/u, "an event nobody subscribed to finds no route");
