@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, EyeOff, KeyRound, Loader2, LogIn, RefreshCw } from "lucide-react";
 import { WEB_PROXY_ROUTES, type SerializedAppConnectorConnection } from "@xmatrix/protocol";
 import { actionClass } from "@/components/ui/action-tone";
+import { GlassSelect } from "@/components/ui/glass-select";
 import { Input } from "@/components/ui/input";
 import { type AppConnectorManifest } from "@/lib/app-connectors";
 import { getDesktopBridge } from "@/lib/desktop/bridge";
@@ -201,14 +202,9 @@ function SecretChoice({ secrets, busy, save, children }: {
       event.preventDefault();
       if (chosen) void save(chosen).catch(() => undefined);
     }}>
-      <select aria-label="Saved secret" value={chosen} onChange={(event) => setChosen(event.target.value)} autoFocus
-        className="h-8 min-w-[16rem] rounded-md border border-input bg-background px-2 text-[13px]">
-        {secrets.map((secret) => (
-          <option key={secret.secretRef} value={secret.secretRef}>
-            {secret.secretRef}{secret.envName && secret.envName !== secret.secretRef ? ` (${secret.envName})` : ""}
-          </option>
-        ))}
-      </select>
+      <GlassSelect aria-label="Saved secret" value={chosen} onChange={setChosen} autoFocus className="min-w-[16rem]"
+        options={secrets.map((secret) => ({ value: secret.secretRef, label: secret.secretRef,
+          ...(secret.envName && secret.envName !== secret.secretRef ? { hint: secret.envName } : {}) }))} />
       <button type="submit" disabled={busy || !chosen} className={actionClass({ variant: "secondary", size: "sm" })}>
         {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} Use it
       </button>

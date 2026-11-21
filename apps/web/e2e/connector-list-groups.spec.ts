@@ -119,7 +119,7 @@ test("a saved credential is replaced from one of the Space's secrets without typ
   await page.getByTestId("connector-row").filter({ hasText: "Bing Webmaster Tools" }).click();
   const rows = page_(page).getByTestId("connector-credential-rows");
   await rows.getByRole("button", { name: "Use a saved secret" }).first().click();
-  await expect(rows.getByLabel("Saved secret")).toHaveValue("bing-webmaster-yiming");
+  await expect(rows.getByRole("combobox", { name: "Saved secret" })).toContainText("bing-webmaster-yiming");
   await rows.getByRole("button", { name: "Use it" }).click();
   await expect.poll(() => fixtureRequestBodies(page, "fill")).toEqual([{ fromSecrets: { apiKey: "bing-webmaster-yiming" } }]);
 });
