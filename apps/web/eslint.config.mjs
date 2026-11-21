@@ -58,6 +58,9 @@ const config = [
       "src/lib/pages/public-page.ts",
       "src/lib/github-release.ts",
       "src/lib/relay-v2/message-attachment-upload-proxy.ts",
+      // The app packaged in the Chrome extension: its page answers `/api` and sends on to the Hub, in the Worker's place.
+      "src/extension-app/local-api.ts",
+      "src/extension-app/hub-proxy.ts",
     ],
     rules: {
       "no-restricted-globals": [

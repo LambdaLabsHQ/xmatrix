@@ -1,0 +1,256 @@
+// Builds the Web's workspace app into files the extension ships and opens in
+// its side panel: apps/web/src/extension-app/main.tsx and everything it
+// imports, the Web's styles, and the public files they name. It is the same
+// source the Web builds, with the same React Compiler pass; what differs is
+// what stands in for Next (see the resolver below) and that the Web's proxy
+// routes are bundled to run in the page.
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { transformAsync } from "@babel/core";
+import tailwind from "@tailwindcss/postcss";
+import reactCompiler from "babel-plugin-react-compiler";
+import * as esbuild from "esbuild";
+import postcss from "postcss";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const repo = path.resolve(root, "../..");
+const web = path.join(repo, "apps", "web");
+const webSource = path.join(web, "src");
+const appSource = path.join(webSource, "extension-app");
+const apiSource = path.join(webSource, "app", "api");
+
+/** Where the packaged page lives in the extension; its public files sit at the extension's root, as on the Web. */
+export const APP_DIRECTORY = "app";
+const ROUTES_MODULE = "xmatrix-extension:api-routes";
+const TARGET = "chrome116";
+
+/** What a proxy route may import and still run in a page: the protocol, and the hop this build supplies. */
+const PAGE_SAFE_IMPORTS = [
+  /^@xmatrix\/protocol(?:\/.*)?$/u,
+  /^@\/lib\/xmatrix-proxy$/u,
+  /^@\/lib\/xmatrix$/u,
+  /^@\/lib\/relay-v2\/message-attachment-upload-proxy$/u,
+];
+
+function walk(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(directory, entry.name);
+    return entry.isDirectory() ? walk(file) : [file];
+  });
+}
+
+/**
+ * The Web's Hub proxy routes that only name a Hub route and send the request
+ * on. A route that needs the Web's server (its cookies, its session store, its
+ * own secrets) is left out, and the page answers 404 for it.
+ */
+export function pageApiRoutes() {
+  const routes = [];
+  const skipped = [];
+  for (const file of walk(path.join(apiSource, "xmatrix")).filter((name) => path.basename(name) === "route.ts").sort()) {
+    const route = path.relative(apiSource, path.dirname(file)).split(path.sep).join("/");
+    const imports = [...fs.readFileSync(file, "utf8").matchAll(/\bfrom\s+["']([^"']+)["']/gu)].map((match) => match[1]);
+    if (imports.length > 0 && imports.every((name) => PAGE_SAFE_IMPORTS.some((allowed) => allowed.test(name)))) {
+      routes.push({ route, file });
+    } else skipped.push(route);
+  }
+  return { routes, skipped };
+}
+
+function routesModule(routes) {
+  const lines = routes.map(({ file }, index) => `import * as route${index} from ${JSON.stringify(file)};`);
+  lines.push(`export const API_ROUTES = [${routes.map(({ route }, index) => `[${JSON.stringify(route)}, route${index}]`).join(", ")}];`);
+  return lines.join("\n");
+}
+
+/** The modules that stand in for Next and for the Web's server hop. */
+const REPLACED = new Map([
+  ["next/navigation", path.join(appSource, "next-navigation.ts")],
+  ["next/link", path.join(appSource, "next-link.tsx")],
+  ["next/image", path.join(appSource, "next-image.tsx")],
+  ["next/dynamic", path.join(appSource, "next-dynamic.tsx")],
+  ["@/lib/xmatrix-proxy", path.join(appSource, "hub-proxy.ts")],
+]);
+
+const WORKER_URL = /new URL\((["'])\.\/([\w.-]+\.worker)\.ts\1,\s*import\.meta\.url\)/gu;
+
+/** Workers the app starts by file (`new URL("./x.worker.ts", import.meta.url)`): each is built beside the app. */
+function workerEntries() {
+  const entries = new Map();
+  for (const file of walk(path.join(webSource, "lib")).filter((name) => /\.tsx?$/u.test(name) && !name.includes(".test."))) {
+    for (const match of fs.readFileSync(file, "utf8").matchAll(WORKER_URL)) {
+      entries.set(match[2], path.join(path.dirname(file), `${match[2]}.ts`));
+    }
+  }
+  return entries;
+}
+
+const cacheDirectory = path.join(root, "node_modules", ".cache", "build-app");
+
+/** The Web's React Compiler pass (next.config.ts `reactCompiler`), for a file that can hold a component or a hook. */
+async function compileReact(file, source) {
+  if (!/\buse[A-Z]|<[A-Za-z]|<>/u.test(source)) return source;
+  const key = createHash("sha256").update(file).update("\0").update(source).digest("hex");
+  const cached = path.join(cacheDirectory, `${key}.tsx`);
+  if (fs.existsSync(cached)) return fs.readFileSync(cached, "utf8");
+  const result = await transformAsync(source, {
+    filename: file,
+    babelrc: false,
+    configFile: false,
+    compact: false,
+    plugins: [[reactCompiler, { target: "19" }]],
+    parserOpts: { plugins: ["typescript", "jsx"] },
+  });
+  const code = result?.code ?? source;
+  fs.mkdirSync(cacheDirectory, { recursive: true });
+  fs.writeFileSync(cached, code);
+  return code;
+}
+
+function appPlugin(routes, release) {
+  return {
+    name: "xmatrix-extension-app",
+    setup(build) {
+      // esbuild's filters are Go regular expressions: no `u` flag.
+      build.onResolve({ filter: /^(?:next\/(?:navigation|link|image|dynamic)|@\/lib\/xmatrix-proxy)$/ }, (args) => ({
+        path: REPLACED.get(args.path),
+      }));
+      // Anything else of Next would bring its router and server runtime into the page.
+      build.onResolve({ filter: /^next(?:\/|$)/ }, (args) => ({
+        errors: [{ text: `The extension's app cannot bundle ${args.path}: give it a module in apps/web/src/extension-app.` }],
+      }));
+      build.onResolve({ filter: new RegExp(`^${ROUTES_MODULE}$`) }, () => ({ path: ROUTES_MODULE, namespace: "routes" }));
+      build.onLoad({ filter: /.*/, namespace: "routes" }, () => ({ contents: routesModule(routes), resolveDir: appSource, loader: "ts" }));
+      // The app names itself to the Hub by the repository's version; a build made for a release is that release.
+      build.onLoad({ filter: /[\\/]version\.json$/ }, (args) => (args.path === path.join(repo, "version.json")
+        ? { contents: JSON.stringify({ version: release }), loader: "json" }
+        : undefined));
+      build.onLoad({ filter: /\.tsx?$/ }, async (args) => {
+        if (!args.path.startsWith(webSource + path.sep)) return undefined;
+        const source = fs.readFileSync(args.path, "utf8").replace(WORKER_URL, 'new URL("./$2.js", import.meta.url)');
+        return { contents: await compileReact(args.path, source), loader: args.path.endsWith(".tsx") ? "tsx" : "ts" };
+      });
+    },
+  };
+}
+
+/**
+ * The Web's build-time settings. Only two are set: the release, which is the
+ * version the app names itself as to the Hub and the build its stale-build
+ * check compares, and the Hub when a build is for another one. Everything else
+ * is unset, as on the production Web: the production Hub, no mock session.
+ */
+function shared({ minify, release, hubUrl }) {
+  return {
+    bundle: true,
+    format: "esm",
+    platform: "browser",
+    target: TARGET,
+    jsx: "automatic",
+    minify,
+    legalComments: "none",
+    absWorkingDir: web,
+    alias: { "@": webSource },
+    loader: { ".md": "text" },
+    define: {
+      "process.env.NODE_ENV": '"production"',
+      "process.env.NEXT_PUBLIC_XMATRIX_WEB_BUILD_ID": JSON.stringify(release),
+      ...(hubUrl ? { "process.env.NEXT_PUBLIC_XMATRIX_HUB_URL": JSON.stringify(hubUrl) } : {}),
+      "process.env": "{}",
+    },
+    logLevel: "warning",
+  };
+}
+
+async function buildScripts(out, settings) {
+  const { routes, skipped } = pageApiRoutes();
+  const workers = workerEntries();
+  const result = await esbuild.build({
+    ...shared(settings),
+    entryPoints: { main: path.join(appSource, "main.tsx"), ...Object.fromEntries(workers) },
+    outdir: out,
+    entryNames: "[name]",
+    chunkNames: "chunk-[hash]",
+    splitting: true,
+    metafile: true,
+    plugins: [appPlugin(routes, settings.release)],
+  });
+  return { routes: routes.length, skipped, bytes: Object.values(result.metafile.outputs).reduce((sum, file) => sum + file.bytes, 0) };
+}
+
+/** The Web's head scripts (extension-app/document-scripts.ts), as the file an extension page may load. */
+async function buildDocumentScript(out, settings) {
+  const result = await esbuild.build({
+    ...shared({ ...settings, minify: false }),
+    entryPoints: [path.join(appSource, "document-scripts.ts")],
+    platform: "node",
+    write: false,
+  });
+  const scripts = await import(`data:text/javascript;base64,${Buffer.from(result.outputFiles[0].text).toString("base64")}`);
+  fs.writeFileSync(path.join(out, "document.js"), `${scripts.DOCUMENT_HEAD_SCRIPT}\n`);
+}
+
+async function buildStyles(out, minify) {
+  const entry = path.join(appSource, "app.css");
+  // Tailwind reads the Web's sources for the classes they use, as the Web's own build does.
+  const result = await postcss([tailwind({ base: web, optimize: false })])
+    .process(fs.readFileSync(entry, "utf8"), { from: entry, to: path.join(out, "app.css") });
+  const css = minify
+    ? (await esbuild.transform(result.css, { loader: "css", minify: true, target: TARGET, logLevel: "error" })).code
+    : result.css;
+  fs.writeFileSync(path.join(out, "app.css"), css);
+  return css;
+}
+
+const PAGE = `<!doctype html>
+<html lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>xMatrix</title>
+  <link rel="stylesheet" href="app.css">
+  <link rel="modulepreload" href="main.js">
+  <script src="document.js"></script>
+</head>
+<body class="site-canvas antialiased">
+  <script type="module" src="main.js"></script>
+</body>
+</html>
+`;
+
+/** Public directories the app names by pattern (an Agent's vendor mark, a connector's icon), copied whole. */
+const PUBLIC_DIRECTORIES = ["agent-vendors", "app-connectors", "fonts", "role-avatars", "textures"];
+
+/** Copies the Web's public files the built app names, to the same paths at the extension's root. */
+function copyPublicFiles(extensionRoot, texts) {
+  const publicRoot = path.join(web, "public");
+  for (const directory of PUBLIC_DIRECTORIES) {
+    fs.cpSync(path.join(publicRoot, directory), path.join(extensionRoot, directory), { recursive: true });
+  }
+  const named = new Set();
+  for (const text of texts) {
+    for (const match of text.matchAll(/["'`(]\/((?:[\w-]+\/)*[\w.-]+\.(?:png|jpe?g|webp|svg|gif|ico|woff2))\b/gu)) named.add(match[1]);
+  }
+  for (const file of named) {
+    const source = path.join(publicRoot, file);
+    if (PUBLIC_DIRECTORIES.includes(file.split("/")[0]) || !fs.existsSync(source)) continue;
+    fs.mkdirSync(path.dirname(path.join(extensionRoot, file)), { recursive: true });
+    fs.copyFileSync(source, path.join(extensionRoot, file));
+  }
+}
+
+/** Builds the app into `<extensionRoot>/app`, and its public files into `extensionRoot`. */
+export async function buildApp({ extensionRoot, release, hubUrl, minify = true }) {
+  const settings = { minify, release, hubUrl };
+  const out = path.join(extensionRoot, APP_DIRECTORY);
+  fs.rmSync(out, { recursive: true, force: true });
+  fs.mkdirSync(out, { recursive: true });
+  const [scripts, css] = await Promise.all([buildScripts(out, settings), buildStyles(out, minify), buildDocumentScript(out, settings)]);
+  fs.writeFileSync(path.join(out, "index.html"), PAGE);
+  const built = fs.readdirSync(out).filter((name) => name.endsWith(".js")).map((name) => fs.readFileSync(path.join(out, name), "utf8"));
+  copyPublicFiles(extensionRoot, [...built, css]);
+  return { out, ...scripts };
+}

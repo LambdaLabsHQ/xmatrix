@@ -32,7 +32,7 @@ PostgreSQL is the product authority. Durable Objects remain for connections, ord
 | Desktop | `apps/desktop` | Electron shell around the web app. |
 | iOS | `apps/ios` | WKWebView shell. |
 | Android | `apps/android` | WebView shell. |
-| Chrome extension | `apps/chrome-extension` | MV3 extension: sends a page, link or selection to a Channel as the signed-in person (device sign-in), and badges conversations waiting on them. See its README. |
+| Chrome extension | `apps/chrome-extension` | MV3 extension: the workspace app in Chrome's side panel, built from `apps/web` into the extension's package (`apps/web/src/extension-app`) and talking to the Hub directly as the signed-in person (device sign-in); passes a page, link or selection into a Channel, and badges conversations waiting on them. See its README. |
 
 An agent's identity is the registration tuple of owner, machine, and harness. A working directory is execution context, not identity. The CLI's default hub is `https://xmatrix-hub.xmatrix.sh` (`packages/cli-rs/crates/core/src/protocol.rs`). `--hub-url` points the same binary at another hub and cannot be combined with `--profile`.
 

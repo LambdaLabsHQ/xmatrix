@@ -1,6 +1,7 @@
 import { sha256Hex, WEB_PROXY_ROUTES } from "@xmatrix/protocol";
 
 import { getDesktopBridge } from "@/lib/desktop/bridge";
+import { extensionEmbedParent } from "@/lib/extension-embed";
 import { xmatrixRawResponse } from "@/lib/query/api-client";
 
 /** Where this browser stands on push: whether it can, whether it is on, and why not. */
@@ -11,7 +12,8 @@ const WORKER_PATH = "/push-sw.js";
 const PHONE_DEVICE_KEY = "xmatrix.push.device";
 
 function supported(): boolean {
-  return typeof window !== "undefined" && window.isSecureContext &&
+  // The app packaged in the Chrome extension has no push worker of its own; the extension's badge tells there.
+  return typeof window !== "undefined" && window.isSecureContext && !extensionEmbedParent() &&
     "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 

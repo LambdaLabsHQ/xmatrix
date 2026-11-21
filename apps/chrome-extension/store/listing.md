@@ -1,6 +1,6 @@
 # Chrome Web Store listing
 
-The text and answers to paste into the Chrome Web Store developer dashboard for the xMatrix extension. The publisher is the MadeByRobot, LLC developer account, declared as a trader. The images in this folder are the screenshots and the small promo tile; they still show the earlier popup and are re-taken from the side panel once the Web change that lets it embed the app is live. Their data is made up.
+The text and answers to paste into the Chrome Web Store developer dashboard for the xMatrix extension. The publisher is the MadeByRobot, LLC developer account, declared as a trader. The images in this folder are the screenshots and the small promo tile; they still show the earlier popup and are re-taken from the side panel before the next submission. Their data is made up.
 
 ## Store listing
 
@@ -48,10 +48,10 @@ Open the user's xMatrix workspace in the side panel, beside the page they are re
 | `contextMenus` | Adds "Discuss in xMatrix" and "Quote in the open xMatrix conversation" to the right-click menu. |
 | `storage` | Keeps the user's xMatrix sign-in on this device, and text they picked until the panel takes it. |
 | `alarms` | Refreshes the badge count once a minute, and keeps checking for the sign-in approval while the user approves it in a tab. |
-| Host `https://xmatrix-hub.xmatrix.sh/*` | The xMatrix server the extension signs in to and reads the badge count from. |
+| Host `https://xmatrix-hub.xmatrix.sh/*` | The xMatrix server. The extension signs in to it and reads the badge count from it, and the workspace in the side panel reads and sends the user's conversations through it. |
 | Optional hosts `https://*/*`, `http://*/*` | Requested only when the user turns on quick select: shows a small button beside text they select on a page. The button reads only the selected text, and only when clicked. |
 
-**Remote code:** No. All code ships in the package.
+**Remote code:** No. All code ships in the package, the workspace shown in the side panel included: it is built into the package, not loaded from a website. The package's content security policy allows scripts from the package only.
 
 **Data usage.** Check these boxes:
 - Personally identifiable information: the account name returned at sign-in.
@@ -70,4 +70,4 @@ Certify all three:
 
 ## Package
 
-Build the upload with `pnpm --filter @xmatrix/chrome-extension package`. Zip the contents of `dist/chrome-extension` with `manifest.json` at the root of the zip.
+Build the upload with `pnpm --filter @xmatrix/chrome-extension package` (after `pnpm --filter @xmatrix/protocol build`). Zip the contents of `dist/chrome-extension` with `manifest.json` at the root of the zip.

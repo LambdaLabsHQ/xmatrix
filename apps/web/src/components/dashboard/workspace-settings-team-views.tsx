@@ -127,6 +127,7 @@ import type {
 } from "@xmatrix/protocol";
 
 import { DetailRow, ReleaseNotesLink } from "./workspace-admin-views";
+import { appAddressOrigin } from "@/lib/app-address";
 
 // Settings and Team: tool views the shell loads when one is first opened, kept
 // apart from workspace-admin-views, whose data helpers the first screen uses.
@@ -1217,7 +1218,7 @@ export function TeamView({
                         {codeBySpace[space.id] && (
                           <div className="flex flex-col gap-1">
                             <code className="select-all break-all rounded bg-muted px-2 py-1.5 text-[11px]">
-                              {`${typeof window === "undefined" ? "" : window.location.origin}/spaces/invite/${codeBySpace[space.id]}`}
+                              {`${appAddressOrigin()}/spaces/invite/${codeBySpace[space.id]}`}
                             </code>
                             <p className={noticeClass("attention", "text-[11px] font-medium")}>
                               Copy it now — this link is shown once and cannot be retrieved again.

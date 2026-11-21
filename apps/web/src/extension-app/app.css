@@ -1,0 +1,5 @@
+/* The Web document's styles (components/site-document.tsx), in its order, for the page packaged in the extension. */
+@import "../app/globals.css";
+@import "../app/themes/materials.css";
+@import "../app/themes/wood.css";
+@import "../app/themes/site.css";
