@@ -291,6 +291,15 @@ saved alone; Check reads the site list when an API key is saved. Bing also
 offers OAuth for Webmaster Tools, but a company app needs its own registration;
 the API key keeps the connection per account without one.
 
+Bing answers every Webmaster API call from Cloudflare Workers' shared egress
+addresses with `ThrottleIP` (ErrorCode 17), whatever the key or call volume,
+and an OAuth token is refused the same way. When the deployment sets
+`CONNECTOR_BING_RELAY_URL` and `CONNECTOR_BING_RELAY_TOKEN`, Bing calls go
+through the relay in `deploy/bing-relay` on Cloud Run: the Hub sends the API key
+as the `x-bing-apikey` header and the relay adds it for Bing, so the key is in no
+URL the relay receives. The relay forwards only Bing Webmaster JSON methods and
+holds just the token's SHA-256. IndexNow does not go through the relay.
+
 App Store Connect (`appstoreconnect`) saves an App Store Connect API key: its
 Key ID, the team's Issuer ID (none for an individual key) and the `.p8` private
 key, pasted as text with or without its line breaks. The Hub signs a ten-minute
