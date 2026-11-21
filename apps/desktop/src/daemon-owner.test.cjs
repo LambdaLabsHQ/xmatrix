@@ -77,6 +77,16 @@ test("windowsPowerShellCommand always hides the console window", async () => {
   });
 });
 
+test("windowsDaemonTaskForceStopScript stops both the task and xmatrix.exe daemon", async () => {
+  const { windowsDaemonTaskForceStopScript } = await import("./daemon-owner.ts");
+  const script = windowsDaemonTaskForceStopScript("xmatrix-daemon");
+  assert.match(script, /Stop-ScheduledTask -TaskName 'xmatrix-daemon'/);
+  assert.match(script, /Name = 'xmatrix\.exe'/);
+  assert.match(script, /\\s\+daemon/);
+  assert.match(script, /Stop-Process -Id \$_\.ProcessId -Force/);
+  assert.match(script, /\.State -eq 'Running'/);
+});
+
 test("daemonStatusChanged ignores heartbeat timestamp refreshes when state is unchanged", async () => {
   const { daemonStatusChanged } = await import("./daemon-owner.ts");
   const running = {

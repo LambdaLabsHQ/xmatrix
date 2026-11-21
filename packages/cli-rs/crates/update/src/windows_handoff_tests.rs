@@ -34,7 +34,11 @@ fn scenario_script(
         )
         .replace(
             "$previousVersionOutput = @(& $installPath --version 2>$null) | Select-Object -First 1",
-            "$previousVersionOutput = 'xmatrix 0.16.289'",
+            if conhost_task {
+                "$previousVersionOutput = 'xmatrix 0.16.289-beta.3'"
+            } else {
+                "$previousVersionOutput = 'xmatrix 0.16.289'"
+            },
         )
         .replace(
             "$installBackupPath = $installPath +",
@@ -99,7 +103,9 @@ Write-Output 'handoff scenario passed'
   if ([System.IO.Path]::GetFileName([string]$healthPath) -ieq 'conhost.exe') { throw "health check waited on $healthPath" }
   if ([System.IO.Path]::GetFullPath([string]$healthPath) -ine [System.IO.Path]::GetFullPath({install})) { throw "health check waited on $healthPath" }
 }
-if (@($script:healthPaths).Count -lt 2) { throw 'conhost rollback did not check the previous daemon' }"#
+if (@($script:healthPaths).Count -lt 2) { throw 'conhost rollback did not check the previous daemon' }
+if ($script:healthVersions[1] -ne '0.16.289-beta.3') { throw "rollback health check lost prerelease suffix: $($script:healthVersions[1])" }
+if ($receipt.version -ne '0.16.289-beta.3') { throw "rollback receipt lost prerelease suffix: $($receipt.version)" }"#
                 .replace(
                     "{install}",
                     &powershell_single_quoted(&install.display().to_string()),

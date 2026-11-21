@@ -3,6 +3,7 @@
 $script:starts = 0
 $script:healthChecks = 0
 $script:healthPaths = @()
+$script:healthVersions = @()
 $script:stopped = @()
 $script:processes = @(
   [pscustomobject]@{ProcessId=101;ExecutablePath=$installPath;CommandLine=('"' + $installPath + '" codex --task "inspect logs"')},
@@ -42,6 +43,7 @@ function Wait-UpdatedDaemonHealthy {
   param($expectedPath,$expectedVersion,$startedAtUtc,$timeoutSeconds)
   $script:healthChecks += 1
   $script:healthPaths += [string]$expectedPath
+  $script:healthVersions += [string]$expectedVersion
   if ($script:healthChecks -eq 1) { return -not $script:failCandidate }
   return -not $script:failRollback
 }

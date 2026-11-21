@@ -78,9 +78,13 @@ without a signed continuity migration.
   action, a historical WScript bridge, a generation selector, or any other task action is replaced on the next
   `setup daemon` run and has no current startup authority. A self-update that can modify the login task makes the
   same action change in place and does not stop the running task.
-- Before replacing the stable binary, the installer stops only the daemon task and daemon process. It then atomically
-  replaces the CLI, asks `setup daemon` to rewrite the exact direct task when needed, starts it, and requires the new
-  executable path to appear as a live daemon before reporting success.
+- Before replacing the stable binary, the installer stops only the daemon task and daemon process. Because
+  `Stop-ScheduledTask` ends the `conhost.exe` parent without terminating its child `xmatrix.exe daemon` (whereas
+  stopping `xmatrix.exe daemon` exits `conhost.exe` and returns the task to `Ready`), `setup daemon`, `install.ps1`,
+  `uninstall`, and Desktop App forced restarts also stop `xmatrix.exe daemon` processes and let the task leave
+  `Running` before starting it again. The installer then atomically replaces the CLI, asks `setup daemon` to rewrite
+  the exact direct task when needed, starts it, and requires the new executable path to appear as a live daemon before
+  reporting success.
 - The daemon and Agent wrappers apply `CREATE_NO_WINDOW` to background subprocesses. Managed Agent processes keep their
   separately tracked lifecycle and are not selected by installer daemon-process cleanup.
 - Windows runs the same daemon self-update loop as macOS and Linux. `xmatrix update` and daemon

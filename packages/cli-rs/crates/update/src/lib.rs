@@ -2269,7 +2269,7 @@ fn windows_update_handoff_script(
 {extra_wait}\
            if (Test-Path -LiteralPath $installPath) {{\n\
              $previousVersionOutput = @(& $installPath --version 2>$null) | Select-Object -First 1\n\
-             if ($previousVersionOutput -match '(\\d+\\.\\d+\\.\\d+)') {{ $previousVersion = $Matches[1] }}\n\
+             if ($previousVersionOutput -match '(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?)') {{ $previousVersion = $Matches[1] }}\n\
            }}\n\
            Write-DaemonUpdateReceipt 'staged' {latest_version} $installPath $null\n\
            $task = Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue\n\
@@ -2350,6 +2350,7 @@ fn windows_update_handoff_script(
              try {{\n\
                $rollbackStartedAtUtc = [DateTime]::UtcNow\n\
                if ($task) {{\n\
+                 if (-not $managedLauncher) {{ Clear-WatchdogStartedDaemon }}\n\
                  Start-ScheduledTask -TaskName $taskName\n\
                }} else {{\n\
 {unmanaged_start}\
@@ -3538,6 +3539,17 @@ mod tests {
             .find("Start-ScheduledTask -TaskName $taskName")
             .expect("then starts the task");
         assert!(start > 0);
+        let rollback_clear = script[clear + start..]
+            .find("if (-not $managedLauncher) { Clear-WatchdogStartedDaemon }")
+            .expect("rollback also clears a watchdog-started daemon and lets conhost settle");
+        let rollback_start = script[clear + start + rollback_clear..]
+            .find("Start-ScheduledTask -TaskName $taskName")
+            .expect("then restarts the previous daemon task");
+        assert!(rollback_start > 0);
+        assert!(
+            script.contains("(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?)"),
+            "previous version capture must keep prerelease suffixes for rollback health checks"
+        );
         let watchdog = script
             .find("if ($task -and -not $managedLauncher) { Add-DaemonWatchdogTrigger }")
             .expect("direct task gains the watchdog trigger");

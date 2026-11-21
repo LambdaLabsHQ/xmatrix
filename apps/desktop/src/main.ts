@@ -30,6 +30,7 @@ import {
   daemonStatusChanged,
   parseDaemonLockPid,
   parsePsDaemonProcesses,
+  windowsDaemonTaskForceStopScript,
   windowsPowerShellCommand,
   type ExistingDaemonProcess,
 } from "./daemon-owner";
@@ -1983,14 +1984,14 @@ function powershellSingleQuoted(value: string) {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function runWindowsDaemonTaskCommand(scriptBody: string): Promise<boolean> {
-  return runWindowsDaemonTaskCommandOutcome(scriptBody).then((outcome) => outcome.started);
+function runWindowsDaemonTaskCommand(scriptBody: string, timeoutMs = 5_000): Promise<boolean> {
+  return runWindowsDaemonTaskCommandOutcome(scriptBody, timeoutMs).then((outcome) => outcome.started);
 }
 
-function runWindowsDaemonTaskCommandOutcome(scriptBody: string): Promise<ManagedStart> {
+function runWindowsDaemonTaskCommandOutcome(scriptBody: string, timeoutMs = 5_000): Promise<ManagedStart> {
   if (process.platform !== "win32") return Promise.resolve({ started: false, output: "" });
 
-  const command = windowsPowerShellCommand(["-ExecutionPolicy", "Bypass", "-Command", scriptBody], 5_000);
+  const command = windowsPowerShellCommand(["-ExecutionPolicy", "Bypass", "-Command", scriptBody], timeoutMs);
   return new Promise((resolve) => {
     execFile(
       command.file,
@@ -2077,7 +2078,8 @@ async function startWindowsDaemonTaskIfAvailable(options: { force?: boolean } = 
 
   if (options.force) {
     await runWindowsDaemonTaskCommand(
-      `$ErrorActionPreference='SilentlyContinue'; Stop-ScheduledTask -TaskName ${powershellSingleQuoted(WINDOWS_DAEMON_TASK_NAME)}`
+      windowsDaemonTaskForceStopScript(WINDOWS_DAEMON_TASK_NAME),
+      10_000,
     );
   }
 
