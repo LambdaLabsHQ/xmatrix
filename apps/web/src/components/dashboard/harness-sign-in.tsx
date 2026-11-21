@@ -92,7 +92,7 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
   const [operation, setOperation] = useState<Operation | null>(null);
   const [prompt, setPrompt] = useState<HarnessLoginProgress | null>(null);
   const [code, setCode] = useState("");
-  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; error: boolean; outputTail?: string } | null>(null);
   const [copied, setCopied] = useState(false);
 
   const [waitState, setWaitState] = useState<"normal" | "slow" | "expired">("normal");
@@ -140,7 +140,9 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
         // A device code finishes on its own once the owner approves it there.
         if (login.flow === "device_code") queue.mutate({ step: "finish" });
       } else {
-        setNotice({ text: settled.error ?? "The harness did not start its sign-in.", error: true });
+        setNotice({ text: settled.error ?? "The harness did not start its sign-in.", error: true,
+          outputTail: settled.result?.outputTail });
+        void queryClient.invalidateQueries({ queryKey: daemonKey });
       }
       return;
     }
@@ -157,7 +159,8 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
       setNotice({ text: "Signed in.", error: false });
       onSignedIn?.();
     } else if (login?.state !== "cancelled") {
-      setNotice({ text: settled.error ?? "The sign-in did not finish.", error: true });
+      setNotice({ text: settled.error ?? "The sign-in did not finish.", error: true,
+        outputTail: settled.result?.outputTail });
     }
     void queryClient.invalidateQueries({ queryKey: daemonKey });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- runs once per settled operation
@@ -242,7 +245,15 @@ export function HarnessSignInSection({ registration, token, userId, bare = false
             </div>
           </div>
         )}
-        {notice && <p role="status" className={noticeClass(notice.error ? "alert" : "settled", "rounded-lg p-3")}>{notice.text}</p>}
+        {notice && <div role="status" className={noticeClass(notice.error ? "alert" : "settled", "rounded-lg p-3")}>
+          <p>{notice.text}</p>
+          {notice.error && notice.outputTail && notice.outputTail.trim() !== notice.text && (
+            <details className="mt-2 text-xs text-muted-foreground">
+              <summary className="cursor-pointer select-none">Command output</summary>
+              <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono">{notice.outputTail}</pre>
+            </details>
+          )}
+        </div>}
         {status.isError && operation && <div className="space-y-2">
           <p role="status" className="text-xs text-destructive">Status could not be checked. The sign-in may still be running on the machine.</p>
           {waitState !== "expired" && <Button size="sm" variant="outline" disabled={status.isFetching}

@@ -226,6 +226,14 @@ export async function readHarnessReleaseTargets(database: AuthorityDatabase, inp
 function boundedError(result: HarnessActionResult): string {
   if (result.status === "unsupported") return "This harness has no official recipe for that action on this platform";
   const last = result.outputTail?.trim().split("\n").at(-1)?.trim();
+  if (result.action === "login_start") {
+    const timeout = last?.match(/^\[?no sign-in link after (\d+) seconds\]?\.?$/iu);
+    if (timeout) return `The sign-in command did not print a sign-in link within ${timeout[1]} seconds.`;
+    if (result.exitCode === 0 || result.outputTail?.includes("Commands available in print mode:") ||
+        (!last && result.exitCode === undefined)) {
+      return "The sign-in command exited without printing a sign-in link.";
+    }
+  }
   const message = `${result.exitCode === undefined ? "Failed" : `Exited with code ${result.exitCode}`}${last ? `: ${last}` : ""}`;
   return message.length > ERROR_MAX ? `${message.slice(0, ERROR_MAX - 1)}…` : message;
 }

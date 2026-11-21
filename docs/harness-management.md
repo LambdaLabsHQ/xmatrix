@@ -301,8 +301,8 @@ Sign-in section with the harness's state on that Machine and a Sign in button.
   (`signed_in`, `signed_out`, `unknown`) on their inventory item; each sign-in
   action re-probes the preset.
 
-Presets with a sign-in today: antigravity (in a pseudo-terminal; the CLI gives
-up 60 seconds after it prints the link, so paste the code within a minute),
+Presets with a sign-in today: antigravity (via `agy acp --login`; paste the code
+or the address the browser ends on),
 codex, claude, cline, copilot, cursor, devin (in a pseudo-terminal), grok,
 hermes, jcode, kilo, kimi, kiro, omp (paste the code or the address the browser
 ends on), opencode, qoder and zcode. gemini,

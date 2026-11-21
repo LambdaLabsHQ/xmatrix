@@ -113,9 +113,12 @@ test("a failed status read offers recovery without issuing a second sign-in", as
   await expect(section.getByRole("button", { name: "Starting sign-in…" })).toHaveCount(0);
   await expect(section.getByRole("button", { name: "Cancel sign-in" })).toBeEnabled();
   await fixtureJson(page, "sign-in-start", `**/api/xmatrix/machine-daemons/harness-actions/${encodeURIComponent(START)}`, {
-    controlId: START, presetId: "codex", action: "login_start", status: "failed", error: "No sign-in link was returned." });
+    controlId: START, presetId: "codex", action: "login_start", status: "failed", error: "No sign-in link was returned.",
+    result: { presetId: "codex", action: "login_start", status: "failed", exitCode: 0, outputTail: "unexpected command output\n" } });
   await section.getByRole("button", { name: "Check status again" }).click();
   await expect(section).toContainText("No sign-in link was returned.");
+  await section.getByText("Command output").click();
+  await expect(section).toContainText("unexpected command output");
   await expect(section.getByRole("button", { name: "Sign in", exact: true })).toBeEnabled();
   expect(await fixtureRequestBodies(page, "sign-in-issue")).toHaveLength(1);
 });
