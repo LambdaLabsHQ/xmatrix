@@ -13,6 +13,7 @@ import { AppControlError } from "../../db/src/app-control.ts";
 import { ControlError } from "../../db/src/control-error.ts";
 import { connectionCredentialsDouble } from "./support/connection-credentials-double.mjs";
 import { commandMailAttachments } from "../src/connectors/gmail-attachments.ts";
+import { providerEgress } from "../src/connectors/provider-egress.ts";
 
 const mailbox = { address: "mailbox@example.test", account: "ca_mailbox", owner: "user:owner" };
 const id = "18f2a9c0d1e2b3a4";
@@ -47,6 +48,7 @@ async function harness(credentials = { mailboxes: JSON.stringify([mailbox]), com
     "./subscription-parse": subscriptionParse,
     "./connection-credentials": connectionCredentialsDouble(async () => credentials),
     "./gmail-attachments": { commandMailAttachments },
+    "./provider-egress": { providerEgress },
     "./credentials": { connectorPermissionRepository: () => ({ mode: async () => "write" }) },
     "./agent-caller": { agentRegistrationOf: async () => ({ ownerUserId: "owner", machineId: "machine", harnessId: "codex" }) },
     "./http": { ConnectorRemedy, ProviderRequestError },
