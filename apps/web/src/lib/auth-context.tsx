@@ -36,7 +36,13 @@ import { handDesktopSessionToCli } from "./desktop/session-exchange";
 import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { clearPersistedChannelComposerDrafts } from "@/components/dashboard/channel-composer-drafts";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
+import {
+  announceEmbedSignOut,
+  extensionEmbedParent,
+  requestEmbedToken,
+  subscribeEmbedSignOut,
+} from "./extension-embed";
 
 export { AUTH_TOKEN_REJECTED_EVENT };
 
@@ -168,6 +174,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (mockAuthState || !signedInUserId || !accessToken) return;
     void registerPhonePush(accessToken).catch(() => undefined);
   }, [mockAuthState, signedInUserId]);
+
+  // In the extension's side panel, signing out there signs this frame out too.
+  useEffect(() => {
+    const parent = extensionEmbedParent();
+    if (mockAuthState || !parent) return;
+    return subscribeEmbedSignOut(parent, () => setState({ session: null, user: null, loading: false }));
+  }, [mockAuthState]);
 
   useEffect(() => {
     if (mockAuthState) {
@@ -351,6 +364,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // In the extension's side panel the session is the extension's: it ends it there.
+    const embedParent = extensionEmbedParent();
+    if (embedParent) {
+      announceEmbedSignOut(embedParent);
+      setState({ session: null, user: null, loading: false });
+      return;
+    }
+
     setState((prev) => ({ ...prev, loading: true }));
     // A signed-out browser is told nothing: forget its push subscription while the session can still say so.
     const accessToken = state.session?.access_token;
@@ -401,6 +422,8 @@ export function useAuth(): AuthContextValue {
 }
 
 async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
+  const embedParent = extensionEmbedParent();
+  if (embedParent) return loadEmbedSessionState(embedParent);
   let transientError: unknown;
   const nativeState = await loadNativeSessionState().catch((error) => {
     if (isTransientSessionLoadError(error)) {
@@ -426,6 +449,26 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
 
   if (transientError) throw transientError;
   return { session: null, user: null };
+}
+
+/**
+ * The side panel's session: a current access token from the extension, asked
+ * for on every load and renewal (the extension renews it), and the account it
+ * belongs to, read from the Hub with that token. Nothing is stored here.
+ */
+async function loadEmbedSessionState(parent: string): Promise<Omit<AuthState, "loading">> {
+  const token = await requestEmbedToken(parent);
+  if (!token) return { session: null, user: null };
+  const { user } = await xmatrixApiRequest<{ user: AuthUser }>({ url: WEB_PROXY_ROUTES.me, token });
+  return {
+    session: {
+      access_token: token,
+      token_type: "bearer",
+      user: { id: user.id, email: user.email, user_metadata: { name: user.name, avatarUrl: user.avatarUrl,
+        avatar_url: user.avatarUrl, picture: user.avatarUrl } },
+    },
+    user,
+  };
 }
 
 /**

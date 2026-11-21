@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { cookies, headers as requestHeaders } from "next/headers";
 import {
   CLIENT_COMPATIBILITY_POLICY,
   clientCompatibilityHeaders,
@@ -24,6 +24,7 @@ import {
   APP_COMPATIBILITY_COOKIE,
   appCompatibilityRequiredForProxyRoute,
   parseAppCompatibilityCookie,
+  parseAppCompatibilityHeaders,
 } from "@/lib/client-compatibility-server";
 import {
   ProxySessionRefreshError,
@@ -227,7 +228,8 @@ export function pickSearchParams(source: URLSearchParams, names: readonly string
 
 async function getProxyClientCompatibility() {
   const cookieStore = await cookies();
-  return parseAppCompatibilityCookie(cookieStore.get(APP_COMPATIBILITY_COOKIE)?.value);
+  return parseAppCompatibilityCookie(cookieStore.get(APP_COMPATIBILITY_COOKIE)?.value)
+    ?? parseAppCompatibilityHeaders(await requestHeaders());
 }
 
 function byteLength(value: string | ArrayBuffer) {
