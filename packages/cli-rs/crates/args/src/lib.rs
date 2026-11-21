@@ -187,7 +187,7 @@ pub enum Commands {
     Whoami,
     /// Star xMatrix on GitHub; only a person at a terminal can, never an Agent run
     Star,
-    /// Inspect billing without purchasing or changing subscriptions
+    /// Inspect billing, or give complimentary Pro as an operator; never purchases
     Billing {
         #[command(subcommand)]
         command: BillingCommand,
@@ -383,6 +383,42 @@ pub enum BillingCommand {
     },
     /// Open the billing page; does not create a checkout or trial
     Open,
+    /// Complimentary Pro for feedback (platform admins and the Agent Runs they own)
+    Grant {
+        #[command(subcommand)]
+        command: BillingGrantCommand,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BillingGrantCommand {
+    /// Find who sent feedback: their user id, the Spaces they own, and any grant they already got
+    Candidate {
+        /// The email the feedback came from
+        #[arg(long, conflicts_with_all = ["handle", "user"])]
+        email: Option<String>,
+        /// The xMatrix username named in a GitHub issue
+        #[arg(long, conflicts_with = "user")]
+        handle: Option<String>,
+        /// A user id
+        #[arg(long)]
+        user: Option<String>,
+    },
+    /// Give one Space its owner owns a month of Pro for one piece of feedback
+    Give {
+        /// The person's user id, from `candidate`
+        #[arg(long)]
+        user: String,
+        /// A Space that person owns
+        #[arg(long)]
+        space: String,
+        /// The feedback: an issue URL, or the email's Message-ID
+        #[arg(long)]
+        reference: String,
+        /// What the feedback was about, without personal data
+        #[arg(long)]
+        reason: String,
+    },
 }
 
 #[derive(Subcommand, Debug)]

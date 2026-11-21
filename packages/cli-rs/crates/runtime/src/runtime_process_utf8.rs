@@ -757,8 +757,25 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
         Some(Commands::Whoami) => cmd_whoami(&hub_url).await,
         Some(Commands::Billing { command }) => {
             use xmatrix_cli_account::billing::{self, Query};
-            use xmatrix_cli_args::{BillingCommand, SpaceBillingCommand};
+            use xmatrix_cli_args::{BillingCommand, BillingGrantCommand, SpaceBillingCommand};
             match command {
+                BillingCommand::Grant { command } => {
+                    let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
+                    match command {
+                        BillingGrantCommand::Candidate { email, handle, user } => {
+                            let candidate = match (email, handle, user) {
+                                (Some(email), _, _) => billing::GrantCandidate::Email(email),
+                                (_, Some(handle), _) => billing::GrantCandidate::Handle(handle),
+                                (_, _, Some(user)) => billing::GrantCandidate::User(user),
+                                _ => return Err(CliError::Auth("Pass --email, --handle or --user".into())),
+                            };
+                            billing::grant_candidate(&hub_url, &token, candidate).await
+                        }
+                        BillingGrantCommand::Give { user, space, reference, reason } => {
+                            billing::grant_give(&hub_url, &token, &user, &space, &reference, &reason).await
+                        }
+                    }
+                }
                 BillingCommand::Space {
                     command: SpaceBillingCommand::Status { space, json },
                 } => {
