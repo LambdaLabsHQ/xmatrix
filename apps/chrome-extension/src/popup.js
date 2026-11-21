@@ -23,14 +23,71 @@ function fail(element, error) {
   element.hidden = false;
 }
 
-function fill(select, items, selectedId) {
-  select.replaceChildren(...items.map((item) => {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = item.needsYou ? `● ${item.name}` : item.name;
-    option.selected = item.id === selectedId;
-    return option;
+function element(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined) node.textContent = text;
+  return node;
+}
+
+let spaces = [];
+let spaceId = null;
+let channelId = null;
+
+function renderSpaces() {
+  const current = spaces.find((space) => space.id === spaceId);
+  $("space-name").textContent = current?.name ?? "";
+  $("space-button").disabled = spaces.length < 2;
+  $("space-menu").replaceChildren(...spaces.map((space) => {
+    const item = element("button", "", space.name);
+    item.type = "button";
+    item.setAttribute("role", "menuitemradio");
+    item.setAttribute("aria-checked", String(space.id === spaceId));
+    if (space.id === spaceId) item.append(element("span", "", "✓"));
+    item.addEventListener("click", () => {
+      closeSpaceMenu();
+      if (space.id === spaceId) return;
+      spaceId = space.id;
+      renderSpaces();
+      $("compose-error").hidden = true;
+      loadChannels(space.id).catch((error) => fail($("compose-error"), error));
+    });
+    return item;
   }));
+}
+
+function closeSpaceMenu() {
+  $("space-menu").hidden = true;
+  $("space-button").setAttribute("aria-expanded", "false");
+}
+
+function channelRow(channel) {
+  const row = element("button", "row");
+  row.type = "button";
+  row.setAttribute("role", "option");
+  row.setAttribute("aria-selected", String(channel.id === channelId));
+  row.append(element("span", "hash", "#"), element("span", "name", channel.name), element("span", "check", "✓"));
+  row.addEventListener("click", () => {
+    channelId = channel.id;
+    for (const other of $("channels").querySelectorAll(".row")) other.setAttribute("aria-selected", String(other === row));
+  });
+  return row;
+}
+
+/** "Needs you" first, then "Recent", as the app's conversation list. */
+function renderChannels(channels) {
+  const list = $("channels");
+  if (channels.length === 0) {
+    list.replaceChildren(element("p", "empty", "This Space has no conversations yet. Start one in xMatrix first."));
+    return;
+  }
+  const waiting = channels.filter((channel) => channel.needsYou);
+  const rest = channels.filter((channel) => !channel.needsYou);
+  const nodes = [];
+  if (waiting.length) nodes.push(element("div", "heading waiting", "Needs you"), ...waiting.map(channelRow));
+  if (rest.length) nodes.push(element("div", "heading recent", "Recent"), ...rest.map(channelRow));
+  list.replaceChildren(...nodes);
+  list.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: "nearest" });
 }
 
 /** The page the popup was opened on, with the selected text when the page allows reading it. */
@@ -63,18 +120,18 @@ function renderCapture() {
   $("capture-selection").textContent = capture.selection;
 }
 
-async function loadChannels(spaceId, selectedId) {
-  const select = $("channel");
-  select.disabled = true;
-  try {
-    const channels = channelsBySpace.get(spaceId) ?? await ask("channels", { spaceId });
-    channelsBySpace.set(spaceId, channels);
-    fill(select, channels, selectedId);
-    $("send").disabled = channels.length === 0;
-    if (channels.length === 0) fail($("compose-error"), "This Space has no conversations yet. Start one in xMatrix first.");
-  } finally {
-    select.disabled = false;
-  }
+function includePage() {
+  return $("include-page").getAttribute("aria-checked") === "true";
+}
+
+async function loadChannels(id, selectedId) {
+  $("channels").replaceChildren(element("p", "empty", "Loading conversations…"));
+  const channels = channelsBySpace.get(id) ?? await ask("channels", { spaceId: id });
+  channelsBySpace.set(id, channels);
+  if (id !== spaceId) return;
+  channelId = channels.some((channel) => channel.id === selectedId) ? selectedId : channels[0]?.id ?? null;
+  renderChannels(channels);
+  $("send").disabled = !channelId;
 }
 
 async function renderCompose(state) {
@@ -83,14 +140,15 @@ async function renderCompose(state) {
   $("sign-out").hidden = false;
   capture = state.capture ?? await activeTabCapture();
   renderCapture();
-  const [spaces, last] = await Promise.all([ask("spaces"), ask("lastTarget")]);
+  const [list, last] = await Promise.all([ask("spaces"), ask("lastTarget")]);
+  spaces = list;
   if (spaces.length === 0) {
     fail($("compose-error"), "You are not in any Space yet.");
     $("send").disabled = true;
     return;
   }
-  const spaceId = spaces.some((space) => space.id === last?.spaceId) ? last.spaceId : spaces[0].id;
-  fill($("space"), spaces, spaceId);
+  spaceId = spaces.some((space) => space.id === last?.spaceId) ? last.spaceId : spaces[0].id;
+  renderSpaces();
   await loadChannels(spaceId, last?.spaceId === spaceId ? last.channelId : undefined);
   $("note").focus();
 }
@@ -135,9 +193,29 @@ $("sign-out").addEventListener("click", async () => {
   await render();
 });
 
-$("space").addEventListener("change", (event) => {
-  $("compose-error").hidden = true;
-  loadChannels(event.target.value).catch((error) => fail($("compose-error"), error));
+$("space-button").addEventListener("click", () => {
+  const open = $("space-menu").hidden;
+  $("space-menu").hidden = !open;
+  $("space-button").setAttribute("aria-expanded", String(open));
+  if (open) $("space-menu").querySelector('[aria-checked="true"]')?.focus();
+});
+
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".space-row")) closeSpaceMenu();
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("space-menu").hidden) {
+    event.preventDefault();
+    closeSpaceMenu();
+    $("space-button").focus();
+  }
+});
+
+$("include-page").addEventListener("click", () => {
+  const on = !includePage();
+  $("include-page").setAttribute("aria-checked", String(on));
+  $("capture").classList.toggle("off", !on);
 });
 
 $("view-compose").addEventListener("submit", async (event) => {
@@ -148,19 +226,21 @@ $("view-compose").addEventListener("submit", async (event) => {
     title: capture?.title,
     url: capture?.url,
     selection: capture?.selection,
-    includePage: Boolean(capture) && $("include-page").checked,
+    includePage: Boolean(capture) && includePage(),
   });
   if (!body) {
     fail($("compose-error"), "Write a message or include the page.");
     return;
   }
-  const spaceId = $("space").value;
-  const channelId = $("channel").value;
+  if (!channelId) return;
+  const target = { spaceId, channelId };
   $("send").disabled = true;
   try {
-    await ask("send", { channelId, body, clientMessageId: crypto.randomUUID() });
-    await ask("rememberTarget", { spaceId, channelId });
-    $("open-channel").href = channelUrl(DEFAULT_APP_URL, spaceId, channelId);
+    await ask("send", { channelId: target.channelId, body, clientMessageId: crypto.randomUUID() });
+    await ask("rememberTarget", target);
+    const name = channelsBySpace.get(target.spaceId)?.find((channel) => channel.id === target.channelId)?.name;
+    $("sent-to").textContent = name ? `Posted to #${name}.` : "";
+    $("open-channel").href = channelUrl(DEFAULT_APP_URL, target.spaceId, target.channelId);
     show("view-sent");
   } catch (error) {
     if (error.code === "signed_out") await render();
