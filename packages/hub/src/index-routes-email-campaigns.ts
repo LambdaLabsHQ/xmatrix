@@ -9,9 +9,10 @@
 
 import type { Hono } from "hono";
 import { PostgresEmailCampaignRepository } from "@xmatrix/db";
-import { hmacHex, timingSafeEqual } from "@xmatrix/protocol";
+import { timingSafeEqual } from "@xmatrix/protocol";
 
 import { authDirectoryEmails } from "./auth-authority";
+import { EMAIL_UNSUBSCRIBE_ROUTE, unsubscribeToken, unsubscribeUrl } from "./email-unsubscribe-token";
 import { sendEmail } from "./email-delivery";
 import { FEEDBACK_PRO_CAMPAIGN, FEEDBACK_REPLY_TO, feedbackProEmail } from "./email-campaign-feedback-pro";
 import { grantOperator } from "./index-routes-billing-grants";
@@ -20,7 +21,6 @@ import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import type { Env } from "./types";
 
-export const EMAIL_UNSUBSCRIBE_ROUTE = "/api/email/unsubscribe";
 const MAX_BATCH = 50;
 const PRIVATE = { "cache-control": "private, no-store" };
 const CAMPAIGNS: Record<string, (unsubscribeUrl: string) => { subject: string; text: string; html: string }> = {
@@ -31,22 +31,6 @@ function repository(env: Env) {
   return new PostgresEmailCampaignRepository(createPostgresAuthorityDatabase(env, {
     applicationName: "xmatrix-hub-email-campaigns", ...POSTGRES_AUTHORITY_TIMEOUTS,
   }));
-}
-
-function unsubscribeKey(env: Env): string {
-  const key = env.BETTER_AUTH_SECRET?.trim() ?? "";
-  if (!key) throw new Error("BETTER_AUTH_SECRET is required to sign unsubscribe links");
-  return key;
-}
-
-/** The token in a person's unsubscribe link: an HMAC of their user id, so links cannot be forged or guessed. */
-export function unsubscribeToken(env: Env, userId: string): Promise<string> {
-  return hmacHex("SHA-256", unsubscribeKey(env), `xmatrix:email-unsubscribe:v1:${userId}`);
-}
-
-export async function unsubscribeUrl(env: Env, origin: string, userId: string): Promise<string> {
-  const token = await unsubscribeToken(env, userId);
-  return `${origin}${EMAIL_UNSUBSCRIBE_ROUTE}?u=${encodeURIComponent(userId)}&t=${token}`;
 }
 
 function page(title: string, body: string): string {
