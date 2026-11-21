@@ -488,13 +488,43 @@ Start-Process -FilePath $InstallPath -ArgumentList 'daemon' -WorkingDirectory $i
     script
 }
 
-/// Per-user login Scheduled Task that runs the stable CLI as `daemon`.
+/// PowerShell that builds the windowless Scheduled Task action.
 ///
-/// The action is the stable CLI directly. Keep an already-correct task,
-/// replace anything else (including a historical WScript bridge), then stop
-/// leftover daemon processes and start the task. Hiding that console is not
-/// this task's job. Pure so every host can assert the shape; only Windows
-/// runs it.
+/// `conhost.exe --headless` stays the parent for the life of the daemon, so
+/// Task Scheduler's job does not close the daemon when a launcher exits, and
+/// it does not open a console. One copy of this text is shared by setup and
+/// the self-update handoff. ASCII only.
+fn windows_conhost_daemon_action_ps() -> &'static str {
+    r#"function New-ConhostDaemonAction {
+  $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+  if (-not (Test-Path -LiteralPath $conhost)) {
+    throw 'conhost.exe was not found; refusing to schedule a console daemon'
+  }
+  $argument = '--headless "' + $InstallPath + '" daemon'
+  $directory = Split-Path -Parent $InstallPath
+  return New-ScheduledTaskAction -Execute $conhost -Argument $argument -WorkingDirectory $directory
+}
+function Test-ConhostDaemonAction($action) {
+  if (-not $action) { return $false }
+  $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
+  $execute = ''
+  try { $execute = [System.IO.Path]::GetFullPath([string]$action.Execute) } catch { return $false }
+  $argument = '--headless "' + $InstallPath + '" daemon'
+  return (
+    ($execute -ieq [System.IO.Path]::GetFullPath($conhost)) -and
+    (([string]$action.Arguments).Trim() -eq $argument)
+  )
+}
+"#
+}
+
+/// Per-user login Scheduled Task that runs the stable CLI as `daemon`
+/// through `conhost.exe --headless`.
+///
+/// Keep an already-correct task. Replace anything else, including a direct
+/// `xmatrix.exe daemon` action and a historical WScript bridge, then stop
+/// leftover daemon processes and start the task. Pure so every host can
+/// assert the shape; only Windows runs it.
 ///
 /// `caller_pid` is the `xmatrix setup daemon` process that spawned this
 /// script. The stop filter must skip it: its command line contains
@@ -507,11 +537,9 @@ pub fn windows_daemon_scheduled_task_script(binary: &Path, caller_pid: u32) -> S
         powershell_single_quoted(WINDOWS_DAEMON_TASK_NAME),
         powershell_single_quoted(WINDOWS_DAEMON_LEGACY_TASK_NAME),
     ));
+    script.push_str(windows_conhost_daemon_action_ps());
     script.push_str(
-        r#"$action = New-ScheduledTaskAction `
-  -Execute $InstallPath `
-  -Argument "daemon" `
-  -WorkingDirectory $installDirectory
+        r#"$action = New-ConhostDaemonAction
 # A logon trigger without -User fires for every user, and registering one
 # needs an elevated shell; a standard user gets "Access is denied".
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -540,8 +568,7 @@ if ($existingTask) {
   $existingAction = $existingTask.Actions | Select-Object -First 1
   $keepExistingTask = (
     $existingAction -and
-    ([System.IO.Path]::GetFullPath([string]$existingAction.Execute) -ieq [System.IO.Path]::GetFullPath($InstallPath)) -and
-    ([string]$existingAction.Arguments).Trim() -eq "daemon" -and
+    (Test-ConhostDaemonAction $existingAction) -and
     ([System.IO.Path]::GetFullPath([string]$existingAction.WorkingDirectory) -ieq [System.IO.Path]::GetFullPath($installDirectory)) -and
     (@($existingTask.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }).Count -gt 0)
   )
@@ -592,13 +619,16 @@ fn powershell_single_quoted(value: &str) -> String {
 
 /// PowerShell functions shared by setup and the self-update handoff.
 ///
-/// The standalone watchdog task runs `conhost.exe --headless "<cli>" daemon`.
-/// Adding the minute trigger to the login task does not change that task's
-/// action. ASCII only, including the Chinese access-denied marker built from
+/// The login task and the standalone watchdog both run
+/// `conhost.exe --headless "<cli>" daemon`. A self-update that can modify
+/// the login task sets that action and adds a missing minute trigger
+/// without stopping the task. A denial leaves the login task alone.
+/// ASCII only, including the Chinese access-denied marker built from
 /// code points: the handoff script is written without a BOM, and Windows
 /// PowerShell 5.1 would otherwise read it in the ANSI code page.
 pub(crate) fn windows_daemon_watchdog_helpers_ps() -> String {
     let mut script = String::new();
+    script.push_str(windows_conhost_daemon_action_ps());
     script.push_str(&format!(
         r#"
 $watchdogTaskName = {task_name}
@@ -618,26 +648,15 @@ function Remove-StandaloneDaemonWatchdog {{
 }}
 function Register-StandaloneDaemonWatchdog {{
   $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-  $conhost = Join-Path $env:SystemRoot 'System32\conhost.exe'
-  if (-not (Test-Path -LiteralPath $conhost)) {{
-    throw 'conhost.exe was not found; refusing to schedule a console daemon'
-  }}
-  $watchdogDirectory = Split-Path -Parent $InstallPath
-  $watchdogArgument = '--headless "' + $InstallPath + '" daemon'
-  $watchdogAction = New-ScheduledTaskAction -Execute $conhost -Argument $watchdogArgument -WorkingDirectory $watchdogDirectory
+  $watchdogAction = New-ConhostDaemonAction
   $watchdogLogon = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
   $watchdogMinute = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
   $watchdogSettings = New-ScheduledTaskSettingsSet -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -MultipleInstances IgnoreNew -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Days 0)
   function Test-ReadyWatchdogTask($task) {{
     if (-not $task -or -not $task.Settings.Enabled) {{ return $false }}
     $action = $task.Actions | Select-Object -First 1
-    if (-not $action) {{ return $false }}
-    $execute = ''
-    try {{ $execute = [System.IO.Path]::GetFullPath([string]$action.Execute) }} catch {{ return $false }}
-    $expectedArgument = '--headless "' + $InstallPath + '" daemon'
     return (
-      ($execute -ieq [System.IO.Path]::GetFullPath($conhost)) -and
-      (([string]$action.Arguments).Trim() -eq $expectedArgument) -and
+      (Test-ConhostDaemonAction $action) -and
       (@($task.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0)
     )
   }}
@@ -688,11 +707,23 @@ function Add-DaemonWatchdogTrigger {{
   $updatedMainTask = $false
   try {{
     $current = Get-ScheduledTask -TaskName $taskName -ErrorAction Stop
+    $existingAction = $current.Actions | Select-Object -First 1
+    $actionReady = Test-ConhostDaemonAction $existingAction
     $hasMinuteTrigger = @($current.Triggers | Where-Object {{ $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' }}).Count -gt 0
-    if (-not $hasMinuteTrigger) {{
-      $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
-      $null = Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger) -ErrorAction Stop
-      Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
+    if ((-not $actionReady) -or (-not $hasMinuteTrigger)) {{
+      $loginAction = New-ConhostDaemonAction
+      $triggers = @($current.Triggers)
+      if (-not $hasMinuteTrigger) {{
+        $watchdogTrigger = New-ScheduledTaskTrigger -Once -At ([DateTime]::Today) -RepetitionInterval (New-TimeSpan -Minutes 1)
+        $triggers = @($current.Triggers) + $watchdogTrigger
+      }}
+      $null = Set-ScheduledTask -TaskName $taskName -Action $loginAction -Trigger $triggers -ErrorAction Stop
+      if (-not $hasMinuteTrigger) {{
+        Write-DaemonUpdateLog 'added the daemon watchdog trigger to the scheduled task'
+      }}
+      if (-not $actionReady) {{
+        Write-DaemonUpdateLog 'updated the login task action to conhost --headless'
+      }}
     }}
     Remove-StandaloneDaemonWatchdog
     $script:daemonWatchdogActive = $true
@@ -1076,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn windows_scheduled_task_runs_the_stable_cli_directly() {
+    fn windows_scheduled_task_runs_the_daemon_through_conhost_headless() {
         let script = windows_daemon_scheduled_task_script(
             Path::new(r"C:\Users\tester\.local\bin\xmatrix.exe"),
             4242,
@@ -1086,13 +1117,18 @@ mod tests {
         assert!(script.contains(&format!(
             "$legacyTaskName = '{WINDOWS_DAEMON_LEGACY_TASK_NAME}'"
         )));
-        assert!(script.contains("New-ScheduledTaskAction"));
-        assert!(script.contains("-Execute $InstallPath"));
-        assert!(script.contains("-Argument \"daemon\""));
-        assert!(script.contains("-WorkingDirectory $installDirectory"));
-        assert!(script.contains("GetFullPath([string]$existingAction.Execute)"));
-        assert!(script.contains("Arguments).Trim() -eq \"daemon\""));
-        assert!(!script.contains("conhost.exe"));
+        assert!(script.contains("function New-ConhostDaemonAction"));
+        assert!(script.contains("function Test-ConhostDaemonAction"));
+        assert!(script.contains(r"System32\conhost.exe"));
+        assert!(script.contains("'--headless \"' + $InstallPath + '\" daemon'"));
+        assert!(script.contains("-Execute $conhost"));
+        assert!(
+            script.contains("conhost.exe was not found; refusing to schedule a console daemon")
+        );
+        assert!(script.contains("$action = New-ConhostDaemonAction"));
+        assert!(script.contains("(Test-ConhostDaemonAction $existingAction)"));
+        assert!(!script.contains("-Execute $InstallPath"));
+        assert!(!script.contains("-Argument \"daemon\""));
         assert!(!script.contains("Install-DaemonLaunchHelper"));
         assert!(!script.to_ascii_lowercase().contains("csc.exe"));
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));
@@ -1276,10 +1312,11 @@ mod tests {
             script.contains("conhost.exe was not found; refusing to schedule a console daemon")
         );
         assert!(script.contains("added the daemon watchdog trigger to the scheduled task"));
+        assert!(script.contains("updated the login task action to conhost --headless"));
         assert!(script.contains(
-            "Set-ScheduledTask -TaskName $taskName -Trigger (@($current.Triggers) + $watchdogTrigger)"
+            "Set-ScheduledTask -TaskName $taskName -Action $loginAction -Trigger $triggers"
         ));
-        assert!(!script.contains("Set-ScheduledTask -TaskName $taskName -Action"));
+        assert!(script.contains("Test-ConhostDaemonAction $existingAction"));
         assert!(!script.contains("Install-DaemonLaunchHelper"));
         assert!(!script.to_ascii_lowercase().contains("csc.exe"));
         assert!(script.contains("New-ScheduledTaskTrigger -AtLogOn -User $currentUser"));

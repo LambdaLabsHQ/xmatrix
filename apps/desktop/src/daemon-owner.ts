@@ -91,6 +91,23 @@ export function windowsPowerShellCommand(args: string[], timeout: number) {
 }
 
 /**
+ * Stops the `xmatrix-daemon` scheduled task and any `xmatrix.exe daemon`
+ * process before a forced restart. `Stop-ScheduledTask` ends the `conhost.exe`
+ * wrapper without ending its child `xmatrix.exe daemon`, so stopping only the
+ * task leaves the old daemon holding `daemon.lock` while the restarted copy
+ * exits immediately.
+ */
+export function windowsDaemonTaskForceStopScript(taskName: string): string {
+  const quotedTaskName = `'${taskName.replace(/'/g, "''")}'`;
+  return [
+    "$ErrorActionPreference='SilentlyContinue'",
+    `Stop-ScheduledTask -TaskName ${quotedTaskName}`,
+    "Get-CimInstance Win32_Process -Filter \"Name = 'xmatrix.exe'\" | Where-Object { $_.CommandLine -match '^(?:\"[^\"]*xmatrix\\.exe\"|\\S*xmatrix\\.exe)\\s+daemon(?:\\s|$)' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }",
+    `$deadline=[DateTime]::UtcNow.AddSeconds(3); while ([DateTime]::UtcNow -lt $deadline -and (Get-ScheduledTask -TaskName ${quotedTaskName}).State -eq 'Running') { Start-Sleep -Milliseconds 100 }`,
+  ].join("; ");
+}
+
+/**
  * Whether a daemon status update changed anything visible beyond `updatedAt`.
  * Heartbeats that find the same running daemon leave the renderer alone.
  */

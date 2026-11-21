@@ -6,6 +6,7 @@ fn scenario_script(
     has_task: bool,
     fail_candidate: bool,
     fail_rollback: bool,
+    conhost_task: bool,
 ) -> String {
     let install = root.join("xmatrix.exe");
     let staged = root.join("candidate.exe");
@@ -33,7 +34,11 @@ fn scenario_script(
         )
         .replace(
             "$previousVersionOutput = @(& $installPath --version 2>$null) | Select-Object -First 1",
-            "$previousVersionOutput = 'xmatrix 0.16.289'",
+            if conhost_task {
+                "$previousVersionOutput = 'xmatrix 0.16.289-beta.3'"
+            } else {
+                "$previousVersionOutput = 'xmatrix 0.16.289'"
+            },
         )
         .replace(
             "$installBackupPath = $installPath +",
@@ -69,6 +74,7 @@ fn scenario_script(
         r#"
 $ErrorActionPreference = 'Stop'
 $script:hasTask = {has_task}
+$script:conhostTask = {conhost_task}
 $script:failCandidate = {fail_candidate}
 $script:failRollback = {fail_rollback}
 New-Item -ItemType Directory -Force -Path {root} | Out-Null
@@ -85,11 +91,28 @@ if ($script:stopped -contains 101 -or $script:stopped -contains 102 -or $script:
 if ([System.IO.File]::ReadAllText({install}) -ne '{expected_binary}') {{ throw 'wrong installed binary' }}
 $receipt = Get-Content -Raw {receipt} | ConvertFrom-Json
 if ($receipt.status -ne '{expected_status}') {{ throw "receipt status: $($receipt.status)" }}
+{conhost_check}
 Write-Output 'handoff scenario passed'
 "#,
         has_task = boolean(has_task),
+        conhost_task = boolean(conhost_task),
         fail_candidate = boolean(fail_candidate),
         fail_rollback = boolean(fail_rollback),
+        conhost_check = if conhost_task {
+            r#"foreach ($healthPath in @($script:healthPaths)) {
+  if ([System.IO.Path]::GetFileName([string]$healthPath) -ieq 'conhost.exe') { throw "health check waited on $healthPath" }
+  if ([System.IO.Path]::GetFullPath([string]$healthPath) -ine [System.IO.Path]::GetFullPath({install})) { throw "health check waited on $healthPath" }
+}
+if (@($script:healthPaths).Count -lt 2) { throw 'conhost rollback did not check the previous daemon' }
+if ($script:healthVersions[1] -ne '0.16.289-beta.3') { throw "rollback health check lost prerelease suffix: $($script:healthVersions[1])" }
+if ($receipt.version -ne '0.16.289-beta.3') { throw "rollback receipt lost prerelease suffix: $($receipt.version)" }"#
+                .replace(
+                    "{install}",
+                    &powershell_single_quoted(&install.display().to_string()),
+                )
+        } else {
+            String::new()
+        },
         root = powershell_single_quoted(&root.display().to_string()),
         install = powershell_single_quoted(&install.display().to_string()),
         staged = powershell_single_quoted(&staged.display().to_string()),
@@ -105,19 +128,32 @@ Write-Output 'handoff scenario passed'
 #[test]
 fn windows_handoff_restart_and_rollback_preserve_agents() {
     let scenarios = [
-        (true, true, false, false),
-        (true, true, true, false),
-        (true, true, true, true),
-        (false, true, false, false),
-        (true, false, false, false),
-        (true, false, true, false),
+        (true, true, false, false, false),
+        (true, true, true, false, false),
+        (true, true, true, true, false),
+        (false, true, false, false, false),
+        (true, false, false, false, false),
+        (true, false, true, false, false),
+        // A conhost login action must not make rollback wait on conhost.exe.
+        (true, true, true, false, true),
     ];
-    for (index, (restart, has_task, fail_candidate, fail_rollback)) in
+    for (index, (restart, has_task, fail_candidate, fail_rollback, conhost_task)) in
         scenarios.into_iter().enumerate()
     {
-        let root =
+        let mut root =
             std::env::temp_dir().join(format!("xmatrix-handoff-{}-{index}", std::process::id()));
-        let script = scenario_script(&root, restart, has_task, fail_candidate, fail_rollback);
+        if conhost_task {
+            root = std::env::temp_dir()
+                .join(format!("xmatrix handoff {} {index}", std::process::id()));
+        }
+        let script = scenario_script(
+            &root,
+            restart,
+            has_task,
+            fail_candidate,
+            fail_rollback,
+            conhost_task,
+        );
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("test.ps1");
         std::fs::write(&path, script).unwrap();
