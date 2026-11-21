@@ -45,6 +45,72 @@ pub async fn query(hub: &str, token: &str, query: Query, json: bool) -> Result<(
     Ok(())
 }
 
+/// Who a grant candidate is looked up by.
+pub enum GrantCandidate {
+    Email(String),
+    Handle(String),
+    User(String),
+}
+
+fn candidate_path(candidate: &GrantCandidate) -> Result<String> {
+    let (key, value) = match candidate {
+        GrantCandidate::Email(v) => ("email", v),
+        GrantCandidate::Handle(v) => ("handle", v),
+        GrantCandidate::User(v) => ("userId", v),
+    };
+    if value.trim().is_empty() {
+        return Err(CliError::Auth(format!("{key} must not be empty")));
+    }
+    Ok(format!(
+        "/api/admin/billing-grants/candidate?{key}={}",
+        urlencoding::encode(value.trim())
+    ))
+}
+
+async fn bounded<T>(future: impl std::future::Future<Output = Result<T>>) -> Result<T> {
+    tokio::time::timeout(Duration::from_secs(30), future)
+        .await
+        .map_err(|_| CliError::Http("Billing grant request timed out".into()))?
+}
+
+/// The person behind a piece of feedback, as JSON.
+pub async fn grant_candidate(hub: &str, token: &str, candidate: GrantCandidate) -> Result<()> {
+    let url = protocol::with_route(hub, &candidate_path(&candidate)?);
+    let value: serde_json::Value =
+        bounded(http::request_json(&url, "GET", Some(token), None)).await?;
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
+/// Give a Space a month of Pro; the Hub enforces who may and how often.
+pub async fn grant_give(
+    hub: &str,
+    token: &str,
+    user: &str,
+    space: &str,
+    reference: &str,
+    reason: &str,
+) -> Result<()> {
+    for (name, value) in [
+        ("user", user),
+        ("space", space),
+        ("reference", reference),
+        ("reason", reason),
+    ] {
+        if value.trim().is_empty() {
+            return Err(CliError::Auth(format!("--{name} must not be empty")));
+        }
+    }
+    let url = protocol::with_route(hub, "/api/admin/billing-grants");
+    let body = serde_json::json!({
+        "userId": user.trim(), "spaceId": space.trim(), "reference": reference.trim(), "reason": reason.trim(),
+    });
+    let value: serde_json::Value =
+        bounded(http::request_json(&url, "POST", Some(token), Some(body))).await?;
+    println!("{}", serde_json::to_string_pretty(&value)?);
+    Ok(())
+}
+
 pub fn page_url(hub: &str) -> Result<&'static str> {
     match hub.trim_end_matches('/') {
         protocol::DEFAULT_HUB_URL => Ok("https://xmatrix.sh/billing"),
@@ -139,6 +205,19 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[test]
+    fn grant_candidates_are_encoded_and_not_empty() {
+        assert_eq!(
+            candidate_path(&GrantCandidate::Email("a+b@x.io".into())).unwrap(),
+            "/api/admin/billing-grants/candidate?email=a%2Bb%40x.io"
+        );
+        assert_eq!(
+            candidate_path(&GrantCandidate::Handle("@dan".into())).unwrap(),
+            "/api/admin/billing-grants/candidate?handle=%40dan"
+        );
+        assert!(candidate_path(&GrantCandidate::User(" ".into())).is_err());
     }
 
     #[test]
