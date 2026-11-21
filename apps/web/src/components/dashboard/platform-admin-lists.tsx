@@ -83,6 +83,7 @@ const ACTION_LABELS: Record<AdminAuditEvent["action"], string> = {
   "agent-senders.repair": "Repaired Agent senders",
   "billing-grant.read": "Looked up a grant candidate",
   "billing-grant.give": "Gave complimentary Pro",
+  "email-campaign.send": "Sent a campaign email batch",
 };
 
 const AUDIT_COLUMNS: AdminColumn<AdminAuditEvent>[] = [

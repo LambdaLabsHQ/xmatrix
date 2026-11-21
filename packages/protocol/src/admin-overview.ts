@@ -345,7 +345,8 @@ export type AdminAuditAction =
   | "handles.backfill"
   | "agent-senders.repair"
   | "billing-grant.read"
-  | "billing-grant.give";
+  | "billing-grant.give"
+  | "email-campaign.send";
 
 export interface AdminAuditEvent {
   eventId: string;

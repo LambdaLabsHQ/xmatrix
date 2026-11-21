@@ -194,6 +194,11 @@ export function PrivacyPolicyContent() {
           <li>protect accounts, enforce permissions, prevent abuse, and respond to security incidents;</li>
           <li>provide support and communicate about authentication, billing, security, and service changes;</li>
           <li>
+            occasionally email you to ask for feedback on the Services or to offer you something related to
+            them, such as complimentary plan time; every such email has a one-click unsubscribe link, and
+            unsubscribing never affects authentication, billing, or security messages;
+          </li>
+          <li>
             measure reliability, capacity, and product performance using operational metrics and, where
             appropriate, aggregate or de-identified information; and
           </li>
