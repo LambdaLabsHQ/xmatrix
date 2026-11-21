@@ -8,7 +8,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
-const shipped = ["manifest.json", "icons", "src"];
+const shipped = ["manifest.json", "assets", "icons", "src"];
 
 /**
  * Chrome allows only up to four dot-separated integers in `version`, so a beta
@@ -32,12 +32,22 @@ export function packageExtension({ out = path.join(repo, "dist", "chrome-extensi
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   manifest.version = version;
   manifest.version_name = versionName;
+  // The key pins the unpacked development build to the store item's ID; the store refuses an upload carrying it.
+  delete manifest.key;
   fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   return { out, version, versionName };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const outArg = process.argv.indexOf("--out");
-  const { out, versionName } = packageExtension(outArg > 0 ? { out: path.resolve(process.argv[outArg + 1]) } : {});
-  console.log(`Packaged the xMatrix Chrome extension ${versionName} in ${out}`);
+  const arg = (name) => {
+    const index = process.argv.indexOf(name);
+    return index > 0 ? process.argv[index + 1] : undefined;
+  };
+  // --release overrides version.json, for a store upload that must exceed the last one.
+  const out = arg("--out");
+  const { out: written, versionName } = packageExtension({
+    ...(out ? { out: path.resolve(out) } : {}),
+    ...(arg("--release") ? { release: arg("--release") } : {}),
+  });
+  console.log(`Packaged the xMatrix Chrome extension ${versionName} in ${written}`);
 }

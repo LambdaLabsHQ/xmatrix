@@ -1,5 +1,17 @@
 # Release Updates
 
+## Unreleased: the Chrome extension becomes a side panel
+
+The extension now opens the person's Space in Chrome's side panel instead of a
+send-to-conversation popup: the real web app in a frame, signed in with the
+extension's session (the panel hands the app short-lived access tokens; the
+refresh token stays in the extension). Selected text can start a new
+conversation or be quoted into the open one, from the context menu, the panel's
+page bar or an optional button beside the selection (asks for web-page access
+first). The unpacked build opens the beta Web, the store build the stable Web.
+Needs the Web change that lets the extension frame the app. Ships outside the
+release train; recovery is reverting the directory.
+
 ## Unreleased: Chrome Web Store listing for the extension; privacy policy covers it
 
 The privacy policy (section 11) now says what the xMatrix Chrome extension

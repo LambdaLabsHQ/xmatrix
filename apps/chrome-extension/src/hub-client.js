@@ -3,7 +3,15 @@
 // the popup and the Node tests.
 
 export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
-export const DEFAULT_APP_URL = "https://xmatrix.sh";
+/**
+ * The web app the side panel opens. A store build opens the stable Web; an
+ * unpacked development build (its manifest still carries the store key, which
+ * packaging removes) opens the beta Web, where Web changes land first. Both
+ * allow this extension to frame them (apps/web extension-embed-origins.ts).
+ */
+export function appOrigin(manifest) {
+  return manifest.key ? "https://beta.xmatrix.sh" : "https://xmatrix.sh";
+}
 const PROTOCOL_VERSION = "2";
 
 /** A Hub answer that is not a success, with the Hub's own code when it gave one. */
@@ -150,41 +158,6 @@ export async function withSession(deps, store, call) {
   return call(scoped, renewed.token);
 }
 
-export async function listSpaces(deps, token) {
-  const json = await request(deps, "/api/spaces", { token });
-  return (Array.isArray(json.spaces) ? json.spaces : [])
-    .filter((space) => space && typeof space.id === "string")
-    .map((space) => ({ id: space.id, name: typeof space.name === "string" && space.name ? space.name : space.id }));
-}
-
-function channelName(channel) {
-  for (const value of [channel.name, channel.topic, channel.summary]) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "Untitled conversation";
-}
-
-function lastActivity(channel) {
-  const sentAt = channel.lastMessage?.sentAt ?? channel.updatedAt ?? channel.createdAt;
-  const time = typeof sentAt === "string" ? Date.parse(sentAt) : NaN;
-  return Number.isFinite(time) ? time : 0;
-}
-
-/** The conversations of one Space, the ones waiting on the person first, then the most recent. */
-export async function listChannels(deps, token, spaceId) {
-  const json = await request(deps, `/api/channels?spaceId=${encodeURIComponent(spaceId)}`, { token });
-  return (Array.isArray(json.channels) ? json.channels : [])
-    .filter((channel) => channel && typeof channel.id === "string" && channel.spaceId === spaceId)
-    .map((channel) => ({
-      id: channel.id,
-      spaceId: channel.spaceId,
-      name: channelName(channel),
-      needsYou: Number(channel.attention?.unreadAttentionCount) > 0,
-      activity: lastActivity(channel),
-    }))
-    .sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.activity - a.activity);
-}
-
 /**
  * How many conversations wait on the signed-in person, across every Space:
  * the same count the web's "Needs you" section shows.
@@ -203,21 +176,34 @@ export async function countNeedsYou(deps, token) {
   return waiting.size;
 }
 
-/**
- * Posts a message as the signed-in person. `clientMessageId` makes a retry of
- * the same send land once. `launch` asks the Hub to start the Agents the text
- * mentions, as the web composer does.
- */
-export async function sendMessage(deps, token, { channelId, body, clientMessageId }) {
-  const json = await request(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
-    method: "POST",
-    token,
-    body: { body, clientMessageId, launch: true },
-  });
-  return { messageId: json.message?.messageId ?? clientMessageId };
+/** When an access token (a JWT) expires, in ms since the epoch; 0 when it cannot be read. */
+export function tokenExpiresAt(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/gu, "+").replace(/_/gu, "/")));
+    return Number.isFinite(payload.exp) ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
 }
 
-/** Where the web app shows a conversation. */
-export function channelUrl(appUrl, spaceId, channelId) {
-  return new URL(`/app/${encodeURIComponent(spaceId)}/${encodeURIComponent(channelId)}`, appUrl).toString();
+/**
+ * A current access token for the side panel's app, renewed first when it has
+ * less than `minLifeMs` left. The refresh token stays here.
+ */
+export async function freshAccessToken(deps, store, minLifeMs = 10 * 60 * 1000) {
+  const session = await store.get();
+  if (!session) return null;
+  if (tokenExpiresAt(session.token) - Date.now() > minLifeMs) return session.token;
+  const scoped = { ...deps, hubUrl: session.hubUrl || deps.hubUrl };
+  try {
+    const renewed = await refreshSession(scoped, session);
+    await store.set(renewed);
+    return renewed.token;
+  } catch (error) {
+    if (error instanceof HubError && (error.status === 401 || error.status === 403)) {
+      await store.set(null);
+      return null;
+    }
+    throw error;
+  }
 }

@@ -1,35 +1,35 @@
 # xMatrix Chrome extension
 
-A Manifest V3 extension that brings what a person is looking at in Chrome into their xMatrix Space.
+A Manifest V3 extension that puts the person's xMatrix Space in Chrome's side panel, beside the page they are reading. The extension is about the moments when someone is actively browsing. Browser automation is out of scope: Playwright already covers it without an extension.
 
-- **Send to a conversation.** The toolbar button (Alt+Shift+X) and the context menu items *Send page / selection / link to xMatrix* open a popup. There the person picks a Space and a conversation, adds a note (mentioning an Agent such as `@claude` hands it the work), and sends. The message is posted as the person. It has the note, a link to the page and, if text was selected, the selection as a quote.
-- **Needs you badge.** Once a minute the badge shows how many conversations are waiting on the person. This is the same `attention` count as the web's "Needs you" section.
+- **The app beside every page.** The toolbar button (Alt+Shift+X) opens the side panel. The panel is the real web app (`https://xmatrix.sh/app`; the beta Web for an unpacked build) in a frame, with a narrow-screen layout: live conversations, mentions, Agents, approval cards and Pages.
+- **Discuss what you are reading.** Select text and choose one of two actions. *Discuss* starts a new conversation named by the passage. *Quote* adds the passage to the open conversation. In both cases the composer holds the passage as a quote with a link back to the page. Both actions are available from the context menu (*Discuss in xMatrix* also works on a whole page or a link), from the bar at the top of the panel (*Quote* / *New chat* for the page beside it), and, once the person turns it on, from a small button next to the selection.
+- **Needs you badge.** The badge counts the conversations waiting on the person. It is the same `attention` count as the web's "Needs you" section.
 
-## How it talks to the Hub
+## How it fits together
 
-- **Sign-in** uses the CLI's device flow: `POST /api/auth/cli/device/start`, the person approves `verificationUriComplete` in a browser tab, then the service worker polls `POST /api/auth/cli/device/token`. The session (a one-hour access token and its 30-day refresh token) is kept in `chrome.storage.local`, which only the extension can read. *Sign out* revokes it with `POST /api/auth/cli/sign-out`.
-- **Every Hub call runs in the service worker** (`src/background.js`). A single queue there renews the access token through `POST /api/auth/refresh`, so the popup and the badge never renew at the same time. The popup's runtime messages are accepted only from the extension's own pages.
-- **Client identity.** Requests declare `component: app`, `platform: chrome-extension`, protocol 2 and the manifest version, so the Hub's compatibility gate admits them. When the app minimum version rises, the extension needs a release at or above it.
-- **Sending** uses `POST /api/channels/:channelId/messages` with `{ body, clientMessageId, launch: true }`, as the web composer does.
-- **Listing** uses `GET /api/spaces` and `GET /api/channels?spaceId=…`. The badge reads `GET /api/channels`.
+- **Sign-in.** The extension uses the CLI's device flow: `POST /api/auth/cli/device/start`, the person approves in a browser tab, then the service worker polls `/api/auth/cli/device/token`. The session (a one-hour access token and a 30-day refresh token) stays in `chrome.storage.local`.
+- **Embedding.** A frame in an extension page gets none of the site's cookies, so the panel cannot use the browser's web session. The embedded app asks for a token over `postMessage` (`apps/web/src/lib/extension-embed.ts`). The panel replies with a current access token, which the service worker renews when it has under ten minutes left. The refresh token never reaches the page.
+  - Both sides check every message: the panel answers only `https://xmatrix.sh` in its own frame, and the app answers only this extension's origin.
+  - Only this extension may frame the app (CSP `frame-ancestors`, `apps/web/src/lib/extension-embed-origins.ts`).
+  - Signing out in either place signs out both.
+- **Extension ID.** `manifest.json` carries the Chrome Web Store item's public `key`, so an unpacked build has the store ID `kaickfjmldmlelnfijaahialjpnebnak`. That is the ID the web app allows. `scripts/package.mjs` removes the key from the store upload.
+- **Passages.** Passages are queued in `chrome.storage.session` until the app reports `ready`, then delivered as `{ type: "passage", text, label, href, target }`. The app quotes them through its existing passage-discussion path.
+- **Client identity.** Requests declare `component: app` and `platform: chrome-extension`, so the Hub's compatibility gate admits them.
 
-## Privacy and permissions
+## Permissions
 
-- **Reading pages.** The extension reads a page only when the person clicks it: through `activeTab`, the context menu, or the keyboard shortcut. Nothing is read in the background.
-- **Host access.** Its only host permission is the production Hub.
-- **Page text.** Text taken from a page is sent as a quoted excerpt. Agents treat it like any other message content: it is untrusted input, never an instruction (guardrail P0#2).
+- **At install:**
+  - `sidePanel`, `storage`, `alarms` and `contextMenus`.
+  - `activeTab` and `scripting`, to read the selected text of the page the person acted on.
+  - Host access to the Hub only.
+- **Quick select (optional):** the button beside selected text needs access to web pages, `https://*/*` and `http://*/*`. That access is requested only when the person clicks *Turn on* in the panel. The extension then registers `src/selection.js`, which reads nothing until the person clicks the button, and then only the selected text. Without that access, the context menu and the panel bar still work.
 
 ## Develop
 
 ```sh
-pnpm --filter @xmatrix/chrome-extension test      # unit tests
-pnpm --filter @xmatrix/chrome-extension package   # dist/chrome-extension, version stamped from version.json
+pnpm --filter @xmatrix/chrome-extension test
+pnpm --filter @xmatrix/chrome-extension package   # dist/chrome-extension; --release X.Y.Z to override version.json
 ```
 
-To try it, open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `apps/chrome-extension`, or the packaged `dist/chrome-extension`.
-
-## Not done yet
-
-- **Chrome Web Store.** No listing or publish workflow yet. The listing has to be created in a developer account first.
-- **Save to Page** is not built yet.
-- **Attachments.** Full-page snapshots as attachments are not supported.
+To load it, open `chrome://extensions`, turn on Developer mode, choose **Load unpacked** and select `apps/chrome-extension`. The unpacked build opens the beta Web (`https://beta.xmatrix.sh/app`), where Web changes land first. The store build, packaged without the key, opens `https://xmatrix.sh/app`.
