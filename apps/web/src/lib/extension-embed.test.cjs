@@ -18,7 +18,7 @@ function frameWindow(ancestor) {
     removeEventListener: (type, listener) => listeners.delete(listener),
     setTimeout: (fn, ms) => setTimeout(fn, ms),
     clearTimeout: (id) => clearTimeout(id),
-    dispatch: (event) => { for (const listener of [...listeners]) listener(event); },
+    dispatch: (event) => { for (const listener of Array.from(listeners)) listener(event); },
   };
   return win;
 }
