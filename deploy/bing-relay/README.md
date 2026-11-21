@@ -31,6 +31,11 @@ small Cloud Run service instead. IndexNow is not relayed.
 3. Store that URL as the GitHub `production` secret `CONNECTOR_BING_RELAY_URL`;
    the next Hub release injects both values. Check the Bing connection in Apps.
 
+The build runs as `bing-relay-build` (Cloud Build builder role only) and the
+service as `bing-relay-run` (no role); the default compute account is untouched.
+
+`GET /health` answers `ok` (Cloud Run reserves `/healthz` on `*.run.app`).
+
 Rotating the token repeats steps 1–2 with the same service; redeploying with a
 new hash replaces the old one at once.
 

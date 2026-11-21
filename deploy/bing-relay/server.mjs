@@ -31,7 +31,7 @@ export function bingRelay({ tokenSha256, fetch = globalThis.fetch }) {
   const expected = Buffer.from(tokenSha256, "hex");
   return async request => {
     const url = new URL(request.url);
-    if (url.pathname === "/healthz" && request.method === "GET") return new Response("ok");
+    if (url.pathname === "/health" && request.method === "GET") return new Response("ok");
     const authorization = request.headers.get("authorization") ?? "";
     const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
     if (!token || !timingSafeEqual(sha256(token), expected)) return refuse(401, "unauthorized");

@@ -54,7 +54,7 @@ test("anything but an authorized Bing Webmaster JSON method is refused without a
     assert.match((await response.json()).Message, /^relay: /u);
   }
   assert.equal(calls.length, 0);
-  assert.equal((await handler(new Request("https://relay.test/healthz"))).status, 200);
+  assert.equal((await handler(new Request("https://relay.test/health"))).status, 200);
   assert.throws(() => bingRelay({ tokenSha256: "" }), /BING_RELAY_TOKEN_SHA256/u);
 });
 
@@ -64,7 +64,7 @@ test("the node:http server bounds the request body and serves the handler", asyn
   await new Promise(resolve => server.once("listening", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    assert.equal((await fetch(`${base}/healthz`)).status, 200);
+    assert.equal((await fetch(`${base}/health`)).status, 200);
     assert.equal((await fetch(`${base}/webmaster/api.svc/json/GetUserSites`, { headers: authorized() })).status, 200);
     const large = await fetch(`${base}/webmaster/api.svc/json/SubmitUrlBatch`, { method: "POST", headers: authorized(),
       body: "x".repeat(1024 * 1024 + 1) }).then(response => response.status, () => 413);
