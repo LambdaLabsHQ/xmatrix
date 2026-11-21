@@ -436,6 +436,9 @@ export function agentRunHttpRouteAllowed(
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_call_off) return true;
   if (request.method === "POST" && path === HUB_ROUTES.norn_request_ask) return true;
   if (request.method === "POST" && path === "/api/ai/jev/evaluate") return true;
+  // Complimentary Pro: the routes admit only a live Run whose owner is a platform admin.
+  if (request.method === "GET" && path === "/api/admin/billing-grants/candidate") return true;
+  if (request.method === "POST" && path === "/api/admin/billing-grants") return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both
