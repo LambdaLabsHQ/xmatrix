@@ -34,6 +34,8 @@ small Cloud Run service instead. IndexNow is not relayed.
 The build runs as `bing-relay-build` (Cloud Build builder role only) and the
 service as `bing-relay-run` (no role); the default compute account is untouched.
 
+`GET /health` answers `ok` (Cloud Run reserves `/healthz` on `*.run.app`).
+
 Rotating the token repeats steps 1–2 with the same service; redeploying with a
 new hash replaces the old one at once.
 
