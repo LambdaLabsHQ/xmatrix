@@ -234,7 +234,7 @@ pub(crate) async fn execute(
         }
         _ => result(preset_id, action, HarnessActionStatus::Unsupported),
     };
-    if action != HarnessAction::LoginStart {
+    if action != HarnessAction::LoginStart || outcome.status != HarnessActionStatus::Succeeded {
         outcome.item = probed_item(preset).await;
     }
     outcome
@@ -343,18 +343,35 @@ async fn wait_for_prompt(
                 );
             }
         }
-        if exited.borrow().is_some() || tokio::time::Instant::now() >= deadline {
+        let exited_code = *exited.borrow();
+        if exited_code.is_some() || tokio::time::Instant::now() >= deadline {
             if let Some(mut current) = take_same_session(&preset.id, &output) {
                 current.end();
             }
-            return if exited.borrow().is_some() {
-                failed(&text)
+            if let Some(exit_code) = exited_code {
+                // Give stdout/stderr pumps a brief moment to flush final output after exit.
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                let text = plain_output(&snapshot(&output));
+                let detail = if exit_code == Some(0) {
+                    let note = "The sign-in command exited without printing a sign-in link.";
+                    if text.trim().is_empty() {
+                        note.to_string()
+                    } else {
+                        format!("{}\n{note}", text.trim_end())
+                    }
+                } else {
+                    text
+                };
+                let mut outcome = failed(&detail);
+                outcome.exit_code = exit_code.map(i64::from);
+                return outcome;
+            }
+            let timeout = format!("No sign-in link after {} seconds.", START_TIMEOUT.as_secs());
+            return failed(&if text.trim().is_empty() {
+                timeout
             } else {
-                failed(&format!(
-                    "{text}\n[no sign-in link after {} seconds]",
-                    START_TIMEOUT.as_secs()
-                ))
-            };
+                format!("{}\n{timeout}", text.trim_end())
+            });
         }
         tokio::time::sleep(POLL).await;
     }
@@ -561,10 +578,11 @@ async fn finish(
         }
     };
     let text = plain_output(&snapshot(&output));
-    let signed_in = match login.status {
-        Some(_) => status(preset).await == Some(true),
-        None => exit_code == Some(Some(0)),
-    };
+    let signed_in = exit_code == Some(Some(0))
+        && match login.status {
+            Some(_) => status(preset).await == Some(true),
+            None => true,
+        };
     if !signed_in {
         let mut failed = failed(&text);
         failed.exit_code = exit_code.flatten().map(i64::from);
@@ -740,11 +758,11 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_sign_in_link_is_read_from_its_terminal_prompt() {
-        // Captured from `agy -p /help` 1.4.12 in a terminal with no browser.
-        // Through a pipe it prints no link at all, only "Run 'agy' to log in".
+    fn antigravity_sign_in_link_is_read_from_acp_login() {
+        // Captured from `agy acp --login` 1.5.14 over piped stdio (works both
+        // when signed out and when signing in again).
         let text = plain_output(
-            "Authentication required. Please visit the URL to log in:\r\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071&code_challenge=AWsM&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&scope=openid&state=99Xa\r\n\r\nWaiting for authentication (timeout 60s)...\r\nOr, paste the authorization code here and press Enter:\r\n".as_bytes(),
+            "Open this link in a browser to log in with Google:\n\n  https://accounts.google.com/o/oauth2/auth?access_type=offline&client_id=1071&code_challenge=AWsM&code_challenge_method=S256&prompt=consent&redirect_uri=https%3A%2F%2Fantigravity.google%2Foauth-callback&response_type=code&scope=openid&state=99Xa\n\nThen paste the authorization code, or the full URL of the page you land on, and press Enter:\n".as_bytes(),
         );
         let (url, code) = prompt(login("antigravity"), &text).unwrap();
         assert_eq!(
@@ -754,7 +772,74 @@ mod tests {
         assert_eq!(code, None);
         let recipe = login("antigravity");
         assert_eq!(recipe.flow, LoginFlow::UrlPasteCode);
-        assert!(recipe.terminal);
+        assert!(!recipe.terminal);
+    }
+
+    #[tokio::test]
+    async fn clean_exit_without_a_sign_in_link_reports_exit_code_and_clear_reason() {
+        let mut preset = agent_preset_by_id("antigravity").unwrap().clone();
+        preset.id = "test-clean-exit-without-link".into();
+        let output = Arc::new(Mutex::new(
+            b"Commands available in print mode:\n/usage (quota)      View model quota usage\n"
+                .to_vec(),
+        ));
+        let (_exit_tx, exited) = watch::channel(Some(Some(0)));
+        let (stop, _stopped) = oneshot::channel();
+        let session = Session {
+            flow: LoginFlow::UrlPasteCode,
+            prompt: (String::new(), None),
+            input: None,
+            output,
+            exited,
+            stop: Some(stop),
+        };
+        let outcome = wait_for_prompt(&preset, login("antigravity"), session).await;
+        assert_eq!(outcome.status, HarnessActionStatus::Failed);
+        assert_eq!(outcome.exit_code, Some(0));
+        let tail = outcome.output_tail.expect("output tail");
+        assert_eq!(
+            tail.lines().last(),
+            Some("The sign-in command exited without printing a sign-in link.")
+        );
+    }
+
+    #[tokio::test]
+    async fn finish_fails_on_nonzero_exit_even_when_status_command_says_signed_in() {
+        let mut preset = agent_preset_by_id("antigravity").unwrap().clone();
+        preset.id = "test-finish-nonzero-status".into();
+        let recipe: HarnessLogin = serde_json::from_value(serde_json::json!({
+            "flow": "device_code",
+            "start": { "command": "agy", "args": ["acp", "--login"] },
+            "urlRegex": "(https://accounts\\.google\\.com/\\S+)",
+            "status": { "command": "true", "args": [] }
+        }))
+        .unwrap();
+        let output = Arc::new(Mutex::new(
+            b"couldn't log in: token exchange failed: invalid_grant\n".to_vec(),
+        ));
+        let (_exit_tx, exited) = watch::channel(Some(Some(1)));
+        let (stop, _stopped) = oneshot::channel();
+        {
+            let mut sessions = SESSIONS.lock().unwrap();
+            sessions.insert(
+                preset.id.clone(),
+                Session {
+                    flow: LoginFlow::DeviceCode,
+                    prompt: ("https://accounts.google.com/o/oauth2/auth".into(), None),
+                    input: None,
+                    output,
+                    exited,
+                    stop: Some(stop),
+                },
+            );
+        }
+        let outcome = finish(&preset, &recipe, None).await;
+        assert_eq!(outcome.status, HarnessActionStatus::Failed);
+        assert_eq!(outcome.exit_code, Some(1));
+        assert_eq!(
+            outcome.login.map(|progress| progress.state),
+            Some(HarnessLoginState::Failed)
+        );
     }
 
     #[test]

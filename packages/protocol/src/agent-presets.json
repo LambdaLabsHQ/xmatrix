@@ -1978,17 +1978,16 @@
       },
       "login": {
         "flow": "url_paste_code",
-        "terminal": true,
         "start": {
           "command": "agy",
-          "args": ["-p", "/help"]
+          "args": ["acp", "--login"]
         },
-        "urlRegex": "Please visit the URL to log in:\\s*(https://accounts\\.google\\.com/\\S+)",
+        "urlRegex": "Open this link in a browser to log in with Google:\\s*(https://accounts\\.google\\.com/\\S+)",
         "status": {
           "command": "agy",
           "args": ["models"]
         },
-        "notes": "Signing in is the CLI's first-run prompt: it asks only on a terminal, and gives up 60 seconds after printing the link. `agy models` fails until the CLI is signed in."
+        "notes": "`agy acp --login` (shipped in 1.5.0) prints a Google OAuth link over stdio whether signed out or signing in again, and accepts the authorization code or full callback URL on stdin. `agy models` fails until the CLI is signed in."
       },
       "autoUpdate": {
         "behavior": "automatic",
@@ -2008,8 +2007,8 @@
         "https://antigravity.google/cli/install.sh",
         "https://antigravity.google/cli/install.ps1"
       ],
-      "checkedAt": "2026-10-31",
-      "notes": "`agy acp` (hidden from `agy --help`; see `agy help acp`) is the CLI's ACP stdio server, first shipped in 1.4.11. It shares the CLI's sign-in."
+      "checkedAt": "2026-11-21",
+      "notes": "`agy acp` is the CLI's ACP stdio server, first shipped in 1.4.11 (`agy acp --login` in 1.5.0). It shares the CLI's sign-in."
     }
   },
   {
