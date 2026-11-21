@@ -4,7 +4,7 @@
 // source the Web builds, with the same React Compiler pass; what differs is
 // what stands in for Next (see the resolver below) and that the Web's proxy
 // routes are bundled to run in the page.
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,7 +95,11 @@ async function compileReact(file, source) {
   if (!/\buse[A-Z]|<[A-Za-z]|<>/u.test(source)) return source;
   const key = createHash("sha256").update(file).update("\0").update(source).digest("hex");
   const cached = path.join(cacheDirectory, `${key}.tsx`);
-  if (fs.existsSync(cached)) return fs.readFileSync(cached, "utf8");
+  try {
+    return fs.readFileSync(cached, "utf8");
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+  }
   const result = await transformAsync(source, {
     filename: file,
     babelrc: false,
@@ -105,8 +109,12 @@ async function compileReact(file, source) {
     parserOpts: { plugins: ["typescript", "jsx"] },
   });
   const code = result?.code ?? source;
+  // Builds can run side by side: write a private file and rename it into
+  // place, so a reader sees a whole entry or none, never a half-written one.
   fs.mkdirSync(cacheDirectory, { recursive: true });
-  fs.writeFileSync(cached, code);
+  const partial = `${cached}.${process.pid}.${randomUUID()}.partial`;
+  fs.writeFileSync(partial, code);
+  fs.renameSync(partial, cached);
   return code;
 }
 
