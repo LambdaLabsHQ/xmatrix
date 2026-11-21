@@ -39,6 +39,7 @@ bindings = [
   { name = "RELAY_SUMMON_DECISION_CLOCK", class_name = "RelaySummonDecisionClock" },
   { name = "RELAY_POSTGRES_AGENT_LAUNCH_CHANNEL", class_name = "RelayPostgresAgentLaunchChannel" },
   { name = "RELAY_POSTGRES_BACKGROUND_ADMISSION", class_name = "RelayPostgresBackgroundAdmission" },
+  { name = "RELAY_REQUEST_ALLOWANCE", class_name = "RelayRequestAllowance" },
   { name = "RELAY_SPACE_DELETION_CLOCK", class_name = "RelaySpaceDeletionClock" },
   { name = "RELAY_PAGE_SESSION", class_name = "RelayPageSession" },
   { name = "RELAY_CONTROL_PLANE_DIRECTORY", class_name = "RelayControlPlaneDirectory" },
@@ -91,41 +92,6 @@ dataset = "xmatrix_relay_authority_observability"
 [[analytics_engine_datasets]]
 binding = "XMATRIX_USAGE_COST_AE"
 dataset = "xmatrix_usage_cost"
-
-# Request allowances (Workers Rate Limiting: per-key counters kept at the edge,
-# no storage). Over-limit requests are logged as "xMatrix rate limit exceeded"
-# and refused with 429 and Retry-After while RATE_LIMIT_ENFORCED is "true".
-# Credential: every request carrying a bearer token, per token.
-[[ratelimits]]
-name = "RATE_LIMIT_CREDENTIAL"
-namespace_id = "3801"
-simple = { limit = 1200, period = 60 }
-
-# Anonymous: requests without a credential, per client IP.
-[[ratelimits]]
-name = "RATE_LIMIT_ANONYMOUS"
-namespace_id = "3802"
-simple = { limit = 600, period = 60 }
-
-# Human socket sign-ins, per verified user, checked before the presence fanout.
-[[ratelimits]]
-name = "RATE_LIMIT_HUMAN_CONNECT"
-namespace_id = "3803"
-simple = { limit = 30, period = 60 }
-
-# Allowances on Jev, which the operator pays a provider for. They bound spend
-# rather than traffic, so they are refused whatever RATE_LIMIT_ENFORCED says.
-# Open Jev evaluations, per owning Human; an Agent Run counts as its owner.
-[[ratelimits]]
-name = "RATE_LIMIT_JEV_EVALUATE"
-namespace_id = "3805"
-simple = { limit = 10, period = 60 }
-
-# Search reorderings, per signed-in Human: one per paused search text.
-[[ratelimits]]
-name = "RATE_LIMIT_SEARCH_RERANK"
-namespace_id = "3806"
-simple = { limit = 30, period = 60 }
 
 # Native deploy identity, so a datapoint can be attributed to an exact version
 # instead of a guessed one. Read-only; never synthesised in code.
@@ -262,10 +228,9 @@ new_sqlite_classes = ["RelayPostgresScheduledTaskCoordinator"]
 # are best-effort. Setting this to anything but "true" stops every write.
 RELAY_AUTHORITY_OBSERVABILITY_ENABLED = "true"
 RELAY_POSTGRES_SHARD_ID = "shard-0"
-# Over-limit requests are answered with 429 and Retry-After. A week of
-# production logs (to 2026-10-16) held no over-limit request, so the limits
-# refuse no current traffic. Any other value only logs them; the Jev
-# allowances are refused either way.
+# Over-limit requests (request-allowance.ts) are answered with 429 and
+# Retry-After. Any other value only logs them; the Jev allowances are refused
+# either way.
 RATE_LIMIT_ENFORCED = "true"
 # The release workflow records the final D1 fence and verified receipt before
 # this configuration can deploy. There is deliberately no D1 fallback.
@@ -358,6 +323,12 @@ new_sqlite_classes = ["GitHubSubscriptionIndex"]
 [[migrations]]
 tag = "v44"
 new_sqlite_classes = ["RelayXUploadExecutor"]
+
+# One object per counted key (credential, client IP, ...) holding its request
+# allowance in memory; no durable state.
+[[migrations]]
+tag = "v45"
+new_sqlite_classes = ["RelayRequestAllowance"]
 
 # Official Agent prompt documents are bundled with the Hub deployment.
 [[rules]]

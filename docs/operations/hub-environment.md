@@ -60,11 +60,6 @@ Leave unset to keep the feature off.
 | `GOOGLE_PLAY_SUBSCRIPTIONS_CONFIG` | secret | Private Google Play service account key, subscription and base plan ids, Pub/Sub push identity and test-purchase Space allowlist. Unset disables Google Play subscription purchases. |
 | `JEV_AI_GATEWAY_API_KEY` | secret | Vercel AI Gateway key for Jev, the model that picks which Agent answers. Unset: message-triggered launches run without Jev's choice, while launches that need a choice (registration input dispatch) answer 503 `registration_selection_unconfigured`. |
 | `PUSH_CONFIG` | secret | JSON with the Hub's push identities, each optional: `vapid` (publicKey, privateKey, subject) for browsers, `apns` (keyP8, keyId, teamId, topic, and macTopic for the Mac app) for Apple devices, `fcm` (the Firebase service account key) for Android. Unset: nothing is pushed and notifications appear only while a client is open. |
-| `RATE_LIMIT_ANONYMOUS` | binding | Workers Rate Limiting allowance per client IP for requests without a credential. Unset: they are not counted. |
-| `RATE_LIMIT_CREDENTIAL` | binding | Workers Rate Limiting allowance per bearer credential. Unset: credentialed requests are not counted. |
-| `RATE_LIMIT_HUMAN_CONNECT` | binding | Workers Rate Limiting allowance of Human socket sign-ins per user. Unset: sign-ins are not counted. |
-| `RATE_LIMIT_JEV_EVALUATE` | binding | Workers Rate Limiting allowance of `POST /api/ai/jev/evaluate` per owning Human and verified Space (an Agent Run counts as its owner), refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: evaluations are not counted. |
-| `RATE_LIMIT_SEARCH_RERANK` | binding | Workers Rate Limiting allowance of `POST /api/search/rerank` (Jev) per signed-in Human, refused with 429 whatever RATE_LIMIT_ENFORCED says. Unset: reorderings are not counted. |
 | `RELAY_AUTHORITY_OBSERVABILITY_AE` | binding | Analytics Engine dataset for authority and PostgreSQL timing. Unset: observation is off. |
 | `RELAY_POSTGRES_SHARD_1` | binding | Hyperdrive binding to a second database shard. Unset: every Space is placed on the primary shard. |
 | `RELAY_POSTGRES_SHARD_1_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_1; set with it in the deployment profile. |
@@ -74,6 +69,7 @@ Leave unset to keep the feature off.
 | `RELAY_POSTGRES_SHARD_3_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_3. |
 | `RELAY_POSTGRES_SHARD_4` | binding | Optional further database shard. |
 | `RELAY_POSTGRES_SHARD_4_ID` | var | Shard id served by RELAY_POSTGRES_SHARD_4. |
+| `RELAY_REQUEST_ALLOWANCE` | binding | Exact request allowances, one Durable Object per counted key: bearer credential, anonymous client IP, Human socket sign-ins per user, and the always-refused Jev allowances (`POST /api/ai/jev/evaluate` per owning Human and Space, `POST /api/search/rerank` per Human). Unset: nothing is counted. |
 | `SLACK_CLIENT_ID` | secret | Slack OAuth client id for the Slack connector. Unset: the Slack connector cannot be connected. |
 | `SLACK_CLIENT_SECRET` | secret | Slack OAuth client secret. |
 | `STRIPE_PRO_ANNUAL_PRICE_ID` | var | Stripe price for the annual Pro seat. |

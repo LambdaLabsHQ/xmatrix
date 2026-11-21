@@ -36,14 +36,12 @@ test("production configuration cannot enable mock auth or reference test resourc
   assert.equal(binding(hub, "analytics_engine_datasets", "XMATRIX_USAGE_COST_AE").dataset, "xmatrix_usage_cost");
 });
 
-test("production refuses over-limit requests and bounds Jev spend, each limiter in its own namespace", () => {
+test("production refuses over-limit requests and bounds Jev spend through the exact allowance objects", () => {
   assert.equal(hub.vars.RATE_LIMIT_ENFORCED, "true");
-  // A missing binding admits everything, so a dropped one silently lifts a spend bound.
-  for (const name of ["RATE_LIMIT_JEV_EVALUATE", "RATE_LIMIT_SEARCH_RERANK"]) {
-    assert.ok(binding(hub, "ratelimits", name), name);
-  }
-  const namespaces = hub.ratelimits.map((limiter) => limiter.namespace_id);
-  assert.equal(new Set(namespaces).size, namespaces.length, "limiters sharing a namespace share counters");
+  // A missing binding admits everything, so a dropped one silently lifts every bound.
+  assert.equal(hub.durable_objects.bindings.find((entry) => entry.name === "RELAY_REQUEST_ALLOWANCE")?.class_name,
+    "RelayRequestAllowance");
+  assert.equal(hub.ratelimits, undefined, "the Workers Rate Limiting binding refused nothing in production");
 });
 
 test("production Web serves its custom domain, and the site at xmatrix.page too", () => {

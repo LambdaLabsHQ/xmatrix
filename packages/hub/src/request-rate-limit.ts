@@ -1,15 +1,11 @@
 import { sha256Hex } from "@xmatrix/protocol";
 import type { Hono } from "hono";
 import { admitAttempt, loginEmailAttemptLimits, type AttemptLimit } from "./auth-attempt-limit";
+import { takeAllowance, type AllowanceClass } from "./request-allowance";
 import type { Env } from "./types";
 
-/** A Workers Rate Limiting binding: a per-key counter over a fixed window. */
-export interface RequestRateLimiter {
-  limit(options: { key: string }): Promise<{ success: boolean }>;
-}
-
 /**
- * What a request is counted against.
+ * What a request is counted against (limits in request-allowance.ts).
  *
  * - `credential`: a request carrying a bearer credential, counted per credential.
  *   Keying on the credential itself, not on an id read from it, means nobody
@@ -20,8 +16,7 @@ export interface RequestRateLimiter {
  * - `jev_evaluate`: an admitted evaluation, counted per owning Human and Space.
  * - `search_rerank`: a search's Jev reordering, counted per signed-in Human.
  */
-export type RateLimitClass = "credential" | "anonymous" | "human_connect" | "jev_evaluate"
-  | "search_rerank";
+export type RateLimitClass = AllowanceClass;
 
 /**
  * Allowances on work the operator pays a provider for. They bound spend, not
@@ -29,43 +24,47 @@ export type RateLimitClass = "credential" | "anonymous" | "human_connect" | "jev
  */
 const ALWAYS_ENFORCED: ReadonlySet<RateLimitClass> = new Set(["jev_evaluate", "search_rerank"]);
 
-/** Seconds a refused caller is told to wait: the limiters count per minute. */
-export const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
+type AllowanceEnv = Pick<Env, "RELAY_REQUEST_ALLOWANCE" | "RATE_LIMIT_ENFORCED">;
 
 /**
- * Whether one more request for `key` is admitted.
+ * Seconds `key` must wait before one more request; 0 when it is admitted.
  *
  * Over the limit is always logged. It is refused when `RATE_LIMIT_ENFORCED`
  * is "true", or always for a provider allowance (`ALWAYS_ENFORCED`); any
  * other value only measures the limit against real traffic. A missing
  * binding admits everything.
  */
+export async function requestWait(
+  env: AllowanceEnv,
+  rateClass: RateLimitClass,
+  key: string,
+  detail: Record<string, string> = {},
+): Promise<number> {
+  if (!env.RELAY_REQUEST_ALLOWANCE) return 0;
+  const wait = await takeAllowance(env.RELAY_REQUEST_ALLOWANCE, rateClass, key);
+  if (wait === 0) return 0;
+  const enforced = ALWAYS_ENFORCED.has(rateClass) || env.RATE_LIMIT_ENFORCED === "true";
+  console.warn("xMatrix rate limit exceeded", { rateClass, enforced, ...detail });
+  return enforced ? wait : 0;
+}
+
+/** Whether one more request for `key` is admitted. */
 export async function admitRequest(
-  env: Pick<Env, "RATE_LIMIT_CREDENTIAL" | "RATE_LIMIT_ANONYMOUS" | "RATE_LIMIT_HUMAN_CONNECT"
-    | "RATE_LIMIT_JEV_EVALUATE" | "RATE_LIMIT_SEARCH_RERANK" | "RATE_LIMIT_ENFORCED">,
+  env: AllowanceEnv,
   rateClass: RateLimitClass,
   key: string,
   detail: Record<string, string> = {},
 ): Promise<boolean> {
-  const limiter = {
-    credential: env.RATE_LIMIT_CREDENTIAL,
-    anonymous: env.RATE_LIMIT_ANONYMOUS,
-    human_connect: env.RATE_LIMIT_HUMAN_CONNECT,
-    jev_evaluate: env.RATE_LIMIT_JEV_EVALUATE,
-    search_rerank: env.RATE_LIMIT_SEARCH_RERANK,
-  }[rateClass];
-  if (!limiter) return true;
-  const { success } = await limiter.limit({ key: `${rateClass}:${key}` });
-  if (success) return true;
-  const enforced = ALWAYS_ENFORCED.has(rateClass) || env.RATE_LIMIT_ENFORCED === "true";
-  console.warn("xMatrix rate limit exceeded", { rateClass, enforced, ...detail });
-  return !enforced;
+  return await requestWait(env, rateClass, key, detail) === 0;
 }
 
-export function rateLimitedResponse(): Response {
+/** Seconds a refused caller is told to wait when the refusal names no shorter wait. */
+export const RATE_LIMIT_RETRY_AFTER_SECONDS = 60;
+
+export function rateLimitedResponse(retryAfterSeconds = RATE_LIMIT_RETRY_AFTER_SECONDS): Response {
   return Response.json(
     { error: "Too many requests. Try again shortly.", code: "rate_limited", retryable: true },
-    { status: 429, headers: { "Retry-After": String(RATE_LIMIT_RETRY_AFTER_SECONDS) } },
+    { status: 429, headers: { "Retry-After": String(retryAfterSeconds) } },
   );
 }
 
@@ -153,15 +152,15 @@ export function registerRequestRateLimit(app: Hono<{ Bindings: Env }>): void {
     const request = context.req.raw;
     const path = new URL(request.url).pathname;
     const credential = bearerCredential(request);
-    const admitted = credential
-      ? await admitRequest(context.env, "credential", await credentialKey(credential), { path })
-      : await admitAnonymous(context.env, request, path);
-    if (!admitted) return rateLimitedResponse();
+    const wait = credential
+      ? await requestWait(context.env, "credential", await credentialKey(credential), { path })
+      : await anonymousWait(context.env, request, path);
+    if (wait > 0) return rateLimitedResponse(wait);
     return await admitAuthRoute(context.env, request, path) ?? next();
   });
 }
 
-async function admitAnonymous(env: Env, request: Request, path: string): Promise<boolean> {
+async function anonymousWait(env: Env, request: Request, path: string): Promise<number> {
   const key = anonymousKey(request);
-  return key ? admitRequest(env, "anonymous", key, { path }) : true;
+  return key ? requestWait(env, "anonymous", key, { path }) : 0;
 }

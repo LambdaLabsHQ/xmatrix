@@ -44,6 +44,7 @@ bindings = [
   { name = "RELAY_RUNTIME_CHANNEL_FANOUT", class_name = "A" },
   { name = "GITHUB_SUBSCRIPTION_INDEX", class_name = "A" },
   { name = "RELAY_X_UPLOAD_EXECUTOR", class_name = "A" },
+  { name = "RELAY_REQUEST_ALLOWANCE", class_name = "A" },
   { name = "DEVICE_AUTH", class_name = "A" }
 ]
 [[hyperdrive]]

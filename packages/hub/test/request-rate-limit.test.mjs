@@ -2,20 +2,19 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Hono } from "hono";
 
+import { ALLOWANCE_RULES, TokenBucket, takeAllowance } from "../src/request-allowance.ts";
 import { registerRequestRateLimit } from "../src/request-rate-limit.ts";
 import { PostgresHumanPort } from "../src/runtime-transport/postgres-human-port.ts";
 
-/** A limiter that admits `allowance` requests per key and records every key it saw. */
-function limiter(allowance) {
+/** Allowance objects that admit `allowance` requests per key, then name a 7 s wait, recording every key asked. */
+function allowances(allowance) {
   const counts = new Map();
-  return {
-    keys: [],
-    async limit({ key }) {
-      this.keys.push(key);
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-      return { success: counts.get(key) <= allowance };
-    },
-  };
+  const keys = [];
+  return { keys, idFromName: (name) => name, get: (name) => ({ async take() {
+    keys.push(name);
+    counts.set(name, (counts.get(name) ?? 0) + 1);
+    return counts.get(name) <= allowance ? 0 : 7;
+  } }) };
 }
 
 function hub(env) {
@@ -26,29 +25,29 @@ function hub(env) {
 }
 
 test("a credential over its allowance is refused with 429 and Retry-After once enforced", async () => {
-  const env = { RATE_LIMIT_CREDENTIAL: limiter(2), RATE_LIMIT_ENFORCED: "true" };
+  const env = { RELAY_REQUEST_ALLOWANCE: allowances(2), RATE_LIMIT_ENFORCED: "true" };
   const call = hub(env);
   const auth = { Authorization: "Bearer token-a" };
   assert.equal((await call("/api/channels", auth)).status, 200);
   assert.equal((await call("/api/channels", auth)).status, 200);
   const refused = await call("/api/channels", auth);
   assert.equal(refused.status, 429);
-  assert.equal(refused.headers.get("Retry-After"), "60");
+  assert.equal(refused.headers.get("Retry-After"), "7", "the wait the allowance named");
   assert.deepEqual(await refused.json(),
     { error: "Too many requests. Try again shortly.", code: "rate_limited", retryable: true });
   assert.equal((await call("/api/channels", { Authorization: "Bearer token-b" })).status, 200,
     "each credential has its own allowance");
-  assert.ok(env.RATE_LIMIT_CREDENTIAL.keys.every((key) => !key.includes("token-")),
+  assert.ok(env.RELAY_REQUEST_ALLOWANCE.keys.every((key) => !key.includes("token-")),
     "the limiter never holds a usable credential");
 });
 
 test("over the limit is only measured while enforcement is off", async () => {
-  const call = hub({ RATE_LIMIT_CREDENTIAL: limiter(0) });
+  const call = hub({ RELAY_REQUEST_ALLOWANCE: allowances(0) });
   assert.equal((await call("/api/channels", { Authorization: "Bearer token-a" })).status, 200);
 });
 
 test("requests without a credential are counted per client IP, except our own Workers' subrequests", async () => {
-  const env = { RATE_LIMIT_ANONYMOUS: limiter(1), RATE_LIMIT_ENFORCED: "true" };
+  const env = { RELAY_REQUEST_ALLOWANCE: allowances(1), RATE_LIMIT_ENFORCED: "true" };
   const call = hub(env);
   assert.equal((await call("/ws/humans", { "CF-Connecting-IP": "203.0.113.7" })).status, 200);
   assert.equal((await call("/ws/humans", { "CF-Connecting-IP": "203.0.113.7" })).status, 429);
@@ -64,7 +63,7 @@ test("requests without a credential are counted per client IP, except our own Wo
   "another zone's Worker is counted like any other caller");
 });
 
-test("without limiter bindings every request is admitted", async () => {
+test("without the allowance binding every request is admitted", async () => {
   const call = hub({ RATE_LIMIT_ENFORCED: "true" });
   assert.equal((await call("/api/channels", { Authorization: "Bearer token-a" })).status, 200);
   assert.equal((await call("/api/channels", { "CF-Connecting-IP": "203.0.113.7" })).status, 200);
@@ -105,4 +104,51 @@ test("a Human socket over its sign-in allowance is refused after the token check
   await assert.rejects(port.authenticate({ token: "t" }),
     (error) => error.failure?.code === "human_rate_limited");
   assert.deepEqual(admitted, ["user-1", "user-1"], "counted per verified user");
+});
+
+/** Real buckets behind the namespace shape: one per name, as one Durable Object per key keeps. */
+function bucketNamespace(clock) {
+  const buckets = new Map();
+  return { idFromName: (name) => name, get: (name) => ({ async take(rateClass) {
+    if (!buckets.has(name)) buckets.set(name, new TokenBucket(ALLOWANCE_RULES[rateClass], clock.now));
+    return buckets.get(name).take(clock.now);
+  } }) };
+}
+
+test("one credential's flood is cut at its burst while every other credential is served", async () => {
+  // 2026-11-19: one Agent Run sent ~17,000 reads in three minutes on one credential and none was refused.
+  const clock = { now: 1_000_000 };
+  const call = hub({ RELAY_REQUEST_ALLOWANCE: bucketNamespace(clock), RATE_LIMIT_ENFORCED: "true" });
+  const flood = { Authorization: "Bearer flooding-run" };
+  const statuses = [];
+  for (let i = 0; i < 2_000; i += 1) statuses.push((await call("/api/channels/c/history", flood)).status);
+  assert.equal(statuses.filter((status) => status === 200).length, ALLOWANCE_RULES.credential.burst);
+  assert.ok(statuses.slice(ALLOWANCE_RULES.credential.burst).every((status) => status === 429));
+  const refused = await call("/api/channels/c/history", flood);
+  assert.equal(refused.headers.get("Retry-After"), "1", "the next request fits within a second at 20 a second");
+  assert.equal((await call("/api/channels", { Authorization: "Bearer someone-else" })).status, 200);
+  clock.now += 10_000;
+  const later = [];
+  for (let i = 0; i < 400; i += 1) later.push((await call("/api/channels/c/history", flood)).status);
+  assert.equal(later.filter((status) => status === 200).length, 200, "ten seconds refill twenty requests a second");
+});
+
+test("a refused request takes nothing, and a bucket never holds more than its burst", () => {
+  const bucket = new TokenBucket({ perMinute: 60, burst: 2 }, 0);
+  assert.deepEqual([bucket.take(0), bucket.take(0), bucket.take(0), bucket.take(0)], [0, 0, 1, 1]);
+  assert.equal(bucket.take(1_000), 0, "one second buys one request however often it was refused");
+  assert.deepEqual([bucket.take(3_600_000), bucket.take(3_600_000), bucket.take(3_600_000)], [0, 0, 1]);
+});
+
+test("an unreachable allowance admits the request; an overloaded one refuses its own flooding key", async (t) => {
+  const warned = t.mock.method(console, "warn", () => {});
+  const failing = (error) => ({ idFromName: (name) => name, get: () => ({ take: () => Promise.reject(error) }) });
+  assert.equal(await takeAllowance(failing(new Error("Durable Object is briefly unavailable")), "credential", "k"), 0);
+  assert.equal(warned.mock.callCount(), 1);
+  assert.ok(await takeAllowance(failing(Object.assign(new Error("overloaded"), { overloaded: true })), "credential", "k") > 0);
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = takeAllowance({ idFromName: (name) => name, get: () => ({ take: () => new Promise(() => {}) }) },
+    "credential", "k");
+  t.mock.timers.tick(1_000);
+  assert.equal(await pending, 0, "an allowance that does not answer within a second admits");
 });
