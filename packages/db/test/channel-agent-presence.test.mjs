@@ -30,7 +30,7 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
   let query;
   const transaction = {
     async query(input) {
-      if (input.name === "channel_agent_resting_presence_v8") return [];
+      if (input.name === "channel_agent_resting_presence_v9") return [];
       query = input;
       return [
         row({ run_metadata_json: { machineId: "machine-runtime", hostname: "current-computer" } }),
@@ -70,7 +70,7 @@ test("PostgreSQL Channel Presence keys each registered Run by its Instance", asy
 test("an Instance is labelled by its registration, whatever its Run was routed as", async () => {
   const transaction = {
     async query(input) {
-      if (input.name === "channel_agent_resting_presence_v8") return [];
+      if (input.name === "channel_agent_resting_presence_v9") return [];
       return [row({
         run_metadata_json: { routedAs: "management_assistant_mention", managementSpaceId: "space-1" },
       })];
@@ -86,9 +86,9 @@ test("an Instance is labelled by its registration, whatever its Run was routed a
 test("live and sleeping repo Instances project the Run repository without checkout or credential leakage", async () => {
   const presence = (await loadChannelAgentPresence({ async query(input) {
     return [row({
-      instance_id: input.name === "channel_agent_presence_v12" ? "live" : "sleeping",
-      status: input.name === "channel_agent_presence_v12" ? "online" : "offline",
-      rest_state: input.name === "channel_agent_presence_v12" ? undefined : "sleeping",
+      instance_id: input.name === "channel_agent_presence_v13" ? "live" : "sleeping",
+      status: input.name === "channel_agent_presence_v13" ? "online" : "offline",
+      rest_state: input.name === "channel_agent_presence_v13" ? undefined : "sleeping",
       workspace_canonical_cwd: ".xmatrix-management/registration-123",
       run_metadata_json: { remoteRepo: "https://token:private@github.com/LambdaLabsHQ/xmatrix.git?secret=hidden" },
     })];
@@ -100,8 +100,8 @@ test("live and sleeping repo Instances project the Run repository without checko
 
 test("a Run in its managed directory names only the repositories it checked out", async () => {
   const read = async (metadata) => (await loadChannelAgentPresence({ async query(input) {
-    return [row({ status: input.name === "channel_agent_presence_v12" ? "online" : "offline",
-      rest_state: input.name === "channel_agent_presence_v12" ? undefined : "sleeping",
+    return [row({ status: input.name === "channel_agent_presence_v13" ? "online" : "offline",
+      rest_state: input.name === "channel_agent_presence_v13" ? undefined : "sleeping",
       workspace_canonical_cwd: ".xmatrix-management/registration-123", run_metadata_json: metadata })];
   } }, "space-1", ["channel-1"])).get("channel-1");
   for (const member of Object.values(await read({ managedWorkspaceKey: "registration-123" }))) {
@@ -137,7 +137,7 @@ test("a resting Instance stays in its Channel's Presence as offline with its res
   const transaction = {
     async query(input) {
       queries.push(input);
-      if (input.name === "channel_agent_presence_v12") return [row()];
+      if (input.name === "channel_agent_presence_v13") return [row()];
       return [
         row({ instance_id: "instance-2", channel_instance_id: 7, status: "offline", rest_state: "sleeping",
           waking: false }),
@@ -163,14 +163,14 @@ test("a resting Instance stays in its Channel's Presence as offline with its res
     { status: "offline", rest: "waking", restReason: undefined },
     { status: "offline", rest: "wake_failed", restReason: "reborn_spawn_failed: slot reclaimed" },
   ]);
-  const resting = queries.find((query) => query.name === "channel_agent_resting_presence_v8");
+  const resting = queries.find((query) => query.name === "channel_agent_resting_presence_v9");
   // Bounded per Channel.
   assert.deepEqual(resting.values, ["space-1", ["channel-1"], 12]);
 });
 
 test("a launched Instance that has not connected yet is waking from the summon onwards", async () => {
   const presence = await loadChannelAgentPresence({ async query(input) {
-    return input.name === "channel_agent_resting_presence_v8"
+    return input.name === "channel_agent_resting_presence_v9"
       ? [row({ instance_id: "launching", status: "offline", run_status: "starting", rest_state: null, waking: true,
         launch_in_flight: true })] : [];
   } }, "space-1", ["channel-1"]);
@@ -183,7 +183,7 @@ test("a launched Instance that has not connected yet is waking from the summon o
 test("a resting Presence row with a live or stopped state fails closed", async () => {
   for (const bad of [{ status: "online", rest_state: "sleeping" }, { status: "offline", rest_state: "stopped" }]) {
     const transaction = { async query(input) {
-      return input.name === "channel_agent_resting_presence_v8" ? [row(bad)] : [];
+      return input.name === "channel_agent_resting_presence_v9" ? [row(bad)] : [];
     } };
     await assert.rejects(loadChannelAgentPresence(transaction, "space-1", ["channel-1"]),
       (error) => error instanceof DatabaseContractError &&
@@ -195,7 +195,7 @@ test("sleeping and live catalogs keep Instance counters while discarding a legac
   const usage = { totalTokens: 7, contextUsedTokens: 3, quotaSource: "provider_api", quotaObservedAt: "2026-09-05T00:00:00Z",
     quotaUsages: [{ label: "5h", percent: 99 }] };
   const result = await loadChannelAgentPresence({ async query(input) {
-    return input.name === "channel_agent_presence_v12" ? [row({ instance_presentation: { usage } })]
+    return input.name === "channel_agent_presence_v13" ? [row({ instance_presentation: { usage } })]
       : [row({ instance_id: "sleeping", status: "offline", rest_state: "sleeping", instance_presentation: { usage } })];
   } }, "space-1", ["channel-1"]);
   for (const presence of Object.values(result.get("channel-1"))) {
@@ -207,7 +207,7 @@ test("sleeping and live catalogs keep Instance counters while discarding a legac
 test("durable presentation projects model, effort and chips, and drops a chip it cannot show", async () => {
   const chips = [{ id: "model", label: "Model", value: "gpt-5.4", source: "codex", parameterKind: "enum" }];
   const result = await loadChannelAgentPresence({ async query(input) {
-    if (input.name === "channel_agent_resting_presence_v8") return [];
+    if (input.name === "channel_agent_resting_presence_v9") return [];
     return [
       row({ instance_presentation: { model: "gpt-5.4", effort: "high", statusChips: chips } }),
       row({ instance_id: "instance-2", channel_instance_id: 7, instance_presentation: { statusChips: [{ id: "quota", label: "", percent: 120 }] } }),
@@ -221,6 +221,34 @@ test("durable presentation projects model, effort and chips, and drops a chip it
   assert.equal(presence["instance-2"].instances[0].statusChips, undefined);
 });
 
+test("a catalog shared by several Instances is read once and shown on each of them", async () => {
+  const models = [{ id: "gpt-5.4", displayName: "GPT-5.4" }];
+  const commands = [{ token: "/review" }];
+  const result = await loadChannelAgentPresence({ async query(input) {
+    // The read ships each distinct catalog on the first row naming its digest only.
+    if (input.name === "channel_agent_presence_v13") {
+      return [
+        row({ catalog_digest_models: "m1", catalog_models: models, catalog_digest_commands: "c1", catalog_commands: commands }),
+        row({ instance_id: "instance-2", channel_instance_id: 7, catalog_digest_models: "m1", catalog_digest_commands: "c1" }),
+      ];
+    }
+    return [row({ instance_id: "sleeping", channel_instance_id: 8, status: "offline", rest_state: "sleeping",
+      catalog_digest_models: "m1", catalog_models: models })];
+  } }, "space-1", ["channel-1"]);
+  const instances = Object.values(result.get("channel-1")).map((presence) => presence.instances[0]);
+  assert.equal(instances.length, 3);
+  for (const instance of instances) assert.deepEqual(instance.models.map((model) => model.id), ["gpt-5.4"]);
+  assert.deepEqual(instances.filter((instance) => instance.commands).map((instance) => instance.id), ["instance-1", "instance-2"]);
+  assert.equal(instances.find((instance) => instance.id === "sleeping").commands, undefined,
+    "an Instance without a commands digest reported no commands");
+});
+
+test("a catalog digest no row of the read carries fails closed", async () => {
+  await assert.rejects(loadChannelAgentPresence({ async query(input) {
+    return input.name === "channel_agent_presence_v13" ? [row({ catalog_digest_models: "m1" })] : [];
+  } }, "space-1", ["channel-1"]), DatabaseContractError);
+});
+
 test("visible live agents are the channels this principal may read", async () => {
   const names = [];
   const found = await loadVisibleLiveAgentPresence({ async query(input) {
@@ -229,13 +257,13 @@ test("visible live agents are the channels this principal may read", async () =>
       assert.deepEqual(input.values, ["space-1", "agent", "agent-1"]);
       return [{ channel_id: "channel-1" }];
     }
-    if (input.name === "channel_agent_resting_presence_v8") return [];
+    if (input.name === "channel_agent_resting_presence_v9") return [];
     return [row()];
   } }, "space-1", { kind: "agent", id: "agent-1" });
   assert.deepEqual(names, [
     "visible_live_agent_channels_v2",
-    "channel_agent_presence_v12",
-    "channel_agent_resting_presence_v8",
+    "channel_agent_presence_v13",
+    "channel_agent_resting_presence_v9",
   ]);
   assert.equal(found.get("channel-1")["instance-1"].instances[0].id, "instance-1");
 });

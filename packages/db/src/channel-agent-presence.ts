@@ -13,6 +13,7 @@ import {
   type InstanceRecord,
   type InstanceRevision,
   mergeInstanceRecord,
+  plainRecord,
   withNewestRegistrationPresentation,
   type SerializedAgentInstance,
 } from "@xmatrix/protocol";
@@ -105,12 +106,68 @@ const PRESENCE_RUN_METADATA_KEYS = ["routedAs", "clientVersion", "machineId", "h
 const PRESENCE_RUN_METADATA_SQL = `jsonb_strip_nulls(jsonb_build_object(${PRESENCE_RUN_METADATA_KEYS
   .map((key) => `'${key}',r.metadata_json->'${key}'`).join(",")}))`;
 /**
+ * The catalogs a runtime reports: what its harness offers, so the same few
+ * values repeat across every Instance of one harness version. They are most of
+ * a durable presentation (about 7 of its 8 KB in production), and a Channel
+ * window lists dozens of Instances, so each read names a catalog by its digest
+ * and ships each distinct catalog once (`sharingCatalogs`).
+ */
+const SHARED_CATALOG_KEYS = ["models", "commands", "parameters"] as const;
+type SharedCatalogKey = typeof SHARED_CATALOG_KEYS[number];
+/** A catalog the presentation holds; JSON null is no catalog, as `jsonb_strip_nulls` made it before. */
+const catalogSql = (alias: string, key: SharedCatalogKey) =>
+  `NULLIF(${alias}.presentation_json->'${key}','null'::jsonb)`;
+/**
  * Durable presentation a list can show without the runtime snapshot: what the
  * connection persisted with the report its revision names. Activity, files,
- * intent and runtimeState are temporary work and stay off this read.
+ * intent and runtimeState are temporary work and stay off this read. Catalogs
+ * travel by digest beside it.
  */
 const DURABLE_PRESENTATION_SQL = `jsonb_strip_nulls(jsonb_build_object(${AGENT_INSTANCE_DURABLE_KEYS
-  .map(key => `'${key}',i.presentation_json->'${key}'`).join(",")})) AS instance_presentation`;
+  .filter(key => !(SHARED_CATALOG_KEYS as readonly string[]).includes(key))
+  .map(key => `'${key}',i.presentation_json->'${key}'`).join(",")})) AS instance_presentation,
+        ${SHARED_CATALOG_KEYS.map(key =>
+          `encode(sha256(convert_to(${catalogSql("i", key)}::text,'UTF8')),'hex') AS catalog_digest_${key}`).join(",")}`;
+/** The order every Instance read answers in. */
+const RECORD_ORDER_SQL = "listed.channel_id,listed.channel_instance_id,listed.instance_id";
+/**
+ * The read `sql` with each distinct catalog on the first row that names it and
+ * on no other, in the read's own order (`withSharedCatalogs` puts it back on
+ * every row). `sql` already applies its LIMIT, so the row carrying a catalog
+ * is always in the answer.
+ */
+function sharingCatalogs(sql: string): string {
+  return `SELECT listed.*,${SHARED_CATALOG_KEYS.map(key => `
+        CASE WHEN listed.catalog_digest_${key} IS NOT NULL AND row_number() OVER (
+          PARTITION BY listed.catalog_digest_${key} ORDER BY ${RECORD_ORDER_SQL})=1
+        THEN (SELECT jsonb_strip_nulls(${catalogSql("shown", key)}) FROM data.instances shown
+          WHERE shown.instance_id=listed.instance_id) END AS catalog_${key}`).join(",")}
+      FROM (${sql}) listed
+      ORDER BY ${RECORD_ORDER_SQL}`;
+}
+
+/** Every row with the catalogs its digests name, as one durable presentation. */
+function withSharedCatalogs<Row extends InstanceRecordRow>(rows: readonly Row[]): Row[] {
+  const catalogs = new Map<string, unknown>();
+  for (const row of rows) {
+    for (const key of SHARED_CATALOG_KEYS) {
+      const catalog = row[`catalog_${key}`];
+      if (catalog !== null && catalog !== undefined) catalogs.set(`${key}:${row[`catalog_digest_${key}`]}`, catalog);
+    }
+  }
+  return rows.map((row) => {
+    const presentation: Record<string, unknown> = { ...plainRecord(row.instance_presentation) };
+    for (const key of SHARED_CATALOG_KEYS) {
+      const digest = row[`catalog_digest_${key}`];
+      if (digest === null || digest === undefined) continue;
+      if (!catalogs.has(`${key}:${digest}`)) {
+        throw new DatabaseContractError("Agent presence catalog is missing from its read");
+      }
+      presentation[key] = catalogs.get(`${key}:${digest}`);
+    }
+    return { ...row, instance_presentation: presentation };
+  });
+}
 /** What every Instance record is made of, whichever read selects it. */
 const RECORD_COLUMNS_SQL = `i.instance_id,i.channel_id,i.channel_instance_id,i.status,r.status AS run_status,
         i.version AS instance_version,i.presentation_json->'presenceVersion' AS presence_version,
@@ -166,18 +223,18 @@ export async function loadChannelInstanceRecords(
   const selected = selectedChannels(channelIds);
   const byChannel = new Map<string, AgentInstanceRecord[]>(selected.map((channelId) => [channelId, []]));
   if (selected.length === 0) return byChannel;
-  const live = await transaction.query<InstanceRecordRow>({
-    name: "channel_agent_presence_v12",
-    text: `SELECT ${RECORD_COLUMNS_SQL}
+  const live = withSharedCatalogs(await transaction.query<InstanceRecordRow>({
+    name: "channel_agent_presence_v13",
+    text: sharingCatalogs(`SELECT ${RECORD_COLUMNS_SQL}
       ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[])
         AND i.status IN (${LIVE_AGENT_STATUS_SQL})
         AND r.status IN ('running','stopping')
       ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
-      LIMIT 513`,
+      LIMIT 513`),
     values: [spaceId, selected],
     maxRows: MAX_ACTIVE_AGENT_INSTANCES + 1,
-  });
+  }));
   if (live.length > MAX_ACTIVE_AGENT_INSTANCES) {
     throw new DatabaseContractError("Active Agent Instance presence limit exceeded");
   }
@@ -191,9 +248,9 @@ export async function loadChannelInstanceRecords(
   // A resting Instance is offline but still the Channel's: the next message
   // wakes it (docs/instance-sleep.md §5). Newest first, a bounded few per
   // Channel; unlike live Instances, a Channel with more simply shows fewer.
-  const resting = await transaction.query<InstanceRecordRow>({
-    name: "channel_agent_resting_presence_v8",
-    text: `SELECT * FROM (SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL},
+  const resting = withSharedCatalogs(await transaction.query<InstanceRecordRow>({
+    name: "channel_agent_resting_presence_v9",
+    text: sharingCatalogs(`SELECT * FROM (SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL},
         row_number() OVER (PARTITION BY i.channel_id ORDER BY i.updated_at DESC,i.instance_id) AS rest_rank
       ${recordFromSql("$1")}
       WHERE i.channel_id=ANY($2::text[]) AND i.status='offline'
@@ -203,10 +260,10 @@ export async function loadChannelInstanceRecords(
               AND launch.state IN ('prepared','queued','admitted','spawned'))))) resting
       WHERE resting.rest_rank<=$3
       ORDER BY resting.channel_id,resting.channel_instance_id,resting.instance_id
-      LIMIT 2048`,
+      LIMIT 2048`),
     values: [spaceId, selected, MAX_RESTING_INSTANCES_PER_CHANNEL],
     maxRows: MAX_RESTING_AGENT_INSTANCES,
-  });
+  }));
   for (const row of resting) {
     const record = instanceRecord(row);
     if (!record.rest) throw new DatabaseContractError("Resting Agent presence state is invalid");
@@ -238,16 +295,16 @@ export async function loadAgentInstanceRecordsById(
   }
   const channels = selectedChannels(channelIds);
   if (requested.length === 0 || channels.length === 0) return { records: [], missingInstanceIds: requested };
-  const rows = await transaction.query<InstanceRecordRow>({
-    name: "agent_instance_records_by_id_v2",
-    text: `SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL}
+  const rows = withSharedCatalogs(await transaction.query<InstanceRecordRow>({
+    name: "agent_instance_records_by_id_v3",
+    text: sharingCatalogs(`SELECT ${RECORD_COLUMNS_SQL},${REST_COLUMNS_SQL}
       ${recordFromSql("$1")}
       WHERE i.instance_id=ANY($2::text[]) AND i.channel_id=ANY($3::text[])
       ORDER BY i.channel_id,i.channel_instance_id,i.instance_id
-      LIMIT 1024`,
+      LIMIT 1024`),
     values: [spaceId, requested, channels],
     maxRows: MAX_KNOWN_INSTANCE_IDS,
-  });
+  }));
   const allowed = new Set(channels);
   const records = rows.map((row) => {
     if (!allowed.has(row.channel_id)) {
