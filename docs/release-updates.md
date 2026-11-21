@@ -1,5 +1,15 @@
 # Release Updates
 
+## Unreleased: Gmail snapshot cleanup preserves the send result
+
+Sending an approved draft, a new message with attachments, or a reply with
+attachments reports the original Gmail result even if deleting the temporary
+upload fails. The Hub logs a fixed cleanup warning without including the
+snapshot URL or provider error details. Access still expires after ten minutes.
+Durable cleanup after a failed deletion or interrupted execution remains open
+in [#1418](https://github.com/LambdaLabsHQ/xmatrix/issues/1418). Hub only. Recovery
+is a CI-validated beta Hub release reverting the change.
+
 ## Unreleased: Chrome extension to send pages to a Channel
 
 New `apps/chrome-extension` (Manifest V3). From the toolbar popup

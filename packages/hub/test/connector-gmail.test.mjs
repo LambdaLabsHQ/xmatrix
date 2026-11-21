@@ -608,6 +608,16 @@ test("send_draft freezes the draft for approval, then sends it only while it is 
   await fetched([rawDraft("19a0b1c2d3e4f5a6", "eA"), aliasList, gmail({ error: { message: "boom" } }, 500)],
     () => assert.rejects(ACTIONS.send_draft.execute({ ...ctx, mailSnapshot: failing }, frozen)));
   assert.equal(failing.removed, true, "a failed send still deletes the staged snapshot");
+  const cleanupFailure = { async stage() {
+    return { url: "https://hub.test/x", remove: async () => { throw new Error("R2 delete failed"); } };
+  } };
+  const snapshotRead = [rawDraft("19a0b1c2d3e4f5a6", "eA"), aliasList];
+  const confirmed = await fetched([...snapshotRead, gmail({ id: "19a0b1c2d3e4f5a7" })],
+    () => ACTIONS.send_draft.execute({ ...ctx, mailSnapshot: cleanupFailure }, frozen));
+  assert.match(confirmed.result.summary, /as message 19a0b1c2d3e4f5a7/u);
+  assert.equal(confirmed.calls.filter(call => call.body.method === "POST").length, 1);
+  await fetched([...snapshotRead, gmail({ error: { message: "Google rejected the send" } }, 400)],
+    () => assert.rejects(ACTIONS.send_draft.execute({ ...ctx, mailSnapshot: cleanupFailure }, frozen), { status: 400 }));
   const missing = await fetched([gmail({ error: { message: "Requested entity was not found." } }, 404)],
     () => assert.rejects(ACTIONS.send_draft.prepare(ctx, { draftId: "r-1" }), /none of your Gmail mailboxes has draft r-1/u));
   assert.equal(missing.calls.length, 1);
