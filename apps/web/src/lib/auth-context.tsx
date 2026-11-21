@@ -459,7 +459,18 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
 async function loadEmbedSessionState(parent: string): Promise<Omit<AuthState, "loading">> {
   const token = await requestEmbedToken(parent);
   if (!token) return { session: null, user: null };
-  const { user } = await xmatrixApiRequest<{ user: AuthUser }>({ url: WEB_PROXY_ROUTES.me, token });
+  let user: AuthUser;
+  try {
+    ({ user } = await xmatrixApiRequest<{ user: AuthUser }>({ url: WEB_PROXY_ROUTES.me, token }));
+  } catch (error) {
+    // The Hub refused the extension's session: it signs in again in the panel,
+    // not on this frame's own sign-in page, whose cookies a frame cannot keep.
+    if (isRejectedTokenError(error)) {
+      announceEmbedSignOut(parent);
+      return { session: null, user: null };
+    }
+    throw error;
+  }
   return {
     session: {
       access_token: token,
@@ -561,6 +572,11 @@ function authResponseToWebSession(payload: AuthResponse): WebAuthSession {
       },
     },
   };
+}
+
+function isRejectedTokenError(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return status === 401 || status === 403;
 }
 
 function isNativeShell(): boolean {
