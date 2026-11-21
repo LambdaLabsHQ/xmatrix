@@ -1,5 +1,18 @@
 # Release Updates
 
+## Unreleased: a late unanswered start does not fail a launch that connected
+
+The Hub ends a spawn command the machine never answers and records that as a
+failed start. That verdict used to be ignored only while the Run was still
+`running` or `stopping`. A launch that had already connected, and whose Run
+had then finished, was still stamped `spawnResult.ok: false`. For the next 30
+minutes the startup breaker ranks that harness behind every other, so the next
+summon skips the environment that did start. An unanswered start is now
+ignored once the launch has connected (`state='connected'` or `connected_at`),
+and that same fact suppresses the startup-failure notice. A start that never
+connected is still failed and still said on its summon. Hub only. Recovery is
+a CI-validated beta Hub release reverting this change.
+
 ## Unreleased: Gmail snapshot cleanup preserves the send result
 
 Sending an approved draft, a new message with attachments, or a reply with
