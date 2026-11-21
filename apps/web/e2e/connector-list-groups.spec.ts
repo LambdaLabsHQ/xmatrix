@@ -106,3 +106,20 @@ test("Remove asks first, then deletes the connection with what it saved", async 
   await expect.poll(() => fixtureRequests(page, "remove")).toHaveLength(1);
   await expect(page_(page).getByRole("button", { name: "Connect with Linear" })).toBeVisible();
 });
+
+test("a saved credential is replaced from one of the Space's secrets without typing it", async ({ page }) => {
+  await openApps(page, { connections: [{ ...connection("bingwebmaster", "Bing Webmaster Tools", "configured"), credentialFields: ["apiKey"] }],
+    app: "Bing Webmaster Tools" });
+  await fixtureJson(page, "secrets", /\/api\/xmatrix\/spaces\/[^/]+\/secrets$/, { canManage: true, secrets: [
+    { secretRef: "bing-webmaster-yiming", envName: "BING_WEBMASTER_API_KEY", access: "ask", createdByUserId: "e2e-user", createdAt: E2E_NOW, updatedAt: E2E_NOW },
+  ] });
+  await fixtureJson(page, "fill", /\/app-connections\/bingwebmaster\/credentials$/, { credentialFields: ["apiKey"] }, { method: "PUT" });
+  await page.reload();
+  await page.getByRole("button", { name: "App", exact: true }).click();
+  await page.getByTestId("connector-row").filter({ hasText: "Bing Webmaster Tools" }).click();
+  const rows = page_(page).getByTestId("connector-credential-rows");
+  await rows.getByRole("button", { name: "Use a saved secret" }).first().click();
+  await expect(rows.getByRole("combobox", { name: "Saved secret" })).toContainText("bing-webmaster-yiming");
+  await rows.getByRole("button", { name: "Use it" }).click();
+  await expect.poll(() => fixtureRequestBodies(page, "fill")).toEqual([{ fromSecrets: { apiKey: "bing-webmaster-yiming" } }]);
+});

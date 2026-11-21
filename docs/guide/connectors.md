@@ -28,7 +28,7 @@ Every command leaves a receipt in the conversation with its result.
 
 A connected app's page offers what to do with its account:
 
-- **Switch account** puts the app on another account. For a sign-in it opens the provider's sign-in with its account chooser (Google always asks which account); the current account stays connected until the new sign-in finishes. For pasted credentials it goes to the Credentials section, where saving another account's values replaces them once the provider accepts them.
+- **Switch account** puts the app on another account. For a sign-in it opens the provider's sign-in with its account chooser (Google always asks which account); the current account stays connected until the new sign-in finishes. For pasted credentials it goes to the Credentials section, where saving another account's values replaces them once the provider accepts them. A Space admin can also choose **Use a saved secret** on a field: the Hub copies that Space secret's current value into the connection and checks it, without showing the value; each copy is recorded in the secret audit.
 - **Pause** stops commands and channel delivery and keeps what the app signed in with. **Resume** turns it back on with the same account, without a new sign-in.
 - **Remove** deletes the connection, its saved credentials and its channel subscriptions, after asking.
 

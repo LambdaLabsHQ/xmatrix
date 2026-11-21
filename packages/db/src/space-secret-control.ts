@@ -200,6 +200,40 @@ export class PostgresSpaceSecretRepository {
     });
   }
 
+  /**
+   * A Space admin fills an app connection's credentials from secrets the
+   * Space already holds. The values go straight to the connection's encrypted
+   * credential store, never back to the person, and each read is audited
+   * under the connection. Whether an Agent may read a secret plays no part.
+   */
+  async adminReadForConnection(input: { spaceId: string; userId: string; providerId: string; secretRefs: readonly unknown[] }):
+    Promise<Map<string, string>> {
+    if (input.secretRefs.length < 1 || input.secretRefs.length > 16) {
+      throw new SpaceSecretError("invalid_request", 400, "Name between 1 and 16 secrets");
+    }
+    const refs = [...new Set(input.secretRefs.map(secretRefOf))];
+    const providerId = String(input.providerId).slice(0, 80);
+    return this.inSpace(input.spaceId, "space-secret.connection-fill", async (tx) => {
+      await requireRole(tx, input.spaceId, input.userId, SECRET_ADMINS, "fills app credentials from its secrets");
+      const rows = await secretRows(tx, (after) => ({ name: "space_secret_connection_values_v1",
+        text: `SELECT ${SECRET_METADATA_COLUMNS},s.value_version,s.encrypted_value_json FROM data.space_secrets s
+          WHERE s.space_id=$1 AND s.secret_ref=ANY($2::text[]) AND ($3::text IS NULL OR s.secret_ref>$3)
+          ORDER BY s.secret_ref LIMIT $4`,
+        values: [input.spaceId, refs, after, SECRET_READ_PAGE_ROWS], maxRows: SECRET_READ_PAGE_ROWS }), MAX_SECRET_READ_BYTES);
+      const values = new Map<string, string>();
+      for (const ref of refs) {
+        const row = rows.find((candidate) => candidate.secret_ref === ref);
+        if (!row) throw new SpaceSecretError("secret_not_found", 404, `Secret ${ref} is not saved in this Space`);
+        values.set(ref, await decryptSpaceSecretValue(this.material, row));
+      }
+      await tx.query({ name: "space_secret_connection_fill_audit_v1", text: `INSERT INTO
+        data.secret_grant_audit (command_id,grant_id,owner_user_id,action,machine_id,space_id,secret_refs_json,created_at)
+        VALUES ($1,$2,$3,'connection_fill',NULL,$4,$5::jsonb,clock_timestamp())`, values: [crypto.randomUUID(),
+        `connection:${input.spaceId}:${providerId}`.slice(0, 300), input.userId, input.spaceId, JSON.stringify(refs)], maxRows: 0 });
+      return values;
+    });
+  }
+
   /** The Space's secrets as this Run sees them: which it may read now. */
   async runList(run: RunSecretCaller): Promise<{ spaceId: string; secrets: RunSecretView[] }> {
     return this.inSpace(run.spaceId, "space-secret.run-list", async (tx) => {
