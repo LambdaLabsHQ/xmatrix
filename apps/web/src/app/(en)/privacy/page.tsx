@@ -14,8 +14,8 @@ export default function PrivacyPolicyPage() {
     <LegalDocument
       title="Privacy Policy"
       description="How MadeByRobot, LLC processes Customer Data, Agent activity, and personal information across xMatrix."
-      version="2026-10-28"
-      effectiveDate="14 October 2026"
+      version="2026-11-22"
+      effectiveDate="22 November 2026"
     >
       <PrivacyPolicyContent />
     </LegalDocument>

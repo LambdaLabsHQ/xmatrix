@@ -76,6 +76,7 @@ import { runAsDeliveryInvocation } from "./runtime-transport/runtime-principal-d
 export { DeviceAuthBroker } from "./device-auth";
 import { registerIndexRoutesAdmin } from "./index-routes-admin";
 import { registerIndexRoutesBillingGrants } from "./index-routes-billing-grants";
+import { registerIndexRoutesEmailCampaigns } from "./index-routes-email-campaigns";
 import { registerIndexRoutesAuthSpace } from "./index-routes-auth-space";
 import { registerIndexRoutesAutomation } from "./index-routes-automation";
 import { registerIndexRoutesSpaceJoinRequests } from "./index-routes-space-join-requests";
@@ -114,6 +115,7 @@ registerClientCompatibilityGate(app);
 registerIndexRoutesPostgresReadiness(app);
 registerIndexRoutesAdmin(app);
 registerIndexRoutesBillingGrants(app);
+registerIndexRoutesEmailCampaigns(app);
 // Before the sign-in library's own /api/auth/* routes.
 registerAppSignInRoutes(app);
 registerIndexRoutesAuthSpace(app);

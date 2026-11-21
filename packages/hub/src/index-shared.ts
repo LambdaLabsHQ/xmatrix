@@ -439,6 +439,8 @@ export function agentRunHttpRouteAllowed(
   // Complimentary Pro: the routes admit only a live Run whose owner is a platform admin.
   if (request.method === "GET" && path === "/api/admin/billing-grants/candidate") return true;
   if (request.method === "POST" && path === "/api/admin/billing-grants") return true;
+  // Campaign email batches: the same live-Run-of-a-platform-admin rule as grants.
+  if (request.method === "POST" && /^\/api\/admin\/email-campaigns\/[^/]+\/send$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/messages\/receipt$/u.test(path)) return true;
   if (request.method === "POST" && /^\/api\/channels\/[^/]+\/page-output$/u.test(path)) return true;
   // Channel memory authorizes the exact Run in the repository: read where both

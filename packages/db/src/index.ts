@@ -27,6 +27,7 @@ export {
   BILLING_GRANT_DAYS,
   BILLING_GRANT_MAX_SEATS,
 } from "./billing-control.js";
+export { PostgresEmailCampaignRepository } from "./email-campaigns.js";
 export { PostgresBillingGrantRepository, BILLING_GRANT_DAILY_LIMIT, type BillingGrant } from "./billing-grants.js";
 export {
   ContentControlError,

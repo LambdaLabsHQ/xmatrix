@@ -39,7 +39,7 @@ function repositories(env: Env) {
 }
 
 /** The grant credential, or a signed-in platform operator; recorded before anything is read or given. */
-async function grantOperator(
+export async function grantOperator(
   request: Request, env: Env, action: AdminAuditAction, target: { kind: string; id: string },
 ): Promise<string> {
   let actor: { actorUserId: string; actorEmail?: string };

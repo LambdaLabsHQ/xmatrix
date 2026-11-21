@@ -140,6 +140,12 @@ function formatEmailAddress(name: string, email: string): string {
   return `${encodeHeaderValue(name)} <${sanitizeEmailAddress(email)}>`;
 }
 
+/** Headers only operator campaigns set; sign-in and invite mail carries none. */
+export interface EmailExtraHeaders {
+  replyTo?: string;
+  unsubscribeUrl?: string;
+}
+
 function buildMimeEmail(input: {
   fromName: string;
   fromEmail: string;
@@ -147,11 +153,17 @@ function buildMimeEmail(input: {
   subject: string;
   text: string;
   html: string;
+  headers?: EmailExtraHeaders;
 }): string {
   const boundary = `xmatrix-${crypto.randomUUID()}`;
+  const extra = input.headers ?? {};
   const lines = [
     `From: ${formatEmailAddress(input.fromName, input.fromEmail)}`,
     `To: ${sanitizeEmailAddress(input.to)}`,
+    ...(extra.replyTo ? [`Reply-To: ${sanitizeEmailAddress(extra.replyTo)}`] : []),
+    // RFC 8058 one-click unsubscribe: mail clients POST to the URL.
+    ...(extra.unsubscribeUrl ? [`List-Unsubscribe: <${sanitizeHeaderValue(extra.unsubscribeUrl).replace(/[<>]/g, "")}>`,
+      "List-Unsubscribe-Post: List-Unsubscribe=One-Click"] : []),
     `Subject: ${encodeHeaderValue(input.subject)}`,
     `Date: ${new Date().toUTCString()}`,
     "MIME-Version: 1.0",
@@ -177,7 +189,7 @@ function buildMimeEmail(input: {
 export async function sendEmail(
   env: Env,
   to: string,
-  message: { subject: string; text: string; html: string }
+  message: { subject: string; text: string; html: string; headers?: EmailExtraHeaders }
 ) {
   if (!env.SEND_EMAIL) {
     throw new EmailDeliveryConfigurationError({
@@ -193,6 +205,7 @@ export async function sendEmail(
     subject: message.subject,
     text: message.text,
     html: message.html,
+    headers: message.headers,
   });
 
   try {
