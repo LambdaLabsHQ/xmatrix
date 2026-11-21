@@ -24,13 +24,14 @@ what the feedback was about, not who wrote it.
 Complimentary Spaces are not paid seats. Growth reports count paid seats from
 `billing_provider IN ('stripe','apple','google')` only.
 
-## Credential
+## Who may call
 
-`BILLING_GRANT_OPERATOR_TOKEN` (Hub secret, at least 32 characters) authorizes
-only the two routes below; the partition operator token does not, and this one
-opens nothing else. Unset, only a signed-in platform admin can grant. An Agent
-reads the same value from the Space secret alias `billing-grant-operator-token`
-through `xmatrix secret exec`, never on a command line or in a message.
+- A signed-in platform admin.
+- A live Agent Run whose owner is a platform admin, with its own Run token
+  (`xmatrix` CLI session). This is the one operator surface an Agent Run may
+  use; the audit row names the Run (`agent-run:<runId>`) and its owner.
+- Optionally, a caller holding `BILLING_GRANT_OPERATOR_TOKEN` (Hub secret, at
+  least 32 characters). It opens only these routes; unset, the path is off.
 
 ## Routes
 

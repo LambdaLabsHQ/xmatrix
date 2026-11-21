@@ -1,7 +1,8 @@
 /**
  * Complimentary Pro for feedback.
  *
- * An operator, or the Agent holding the grant credential, looks up who sent a
+ * An operator, or a live Agent Run its operator owns (or a caller holding the
+ * grant credential), looks up who sent a
  * piece of feedback and gives their Space one month of Pro. The rules a caller
  * cannot argue with — one grant per person and per piece of feedback, a daily
  * cap, a fixed length, owners only, never over a live subscription — are kept
@@ -16,7 +17,7 @@ import { bearerMatchesSecret } from "./admin-operator-token";
 import { recordAdminAudit } from "./admin-audit";
 import { authDirectoryEmails, authDirectoryUserIdBy } from "./auth-authority";
 import { platformAdminForRequest } from "./index-routes-admin";
-import { PermissionFailure, jsonErrors, readBoundedRequestBody, requireAuth, requireHumanAuth } from "./index-shared";
+import { PermissionFailure, jsonErrors, readBoundedRequestBody, requireAuth, requireLiveAgentRun } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS, controlErrorResponse, postgresAuthorityShardId } from "./postgres-authority-http";
 import { readPostgresAdminUserDetail } from "./postgres-admin-user-detail";
@@ -45,10 +46,23 @@ async function grantOperator(
   if (await bearerMatchesSecret(request, env.BILLING_GRANT_OPERATOR_TOKEN)) {
     actor = { actorUserId: BILLING_GRANT_TOKEN_ACTOR };
   } else {
-    // An Agent Run holds the grant credential instead; its own session never grants.
-    const user = requireHumanAuth(await requireAuth(request, env));
-    if (!(await platformAdminForRequest(user, env))) throw new PermissionFailure("Platform admin permission is required");
-    actor = { actorUserId: user.id, ...(user.email ? { actorEmail: user.email } : {}) };
+    const user = await requireAuth(request, env);
+    if (user.agentRun) {
+      // The one place an Agent Run acts on operator authority: a live Run whose
+      // owner is a platform operator may judge feedback and grant, so the
+      // operator is not asked to hand it a credential. The ledger's caps bind
+      // it exactly as they bind the operator.
+      const run = await requireLiveAgentRun(env, user);
+      const owner = run.ownerUserId;
+      const ownerEmail = (await authDirectoryEmails(env, [owner]).catch(() => new Map<string, string>())).get(owner);
+      if (!(await platformAdminForRequest({ id: owner, email: ownerEmail ?? "" }, env))) {
+        throw new PermissionFailure("Only an Agent Run owned by a platform admin can give complimentary Pro");
+      }
+      actor = { actorUserId: `agent-run:${run.runId}`, ...(ownerEmail ? { actorEmail: ownerEmail } : {}) };
+    } else {
+      if (!(await platformAdminForRequest(user, env))) throw new PermissionFailure("Platform admin permission is required");
+      actor = { actorUserId: user.id, ...(user.email ? { actorEmail: user.email } : {}) };
+    }
   }
   await recordAdminAudit(env, { ...actor, action, targetKind: target.kind, targetId: target.id.slice(0, 300) });
   return actor.actorEmail ? `${actor.actorUserId} <${actor.actorEmail}>` : actor.actorUserId;
