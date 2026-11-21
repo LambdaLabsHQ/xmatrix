@@ -13,6 +13,7 @@ import {
   pollDeviceSignIn,
   signOut,
   startDeviceSignIn,
+  tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
 import { discussionHead, discussionTitle, pagePassage } from "./passage.js";
@@ -48,7 +49,8 @@ function serial(call) {
   inFlight = run.catch(() => undefined);
   return run;
 }
-const authed = (call) => serial(() => withSession(deps, store, call));
+// Calls with a valid token run at once: the badge's catalog read must not hold up the panel or a question.
+const authed = (call) => withSession(deps, store, call);
 
 async function setBadge(count) {
   await chrome.action.setBadgeBackgroundColor({ color: "#b5832f" });
@@ -214,7 +216,12 @@ const panelHandlers = {
     await chrome.alarms.clear(SIGN_IN_ALARM);
   },
   signOut: endSession,
-  token: () => serial(() => freshAccessToken(deps, store)),
+  async token() {
+    // The usual case answers from storage at once; only a renewal takes the queue.
+    const session = await store.get();
+    if (session && tokenExpiresAt(session.token) - Date.now() > 10 * 60 * 1000) return session.token;
+    return serial(() => freshAccessToken(deps, store));
+  },
   takePassages,
   async takeOpenPath() {
     const { openPath } = await chrome.storage.session.get("openPath");
