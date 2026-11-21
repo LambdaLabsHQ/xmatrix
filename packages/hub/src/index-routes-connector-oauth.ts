@@ -13,7 +13,7 @@ import { connectorCredentialRepository, INGRESS_KEY_FIELD, mintConnectorSecret }
 import { exchangeOAuthGrant, oauthAuthorizeUrl, oauthClient, oauthProviderIds, oauthRedirectUri,
   verifyOAuthState } from "./connectors/oauth";
 import { stripeAuthorizeEndpoint, stripeConnectOffered } from "./connectors/stripe-oauth";
-import { appOrigin } from "./deployment-origins";
+import { appOrigin, appOrigins } from "./deployment-origins";
 import { vercelCompletionUrl } from "./connectors/vercel-api";
 import { connectorHubOrigin, requireAuth, requireHumanAuth, jsonErrors } from "./index-shared";
 import { ControlError, SLACK_WORKSPACE_TAKEN } from "@xmatrix/db";
@@ -38,8 +38,14 @@ import { confirmGitHubInstallations, linkGitHubInstallation } from "./index-rout
  * check still decides.
  */
 
-function appsRedirect(env: Env, spaceId: string, providerId: string, outcome: "connected" | "failed" | "elsewhere"): string {
-  return new URL(appViewAddress(spaceId, "apps", providerId, { oauth: outcome }), appOrigin(env)).toString();
+/** The Web a connect returns to: the beta app when it started there, else the stable one. */
+function returnOrigin(env: Env, verified: { beta?: boolean }): string {
+  return verified.beta && env.APP_BETA_URL?.trim() ? appOrigins(env)[1]! : appOrigin(env);
+}
+
+function appsRedirect(env: Env, verified: { spaceId: string; beta?: boolean }, providerId: string,
+  outcome: "connected" | "failed" | "elsewhere"): string {
+  return new URL(appViewAddress(verified.spaceId, "apps", providerId, { oauth: outcome }), returnOrigin(env, verified)).toString();
 }
 
 /** The provider's callback parameters the app passes back to finish a connect. */
@@ -52,7 +58,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
   input: { code?: string; configurationId?: string; teamId?: string; next?: string }): Promise<string> {
   const providerId = verified.client.manifest.id;
   /* Composio returns no code: the account is found from the signed state alone. */
-  if (!input.code && verified.client.manifest.oauth.flow !== "composio") return appsRedirect(env, verified.spaceId, providerId, "failed");
+  if (!input.code && verified.client.manifest.oauth.flow !== "composio") return appsRedirect(env, verified, providerId, "failed");
   try {
     // Signed state identifies the initiator; current Space authority still
     // decides whether that person may exchange a grant now.
@@ -73,7 +79,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       if (!verified.connectionSnapshot || verified.authorizationStartedAt === undefined) throw new Error("Restart Stripe Connect");
       await connectStripeAccount(env, { spaceId: verified.spaceId, actorUserId: verified.userId, fields: grant.fields,
         appClientId: verified.client.clientId, authorizedAt: verified.authorizationStartedAt, snapshot: verified.connectionSnapshot });
-      return appsRedirect(env, verified.spaceId, providerId, "connected");
+      return appsRedirect(env, verified, providerId, "connected");
     }
     if (providerId === "x") {
       if (!verified.connectionSnapshot) throw new Error("Restart X Connect");
@@ -81,7 +87,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
         fields: grant.fields, snapshot: verified.connectionSnapshot });
       const checked = await checkAppConnection(env, { spaceId: verified.spaceId, providerId,
         userId: verified.userId, commandId: `connector-x-check:${crypto.randomUUID()}` });
-      return appsRedirect(env, verified.spaceId, providerId, (checked as { ok?: unknown }).ok === true ? "connected" : "failed");
+      return appsRedirect(env, verified, providerId, (checked as { ok?: unknown }).ok === true ? "connected" : "failed");
     }
     /* A Cloudflare Connect adds one login to the connection's list. */
     if (providerId === "cloudflare") {
@@ -95,7 +101,7 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
     const integration = verified.client.manifest.oauth.flow === "vercel-integration";
     const completion = integration ? vercelCompletionUrl({ configurationId: input.configurationId,
       teamId: input.teamId, next: input.next }, grant.fields) : undefined;
-    if (integration && !completion) return appsRedirect(env, verified.spaceId, providerId, "failed");
+    if (integration && !completion) return appsRedirect(env, verified, providerId, "failed");
     /* The row comes first because credentials are stored on it; it is not
        Connected until the check below has used the token. */
     if (providerId !== "discord") {
@@ -113,15 +119,15 @@ async function completeOAuthConnect(env: Env, request: Request, verified: Verifi
       at: new Date().toISOString() });
     const checked = await checkAppConnection(env, { spaceId: verified.spaceId, providerId,
       userId: verified.userId, commandId: `connector-oauth-check:${crypto.randomUUID()}` });
-    if ((checked as { ok?: unknown }).ok !== true) return appsRedirect(env, verified.spaceId, providerId, "failed");
-    return completion ?? appsRedirect(env, verified.spaceId, providerId, "connected");
+    if ((checked as { ok?: unknown }).ok !== true) return appsRedirect(env, verified, providerId, "failed");
+    return completion ?? appsRedirect(env, verified, providerId, "connected");
   } catch (error) {
     // The workspace is another Space's (claimSlackWorkspace): say so, rather than that Connect failed.
     if (error instanceof ControlError && error.code === SLACK_WORKSPACE_TAKEN) {
-      return appsRedirect(env, verified.spaceId, providerId, "elsewhere");
+      return appsRedirect(env, verified, providerId, "elsewhere");
     }
     console.error("Connector OAuth callback failed", providerId, ["discord", "x"].includes(providerId) ? "installation rejected" : error instanceof Error ? error.message : "unknown");
-    return appsRedirect(env, verified.spaceId, providerId, "failed");
+    return appsRedirect(env, verified, providerId, "failed");
   }
 }
 
@@ -182,6 +188,8 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     }
     return c.json({ url: await oauthAuthorizeUrl(client, { spaceId, userId: user.id, connectionSnapshot, accountId,
       desktop: body?.returnTo === "desktop",
+      // Started on the beta Web: the callback returns there, not to the stable app.
+      beta: typeof body?.returnOrigin === "string" && appOrigins(c.env).slice(1).includes(body.returnOrigin),
       ...(stripeAuthorizeUrl ? { authorizeUrl: stripeAuthorizeUrl } : {}),
       redirectUri: oauthRedirectUri(connectorHubOrigin(c.env, c.req.raw)),
       meter: upstreamMeter(c.env, { spaceId, connector: client.manifest.id, action: "connect" }) }) },
@@ -196,7 +204,7 @@ export function registerConnectorOAuthRoutes(app: Hono<{ Bindings: Env }>): void
     const state = c.req.query("state") ?? "";
     const verified = state ? await verifyOAuthState(c.env, state) : undefined;
     if (!verified) return c.json({ error: "Invalid or expired connect request" }, 400);
-    const url = new URL("/connect/oauth", appOrigin(c.env));
+    const url = new URL("/connect/oauth", returnOrigin(c.env, verified));
     for (const key of COMPLETION_QUERY_KEYS) {
       const value = c.req.query(key);
       if (value !== undefined) url.searchParams.set(key, value);

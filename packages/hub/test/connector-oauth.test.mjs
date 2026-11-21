@@ -47,6 +47,10 @@ test("the authorize URL carries a state bound to provider, Space and admin, whic
   assert.equal(verified.client.manifest.id, "jira");
   assert.equal(verified.spaceId, "space-1");
   assert.equal(verified.userId, "admin-1");
+  assert.equal(verified.beta, undefined, "a connect returns to the stable Web unless it started on the beta one");
+  const beta = new URL(await oauthAuthorizeUrl(client, { spaceId: "space-1", userId: "admin-1", beta: true,
+    redirectUri: "https://hub.test/api/connectors/oauth/callback" })).searchParams.get("state");
+  assert.equal((await verifyOAuthState(env, beta)).beta, true);
   const [payload, signature] = state.split(".");
   assert.equal(await verifyOAuthState(env, `${payload.slice(0, 12)}${payload[12] === "A" ? "B" : "A"}${payload.slice(13)}.${signature}`), undefined);
   assert.equal(await verifyOAuthState({ ...env, CONNECTOR_JIRA_CLIENT_SECRET: "rotated" }, state), undefined);
