@@ -1,9 +1,14 @@
-// The extension's only route to the Hub. Every function takes its `fetch` and
-// session store from the caller, so the same code runs in the service worker,
-// the popup and the Node tests.
+// The service worker's route to the Hub. Every function takes its `fetch` and
+// session store from the caller, so the same code runs in the service worker
+// and the Node tests.
 
-export const DEFAULT_HUB_URL = "https://xmatrix-hub.xmatrix.sh";
-export const DEFAULT_APP_URL = "https://xmatrix.sh";
+/**
+ * The Hub this build talks to: the one host its manifest may reach. The app
+ * packaged beside it is built for the same Hub (scripts/package.mjs).
+ */
+export function hubUrl(manifest) {
+  return new URL(manifest.host_permissions[0]).origin;
+}
 const PROTOCOL_VERSION = "2";
 
 /** A Hub answer that is not a success, with the Hub's own code when it gave one. */
@@ -77,6 +82,16 @@ export async function startDeviceSignIn(deps) {
   };
 }
 
+/**
+ * The account a session belongs to, as the Hub names it at sign-in and at each
+ * renewal. The panel's app opens with it, instead of reading it first.
+ */
+export function accountFrom(user) {
+  if (!user || typeof user !== "object" || typeof user.id !== "string" || !user.id) return null;
+  const text = (value) => (typeof value === "string" && value ? value : undefined);
+  return { id: user.id, name: text(user.name) ?? text(user.email) ?? "", email: text(user.email), avatarUrl: text(user.avatarUrl) };
+}
+
 function sessionFrom(json, hubUrl) {
   if (typeof json.token !== "string" || typeof json.refreshToken !== "string") {
     throw new HubError(502, "xMatrix did not return a session.");
@@ -84,9 +99,7 @@ function sessionFrom(json, hubUrl) {
   return {
     token: json.token,
     refreshToken: json.refreshToken,
-    user: json.user && typeof json.user === "object"
-      ? { id: String(json.user.id ?? ""), name: String(json.user.name ?? json.user.email ?? "") }
-      : null,
+    user: accountFrom(json.user),
     hubUrl,
   };
 }
@@ -111,7 +124,9 @@ export async function refreshSession(deps, session) {
     method: "POST",
     body: { refreshToken: session.refreshToken },
   });
-  return sessionFrom(json, session.hubUrl);
+  const renewed = sessionFrom(json, session.hubUrl);
+  // A renewal that names no account keeps the one the sign-in named.
+  return renewed.user ? renewed : { ...renewed, user: session.user ?? null };
 }
 
 /** Ends the session on the Hub; the caller forgets it either way. */
@@ -150,41 +165,6 @@ export async function withSession(deps, store, call) {
   return call(scoped, renewed.token);
 }
 
-export async function listSpaces(deps, token) {
-  const json = await request(deps, "/api/spaces", { token });
-  return (Array.isArray(json.spaces) ? json.spaces : [])
-    .filter((space) => space && typeof space.id === "string")
-    .map((space) => ({ id: space.id, name: typeof space.name === "string" && space.name ? space.name : space.id }));
-}
-
-function channelName(channel) {
-  for (const value of [channel.name, channel.topic, channel.summary]) {
-    if (typeof value === "string" && value.trim()) return value.trim();
-  }
-  return "Untitled conversation";
-}
-
-function lastActivity(channel) {
-  const sentAt = channel.lastMessage?.sentAt ?? channel.updatedAt ?? channel.createdAt;
-  const time = typeof sentAt === "string" ? Date.parse(sentAt) : NaN;
-  return Number.isFinite(time) ? time : 0;
-}
-
-/** The conversations of one Space, the ones waiting on the person first, then the most recent. */
-export async function listChannels(deps, token, spaceId) {
-  const json = await request(deps, `/api/channels?spaceId=${encodeURIComponent(spaceId)}`, { token });
-  return (Array.isArray(json.channels) ? json.channels : [])
-    .filter((channel) => channel && typeof channel.id === "string" && channel.spaceId === spaceId)
-    .map((channel) => ({
-      id: channel.id,
-      spaceId: channel.spaceId,
-      name: channelName(channel),
-      needsYou: Number(channel.attention?.unreadAttentionCount) > 0,
-      activity: lastActivity(channel),
-    }))
-    .sort((a, b) => Number(b.needsYou) - Number(a.needsYou) || b.activity - a.activity);
-}
-
 /**
  * How many conversations wait on the signed-in person, across every Space:
  * the same count the web's "Needs you" section shows.
@@ -203,10 +183,63 @@ export async function countNeedsYou(deps, token) {
   return waiting.size;
 }
 
+/** When an access token (a JWT) expires, in ms since the epoch; 0 when it cannot be read. */
+export function tokenExpiresAt(token) {
+  try {
+    const payload = JSON.parse(atob(token.split(".")[1].replace(/-/gu, "+").replace(/_/gu, "/")));
+    return Number.isFinite(payload.exp) ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * A current access token for the side panel's app, renewed first when it has
+ * less than `minLifeMs` left. The refresh token stays here.
+ */
+export async function freshAccessToken(deps, store, minLifeMs = 10 * 60 * 1000) {
+  const session = await store.get();
+  if (!session) return null;
+  if (tokenExpiresAt(session.token) - Date.now() > minLifeMs) return session.token;
+  const scoped = { ...deps, hubUrl: session.hubUrl || deps.hubUrl };
+  try {
+    const renewed = await refreshSession(scoped, session);
+    await store.set(renewed);
+    return renewed.token;
+  } catch (error) {
+    if (error instanceof HubError && (error.status === 401 || error.status === 403)) {
+      await store.set(null);
+      return null;
+    }
+    throw error;
+  }
+}
+
+export async function listSpaces(deps, token) {
+  const json = await request(deps, "/api/spaces", { token });
+  return (Array.isArray(json.spaces) ? json.spaces : [])
+    .filter((space) => space && typeof space.id === "string")
+    .map((space) => ({ id: space.id, name: typeof space.name === "string" && space.name ? space.name : space.id }));
+}
+
+/**
+ * Starts a conversation in a Space, as the web app's passage discussion does:
+ * named by the passage until its first message names it.
+ */
+export async function createConversation(deps, token, { spaceId, name, memberName }) {
+  const json = await request(deps, "/api/channels", {
+    method: "POST",
+    token,
+    body: { spaceId, name, mode: "open", metadata: { createdBy: "chrome-extension", autoName: true }, memberName },
+  });
+  if (typeof json.channel?.id !== "string") throw new HubError(502, "xMatrix did not start the conversation.");
+  return { id: json.channel.id, spaceId: json.channel.spaceId ?? spaceId };
+}
+
 /**
  * Posts a message as the signed-in person. `clientMessageId` makes a retry of
- * the same send land once. `launch` asks the Hub to start the Agents the text
- * mentions, as the web composer does.
+ * the same send land once; `launch` starts the Agents it mentions, as the web
+ * composer does.
  */
 export async function sendMessage(deps, token, { channelId, body, clientMessageId }) {
   const json = await request(deps, `/api/channels/${encodeURIComponent(channelId)}/messages`, {
@@ -215,9 +248,4 @@ export async function sendMessage(deps, token, { channelId, body, clientMessageI
     body: { body, clientMessageId, launch: true },
   });
   return { messageId: json.message?.messageId ?? clientMessageId };
-}
-
-/** Where the web app shows a conversation. */
-export function channelUrl(appUrl, spaceId, channelId) {
-  return new URL(`/app/${encodeURIComponent(spaceId)}/${encodeURIComponent(channelId)}`, appUrl).toString();
 }

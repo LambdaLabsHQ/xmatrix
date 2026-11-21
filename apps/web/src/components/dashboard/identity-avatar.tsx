@@ -4,6 +4,8 @@ import { memo, type MouseEvent } from "react";
 import { AlertTriangle, Boxes, Bot, Moon, Server, UserRound } from "lucide-react";
 import { LoadingImage, MediaSkeleton } from "@/components/dashboard/content-skeleton";
 import { LiquidGlassPill } from "@/components/ui/material-surfaces";
+import { extensionEmbedParent } from "@/lib/extension-embed";
+import { appUrl } from "@/lib/site-url";
 import { cn } from "@/lib/utils";
 
 type IdentityKind = "agent" | "app" | "human" | "machine" | "system";
@@ -197,7 +199,9 @@ export function avatarImageSrc(imageUrl: string | undefined): string | undefined
   try {
     const url = new URL(value);
     if (url.protocol === "https:" && url.hostname === "lh3.googleusercontent.com") {
-      return `/api/xmatrix/avatar?url=${encodeURIComponent(url.toString())}`;
+      // The Web fetches it, so the reader's browser asks only xMatrix. The app packaged in the extension has no
+      // such route in its own package: it asks the Web's.
+      return `${extensionEmbedParent() ? appUrl.origin : ""}/api/xmatrix/avatar?url=${encodeURIComponent(url.toString())}`;
     }
   } catch {
     return value;

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>xMatrix</title>
+  <link rel="stylesheet" href="panel.css">
+  <!-- The app's files are in the package; its first reads go to the Hub. -->
+  <link rel="preconnect" href="https://xmatrix-hub.xmatrix.sh">
+</head>
+<body>
+  <section id="view-signed-out" class="view center" hidden>
+    <img class="mark" src="../assets/mark.png" alt="" width="56" height="56">
+    <h1 class="display">xMatrix beside every page</h1>
+    <p class="lede">Discuss what you are reading with your team and Agents, without leaving the page.</p>
+    <p id="signed-out-error" class="error" role="alert" hidden></p>
+    <button id="sign-in" type="button" class="pill wood">Sign in to xMatrix</button>
+  </section>
+
+  <section id="view-signing-in" class="view center" hidden>
+    <h1 class="display">Approve in the tab</h1>
+    <p class="lede">Check that xMatrix shows the same code, then approve it there.</p>
+    <div class="request"><p id="user-code" class="code"></p></div>
+    <p id="sign-in-error" class="error" role="alert" hidden></p>
+    <button id="cancel-sign-in" type="button" class="pill white">Cancel</button>
+  </section>
+
+  <section id="view-update" class="view center" hidden>
+    <h1 class="display">Update xMatrix</h1>
+    <p class="lede">This version of the extension is too old for xMatrix. Update it to carry on here.</p>
+    <button id="update" type="button" class="pill wood">Update the extension</button>
+  </section>
+
+  <section id="view-app" class="app" hidden>
+    <div id="context" class="context">
+      <span id="context-title" class="context-title"></span>
+      <button id="context-quote" type="button" class="chip">Quote</button>
+      <button id="context-new" type="button" class="chip">New chat</button>
+    </div>
+    <div id="quick-select" class="hint" hidden>
+      <span>Select text on any page to discuss it here.</span>
+      <button id="quick-select-on" type="button" class="text-button">Turn on</button>
+    </div>
+    <iframe id="app" title="xMatrix" allow="clipboard-write"></iframe>
+  </section>
+
+  <script type="module" src="sidepanel.js"></script>
+</body>
+</html>

@@ -1,28 +1,34 @@
-// The service worker owns the session: every Hub call runs here, so the popup,
-// the context menu and the badge never renew the same token twice at once.
+// The service worker owns the extension's session: the side panel's app asks
+// it for a current access token and the account (the refresh token never
+// leaves here), and it queues what the person picks on a page until the panel
+// hands it over.
 
 import {
-  DEFAULT_HUB_URL,
   HubError,
+  accountFrom,
   countNeedsYou,
-  listChannels,
+  createConversation,
   listSpaces,
-  pollDeviceSignIn,
   sendMessage,
+  freshAccessToken,
+  hubUrl,
+  pollDeviceSignIn,
   signOut,
   startDeviceSignIn,
+  tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
-import { capturableUrl } from "./compose.js";
+import { discussionHead, discussionTitle, pagePassage } from "./passage.js";
 
 const BADGE_ALARM = "needs-you";
 const SIGN_IN_ALARM = "sign-in";
-const MENU_PAGE = "send-page";
-const MENU_SELECTION = "send-selection";
-const MENU_LINK = "send-link";
+const MENU_NEW = "discuss-new";
+const MENU_QUOTE = "quote-current";
+const SELECTION_SCRIPT = "selection-chip";
+const WEB_ORIGINS = ["https://*/*", "http://*/*"];
 
 const manifest = chrome.runtime.getManifest();
-const deps = { fetch: (...args) => fetch(...args), hubUrl: DEFAULT_HUB_URL, version: manifest.version };
+const deps = { fetch: (...args) => fetch(...args), hubUrl: hubUrl(manifest), version: manifest.version };
 
 let pendingWrite = Promise.resolve();
 const store = {
@@ -40,14 +46,16 @@ const store = {
 
 // One renewal at a time: a second caller waits for the first one's token.
 let inFlight = Promise.resolve();
-function authed(call) {
-  const run = inFlight.then(() => withSession(deps, store, call));
+function serial(call) {
+  const run = inFlight.then(call);
   inFlight = run.catch(() => undefined);
   return run;
 }
+// Calls with a valid token run at once: the badge's catalog read must not hold up the panel or a question.
+const authed = (call) => withSession(deps, store, call);
 
 async function setBadge(count) {
-  await chrome.action.setBadgeBackgroundColor({ color: "#d93025" });
+  await chrome.action.setBadgeBackgroundColor({ color: "#b5832f" });
   await chrome.action.setBadgeText({ text: count > 0 ? (count > 99 ? "99+" : String(count)) : "" });
 }
 
@@ -60,7 +68,7 @@ async function refreshBadge() {
   }
 }
 
-// ---- Sign-in: the person approves in a tab, so the popup may close meanwhile.
+// ---- Sign-in: the person approves in a tab, so the panel may lose focus meanwhile.
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let polling = false;
@@ -126,13 +134,98 @@ async function endSession() {
   if (session) await signOut(deps, session).catch(() => undefined);
 }
 
-// ---- Popup requests.
+// ---- Passages: picked on a page, waiting for the panel's app to take them.
 
-const handlers = {
+async function queuePassage(passage) {
+  if (!passage) return;
+  const { passages = [] } = await chrome.storage.session.get("passages");
+  await chrome.storage.session.set({ passages: [...passages.slice(-4), passage] });
+}
+
+async function takePassages() {
+  const { passages = [] } = await chrome.storage.session.get("passages");
+  await chrome.storage.session.remove("passages");
+  return passages;
+}
+
+/** Opens the panel beside the tab. Called first in a click handler: Chrome allows it only in a user gesture. */
+function openPanel(tab) {
+  if (tab?.windowId !== undefined) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => undefined);
+}
+
+// ---- Quick ask: a question about a passage, started straight through the Hub.
+
+/**
+ * The Space a quick question goes to: the one last used, or the person's
+ * first. Remembered, so a question costs no Space lookup once one was asked;
+ * a Space that is gone is looked up again.
+ */
+async function quickAskSpace(token, { fresh = false } = {}) {
+  const { lastSpace } = await chrome.storage.local.get("lastSpace");
+  if (lastSpace?.id && !fresh) return lastSpace;
+  const spaces = await listSpaces(deps, token);
+  return spaces.find((space) => space.id === lastSpace?.id) ?? spaces[0] ?? null;
+}
+
+/**
+ * Starts a conversation holding the passage and the question, without waiting
+ * for the app: the panel then shows it. Mentioning an Agent hands it the work
+ * at once.
+ */
+async function quickAsk(tab, { text, question }) {
+  const passage = pagePassage({ text, title: tab.title, url: tab.url, target: "new" });
+  const asked = String(question ?? "").trim().slice(0, 8000);
+  if (!passage || !passage.text || !asked) throw new Error("Select some text and write a question.");
+  const session = await store.get();
+  if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
+  const result = await authed(async (scoped, token) => {
+    const create = (space) => createConversation(scoped, token, {
+      spaceId: space.id, name: discussionTitle(passage.text), memberName: session.user?.name || "Human" });
+    let space = await quickAskSpace(token);
+    if (!space) throw new Error("You are not in any Space yet.");
+    let channel;
+    try {
+      channel = await create(space);
+    } catch (error) {
+      // The remembered Space may be gone or no longer ours: look the Spaces up once and retry.
+      if (!(error instanceof HubError) || ![403, 404].includes(error.status)) throw error;
+      space = await quickAskSpace(token, { fresh: true });
+      if (!space) throw new Error("You are not in any Space yet.");
+      channel = await create(space);
+    }
+    await sendMessage(scoped, token, { channelId: channel.id,
+      body: discussionHead(passage.text, { label: passage.label || new URL(passage.href).host, href: passage.href }) + asked,
+      clientMessageId: crypto.randomUUID() });
+    return { space, channel };
+  });
+  await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
+  // The panel shows it: at once if its app is loaded, or opening straight onto it.
+  await chrome.storage.session.set({ openPath: {
+    path: `/app/${encodeURIComponent(result.space.id)}/channels/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
+  return { spaceName: result.space.name };
+}
+
+// ---- Quick select: a small button beside selected text, on pages the person allowed.
+
+async function syncSelectionScript() {
+  const granted = await chrome.permissions.contains({ origins: WEB_ORIGINS });
+  const registered = await chrome.scripting.getRegisteredContentScripts({ ids: [SELECTION_SCRIPT] });
+  if (granted && registered.length === 0) {
+    await chrome.scripting.registerContentScripts([{
+      id: SELECTION_SCRIPT, matches: WEB_ORIGINS, js: ["src/selection.js"], runAt: "document_idle",
+    }]);
+  } else if (!granted && registered.length > 0) {
+    await chrome.scripting.unregisterContentScripts({ ids: [SELECTION_SCRIPT] });
+  }
+}
+
+// ---- Requests from the side panel (extension pages only) and the selection button (content script).
+
+const panelHandlers = {
   async state() {
     const session = await store.get();
-    const { signIn, capture } = await chrome.storage.session.get(["signIn", "capture"]);
-    return { user: session?.user ?? null, signedIn: Boolean(session), signIn: signIn ?? null, capture: capture ?? null };
+    const { signIn } = await chrome.storage.session.get("signIn");
+    return { signedIn: Boolean(session), signIn: signIn ?? null };
   },
   signIn: beginSignIn,
   async cancelSignIn() {
@@ -140,68 +233,83 @@ const handlers = {
     await chrome.alarms.clear(SIGN_IN_ALARM);
   },
   signOut: endSession,
-  spaces: () => authed((scoped, token) => listSpaces(scoped, token)),
-  channels: ({ spaceId }) => authed((scoped, token) => listChannels(scoped, token, spaceId)),
-  async send({ channelId, body, clientMessageId }) {
-    const sent = await authed((scoped, token) => sendMessage(scoped, token, { channelId, body, clientMessageId }));
-    await chrome.storage.session.remove("capture");
-    refreshBadge();
-    return sent;
+  /** The app's session: a current access token and the account, never the refresh token. */
+  async session({ renew = false }) {
+    // The usual case answers from storage at once; only a renewal takes the queue.
+    let session = await store.get();
+    if (!session) return null;
+    // The app asks for a renewal when the account changed under the token (its name is a claim of the token).
+    if (renew || tokenExpiresAt(session.token) - Date.now() <= 10 * 60 * 1000) {
+      if (!(await serial(() => freshAccessToken(deps, store, renew ? Infinity : undefined)))) return null;
+      session = await store.get();
+    }
+    return session ? { token: session.token, user: session.user ?? null } : null;
   },
-  async lastTarget() {
-    const { lastTarget } = await chrome.storage.local.get("lastTarget");
-    return lastTarget ?? null;
+  /** The account as the app just read it from the Hub: what the panel opens with next time. */
+  rememberAccount({ user }) {
+    const account = accountFrom(user);
+    // In the renewal's queue: a write here must not put back a token a renewal just replaced.
+    return serial(async () => {
+      const session = await store.get();
+      // Only the session's own account: the app cannot make this session someone else's.
+      if (!session || !account || (session.user?.id && session.user.id !== account.id)) return;
+      await store.set({ ...session, user: account });
+    });
   },
-  async rememberTarget({ spaceId, channelId }) {
-    await chrome.storage.local.set({ lastTarget: { spaceId, channelId } });
+  takePassages,
+  async takeOpenPath() {
+    const { openPath } = await chrome.storage.session.get("openPath");
+    await chrome.storage.session.remove("openPath");
+    return openPath && Date.now() - openPath.at < 60_000 ? openPath.path : null;
   },
-  async clearCapture() {
-    await chrome.storage.session.remove("capture");
-  },
+  queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
+  quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),
 };
 
+function isExtensionPage(sender) {
+  return sender.id === chrome.runtime.id && Boolean(sender.url?.startsWith(chrome.runtime.getURL("")));
+}
+
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
-  // Only the extension's own pages (the popup, or its fallback window) may ask.
-  if (sender.id !== chrome.runtime.id || !sender.url?.startsWith(chrome.runtime.getURL(""))) return false;
-  const handler = handlers[message?.type];
+  if (sender.id !== chrome.runtime.id) return false;
+  // The selection button runs in web pages: it may only hand over a passage of its own tab.
+  if (message?.type === "quick-ask" && sender.tab) {
+    openPanel(sender.tab);
+    quickAsk(sender.tab, message)
+      .then((value) => reply({ ok: true, value }))
+      .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
+  if (message?.type === "chip" && sender.tab) {
+    openPanel(sender.tab);
+    queuePassage(pagePassage({ text: message.text, title: sender.tab.title, url: sender.tab.url, target: message.target }));
+    return false;
+  }
+  const handler = isExtensionPage(sender) ? panelHandlers[message?.type] : undefined;
   if (!handler) return false;
   Promise.resolve()
     .then(() => handler(message.args ?? {}))
     .then((value) => reply({ ok: true, value }))
-    .catch((error) => reply({
-      ok: false,
-      error: error instanceof Error ? error.message : String(error),
-      code: error instanceof HubError ? error.code : undefined,
-    }));
+    .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
   return true;
 });
 
-// ---- Context menu: capture what was clicked, then open the popup to choose where it goes.
+// ---- Context menu: what was clicked goes to the panel, quoted or as a new conversation.
 
 function installMenus() {
   chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: MENU_PAGE, title: "Send page to xMatrix", contexts: ["page"] });
-    chrome.contextMenus.create({ id: MENU_SELECTION, title: "Send selection to xMatrix", contexts: ["selection"] });
-    chrome.contextMenus.create({ id: MENU_LINK, title: "Send link to xMatrix", contexts: ["link"] });
+    chrome.contextMenus.create({ id: MENU_NEW, title: "Discuss in xMatrix", contexts: ["selection", "page", "link"] });
+    chrome.contextMenus.create({ id: MENU_QUOTE, title: "Quote in the open xMatrix conversation", contexts: ["selection"] });
   });
 }
 
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  const capture = info.menuItemId === MENU_LINK
-    ? { url: capturableUrl(info.linkUrl ?? ""), title: info.selectionText ?? "", selection: "" }
-    : {
-      url: capturableUrl(info.pageUrl ?? tab?.url ?? ""),
-      title: tab?.title ?? "",
-      selection: info.menuItemId === MENU_SELECTION ? info.selectionText ?? "" : "",
-    };
-  if (!capture.url) return;
-  await chrome.storage.session.set({ capture });
-  try {
-    await chrome.action.openPopup();
-  } catch {
-    // Chrome versions without openPopup from a menu: open the same page in a small window.
-    await chrome.windows.create({ url: chrome.runtime.getURL("src/popup.html"), type: "popup", width: 400, height: 600 });
-  }
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  openPanel(tab);
+  const target = info.menuItemId === MENU_QUOTE ? "current" : "new";
+  const passage = info.linkUrl && !info.selectionText
+    ? pagePassage({ text: "", title: info.linkUrl, url: info.linkUrl, target })
+    : pagePassage({ text: info.selectionText ?? "", title: tab?.title, url: info.pageUrl ?? tab?.url, target });
+  queuePassage(passage);
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
@@ -209,13 +317,18 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === SIGN_IN_ALARM) pollSignIn();
 });
 
+chrome.permissions.onAdded.addListener(() => syncSelectionScript());
+chrome.permissions.onRemoved.addListener(() => syncSelectionScript());
+
+function start() {
+  chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => undefined);
+  chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 });
+  syncSelectionScript().catch(() => undefined);
+  refreshBadge();
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   installMenus();
-  chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 });
-  refreshBadge();
+  start();
 });
-
-chrome.runtime.onStartup.addListener(() => {
-  chrome.alarms.create(BADGE_ALARM, { periodInMinutes: 1 });
-  refreshBadge();
-});
+chrome.runtime.onStartup.addListener(start);

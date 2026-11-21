@@ -1,5 +1,63 @@
 # Release Updates
 
+## Unreleased: mobile Handoff and Stop second confirmation no longer collapses on tap
+
+Opening Handoff or long-pressing Stop on an Agent dock item programmatically
+focused the first successor or Stop button, and `.app-agent-work-item`'s
+`onBlur` cleared `handoffPickerOpen` and `armedAction` whenever
+`relatedTarget` was outside the item. On iOS WebKit (WKWebView and Mobile
+Safari), tapping any `<button>` blurs the previously focused button with
+`relatedTarget === null` before `click`, so confirming Handoff or Stop
+immediately closed the picker or disarmed Stop without sending. Separately, on
+narrow mobile viewports or for a second Agent in the dock, bare-disc controls
+stayed on the avatar's row (`trace-row` / `row`), letting the raised avatar
+(`z-index: 21`) overlap Handoff/Stop (`z-index: 20`) and toggle the panel shut
+when tapped.
+
+`AgentWorkAvatar` now keeps armed controls and the Handoff picker explicitly
+pinned (`data-controls-open`), dismisses them on outside presses or `Escape`
+via `listenForOverlayDismissal` (and when its Trace folds), and ignores
+in-window `onBlur` with `relatedTarget === null`. Bare-disc items whose panel
+shifts left of the disc or would overflow the column stack their controls above
+the avatar (`panel` / `trace-panel`) so every button stays unobstructed and
+within the viewport. Web only. Recovery is a CI-validated beta reverting this
+change.
+
+## Unreleased: the Chrome extension packages the app instead of framing the Web
+
+The extension's side panel showed the Web (`/app`) in a frame, so every open
+downloaded the page and its scripts and ran each request through the Web's
+Worker: several serial round trips before anything showed. The extension now
+ships the workspace app in its own package, built from `apps/web`
+(`src/extension-app`, `apps/chrome-extension/scripts/build-app.mjs`): the same
+providers, gate and shell, with the Web's Hub proxy routes bundled to answer in
+the page and send straight to the Hub. Opening the panel loads nothing from the
+Web; the last conversation list paints from the app's local copy while the Hub
+is asked. The panel hands the app its session over `postMessage` as before,
+now with the account, so the app does not wait on a read of it; the refresh
+token stays in the service worker. The package's content security policy is
+the Web's without the Web (packaged scripts only, requests to the Hub only, no
+picture loaded from an address a message names).
+
+The Web no longer allows the extension to frame it: CSP `frame-ancestors` is
+`'none'` again, and its proxy no longer takes a client identity from request
+headers. That allowance reached only the beta Web. Addresses the app writes
+for other people (a copied conversation or page link, an invite) are the Web's
+in the extension, where the page itself lives at the extension's origin.
+Web (the policy and the address helper) and the extension, which ships outside
+the release train. Recovery is a CI-validated beta reverting this change; an
+extension build from before it then frames the beta Web again.
+
+## Unreleased: the Chrome extension becomes a side panel
+
+The extension now opens the person's Space in Chrome's side panel instead of a
+send-to-conversation popup, signed in with the extension's session (the panel
+hands the app short-lived access tokens; the refresh token stays in the
+extension). Selected text can start a new conversation or be quoted into the
+open one, from the context menu, the panel's page bar or an optional button
+beside the selection (asks for web-page access first). Ships outside the
+release train; recovery is reverting the directory.
+
 ## Unreleased: Chrome Web Store listing for the extension; privacy policy covers it
 
 The privacy policy (section 11) now says what the xMatrix Chrome extension

@@ -4,7 +4,7 @@ import { AUTH_TOKEN_REJECTED_EVENT } from "@/lib/auth-events";
 import { subscribeResume } from "@/lib/connectivity/connectivity";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { WEB_PROXY_ROUTES, type AuthResponse, type AuthUser } from "@xmatrix/protocol";
+import { WEB_PROXY_ROUTES, isPlaceholderHumanName, type AuthResponse, type AuthUser } from "@xmatrix/protocol";
 import {
   loadBetterAuthSession,
   isTransientAuthSessionError,
@@ -36,7 +36,14 @@ import { handDesktopSessionToCli } from "./desktop/session-exchange";
 import { disableBrowserPush, forgetPhonePush, registerPhonePush } from "./push-subscription";
 import { XMatrixQueryProvider } from "./query/query-provider";
 import { clearPersistedChannelComposerDrafts } from "@/components/dashboard/channel-composer-drafts";
-import { xmatrixRawResponse } from "@/lib/query/api-client";
+import { xmatrixApiRequest, xmatrixRawResponse } from "@/lib/query/api-client";
+import {
+  announceEmbedAccount,
+  announceEmbedSignOut,
+  extensionEmbedParent,
+  requestEmbedSession,
+  subscribeEmbedSignOut,
+} from "./extension-embed";
 
 export { AUTH_TOKEN_REJECTED_EVENT };
 
@@ -169,6 +176,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void registerPhonePush(accessToken).catch(() => undefined);
   }, [mockAuthState, signedInUserId]);
 
+  // In the extension's side panel, signing out there signs this frame out too.
+  useEffect(() => {
+    const parent = extensionEmbedParent();
+    if (mockAuthState || !parent) return;
+    return subscribeEmbedSignOut(parent, () => setState({ session: null, user: null, loading: false }));
+  }, [mockAuthState]);
+
   useEffect(() => {
     if (mockAuthState) {
       setState(mockAuthState);
@@ -180,6 +194,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((next) => {
         if (cancelled) return;
         applySessionState(next);
+        // The side panel opened with the account its extension remembered: read it from the Hub behind the open app.
+        if (!next.session || !embedAccountRemembered) return;
+        void loadSessionStateOnce().then((confirmed) => {
+          if (!cancelled && confirmed.session) applySessionState(confirmed);
+        }).catch(() => undefined);
       })
       .catch((error) => {
         if (cancelled) return;
@@ -351,6 +370,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
+    // In the extension's side panel the session is the extension's: it ends it there.
+    const embedParent = extensionEmbedParent();
+    if (embedParent) {
+      announceEmbedSignOut(embedParent);
+      setState({ session: null, user: null, loading: false });
+      return;
+    }
+
     setState((prev) => ({ ...prev, loading: true }));
     // A signed-out browser is told nothing: forget its push subscription while the session can still say so.
     const accessToken = state.session?.access_token;
@@ -401,6 +428,8 @@ export function useAuth(): AuthContextValue {
 }
 
 async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
+  const embedParent = extensionEmbedParent();
+  if (embedParent) return loadEmbedSessionState(embedParent);
   let transientError: unknown;
   const nativeState = await loadNativeSessionState().catch((error) => {
     if (isTransientSessionLoadError(error)) {
@@ -426,6 +455,63 @@ async function loadSessionState(): Promise<Omit<AuthState, "loading">> {
 
   if (transientError) throw transientError;
   return { session: null, user: null };
+}
+
+/**
+ * The side panel's session: a current access token from the extension, asked
+ * for on every load and renewal (the extension renews it), and the account it
+ * belongs to. Nothing is stored here.
+ *
+ * The extension remembers the account, so the first load opens the app with it
+ * at once instead of waiting on a read of it; the provider then loads once
+ * more behind the open app. That load, and every later one, reads the account
+ * from the Hub, which is what tells a session the Hub ended from one that is
+ * merely slow.
+ */
+let embedAccountRemembered = false;
+let embedAccountAsked = false;
+async function loadEmbedSessionState(parent: string): Promise<Omit<AuthState, "loading">> {
+  let embed = await requestEmbedSession(parent);
+  if (!embed) return { session: null, user: null };
+  // An account still under the name the Hub made up for it may have been named since: only the Hub knows.
+  let user = embedAccountAsked || !embed.user || isPlaceholderHumanName(embed.user.name, embed.user.id)
+    ? undefined : embed.user;
+  embedAccountAsked = true;
+  embedAccountRemembered = Boolean(user);
+  if (!user) {
+    const readAccount = async (token: string) =>
+      (await xmatrixApiRequest<{ user: AuthUser }>({ url: WEB_PROXY_ROUTES.me, token })).user;
+    try {
+      user = await readAccount(embed.token);
+      // The token itself names the account: one issued before the account was named still says the made-up
+      // name. A renewed token says the name it has now.
+      if (isPlaceholderHumanName(user.name, user.id)) {
+        const renewed = await requestEmbedSession(parent, { renew: true });
+        if (renewed && renewed.token !== embed.token) {
+          embed = renewed;
+          user = await readAccount(embed.token);
+        }
+      }
+    } catch (error) {
+      // The Hub refused the extension's session: it signs in again in the panel.
+      if (isRejectedTokenError(error)) {
+        announceEmbedSignOut(parent);
+        return { session: null, user: null };
+      }
+      throw error;
+    }
+    // What the extension opens the app with next time.
+    announceEmbedAccount(parent, user);
+  }
+  return {
+    session: {
+      access_token: embed.token,
+      token_type: "bearer",
+      user: { id: user.id, email: user.email, user_metadata: { name: user.name, avatarUrl: user.avatarUrl,
+        avatar_url: user.avatarUrl, picture: user.avatarUrl } },
+    },
+    user,
+  };
 }
 
 /**
@@ -518,6 +604,11 @@ function authResponseToWebSession(payload: AuthResponse): WebAuthSession {
       },
     },
   };
+}
+
+function isRejectedTokenError(error: unknown): boolean {
+  const status = (error as { status?: unknown } | null)?.status;
+  return status === 401 || status === 403;
 }
 
 function isNativeShell(): boolean {

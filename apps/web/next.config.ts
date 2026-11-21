@@ -64,6 +64,8 @@ const nextConfig: NextConfig = {
       "default-src 'self'",
       "base-uri 'self'",
       "object-src 'none'",
+      // No page frames the app. The Chrome extension's side panel shows the app
+      // from its own package (src/extension-app), not from here.
       "frame-ancestors 'none'",
       "form-action 'self'",
       `script-src 'self' 'unsafe-inline'${development ? " 'unsafe-eval'" : ""} https://static.cloudflareinsights.com https://accounts.google.com/gsi/client https://apis.google.com`,

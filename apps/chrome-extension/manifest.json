@@ -1,32 +1,36 @@
 {
   "manifest_version": 3,
   "name": "xMatrix",
-  "description": "Send the page you are on, a link or selected text to a conversation in your xMatrix Space, and see what is waiting on you.",
+  "description": "Your xMatrix Space beside every page: discuss what you are reading with your team and Agents.",
   "version": "1.0.0",
   "minimum_chrome_version": "116",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAnd35Dd0NkO2NpqbZEM1UtVjbaMnIn9MnolVpIUqviV5LG+Z9Jl4mNJ1yr2iGAelJlfKot/3u3g4OfZ5K/pEdMNb1PG4iBogrcIkBWl5gH5fRVWNlB6eMXQkVEb4SK7yCTUk90xGYeSXtiCmOr4+d72QUSVyabPf/QtewmH1BFnoFr4MvKdcHgjfhKAyX4lz2Hj69RcdsjEe35LR0qaLyiX3Wu9nXQqW59pYVn62GNimhCxcxxK5chlvND7DC/QMh2NjiQHRz9sg8lT7vbw3jzDb/FgNrsATwACr6eG1E9/XAXUqEuwjGziSHdpKK/02abRds/dW/bXLi601+7KEoTQIDAQAB",
   "icons": {
     "32": "icons/icon-32.png",
     "48": "icons/icon-48.png",
     "128": "icons/icon-128.png"
   },
   "action": {
-    "default_title": "Send to xMatrix",
-    "default_popup": "src/popup.html",
+    "default_title": "Open xMatrix",
     "default_icon": {
       "32": "icons/icon-32.png",
       "48": "icons/icon-48.png"
     }
   },
+  "side_panel": {
+    "default_path": "src/sidepanel.html"
+  },
   "background": {
     "service_worker": "src/background.js",
     "type": "module"
   },
-  "permissions": ["activeTab", "alarms", "contextMenus", "scripting", "storage"],
+  "permissions": ["activeTab", "alarms", "contextMenus", "scripting", "sidePanel", "storage"],
   "host_permissions": ["https://xmatrix-hub.xmatrix.sh/*"],
+  "optional_host_permissions": ["https://*/*", "http://*/*"],
   "commands": {
     "_execute_action": {
       "suggested_key": { "default": "Alt+Shift+X" },
-      "description": "Send this page to xMatrix"
+      "description": "Open xMatrix beside this page"
     }
   }
 }

@@ -1,14 +1,22 @@
 #!/usr/bin/env node
-// Copies the extension into dist/chrome-extension with the release's version
-// stamped into its manifest, ready to zip for the Chrome Web Store.
+// Builds the extension into a directory Chrome can load: its own pages and
+// service worker as they are, the app built from apps/web beside them
+// (build-app.mjs), and the release's version stamped into the manifest.
+//
+//   package.mjs                      the Chrome Web Store upload, in dist/chrome-extension
+//   package.mjs --unpacked           a build to "Load unpacked", in dist/chrome-extension-unpacked
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { buildApp } from "./build-app.mjs";
+
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repo = path.resolve(root, "../..");
-const shipped = ["manifest.json", "icons", "src"];
+const shipped = ["manifest.json", "assets", "icons", "src"];
+/** The Web, which fetches an account's Google picture for the app (apps/web identity-avatar.tsx). */
+const WEB_ORIGIN = "https://xmatrix.sh";
 
 /**
  * Chrome allows only up to four dot-separated integers in `version`, so a beta
@@ -20,24 +28,84 @@ export function chromeVersion(release) {
   return { version: `${Number(match[1])}.${Number(match[2])}.${Number(match[3])}`, versionName: release };
 }
 
-export function packageExtension({ out = path.join(repo, "dist", "chrome-extension"), release } = {}) {
+/**
+ * What the extension's own pages may load, the app in the side panel among
+ * them: the Web's policy for the app (apps/web next.config.ts) without the
+ * Web. Scripts, styles and fonts come from the package only. The Hub is the
+ * one server they talk to, and a picture in a message comes from the package,
+ * the Hub or the Web (an account's Google picture, fetched by the Web), never
+ * from the address a message names.
+ */
+export function extensionPagesPolicy(hubOrigin) {
+  const hub = new URL(hubOrigin);
+  const socket = `${hub.protocol === "http:" ? "ws" : "wss"}://${hub.host}`;
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    // The Docs picker runs in Google's own frame.
+    "frame-src 'self' https://docs.google.com",
+    `img-src 'self' data: blob: ${hub.origin} ${WEB_ORIGIN}`,
+    // Direct Internet audio and video previews load only after a reader clicks Preview.
+    `media-src 'self' blob: https: ${hub.origin}`,
+    "font-src 'self' data:",
+    `connect-src 'self' ${hub.origin} ${socket}`,
+    "worker-src 'self'",
+  ].join("; ");
+}
+
+/**
+ * The manifest a build ships. The store upload drops the key: it pins an
+ * unpacked build to the store item's ID, and the store refuses an upload
+ * carrying it. `hubUrl` points a build at another Hub (a local stack), for
+ * the service worker and the app alike.
+ */
+export function shippedManifest(manifest, { release, unpacked = false, hubUrl }) {
+  const { version, versionName } = chromeVersion(release);
+  const { key, ...rest } = manifest;
+  const hubOrigin = new URL(hubUrl ?? manifest.host_permissions[0]).origin;
+  return {
+    ...rest,
+    version,
+    version_name: versionName,
+    ...(unpacked ? { key } : {}),
+    host_permissions: [`${hubOrigin}/*`],
+    content_security_policy: { extension_pages: extensionPagesPolicy(hubOrigin) },
+  };
+}
+
+export async function packageExtension({ out, release, unpacked = false, hubUrl, minify = true } = {}) {
+  const target = out ?? path.join(repo, "dist", unpacked ? "chrome-extension-unpacked" : "chrome-extension");
   const resolved = release ?? JSON.parse(fs.readFileSync(path.join(repo, "version.json"), "utf8")).version;
-  const { version, versionName } = chromeVersion(resolved);
-  fs.rmSync(out, { recursive: true, force: true });
-  fs.mkdirSync(out, { recursive: true });
+  fs.rmSync(target, { recursive: true, force: true });
+  fs.mkdirSync(target, { recursive: true });
   for (const entry of shipped) {
-    fs.cpSync(path.join(root, entry), path.join(out, entry), { recursive: true });
+    fs.cpSync(path.join(root, entry), path.join(target, entry), { recursive: true });
   }
-  const manifestPath = path.join(out, "manifest.json");
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
-  manifest.version = version;
-  manifest.version_name = versionName;
-  fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  return { out, version, versionName };
+  const manifest = shippedManifest(JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")),
+    { release: resolved, unpacked, hubUrl });
+  fs.writeFileSync(path.join(target, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  const app = await buildApp({ extensionRoot: target, release: resolved, hubUrl, minify });
+  return { out: target, version: manifest.version, versionName: manifest.version_name, app };
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
-  const outArg = process.argv.indexOf("--out");
-  const { out, versionName } = packageExtension(outArg > 0 ? { out: path.resolve(process.argv[outArg + 1]) } : {});
-  console.log(`Packaged the xMatrix Chrome extension ${versionName} in ${out}`);
+  const arg = (name) => {
+    const index = process.argv.indexOf(name);
+    return index > 0 ? process.argv[index + 1] : undefined;
+  };
+  // --release overrides version.json, for a store upload that must exceed the last one.
+  const out = arg("--out");
+  const built = await packageExtension({
+    ...(out ? { out: path.resolve(out) } : {}),
+    ...(arg("--release") ? { release: arg("--release") } : {}),
+    ...(arg("--hub") ? { hubUrl: arg("--hub") } : {}),
+    unpacked: process.argv.includes("--unpacked"),
+    minify: !process.argv.includes("--no-minify"),
+  });
+  console.log(`Packaged the xMatrix Chrome extension ${built.versionName} in ${built.out}: `
+    + `${(built.app.bytes / 1024 / 1024).toFixed(1)} MB of app scripts, ${built.app.routes} proxy routes in the page`);
 }

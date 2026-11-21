@@ -77,6 +77,7 @@ import { usePageSummons, type PageSummon } from "./page-summon-store";
 import { PageFind } from "./page-find";
 import { avatarImageSrc } from "@/components/dashboard/identity-avatar";
 import { UserFacingProblem, userErrorMessage } from "@/lib/user-facing-error";
+import { appAddressOrigin } from "@/lib/app-address";
 
 // The native shell also imports this module for its list screens. The editor
 // (ProseMirror and the page document) belongs to an open document, not to the cold-start list dependency graph.
@@ -1214,7 +1215,7 @@ export function PagesView({ spaceId, token, selectedPageId, onSelectPage, onOpen
   }
   // A new page is as restricted as where it goes.
   const restricted = page ? effectivelyRestricted(pending ? page.parentPageId ?? "" : page.pageId, pages) : false;
-  const pageLink = () => `${window.location.origin}${
+  const pageLink = () => `${appAddressOrigin()}${
     pagesViewPath(`/app/${encodeURIComponent(spaceId)}/pages`, page?.pageId ?? null, null)}`;
   // The link a pull request names for the block it works on.
   const blockLink = (blockId: string) => `${pageLink()}#${blockId}`;

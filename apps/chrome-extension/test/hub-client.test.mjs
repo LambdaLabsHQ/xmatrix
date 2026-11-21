@@ -3,10 +3,9 @@ import test from "node:test";
 
 import {
   countNeedsYou,
-  listSpaces,
-  listChannels,
+  freshAccessToken,
+  hubUrl,
   pollDeviceSignIn,
-  sendMessage,
   withSession,
 } from "../src/hub-client.js";
 
@@ -34,45 +33,43 @@ const session = { token: "old", refreshToken: "refresh-1", user: null, hubUrl: "
 // once legacy admission is off (client-compatibility-gate.ts); the extension
 // must declare itself as an app on every call.
 test("every call declares an app client identity the Hub's compatibility gate admits", async () => {
-  const { calls, deps } = fakeHub({ "POST /api/channels/c1/messages": () => ({ json: { message: { messageId: "m1" } } }) });
-  await sendMessage(deps, "t", { channelId: "c1", body: "hi", clientMessageId: "m1" });
+  const { calls, deps } = fakeHub({ "GET /api/channels": () => ({ json: { channels: [] } }) });
+  await countNeedsYou(deps, "t");
   assert.equal(calls[0].headers["x-xmatrix-client-component"], "app");
   assert.equal(calls[0].headers["x-xmatrix-client-protocol"], "2");
   assert.equal(calls[0].headers["x-xmatrix-client-version"], "4.7.3");
   assert.equal(calls[0].headers.authorization, "Bearer t");
-  // A bare @Agent mention is refused unless the send asks to launch it.
-  assert.deepEqual(calls[0].body, { body: "hi", clientMessageId: "m1", launch: true });
 });
 
 test("an expired access token is renewed once and the call retried with the new one", async () => {
   const { calls, deps } = fakeHub({
-    "GET /api/spaces": ({ headers }) => (headers.authorization === "Bearer new"
-      ? { json: { spaces: [] } } : { status: 401, json: { error: "expired" } }),
+    "GET /api/channels": ({ headers }) => (headers.authorization === "Bearer new"
+      ? { json: { channels: [] } } : { status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ json: { token: "new", refreshToken: "refresh-2", user: { id: "u1", name: "Dana" } } }),
   });
   const store = memoryStore(session);
-  await withSession(deps, store, listSpaces);
-  assert.deepEqual(calls.map((call) => call.path), ["/api/spaces", "/api/auth/refresh", "/api/spaces"]);
+  await withSession(deps, store, countNeedsYou);
+  assert.deepEqual(calls.map((call) => call.path), ["/api/channels", "/api/auth/refresh", "/api/channels"]);
   assert.equal(store.peek().refreshToken, "refresh-2");
 });
 
 test("a refused renewal forgets the session so the popup asks to sign in again", async () => {
   const { deps } = fakeHub({
-    "GET /api/spaces": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/channels": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 401, json: { error: "revoked" } }),
   });
   const store = memoryStore(session);
-  await assert.rejects(withSession(deps, store, listSpaces), (error) => error.code === "signed_out");
+  await assert.rejects(withSession(deps, store, countNeedsYou), (error) => error.code === "signed_out");
   assert.equal(store.peek(), null);
 });
 
 test("a renewal that fails for another reason keeps the session", async () => {
   const { deps } = fakeHub({
-    "GET /api/spaces": () => ({ status: 401, json: { error: "expired" } }),
+    "GET /api/channels": () => ({ status: 401, json: { error: "expired" } }),
     "POST /api/auth/refresh": () => ({ status: 503, json: { error: "unavailable" } }),
   });
   const store = memoryStore(session);
-  await assert.rejects(withSession(deps, store, listSpaces), (error) => error.status === 503);
+  await assert.rejects(withSession(deps, store, countNeedsYou), (error) => error.status === 503);
   assert.equal(store.peek(), session);
 });
 
@@ -85,31 +82,12 @@ test("device sign-in reports waiting, then the session, and ends on a declined r
   const { deps } = fakeHub({ "POST /api/auth/cli/device/token": () => ({ json: answers.shift() }) });
   assert.deepEqual(await pollDeviceSignIn(deps, "dc"), { pending: true, intervalMs: 7000 });
   const approved = await pollDeviceSignIn(deps, "dc");
+  // The account is kept as the Hub names it: the panel's app opens with it.
   assert.deepEqual(approved.session, {
-    token: "t", refreshToken: "r", user: { id: "u1", name: "d@example.test" }, hubUrl: "https://hub.test",
+    token: "t", refreshToken: "r", hubUrl: "https://hub.test",
+    user: { id: "u1", name: "d@example.test", email: "d@example.test", avatarUrl: undefined },
   });
   await assert.rejects(pollDeviceSignIn(deps, "dc"), /Declined in the browser/u);
-});
-
-test("conversations waiting on the person come first, then the most recent", async () => {
-  const { deps } = fakeHub({
-    "GET /api/channels": () => ({
-      json: {
-        channels: [
-          { id: "old", spaceId: "s1", name: "Old", lastMessage: { sentAt: "2026-11-01T00:00:00Z" } },
-          { id: "new", spaceId: "s1", topic: "New topic", lastMessage: { sentAt: "2026-11-20T00:00:00Z" } },
-          { id: "wait", spaceId: "s1", name: "Waiting", attention: { unreadAttentionCount: 2 } },
-          { id: "other", spaceId: "s2", name: "Other Space" },
-        ],
-      },
-    }),
-  });
-  const channels = await listChannels(deps, "t", "s1");
-  assert.deepEqual(channels.map((channel) => [channel.id, channel.name, channel.needsYou]), [
-    ["wait", "Waiting", true],
-    ["new", "New topic", false],
-    ["old", "Old", false],
-  ]);
 });
 
 test("the badge counts each waiting conversation once across the snapshot and the list", async () => {
@@ -122,4 +100,47 @@ test("the badge counts each waiting conversation once across the snapshot and th
     }),
   });
   assert.equal(await countNeedsYou(deps, "t"), 2);
+});
+
+function jwt(expSeconds) {
+  return `h.${Buffer.from(JSON.stringify({ exp: expSeconds })).toString("base64url")}.s`;
+}
+
+test("the side panel gets the current token while it has life left, and a renewed one near its end", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const renewed = jwt(now + 3600);
+  const { calls, deps } = fakeHub({ "POST /api/auth/refresh": () => ({ json: { token: renewed, refreshToken: "refresh-2" } }) });
+  const store = memoryStore({ ...session, token: jwt(now + 1800) });
+  assert.equal(await freshAccessToken(deps, store), store.peek().token);
+  assert.equal(calls.length, 0);
+  await store.set({ ...session, token: jwt(now + 60) });
+  assert.equal(await freshAccessToken(deps, store), renewed);
+  assert.equal(store.peek().refreshToken, "refresh-2");
+});
+
+test("a renewal keeps the account it was signed in as, and takes the Hub's when it names one", async () => {
+  const account = { id: "u1", name: "Dana", email: "d@example.test", avatarUrl: undefined };
+  const answers = [{ token: jwt(1), refreshToken: "refresh-2" },
+    { token: jwt(2), refreshToken: "refresh-3", user: { id: "u1", name: "Dana Scully", email: "d@example.test" } }];
+  const { deps } = fakeHub({ "POST /api/auth/refresh": () => ({ json: answers.shift() }) });
+  const store = memoryStore({ ...session, token: jwt(0), user: account });
+  await freshAccessToken(deps, store);
+  assert.deepEqual(store.peek().user, account);
+  // Asked for outright (the account was renamed under the token), whatever life the token has left.
+  await store.set({ ...store.peek(), token: jwt(Math.floor(Date.now() / 1000) + 3600) });
+  await freshAccessToken(deps, store, Infinity);
+  assert.equal(store.peek().user.name, "Dana Scully");
+  assert.equal(store.peek().refreshToken, "refresh-3");
+});
+
+test("the Hub a build talks to is the one host its manifest may reach", () => {
+  assert.equal(hubUrl({ host_permissions: ["https://xmatrix-hub.xmatrix.sh/*"] }), "https://xmatrix-hub.xmatrix.sh");
+  assert.equal(hubUrl({ host_permissions: ["http://localhost:8787/*"] }), "http://localhost:8787");
+});
+
+test("a refused renewal for the side panel signs it out", async () => {
+  const { deps } = fakeHub({ "POST /api/auth/refresh": () => ({ status: 401, json: { error: "revoked" } }) });
+  const store = memoryStore({ ...session, token: jwt(0) });
+  assert.equal(await freshAccessToken(deps, store), null);
+  assert.equal(store.peek(), null);
 });
