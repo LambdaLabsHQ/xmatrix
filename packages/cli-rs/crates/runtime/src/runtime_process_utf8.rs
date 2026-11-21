@@ -912,9 +912,9 @@ pub async fn run(mut cli: Cli) -> error::Result<()> {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
             cmd_agent(&hub_url, &token, command).await
         }
-        Some(Commands::Channels { space, intake }) => {
+        Some(Commands::Channels { space, intake, find }) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
-            cmd_channels(&hub_url, &token, space.as_deref(), intake).await
+            cmd_channels(&hub_url, &token, space.as_deref(), intake, find.as_deref()).await
         }
         Some(Commands::Spaces) => {
             let token = resolve_auth_token(cli.token.as_deref(), &hub_url).await?;
