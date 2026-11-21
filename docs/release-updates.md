@@ -1,5 +1,16 @@
 # Release Updates
 
+## Unreleased: Agent presence reads ship each distinct Instance catalog once
+
+Channel windows and exact Instance reads carried each Instance's model,
+command and parameter catalogs on every row, although Instances of one harness
+version report identical catalogs. Those copies made the resting-presence read
+the largest source of PostgreSQL result bytes (40-60% per day). The reads now
+name each catalog by its SHA-256 digest and ship each distinct catalog once per
+answer; the DB layer puts it back on every record, so Hub responses are
+unchanged. A production-sized 200-Channel page drops from about 4.9 MB to
+1.7 MB. DB and Hub. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: Stripe connector exposes read-only account and payment inspection actions
 
 The Stripe connector previously delivered inbound webhook cards only and
