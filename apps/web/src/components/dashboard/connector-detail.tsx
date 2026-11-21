@@ -44,7 +44,7 @@ import { XAccounts } from "./x-accounts";
  * action; then everything it is signed in with, together, so a person can
  * reconnect or sign out without scrolling: the accounts, groups or company it
  * links, its credentials and sign-ins (App Store Connect's API key and web
- * session), where its events arrive, and Reconnect and Disconnect. After
+ * session), where its events arrive, and Switch account, Pause and Remove. After
  * that, once connected: what it reaches, how to use it in a channel, what it
  * did, what it may do, its settings, and the command reference, folded. A
  * connected app that works shows no call to action.
@@ -86,8 +86,8 @@ function connectorAuthorizationLabel(connector: AppConnectorManifest, connection
 
 export function ConnectorDetailPage({
   connector, Icon, connection, spaceId, token, userId, members, oauth, native,
-  executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting,
-  onBack, onConnect, onCheck, onDisconnect, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
+  executions, executionsLoading, executionsError, notice, error, connecting, checking, disconnecting, removing = false,
+  onBack, onConnect, onCheck, onDisconnect, onRemove, onRefreshExecutions, onSaveMetadata, ensureConnectionRow, refreshConnections,
 }: {
   connector: AppConnectorManifest;
   Icon: ComponentType<{ className?: string }>;
@@ -108,10 +108,14 @@ export function ConnectorDetailPage({
   connecting: boolean;
   checking: boolean;
   disconnecting: boolean;
+  /** Removing the connection and everything saved for it is in progress. */
+  removing?: boolean;
   onBack: () => void;
   onConnect: (options?: ConnectOptions) => void;
   onCheck: () => Promise<void>;
   onDisconnect: () => void;
+  /** Deletes the connection with its saved credentials and channel subscriptions. */
+  onRemove?: () => void;
   onRefreshExecutions: () => void;
   onSaveMetadata: (metadata: Record<string, unknown>) => Promise<void>;
   /** Creates the unconnected row credentials and links are stored on. */
@@ -122,7 +126,7 @@ export function ConnectorDetailPage({
   const configured = connection?.status === "configured";
   const needsAttention = connection?.status === "error";
   const kind = setupKind(connector, oauth, native);
-  const busy = connecting || checking || disconnecting;
+  const busy = connecting || checking || disconnecting || removing;
   const credentials = { connector, connection, spaceId, token, userId, beforeSave: ensureConnectionRow, afterSave: onCheck };
   // A linked company app owns these apps' delivery; a manual webhook replaces it and takes no ingress of its own.
   const manualConnector = ["googlechat", "wecom", "teams"].includes(connector.id) ? { ...connector, events: undefined } : connector;
@@ -222,7 +226,8 @@ export function ConnectorDetailPage({
               </ConnectorFold>
             </ConnectorSection>
           ) : (
-            <ConnectorSection title="Credentials" note={`Saved values are never shown again. Replace one when ${connector.name} issues a new one.`}>
+            <ConnectorSection title="Credentials" testId="connector-credentials"
+              note={`Saved values are never shown again. To use another ${connector.name} account, replace them with that account's.`}>
               <ConnectorCredentialRows {...credentials} />
             </ConnectorSection>
           )
@@ -233,7 +238,8 @@ export function ConnectorDetailPage({
 
         {configured ? (
           <ConnectorSignedIn connector={connector} kind={kind} busy={busy} connecting={connecting}
-            disconnecting={disconnecting} onReconnect={() => onConnect()} onDisconnect={onDisconnect} />
+            disconnecting={disconnecting} removing={removing} onReconnect={() => onConnect()} onDisconnect={onDisconnect}
+            onRemove={onRemove} />
         ) : null}
 
         {connector.id === "google" && configured ? (
@@ -341,6 +347,10 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
   const needsAttention = connection?.status === "error";
   const disconnected = Boolean(connection) && !needsAttention;
   const savedCredentials = kind === "credentials" && connectorReconnectsWithSavedCredentials(connector, connection);
+  // A paused sign-in kept its token; resuming checks it instead of signing in again.
+  const managedIds = new Set((connector.credentials ?? []).filter((field) => field.managed).map((field) => field.id));
+  const savedSignIn = kind === "oauth" && disconnected && Boolean(connection?.credentialFields?.some((id) => managedIds.has(id)));
+  const paused = savedCredentials || savedSignIn;
   const writable = connectorWritableCredentials(connector);
   const primary = (label: string, onClick: () => void, pending: boolean) => (
     <button type="button" disabled={busy} onClick={onClick} className={actionClass({ variant: "primary", size: "md" })}>
@@ -353,7 +363,13 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
       {checking ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <RefreshCw className="size-3.5" />} Check again
     </ConnectorAction>
   ) : null;
-  const title = needsAttention ? `${name} isn't working` : disconnected ? `Reconnect ${name}` : `Connect ${name}`;
+  const title = needsAttention ? `${name} isn't working` : paused ? `${name} is paused` : disconnected ? kind === "oauth" ? `Sign in to ${name}` : `Reconnect ${name}` : `Connect ${name}`;
+  const resume = (
+    <button type="button" disabled={busy} onClick={() => void onCheck()} className={actionClass({ variant: "primary", size: "md" })}
+      title={`Resume ${name} with what it signed in with`}>
+      {checking ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <PlugZap className="size-4" />} Resume
+    </button>
+  );
   const why = needsAttention ? connection?.error || "The connection needs to be authorized again." : null;
 
   let body: ReactNode;
@@ -370,12 +386,20 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
         ) : null}
       </div>
     );
+  } else if (kind === "oauth" && savedSignIn) {
+    body = `Commands and channel delivery are off. Resume turns them back on with the same ${name} account.`;
+    action = (
+      <div className="flex flex-wrap items-center gap-2">
+        {resume}
+        <ConnectorAction disabled={busy} onClick={() => onConnect()}>Switch account</ConnectorAction>
+      </div>
+    );
   } else if (kind === "oauth") {
     body = why ?? (disconnected ? `Sign in with ${name} again to resume channel delivery and commands.`
       : `Sign in with ${name} and approve what xMatrix may reach.`);
     action = (
       <div className="space-y-3">
-        {primary(disconnected || needsAttention ? "Reconnect" : `Connect with ${name}`, () => onConnect(), connecting)}
+        {primary(needsAttention ? "Sign in again" : disconnected ? "Sign in" : `Connect with ${name}`, () => onConnect(), connecting)}
         {writable.length > 0 ? (
           <ConnectorFold summary="Paste credentials instead">
             <div className="pt-2"><ConnectorCredentialForm {...credentials} /></div>
@@ -384,15 +408,12 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
       </div>
     );
   } else if (kind === "credentials") {
-    body = why ?? (savedCredentials ? "Its saved credentials are still here; reconnecting checks them again."
+    body = why ?? (savedCredentials ? `Commands and channel delivery are off. Resume checks the saved credentials with ${name} and turns them back on.`
       : `Paste the credentials below. xMatrix checks them with ${name} before it connects.`);
     action = savedCredentials ? (
       <div className="space-y-3">
-        <button type="button" disabled={busy} onClick={() => void onCheck()} className={actionClass({ variant: "primary", size: "md" })}
-          title={`Reconnect ${name} with its saved credentials`}>
-          {checking ? <AnimatedIcon icon={Loader2} className="size-4 animate-spin" /> : <PlugZap className="size-4" />} Reconnect
-        </button>
-        <ConnectorFold summary="Use other credentials">
+        {resume}
+        <ConnectorFold summary="Use another account">
           <div className="pt-2"><ConnectorCredentialForm {...credentials} /></div>
         </ConnectorFold>
       </div>
@@ -418,36 +439,104 @@ function ConnectorLead({ connector, connection, kind, available, busy, connectin
 /* Apps that list their own accounts, groups or company add and renew each one there; a single sign-in is renewed here. */
 const RENEWS_IN_ITS_OWN_LIST = new Set(["github", "stripe", "gmail", "cloudflare", "x"]);
 
-/** How a connected app is signed in, ended or renewed: beside its credentials, never at the foot of the page. */
-function ConnectorSignedIn({ connector, kind, busy, connecting, disconnecting, onReconnect, onDisconnect }: {
+/*
+ * Sign-ins the Hub deletes whenever the connection stops (Google API Services
+ * User Data Policy, and the privacy policy's promise). They cannot be paused:
+ * stopping one is signing out.
+ */
+const SIGNS_OUT_WHEN_STOPPED = new Set(["google", "googlesearchconsole", "googleadsense", "googlecalendar",
+  "googleanalytics", "googleads", "googlebusinessprofile", "gcp", "googleplay"]);
+
+/** How a connection with one account is put on another, paused or removed. */
+type SignedInActions = "switch" | "list" | "fixed";
+
+function signedInActions(connector: AppConnectorManifest, kind: SetupKind): SignedInActions {
+  if (RENEWS_IN_ITS_OWN_LIST.has(connector.id) || kind === "github" || kind === "chat" || kind === "company") return "list";
+  return kind === "oauth" || kind === "credentials" ? "switch" : "fixed";
+}
+
+function showCredentials() {
+  const section = document.querySelector<HTMLElement>('[data-testid="connector-credentials"]');
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+  section?.querySelector<HTMLElement>("button, input, textarea")?.focus({ preventScroll: true });
+}
+
+/**
+ * What a person does with a working connection, in their words: put it on
+ * another account, pause it, or remove it. Pausing keeps what it signed in
+ * with, so resuming needs no new sign-in; removing deletes it.
+ */
+function ConnectorSignedIn({ connector, kind, busy, connecting, disconnecting, removing, onReconnect, onDisconnect, onRemove }: {
   connector: AppConnectorManifest;
   kind: SetupKind;
   busy: boolean;
   connecting: boolean;
   disconnecting: boolean;
+  removing: boolean;
   onReconnect: () => void;
   onDisconnect: () => void;
+  onRemove?: () => void;
 }) {
-  const reconnects = kind === "oauth" && !RENEWS_IN_ITS_OWN_LIST.has(connector.id);
+  const name = connector.name;
+  const actions = signedInActions(connector, kind);
+  const spinner = (on: boolean) => on ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null;
+  if (actions === "list") {
+    // These name each account, group or install themselves; ending the whole connection stays one step.
+    return (
+      <section aria-label="Disconnect" data-testid="connector-signed-in">
+        <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Disconnect ${name}`}
+          className={actionClass({ variant: "danger", size: "sm" })}>
+          {spinner(disconnecting)}{disconnecting ? "Disconnecting" : `Disconnect ${name}`}
+        </button>
+        <p className="mt-2 max-w-[62ch] text-[12px] leading-[1.45] text-muted-foreground">
+          Add or remove accounts in the list above. Disconnect stops commands and channel delivery for all of them.
+        </p>
+      </section>
+    );
+  }
+  const signsOut = SIGNS_OUT_WHEN_STOPPED.has(connector.id);
+  const switches = actions === "switch";
+  const remove = () => {
+    if (window.confirm(`Remove ${name} from this Space? Its saved credentials and channel subscriptions are deleted; `
+      + "connecting again starts from the beginning.")) onRemove?.();
+  };
   return (
-    <section aria-label="Disconnect" data-testid="connector-signed-in">
+    <section aria-label="Account" data-testid="connector-signed-in">
       <div className="flex flex-wrap items-center gap-2">
-        {reconnects ? (
-          <button type="button" disabled={busy} onClick={onReconnect} aria-label={`Reconnect ${connector.name}`}
-            className={actionClass({ variant: "secondary", size: "sm" })}>
+        {switches ? (
+          <button type="button" disabled={busy} onClick={kind === "oauth" ? onReconnect : showCredentials}
+            aria-label={`Switch ${name} account`} className={actionClass({ variant: "secondary", size: "sm" })}>
             {connecting ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <PlugZap className="size-3.5" />}
-            {connecting ? "Reconnecting" : "Reconnect"}
+            {connecting ? "Opening sign-in" : "Switch account"}
           </button>
         ) : null}
-        <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Disconnect ${connector.name}`}
-          className={actionClass({ variant: "danger", size: "sm" })}>
-          {disconnecting ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : null}
-          {disconnecting ? "Disconnecting" : `Disconnect ${connector.name}`}
-        </button>
+        {signsOut ? (
+          <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Sign out of ${name}`}
+            className={actionClass({ variant: "danger", size: "sm" })}>
+            {spinner(disconnecting)}{disconnecting ? "Signing out" : "Sign out"}
+          </button>
+        ) : (
+          <>
+            <button type="button" disabled={busy} onClick={onDisconnect} aria-label={`Pause ${name}`}
+              className={actionClass({ variant: "secondary", size: "sm" })}>
+              {spinner(disconnecting)}{disconnecting ? "Pausing" : "Pause"}
+            </button>
+            {onRemove ? (
+              <button type="button" disabled={busy} onClick={remove} aria-label={`Remove ${name}`}
+                className={actionClass({ variant: "danger", size: "sm" })}>
+                {spinner(removing)}{removing ? "Removing" : "Remove"}
+              </button>
+            ) : null}
+          </>
+        )}
       </div>
       <p className="mt-2 max-w-[62ch] text-[12px] leading-[1.45] text-muted-foreground">
-        {reconnects ? `Reconnect signs in with ${connector.name} again, for another account or wider access. ` : null}
-        Disconnect stops commands and channel delivery until it is connected again. Typed credentials stay saved; a sign-in is forgotten.
+        {switches ? kind === "oauth"
+          ? `Switch account opens the ${name} sign-in to choose an account; the current one stays connected until the new sign-in finishes. `
+          : `Switch account goes to the credentials; saving another account's replaces this one after ${name} accepts them. ` : null}
+        {signsOut
+          ? "Sign out stops commands and channel delivery and deletes the sign-in; connecting again asks you to sign in."
+          : "Pause stops commands and channel delivery and keeps what it signed in with, so Resume needs nothing new. Remove deletes it."}
       </p>
     </section>
   );

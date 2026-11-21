@@ -49,8 +49,8 @@ test("a failed Check can be retried without reconnecting and only server success
   expect(await fixtureRequests(page, "sentry-passed-check")).toHaveLength(1);
 });
 
-test("an explicitly disconnected connection still requires reconnecting before Check", async ({ page }) => {
+test("an explicitly disconnected sign-in asks to sign in before Check", async ({ page }) => {
   await open(page, "disconnected");
   await expect(page.getByRole("button", { name: "Check Sentry connection", exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Reconnect", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in", exact: true })).toBeVisible();
 });

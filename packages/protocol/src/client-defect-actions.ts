@@ -92,6 +92,7 @@ const CLIENT_DEFECT_ACTIONS = [
   "Couldn't refresh the local daemon session",
   "Couldn't remove local directory",
   "Couldn't remove the Machine",
+  "Couldn't remove the app",
   "Couldn't remove your photo",
   "Couldn't rename the Machine",
   "Couldn't rename the Space",

@@ -24,7 +24,7 @@ test("Google authorization requests only offline drive.file with signed Space/ad
   assert.equal(url.origin, "https://accounts.google.com");
   assert.equal(url.searchParams.get("scope"), scope);
   assert.equal(url.searchParams.get("access_type"), "offline");
-  assert.equal(url.searchParams.get("prompt"), "consent");
+  assert.equal(url.searchParams.get("prompt"), "select_account consent");
   assert.equal(url.searchParams.has("include_granted_scopes"), false);
   const verified = await verifyOAuthState(env, url.searchParams.get("state"));
   assert.equal(verified.spaceId, "space-1");

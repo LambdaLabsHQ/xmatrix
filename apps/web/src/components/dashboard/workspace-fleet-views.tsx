@@ -1073,6 +1073,7 @@ export function AppsView({
   const [executionActionError, setExecutionsError] = useState<string | null>(null);
   const [updatingProviderId, setUpdatingProviderId] = useState<string | null>(null);
   const [disconnectingProviderId, setDisconnectingProviderId] = useState<string | null>(null);
+  const [removingProviderId, setRemovingProviderId] = useState<string | null>(null);
   const [checkingProviderId, setCheckingProviderId] = useState<string | null>(null);
   const connectionKey = xmatrixQueryKeys.domain(
     { userId: user?.id ?? "anonymous" }, "app-connections", [currentSpace?.id ?? null],
@@ -1351,6 +1352,24 @@ export function AppsView({
     }
   }
 
+  async function removeConnector(connector: AppConnectorManifest) {
+    if (!token || !currentSpace) return;
+    setUpdatingProviderId(connector.id);
+    setRemovingProviderId(connector.id);
+    setConnectionsError(null);
+    try {
+      await connectionMutation.mutateAsync({
+        url: WEB_PROXY_ROUTES.space_app_connection(currentSpace.id, connector.id), method: "DELETE",
+      });
+      setConnections(current => current.filter(connection => connection.providerId !== connector.id));
+    } catch (error) {
+      setConnectionsError(userErrorMessage(error, "Couldn't remove the app", `Couldn't remove ${connector.name}`));
+    } finally {
+      setUpdatingProviderId(null);
+      setRemovingProviderId(null);
+    }
+  }
+
   async function checkConnector(connector: AppConnectorManifest) {
     if (!token || !currentSpace) return;
     setCheckingProviderId(connector.id);
@@ -1435,11 +1454,12 @@ export function AppsView({
       executions={selectedExecutions} executionsLoading={loadingExecutions} executionsError={executionsError}
       notice={setupNotice} error={connectionsError}
       connecting={updatingProviderId === connector.id} checking={checkingProviderId === connector.id}
-      disconnecting={disconnectingProviderId === connector.id}
+      disconnecting={disconnectingProviderId === connector.id} removing={removingProviderId === connector.id}
       onBack={() => selectConnector(null)}
       onConnect={(options) => void configureConnector(connector, options)}
       onCheck={() => checkConnector(connector)}
       onDisconnect={() => void disconnectConnector(connector)}
+      onRemove={() => void removeConnector(connector)}
       onRefreshExecutions={() => void loadExecutions()}
       onSaveMetadata={(metadata) => saveConnectorMetadata(connector, metadata)}
       ensureConnectionRow={() => ensureConnectionRow(connector)}

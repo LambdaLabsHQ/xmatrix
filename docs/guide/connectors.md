@@ -24,6 +24,16 @@ The command must begin the message, and one message carries one command. Lines a
 
 Every command leaves a receipt in the conversation with its result.
 
+## Switching, pausing and removing
+
+A connected app's page offers what to do with its account:
+
+- **Switch account** puts the app on another account. For a sign-in it opens the provider's sign-in with its account chooser (Google always asks which account); the current account stays connected until the new sign-in finishes. For pasted credentials it goes to the Credentials section, where saving another account's values replaces them once the provider accepts them.
+- **Pause** stops commands and channel delivery and keeps what the app signed in with. **Resume** turns it back on with the same account, without a new sign-in.
+- **Remove** deletes the connection, its saved credentials and its channel subscriptions, after asking.
+
+Google apps cannot be paused: xMatrix deletes a Google sign-in whenever it stops, so they offer **Sign out** instead. Apps that list several accounts (GitHub, Gmail, Stripe, Cloudflare, X) add and remove each account in that list.
+
 ## Events
 
 Subscribing a conversation to a source posts that source's events there:
