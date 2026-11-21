@@ -264,7 +264,7 @@ pub enum Commands {
         #[command(subcommand)]
         command: AgentCommand,
     },
-    /// List workspace channels
+    /// List workspace channels, most recently active first; `--find <words>` finds a conversation by title and summary
     Channels {
         /// Filter by space ID
         #[arg(long)]
@@ -272,6 +272,9 @@ pub enum Commands {
         /// Only an open project's intake: conversations its participants started
         #[arg(long)]
         intake: bool,
+        /// Find a conversation: keep those whose title, topic or summary holds every word, and show each summary. One request, however many conversations there are; never read each one's history to search
+        #[arg(long, value_name = "WORDS")]
+        find: Option<String>,
     },
     /// List spaces
     Spaces,

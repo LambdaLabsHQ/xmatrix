@@ -54,6 +54,7 @@ pub async fn cmd_channels(
     token: &str,
     space_id: Option<&str>,
     intake: bool,
+    find: Option<&str>,
 ) -> error::Result<()> {
     #[derive(Deserialize)]
     struct ChannelsResponse {
@@ -77,14 +78,58 @@ pub async fn cmd_channels(
     if intake {
         channels.retain(is_intake);
     }
+    if let Some(words) = find {
+        channels.retain(|channel| channel_holds_words(channel, words));
+    }
     if channels.is_empty() {
         println!("No channels available.");
         return Ok(());
     }
     // Conversations are one list, most recently active first; pages say how work is organized.
     channels.sort_by(|left, right| channel_activity(right).cmp(channel_activity(left)));
-    print_channel_table(&channels);
+    if find.is_some() {
+        print_found_channels(&channels);
+    } else {
+        print_channel_table(&channels);
+    }
     Ok(())
+}
+
+/// Whether a conversation's title, topic or summary holds every word, whatever the case.
+///
+/// The list already carries these for every conversation, so finding one costs
+/// the single list request. Reading each conversation's history to search
+/// instead is thousands of requests in a large Space.
+pub fn channel_holds_words(channel: &protocol::SerializedChannel, words: &str) -> bool {
+    let text = [&channel.name, &channel.topic, &channel.summary]
+        .into_iter()
+        .flatten()
+        .map(|part| part.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("\n");
+    words
+        .split_whitespace()
+        .all(|word| text.contains(&word.to_lowercase()))
+}
+
+/// Found conversations with what tells them apart: last activity and summary.
+fn print_found_channels(channels: &[protocol::SerializedChannel]) {
+    for channel in channels {
+        println!(
+            "{}  {}  {} messages  {}",
+            channel_label(channel).bold(),
+            channel_activity(channel),
+            channel.message_count.unwrap_or(0),
+            channel.id.dimmed()
+        );
+        if let Some(summary) = channel.summary.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            println!("  {}", summary.replace('\n', " "));
+        }
+    }
+    println!(
+        "{} found. Read one with `xmatrix channel history <ID>`.",
+        channels.len()
+    );
 }
 
 /// A conversation an open project's participant started, for the project's triage.

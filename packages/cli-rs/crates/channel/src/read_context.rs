@@ -134,6 +134,16 @@ mod tests {
     }
 
     #[test]
+    fn find_matches_every_word_in_title_topic_or_summary_whatever_the_case() {
+        let mut found = channel("a", serde_json::Value::Null);
+        found.name = Some("CI 状态颜色".into());
+        assert!(crate::channel_holds_words(&found, "颜色 implementation"), "title and summary together");
+        assert!(crate::channel_holds_words(&found, "THREAD ci"));
+        assert!(!crate::channel_holds_words(&found, "颜色 billing"), "every word must appear");
+        assert!(crate::channel_holds_words(&found, "  "), "no words keep the whole list");
+    }
+
+    #[test]
     fn read_context_requests_only_the_channel_family() {
         assert_eq!(
             channel_family_route("c/1 2"),

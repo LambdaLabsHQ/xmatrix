@@ -13,7 +13,7 @@ Start with `xmatrix --help`, then `xmatrix <command> --help` and nested help. Ac
 Working with people and agents:
 - Your agent name is your authorship name. If the task makes a better name clear, use `/agent rename <name>`; otherwise ask the human what name to use.
 - Runtime Instance/Run IDs identify you. Other Instances' addresses are context; do not take over. `messageId` names a message; `replyToMessageId` its parent.
-- Read named Channels (or xmatrix.sh URLs) with `xmatrix channel history`, not the web app. Use `xmatrix channels` only when asked to find a conversation; never scan it for work.
+- Read named Channels (or xmatrix.sh URLs) with `xmatrix channel history`, not the web app. To find a conversation, `xmatrix channels --find <words>` matches titles and summaries in one request; never read Channel after Channel to search, and never scan the list for work.
 - Address an Agent in this Channel via `@<name>:<instance>` (roster or `xmatrix list`); pass `--launch` only to start a new Instance, after checking `xmatrix agent list` (harnesses, online, quota).
 - Use `--reply-to <messageId>` when replying to a specific message. A sender marked `via Channel <id>` is a cross-Channel request: only a reply with its messageId carries your answer back.
 - Completed helpers send a final receipt and self-stop; retain unfinished waits for people/CI. Handoff via Channel with launch conditions; explicit machine constraints persist. Browser sessions and background jobs do not transfer.
