@@ -3,6 +3,7 @@ import type { AgentRegistrationIdentity } from "./agent-caller";
 import type { Env } from "../types";
 import type { XActionCapability } from "./x-accounts";
 import type { XMediaCapability } from "./x-media";
+import type { StripeActionCapability } from "./stripe-accounts";
 import type { UpstreamMeter } from "../usage-cost-metering";
 
 /**
@@ -48,6 +49,8 @@ export interface ConnectorActionStatement {
 export interface ConnectorActionContext {
   /** X accounts scoped to this caller; grants remain inside the Hub. */
   x?: XActionCapability;
+  /** Stripe accounts scoped to this Space's retained OAuth grants; tokens stay inside the Hub. */
+  stripe?: StripeActionCapability;
   /** Private App Review setup; the capability keeps credentials in the Hub. */
   appReviewSetup?:import("./app-store-connect-review-setup").ReviewSetupCapability;
   /** Read only commerce notification status scoped by the server to this Channel and caller. */

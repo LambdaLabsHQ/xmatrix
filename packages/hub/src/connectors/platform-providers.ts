@@ -40,6 +40,7 @@ import { PAGESPEED_ACTIONS, verifyPageSpeed } from "./actions/pagespeed";
 import { GMAIL_ACTIONS, verifyGmail } from "./actions/gmail";
 import { GMAIL_SUBSCRIPTIONS } from "./gmail-mailboxes";
 import { X_ACTIONS } from "./actions/x";
+import { STRIPE_ACTIONS } from "./actions/stripe";
 import { OPENCONNECTOR_ACTIONS, verifyOpenConnector } from "./actions/openconnector";
 import { YANDEX_WEBMASTER_ACTIONS, verifyYandexWebmaster } from "./actions/yandex-webmaster";
 import { PAGERDUTY_ACTIONS, verifyPagerDuty } from "./actions/pagerduty";
@@ -112,7 +113,7 @@ const PROVIDERS: Record<string, {
   bitbucket: { receive: receiveBitbucketDelivery, actions: BITBUCKET_ACTIONS, verify: verifyBitbucket },
   circleci: { receive: receiveCircleCiDelivery },
   buildkite: { receive: receiveBuildkiteDelivery },
-  stripe: { receive: (delivery) => receiveStripeDelivery(delivery), verify: verifyStripe },
+  stripe: { receive: (delivery) => receiveStripeDelivery(delivery), actions: STRIPE_ACTIONS, verify: verifyStripe },
   grafana: { receive: receiveGrafanaDelivery },
   opsgenie: { receive: receiveOpsgenieDelivery },
   netlify: { receive: receiveNetlifyDelivery, verify: verifyNetlify },

@@ -23,6 +23,7 @@ import type { Env } from "../types";
 import type { ConnectorAction, ConnectorActionContext, ConnectorActionResult, ConnectorCommandHandler, ConnectorCommandInput, ConnectorSubscriptionSync } from "./provider";
 import { runSubscriptionStatement } from "./subscription-command";
 import { xActionCapability } from "./x-api";
+import { stripeActionCapability } from "./stripe-accounts";
 import { upstreamMeter } from "../usage-cost-metering";
 import { createXMediaCapability } from "./x-media";
 import { postgresMessageAttachmentAuthorityRequest } from "../postgres-message-attachment-authority";
@@ -361,6 +362,8 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     ? await dingtalkActionCapability(input.env, spaceId, authorizeWrite) : undefined;
   const x = providerId === "x" ? xActionCapability(input.env, { spaceId, channelId: input.channelId,
     actorUserId: input.actorUserId, action: actionId, billingKey, authorizeWrite }) : undefined;
+  const stripe = providerId === "stripe" ? stripeActionCapability(input.env, { spaceId, channelId: input.channelId,
+    actorUserId: input.actorUserId }) : undefined;
   const xMedia = x && input.env.RELAY_PAYLOAD_BUCKET ? createXMediaCapability({ spaceId, channelId: input.channelId,
     actorUserId: input.actorUserId, x, authorizeWrite, bucket: input.env.RELAY_PAYLOAD_BUCKET,
     receiptSecret: input.env.RELAY_R2_CAPABILITY_HMAC_SECRET,
@@ -369,7 +372,7 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
     ? appleCommerceStatusCapability(input.env,{spaceId,channelId:input.channelId,userId:input.actorUserId}) : undefined;
   const appReviewSetup = providerId === "appstoreconnect" && actionId === "set_review_setup"
     ? appReviewSetupCapability(()=>connectorCredentialRepository(input.env).resolve({requestId:crypto.randomUUID(),spaceId,providerId}),authorizeWrite):undefined;
-  const native = appReviewSetup || appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x;
+  const native = appReviewSetup || appleCommerce || teams || googleChat || discord || feishu || telegram || wecom || dingtalk || x || stripe;
   const grant = native ? undefined : await connectionCredentialGrant(input.env, spaceId, providerId);
   const credentials = grant?.values ?? {};
   /* `a|b` requires either field: a pasted token or the one OAuth issued. */
@@ -392,5 +395,5 @@ async function actionContext(providerId: string, input: ConnectorCommandInput, s
   const files = providerId === "googleplay" && ["api_plan", "api_write"].includes(actionId) ? commandFiles(input) : undefined;
   return { credentials, caller, authorizeWrite, usage, ...(appReviewSetup ? {appReviewSetup}:{}), ...(appleCommerce ? {appleCommerce}:{}), ...(mailSnapshot ? { mailSnapshot } : {}), ...(mailAttachments ? { mailAttachments } : {}), ...(files ? { commandFiles: files } : {}), ...(saveCredentials ? { saveCredentials } : {}), ...(teams ? { teams } : {}), ...(googleChat ? { googleChat } : {}),
     ...(discord ? { discord } : {}), ...(feishu ? { feishu } : {}), ...(telegram ? { telegram } : {}),
-    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}) };
+    ...(wecom ? { wecom } : {}), ...(dingtalk ? { dingtalk } : {}), ...(x ? { x } : {}), ...(xMedia ? { xMedia } : {}), ...(stripe ? { stripe } : {}) };
 }

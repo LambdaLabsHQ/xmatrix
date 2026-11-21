@@ -1,5 +1,20 @@
 # Release Updates
 
+## Unreleased: Stripe connector exposes read-only account and payment inspection actions
+
+The Stripe connector previously delivered inbound webhook cards only and
+declared no outbound read actions, so Agents and Channels could not inspect
+connected accounts or look up a failed PaymentIntent's decline code and payment
+method through `xmatrix call` even though the Stripe App OAuth grant already
+held `event_read`, `payment_intent_read`, `invoice_read`, `subscription_read`,
+and `dispute_read`. The connector now exposes eleven read-only actions over
+the Space's retained native OAuth grants (`accounts`, `list_events`,
+`get_event`, `list_payment_intents`, `get_payment_intent`, `list_invoices`,
+`get_invoice`, `list_subscriptions`, `get_subscription`, `list_disputes`, and
+`get_dispute`), using the existing per-account leased token refresh and a
+strict endpoint allowlist with no `expand` outside those five permissions.
+Protocol and Hub. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: mobile Handoff and Stop second confirmation no longer collapses on tap
 
 Opening Handoff or long-pressing Stop on an Agent dock item programmatically
