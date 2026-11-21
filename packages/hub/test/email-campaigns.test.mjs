@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { unsubscribeToken, unsubscribeUrl } from "../src/index-routes-email-campaigns.ts";
+import { unsubscribeToken, unsubscribeUrl } from "../src/email-unsubscribe-token.ts";
 import { feedbackProEmail } from "../src/email-campaign-feedback-pro.ts";
 import { agentRunAllowed as allowed } from "./support/agent-run-routes.mjs";
 
