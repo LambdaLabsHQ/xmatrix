@@ -6,13 +6,17 @@ import {
   DEFAULT_HUB_URL,
   HubError,
   countNeedsYou,
+  createConversation,
+  listSpaces,
+  sendMessage,
   freshAccessToken,
   pollDeviceSignIn,
   signOut,
   startDeviceSignIn,
+  tokenExpiresAt,
   withSession,
 } from "./hub-client.js";
-import { pagePassage } from "./passage.js";
+import { discussionHead, discussionTitle, pagePassage } from "./passage.js";
 
 const BADGE_ALARM = "needs-you";
 const SIGN_IN_ALARM = "sign-in";
@@ -45,7 +49,8 @@ function serial(call) {
   inFlight = run.catch(() => undefined);
   return run;
 }
-const authed = (call) => serial(() => withSession(deps, store, call));
+// Calls with a valid token run at once: the badge's catalog read must not hold up the panel or a question.
+const authed = (call) => withSession(deps, store, call);
 
 async function setBadge(count) {
   await chrome.action.setBadgeBackgroundColor({ color: "#b5832f" });
@@ -146,6 +151,58 @@ function openPanel(tab) {
   if (tab?.windowId !== undefined) chrome.sidePanel.open({ windowId: tab.windowId }).catch(() => undefined);
 }
 
+// ---- Quick ask: a question about a passage, started straight through the Hub.
+
+/**
+ * The Space a quick question goes to: the one last used, or the person's
+ * first. Remembered, so a question costs no Space lookup once one was asked;
+ * a Space that is gone is looked up again.
+ */
+async function quickAskSpace(token, { fresh = false } = {}) {
+  const { lastSpace } = await chrome.storage.local.get("lastSpace");
+  if (lastSpace?.id && !fresh) return lastSpace;
+  const spaces = await listSpaces(deps, token);
+  return spaces.find((space) => space.id === lastSpace?.id) ?? spaces[0] ?? null;
+}
+
+/**
+ * Starts a conversation holding the passage and the question, without waiting
+ * for the app: the panel then shows it. Mentioning an Agent hands it the work
+ * at once.
+ */
+async function quickAsk(tab, { text, question }) {
+  const passage = pagePassage({ text, title: tab.title, url: tab.url, target: "new" });
+  const asked = String(question ?? "").trim().slice(0, 8000);
+  if (!passage || !passage.text || !asked) throw new Error("Select some text and write a question.");
+  const session = await store.get();
+  if (!session) throw new Error("Sign in to xMatrix in the side panel first.");
+  const result = await authed(async (scoped, token) => {
+    const create = (space) => createConversation(scoped, token, {
+      spaceId: space.id, name: discussionTitle(passage.text), memberName: session.user?.name || "Human" });
+    let space = await quickAskSpace(token);
+    if (!space) throw new Error("You are not in any Space yet.");
+    let channel;
+    try {
+      channel = await create(space);
+    } catch (error) {
+      // The remembered Space may be gone or no longer ours: look the Spaces up once and retry.
+      if (!(error instanceof HubError) || ![403, 404].includes(error.status)) throw error;
+      space = await quickAskSpace(token, { fresh: true });
+      if (!space) throw new Error("You are not in any Space yet.");
+      channel = await create(space);
+    }
+    await sendMessage(scoped, token, { channelId: channel.id,
+      body: discussionHead(passage.text, { label: passage.label || new URL(passage.href).host, href: passage.href }) + asked,
+      clientMessageId: crypto.randomUUID() });
+    return { space, channel };
+  });
+  await chrome.storage.local.set({ lastSpace: { id: result.space.id, name: result.space.name } });
+  // The panel shows it: at once if its app is loaded, or opening straight onto it.
+  await chrome.storage.session.set({ openPath: {
+    path: `/app/${encodeURIComponent(result.space.id)}/${encodeURIComponent(result.channel.id)}`, at: Date.now() } });
+  return { spaceName: result.space.name };
+}
+
 // ---- Quick select: a small button beside selected text, on pages the person allowed.
 
 async function syncSelectionScript() {
@@ -174,8 +231,18 @@ const panelHandlers = {
     await chrome.alarms.clear(SIGN_IN_ALARM);
   },
   signOut: endSession,
-  token: () => serial(() => freshAccessToken(deps, store)),
+  async token() {
+    // The usual case answers from storage at once; only a renewal takes the queue.
+    const session = await store.get();
+    if (session && tokenExpiresAt(session.token) - Date.now() > 10 * 60 * 1000) return session.token;
+    return serial(() => freshAccessToken(deps, store));
+  },
   takePassages,
+  async takeOpenPath() {
+    const { openPath } = await chrome.storage.session.get("openPath");
+    await chrome.storage.session.remove("openPath");
+    return openPath && Date.now() - openPath.at < 60_000 ? openPath.path : null;
+  },
   queuePassage: ({ passage }) => queuePassage(pagePassage(passage ?? {})),
   quickSelect: () => chrome.permissions.contains({ origins: WEB_ORIGINS }),
 };
@@ -187,6 +254,13 @@ function isExtensionPage(sender) {
 chrome.runtime.onMessage.addListener((message, sender, reply) => {
   if (sender.id !== chrome.runtime.id) return false;
   // The selection button runs in web pages: it may only hand over a passage of its own tab.
+  if (message?.type === "quick-ask" && sender.tab) {
+    openPanel(sender.tab);
+    quickAsk(sender.tab, message)
+      .then((value) => reply({ ok: true, value }))
+      .catch((error) => reply({ ok: false, error: error instanceof Error ? error.message : String(error) }));
+    return true;
+  }
   if (message?.type === "chip" && sender.tab) {
     openPanel(sender.tab);
     queuePassage(pagePassage({ text: message.text, title: sender.tab.title, url: sender.tab.url, target: message.target }));

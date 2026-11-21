@@ -24,3 +24,11 @@ test("an unpacked build opens the beta Web and the store build the stable Web", 
   assert.equal(appOrigin({ key: "MIIB…" }), "https://beta.xmatrix.sh");
   assert.equal(appOrigin({}), "https://xmatrix.sh");
 });
+
+test("a quick question opens with the same quoted head the web app writes", async () => {
+  const { discussionHead, discussionTitle } = await import("../src/passage.js");
+  assert.equal(discussionHead("line one\n\nline two", { label: "Issue [12]", href: "https://a.example/x" }),
+    "> line one\n>\n> line two\n\n— [Issue \\[12\\]](https://a.example/x)\n\n");
+  assert.equal(discussionHead("q", { label: "", href: "https://a.example/a b" }), "> q\n\n— [source](<https://a.example/a b>)\n\n");
+  assert.equal(discussionTitle(`  ${"w".repeat(80)} `), `“${"w".repeat(59)}…”`);
+});
