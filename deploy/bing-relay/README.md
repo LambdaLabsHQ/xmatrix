@@ -23,11 +23,11 @@ small Cloud Run service instead. IndexNow is not relayed.
 
    ```sh
    git clone --depth 1 https://github.com/LambdaLabsHQ/xmatrix && cd xmatrix/deploy/bing-relay
-   TOKEN_SHA256=<sha256> bash deploy.sh
+   PROJECT=<project-id> TOKEN_SHA256=<sha256> bash deploy.sh
    ```
 
-   `PROJECT` (default `madebyrobot-usd-prepay`), `REGION` (`us-central1`) and
-   `SERVICE` (`bing-relay`) can be overridden. The script prints the service URL.
+   `PROJECT` is required; `REGION` (`us-central1`) and `SERVICE` (`bing-relay`)
+   can be overridden. The script prints the service URL.
 3. Store that URL as the GitHub `production` secret `CONNECTOR_BING_RELAY_URL`;
    the next Hub release injects both values. Check the Bing connection in Apps.
 

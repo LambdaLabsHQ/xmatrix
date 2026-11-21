@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Deploy the Bing egress relay to Cloud Run. Run as a project owner (for
-# example in Google Cloud Shell):   TOKEN_SHA256=<hex> bash deploy.sh
+# example in Google Cloud Shell):   PROJECT=<project-id> TOKEN_SHA256=<hex> bash deploy.sh
 # TOKEN_SHA256 is the SHA-256 of the Hub's CONNECTOR_BING_RELAY_TOKEN; it is
 # not a secret. Prints the service URL to store as CONNECTOR_BING_RELAY_URL.
 #
@@ -8,7 +8,7 @@
 # builder role, and the service runs as one holding no role, so the project's
 # default compute account is neither used nor granted anything.
 set -euo pipefail
-PROJECT="${PROJECT:-madebyrobot-usd-prepay}"
+PROJECT="${PROJECT:?set PROJECT to the Google Cloud project to deploy into}"
 REGION="${REGION:-us-central1}"
 SERVICE="${SERVICE:-bing-relay}"
 [[ "${TOKEN_SHA256:-}" =~ ^[a-f0-9]{64}$ ]] || { echo "TOKEN_SHA256 must be a lowercase hex SHA-256" >&2; exit 1; }
