@@ -1,5 +1,21 @@
 # Release Updates
 
+## Unreleased: the app can open in the xMatrix Chrome extension's side panel
+
+The Web may now be framed by one page only: the xMatrix Chrome extension's
+side panel (`chrome-extension://kaickfjmldmlelnfijaahialjpnebnak`, CSP
+`frame-ancestors`; `X-Frame-Options: DENY` still covers browsers without it).
+A frame in an extension page gets no site cookies, so in the panel the app
+signs in with a short-lived access token it asks the extension for over
+`postMessage`; the refresh token stays in the extension and nothing is stored
+in the frame. Messages are accepted only from that parent origin and frame,
+and posted only to it. The Web proxy accepts the client identity from request
+headers when its compatibility cookie is absent; the Hub still judges it. The
+extension can hand the app a passage of the page being read, which the app
+quotes in the open conversation or starts a new conversation with, as a
+passage of a message does. Web only. Recovery is a CI-validated beta
+reverting this change.
+
 ## Unreleased: Chrome Web Store listing for the extension; privacy policy covers it
 
 The privacy policy (section 11) now says what the xMatrix Chrome extension
