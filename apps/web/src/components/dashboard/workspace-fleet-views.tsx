@@ -1288,7 +1288,9 @@ export function AppsView({
           method: "POST",
           // A shell that takes the grant back says so; the browser then returns to it instead of finishing itself.
           body: { ...(connector.id === "x" && options?.xAccountId ? { accountId: options.xAccountId } : {}),
-            ...(getDesktopBridge()?.connectReturn ? { returnTo: "desktop" } : {}) },
+            ...(getDesktopBridge()?.connectReturn ? { returnTo: "desktop" } : {}),
+            // The Hub returns a connect started on the beta Web there; it ignores any other origin.
+            returnOrigin: window.location.origin },
         });
         if (!started.url) throw unexpectedResponse("The sign-in link");
         window.location.assign(started.url);
