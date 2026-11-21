@@ -12,6 +12,7 @@ import { getDesktopBridge } from "@/lib/desktop/bridge";
 import { xmatrixApiRequest } from "@/lib/query/api-client";
 import { xmatrixQueryKeys } from "@/lib/query/query-keys";
 import { userErrorMessage } from "@/lib/user-facing-error";
+import { normalizeSecretCatalogList } from "./secret-catalog";
 import {
   ConnectorAction, ConnectorCopyLine, ConnectorField, ConnectorFold, ConnectorRow, ConnectorRows, ConnectorSection,
 } from "./connector-page";
@@ -86,7 +87,7 @@ export function useCredentialStore({ connector, connection, spaceId, token, user
   });
   const save = useMutation({
     mutationKey: [...key, "put"],
-    mutationFn: async (body: { fields?: Record<string, string | null>; regenerate?: string[] }) => {
+    mutationFn: async (body: { fields?: Record<string, string | null>; fromSecrets?: Record<string, string>; regenerate?: string[] }) => {
       await beforeSave();
       return xmatrixApiRequest<CredentialView>({ url, method: "PUT", token, body });
     },
@@ -177,6 +178,48 @@ export function ConnectorCredentialForm({ submitLabel = "Save and connect", ...i
   );
 }
 
+/** The Space's saved secrets, for an admin filling a credential from one; values are never listed. */
+function useSpaceSecrets(spaceId: string, token: string, userId: string) {
+  return useQuery({
+    queryKey: xmatrixQueryKeys.domain({ userId }, "space-secrets", [spaceId]),
+    queryFn: ({ signal }) => xmatrixApiRequest<{ secrets?: unknown[]; canManage?: boolean }>({
+      url: WEB_PROXY_ROUTES.space_secrets(spaceId), token, signal,
+    }).then(normalizeSecretCatalogList),
+  });
+}
+
+/** Choose one of the Space's secrets to become this field's value, read by the Hub and never shown. */
+function SecretChoice({ secrets, busy, save, children }: {
+  secrets: { secretRef: string; envName: string; description?: string | null }[];
+  busy: boolean;
+  save: (secretRef: string) => Promise<unknown>;
+  children?: ReactNode;
+}) {
+  const [chosen, setChosen] = useState(secrets[0]?.secretRef ?? "");
+  return (
+    <form className="mt-2 flex flex-wrap items-center gap-2" onSubmit={(event) => {
+      event.preventDefault();
+      if (chosen) void save(chosen).catch(() => undefined);
+    }}>
+      <select aria-label="Saved secret" value={chosen} onChange={(event) => setChosen(event.target.value)} autoFocus
+        className="h-8 min-w-[16rem] rounded-md border border-input bg-background px-2 text-[13px]">
+        {secrets.map((secret) => (
+          <option key={secret.secretRef} value={secret.secretRef}>
+            {secret.secretRef}{secret.envName && secret.envName !== secret.secretRef ? ` (${secret.envName})` : ""}
+          </option>
+        ))}
+      </select>
+      <button type="submit" disabled={busy || !chosen} className={actionClass({ variant: "secondary", size: "sm" })}>
+        {busy ? <AnimatedIcon icon={Loader2} className="size-3.5 animate-spin" /> : <KeyRound className="size-3.5" />} Use it
+      </button>
+      {children}
+      <p className="basis-full text-[12px] leading-[1.45] text-muted-foreground">
+        The Hub copies the secret&apos;s current value into this connection and checks it; the value is not shown.
+      </p>
+    </form>
+  );
+}
+
 /**
  * A connected app's saved credentials, a row each: whether it is set, and
  * Replace, which opens that one field. A value is never shown back.
@@ -185,6 +228,9 @@ export function ConnectorCredentialRows(input: CredentialStoreInput) {
   const { connector } = input;
   const { view, save, stored } = useCredentialStore(input);
   const [editing, setEditing] = useState<string | null>(null);
+  const [fromSecret, setFromSecret] = useState<string | null>(null);
+  const catalog = useSpaceSecrets(input.spaceId, input.token, input.userId);
+  const secrets = catalog.data?.canManage ? catalog.data.secrets : [];
   const error = userErrorMessage(save.error, "Couldn't save the credentials") ??
     userErrorMessage(view.error, "Couldn't load the credentials");
   return (
@@ -194,11 +240,24 @@ export function ConnectorCredentialRows(input: CredentialStoreInput) {
           <ConnectorRow key={field.id} title={field.label}
             meta={field.plain && view.data?.plain?.[field.id] ? view.data.plain[field.id]
               : stored.has(field.id) ? "Saved" : field.required ? "Required, not set" : "Not set"}
-            trailing={editing === field.id ? null : (
-              <ConnectorAction disabled={save.isPending} onClick={() => setEditing(field.id)}>
-                {stored.has(field.id) ? field.plain ? "Change" : "Replace" : "Add"}
-              </ConnectorAction>
+            trailing={editing === field.id || fromSecret === field.id ? null : (
+              <div className="flex flex-wrap items-center gap-1">
+                <ConnectorAction disabled={save.isPending} onClick={() => { setFromSecret(null); setEditing(field.id); }}>
+                  {stored.has(field.id) ? field.plain ? "Change" : "Replace" : "Add"}
+                </ConnectorAction>
+                {!field.plain && secrets.length > 0 ? (
+                  <ConnectorAction disabled={save.isPending} onClick={() => { setEditing(null); setFromSecret(field.id); }}>
+                    Use a saved secret
+                  </ConnectorAction>
+                ) : null}
+              </div>
             )}>
+            {fromSecret === field.id ? (
+              <SecretChoice secrets={secrets} busy={save.isPending}
+                save={(secretRef) => save.mutateAsync({ fromSecrets: { [field.id]: secretRef } }).then(() => setFromSecret(null))}>
+                <ConnectorAction onClick={() => setFromSecret(null)}>Cancel</ConnectorAction>
+              </SecretChoice>
+            ) : null}
             {editing === field.id ? (
               <CredentialValueForm field={field} busy={save.isPending} saving={save.isPending} submitLabel="Save" autoFocus
                 className="mt-2 flex flex-wrap items-center gap-2" plain={field.plain} initialValue={view.data?.plain?.[field.id]}
