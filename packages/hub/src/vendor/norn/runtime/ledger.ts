@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // The ledger is the only durable state (spec §9, §11). A program keeps no
 // snapshot: every pass evaluates it from the top against the ledger and
 // reports which requests should exist now. Nothing here dispatches anything.
@@ -848,7 +848,12 @@ interface LoopState {
     value: Value;
     streamTaken?: { stream: string; next: number };
     timerAt?: number;
+    partKey?: string;
   } | null;
+  /** Queued occurrences frozen by `~each=Batch` or partitioned by `~per`. */
+  pendingQueue?: { roundKey: string; at: number; value: Value; partKey?: string }[];
+  /** Concurrent in-flight rounds driven by `~each=Together`. */
+  activeRounds?: { roundKey: string; at: number; value: Value; partKey?: string }[];
 }
 
 /** Resolves an address through explicit `moved` entries (including scope prefix moves inside `kind:<scope>/...` keys). */
@@ -1043,9 +1048,12 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     if (name === "withinEnter") {
       const limit = instant(args[0], now);
       if (limit === null) throw new ProgramError("within needs a deadline");
-      const effective = deadlineStack.length ? Math.min(deadlineStack.at(-1)!, limit) : limit;
+      const withinKey = identity("within", { limit: args[0] });
+      const anchored = entry(withinKey, () => ({ at: now, value: limit }));
+      const anchoredLimit = Number(anchored.value);
+      const effective = deadlineStack.length ? Math.min(deadlineStack.at(-1)!, anchoredLimit) : anchoredLimit;
       deadlineStack.push(effective);
-      return { value: unit, at: now };
+      return { value: unit, at: anchored.at };
     }
     if (name === "withinExit") {
       deadlineStack.pop();
@@ -1244,6 +1252,128 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
       const state = structuredClone(rawEntry.value as unknown as LoopState);
 
       const eachStrategy = effect.eachStrategy ?? "Latest";
+      const partitionOf = (val: Value): string | undefined => {
+        if (!effect.perKey) return undefined;
+        try {
+          return show(runPure(code, effect.perKey, val, activeMachine, now));
+        } catch (error) {
+          throw new ProgramError(error instanceof Error ? error.message : String(error));
+        }
+      };
+
+      // Concurrent `~each=Together`: ingest every arrived occurrence into `state.activeRounds`
+      // and drive each in-flight round in its own isolated scope on every pass.
+      if (eachStrategy === "Together") {
+        if (!effect.callback) throw new ProgramError("forEach ~each=Together requires a callback");
+        const provisionalBegan = state.lastTimerAt ?? state.startedAt;
+        let detailed = detailedTargetsOf(ledger, args[0], provisionalBegan);
+        const nextSpec = timerSpecOf(detailed);
+        let began = provisionalBegan;
+        if (state.timerSpec !== null && state.timerSpec !== nextSpec) {
+          began = Math.max(provisionalBegan, now);
+          state.lastTimerAt = began;
+          state.timerSpec = nextSpec;
+          detailed = detailedTargetsOf(ledger, args[0], began);
+        } else if (state.timerSpec === null) {
+          state.timerSpec = nextSpec;
+        }
+        if (!permitted()) return revoked();
+        const targets = detailed.map(item => item.target);
+        const scanStates = loadScanStates(storageKey);
+        const activeRounds = [...(state.activeRounds ?? [])];
+        let loopNextDue: number | null = null;
+        const trackDue = (at: number): void => {
+          due(at);
+          if (at > now && (loopNextDue === null || at < loopNextDue)) loopNextDue = at;
+        };
+        for (const item of detailed) {
+          const { target, ops, timer } = item;
+          if (target.kind === "timer") {
+            let tickAt = target.at;
+            const period = timer?.kind === "every" ? timer.period : 0;
+            let guard = 0;
+            while (tickAt <= now && guard++ < 10_000) {
+              if (!state.sealedTimerInstants.includes(tickAt)) {
+                const transformed = applyOps(code, activeMachine, { type: "time", value: String(tickAt) }, ops, now, tickAt, scanStates);
+                state.sealedTimerInstants.push(tickAt);
+                if (transformed !== null) {
+                  activeRounds.push({ roundKey: `timer@${tickAt}`, at: tickAt, value: transformed, partKey: partitionOf(transformed) });
+                  log.push({ kind: "waited", targets, until: null, at: tickAt, value: transformed });
+                }
+              }
+              if (period <= 0) { tickAt = Number.POSITIVE_INFINITY; break; }
+              tickAt += period;
+            }
+            if (Number.isFinite(tickAt) && tickAt > now) trackDue(tickAt);
+          } else if (target.kind === "stream") {
+            const streamKey = eventKey(target.source);
+            const from = state.streams[streamKey] ?? state.from;
+            const arrived = ledger.occurrences.flatMap((occurrence, index) => index >= from && occurrence.key === streamKey ? [{ ...occurrence, index }] : []);
+            if (!arrived.length) continue;
+            const streamDigest = sha256(streamKey).slice(0, 12);
+            const lastIndex = arrived.at(-1)!.index;
+            for (const occurrence of arrived) {
+              const transformed = applyOps(code, activeMachine, occurrence.value, ops, now, occurrence.at, scanStates);
+              if (transformed !== null) {
+                activeRounds.push({
+                  roundKey: `stream:${streamDigest}#${occurrence.index}`,
+                  at: occurrence.at,
+                  value: transformed,
+                  partKey: partitionOf(transformed),
+                });
+                log.push({ kind: "waited", targets, until: null, at: occurrence.at, value: transformed });
+              }
+            }
+            state.streams[streamKey] = Math.max(state.streams[streamKey] ?? state.from, lastIndex + 1);
+          }
+        }
+        saveScanStates(storageKey, scanStates);
+
+        const stillOpenRounds: typeof activeRounds = [];
+        for (const round of activeRounds) {
+          const prevMachine = activeMachine;
+          const childMachine = startClosure(code, effect.callback, [round.value], prevMachine, now);
+          scopeStack.push(`${displayKey}/round:${round.roundKey}`);
+          activeMachine = childMachine;
+          const outcome = driveMachine(childMachine);
+          activeMachine = prevMachine;
+          scopeStack.pop();
+          if (outcome.kind === "done") {
+            const isFailureOutcome = outcome.value.type === "variant" &&
+              (["NoReply", "Cancelled", "Revoked"].includes(outcome.value.name) ||
+               ((outcome.value.name === "Refused" || outcome.value.name === "Broke") && outcome.value.args.length === 1 && outcome.value.args[0]?.type === "string"));
+            if (isFailureOutcome) {
+              const rKey = identity("report", { round: round.roundKey, outcome: outcome.value });
+              if (!ledger.entries[rKey]) log.push({ kind: "handlerFailed", reply: outcome.value });
+              entry(rKey, () => ({ at: now, value: outcome.value as unknown as Json }));
+            }
+            state.sealedRounds += 1;
+          } else if (outcome.kind === "failed") {
+            const replyVal = outcome.outcome ?? variant("Broke", text(outcome.error ?? "Round failed"));
+            const rKey = identity("report", { round: round.roundKey, outcome: replyVal });
+            if (!ledger.entries[rKey]) log.push({ kind: "handlerFailed", reply: replyVal });
+            entry(rKey, () => ({ at: now, value: replyVal as unknown as Json }));
+            state.sealedRounds += 1;
+          } else {
+            stillOpenRounds.push(round);
+          }
+        }
+        state.activeRounds = stillOpenRounds;
+        if (!state.waitingLogged) {
+          log.push({ kind: "waiting", targets, until: null });
+          state.waitingLogged = true;
+        }
+        ledger.entries[storageKey] = { at: now, value: state as unknown as Json };
+        pass.loops.push({
+          key: displayKey,
+          sealedRounds: state.sealedRounds,
+          activeRound: stillOpenRounds[0]?.roundKey ?? null,
+          nextDue: loopNextDue,
+        });
+        pass.waiting = { targets, until: null };
+        return null;
+      }
+
       if (effect.loop === "continues") {
         // Seal the finished round atomically before checking for the next occurrence.
         scopeStack.pop();
@@ -1264,15 +1394,23 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
           ledger.entries[storageKey] = { at: now, value: state as unknown as Json };
         }
       } else if (state.active) {
-        // Under `~each=Restart`, if a newer occurrence has arrived on any listened stream, cancel the active round and restart.
+        // Under `~each=Restart`, if a newer occurrence has arrived on any listened stream
+        // (matching `~per` partition when set), cancel the active round and restart.
         let restarted = false;
         if (eachStrategy === "Restart") {
           const checkDetailed = detailedTargetsOf(ledger, args[0], state.lastTimerAt ?? state.startedAt);
+          const scanCheck = loadScanStates(storageKey);
           const hasNewer = checkDetailed.some(item => {
             if (item.target.kind !== "stream") return false;
             const streamKey = eventKey(item.target.source);
             const activeNext = state.active?.streamTaken?.stream === streamKey ? state.active.streamTaken.next : (state.streams[streamKey] ?? state.from);
-            return ledger.occurrences.some((occ, idx) => idx >= activeNext && occ.key === streamKey);
+            const newer = ledger.occurrences.filter((occ, idx) => idx >= activeNext && occ.key === streamKey);
+            if (!newer.length) return false;
+            if (!effect.perKey) return true;
+            return newer.some(occ => {
+              const transformed = applyOps(code, activeMachine, occ.value, item.ops, now, occ.at, new Map(scanCheck));
+              return transformed !== null && partitionOf(transformed) === state.active?.partKey;
+            });
           });
           if (hasNewer) {
             const activePrefix = `request:${displayKey}/round:${state.active.roundKey}/`;
@@ -1303,6 +1441,27 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
         }
       }
 
+      // Drain any frozen `~each=Batch` / partitioned `~per` queue before polling new arrivals.
+      if (state.pendingQueue?.length) {
+        const nextQueued = state.pendingQueue.shift()!;
+        const detailed = detailedTargetsOf(ledger, args[0], state.lastTimerAt ?? state.startedAt);
+        const targets = detailed.map(item => item.target);
+        if (!state.waitingLogged) log.push({ kind: "waiting", targets, until: null });
+        state.waitingLogged = true;
+        state.active = {
+          roundKey: nextQueued.roundKey,
+          at: nextQueued.at,
+          value: nextQueued.value,
+          ...(nextQueued.partKey !== undefined ? { partKey: nextQueued.partKey } : {}),
+        };
+        ledger.entries[storageKey] = { at: now, value: state as unknown as Json };
+        scopeStack.push(`${displayKey}/round:${nextQueued.roundKey}`);
+        pass.loops.push({ key: displayKey, sealedRounds: state.sealedRounds, activeRound: nextQueued.roundKey, nextDue: null });
+        log.push({ kind: "waited", targets, until: null, at: nextQueued.at, value: nextQueued.value });
+        lastWaitEvaluated = true;
+        return { value: nextQueued.value, at: Math.max(nextQueued.at, state.lastTimerAt ?? state.startedAt) };
+      }
+
       // Select the next occurrence for this loop.
       const provisionalBegan = state.lastTimerAt ?? state.startedAt;
       let detailed = detailedTargetsOf(ledger, args[0], provisionalBegan);
@@ -1320,7 +1479,7 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
 
       if (!permitted()) return revoked();
       const targets = detailed.map(item => item.target);
-      const candidates: Candidate[] = [];
+      const candidates: (Candidate & { queuedRest?: { roundKey: string; at: number; value: Value; partKey?: string }[]; partKey?: string })[] = [];
       const rejectedStreamProgress = new Map<string, number>();
       const scanStates = loadScanStates(storageKey);
       let loopNextDue: number | null = null;
@@ -1387,24 +1546,51 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
               rejectedStreamProgress.set(streamKey, lastIndex + 1);
             }
           } else {
-            const matched: { at: number; index: number; value: Value }[] = [];
+            const matched: { at: number; index: number; value: Value; partKey?: string }[] = [];
             for (const occurrence of arrived) {
               const transformed = applyOps(code, activeMachine, occurrence.value, ops, now, occurrence.at, scanStates);
               if (transformed !== null) {
-                matched.push({ at: occurrence.at, index: occurrence.index, value: transformed });
+                matched.push({ at: occurrence.at, index: occurrence.index, value: transformed, partKey: partitionOf(transformed) });
                 if (eachStrategy === "Queue") break;
               }
             }
             if (matched.length) {
-              const first = matched[0], latest = matched.at(-1)!;
-              const picked = eachStrategy === "Queue" ? first : latest;
-              const nextCursor = eachStrategy === "Queue" ? picked.index + 1 : lastIndex + 1;
-              candidates.push({
-                at: picked.at, value: picked.value, rank: 2,
-                taken: { stream: streamKey, next: nextCursor },
-                roundKey: `stream:${streamDigest}#${picked.index}`,
-                evaluated: true,
-              });
+              if (eachStrategy === "Batch") {
+                const [first, ...rest] = matched;
+                candidates.push({
+                  at: first!.at, value: first!.value, rank: 2,
+                  taken: { stream: streamKey, next: lastIndex + 1 },
+                  roundKey: `stream:${streamDigest}#${first!.index}`,
+                  partKey: first!.partKey,
+                  queuedRest: rest.map(m => ({ roundKey: `stream:${streamDigest}#${m.index}`, at: m.at, value: m.value, ...(m.partKey !== undefined ? { partKey: m.partKey } : {}) })),
+                  evaluated: true,
+                });
+              } else if (effect.perKey && (eachStrategy === "Latest" || eachStrategy === "Restart")) {
+                // Collapse burst per partition key so distinct partitions never drop each other's events.
+                const byPart = new Map<string, (typeof matched)[number]>();
+                for (const m of matched) byPart.set(m.partKey ?? "", m);
+                const collapsed = [...byPart.values()].sort((a, b) => a.index - b.index);
+                const [first, ...rest] = collapsed;
+                candidates.push({
+                  at: first!.at, value: first!.value, rank: 2,
+                  taken: { stream: streamKey, next: lastIndex + 1 },
+                  roundKey: `stream:${streamDigest}#${first!.index}`,
+                  partKey: first!.partKey,
+                  queuedRest: rest.map(m => ({ roundKey: `stream:${streamDigest}#${m.index}`, at: m.at, value: m.value, ...(m.partKey !== undefined ? { partKey: m.partKey } : {}) })),
+                  evaluated: true,
+                });
+              } else {
+                const first = matched[0], latest = matched.at(-1)!;
+                const picked = eachStrategy === "Queue" ? first : latest;
+                const nextCursor = eachStrategy === "Queue" ? picked.index + 1 : lastIndex + 1;
+                candidates.push({
+                  at: picked.at, value: picked.value, rank: 2,
+                  taken: { stream: streamKey, next: nextCursor },
+                  roundKey: `stream:${streamDigest}#${picked.index}`,
+                  partKey: picked.partKey,
+                  evaluated: true,
+                });
+              }
             } else {
               rejectedStreamProgress.set(streamKey, lastIndex + 1);
             }
@@ -1433,12 +1619,16 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
 
       if (!state.waitingLogged) log.push({ kind: "waiting", targets, until: null });
       state.waitingLogged = true;
+      if (winner.queuedRest?.length) {
+        state.pendingQueue = [...(state.pendingQueue ?? []), ...winner.queuedRest];
+      }
       state.active = {
         roundKey: winner.roundKey!,
         at: winner.at,
         value: winner.value,
         ...(winner.taken ? { streamTaken: winner.taken } : {}),
         ...(winner.timerAt !== undefined ? { timerAt: winner.timerAt } : {}),
+        ...(winner.partKey !== undefined ? { partKey: winner.partKey } : {}),
       };
       ledger.entries[storageKey] = { at: now, value: state as unknown as Json };
       const roundScope = `${displayKey}/round:${winner.roundKey!}`;
@@ -1450,6 +1640,9 @@ export function* slices(code: Code, source: Ledger, now: number, options: PassOp
     }
 
     // --- Legacy v1 `forEach` bookkeeping (only for unmigrated v1 ledgers) ---
+    if (!v2 && effect.loop && ((effect.eachStrategy && effect.eachStrategy !== "Latest") || effect.perKey)) {
+      throw new ProgramError(`forEach ~each=${effect.eachStrategy ?? "Latest"}${effect.perKey ? " / ~per" : ""} requires an identityScheme 2 ledger; migrate this v1 ledger first`);
+    }
     const loop = !v2 && effect.loop ? `forEach:${sha256(eventKey(args[0])).slice(0, 16)}` : null;
     if (loop) {
       const handled = `${loop}/handled`;
@@ -2035,6 +2228,7 @@ export function migrateLedger(code: Code, legacy: Ledger, now: number): Migratio
 export type MigrationStep =
   | { kind: "advance"; at: number }
   | { kind: "occur"; stream: Value; value: Value; at: number }
+  | { kind: "reply"; requestId: string; holder?: string; reply: Reply; at: number; epoch?: number }
   | { kind: "settleAll"; reply: Reply; at: number }
   | { kind: "edit"; code: Code; at: number }
   | { kind: "restart"; at: number };
@@ -2042,6 +2236,9 @@ export type MigrationStep =
 export interface DispatchedRecord { step: number; at: number; id: string; verb: string; holder: string; text: string }
 export interface MigrationReport {
   ok: boolean;
+  /** False when no forward-advancing steps were executed (never claim verified on an empty trace). */
+  verified: boolean;
+  stepsExecuted: number;
   migration: MigrationResult;
   legacyDispatched: DispatchedRecord[];
   migratedDispatched: DispatchedRecord[];
@@ -2051,13 +2248,25 @@ export interface MigrationReport {
 /**
  * Forward-advancing migration verifier: starts from one legacy snapshot and
  * drives both the legacy v1 evaluator and the migrated v2 evaluator through
- * clock advances, events, replies, edits, and JSON restarts, comparing actual
- * dispatched requests at every step.
+ * clock advances, events, replies (by original request ID & epoch), edits, and
+ * JSON restarts, comparing actual dispatched requests and status at every step.
+ * Empty step traces fail closed (`ok: false, verified: false`).
  */
 export function verifyMigration(initialCode: Code, legacySnapshot: Ledger, at: number, steps: readonly MigrationStep[]): MigrationReport {
   const migration = migrateLedger(initialCode, legacySnapshot, at);
   if (!migration.ok) {
-    return { ok: false, migration, legacyDispatched: [], migratedDispatched: [], differences: [migration.reason] };
+    return { ok: false, verified: false, stepsExecuted: 0, migration, legacyDispatched: [], migratedDispatched: [], differences: [migration.reason] };
+  }
+  if (steps.length === 0) {
+    return {
+      ok: false,
+      verified: false,
+      stepsExecuted: 0,
+      migration,
+      legacyDispatched: [],
+      migratedDispatched: [],
+      differences: ["Unverified: no forward-advancing replay steps were provided"],
+    };
   }
   let legacyLedger = structuredClone(legacySnapshot);
   let migratedLedger = structuredClone(migration.ledger);
@@ -2075,16 +2284,37 @@ export function verifyMigration(initialCode: Code, legacySnapshot: Ledger, at: n
     if (sig(p1.opened) !== sig(p2.opened)) {
       differences.push(`step ${stepIndex} (at ${now}): legacy opened [${sig(p1.opened)}], migrated opened [${sig(p2.opened)}]`);
     }
+    if (p1.status !== p2.status) {
+      differences.push(`step ${stepIndex} (at ${now}): legacy status=${p1.status}, migrated status=${p2.status}`);
+    }
   };
 
+  let stepsExecuted = 0;
   steps.forEach((step, index) => {
     if (step.kind === "advance") {
+      stepsExecuted += 1;
       runBoth(index, step.at);
     } else if (step.kind === "occur") {
+      stepsExecuted += 1;
       occur(legacyLedger, step.stream, step.value, step.at);
       occur(migratedLedger, step.stream, step.value, step.at);
       runBoth(index, step.at);
+    } else if (step.kind === "reply") {
+      stepsExecuted += 1;
+      const r1 = legacyLedger.requests[step.requestId];
+      const r2 = migratedLedger.requests[step.requestId];
+      const h1 = step.holder ?? r1?.candidates?.[0] ?? r1?.holder ?? "";
+      const h2 = step.holder ?? r2?.candidates?.[0] ?? r2?.holder ?? "";
+      const e1 = step.epoch ?? r1?.epoch;
+      const e2 = step.epoch ?? r2?.epoch;
+      const s1 = r1 ? settle(legacyLedger, step.requestId, h1, step.reply, step.at, e1) : false;
+      const s2 = r2 ? settle(migratedLedger, step.requestId, h2, step.reply, step.at, e2) : false;
+      if (s1 !== s2 || !r1 || !r2) {
+        differences.push(`step ${index} (reply ${step.requestId} at ${step.at}): legacy settled=${s1}, migrated settled=${s2}`);
+      }
+      runBoth(index, step.at);
     } else if (step.kind === "settleAll") {
+      stepsExecuted += 1;
       for (const req of Object.values(legacyLedger.requests)) {
         if (req.reply === null && !req.detached) settle(legacyLedger, req.id, req.candidates?.[0] ?? req.holder, step.reply, step.at, req.epoch);
       }
@@ -2093,14 +2323,19 @@ export function verifyMigration(initialCode: Code, legacySnapshot: Ledger, at: n
       }
       runBoth(index, step.at);
     } else if (step.kind === "edit") {
+      stepsExecuted += 1;
       currentCode = step.code;
       runBoth(index, step.at);
     } else if (step.kind === "restart") {
+      stepsExecuted += 1;
       legacyLedger = JSON.parse(JSON.stringify(legacyLedger)) as Ledger;
       migratedLedger = JSON.parse(JSON.stringify(migratedLedger)) as Ledger;
       runBoth(index, step.at);
+    } else {
+      differences.push(`step ${index}: unknown migration replay step kind "${String((step as { kind?: unknown }).kind)}"`);
     }
   });
 
-  return { ok: differences.length === 0, migration, legacyDispatched, migratedDispatched, differences };
+  const verified = stepsExecuted > 0;
+  return { ok: verified && differences.length === 0, verified, stepsExecuted, migration, legacyDispatched, migratedDispatched, differences };
 }

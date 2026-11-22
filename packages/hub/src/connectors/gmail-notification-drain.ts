@@ -2,6 +2,8 @@ import type { GmailRoutingJob } from "@xmatrix/db";
 import type { Env } from "../types";
 import { dispatchProductMessageAppend } from "../product-message-append";
 import { connectorEventArrived } from "../outside-events";
+import { hasWaitingNornProgram } from "../norn-events";
+import { appStream, eventsStream } from "../norn-host";
 import { extractGmailEventData } from "../norn-libraries";
 import { connectorAppRepository, connectorCredentialRepository, gmailRoutingRepository } from "./credentials";
 import { appendToRoutes, connectorEventMessageId } from "./event-ingress";
@@ -46,17 +48,26 @@ async function deliver(env: Env, job: GmailRoutingJob, id: string, read: { crede
   // A Gmail read can outlast the claim lease; keep the lease this pass already holds.
   await repository.heartbeat(job);
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
-  const eventId = `${job.id}:${id}`, feature = "message.received";
+  const eventId = `${job.id}:${id}`, feature = "message.received", sourceRef = `gmail:${job.selection.address}`;
   const targets = await routes(env, job, feature);
-  const autoRead = targets.length ? await autoReadGmailMessage(env, { job, id, ...read }) : undefined;
+  const nornListening = await hasWaitingNornProgram(env, {
+    spaceId: job.spaceId,
+    matches: stream => appStream("gmail", feature)(stream) || eventsStream("gmail", feature, sourceRef)(stream),
+    allowed: async program => program.authorityUserId === job.userId,
+  });
+  const autoRead = (targets.length || nornListening) ? await autoReadGmailMessage(env, { job, id, ...read }) : undefined;
   // Ownership can change while Gmail answers; a stale read is never stored or announced.
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");
+  // When an authorized Norn program listens for Gmail events, require structured headers before marking delivered so transient read failures retry cleanly.
+  if (nornListening && (!autoRead || "unread" in autoRead)) {
+    throw new ProviderRequestError(503, "Gmail message metadata could not be read for Norn listener; retry pending");
+  }
   const privateRead = autoRead && "detail" in autoRead ? autoRead.detail : undefined;
   // Every copy is stored before any notification names it, so a retry never posts one without its result.
   if (privateRead !== undefined) await Promise.all(targets.map(route => writeConnectorPrivateResult(env, { channelId: route.channelId,
     spaceId: job.spaceId, ownerUserId: job.userId, messageId: connectorEventMessageId("gmail", eventId, route.channelId), detail: privateRead })));
   const body = `A new Gmail message is available in ${job.selection.address}. Read it with @gmail:read:${id}.`;
-  const event = { eventId, sourceRef: `gmail:${job.selection.address}`, feature,
+  const event = { eventId, sourceRef, feature,
     summary: "A new Gmail message is available", body: autoRead && "unread" in autoRead ? `${body} ${autoRead.unread}` : body };
   await post(env, job, event, feature, targets, privateRead === undefined ? undefined : { xmatrixPrivateConnectorResultOwner: job.userId });
   if (!await repository.current(job)) throw new ProviderRequestError(409,"Mailbox access changed");

@@ -21,7 +21,7 @@ import type { Value } from "./vendor/norn/runtime/value";
 
 interface GitHubOutsideEvent {
   id: string;
-  kind: "merged" | "ci-failed" | "issue-opened";
+  kind: "merged" | "ci-failed" | "issue-opened" | "workflow-completed" | "pull-closed";
   summary: string;
   url?: string;
   repository: string;
@@ -29,6 +29,8 @@ interface GitHubOutsideEvent {
   defaultBranch: string;
   installationId: string;
   workflow?: string;
+  conclusion?: string;
+  merged?: boolean;
   pullRequest?: number;
   title?: string;
   author?: string;
@@ -76,25 +78,42 @@ export function githubOutsideEvent(event: string, payload: Record<string, unknow
   const installationId = text(record(payload.installation).id);
   if (!name || !installationId) return undefined;
   const base = { repository: name, defaultBranch: text(repository.default_branch) || "main", installationId };
-  if (event === "pull_request" && payload.action === "closed" && record(payload.pull_request).merged === true) {
+  if (event === "pull_request" && payload.action === "closed") {
     const pull = record(payload.pull_request);
     const number = Number(pull.number);
     const branch = text(record(pull.base).ref);
     const title = text(pull.title).slice(0, 120);
+    const merged = pull.merged === true;
     if (!Number.isSafeInteger(number) || !branch) return undefined;
-    return { ...base, kind: "merged", branch, pullRequest: number, id: `github:${name}#${number}:merged`,
-      summary: `Pull request #${number} “${title}” was merged into ${branch}`,
-      ...(text(pull.html_url) ? { url: text(pull.html_url) } : {}) };
+    return {
+      ...base,
+      kind: merged ? "merged" : "pull-closed",
+      branch,
+      pullRequest: number,
+      merged,
+      ...(title ? { title } : {}),
+      id: `github:${name}#${number}:${merged ? "merged" : "closed"}`,
+      summary: merged ? `Pull request #${number} “${title}” was merged into ${branch}` : `Pull request #${number} “${title}” was closed on ${branch}`,
+      ...(text(pull.html_url) ? { url: text(pull.html_url) } : {}),
+    };
   }
-  if (event === "workflow_run" && payload.action === "completed" &&
-      record(payload.workflow_run).conclusion === "failure") {
+  if (event === "workflow_run" && payload.action === "completed") {
     const run = record(payload.workflow_run);
     const branch = text(run.head_branch);
     const workflow = text(run.name);
+    const conclusion = text(run.conclusion) || "unknown";
     if (!branch || !text(run.id)) return undefined;
-    return { ...base, kind: "ci-failed", branch, workflow, id: `github:run:${text(run.id)}:${text(run.run_attempt) || "1"}`,
-      summary: `Workflow “${workflow.slice(0, 120)}” failed on ${branch}`,
-      ...(text(run.html_url) ? { url: text(run.html_url) } : {}) };
+    const failed = conclusion === "failure";
+    return {
+      ...base,
+      kind: failed ? "ci-failed" : "workflow-completed",
+      branch,
+      workflow,
+      conclusion,
+      id: `github:run:${text(run.id)}:${text(run.run_attempt) || "1"}`,
+      summary: failed ? `Workflow “${workflow.slice(0, 120)}” failed on ${branch}` : `Workflow “${workflow.slice(0, 120)}” completed (${conclusion}) on ${branch}`,
+      ...(text(run.html_url) ? { url: text(run.html_url) } : {}),
+    };
   }
   if (event === "issues" && payload.action === "opened") {
     const issue = record(payload.issue);
@@ -125,7 +144,7 @@ function githubCloudEvent(arrived: GitHubOutsideEvent): CloudEventInput {
       }),
     };
   }
-  if (arrived.kind === "ci-failed") {
+  if (arrived.kind === "ci-failed" || arrived.kind === "workflow-completed") {
     return {
       app: "github",
       kind: "workflow_run.completed",
@@ -133,7 +152,7 @@ function githubCloudEvent(arrived: GitHubOutsideEvent): CloudEventInput {
       id: arrived.id,
       data: toNornValue({
         workflow: arrived.workflow ?? "",
-        conclusion: "failure",
+        conclusion: arrived.conclusion ?? (arrived.kind === "ci-failed" ? "failure" : "unknown"),
         branch: arrived.branch,
         defaultBranch: arrived.defaultBranch,
         url: arrived.url ?? "",
@@ -148,7 +167,7 @@ function githubCloudEvent(arrived: GitHubOutsideEvent): CloudEventInput {
     data: toNornValue({
       number: arrived.pullRequest ?? 0,
       title: arrived.title ?? arrived.summary,
-      merged: true,
+      merged: arrived.merged ?? arrived.kind === "merged",
       branch: arrived.branch,
       defaultBranch: arrived.defaultBranch,
       url: arrived.url ?? "",
@@ -182,12 +201,13 @@ const inWords = (event: { summary: string; url?: string }): string =>
 /** A GitHub webhook arrived. */
 export async function githubEventArrived(env: Env, event: string, payload: Record<string, unknown>): Promise<void> {
   const arrived = githubOutsideEvent(event, payload);
-  // A program's GitHub branch streams are about a repository's default branch.
-  if (!arrived || (arrived.kind !== "issue-opened" && arrived.branch !== arrived.defaultBranch)) return;
+  if (!arrived) return;
   const spaceConnected = githubSpaceConnected(env, arrived);
   const cloudEvent = githubCloudEvent(arrived);
   const matchEvents = eventsStream ? eventsStream(cloudEvent.app, cloudEvent.kind, cloudEvent.source) : () => false;
-  const matchLegacy = arrived.kind === "issue-opened" ? () => false : githubStream(arrived.kind, arrived.repository);
+  // Legacy `ciFailed`/`prMerged` streams remain strictly gated to failed CI / merged PRs on the default branch.
+  const isLegacyMatchable = (arrived.kind === "ci-failed" || arrived.kind === "merged") && arrived.branch === arrived.defaultBranch;
+  const matchLegacy = isLegacyMatchable ? githubStream(arrived.kind as "ci-failed" | "merged", arrived.repository) : () => false;
   const matches = (stream: NornStream): boolean => matchLegacy(stream) || matchEvents(stream);
   await occurNornEvent(env, { id: arrived.id, what: inWords(arrived), cloudEvent, matches,
     grant: { kind: "github", repository: arrived.repository, installationId: arrived.installationId },

@@ -4,7 +4,8 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-const revision = "9882eceec0c609c362a64144ad5bef227268bac4";
+const revision = "3a8adebc52c4e8af22a0b40ddf7a2dfd7ca36f03";
+const legacyV1StdRevision = "38245c85e0afacad4ce937b6b84fa1d72442af9a";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/vendor-norn-core.mjs <norn-checkout>");
 const root = fileURLToPath(new URL("../packages/hub/src/vendor/norn/", import.meta.url));
@@ -46,9 +47,12 @@ for (const file of [...files, "LICENSE"]) {
       portable);
 }
 // The standard library is Norn text; a host reads it as a module of its own.
+// Retain the pre-#1961 v1 snapshot (`NORN_STD_LEGACY_V1`) so existing unmigrated v1 ledgers
+// keep exact AST node numbering for `open Std` + `map` loops across Hub upgrades.
 writeFileSync(resolve(root, "std.ts"),
   `// Vendored from norn-lang/norn@${revision} (std/std.norn); Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.\n` +
-    `/** The standard library, opened with \`open Std\`. */\nexport const NORN_STD = ${JSON.stringify(git("show", `${revision}:std/std.norn`))};\n`);
+    `/** The standard library, opened with \`open Std\`. */\nexport const NORN_STD = ${JSON.stringify(git("show", `${revision}:std/std.norn`))};\n` +
+    `/** Pre-edition-1 standard library snapshot pinned for legacy v1 ledgers (norn-lang/norn@${legacyV1StdRevision}). */\nexport const NORN_STD_LEGACY_V1 = ${JSON.stringify(git("show", `${legacyV1StdRevision}:std/std.norn`))};\n`);
 writeFileSync(resolve(root, "README.md"), `# Norn snapshot
 
 Source: https://github.com/norn-lang/norn/tree/${revision}
