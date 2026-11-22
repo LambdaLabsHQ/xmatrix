@@ -5,6 +5,7 @@ import { noticeCliReleases, readCliReleaseFeeds } from "./cli-release-notice";
 import { connectorFeishuRoomRepository, connectorGoogleChatRoomRepository, connectorTeamsRoomRepository,
   connectorTelegramRoomRepository } from "./connectors/credentials";
 import { drainGmailNotifications } from "./connectors/gmail-notification-drain";
+import { reconcileMailSnapshotLeases } from "./connectors/mail-snapshot-link";
 import { drainSentryEvents } from "./connectors/sentry-event-drain";
 import { answerHarnessReleaseWatch, watchHarnessReleasesBesidePostgres } from "./harness-release-watch";
 import { maintainAccountDeletions } from "./index-routes-account-deletion";
@@ -45,6 +46,7 @@ export async function runMinutePasses(env: Env, scheduledTime: number, inCell: b
   const network: ScheduledPass[] = [
     { name: "Sentry event recovery", work: () => drainSentryEvents(env) },
     { name: "Gmail notification recovery and renewal", work: () => drainGmailNotifications(env) },
+    { name: "Gmail snapshot cleanup", work: () => reconcileMailSnapshotLeases(env) },
     // In the cell this is the cell's own answer: an outage is deferred, a defect thrown.
     { name: "Harness release watch", work: () => inCell
       ? answerHarnessReleaseWatch(env).then(response => response.body?.cancel())

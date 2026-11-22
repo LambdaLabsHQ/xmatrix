@@ -1,5 +1,5 @@
 import { trimEnd } from "@xmatrix/protocol";
-import { PostgresAppleCommerceRepository, PostgresStripeAccountRepository } from "@xmatrix/db";
+import { PostgresAppleCommerceRepository, PostgresMailSnapshotLeaseRepository, PostgresStripeAccountRepository } from "@xmatrix/db";
 import { PostgresGmailRoutingRepository } from "@xmatrix/db";
 import { PostgresDingTalkTokenRepository, PostgresDingTalkInstallRepository, PostgresDingTalkCompanyRepository, PostgresDingTalkVisibilityRepository, PostgresDiscordLifecycleRepository, createAuthorityDatabase, PostgresDingTalkSuiteRepository, PostgresWeComCompanyRepository, PostgresWeComInstallRepository, PostgresAppPermissionRepository, PostgresAppActionRequestRepository, PostgresAppCredentialRepository,
   PostgresAppRepository, PostgresWeComSuiteRepository, PostgresTelegramRoomRepository, PostgresFeishuAppRepository, PostgresFeishuRoomRepository, PostgresSentryEventRepository, PostgresGoogleChatRoomRepository, PostgresTeamsRoomRepository, type AuthorityDatabase } from "@xmatrix/db";
@@ -116,4 +116,8 @@ export function gmailRoutingRepository(env: Env) {
 
 export function appleCommerceRepository(env: Env): PostgresAppleCommerceRepository {
   return new PostgresAppleCommerceRepository(appPolicyDatabase(env));
+}
+
+export function connectorMailSnapshotLeaseRepository(env: Env): PostgresMailSnapshotLeaseRepository {
+  return new PostgresMailSnapshotLeaseRepository(appPolicyDatabase(env));
 }
