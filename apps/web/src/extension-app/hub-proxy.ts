@@ -11,7 +11,7 @@
  * The Hub authorizes every call exactly as it does through the Web.
  */
 import { withRoute } from "@xmatrix/protocol";
-import { embedClientCompatibilityHeaders, extensionEmbedParent, requestEmbedSession } from "@/lib/extension-embed";
+import { embedClientCompatibilityHeaders, extensionAskToken, extensionEmbedParent, requestEmbedSession } from "@/lib/extension-embed";
 import { getXMatrixHubUrl } from "@/lib/xmatrix";
 import {
   createHubRouteHandlers,
@@ -26,7 +26,7 @@ export { pickSearchParams, withSearchParams };
 let pendingToken: Promise<string | null> | null = null;
 function extensionToken(): Promise<string | null> {
   const parent = extensionEmbedParent();
-  if (!parent) return Promise.resolve(null);
+  if (!parent) return Promise.resolve(extensionAskToken());
   pendingToken ??= requestEmbedSession(parent)
     .then((session) => session?.token ?? null)
     .finally(() => { pendingToken = null; });

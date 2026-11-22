@@ -178,7 +178,7 @@ async function buildScripts(out, settings) {
   const workers = workerEntries();
   const result = await esbuild.build({
     ...shared(settings),
-    entryPoints: { main: path.join(appSource, "main.tsx"), ...Object.fromEntries(workers) },
+    entryPoints: { main: path.join(appSource, "main.tsx"), ask: path.join(appSource, "ask.tsx"), ...Object.fromEntries(workers) },
     outdir: out,
     entryNames: "[name]",
     chunkNames: "chunk-[hash]",
@@ -210,6 +210,7 @@ async function buildStyles(out, minify) {
     ? (await esbuild.transform(result.css, { loader: "css", minify: true, target: TARGET, logLevel: "error" })).code
     : result.css;
   fs.writeFileSync(path.join(out, "app.css"), css);
+  fs.writeFileSync(path.join(out, "ask.css"), desktopStylesheet(css));
   return css;
 }
 
@@ -225,6 +226,25 @@ const PAGE = `<!doctype html>
 </head>
 <body class="site-canvas antialiased">
   <script type="module" src="main.js"></script>
+</body>
+</html>
+`;
+
+/**
+ * The question box a web page frames beside a selection (extension-app/ask.tsx,
+ * src/selection.js): the App's stylesheet, on a clear page so only the App's
+ * own surface shows over the page.
+ */
+const ASK_PAGE = `<!doctype html>
+<html lang="en" class="font-sans light" data-app-theme="wood" style="color-scheme: light; background: transparent">
+<head>
+  <meta charset="utf-8">
+  <title>Ask xMatrix</title>
+  <link rel="stylesheet" href="ask.css">
+  <script src="document.js"></script>
+</head>
+<body class="antialiased" style="margin: 0; background: transparent; overflow: hidden">
+  <script type="module" src="ask.js"></script>
 </body>
 </html>
 `;
@@ -250,6 +270,51 @@ function copyPublicFiles(extensionRoot, texts) {
   }
 }
 
+/** The window the question box's stylesheet is fixed at: a desktop one, as the App draws its comment box there. */
+const DESKTOP_WIDTH_PX = 1280;
+const DESKTOP_HEIGHT_PX = 800;
+
+/** One width condition of a media query, at `width` px: true, false, or null when it is not one. */
+export function widthCondition(text, width = DESKTOP_WIDTH_PX) {
+  const px = (value, unit) => Number(value) * (unit === "rem" || unit === "em" ? 16 : 1);
+  const legacy = text.match(/^\(\s*(min|max)-width\s*:\s*([\d.]+)(px|rem|em)\s*\)$/u);
+  if (legacy) return legacy[1] === "min" ? width >= px(legacy[2], legacy[3]) : width <= px(legacy[2], legacy[3]);
+  const range = text.match(/^\(\s*width\s*(>=|<=|>|<)\s*([\d.]+)(px|rem|em)\s*\)$/u);
+  if (!range) return null;
+  const bound = px(range[2], range[3]);
+  return { ">=": width >= bound, "<=": width <= bound, ">": width > bound, "<": width < bound }[range[1]];
+}
+
+/**
+ * The App's stylesheet as a desktop window applies it, for the question box a
+ * web page frames (extension-app/ask.tsx). The frame is only as wide as the
+ * box, so the App's width queries would take it for a phone; here each one is
+ * settled at a desktop width instead: kept rules lose the query, the others go.
+ * Queries on anything but width (hover, reduced motion) stay as they are.
+ * Lengths in viewport units are the window's too, not the frame's: a field
+ * capped at a third of the viewport would otherwise be a third of the box.
+ */
+export function desktopStylesheet(css, width = DESKTOP_WIDTH_PX, height = DESKTOP_HEIGHT_PX) {
+  const root = postcss.parse(css);
+  const units = { vh: height / 100, dvh: height / 100, svh: height / 100, lvh: height / 100,
+    vw: width / 100, dvw: width / 100, svw: width / 100, lvw: width / 100 };
+  root.walkDecls((decl) => {
+    if (decl.prop.startsWith("--") && !/\d(?:[dsl]?v[hw])\b/u.test(decl.value)) return;
+    decl.value = decl.value.replace(/(-?\d*\.?\d+)([dsl]?v[hw])\b/gu, (_, value, unit) => `${+(Number(value) * units[unit]).toFixed(3)}px`);
+  });
+  root.walkAtRules("media", (rule) => {
+    if (/,|\bor\b|\bnot\b|\bonly\b/u.test(rule.params)) return;
+    const parts = rule.params.split(/\s*\band\b\s*/u).map((part) => part.trim()).filter(Boolean);
+    const verdicts = parts.map((part) => widthCondition(part, width));
+    if (verdicts.every((verdict) => verdict === null)) return;
+    if (verdicts.includes(false)) return void rule.remove();
+    const rest = parts.filter((_, index) => verdicts[index] === null);
+    if (rest.length) rule.params = rest.join(" and ");
+    else rule.replaceWith(rule.nodes);
+  });
+  return root.toString();
+}
+
 /** Builds the app into `<extensionRoot>/app`, and its public files into `extensionRoot`. */
 export async function buildApp({ extensionRoot, release, hubUrl, minify = true }) {
   const settings = { minify, release, hubUrl };
@@ -258,6 +323,7 @@ export async function buildApp({ extensionRoot, release, hubUrl, minify = true }
   fs.mkdirSync(out, { recursive: true });
   const [scripts, css] = await Promise.all([buildScripts(out, settings), buildStyles(out, minify), buildDocumentScript(out, settings)]);
   fs.writeFileSync(path.join(out, "index.html"), PAGE);
+  fs.writeFileSync(path.join(out, "ask.html"), ASK_PAGE);
   const built = fs.readdirSync(out).filter((name) => name.endsWith(".js")).map((name) => fs.readFileSync(path.join(out, name), "utf8"));
   copyPublicFiles(extensionRoot, [...built, css]);
   return { out, ...scripts };

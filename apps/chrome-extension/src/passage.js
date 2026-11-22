@@ -45,24 +45,3 @@ export function discussionTitle(quote) {
   const line = quote.trim().replace(/\s+/gu, " ");
   return `“${line.length > 60 ? `${line.slice(0, 59)}…` : line}”`;
 }
-
-function linkDestination(href) {
-  return /[\s()<>]/u.test(href) ? `<${href.replace(/[<>\n]/gu, encodeURIComponent)}>` : href;
-}
-
-/**
- * The quoted passage and where it came from, as the first lines of a
- * discussion's first message; the same Markdown the web app writes
- * (`discussionHead` in @xmatrix/protocol), so it shows as a quote there.
- */
-export function discussionHead(quote, source) {
-  const quoted = quote.split(/\r?\n/u).map((line) => (line.trim() ? `> ${line.trimEnd()}` : ">")).join("\n");
-  const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
-  return `${quoted}\n\n— [${label}](${linkDestination(source.href)})\n\n`;
-}
-
-/** Where a question about a whole page came from, as the first line of its message. */
-export function sourceLink(source) {
-  const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
-  return `[${label}](${linkDestination(source.href)})\n\n`;
-}
