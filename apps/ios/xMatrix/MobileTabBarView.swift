@@ -188,7 +188,7 @@ final class NativeMobileTabBarController: UIViewController, UITabBarDelegate {
             view.isHidden = false
             UIView.animate(withDuration: 0.3, delay: 0, options: [.beginFromCurrentState, .curveEaseOut]) {
                 self.view.alpha = back ? 1 : 0
-            } completion: { _ in
+            } completion: { [weak self] _ in
                 // Going Back, the page reports the dock shown once the list
                 // lands; if it never does, the reported state wins.
                 let wait: TimeInterval = back ? 1.5 : 0
