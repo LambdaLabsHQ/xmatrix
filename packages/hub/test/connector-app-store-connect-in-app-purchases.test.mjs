@@ -76,3 +76,73 @@ test("multi-page purchase catalogs list and submit later-page products, while tr
   const foreign = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": { data: [], links: { next: "https://evil.example/v1/apps" } } };
   await assert.rejects(run(foreign, `@appstoreconnect:in_app_purchases:${BUNDLE}`), /outside its API/u);
 });
+
+test("in_app_purchases supports resumable cursor continuation beyond 5 pages (#1384)", async () => {
+  const sixPages = { ...catalog(), "GET /v1/apps/6760000001/inAppPurchasesV2": call => {
+    const page = Number(call.query.cursor ?? "1");
+    return {
+      data: [purchase(`p-${page}`, `app.beans.page${page}`, "CONSUMABLE", "READY_TO_SUBMIT")],
+      ...(page < 6 ? { links: { next: `https://api.appstoreconnect.apple.com/v1/apps/6760000001/inAppPurchasesV2?cursor=${page + 1}` } } : {}),
+    };
+  } };
+  const first = await run(sixPages, `@appstoreconnect:in_app_purchases:${BUNDLE}`);
+  assert.match(first.value.summary, /app\.beans\.page5/u);
+  assert.doesNotMatch(first.value.summary, /app\.beans\.page6/u);
+  const cursorMatch = first.value.summary.match(/Continue with cursor:([A-Za-z0-9_-]+)/u);
+  assert.ok(cursorMatch, "incomplete listing prints a resumable continuation cursor");
+  const second = await run(sixPages, `@appstoreconnect:in_app_purchases:${BUNDLE} cursor:${cursorMatch[1]}`);
+  assert.match(second.value.summary, /app\.beans\.page6/u);
+  assert.doesNotMatch(second.value.summary, /list is incomplete/u);
+});
+
+test("submit_in_app_purchases freezes exact product identities at prepare, rejects post-approval widening, and recovers partial writes (#1384)", async () => {
+  let rows = [purchase("p-1", "app.beans.starter", "CONSUMABLE", "READY_TO_SUBMIT"),
+    purchase("p-2", "app.beans.propack", "CONSUMABLE", "READY_TO_SUBMIT")];
+  const draftItems = [];
+  let failSecondItem = true;
+  const routes = {
+    ...apps,
+    "GET /v1/apps/6760000001/inAppPurchasesV2": () => ({ data: rows }),
+    "GET /v1/reviewSubmissions": () => ({ data: draftItems.length ? [{ type: "reviewSubmissions", id: "draft-1", attributes: { state: "READY_FOR_REVIEW" } }] : [] }),
+    "POST /v1/reviewSubmissions": { data: { type: "reviewSubmissions", id: "draft-1", attributes: { state: "READY_FOR_REVIEW" } } },
+    "GET /v1/reviewSubmissions/draft-1/items": () => ({ data: draftItems.map((versionId, idx) => ({
+      type: "reviewSubmissionItems", id: `item-${idx}`,
+      relationships: { inAppPurchaseVersion: { data: { type: "inAppPurchaseVersions", id: versionId } } },
+    })) }),
+    "GET /v2/inAppPurchases/p-1/versions": { data: [{ type: "inAppPurchaseVersions", id: "iv-1", attributes: { state: "PREPARE_FOR_SUBMISSION" } }] },
+    "GET /v2/inAppPurchases/p-2/versions": { data: [{ type: "inAppPurchaseVersions", id: "iv-2", attributes: { state: "PREPARE_FOR_SUBMISSION" } }] },
+    "POST /v1/reviewSubmissionItems": (call) => {
+      const versionId = call.body.relationships.inAppPurchaseVersion.data.id;
+      if (versionId === "iv-2" && failSecondItem) {
+        failSecondItem = false;
+        return { status: 500, errors: [{ detail: "transient Apple failure" }] };
+      }
+      draftItems.push(versionId);
+      return { data: { type: "reviewSubmissionItems", id: `item-${versionId}` } };
+    },
+  };
+
+  // Prepare freezes exact p-1 and p-2 identities with zero writes.
+  const prep = await withApple(routes, () => ACTIONS.submit_in_app_purchases.prepare({ credentials }, { app: BUNDLE, products: "" }));
+  assert.deepEqual(writes(prep.calls), []);
+  assert.ok(prep.value.preparedDigest);
+  assert.match(prep.value.preview, /app\.beans\.starter \(p-1\)/u);
+
+  // Even if a third product becomes READY_TO_SUBMIT after approval, execute submits ONLY the frozen targets.
+  rows = [...rows, purchase("p-3", "app.beans.surprise", "CONSUMABLE", "READY_TO_SUBMIT")];
+
+  // First execute fails midway after adding iv-1 (partial write).
+  await withApple(routes, () => assert.rejects(ACTIONS.submit_in_app_purchases.execute({ credentials }, prep.value), /transient Apple failure/u));
+  assert.deepEqual(draftItems, ["iv-1"]);
+
+  // Replay with the same frozen approval skips iv-1 (already in draft) and completes iv-2; never touches p-3.
+  const replayed = await withApple(routes, () => ACTIONS.submit_in_app_purchases.execute({ credentials }, prep.value));
+  assert.deepEqual(draftItems, ["iv-1", "iv-2"]);
+  assert.deepEqual(itemsOf(replayed.calls), ["iv-2"]);
+  assert.doesNotMatch(replayed.value.summary, /app\.beans\.surprise/u);
+
+  // Tampered digest fails closed with zero writes.
+  const tampered = await withApple(routes, () => assert.rejects(
+    ACTIONS.submit_in_app_purchases.execute({ credentials }, { ...prep.value, preparedDigest: "0".repeat(64) }), /no longer matches/u));
+  assert.deepEqual(writes(tampered.calls), []);
+});

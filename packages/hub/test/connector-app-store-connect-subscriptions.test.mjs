@@ -129,3 +129,42 @@ test("multi-page subscriptions and truncated catalogs/versions/items are handled
     ACTIONS.submit_subscriptions.execute({ credentials }, { app: BUNDLE, products: "" }), /more items/u));
   assert.deepEqual(writes(refusedItems.calls), []);
 });
+
+test("subscriptions resumes beyond 5 pages via cursor, and submit_subscriptions freezes identities at prepare (#1384)", async () => {
+  const sixPages = {
+    ...apps,
+    "GET /v1/apps/6760000001/subscriptionGroups": { data: [{ type: "subscriptionGroups", id: "g-1", attributes: { referenceName: "Pro" } }] },
+    "GET /v1/subscriptionGroups/g-1/subscriptions": call => {
+      const page = Number(call.query.cursor ?? "1");
+      return {
+        data: [subscription(`s-${page}`, `app.pro.tier${page}`, "READY_TO_SUBMIT")],
+        ...(page < 6 ? { links: { next: `https://api.appstoreconnect.apple.com/v1/subscriptionGroups/g-1/subscriptions?cursor=${page + 1}` } } : {}),
+      };
+    },
+  };
+  const first = await run(sixPages, `@appstoreconnect:subscriptions:${BUNDLE}`);
+  assert.match(first.value.summary, /app\.pro\.tier5/u);
+  assert.doesNotMatch(first.value.summary, /app\.pro\.tier6/u);
+  const match = first.value.summary.match(/Continue with cursor:([A-Za-z0-9_-]+)/u);
+  assert.ok(match, "truncated subscription list exposes continuation cursor");
+  const second = await run(sixPages, `@appstoreconnect:subscriptions:${BUNDLE} cursor:${match[1]}`);
+  assert.match(second.value.summary, /app\.pro\.tier6/u);
+  assert.doesNotMatch(second.value.summary, /list is incomplete/u);
+
+  // Prepare freezes exact subscription + group identities and blocks post-approval state regression.
+  let subState = "READY_TO_SUBMIT";
+  const prepRoutes = {
+    ...apps,
+    "GET /v1/apps/6760000001/subscriptionGroups": { data: [{ type: "subscriptionGroups", id: "g-1", attributes: { referenceName: "Pro" } }] },
+    "GET /v1/subscriptionGroups/g-1/subscriptions": () => ({ data: [subscription("s-month", "app.pro.monthly", subState)] }),
+    ...submitted,
+  };
+  const prep = await withApple(prepRoutes, () => ACTIONS.submit_subscriptions.prepare({ credentials }, { app: BUNDLE, products: "" }));
+  assert.deepEqual(writes(prep.calls), []);
+  assert.match(prep.value.preview, /app\.pro\.monthly \(s-month\)/u);
+
+  subState = "MISSING_METADATA";
+  const regressed = await withApple(prepRoutes, () => assert.rejects(
+    ACTIONS.submit_subscriptions.execute({ credentials }, prep.value), /now MISSING_METADATA/u));
+  assert.deepEqual(writes(regressed.calls), []);
+});

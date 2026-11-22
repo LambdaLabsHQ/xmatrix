@@ -1,4 +1,5 @@
 import { readBoundedStream } from "@xmatrix/protocol";
+import { base64UrlDecode } from "../index-shared";
 import { pemPrivateKeyBytes } from "../push/apns";
 import { requestAppleOperation } from "./app-store-connect-schema";
 import { base64UrlEncodeValue } from "../relay-v2-primitives";
@@ -23,6 +24,9 @@ import type { ConnectorSubscriptionSync } from "./provider";
 const ORIGIN = "https://api.appstoreconnect.apple.com";
 const TOKEN_SECONDS = 600;
 const MAX_PAGES = 5;
+const MAX_COMPLETE_PAGES = 20;
+const MAX_CURSOR_BYTES = 1_024;
+const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,1400}$/u;
 const MAX_LIST_BYTES = 1024 * 1024;
 const MAX_PROBLEM = 900;
 /* A sales report is a gzipped tab-separated file; a summary for one month of a small team is kilobytes. */
@@ -52,6 +56,26 @@ export interface AppleCollection {
 export interface ApplePreviewCollection extends AppleCollection {
   incomplete: boolean;
   next?: string;
+  /** Opaque query-only continuation cursor returned when `incomplete` is true. */
+  cursor?: string;
+}
+
+export interface ApplePaginationOptions {
+  pages?: number;
+  /** Opaque query-only cursor returned by an earlier `listPreview` call. */
+  cursor?: string;
+  /** Maximum rows accepted per provider page. */
+  maxPageSize?: number;
+  /** Optional per-row contract validation for stricter endpoints (review, sandbox). */
+  validateRow?: (raw: unknown, resource: AppleResource | undefined) => void;
+  /** Require every initial `filter[...]` parameter to remain unchanged across next links. */
+  preserveFilters?: boolean;
+  /** Label used in malformed/out-of-scope pagination errors (default `"page"`). */
+  pageLabel?: string;
+  /** Custom error message when `listComplete` exceeds the page bound. */
+  incompleteMessage?: string;
+  /** HTTP status thrown when `listComplete` exceeds the page bound (default 409). */
+  incompleteStatus?: number;
 }
 
 export interface AppStoreConnectApi {
@@ -61,8 +85,8 @@ export interface AppStoreConnectApi {
     quiet?: boolean; accept?: string }): Promise<Record<string, unknown>>;
   /** Every page of a scoped collection up to `options.pages` (default 5); fails closed if truncated, repeated, or out of scope. */
   listComplete(path: string, query?: Record<string, string>, options?: { pages?: number; incompleteMessage?: string }): Promise<AppleCollection>;
-  /** A bounded preview of a collection up to `pages` pages (default 5), reporting whether more pages remain. */
-  listPreview(path: string, query?: Record<string, string>, pages?: number): Promise<ApplePreviewCollection>;
+  /** A bounded preview of a collection up to `pages` pages (default 5), reporting whether more pages remain and a resumable cursor. */
+  listPreview(path: string, query?: Record<string, string>, pagesOrOptions?: number | { pages?: number; cursor?: string }): Promise<ApplePreviewCollection>;
   /** A gzipped report (sales, finance) as text; undefined when Apple has no report for that period (404). */
   report(path: string, query: Record<string, string>, accept?: string): Promise<string | undefined>;
 }
@@ -162,6 +186,99 @@ function apiUrl(path: string, query: Record<string, string> = {}): URL {
   return url;
 }
 
+function encodeApplePageCursor(target: URL): string | undefined {
+  if (!target.search || target.search.length > MAX_CURSOR_BYTES) return undefined;
+  return base64UrlEncodeValue(target.search);
+}
+
+function decodeApplePageCursor(cursor: string): string {
+  if (!CURSOR_TOKEN.test(cursor)) throw new ProviderRequestError(400, "Invalid App Store Connect pagination cursor");
+  let decoded: string;
+  try {
+    decoded = base64UrlDecode(cursor);
+  } catch {
+    throw new ProviderRequestError(400, "Invalid App Store Connect pagination cursor");
+  }
+  if (!decoded.startsWith("?") || decoded.length > MAX_CURSOR_BYTES || /[\r\n#]/u.test(decoded)) {
+    throw new ProviderRequestError(400, "Invalid App Store Connect pagination cursor");
+  }
+  return decoded;
+}
+
+/**
+ * Shared bounded JSON:API collection paginator for both public API (`AppStoreConnectApi`)
+ * and website `iris` endpoints (`WebSession`). Enforces origin, exact pathname, optional
+ * `filter[...]` preservation, cycle detection, row validation, and an explicit complete vs
+ * partial (`incomplete`, `next`, `cursor`) contract.
+ */
+export async function paginateAppleCollection(input: {
+  origin: string;
+  readPage: (url: URL, pageIndex: number) => Promise<Record<string, unknown>>;
+  path: string;
+  query?: Record<string, string>;
+  options?: ApplePaginationOptions;
+}): Promise<ApplePreviewCollection> {
+  const { origin, readPage, path, query = {}, options = {} } = input;
+  const pageLabel = options.pageLabel ?? "page";
+  const validateUrl = (raw: string): URL => {
+    let parsed: URL;
+    try { parsed = new URL(raw, origin); } catch {
+      throw new ProviderRequestError(502, `App Store Connect returned an invalid ${pageLabel} link`);
+    }
+    if (parsed.origin !== origin || parsed.username || parsed.password || parsed.hash) {
+      throw new ProviderRequestError(502, `App Store Connect returned a ${pageLabel} outside its API`);
+    }
+    return parsed;
+  };
+  const initial = validateUrl(path);
+  for (const [name, value] of Object.entries(query)) initial.searchParams.set(name, value);
+  const checkScope = (target: URL) => {
+    if (target.pathname !== initial.pathname) {
+      throw new ProviderRequestError(502, `App Store Connect returned a ${pageLabel} outside this collection`);
+    }
+    if (options.preserveFilters && Object.entries(query).some(([key, value]) =>
+        key.startsWith("filter[") && target.searchParams.get(key) !== value)) {
+      throw new ProviderRequestError(502, `App Store Connect returned a ${pageLabel} outside this relationship`);
+    }
+  };
+  let nextUrl: URL | undefined = initial;
+  if (options.cursor) {
+    const search = decodeApplePageCursor(options.cursor);
+    nextUrl = validateUrl(`${initial.pathname}${search}`);
+    checkScope(nextUrl);
+  }
+  const rows: AppleResource[] = [], included: AppleResource[] = [], visited = new Set<string>();
+  const limit = Math.max(1, Math.min(options.pages ?? MAX_PAGES, MAX_COMPLETE_PAGES));
+  for (let page = 0; nextUrl && page < limit; page += 1) {
+    const href = nextUrl.toString();
+    if (visited.has(href)) throw new ProviderRequestError(502, `App Store Connect repeated a ${pageLabel}`);
+    visited.add(href);
+    const response = await readPage(nextUrl, page);
+    if (!Array.isArray(response.data) || (options.maxPageSize !== undefined && response.data.length > options.maxPageSize)) {
+      throw new ProviderRequestError(502, "App Store Connect did not return a list");
+    }
+    for (const raw of response.data) {
+      const resource = appleResource(raw);
+      options.validateRow?.(raw, resource);
+      if (resource) rows.push(resource);
+    }
+    included.push(...(Array.isArray(response.included) ? response.included : []).flatMap((row) => appleResource(row) ?? []));
+    const rawLink = record(response.links).next;
+    if (rawLink !== undefined && rawLink !== null && typeof rawLink !== "string") {
+      throw new ProviderRequestError(502, `App Store Connect returned an invalid ${pageLabel} link`);
+    }
+    const link = text(rawLink);
+    if (!link) { nextUrl = undefined; break; }
+    const target = validateUrl(link);
+    checkScope(target);
+    if (visited.has(target.toString())) throw new ProviderRequestError(502, `App Store Connect repeated a ${pageLabel}`);
+    nextUrl = target;
+  }
+  const next = nextUrl?.toString();
+  const cursor = nextUrl ? encodeApplePageCursor(nextUrl) : undefined;
+  return { rows, included, incomplete: Boolean(next), ...(next ? { next } : {}), ...(cursor ? { cursor } : {}) };
+}
+
 export function appStoreConnect(credentials: Credentials, now: () => number = Date.now): AppStoreConnectApi {
   /* One token serves every call of an action; it outlives the action by minutes at most. */
   let authorization: Promise<string> | undefined;
@@ -181,32 +298,8 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
         ? `App Store Connect returned ${error.status}: ${problem}${hint}` : `${error.message}${hint}`);
     }
   };
-  async function paginate(path: string, query: Record<string, string> = {}, pages = MAX_PAGES): Promise<ApplePreviewCollection> {
-    const rows: AppleResource[] = [], included: AppleResource[] = [], visited = new Set<string>();
-    const initial = apiUrl(path, query);
-    const limit = Math.max(1, Math.min(pages, MAX_PAGES));
-    let next: string | undefined = initial.toString();
-    for (let page = 0; next && page < limit; page += 1) {
-      visited.add(next);
-      const response = await request(next);
-      if (!Array.isArray(response.data)) throw new ProviderRequestError(502, "App Store Connect did not return a list");
-      rows.push(...response.data.flatMap((row) => appleResource(row) ?? []));
-      included.push(...(Array.isArray(response.included) ? response.included : []).flatMap((row) => appleResource(row) ?? []));
-      const rawLink = record(response.links).next;
-      if (rawLink !== undefined && rawLink !== null && typeof rawLink !== "string") {
-        throw new ProviderRequestError(502, "App Store Connect returned an invalid page link");
-      }
-      const link = text(rawLink);
-      if (!link) { next = undefined; break; }
-      const target = apiUrl(link);
-      if (target.pathname !== initial.pathname) {
-        throw new ProviderRequestError(502, "App Store Connect returned a page outside this collection");
-      }
-      next = target.toString();
-      if (visited.has(next)) throw new ProviderRequestError(502, "App Store Connect repeated a page");
-    }
-    return { rows, included, incomplete: Boolean(next), ...(next ? { next } : {}) };
-  }
+  const paginate = (path: string, query: Record<string, string> = {}, options: ApplePaginationOptions = {}) =>
+    paginateAppleCollection({ origin: ORIGIN, path, query, options, readPage: (url) => request(url.toString()) });
   return {
     request,
     async report(path, query, accept = "application/a-gzip") {
@@ -231,13 +324,16 @@ export function appStoreConnect(credentials: Credentials, now: () => number = Da
         () => new ProviderRequestError(502, "App Store Connect report is too large"), signal));
     },
     async listComplete(path, query = {}, options = {}) {
-      const result = await paginate(path, query, options.pages ?? MAX_PAGES);
+      const result = await paginate(path, query, { pages: options.pages ?? MAX_PAGES });
       if (result.incomplete) {
         throw new ProviderRequestError(409, options.incompleteMessage ?? "Apple returned more items than this action can inspect; nothing was changed");
       }
       return { rows: result.rows, included: result.included };
     },
-    listPreview: paginate,
+    listPreview(path, query = {}, pagesOrOptions) {
+      const options = typeof pagesOrOptions === "number" ? { pages: pagesOrOptions } : (pagesOrOptions ?? {});
+      return paginate(path, query, options);
+    },
   };
 }
 
