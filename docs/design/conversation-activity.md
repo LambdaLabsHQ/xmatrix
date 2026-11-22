@@ -124,8 +124,9 @@ background watch ends; Codex, Cursor, Grok and ACP harnesses cannot.
 
 - **Report.** GitHub cannot say which Run opened a pull request (every Run
   acts as its owner's one account), so the Run reports it. Its runtime sees
-  `gh pr create` in the commands Claude Code and Codex run and reports the
-  pull request it printed. That is the only place that sees what the harness
+  `gh pr create` in the commands Claude Code, Codex and ACP runtimes run and
+  reports the pull request it printed. That is the only place that sees what the
+  harness
   ran whatever its shell and PATH are: a login shell reorders PATH, so a
   `gh` entrypoint placed in front of the real one is bypassed.
   The runtime keeps the report until the Hub answers it and sends it again

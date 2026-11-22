@@ -269,7 +269,7 @@ pub(crate) fn acp_tool_has_wait_metadata(update: &Value) -> bool {
             .is_some_and(|text| !text.trim().is_empty())
 }
 
-fn acp_command_text(input: &Value) -> Option<String> {
+pub(crate) fn acp_command_text(input: &Value) -> Option<String> {
     for key in ["CommandLine", "command", "cmd"] {
         match input.get(key) {
             Some(Value::String(command)) if !command.trim().is_empty() => {

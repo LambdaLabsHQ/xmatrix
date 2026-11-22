@@ -366,3 +366,33 @@ async fn antigravity_subagent_killed_without_wakeup_settles_back_to_idle() {
     .await
     .expect("antigravity killed subagent fixture must not hang");
 }
+
+#[tokio::test]
+async fn acp_publishes_pull_request_activity_over_relay_for_gh_pr_create_only() {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        let (_, agent, relay, frames, mut app, runtime_state) =
+            spawn_antigravity_fixture("antigravity-pr", "pr-activity").await;
+        let _turn_guard = runtime_state.begin_turn(Some("channel-1"), None);
+        let turn = submit_acp_waiting_turn(&mut app, &agent, &relay, &runtime_state)
+            .await
+            .expect("antigravity PR activity turn");
+        assert!(!turn.failed, "{:?}", turn.failure_detail);
+
+        let index = wait_for_frame(&frames, 0, |frame| frame["type"] == "channel_activity").await;
+        let recorded = frames.lock().unwrap();
+        let activities: Vec<&serde_json::Value> = recorded
+            .iter()
+            .filter(|frame| frame["type"] == "channel_activity")
+            .collect();
+        assert_eq!(activities.len(), 1, "only gh pr create emits activity");
+        assert_eq!(recorded[index]["channelId"], "channel-1");
+        assert_eq!(recorded[index]["activity"]["kind"], "pull_request");
+        assert_eq!(
+            recorded[index]["activity"]["url"],
+            "https://github.com/LambdaLabsHQ/xmatrix/pull/1969"
+        );
+        app.shutdown().await;
+    })
+    .await
+    .expect("antigravity PR activity fixture must not hang");
+}

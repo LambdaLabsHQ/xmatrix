@@ -54,6 +54,7 @@ impl AcpSession {
             config,
             questions: Default::default(),
             background_tasks: crate::runtime_waiting::AcpBackgroundTasks::default(),
+            activity: crate::runtime_channel_activity::AcpActivityObserver::default(),
             active_subagents: 0,
             subagent_read_reports: 0,
             tool_wait_threshold: crate::runtime_waiting::TOOL_WAIT_THRESHOLD,
@@ -71,6 +72,22 @@ impl AcpSession {
                     .count()
                     .saturating_add(self.active_subagents),
             ));
+        }
+    }
+
+    fn observe_activity(
+        &mut self,
+        update: &Value,
+        relay: Option<&Arc<agent_instance_connection::AgentInstanceConnectionClient>>,
+        channel_id: Option<&str>,
+    ) {
+        if let (Some(relay), Some(channel_id)) = (relay, channel_id) {
+            crate::runtime_channel_activity::observe_acp_activity(
+                &mut self.activity,
+                relay,
+                channel_id,
+                update,
+            );
         }
     }
 
@@ -348,11 +365,12 @@ impl AcpSession {
             match self
                 .request_with_login_retry(
                     "session/load",
-                    serde_json::json!({
-                        "sessionId": session_id,
-                        "cwd": workspace_path.clone(),
-                        "mcpServers": [],
-                    }),
+                    acp_session_load_params(
+                        session_id,
+                        &workspace_path,
+                        trusted_rules,
+                        rules_channel,
+                    ),
                 )
                 .await
             {
@@ -1034,6 +1052,7 @@ impl AcpSession {
                     }
                 }
                 Some("tool_call") | Some("tool_call_update") => {
+                    self.observe_activity(update, trace_relay, trace_channel_id);
                     if observe_acp_tool_wait(
                         session_update,
                         update,

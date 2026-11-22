@@ -93,6 +93,40 @@ async function runPrompt(req) {
     }, 150);
     return;
   }
+  if (mode === "pr-activity") {
+    notify({
+      sessionUpdate: "tool_call",
+      toolCallId: "call-pr-1",
+      name: "run_command",
+      title: "Create PR",
+      status: "in_progress",
+      rawInput: { CommandLine: "gh pr create --title 'ACP activity' --body 'body'" },
+    });
+    notify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call-pr-1",
+      name: "run_command",
+      status: "completed",
+      rawOutput: "Creating pull request\nhttps://github.com/LambdaLabsHQ/xmatrix/pull/1969\n",
+    });
+    notify({
+      sessionUpdate: "tool_call",
+      toolCallId: "call-view-1",
+      name: "run_command",
+      title: "View PR",
+      status: "in_progress",
+      rawInput: { CommandLine: "gh pr view 1969" },
+    });
+    notify({
+      sessionUpdate: "tool_call_update",
+      toolCallId: "call-view-1",
+      name: "run_command",
+      status: "completed",
+      rawOutput: "https://github.com/LambdaLabsHQ/xmatrix/pull/1970\n",
+    });
+    respond(req, { stopReason: "end_turn" });
+    return;
+  }
   if (mode === "unclosed-tool") {
     notify({
       sessionUpdate: "tool_call",
