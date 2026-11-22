@@ -811,11 +811,42 @@ pub(crate) fn render_page_read(
     }
 }
 
+/// The keys a whole-page or one-section read prints above its text. A header with any other
+/// key is another read (an outline, history, changes or a later view), whose text is not the page.
+const PAGE_READ_HEADER_KEYS: &[&str] = &[
+    "pageId",
+    "title",
+    "revision",
+    "headRevision",
+    "canEdit",
+    "lastEditedBy",
+    "agentEdits",
+    "blocks",
+    "programs",
+    "writeLive",
+    "section",
+    "edit",
+];
+
 /// The page's own text in what an Agent writes into it (`page edit`, `page create`): all of
 /// what `page read` printed leaves its header out. A line of that header anywhere else means
 /// the text was cut out of a read by hand, so nothing is written: a page never carries it.
+/// A read that is not the whole page or one section is refused before any request, because
+/// writing its text back would replace the page with an outline, a diff or a history.
 fn page_text(text: &str) -> error::Result<&str> {
-    let text = read_header_end(text).map_or(text, |end| &text[end..]);
+    let text = match read_header_end(text) {
+        Some(end) => {
+            if let Some(key) = partial_read_key(&text[..end]) {
+                return Err(CliError::Launch(format!(
+                    "Nothing was written: `{key}:` is from a partial `xmatrix page read` (an outline, \
+                     history, changes or another view), not from the page. Read the whole page, or one \
+                     section, and edit that."
+                )));
+            }
+            &text[end..]
+        }
+        None => text,
+    };
     match read_header_line(text) {
         None => Ok(text),
         Some((number, line)) => Err(CliError::Launch(format!(
@@ -824,6 +855,17 @@ fn page_text(text: &str) -> error::Result<&str> {
              closing `---`, or all of what `page read` printed."
         ))),
     }
+}
+
+/// The first top-level key of a read's header that only a whole-page or section read prints.
+fn partial_read_key(header: &str) -> Option<&str> {
+    header.lines().find_map(|line| {
+        if line.is_empty() || line == "---" || line.starts_with(' ') || line.starts_with('\t') {
+            return None;
+        }
+        let (key, _) = line.split_once(':')?;
+        (!PAGE_READ_HEADER_KEYS.contains(&key)).then_some(key)
+    })
 }
 
 /// Where the page's text starts in `text` that opens with the header `page read` prints.
@@ -1654,6 +1696,43 @@ mod page_tests {
         let whole = render_page_document_with(&document("plan", "# Plan\n"), None);
         assert_eq!(read_header_section(&whole), None);
         assert_eq!(read_header_section("section: now\n## Now\n"), None);
+    }
+
+    #[test]
+    fn a_partial_read_is_never_written_back_as_the_page() {
+        let doc = document("plan", "## Now\n\nship\n");
+        let outline = render_page_outline(
+            &document("plan", ""),
+            &[PageOutlineEntry {
+                id: "now".into(),
+                title: "Now".into(),
+                depth: 1,
+                chars: 10,
+            }],
+        );
+        let changes = render_page_changes(&PageChanges {
+            page_id: "plan".into(),
+            since: 1,
+            head_revision: 7,
+            revisions: vec![],
+            diff: vec![],
+        });
+        let revisions = "---\npageId: plan\nrevisions:\n  r7 by ana\n---\n# Plan\n".to_string();
+        for (rendered, key) in [
+            (&outline, "outline"),
+            (&changes, "since"),
+            (&revisions, "revisions"),
+        ] {
+            let refused = page_text(rendered).unwrap_err().to_string();
+            assert!(refused.contains(&format!("`{key}:`")), "{refused}");
+            assert!(refused.contains("partial `xmatrix page read`"), "{refused}");
+        }
+        // The whole page and one section still write back.
+        assert_eq!(page_text(&render_page_document(&doc)).unwrap(), doc.body);
+        assert_eq!(
+            page_text(&render_page_section(&doc, "now")).unwrap(),
+            doc.body
+        );
     }
 
     #[test]
