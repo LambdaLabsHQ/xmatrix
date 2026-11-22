@@ -7574,8 +7574,6 @@ html .xmatrix-app.xmatrix-app.app-hint-tooltip {
 .app-invocation-current { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
 .app-invocation-current svg { color: var(--invocation-color); }
 .app-invocation-description { margin: 6px 0 12px; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.app-invocation-fix-steps { margin: -6px 0 12px; padding-left: 1.4em; list-style: decimal; color: var(--muted-foreground); overflow-wrap: anywhere; }
-.app-invocation-fix-steps li + li { margin-top: 4px; }
 /* Completion rows are one flat bar across the panel, not a rounded pill
    floating inside it. The blanket `.app-composer button { border-radius: 999px }`
    rule would otherwise turn the selected fill into a capsule that stops short

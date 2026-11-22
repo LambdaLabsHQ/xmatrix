@@ -345,7 +345,7 @@ export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, su
       {explanation && <p className="app-invocation-description">{explanation}</p>}
       {steps.length > 0 && <>
         <p className="app-invocation-description"><strong>{copy.stepsLabel}</strong></p>
-        <ol className="app-invocation-fix-steps">{steps.map(step => <li key={step}>{step}</li>)}</ol>
+        {steps.map((step, index) => <p key={step} className="app-invocation-description">{steps.length > 1 ? `${index + 1}. ` : ""}{step}</p>)}
       </>}
     </>;
     if (key) details = <><p className="app-invocation-description">{copy.rawLabel}</p>
