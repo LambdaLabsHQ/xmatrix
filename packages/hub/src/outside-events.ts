@@ -97,7 +97,7 @@ export async function githubEventArrived(env: Env, event: string, payload: Recor
   // A program's GitHub streams are about a repository's default branch.
   if (!arrived || arrived.branch !== arrived.defaultBranch) return;
   const spaceConnected = githubSpaceConnected(env, arrived);
-  await occurNornEvent(env, { what: inWords(arrived), matches: githubStream(arrived.kind, arrived.repository),
+  await occurNornEvent(env, { id: arrived.id, what: inWords(arrived), matches: githubStream(arrived.kind, arrived.repository),
     allowed: (program) => spaceConnected(program.spaceId, program.authorityUserId) });
 }
 
@@ -105,7 +105,8 @@ export async function githubEventArrived(env: Env, event: string, payload: Recor
 export async function connectorEventArrived(env: Env, input: ConnectorOutsideEvent): Promise<void> {
   // Mail is one member's: an event that names no member is heard by nobody.
   if (input.provider === "gmail" && !input.authorizedUserId) return;
-  await occurNornEvent(env, { spaceId: input.spaceId, what: inWords(input.event),
+  await occurNornEvent(env, { id: JSON.stringify(["connector", input.provider, input.event.eventId]),
+    spaceId: input.spaceId, what: inWords(input.event),
     matches: appStream(input.provider, input.event.feature),
     allowed: async (program) => !input.authorizedUserId || program.authorityUserId === input.authorizedUserId });
 }

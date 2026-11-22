@@ -379,7 +379,11 @@ program waits on or listens to (`norn_programs.waits_json`, expand migration
 0251). An event arrives in `outside-events.ts`, from GitHub's webhook or a
 connector's ingress. It is recorded as an occurrence in the ledger of every
 running program that waits on a matching stream, and the program is
-evaluated at once (`norn-events.ts`). The value is the event in words, with
+evaluated at once (`norn-events.ts`). All matching streams in a program
+receive the occurrence in one transaction. A digest of the provider event
+identity is stored on those occurrences so a repeated delivery cannot add
+another round. If the running Hub build cannot evaluate the source, that
+transaction saves the occurrences and schedules a recheck. The value is the event in words, with
 its link. A program hears an event only when its authority is a member who
 may act and the Space's connection still covers the event's source. A program listens while a round of its loop is
 out, too: the streams its loops take from are stored with the ones it waits

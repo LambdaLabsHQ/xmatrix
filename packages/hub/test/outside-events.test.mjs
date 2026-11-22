@@ -52,6 +52,7 @@ test("a GitHub event on the default branch reaches the programs waiting on its r
   assert.equal(f.heard.length, 1);
   const [event] = f.heard;
   assert.equal(event.spaceId, undefined);
+  assert.equal(event.id, "github:run:5:1");
   assert.equal(event.what, "Workflow “CI” failed on main (https://github.com/acme/widgets/actions/runs/5)");
   assert.equal(event.matches(stream("ciFailed", "acme/widgets")), true);
   assert.equal(event.matches(stream("ciFailed", "acme/other")), false);
@@ -84,6 +85,7 @@ test("a connector event reaches the programs of its Space waiting on the app's s
   await f.connectorEventArrived({}, input);
   const [event] = f.heard;
   assert.equal(event.spaceId, "space");
+  assert.equal(event.id, JSON.stringify(["connector", "sentry", "e1"]));
   assert.equal(event.what, "A new issue (https://sentry.example/1)");
   assert.equal(event.matches(stream("appEvent", "sentry")), true);
   assert.equal(event.matches(stream("appEvent", "sentry", { feature: "issue.created" })), true);

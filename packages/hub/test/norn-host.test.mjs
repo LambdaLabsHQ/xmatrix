@@ -254,13 +254,15 @@ test("a program waits for an outside event beside its beat, and an event it hear
   const first = step();
   assert.deepEqual(first.write.waits.map(stream => [stream.name, stream.args[0].value]), [["ciFailed", "acme/app"]]);
   assert.equal(first.open.length, 0);
-  const heard = nornStep(undefined, { stream: first.write.waits[0], what: "Workflow CI failed on main" })(structuredClone({ ...state, nowMs: state.nowMs + 60_000 }));
+  const heard = nornStep(undefined, { id: "ci-1", streams: first.write.waits, what: "Workflow CI failed on main" })(
+    structuredClone({ ...state, nowMs: state.nowMs + 60_000 }));
   assert.deepEqual(heard.write.requests.map(request => request.holder), ["@auto"]);
   // While the round runs the program still listens: two more failures are kept, and are one more round with the latest.
   assert.deepEqual(heard.write.waits.map(stream => stream.name), ["ciFailed"]);
   const during = { ...state, ledger: heard.write.ledger, requests: [] };
   for (const [what, at] of [["Deploy failed", 120_000], ["Tests failed again", 180_000]]) {
-    during.ledger = nornStep(undefined, { stream: heard.write.waits[0], what })(structuredClone({ ...during, nowMs: state.nowMs + at })).write.ledger;
+    during.ledger = nornStep(undefined, { id: `ci-${at}`, streams: heard.write.waits, what })(
+      structuredClone({ ...during, nowMs: state.nowMs + at })).write.ledger;
   }
   assert.equal(Object.keys(during.ledger.requests).length, 1);
   const [running] = Object.values(during.ledger.requests);
@@ -274,7 +276,8 @@ test("a program waits for an outside event beside its beat, and an event it hear
 both(every(1d)->map(_ => "the daily round"), both(ciFailed("acme/app"), ciFailed("acme/web")))->forEach(why => ask(@auto, why)->wait)`);
   const listening = many.step().write;
   assert.deepEqual(listening.waits.map(stream => stream.args[0].value), ["acme/app", "acme/web"]);
-  const round = nornStep(undefined, { stream: listening.waits[1], what: "Deploy failed" })(structuredClone({ ...many.state, nowMs: many.state.nowMs + 1 })).write;
+  const round = nornStep(undefined, { id: "deploy-1", streams: [listening.waits[1]], what: "Deploy failed" })(
+    structuredClone({ ...many.state, nowMs: many.state.nowMs + 1 })).write;
   assert.deepEqual(Object.values(round.ledger.requests).map(request => request.text), ["Deploy failed"]);
   // An event is an occurrence of the streams that name its source: the repository, or the app and — when named — its feature.
   const waits = source => program(source).step().write.waits;
@@ -285,6 +288,23 @@ both(every(1d)->map(_ => "the daily round"), both(ciFailed("acme/app"), ciFailed
   const [any] = waits(`appEvent("sentry")->forEach(what => ask(@auto, what)->wait)`);
   assert.deepEqual([appStream("sentry", "issue.created")(issue), appStream("sentry", "issue.resolved")(issue),
     appStream("sentry", "issue.resolved")(any), appStream("stripe", "issue.created")(any)], [true, false, true, false]);
+});
+
+test("an outside event is recorded for every matching stream once, even when this build cannot evaluate", () => {
+  const source = 'appEvent("sentry")->or(appEvent("sentry", ~feature="issue.created"))->forEach(what => ask(@codex, show(what))->wait)';
+  const { state, step } = program(source);
+  const { waits } = step().write;
+  assert.equal(waits.length, 2);
+  const event = { id: "sentry-event-1", streams: waits, what: "Issue created" };
+  const retry = nornStep(undefined, event)({ ...structuredClone(state), source: "(", nowMs: state.nowMs + 1 });
+  assert.equal(retry.write.ledger.occurrences.length, 2);
+  assert.ok(retry.write.retryAtMs > state.nowMs);
+  const resumed = { ...state, ledger: retry.write.ledger, nowMs: retry.write.retryAtMs };
+  assert.equal(nornStep(undefined, event)(structuredClone(resumed)).write, null);
+  const evaluated = nornStep()(structuredClone(resumed)).write;
+  assert.deepEqual(evaluated.requests.map(request => request.holder), ["@codex"]);
+  const distinct = nornStep(undefined, { ...event, id: "sentry-event-2" })({ ...resumed, ledger: evaluated.ledger }).write;
+  assert.equal(distinct.ledger.occurrences.length, 4);
 });
 
 test("a request of a person stays open for them, and reads as a card with what an answer may be", () => {

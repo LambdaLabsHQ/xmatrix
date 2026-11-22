@@ -481,11 +481,23 @@ export function nornPasses(code: Code, ledger: Ledger, now: number, each: (pass:
  * Requests this host cannot deliver end at once, so the program reads why.
  */
 export function nornStep(act?: NornAct,
-  /** An outside event the program waits for: the stream as the program named it, and what happened. */
-  occurred?: { stream: unknown; what: string }): NornStep<NornPassResult> {
+  /** An outside event and the streams it matches in this program. */
+  occurred?: { id: string; streams: readonly NornStream[]; what: string }): NornStep<NornPassResult> {
   return (state: NornProgramState) => {
-    const ledger = state.ledger as Ledger;
+    // The host's receipt travels with the occurrence. Older ledgers have no receipt on their occurrences.
+    const ledger = state.ledger as Omit<Ledger, "occurrences"> & {
+      occurrences: (Ledger["occurrences"][number] & { outsideEventId?: string })[];
+    };
     const now = Math.max(state.nowMs, ledger.startedAt);
+    if (occurred && state.stopReason === null) {
+      if (ledger.occurrences.some(entry => entry.outsideEventId === occurred.id)) {
+        return { write: null, result: { status: "running" } };
+      }
+      for (const stream of occurred.streams) {
+        occur(ledger, stream, text(occurred.what), now);
+        ledger.occurrences.at(-1)!.outsideEventId = occurred.id;
+      }
+    }
     const checked = checkNornProgram(state.source);
     let refusal: string | undefined, returnedTo: string | undefined, nextDue: number | null = null, taken = false;
     // What the program says is new to the ledger in the pass that says it, so it is collected here and nowhere else.
@@ -497,7 +509,8 @@ export function nornStep(act?: NornAct,
     // A stop needs no reading of the text, so it is taken either way.
     if (state.stopReason !== null) stop(ledger, now, state.stopReason);
     else if ("refusal" in checked) {
-      return { write: { retryAtMs: now + NORN_RECHECK_MS }, result: { status: "running", refusal: `The program does not check on this build of the Hub yet:\n${checked.refusal}` } };
+      return { write: { retryAtMs: now + NORN_RECHECK_MS, ...(occurred ? { ledger } : {}) },
+        result: { status: "running", refusal: `The program does not check on this build of the Hub yet:\n${checked.refusal}` } };
     } else {
       const asked = act ? ledger.requests[act.requestId] : undefined;
       if (act && asked && "reply" in act) {
@@ -520,7 +533,6 @@ export function nornStep(act?: NornAct,
         refusal = asked.delegatedBy ? reclaim(ledger, asked.id, asked.delegatedBy, now) ?? undefined : "The request is not delegated";
         taken = refusal === undefined;
       }
-      if (occurred) occur(ledger, occurred.stream as Value, text(occurred.what), now);
       for (const row of state.requests) {
         const request = ledger.requests[row.requestId];
         if (!row.abandoned || request?.reply !== null || request.epoch !== row.epoch) continue;
@@ -582,10 +594,12 @@ export const nornBlockSource = (name: string): string => `\`\`\`norn run ${name}
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);
 
 /** An outside stream as a program named it: `ciFailed("acme/app")`, `appEvent("sentry", ~feature="issue.created")`. */
-export interface NornStream { name: string; args: { type: string; value?: unknown }[]; labels: Record<string, { type: string; value?: unknown }> }
+export type NornStream = Extract<Value, { type: "source" }>;
 
-export const isNornStream = (value: unknown): value is NornStream => Boolean(value) && typeof value === "object" &&
-  typeof (value as NornStream).name === "string" && Array.isArray((value as NornStream).args);
+export function isNornStream(value: unknown): value is NornStream {
+  const stream = value as Partial<NornStream> | null;
+  return stream?.type === "source" && stream.kind === "stream" && typeof stream.name === "string" && Array.isArray(stream.args);
+}
 /** The text a program wrote in a stream's position or label, when it wrote text there. */
 const streamText = (value: { type: string; value?: unknown } | undefined): string | undefined =>
   value?.type === "string" && typeof value.value === "string" ? value.value : undefined;
