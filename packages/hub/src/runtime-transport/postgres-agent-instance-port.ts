@@ -893,6 +893,8 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
     const billingRefusal = isAccountBillingRefusalError(message.detail);
     const scopedBillingRefusal = billingRefusal && isScopedBillingRefusalError(message.detail);
     const explicitScope = typeof message.quotaScope === "string" ? message.quotaScope.slice(0, 64) : undefined;
+    const quotaScopeReason = typeof message.quotaScopeReason === "string"
+      ? message.quotaScopeReason.slice(0, 64) : undefined;
     const inferredScope = !explicitScope && scopedBillingRefusal
       ? agentModelEntry(session.presentation?.models, session.presentation?.model)?.quotaScopes
           ?.map(scope => scope.trim()).find(Boolean)?.slice(0, 64)
@@ -906,6 +908,7 @@ export class PostgresAgentInstancePort implements AgentInstanceSocketBackend {
         sourceInstanceId: session.run.instanceId,
         ...(typeof message.resetsAt === "string" ? { resetsAt: message.resetsAt.slice(0, 64) } : {}),
         ...(quotaScope ? { quotaScope } : {}),
+        ...(quotaScopeReason ? { quotaScopeReason } : {}),
         ...(message.usage && typeof message.usage === "object" ? { usage: message.usage } : {}),
         ...(billingRefusal ? { billingRefusal: true } : {}),
         ...(scopedBillingRefusal ? { scopedBillingRefusal: true } : {}),

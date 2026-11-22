@@ -790,7 +790,7 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
    * off, anything narrower waits for a quota retry. Only the Instance's owner,
    * acting through that Instance's own Run, gets here. */
   async holdUsageLimit(raw: { commandId: string; actorUserId: string; channelId: string; sourceInstanceId: string;
-    resetsAt?: string; quotaScope?: string; usage?: unknown; billingRefusal?: boolean;
+    resetsAt?: string; quotaScope?: string; quotaScopeReason?: string; usage?: unknown; billingRefusal?: boolean;
     scopedBillingRefusal?: boolean }): Promise<RegistrationUsageLimit | undefined> {
     const input = continuationInput({ ...raw, sourceMessageId: raw.commandId, prompt: "" });
     const located = await this.locate(input, "handoff");
@@ -800,10 +800,12 @@ export class PostgresRegistrationRebornRepository extends RegistrationPreparatio
       const model = located.instanceModel ?? located.preferredRuntimeModel ?? located.requestedRuntimeModel;
       quotaScope = modelQuotaScopes(located.instanceModels, model)[0];
     }
+    const quotaScopeReason = raw.quotaScopeReason?.trim() || undefined;
     return this.directory.transaction({ requestId: `${input.commandId}:limit`,
       operation: "registration.usage-limit.record" }, tx => recordRegistrationUsageLimit(tx, {
       ownerUserId: located.key.ownerUserId, machineId: located.key.machineId, harness: located.key.harness,
       ...(raw.resetsAt ? { resetsAt: raw.resetsAt } : {}), ...(quotaScope ? { quotaScope } : {}),
+      ...(quotaScopeReason ? { quotaScopeReason } : {}),
       ...(raw.usage !== undefined ? { usage: raw.usage } : {}),
       ...(raw.billingRefusal ? { billingRefusal: true } : {}) }));
   }

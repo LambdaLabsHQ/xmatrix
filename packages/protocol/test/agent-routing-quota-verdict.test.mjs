@@ -80,4 +80,10 @@ test('launch choice does not keep a second billing-hold policy', () => {
   assert.equal(source.includes('billingRefusalScopes'), false);
   const probe = readFileSync(new URL('../../db/src/agent-registration-quota-probe.ts', import.meta.url), 'utf8');
   assert.equal(probe.includes('billingRefusal: true'), false, 'a billing hold is not stored as a quota window');
+  assert.equal(probe.includes("interval '31 days'"), false, '31-day exhausted hold is owned by protocol, never SQL');
+  assert.equal(probe.includes('KEPT_REMAINING'), false, 'remaining headroom is owned by protocol, never SQL');
+  assert.equal(probe.includes('QUOTA_RESET_MATCH_MS'), false, 'reset matching tolerance is owned by protocol');
+  const rustLimit = readFileSync(new URL('../../cli-rs/crates/runtime/src/runtime_usage_limit.rs', import.meta.url), 'utf8');
+  assert.equal(rustLimit.includes('quota_scope_by_reset'), false, 'refusal scope attribution is owned by protocol/Hub, not Rust');
+  assert.equal(rustLimit.includes('RESET_MATCH_TOLERANCE'), false, 'reset matching tolerance is not duplicated in Rust');
 });

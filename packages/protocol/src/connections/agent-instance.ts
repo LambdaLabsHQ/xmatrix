@@ -151,12 +151,13 @@ export interface AgentInstanceLifecycleMessage {
   /** RFC 3339 time a `usage_limited` provider account resets, when known. */
   resetsAt?: string;
   /** What a `usage_limited` turn used up: `account`, the `scope` of one
-   * scoped window (`Fable`), or `unresolved`. Absent from a daemon that
-   * predates scopes, which means the account. */
+   * scoped window (`Fable`), or `unresolved`. Older daemons send this; current
+   * daemons send raw `resetsAt` + `usage` and let the Hub attribute it. Absent
+   * without `usage` or `quotaScopeReason` means a pre-scope daemon (account). */
   quotaScope?: string;
-  /** Why an `unresolved` quota scope could not be told. */
+  /** Why no reading or reset time could be supplied for Hub attribution. */
   quotaScopeReason?: string;
-  /** The complete provider reading the quota scope was told from. */
+  /** The complete provider reading taken after the refusal. */
   usage?: LlmUsage;
   /** Tasks still pending when `background_tasks_interrupted` was observed. */
   pendingTasks?: number;
