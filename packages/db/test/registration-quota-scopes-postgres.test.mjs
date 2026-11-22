@@ -88,9 +88,9 @@ integration("a pool reading keeps an account part and a scoped part, and a usage
     await sql(`DELETE FROM control.registration_quota_observations`);
     const rawScoped = await limit({ resetsAt: refused, usage: reading(1000, 55, 100) });
     assert.deepEqual([rawScoped.usedUp, rawScoped.scope], ["scope", "Fable"]);
-    assert.equal((await row()).source, "provider");
-    assert.equal(registrationQuotaReading(await row()).remainingPercent, 45);
-    assert.equal(registrationQuotaReading(await row(), fable).remainingPercent, 0);
+    const rawStored = await row();
+    assert.deepEqual([rawStored.source, registrationQuotaReading(rawStored).remainingPercent,
+      registrationQuotaReading(rawStored, fable).remainingPercent], ["provider", 45, 0]);
 
     // Raw refusal with both account and Fable at 100% -> account wins.
     await sql(`DELETE FROM control.registration_quota_observations`);
