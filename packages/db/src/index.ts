@@ -282,8 +282,9 @@ export { GovernanceError, PostgresGovernanceRepository, type SpaceGovernance } f
 export { observeRegistrationQuota, readOwnerRegistrationQuotaState, readRegistrationQuotaUsages,
   readRegistrationQuotaState, registrationQuotaKey,
   type RegistrationQuotaKey, type RegistrationQuotaReading } from "./registration-quota-state.js";
-export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, settleRegistrationQuotaWaits,
-  waitForRegistrationQuota, waitedRegistrationsOnMachine, type ReadyRegistrationQuotaWait } from "./registration-quota-waiters.js";
+export { owedRegistrationQuotaWaitOwners, readyRegistrationQuotaWaits, reconcileOwedRegistrationQuotaPools,
+  settleRegistrationQuotaWaits, waitForRegistrationQuota, waitedRegistrationsOnMachine,
+  type ReadyRegistrationQuotaWait } from "./registration-quota-waiters.js";
 
 export { PostgresDiscordLifecycleRepository } from "./discord-installation-lifecycle.js";
 export { PostgresSentryEventRepository, validateSentryEventIdentity, type SentryEventIdentity, type SentryEventKey, type SentryEventJob } from "./sentry-event-control.js";

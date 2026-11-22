@@ -77,3 +77,49 @@ test("redelivery reads the database only: it never asks a daemon or a provider",
     wakeCoordinator: async () => {}, issue: forbidden, machines: { getDaemon: forbidden } });
   assert.deepEqual(settled.map(wait => wait.readyToken), ["t1"]);
 });
+
+test("multi-batch delivery reconciles pending pool pages, isolates placement failures, and wakes every ready Channel", async () => {
+  const queue = Array.from({ length: 40 }, (_, i) => ({
+    ownerUserId: "owner", quotaPoolId: "pool-codex", channelId: `ch-${String(i + 1).padStart(2, "0")}`, readyToken: `tok-${i + 1}`,
+  }));
+  const pendingUnreconciled = [
+    { ownerUserId: "owner", quotaPoolId: "pool-codex", channelId: "ch-41", readyToken: "tok-41" },
+  ];
+  const settled = [];
+  let reconcileCalls = 0;
+  const store = {
+    async reconcile() {
+      reconcileCalls++;
+      if (pendingUnreconciled.length) {
+        queue.push(...pendingUnreconciled.splice(0, pendingUnreconciled.length));
+        return { readied: 1, more: false };
+      }
+      return { readied: 0, more: false };
+    },
+    async ready() {
+      return queue.slice(0, 32);
+    },
+    async settle(done) {
+      const tokens = new Set(done.map(item => item.readyToken));
+      settled.push(...done);
+      for (let i = queue.length - 1; i >= 0; i--) {
+        if (tokens.has(queue[i].readyToken)) queue.splice(i, 1);
+      }
+    },
+    async owedOwners() { return ["owner"]; },
+  };
+  const woken = [];
+  const result = await deliverQuotaWakes({}, "owner", {
+    waits: store,
+    retries: async channelId => {
+      if (channelId === "ch-05") throw new RegistrationAccessError("registration_placement_unavailable", 503);
+      return { wake: async () => 1 };
+    },
+    wakeCoordinator: async channelId => { woken.push(channelId); },
+  });
+  assert.equal(reconcileCalls >= 2, true, "reconciles across bounded delivery batches");
+  assert.equal(result.delivered, 40, "delivers all 40 healthy Channels including the reconciled 41st");
+  assert.equal(woken.includes("ch-41"), true, "wakes the Channel reconciled from the pending pool page");
+  assert.equal(woken.includes("ch-05"), false, "placement failure does not wake coordinator");
+  assert.deepEqual(queue.map(wait => wait.channelId), ["ch-05"], "placement failure retains its wait for redelivery");
+});
