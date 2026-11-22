@@ -16,6 +16,7 @@ import { EMAIL_UNSUBSCRIBE_ROUTE, unsubscribeToken, unsubscribeUrl } from "./ema
 import { sendEmail } from "./email-delivery";
 import { FEEDBACK_PRO_CAMPAIGN, FEEDBACK_REPLY_TO, feedbackProEmail } from "./email-campaign-feedback-pro";
 import { grantOperator } from "./index-routes-billing-grants";
+import { internalAddress } from "./internal-accounts";
 import { jsonErrors, readBoundedRequestBody } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
@@ -79,14 +80,18 @@ export function registerIndexRoutesEmailCampaigns(app: Hono<{ Bindings: Env }>):
     const { eligible, skipped } = await repo.eligible(crypto.randomUUID(), campaign, userIds, !dryRun);
     const emails = await authDirectoryEmails(c.env, eligible);
     const noEmail = eligible.filter((id) => !emails.get(id));
+    // Operator and QA addresses are never campaign recipients.
+    const internal = eligible.filter((id) => internalAddress(c.env, emails.get(id)));
     if (dryRun) {
-      return c.json({ dryRun: true, wouldSend: eligible.length - noEmail.length, skipped: { ...skipped, noEmail: noEmail.length } }, 200, PRIVATE);
+      return c.json({ dryRun: true, wouldSend: eligible.length - noEmail.length - internal.length,
+        skipped: { ...skipped, noEmail: noEmail.length, internal: internal.length } }, 200, PRIVATE);
     }
     const origin = new URL(c.req.url).origin;
     let sent = 0;
     const failed: string[] = [];
     for (const userId of eligible) {
       const address = emails.get(userId);
+      if (internal.includes(userId)) { await repo.record(crypto.randomUUID(), campaign, userId, "failed"); continue; }
       if (!address) { await repo.record(crypto.randomUUID(), campaign, userId, "failed"); failed.push(userId); continue; }
       const link = await unsubscribeUrl(c.env, origin, userId);
       try {
@@ -99,6 +104,6 @@ export function registerIndexRoutesEmailCampaigns(app: Hono<{ Bindings: Env }>):
       }
     }
     // Failed sends stay claimed: an operator looks at them rather than mailing twice.
-    return c.json({ sent, failed, skipped }, 200, PRIVATE);
+    return c.json({ sent, failed, skipped: { ...skipped, internal: internal.length } }, 200, PRIVATE);
   }));
 }

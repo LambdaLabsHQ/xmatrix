@@ -16,6 +16,7 @@ import type { AdminAuditAction } from "@xmatrix/protocol";
 import { bearerMatchesSecret } from "./admin-operator-token";
 import { recordAdminAudit } from "./admin-audit";
 import { authDirectoryEmails, authDirectoryUserIdBy } from "./auth-authority";
+import { internalAddress } from "./internal-accounts";
 import { platformAdminForRequest } from "./index-routes-admin";
 import { PermissionFailure, jsonErrors, readBoundedRequestBody, requireAuth, requireLiveAgentRun } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
@@ -91,6 +92,7 @@ export function registerIndexRoutesBillingGrants(app: Hono<{ Bindings: Env }>): 
     ]);
     return c.json({
       userId,
+      internal: internalAddress(c.env, emails.get(userId) ?? email),
       email: emails.get(userId) ?? (email || undefined),
       grant,
       rules: { days: BILLING_GRANT_DAYS, perPerson: 1, perUtcDay: BILLING_GRANT_DAILY_LIMIT },
@@ -116,6 +118,13 @@ export function registerIndexRoutesBillingGrants(app: Hono<{ Bindings: Env }>): 
     }
     const spaceId = typeof body.spaceId === "string" ? body.spaceId : "";
     const actor = await grantOperator(c.req.raw, c.env, "billing-grant.give", { kind: "space", id: spaceId || "-" });
+    // Operator and QA accounts never receive complimentary Pro.
+    if (typeof body.userId === "string" && body.userId) {
+      const email = (await authDirectoryEmails(c.env, [body.userId])).get(body.userId);
+      if (internalAddress(c.env, email)) {
+        return c.json({ error: "This is an operator or QA account, not a customer", code: "billing_grant_internal_account" }, 409, PRIVATE);
+      }
+    }
     try {
       const result = await repositories(c.env).grants.grant({
         requestId: crypto.randomUUID(), userId: body.userId, spaceId: body.spaceId,

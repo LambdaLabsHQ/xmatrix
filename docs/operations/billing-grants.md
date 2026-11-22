@@ -75,3 +75,11 @@ not retried. Start with `dryRun`.
 Unsubscribing (`/api/email/unsubscribe?u=&t=`, token = HMAC of the user id under
 `BETTER_AUTH_SECRET`) stops every campaign for that person; sign-in, billing and
 security mail is unaffected.
+
+## Operator and QA accounts
+
+Campaigns skip, and grants refuse (`billing_grant_internal_account`), any address
+on `xmatrix.sh`, `madebyrobot.net` or `madebyrobot.llc`, any plus address, and any
+platform admin (`PLATFORM_ADMIN_EMAILS`). The candidate lookup reports `internal`.
+An operator's personal address outside these rules is excluded by unsubscribing it
+(its unsubscribe link) and by listing its user id where the judging routine reads it.
