@@ -38,29 +38,21 @@ jobs:
         run: node scripts/check-release-version.mjs
 
       # Apple ITMS-90725: from April 2027 App Store uploads must be built with
-      # the iOS 27 SDK. Pick the newest release Xcode 27+ installed side by side.
+      # the iOS 27 SDK.
       - name: Select Xcode 27
         run: |
           set -euo pipefail
 
-          XCODE_APP="$(
-            for candidate in /Applications/Xcode*.app; do
-              [[ -d "$candidate" && "$candidate" != *[Bb]eta* ]] || continue
-              version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$candidate/Contents/Info.plist" 2>/dev/null || true)"
-              if [[ "${version%%.*}" =~ ^[0-9]+$ ]] && (( ${version%%.*} >= 27 )); then
-                printf '%s\t%s\n' "$version" "$candidate"
-              fi
-            done | sort -V | tail -n 1 | cut -f2
-          )"
+          export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
 
-          if [[ -z "$XCODE_APP" ]]; then
-            echo "Xcode 27 or newer (iOS 27 SDK) is required for App Store upload." >&2
-            ls -1 /Applications | grep '^Xcode' || true
+          XCODE_FIRST_LINE="$(xcodebuild -version | head -n 1)"
+          XCODE_MAJOR="$(sed -E 's/^Xcode ([0-9]+).*/\1/' <<<"$XCODE_FIRST_LINE")"
+          if [[ ! "$XCODE_MAJOR" =~ ^[0-9]+$ ]] || (( XCODE_MAJOR < 27 )); then
+            echo "Xcode 27 or newer (iOS 27 SDK) is required for App Store upload, found: $XCODE_FIRST_LINE" >&2
             exit 1
           fi
 
-          export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
-          echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
           xcodebuild -version
           xcodebuild -showsdks | grep -E 'iphoneos[0-9]'
 
