@@ -388,11 +388,26 @@ pub enum BillingCommand {
         #[command(subcommand)]
         command: BillingGrantCommand,
     },
+    /// The operator's own email addresses, which campaigns skip and grants refuse
+    Internal {
+        #[command(subcommand)]
+        command: BillingInternalCommand,
+    },
     /// Operator email campaigns (platform admins and the Agent Runs they own)
     Campaign {
         #[command(subcommand)]
         command: BillingCampaignCommand,
     },
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BillingInternalCommand {
+    /// List the listed internal addresses
+    List,
+    /// Add an internal address
+    Add { email: String },
+    /// Remove an internal address
+    Remove { email: String },
 }
 
 #[derive(Subcommand, Debug)]

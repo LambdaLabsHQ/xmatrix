@@ -33,4 +33,6 @@ test("an Agent Run reaches campaign batches but no other campaign path", () => {
   assert.equal(allowed("POST", "/api/admin/email-campaigns/feedback-pro-2026-11/send"), true);
   assert.equal(allowed("GET", "/api/admin/email-campaigns/feedback-pro-2026-11/send"), false);
   assert.equal(allowed("POST", "/api/admin/email-campaigns/a/b/send"), false);
+  for (const method of ["GET", "POST", "DELETE"]) assert.equal(allowed(method, "/api/admin/internal-email-addresses"), true);
+  assert.equal(allowed("PUT", "/api/admin/internal-email-addresses"), false);
 });

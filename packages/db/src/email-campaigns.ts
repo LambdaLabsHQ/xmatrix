@@ -57,6 +57,30 @@ export class PostgresEmailCampaignRepository {
     });
   }
 
+  /** The operator's own addresses, lowercased. */
+  async internalAddresses(requestId: string): Promise<string[]> {
+    return this.database.transaction({ requestId, operation: "email.internal.list" }, async (tx) =>
+      (await tx.query<{ email: string }>({ name: "email_internal_list_v1",
+        text: "SELECT email FROM control.internal_email_addresses ORDER BY email LIMIT 1000", values: [], maxRows: 1000 }))
+        .map(r => r.email));
+  }
+
+  async addInternalAddress(requestId: string, email: string, addedBy: string): Promise<void> {
+    await this.database.transaction({ requestId, operation: "email.internal.add" }, (tx) => tx.query({
+      name: "email_internal_add_v1",
+      text: "INSERT INTO control.internal_email_addresses (email,added_by) VALUES (lower($1),$2) ON CONFLICT DO NOTHING",
+      values: [email.trim(), addedBy], maxRows: 0,
+    }));
+  }
+
+  async removeInternalAddress(requestId: string, email: string): Promise<void> {
+    await this.database.transaction({ requestId, operation: "email.internal.remove" }, (tx) => tx.query({
+      name: "email_internal_remove_v1",
+      text: "DELETE FROM control.internal_email_addresses WHERE email=lower($1)",
+      values: [email.trim()], maxRows: 0,
+    }));
+  }
+
   async record(requestId: string, campaign: string, userId: string, status: "sent" | "failed"): Promise<void> {
     await this.database.transaction({ requestId, operation: "email.campaign.record" }, (tx) => tx.query({
       name: "email_campaign_record_v1",

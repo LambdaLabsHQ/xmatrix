@@ -16,12 +16,14 @@ import { EMAIL_UNSUBSCRIBE_ROUTE, unsubscribeToken, unsubscribeUrl } from "./ema
 import { sendEmail } from "./email-delivery";
 import { FEEDBACK_PRO_CAMPAIGN, FEEDBACK_REPLY_TO, feedbackProEmail } from "./email-campaign-feedback-pro";
 import { grantOperator } from "./index-routes-billing-grants";
+import { internalAddress } from "./internal-accounts";
 import { jsonErrors, readBoundedRequestBody } from "./index-shared";
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_AUTHORITY_TIMEOUTS } from "./postgres-authority-http";
 import type { Env } from "./types";
 
 const MAX_BATCH = 50;
+export const INTERNAL_EMAILS_ROUTE = "/api/admin/internal-email-addresses";
 const PRIVATE = { "cache-control": "private, no-store" };
 const CAMPAIGNS: Record<string, (unsubscribeUrl: string) => { subject: string; text: string; html: string }> = {
   [FEEDBACK_PRO_CAMPAIGN]: feedbackProEmail,
@@ -58,6 +60,27 @@ export function registerIndexRoutesEmailCampaigns(app: Hono<{ Bindings: Env }>):
     return c.json({ unsubscribed: ok }, ok ? 200 : 400, PRIVATE);
   });
 
+  /* The operator's own addresses that no domain rule catches. */
+  app.get(INTERNAL_EMAILS_ROUTE, (c) => jsonErrors(c, async () => {
+    await grantOperator(c.req.raw, c.env, "internal-email.manage", { kind: "internal-emails", id: "list" });
+    return c.json({ emails: await repository(c.env).internalAddresses(crypto.randomUUID()) }, 200, PRIVATE);
+  }));
+  for (const method of ["post", "delete"] as const) {
+    app[method](INTERNAL_EMAILS_ROUTE, (c) => jsonErrors(c, async () => {
+      const buffer = await readBoundedRequestBody(c.req.raw, 1_024);
+      let email = "";
+      try { email = String((JSON.parse(new TextDecoder().decode(buffer ?? new Uint8Array())) as { email?: unknown }).email ?? "").trim(); } catch { /* invalid below */ }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(email) || email.length > 320) {
+        return c.json({ error: "Pass one email address", code: "invalid_internal_email" }, 400, PRIVATE);
+      }
+      const actor = await grantOperator(c.req.raw, c.env, "internal-email.manage", { kind: "internal-emails", id: method });
+      const repo = repository(c.env);
+      if (method === "post") await repo.addInternalAddress(crypto.randomUUID(), email, actor);
+      else await repo.removeInternalAddress(crypto.randomUUID(), email);
+      return c.json({ emails: await repo.internalAddresses(crypto.randomUUID()) }, 200, PRIVATE);
+    }));
+  }
+
   /* Send one batch of a campaign to people named by user id. `dryRun` reports
      who would be mailed without claiming or sending anything. */
   app.post("/api/admin/email-campaigns/:campaign/send", (c) => jsonErrors(c, async () => {
@@ -79,14 +102,19 @@ export function registerIndexRoutesEmailCampaigns(app: Hono<{ Bindings: Env }>):
     const { eligible, skipped } = await repo.eligible(crypto.randomUUID(), campaign, userIds, !dryRun);
     const emails = await authDirectoryEmails(c.env, eligible);
     const noEmail = eligible.filter((id) => !emails.get(id));
+    // Operator and QA addresses are never campaign recipients.
+    const listed = new Set(await repo.internalAddresses(crypto.randomUUID()));
+    const internal = eligible.filter((id) => internalAddress(c.env, emails.get(id), listed));
     if (dryRun) {
-      return c.json({ dryRun: true, wouldSend: eligible.length - noEmail.length, skipped: { ...skipped, noEmail: noEmail.length } }, 200, PRIVATE);
+      return c.json({ dryRun: true, wouldSend: eligible.length - noEmail.length - internal.length,
+        skipped: { ...skipped, noEmail: noEmail.length, internal: internal.length } }, 200, PRIVATE);
     }
     const origin = new URL(c.req.url).origin;
     let sent = 0;
     const failed: string[] = [];
     for (const userId of eligible) {
       const address = emails.get(userId);
+      if (internal.includes(userId)) { await repo.record(crypto.randomUUID(), campaign, userId, "failed"); continue; }
       if (!address) { await repo.record(crypto.randomUUID(), campaign, userId, "failed"); failed.push(userId); continue; }
       const link = await unsubscribeUrl(c.env, origin, userId);
       try {
@@ -99,6 +127,6 @@ export function registerIndexRoutesEmailCampaigns(app: Hono<{ Bindings: Env }>):
       }
     }
     // Failed sends stay claimed: an operator looks at them rather than mailing twice.
-    return c.json({ sent, failed, skipped }, 200, PRIVATE);
+    return c.json({ sent, failed, skipped: { ...skipped, internal: internal.length } }, 200, PRIVATE);
   }));
 }
