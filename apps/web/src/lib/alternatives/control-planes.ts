@@ -8,32 +8,32 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "T3 Code Alternatives (2026): T3 Code vs xMatrix",
     metaDescription:
-      "Searching for T3 Code alternatives? Get the three features T3 Code users keep asking for: real multiplayer Spaces (#27974), living project Pages (#15858), and automatic quota handoff (#15846).",
+      "Searching for T3 Code alternatives? Give your team real user identities, shared Channels (#27974), living project Pages (#15858), Space secrets, and cross-provider handoff (#15846).",
     eyebrow: "T3 Code Alternative · T3 Code vs xMatrix",
-    headline: "The T3 Code Alternative for Teams, Living Pages, and Automatic Quota Handoff",
-    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, stops cold at 'Limited' when a provider quota runs out, and has no shared project pages. xMatrix delivers the exact three upgrades T3 Code's own community keeps asking for.",
-    productCaption: "Inside xMatrix: real multiplayer Channels where Claude Code and Codex work together across all your machines, hand off capped quotas automatically, and keep living Pages current.",
+    headline: "T3 Code for Teams: Real Identities, One Channel, and One Living Page",
+    lead: "T3 Code is an impressive free single-player coding workbench, but it binds each environment to one account, has no shared living project pages, and stalls at 'Limited' when a provider quota runs out. xMatrix gives your team shared Channels, living Pages, Space secrets, and 35 coding harnesses across your machines.",
+    productCaption: "Inside xMatrix: real multiplayer Channels where 35 coding harnesses work across all your machines and keep living Pages current for the whole team.",
     painPoints: [
       {
         title: "No real multiplayer identity or shared team channels",
         problem:
-          "T3 Code binds each environment to a single T3 Connect account—everyone in logs is just 'user', and guest links expire in 24 hours with every guest message requiring host approval. Repeated team requests (#27974, #12283, #27708) have gone unanswered, pushing teams onto third-party forks.",
+          "T3 Code binds each environment to a single T3 Connect account—everyone in logs is just 'user', and guest links expire in 24 hours with every guest message requiring host approval. Repeated GitHub Discussion requests (#27974, #12283, #27708) have gone unanswered, pushing teams onto third-party forks.",
         xmatrixAnswer:
           "xMatrix is built for multi-human + multi-agent Spaces from the ground up: real user identities, public and private Channels, attributed Page edits, and notifications routed to the person who asked.",
       },
       {
         title: "Hits 'Limited' and stops—no automatic cross-provider quota handoff",
         problem:
-          "When Claude or Codex hits a usage cap in T3 Code, the thread freezes at Limited until reset or manual switching. Community requests for automatic cross-provider failover (#15846, #24453, #18949) remain unbuilt, and users also report wrapper sub-task overhead draining limits faster or showing false 'Limited' states.",
+          "When Claude or Codex hits a usage cap in T3 Code, the thread freezes at Limited until reset or manual switching. GitHub Discussion requests for automatic cross-provider failover (#15846, #24453, #18949) remain unbuilt, and users also report wrapper sub-task overhead draining limits faster or showing false 'Limited' states.",
         xmatrixAnswer:
           "xMatrix monitors provider quota windows across your registered harnesses and automatically hands work from a capped provider (like Claude Code) to another available provider (like Codex or Gemini) so work keeps moving.",
       },
       {
         title: "No living project pages, Space secrets, or ops connectors",
         problem:
-          "T3 Code excels at local diffs and emulators, but has no shared project memory or living documentation (#15858), defaults new threads to Full access, caps free T3 Connect tunnels at 3 machines, and focuses strictly on code rather than governed ops apps.",
+          "T3 Code excels at local diffs and emulators, but has no shared project memory or living documentation (GitHub Discussion #15858), defaults new threads to Full access, caps free T3 Connect tunnels at 3 machines, and focuses strictly on code rather than governed ops apps.",
         xmatrixAnswer:
-          "xMatrix turns completed conversations into living Pages, connects unlimited machines across your team, stores Space-level secrets safely, and governs 20+ apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
+          "xMatrix turns completed conversations into living Pages, connects unlimited machines across 35 harnesses, stores Space-level secrets safely, and governs 35 connected apps like Vercel, Cloudflare, Sentry, Gmail, and Stripe.",
       },
     ],
     comparisonRows: [
@@ -44,23 +44,23 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "When a provider hits its quota limit",
-        xmatrix: "Automatic cross-provider handoff (e.g. Claude Code to Codex/Gemini)",
+        xmatrix: "Automatic cross-provider handoff with uncommitted changes intact",
         competitor: "Pauses at Limited; manual switch or wait for reset only",
       },
       {
         dimension: "Project status & living docs",
         xmatrix: "Living Pages kept current by agents and co-edited with humans",
-        competitor: "Thread-by-thread history; no project memory or living docs (#15858)",
+        competitor: "Thread-by-thread history; no project memory or living docs (Discussion #15858)",
       },
       {
         dimension: "Default safety & ops governance",
-        xmatrix: "Per-app Read-only / Ask first / Read & write across 20+ apps + Space secrets",
+        xmatrix: "Per-app policies across 35 apps + Space secrets",
         competitor: "New threads default to Full access; machine-local secrets; dev issues only",
       },
       {
-        dimension: "Remote machine limits",
-        xmatrix: "Register all your macOS, Windows, and Linux machines in one Space",
-        competitor: "T3 Connect free tier caps at 3 machines (requires paid T3 Chat for 10/100)",
+        dimension: "Harnesses & remote machines",
+        xmatrix: "35 coding harnesses (+ --runtime) across all your macOS, Windows, and Linux machines",
+        competitor: "10 harnesses + ACP; T3 Connect free tier caps at 3 machines",
       },
     ],
     stayWhen: [
@@ -79,7 +79,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Connect more than 3 machines without a T3 Chat bundle",
-        detail: "Register your laptops, build boxes, and cloud VMs directly into one Space so @auto routes to whichever machine and provider has headroom.",
+        detail: "Register your laptops, build boxes, and your own servers directly into one Space so @auto routes to whichever machine and provider has headroom.",
       },
       {
         title: "Give every project a living Page",
@@ -90,7 +90,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       {
         question: "Why pay for xMatrix Pro when T3 Code is free?",
         answer:
-          "If you only want a free solo coding workbench on 1–3 machines, T3 Code is great. Teams choose xMatrix when they need real multiplayer Spaces, living project Pages, automatic cross-provider quota handoff, Space secrets, and 20+ governed operational connectors.",
+          "If you only want a free solo coding workbench on 1–3 machines, T3 Code is great. Teams choose xMatrix when they need real multiplayer Spaces, living project Pages, cross-provider quota handoff, Space secrets, and 35 governed operational connectors.",
       },
       {
         question: "Does xMatrix automatically switch providers when Claude hits its limit?",
@@ -113,7 +113,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Evaluating herdr (herdr-core) alternatives? Get built-in auth, team permissions, live cross-device relay today (no waitlist), per-app approvals, and living Pages in xMatrix.",
     eyebrow: "herdr Alternative · herdr vs xMatrix",
-    headline: "The herdr Alternative With Built-In Auth, Team Approvals, and Living Pages Today",
+    headline: "herdr Alternative With Team Auth, Approvals, and Living Pages — Live Across Devices Today",
     lead: "herdr evolved from a beloved Rust TUI multiplexer into herdr-core plus native apps, bringing breaking protocol changes and Reddit pushback over GUI lock-in—while still lacking multi-user auth, approvals, secrets, and a live cloud relay. xMatrix gives you a complete, governed collaboration layer today.",
     productCaption: "Inside xMatrix: cross-device desktop, web, and mobile coordination live today—with authenticated Spaces, Space secrets, and living Pages instead of an unauthenticated preview socket.",
     painPoints: [
@@ -136,7 +136,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
         problem:
           "Cross-device encrypted relaying (Herdr Cloud) and the official mobile app remain waitlisted/in-progress, and even once live, a PTY multiplexer leaves every decision buried inside terminal scrollback.",
         xmatrixAnswer:
-          "Cross-machine relaying across macOS, Windows, Linux, Web, Android, and iOS TestFlight works in xMatrix today, and finished runs keep living Pages up to date automatically.",
+          "Cross-machine relaying across macOS, Windows, Linux, Android, and Web (including iPhone & iPad) works in xMatrix today, and finished runs keep living Pages up to date automatically.",
       },
     ],
     comparisonRows: [
@@ -147,7 +147,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Cross-device relay & mobile",
-        xmatrix: "Live today across Web, macOS, Windows, Linux, Android, iOS TestFlight",
+        xmatrix: "Live today across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
         competitor: "SSH manual setup today; Herdr Cloud relay on waitlist",
       },
       {
@@ -157,7 +157,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Automation & connectors",
-        xmatrix: "Scheduled/event-driven Norn routines + 20+ connected apps",
+        xmatrix: "Scheduled/event-driven Norn programs + 35 connected apps",
         competitor: "No built-in cron, webhook automation, or app connectors",
       },
       {
@@ -218,14 +218,14 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     eyebrow: "Seedmux Alternative · Seedmux vs xMatrix",
     headline: "The Seedmux Alternative for Cross-OS Teams, Android, and Governed Mobile Control",
     lead: "Seedmux pairs a slick Ghostty + tmux macOS terminal with an iPhone companion app, but it is closed-source, Mac-only, single-player, and launches phone-initiated sessions in YOLO mode by default. xMatrix brings cross-OS multi-machine coordination, real team Spaces, and living Pages to macOS, Windows, Linux, Android, and iOS.",
-    productCaption: "Inside xMatrix: one workspace across macOS, Windows, Linux, Web, Android, and iOS TestFlight—with governed app approvals instead of YOLO phone defaults.",
+    productCaption: "Inside xMatrix: one workspace across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)—with governed app approvals instead of YOLO phone defaults.",
     painPoints: [
       {
         title: "macOS + iPhone lock-in leaves Windows, Linux, and Android behind",
         problem:
           "Seedmux is strictly a native macOS app with notch-dependent alerts and an iPhone companion (behind Seedmux Pro). There is no native Windows or Linux desktop app, no web workspace, and no Android app.",
         xmatrixAnswer:
-          "xMatrix runs natively across macOS, Windows, Linux, Web, Android, and iOS TestFlight—so every machine and phone you or your teammates use joins the exact same Space.",
+          "xMatrix runs across macOS, Windows, Linux, Android, and Web (including iPhone & iPad)—so every machine and phone you or your teammates use joins the exact same Space.",
       },
       {
         title: "Single-player terminal panes with YOLO defaults on mobile",
@@ -245,7 +245,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     comparisonRows: [
       {
         dimension: "Supported platforms",
-        xmatrix: "macOS, Windows, Linux, Web, Android, iOS TestFlight",
+        xmatrix: "macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
         competitor: "macOS + iPhone companion only (SSH/relay to Linux hosts)",
       },
       {
@@ -265,7 +265,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "External ops apps",
-        xmatrix: "20+ connected apps (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe)",
+        xmatrix: "35 connected apps (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe, etc.)",
         competitor: "Terminal CLI commands only; no SaaS connector approval layer",
       },
     ],
@@ -280,11 +280,11 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     migrationSteps: [
       {
         title: "Keep your existing CLI tools and subscriptions",
-        detail: "Install xMatrix on your Mac and Linux hosts and add Claude Code, Codex, Grok, OpenCode, or Kimi with xmatrix agent add.",
+        detail: "Install xMatrix on your Mac and Linux hosts and add any of 35 harnesses (Claude Code, Codex, Grok, OpenCode, Kimi, etc.) with xmatrix agent add.",
       },
       {
         title: "Use Web, Desktop, or Mobile without self-hosting a relay",
-        detail: "Follow progress and answer approvals from any browser, desktop app, Android device, or iOS TestFlight.",
+        detail: "Follow progress and answer approvals from any browser (including iPhone & iPad), desktop app, or Android device.",
       },
       {
         title: "Collect worker outputs in one living Page",
@@ -295,7 +295,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       {
         question: "Does xMatrix have structured task receipts like Seedmux workers?",
         answer:
-          "Yes. Every xMatrix agent run reports explicit lifecycle states, final receipts, and updates directly into the Channel and linked Page.",
+          "Yes. Every program request sent to an agent ends with a typed reply, alongside explicit lifecycle states and updates directly in the Channel and linked Page.",
       },
       {
         question: "Can I connect my Linux servers alongside my MacBook?",
@@ -315,21 +315,14 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
     name: "Claude Code",
     alsoKnownAs: "Claude Code Desktop, Cowork & Dispatch",
     verifiedDate: "November 22, 2026",
-    metaTitle: "Claude Code Alternatives (2026): Avoid Quota Walls",
+    metaTitle: "Claude Code Alternatives (2026): Add Teams & Pages",
     metaDescription:
-      "Hitting Claude Code 5-hour or weekly quota limits? Keep Claude Code inside xMatrix and add automatic handoff to Codex/Gemini, multiplayer Channels, living Pages, and Space secrets.",
+      "Want multiplayer Channels, living Pages, and 34 other coding agents around Claude Code? Keep Claude Code inside xMatrix, with automatic quota handoff when 5-hour caps hit.",
     eyebrow: "Claude Code Alternative · Claude Code vs xMatrix",
-    headline: "The Claude Code Alternative That Keeps Claude—and Adds Codex/Gemini Quota Handoff",
-    lead: "Claude Code Desktop and Cowork are excellent for pairing with one Claude session, but November 2026 community reports highlight 3x faster quota burn across shared Pro/Max allowances—and Anthropic will never hand your work to Codex or Gemini when Claude caps out. xMatrix orchestrates Claude Code alongside every other harness in multiplayer Channels and living Pages.",
-    productCaption: "Inside xMatrix: keep running your local Claude Code CLI while teammates collaborate in the same Channel and Codex or Gemini picks up automatically when Claude hits a quota wall.",
+    headline: "Claude Code Alternative? Keep Claude Code — Wrap It With Teammates, 34 Other Agents, and Living Pages",
+    lead: "Claude Code Desktop and Cowork are great for solo pairing with one Claude session, but they leave teammates outside the room, keep context trapped in solo sessions, and stop cold when November 2026's tighter 5-hour or weekly caps hit. xMatrix wraps Claude Code with shared Channels, living Pages, 34 other harnesses, and Space secrets.",
+    productCaption: "Inside xMatrix: keep running your local Claude Code CLI while teammates and 34 other coding harnesses collaborate in the same Channel and maintain living Pages.",
     painPoints: [
-      {
-        title: "Shared 5-hour and weekly quota walls stop work dead",
-        problem:
-          "Because Claude Code, Claude Desktop, and Cowork all draw from the same plan allowance—and background subagents plus /code-review dramatically accelerate token consumption (many r/claude users report 3x burn in November 2026)—Pro and lower tiers hit limits mid-day with no way to roll work over to another provider.",
-        xmatrixAnswer:
-          "xMatrix doesn't replace Claude Code—it elevates it. When Claude Code hits its 5-hour or weekly cap, xMatrix hands the conversation and Page context straight to Codex, Gemini, Cursor, or Grok so your work never stalls.",
-      },
       {
         title: "Built for solo pairing, not multiplayer teams or shared living docs",
         problem:
@@ -338,28 +331,35 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
           "xMatrix sits one layer up: teammates and dozens of parallel agents collaborate in shared Channels, while every finished run updates the shared living Page so you supervise outcomes and decisions rather than every line of terminal output.",
       },
       {
+        title: "Shared 5-hour and weekly quota walls stop work dead",
+        problem:
+          "Because Claude Code, Claude Desktop, and Cowork all draw from the same plan allowance—and background subagents plus /code-review accelerate token burn (many r/claude users report 3x burn in November 2026)—Pro and lower tiers hit limits mid-day with no way to roll work over to another provider.",
+        xmatrixAnswer:
+          "xMatrix doesn't replace Claude Code—it elevates it. When Claude Code hits its 5-hour or weekly cap, xMatrix can hand the checkout (uncommitted changes included) and Page context to Codex, Gemini, Cursor, or another registered harness so work keeps moving.",
+      },
+      {
         title: "No Space-level secrets or cross-harness governance across your machines",
         problem:
           "Claude Code Desktop ties local execution to Anthropic's ecosystem, lacks Space-wide secret injection across heterogeneous harnesses, and Anthropic's regional restrictions block unsupported territories outright.",
         xmatrixAnswer:
-          "xMatrix coordinates Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, and OpenCode across all your macOS, Windows, and Linux machines under one set of Space secrets and per-app connector approvals.",
+          "xMatrix coordinates 35 coding harnesses (plus any custom CLI via --runtime) across all your macOS, Windows, and Linux machines under one set of Space secrets and per-app approvals across 35 connected apps.",
       },
     ],
     comparisonRows: [
       {
-        dimension: "When Claude hits its usage limit",
-        xmatrix: "Automatic handoff to Codex, Gemini, Cursor, or Grok with full Page context",
-        competitor: "Work pauses until the 5-hour/weekly reset or requires switching to paid API keys",
-      },
-      {
-        dimension: "Supported coding harnesses",
-        xmatrix: "Claude Code, Codex, Cursor, Gemini, Grok, Kimi, Copilot, OpenCode, Antigravity",
-        competitor: "Claude only",
-      },
-      {
         dimension: "Collaboration & shared memory",
         xmatrix: "Multiplayer public/private Channels + living Pages co-edited by humans and agents",
         competitor: "Single-user sessions and personal Projects; Claude Tag limited to Slack paid plans",
+      },
+      {
+        dimension: "Supported coding harnesses",
+        xmatrix: "35 built-in harnesses (Claude Code, Codex, Cursor, Gemini, Antigravity, etc.) + --runtime",
+        competitor: "Claude only",
+      },
+      {
+        dimension: "When Claude hits its usage limit",
+        xmatrix: "Hands off checkout & Page context to another available harness automatically",
+        competitor: "Work pauses until the 5-hour/weekly reset or requires switching to paid API keys",
       },
       {
         dimension: "Supervision model",
@@ -368,7 +368,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Ops connectors & secrets",
-        xmatrix: "Space-level secrets + 20+ apps with Read-only / Ask first / Read & write rules",
+        xmatrix: "Space-level secrets + 35 apps with per-app policies",
         competitor: "Per-session MCP tools; Duet cloud VM still in US-only research waitlist",
       },
     ],
@@ -408,7 +408,7 @@ export const controlPlaneEntries: readonly AlternativeEntry[] = [
       {
         question: "Does xMatrix include cloud VMs like Claude Cowork?",
         answer:
-          "Not today. xMatrix connects your own laptops, desktops, and cloud VMs across macOS, Windows, and Linux.",
+          "Not today. xMatrix connects your own laptops, desktops, and self-managed servers across macOS, Windows, and Linux.",
       },
     ],
     relatedSlugs: ["t3-code", "jules", "orca", "paradev"],

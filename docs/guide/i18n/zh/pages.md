@@ -1,5 +1,5 @@
 ---
-title: "动态页面与保持文档准确的 Norn 程序 · xMatrix 文档"
+title: "活页面与保持文档准确的 Norn 程序 · xMatrix 文档"
 description: "用 xMatrix 页面保持项目文档实时准确：人与 Agent 协同编辑的共享 Markdown，以及按定时或事件自动运行 Agent 的 Norn 程序。"
 ---
 

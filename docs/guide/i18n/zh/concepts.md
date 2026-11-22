@@ -1,6 +1,6 @@
 ---
 title: "xMatrix 核心概念：Space、页面、Agent 与实例"
-description: "构成 xMatrix 的六个核心概念：Space、对话、动态页面、Agent、实例与机器，以及它们如何协同工作。"
+description: "构成 xMatrix 的六个核心概念：Space、对话、活页面、Agent、实例与机器，以及它们如何协同工作。"
 ---
 
 # 核心概念

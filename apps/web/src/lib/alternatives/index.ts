@@ -9,8 +9,14 @@ import { alternativesCopyJa } from "./i18n/ja";
 import { alternativesCopyKo } from "./i18n/ko";
 import { alternativesCopyZh } from "./i18n/zh";
 import { alternativesCopyZhTw } from "./i18n/zh-tw";
+import {
+  ALTERNATIVE_VERIFIED_DATE_ISO,
+  FOOTER_ALTERNATIVE_SLUGS,
+  alternativePainPointSources,
+} from "./sources";
 import type { AlternativeEntry, AlternativeLocaleCopy, AlternativePage, AlternativeSlug } from "./types";
 
+export { ALTERNATIVE_VERIFIED_DATE_ISO };
 export type { AlternativePage } from "./types";
 
 const ROUTE_SUFFIX = "-alternatives";
@@ -33,16 +39,28 @@ function buildAlternativePage(entry: AlternativeEntry, locale: SiteLocale): Alte
   const routeSlug = `${entry.slug}${ROUTE_SUFFIX}`;
   const basePath = `/${routeSlug}`;
   const copy = locale === "en" ? entry : localeCopyMap[locale][entry.slug];
+  const pointSources = alternativePainPointSources[entry.slug];
   return {
     ...entry,
     ...copy,
+    painPoints: copy.painPoints.map((point, index) => ({
+      ...point,
+      sources: pointSources[index] ?? point.sources,
+    })),
     routeSlug,
     basePath,
     href: localizedPath(locale, basePath),
+    verifiedDateIso: ALTERNATIVE_VERIFIED_DATE_ISO,
   };
 }
 
 export const alternativePages: readonly AlternativePage[] = allEntries.map((entry) => buildAlternativePage(entry, "en"));
+
+export const footerAlternativePages: readonly AlternativePage[] = FOOTER_ALTERNATIVE_SLUGS.map((slug) => {
+  const page = alternativePages.find((item) => item.slug === slug);
+  if (!page) throw new Error(`Unknown footer alternative slug: ${slug}`);
+  return page;
+});
 
 /** Legacy product names that redirect permanently to the current competitor page. */
 const legacyRouteRedirects: Readonly<Record<string, string>> = {

@@ -9,10 +9,10 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Raft Alternatives (2026): Raft vs xMatrix",
     metaDescription:
-      "Searching for Raft (Slock) alternatives? Compare Raft vs xMatrix: living project Pages instead of buried chat and retired Wiki Agent, $0 agent seats, and 20+ governed apps.",
+      "Searching for Raft (Slock) alternatives? Compare Raft vs xMatrix: living project Pages instead of buried chat and retired Wiki Agent, 35 coding harnesses, and 35 governed apps.",
     eyebrow: "Raft Alternative · Raft vs xMatrix",
     headline: "The Raft Alternative Where Decisions Land in Living Pages, Not Buried Chat",
-    lead: "Raft treats coding agents as chat teammates and retired its Wiki Agent in September 2026. xMatrix keeps shared channels for humans and agents, then turns finished work into living Pages that stay current across every machine and connected app.",
+    lead: "Raft treats coding agents as chat teammates and retired its Wiki Agent in September 2026. xMatrix keeps shared channels for humans and 35 coding harnesses, then turns finished work into living Pages that stay current across every machine and 35 connected apps.",
     productCaption: "Inside xMatrix: humans and coding agents collaborate in Channels while updating one living project Page instead of scattering context across chat scrollback and local MEMORY.md files.",
     painPoints: [
       {
@@ -27,14 +27,14 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Raft's Stamp adds human approval for GitHub pushes and PRs, but teams deploying real software also touch Vercel, Cloudflare, Linear, Sentry, Gmail, Stripe, and Google Workspace. Raft's agent runtimes otherwise launch with permissions bypassed.",
         xmatrixAnswer:
-          "xMatrix applies one per-app policy (Read-only, Ask first, or Read & write) across 20+ connected services, while Space-level secrets are injected via xmatrix secret exec so agents never read raw secret values.",
+          "xMatrix applies one per-app policy across 35 connected services (Read-only, Ask first, or Read & write — with GitHub offering Read-only and Read & write), while Space-level secrets are injected via xmatrix secret exec so agents never read raw secret values.",
       },
       {
         title: "Agents still cost seats on Pro and stay tied to one computer",
         problem:
           "On Raft Pro ($10/human seat/mo, or $8.80 annual), every agent counts as 0.1 seat, and each agent is pinned to one machine—when that laptop goes offline, the agent stops.",
         xmatrixAnswer:
-          "xMatrix never charges seats for agents on any plan, lets one Space span every macOS, Windows, and Linux machine you register, and hands work to another harness when a provider quota window runs dry.",
+          "xMatrix supports 35 coding harnesses (plus any custom CLI via --runtime) across every macOS, Windows, and Linux machine you register at $0 per agent seat, routing tasks by fit and headroom.",
       },
     ],
     comparisonRows: [
@@ -45,17 +45,17 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Approval & secrets layer",
-        xmatrix: "Per-app policies across 20+ apps + Space secrets without raw exposure",
+        xmatrix: "Per-app policies across 35 apps + Space secrets (GitHub: Read-only / Read & write)",
         competitor: "Stamp for GitHub pushes/PRs; local proxy tokens; runtimes bypass permissions",
       },
       {
-        dimension: "Pricing for agents",
-        xmatrix: "$0 per agent; Pro is $10/human seat/mo ($8/mo annual) with 5,000 agent credits/seat",
-        competitor: "Free (30-day history); Pro $10/seat/mo ($8.80 annual) + 0.1 seat per agent",
+        dimension: "Harnesses & pricing",
+        xmatrix: "35 harnesses (+ --runtime); Free (500 lifetime writes) / Pro $10/human/mo ($8 annual)",
+        competitor: "Fewer runtimes; Free (30-day history); Pro $10/seat/mo ($8.80 annual) + 0.1 seat/agent",
       },
       {
-        dimension: "Quota exhaustion handling",
-        xmatrix: "Cross-provider handoff (e.g. Claude Code to Codex or Gemini) in the same Space",
+        dimension: "Routing & failover",
+        xmatrix: "@auto picks by fit & machine headroom; hands off across providers on quota caps",
         competitor: "Single-runtime binding per agent; stops when that provider or machine stops",
       },
       {
@@ -84,7 +84,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         title: "Move API tokens into Space Secrets and connect apps",
-        detail: "Connect GitHub, Linear, Vercel, Cloudflare, or Sentry with Ask-first rules and store remaining credentials in Space Secrets.",
+        detail: "Connect GitHub (Read-only or Read & write) alongside Linear, Vercel, Cloudflare, or Sentry with Ask-first rules, and store remaining credentials in Space Secrets.",
       },
     ],
     faqs: [
@@ -114,9 +114,9 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Lody alternatives? Switch from Lody's single-session worktrees and daemon sync drops to xMatrix's shared multi-human Channels, living Pages, Space secrets, and webhook routines.",
     eyebrow: "Lody Alternative · Lody vs xMatrix",
-    headline: "The Lody Alternative for Shared Team Channels, Living Pages, and Space Secrets",
-    lead: "Lody organizes work around isolated one-session-per-worktree threads synced through a closed-source cloud relay. xMatrix pairs multi-machine agent execution with shared multi-human channels, living Pages, Space-level secrets, and event-driven automation.",
-    productCaption: "Inside xMatrix: instead of passing isolated coding sessions one by one, teammates and multiple harnesses work in one shared Channel and roll finished work into living Pages.",
+    headline: "Lody Alternative: One Channel, One Living Page — Shared by Your Whole Team and Every Agent",
+    lead: "Lody organizes work around isolated one-session-per-worktree threads synced through a closed-source cloud relay. xMatrix brings teammates and 35 coding harnesses into one shared Channel, keeps living Pages current as work lands, and adds Space secrets plus event-driven Norn programs.",
+    productCaption: "Inside xMatrix: instead of passing isolated coding sessions one by one, teammates and 35 coding harnesses work in one shared Channel and roll finished work into living Pages.",
     painPoints: [
       {
         title: "Session-centric UX leaves out shared team channels and living docs",
@@ -137,7 +137,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Lody scopes permissions per session without a Workspace secret vault, lacks per-app connector governance for ops tools, and supports cron jobs without inbound webhook triggers.",
         xmatrixAnswer:
-          "xMatrix provides Space-level secrets injected at runtime, per-app approval controls across 20+ connectors, and Norn routines triggered by both schedules and external events like GitHub or Sentry.",
+          "xMatrix provides Space-level secrets injected at runtime, per-app approval controls across 35 connectors, and Norn programs embedded inside Pages triggered by schedules or external events like GitHub or Sentry.",
       },
     ],
     comparisonRows: [
@@ -148,17 +148,17 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Secrets & external ops tools",
-        xmatrix: "Space-level secrets (xmatrix secret exec) + 20+ governed app connectors",
+        xmatrix: "Space-level secrets (xmatrix secret exec) + 35 governed app connectors",
         competitor: "Per-session permissions only; no workspace secret store",
       },
       {
         dimension: "Automation triggers",
-        xmatrix: "Scheduled and event-driven Norn routines embedded inside Pages",
+        xmatrix: "Scheduled and event-driven Norn programs embedded inside Pages",
         competitor: "Scheduled cron tasks and quota-reset resume; no webhook triggers",
       },
       {
-        dimension: "Quota limit handling",
-        xmatrix: "Automatic cross-provider handoff when one provider hits its limit",
+        dimension: "Harness & routing breadth",
+        xmatrix: "35 coding harnesses (+ --runtime) routed by fit, headroom, and quota handoff",
         competitor: "Waits and resumes after the same provider's quota resets",
       },
       {
@@ -194,7 +194,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       {
         question: "Does xMatrix also let me run coding agents on my own machines like Lody?",
         answer:
-          "Yes. Agents run directly on your own macOS, Windows, and Linux computers or cloud VMs in the folders and repositories you register.",
+          "Yes. Agents run directly on your own macOS, Windows, and Linux computers (or your own servers) in the folders and repositories you register.",
       },
       {
         question: "How does xMatrix handle provider rate limits compared to Lody?",
@@ -217,57 +217,57 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Evaluating Multica alternatives? Move beyond headless ticket runs, silent bypassPermissions drops (#9559), and plaintext env vars to xMatrix's live Channels, living Pages, and Space secrets.",
     eyebrow: "Multica Alternative · Multica vs xMatrix",
-    headline: "The Multica Alternative Without Headless Ticket Traps or Silent bypassPermissions",
-    lead: "Multica turns every agent task into a Kanban issue executed headlessly with full host permissions and no living documentation layer. xMatrix gives humans and agents shared real-time Channels, living Pages, and governed app actions without forcing every request into a ticket.",
-    productCaption: "Inside xMatrix: steer Claude Code and Codex live alongside teammates in shared Channels—with explicit app approvals and living Pages instead of blind headless board runs.",
+    headline: "Multica Alternative: Don't Turn Every Request Into a Ticket — Say It Once, Agents Ship, Pages Stay Current",
+    lead: "Multica forces every agent task into a headless Kanban issue with bypassPermissions defaults and no living documentation layer. xMatrix lets humans and 35 coding harnesses collaborate live in Channels (or attach an interactive session with xmatrix claude), keeps living Pages current, and governs 35 external apps with Space secrets.",
+    productCaption: "Inside xMatrix: steer Claude Code, Codex, and 33 other harnesses live alongside teammates in shared Channels—with explicit app approvals and living Pages instead of blind headless board runs.",
     painPoints: [
       {
-        title: "Forced bypassPermissions defaults and silent restriction drops",
+        title: "Forced bypassPermissions defaults, silent restriction drops, and plaintext server env vars",
         problem:
-          "Multica launches Claude Code with --permission-mode bypassPermissions and Codex in full-auto mode with no built-in filesystem sandbox. Community bug #9559 revealed custom_args silently dropping user-supplied --permission-mode restrictions, leaving agents running unrestricted even when admins believed they were locked down.",
+          "Multica launches Claude Code with --permission-mode bypassPermissions and Codex in full-auto mode, and stores server env vars in plaintext. Community bug #9559 revealed custom_args silently dropping user-supplied --permission-mode restrictions.",
         xmatrixAnswer:
-          "xMatrix keeps explicit permission boundaries: every connected app can be set to Read-only, Ask first, or Read & write, and sensitive credentials stay in Space Secrets injected at execution time rather than stored in plaintext env vars on the server.",
+          "xMatrix governs external actions across 35 connected apps with per-app Read-only, Ask first, or Read & write policies, and injects Space Secrets at runtime via xmatrix secret exec so raw credentials never appear in server env vars or chat transcripts.",
       },
       {
-        title: "Everything must become an issue—no shared human + multi-agent channels",
+        title: "Everything must become a headless ticket—no shared channels or interactive session attach",
         problem:
-          "Multica's in-app chat is strictly private 1:1, and its workflow requires turning work into headless board tickets. Steering an agent mid-flight or coordinating two engineers and three harnesses on an incident feels unnatural.",
+          "Multica's in-app chat is strictly private 1:1, and its workflow requires turning work into headless board tickets. Steering an agent mid-flight or bringing an active local terminal session into a team conversation isn't supported.",
         xmatrixAnswer:
-          "xMatrix lets teammates and agents work live in shared Channels. Mentioning an agent steers or starts work in place, while multiple agents collaborate in parallel and report outcomes back to the Page.",
+          "xMatrix lets teammates and 35 harnesses work live in shared Channels—and xmatrix claude attaches an existing local terminal session straight into the Channel while outcomes roll up to the living Page.",
       },
       {
         title: "No living pages or built-in project memory",
         problem:
           "Multica tracks issues and skills, not evolving project truth—its community memory request (#838) has sat unanswered since April 2026, leaving decisions scattered across closed tickets.",
         xmatrixAnswer:
-          "Living Pages are built into every xMatrix Space. Every decision is written once, co-editable with humans, and automatically kept current by the agents doing the work.",
+          "Living Pages are built into every xMatrix Space. Every decision is written once, co-editable with humans (with suggestion mode and per-paragraph attribution), and kept current by the working agents.",
       },
     ],
     comparisonRows: [
       {
         dimension: "Collaboration model",
-        xmatrix: "Shared multi-human + multi-agent Channels backed by living Pages",
-        competitor: "Kanban issue board + headless runs + private 1:1 chat only",
+        xmatrix: "Shared multi-human + multi-agent Channels + xmatrix claude attach + living Pages",
+        competitor: "Kanban issue board + headless runs only + private 1:1 chat",
       },
       {
-        dimension: "Permissions & secrets",
-        xmatrix: "Per-app Read-only / Ask first / Read & write + masked Space secrets",
+        dimension: "External actions & secrets",
+        xmatrix: "35 apps with per-app policies + masked Space secrets (runtime-injected)",
         competitor: "bypassPermissions default (#9559); plaintext server env vars; MCP schema approval",
       },
       {
         dimension: "Living documentation",
-        xmatrix: "Native Pages updated by agents; human edits take priority on active lines",
+        xmatrix: "Native Pages updated by agents; suggestion mode, attribution, human edit priority",
         competitor: "None (memory feature request #838 unresolved)",
       },
       {
-        dimension: "External ops connectors",
-        xmatrix: "20+ native connectors (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe)",
-        competitor: "Chat bridges (Slack, Lark, DingTalk, WeCom, Telegram) + MCP plugins",
+        dimension: "Supported coding harnesses",
+        xmatrix: "35 built-in harnesses (+ any custom CLI via --runtime)",
+        competitor: "28 CLI runtimes",
       },
       {
-        dimension: "Quota continuity",
-        xmatrix: "Automatic handoff across providers (Claude, Codex, Gemini, Cursor, etc.)",
-        competitor: "Daemon claims tickets per configured CLI runtime",
+        dimension: "External ops connectors",
+        xmatrix: "35 native connectors (GitHub, Linear, Vercel, Cloudflare, Sentry, Gmail, Stripe, etc.)",
+        competitor: "Chat bridges (Slack, Lark, DingTalk, WeCom, Telegram) + MCP plugins",
       },
     ],
     stayWhen: [
@@ -319,10 +319,10 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     verifiedDate: "November 22, 2026",
     metaTitle: "Paradev & Superset Alternatives (2026): vs xMatrix",
     metaDescription:
-      "Looking for Paradev (Superset) alternatives? Skip $20–$60/seat paywalls, terminal sprawl, and whole-machine relays with xMatrix's $10/seat Channels, living Pages, and 20+ app approvals.",
+      "Looking for Paradev (Superset) alternatives? Run coding teams on macOS, Windows, Linux, and Android with shared Channels, living Pages, 35 app approvals, and $10/seat pricing.",
     eyebrow: "Paradev (Superset) Alternative · Paradev vs xMatrix",
-    headline: "The Paradev (Superset) Alternative Without $60/Seat Pricing or Terminal Sprawl",
-    lead: "Paradev (rebranded from Superset in October 2026) excels at parallel local and Vercel-hosted dev worktrees, but team collaboration jumps to $60/user/month and opening a remote host exposes the whole machine. xMatrix gives teams shared channels, living Pages, and per-app approvals at $10/human seat/month.",
+    headline: "Paradev Alternative for Teams on Any OS: Shared Channels, Living Pages, $10/Seat",
+    lead: "Paradev (rebranded from Superset in October 2026) is macOS-first, jumps to $60/user/month for Team collaboration, and exposes the whole machine when opening a remote host. xMatrix works across macOS, Windows, Linux, Android, and Web with shared Channels, living Pages, and 35 governed app connectors at $10/human seat/month.",
     productCaption: "Inside xMatrix: supervise dozens of parallel agent conversations through clean Channels and living Pages instead of juggling 20 terminal panes.",
     painPoints: [
       {
@@ -344,13 +344,13 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Paradev lacks Space-level secrets and a cross-app approval governance layer; granting remote relay access effectively opens the entire host machine to authorized teammates.",
         xmatrixAnswer:
-          "xMatrix scopes agents to registered repositories and folders, injects Space secrets without printing raw values, and enforces Read-only / Ask first / Read & write policies across 20+ operational connectors.",
+          "xMatrix scopes agents to registered repositories and folders, injects Space secrets without printing raw values, and enforces per-app policies across 35 operational connectors.",
       },
     ],
     comparisonRows: [
       {
         dimension: "Team pricing",
-        xmatrix: "$10/human seat/mo ($8/mo annual); Free for up to 3 people",
+        xmatrix: "$10/human seat/mo ($8/mo annual); Free for up to 3 people (500 lifetime writes)",
         competitor: "Free (1 person local) / Pro $20/user/mo / Team $60/user/mo (150 cloud hrs)",
       },
       {
@@ -360,12 +360,12 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Where agents run",
-        xmatrix: "Your own macOS, Windows, and Linux machines or your own cloud VMs",
+        xmatrix: "Your own macOS, Windows, and Linux machines (desktop, laptop, or your own server)",
         competitor: "macOS-first local IDE, remote SSH/relay hosts, or Vercel cloud sandboxes",
       },
       {
         dimension: "Secrets & operational apps",
-        xmatrix: "Space-level secret vault + 20+ connectors with per-app approval policies",
+        xmatrix: "Space-level secret vault + 35 connectors with per-app approval policies",
         competitor: "Inline out-of-workspace approvals; no Space secrets; dev triggers only",
       },
       {
@@ -386,7 +386,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     migrationSteps: [
       {
         title: "Register your macOS, Linux, or Windows hosts in xMatrix",
-        detail: "Bring your existing workstations or always-on cloud VMs into one Space—no macOS-only client constraint.",
+        detail: "Bring your existing workstations or your own always-on Linux servers into one Space—no macOS-only client constraint.",
       },
       {
         title: "Replace multi-tab monitoring with a Project Page",
@@ -425,9 +425,9 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Conductor was acquired by Meta and shut down Conductor Cloud on Nov 20, 2026. Switch to xMatrix to run Claude Code and Codex teams across macOS, Windows, and Linux at $10/seat.",
     eyebrow: "Conductor Alternative · Post-Meta Migration",
-    headline: "Best Conductor Alternative After Meta's Cloud Shutdown: Switch to xMatrix",
-    lead: "Meta acquired Conductor in November 2026, stopped new signups, and shut down Conductor Cloud on November 20, 2026 while putting the macOS-only local app on maintenance support into early 2027. xMatrix is an active, independent home for your Claude Code, Codex, and Cursor workflows on macOS, Windows, and Linux.",
-    productCaption: "Inside xMatrix: bring your exported Conductor repos and Claude Code / Codex logins into one cross-OS workspace across macOS, Windows, Linux, Web, and mobile.",
+    headline: "Where to Move After Meta's Conductor Shutdown: Mac, Windows & Linux With Living Pages",
+    lead: "Meta acquired Conductor in November 2026, stopped new signups, and shut down Conductor Cloud on November 20, 2026 while putting the macOS-only local app on maintenance support into early 2027. xMatrix is an active, independent home for your 35 coding harnesses on macOS, Windows, and Linux—with team context kept in living Pages.",
+    productCaption: "Inside xMatrix: bring your exported Conductor repos and Claude Code / Codex logins into one cross-OS workspace across macOS, Windows, Linux, Android, and Web.",
     painPoints: [
       {
         title: "Conductor Cloud is gone and the roadmap is winding down",
@@ -441,14 +441,14 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Throughout its independent life, Conductor never shipped native Windows or Linux support, forcing mixed-OS engineering teams to split tools or buy Macs just to share workspaces.",
         xmatrixAnswer:
-          "xMatrix runs natively across macOS, Windows, Linux, Web, Android, and iOS TestFlight. Connect Linux build servers, Windows dev boxes, and MacBooks inside the exact same Space.",
+          "xMatrix runs across macOS, Windows, Linux, Android, and Web (including iPhone & iPad). Connect Linux build servers, Windows dev boxes, and MacBooks inside the exact same Space.",
       },
       {
         title: "No living project pages, and $50–$60/mo pricing before shutdown",
         problem:
           "Conductor charged $50/month for Pro and $60/user/month for Teams, suffered UI lag on massive conversation logs, and left knowledge inside isolated workspaces rather than a shared living document.",
         xmatrixAnswer:
-          "xMatrix Pro is $10/human seat/month ($8/mo annual) with unlimited agents, turns completed work into living Pages, and adds cross-provider quota handoff plus 20+ governed app connectors.",
+          "xMatrix Pro is $10/human seat/month ($8/mo annual) with unlimited agents across 35 harnesses, turns completed work into living Pages, and adds 35 governed app connectors plus Space secrets.",
       },
     ],
     comparisonRows: [
@@ -459,22 +459,22 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Operating systems",
-        xmatrix: "macOS, Windows, Linux, Web, Android, iOS TestFlight",
+        xmatrix: "macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
         competitor: "macOS and iOS only; no native Windows or Linux support",
       },
       {
         dimension: "Pricing",
-        xmatrix: "Free tier + Pro $10/human seat/mo ($8/mo annual)",
+        xmatrix: "Free tier (500 lifetime writes) + Pro $10/human seat/mo ($8/mo annual)",
         competitor: "Previously Pro $50/mo, Teams $60/user/mo (refunded on shutdown)",
       },
       {
         dimension: "Multi-agent output",
-        xmatrix: "Living Pages + shared multi-human Channels",
+        xmatrix: "Living Pages + shared multi-human Channels across 35 harnesses",
         competitor: "Parallel worktree sessions and diff views",
       },
       {
         dimension: "Governance & connectors",
-        xmatrix: "Per-app Read-only / Ask first / Read & write across 20+ apps + Space secrets",
+        xmatrix: "Per-app policies across 35 apps + Space secrets",
         competitor: "Local agents ran with full OS user permissions; no ops approval plane",
       },
     ],
@@ -527,8 +527,8 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Orca (stablyai/orca) alternatives? Trade single-player RAM spikes, 8,900+ open issues, and brittle LAN mobile pairing for xMatrix's multiplayer Channels and living Pages.",
     eyebrow: "Orca Alternative · Orca vs xMatrix",
-    headline: "The Orca Alternative Built for Real Teams, Calm Supervision, and Living Pages",
-    lead: "Orca is a popular open-source single-player ADE for fanning prompts across parallel local worktrees, but multiplayer UI is still missing, heavy fleets spike local RAM and token bills, and stability complaints fill its tracker. xMatrix focuses on calm, multiplayer coordination where agents maintain living Pages.",
+    headline: "Orca Alternative When It's More Than Just You: One Channel, One Living Page, Right-Sized Routing",
+    lead: "Orca is a popular open-source single-player ADE for fanning prompts across parallel local worktrees, but multiplayer UI is still missing, fanning one prompt to N agents multiplies token burn, and heavy fleets spike local RAM. xMatrix routes each task to the best-fit agent across 35 harnesses and keeps living Pages current for your whole team.",
     productCaption: "Inside xMatrix: distribute parallel coding work across all your machines without embedded browser RAM spikes—and monitor outcomes cleanly from desktop or mobile.",
     painPoints: [
       {
@@ -566,17 +566,17 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Mobile & remote access",
-        xmatrix: "Hub-relayed Web, Android, and iOS TestFlight across any network or VPN",
+        xmatrix: "Hub-relayed Web (including iPhone & iPad), desktop, and Android across any VPN",
         competitor: "Local-network QR pairing prone to corporate VPN/firewall drops",
       },
       {
-        dimension: "Quota protection",
-        xmatrix: "Targeted routing + automatic cross-provider quota handoff",
+        dimension: "Routing & token spend",
+        xmatrix: "@auto picks one best-fit agent by skill, CPU/RAM, and quota headroom",
         competitor: "Fan-out prompts multiply token burn across N parallel worktrees",
       },
       {
         dimension: "Operational connectors",
-        xmatrix: "20+ connectors with Read-only / Ask first / Read & write policies",
+        xmatrix: "35 connectors with per-app policies + Space secrets",
         competitor: "Experimental Slack/Discord context bridges; no ops approval plane",
       },
     ],
@@ -631,8 +631,8 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Searching for LobeHub or LobeChat alternatives? Skip credit resale markups, 2.0 PostgreSQL/S3 migration friction, and RAG chunk pollution with xMatrix's local coding agents and living Pages.",
     eyebrow: "LobeHub (LobeChat) Alternative · LobeHub vs xMatrix",
-    headline: "The LobeHub (LobeChat) Alternative Built for Your Own Coding Subscriptions",
-    lead: "LobeHub (rebranded from LobeChat) is a broad general-purpose AI workspace monetized by reselling model credits, with a heavy 2.0 self-hosting stack and no shared multi-human + multi-agent channels. xMatrix is purpose-built for coordinating real coding agents on your own machines with your own subscriptions.",
+    headline: "LobeHub Alternative: For Coding Teams Already Paying for Claude Code or Codex — Stop Buying Credits Twice",
+    lead: "LobeHub (rebranded from LobeChat) is a general-purpose AI workspace monetized by reselling model credits, with a heavy 2.0 self-hosting stack and no shared multi-human + multi-agent channels. xMatrix runs 35 coding harnesses directly in your real repos on your existing subscriptions, with Goals for delivery checks and 35 governed app connectors.",
     productCaption: "Inside xMatrix: coordinate your own Claude Code, Codex, and Cursor subscriptions in real-time team Channels with living Pages—zero token resale or Docker stack maintenance.",
     painPoints: [
       {
@@ -679,32 +679,32 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         competitor: "Cloud SaaS or self-hosted PostgreSQL + S3 + auth stack (2.0 migration)",
       },
       {
-        dimension: "Cross-provider coding handoff",
-        xmatrix: "Native quota-aware handoff across Claude Code, Codex, Gemini, Cursor, etc.",
-        competitor: "External coding agents connected via lh connect; external permissions unmanaged",
+        dimension: "Delivery verification & governance",
+        xmatrix: "Goals verify completion after each turn + 35 governed connectors for every harness",
+        competitor: "Built-in delivery checks; external lh connect coding agents run outside governance",
       },
     ],
     stayWhen: [
       "You want one general-purpose AI portal bundling 40+ hosted chat models on a single credit invoice without holding separate Anthropic/OpenAI subscriptions.",
-      "You rely on LobeHub's built-in Discord, Telegram, WeChat, and Lark bot bindings for consumer-style assistants.",
+      "You rely on LobeHub's built-in Discord, Telegram, WeChat, and Lark bot bindings or per-member/agent budget dashboards.",
     ],
     switchWhen: [
       "You already pay for Claude Code, Codex, or Cursor and don't want to pay credit markups on top of long coding contexts.",
-      "You want engineers and coding agents collaborating live in shared Channels and maintaining authoritative living Pages instead of debugging RAG retrieval.",
+      "You want engineers and 35 coding harnesses collaborating live in shared Channels and maintaining authoritative living Pages instead of debugging RAG retrieval.",
       "You don't want to maintain a PostgreSQL + S3 self-hosting stack just to coordinate local coding agents.",
     ],
     migrationSteps: [
       {
         title: "Keep your native coding CLIs and subscriptions",
-        detail: "Register Claude Code, Codex, Gemini, or Cursor directly with xMatrix so you stop paying double for hosted credit pools.",
+        detail: "Register any of 35 harnesses (Claude Code, Codex, Gemini, Cursor, etc.) directly with xMatrix so you stop paying double for hosted credit pools.",
       },
       {
-        title: "Turn static knowledge bases into living Pages",
-        detail: "Import your key architecture notes and open work into xMatrix Pages where agents keep them current as PRs merge.",
+        title: "Turn static knowledge bases into living Pages and Goals",
+        detail: "Import your key architecture notes and open work into xMatrix Pages where agents keep them current, and use /goal to verify completion conditions automatically.",
       },
       {
         title: "Connect your operational apps with per-app governance",
-        detail: "Attach GitHub, Linear, Vercel, Cloudflare, Sentry, or Gmail with Read-only / Ask first / Read & write rules.",
+        detail: "Attach GitHub (Read-only or Read & write) alongside Linear, Vercel, Cloudflare, Sentry, or Gmail with Read-only / Ask first / Read & write rules.",
       },
     ],
     faqs: [
@@ -734,8 +734,8 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
     metaDescription:
       "Comparing Cumora (yetone/cumora) alternatives? Run coding agents directly in your real local repos without offline sandbox blocks (#350), bwrap errors, or invite-only previews.",
     eyebrow: "Cumora Alternative · Cumora vs xMatrix",
-    headline: "The Cumora Alternative Where Agents Work in Your Real Repos Without Offline Sandboxes",
-    lead: "Cumora puts persona-driven agents into team chat, but locks local BYOA runs inside offline sandboxes separated from your real sessions, hits Bubblewrap and CDN fetch breakages, and remains an invite-only preview. xMatrix runs your real Claude Code and Codex harnesses directly in your repositories with governed app connectors.",
+    headline: "Cumora Alternative: Agents Working in Your Real Repos, Shipping Through Governed Connectors",
+    lead: "Cumora puts persona-driven agents into team chat, but locks local BYOA runs inside offline sandboxes separated from your real sessions, hits Bubblewrap and CDN fetch breakages (#350), and remains an invite-only preview. xMatrix runs 35 coding harnesses directly in your repositories and ships through 35 governed connectors and living Pages.",
     productCaption: "Inside xMatrix: no invite waitlist and no offline sandbox wall—your real local Claude Code and Codex harnesses collaborate with your team right inside your repositories.",
     painPoints: [
       {
@@ -750,30 +750,30 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
         problem:
           "Users hit local bwrap startup failures, behavioral drift between Cumora Cloud's Kubernetes FUSE pods and local BYOA hosts, and mobile views showing 'coming soon' placeholders—while repository commits paused after November 1, 2026.",
         xmatrixAnswer:
-          "xMatrix ships continuously across macOS, Windows, Linux, Web, Android, and iOS TestFlight with one consistent local-machine execution model and production-tested release trains.",
+          "xMatrix ships continuously across macOS, Windows, Linux, Android, and Web (including iPhone & iPad) with one consistent local-machine execution model and production-tested release trains.",
       },
       {
         title: "Missing governed connectors for shipping and operations",
         problem:
           "Cumora includes chat, docs, kanban, and calendar primitives, but lacks a cross-app approval plane and Space secret vault for GitHub, Vercel, Cloudflare, Linear, Sentry, Gmail, and Stripe.",
         xmatrixAnswer:
-          "xMatrix connects 20+ engineering and business services with per-app Read-only / Ask first / Read & write policies and Space-level secrets.",
+          "xMatrix connects 35 engineering and business services with per-app policies and Space-level secrets.",
       },
     ],
     comparisonRows: [
       {
         dimension: "Where local agents work",
-        xmatrix: "Directly in your registered local repositories and toolchains",
+        xmatrix: "Directly in your registered local repositories and toolchains across 35 harnesses",
         competitor: "Inside Cumora's own offline sandbox workspace (blocks outbound fetches, #350)",
       },
       {
         dimension: "Availability & momentum",
-        xmatrix: "Open self-serve Free & Pro plans; daily active releases",
+        xmatrix: "Open self-serve Free (500 lifetime writes) & Pro plans; daily active releases",
         competitor: "Invite-only preview; no repo pushes since Nov 1, 2026",
       },
       {
         dimension: "External app governance",
-        xmatrix: "20+ connectors with per-app approval policies + Space secrets",
+        xmatrix: "35 connectors with per-app policies + Space secrets",
         competitor: "Production deploy approvals; no comparable ops connector approval layer",
       },
       {
@@ -783,7 +783,7 @@ export const directCompetitorEntries: readonly AlternativeEntry[] = [
       },
       {
         dimension: "Mobile & cross-OS clients",
-        xmatrix: "Web, macOS, Windows, Linux, Android, and iOS TestFlight",
+        xmatrix: "macOS, Windows, Linux, Android, and Web (including iPhone & iPad)",
         competitor: "Desktop/web primary; mobile session gaps ('coming soon' states)",
       },
     ],
