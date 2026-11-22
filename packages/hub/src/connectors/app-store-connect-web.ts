@@ -1,5 +1,6 @@
 import { readBoundedStream, stripHtmlTags } from "@xmatrix/protocol";
-import { appStoreConnect, appleApp, BUNDLE_ID, type AppleResource, type AppStoreConnectApi } from "./app-store-connect-api";
+import { appStoreConnect, appleApp, BUNDLE_ID, paginateAppleCollection, type AppleCollection,
+  type ApplePaginationOptions, type ApplePreviewCollection, type AppleResource, type AppStoreConnectApi } from "./app-store-connect-api";
 import { cell } from "./actions/google-report";
 import { record, text } from "./event-format";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
@@ -117,8 +118,20 @@ export function webSession(context: Pick<ConnectorActionContext, "credentials" |
     }
     return payload as Record<string, unknown>;
   };
+  const listPreview = (path: string, query: Record<string, string> = {}, options: ApplePaginationOptions = {}): Promise<ApplePreviewCollection> =>
+    paginateAppleCollection({ origin: ORIGIN, path, query, options, readPage: (url) => call("GET", url.toString(), {}) });
   return {
     read: (path: string, query: Record<string, string> = {}) => call("GET", path, query),
+    listPreview,
+    /** Complete bounded JSON:API collection over the web session, sharing `paginateAppleCollection` with the public API. */
+    async listComplete(path: string, query: Record<string, string> = {}, options: ApplePaginationOptions = {}): Promise<AppleCollection> {
+      const result = await listPreview(path, query, options);
+      if (result.incomplete) {
+        throw new ProviderRequestError(options.incompleteStatus ?? 502,
+          options.incompleteMessage ?? "Apple returned more items than this action can inspect; nothing was changed");
+      }
+      return { rows: result.rows, included: result.included };
+    },
     /** A change, sent once: nothing here retries a write. */
     send: (method: "POST" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>) => call(method, path, {}, body),
     /** A credential-bearing request: provider error text may echo private fields, so never include it in a receipt. */
