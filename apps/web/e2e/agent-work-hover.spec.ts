@@ -126,6 +126,7 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   await expect(controls).toHaveCSS("visibility", "visible");
   await expect(toolbar.locator(".app-agent-work-instance-name")).toHaveText("codex:1");
   await expect(toolbar.getByRole("button", { name: "Reborn codex:1" })).toContainText("Reborn");
+  await expect(toolbar.getByRole("button", { name: "Hand off codex:1" })).toContainText("Handoff");
   await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toContainText("Stop");
   // The glass is the panel the capsule grows into, not the toolbar inside it.
   await expect(controls.locator(".app-agent-work-morph")).toHaveCSS("backdrop-filter", /^(?!none$).+/);
@@ -152,6 +153,7 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
   expect(actionMaterials).toEqual([
     { backdropFilter: "none", boxShadow: "none" },
     { backdropFilter: "none", boxShadow: "none" },
+    { backdropFilter: "none", boxShadow: "none" },
   ]);
 
   const actionCentersAreInteractive = await toolbar.getByRole("button").evaluateAll((buttons) =>
@@ -160,7 +162,7 @@ test("agent avatar reveals one compact, keyboard-accessible action toolbar", asy
       return document.elementsFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2).includes(button);
     })
   );
-  expect(actionCentersAreInteractive).toEqual([true, true]);
+  expect(actionCentersAreInteractive).toEqual([true, true, true]);
 
   await toolbar.hover();
   await expect(controls).toHaveCSS("visibility", "visible");
@@ -273,80 +275,75 @@ async function hoverCodexControlsWithSend(page: Page, key: string) {
   return { avatar, toolbar };
 }
 
-test("Handoff picks a successor and posts the handoff mention", async ({ page }) => {
+const HANDOFF_TEST_REGISTRATIONS = [
+  {
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-laptop", harness: "claude" },
+    machineName: "Laptop",
+    models: ["claude-opus-4-6"],
+    modelCatalog: [{ model: "claude-opus-4-6", efforts: [{ value: "high" }, { value: "max" }] }],
+  },
+  {
+    key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-server", harness: "codex" },
+    machineName: "Server",
+    models: ["gpt-5.4"],
+    modelCatalog: [{ model: "gpt-5.4", efforts: [{ value: "medium" }] }],
+  },
+];
+
+async function openHandoffComposer(page: Page, fixtureKey: string) {
   await openWorkspaceWithStubs(page, {
     spaces: [E2E_SPACE],
     channels: [ACTIVE_AGENT_CHANNEL],
-    registrations: ["claude", "codex", "cursor", "gemini", "grok"].map((harness) => ({
-      key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-id", harness },
-    })),
+    registrations: HANDOFF_TEST_REGISTRATIONS,
   });
-  const { toolbar } = await hoverCodexControlsWithSend(page, "handoff-send");
+  const { toolbar } = await hoverCodexControlsWithSend(page, fixtureKey);
+  const composer = page.locator(".composer-textarea").first();
   await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
+  return { composer, listbox: page.getByRole("listbox") };
+}
 
-  await expect(toolbar.getByText("Hand off codex:1 to")).toBeVisible();
-  const successors = toolbar.getByRole("button", { name: /^Hand off codex:1 to/ });
-  await expect(successors).toHaveText([/^Auto/, "@claude", "@codex", "@cursor", "@gemini", "@grok"]);
-  // Many successors stack in one column instead of widening the toolbar.
-  const successorLefts = await successors.evaluateAll((buttons) =>
-    buttons.map((button) => Math.round(button.getBoundingClientRect().left)));
-  expect(new Set(successorLefts).size).toBe(1);
-  const pickerBox = await toolbar.boundingBox();
-  expect(pickerBox!.width).toBeLessThan(320);
-  await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toHaveCount(0);
+test("Handoff fills the composer and opens agent + parameter completion without sending immediately", async ({ page }) => {
+  const { composer, listbox } = await openHandoffComposer(page, "handoff-send");
 
-  await toolbar.getByRole("button", { name: "Back to controls" }).click();
-  await expect(toolbar.getByRole("button", { name: "Stop codex:1" })).toBeVisible();
-
-  await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
-  await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).click();
-  // The successor asks in place like Stop before anything is sent.
-  const confirm = toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" });
-  await expect(confirm).toHaveText("Confirm");
+  // Clicking Handoff fills the composer instead of sending immediately.
   expect(await fixtureRequestBodies(page, "handoff-send")).toEqual([]);
-  await confirm.click();
+  await expect(composer).toHaveText("@Codex:1:handoff:@");
+  await expect(composer).toBeFocused();
+
+  await expect(listbox).toBeVisible();
+  await expect(listbox.getByRole("option", { name: /^auto\b/ })).toBeVisible();
+  const claudeOption = listbox.getByRole("option", { name: /^claude\b/ });
+  await expect(claudeOption).toBeVisible();
+  // Registered handoff targets must not show a bogus "offline" badge.
+  await expect(claudeOption).not.toContainText("offline");
+  // Condition-first parameters are visible right away without guessing syntax.
+  await expect(listbox.getByRole("option", { name: /@machine:Laptop/ })).toBeVisible();
+  await expect(listbox.getByRole("option", { name: /@model:claude-opus-4-6/ })).toBeVisible();
+
+  // Picking @claude keeps parameter completion open for machine/model/effort, then Enter sends.
+  await claudeOption.click();
+  await expect(composer).toHaveText("@Codex:1:handoff:@claude ");
+  await expect(listbox.getByRole("option", { name: /machine:Laptop/ })).toBeVisible();
+  await listbox.getByRole("option", { name: /machine:Laptop/ }).click();
+  await listbox.getByRole("option", { name: /model:claude-opus-4-6/ }).click();
+  await listbox.getByRole("option", { name: /effort:high/ }).click();
+  await expect(composer).toHaveText("@Codex:1:handoff:@claude machine:Laptop model:claude-opus-4-6 effort:high ");
+  await composer.pressSequentially("continue the fix");
+  await composer.press("Enter");
   await expect.poll(async () => (await fixtureRequestBodies(page, "handoff-send")).map((body) => body.body))
-    .toEqual(["@Codex:1:handoff:@claude"]);
+    .toEqual(["@Codex:1:handoff:@claude machine:Laptop model:claude-opus-4-6 effort:high continue the fix"]);
 });
 
-test("Handoff picker supports choosing machine, model and effort parameters", async ({ page }) => {
-  await openWorkspaceWithStubs(page, {
-    spaces: [E2E_SPACE],
-    channels: [ACTIVE_AGENT_CHANNEL],
-    registrations: [
-      {
-        key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-laptop", harness: "claude" },
-        machineName: "Laptop",
-        models: ["claude-opus-4-6"],
-        modelCatalog: [{ model: "claude-opus-4-6", efforts: [{ value: "high" }, { value: "max" }] }],
-      },
-      {
-        key: { spaceId: E2E_SPACE.id, ownerUserId: "e2e-user", machineId: "mac-server", harness: "codex" },
-        machineName: "Server",
-        models: ["gpt-5.4"],
-        modelCatalog: [{ model: "gpt-5.4", efforts: [{ value: "medium" }] }],
-      },
-    ],
-  });
-  const { toolbar } = await hoverCodexControlsWithSend(page, "handoff-params");
-  await toolbar.getByRole("button", { name: "Hand off codex:1" }).click();
-  await toolbar.getByRole("button", { name: "Handoff parameters" }).click();
+test("Handoff supports condition-first selection directly from the composer menu", async ({ page }) => {
+  const { composer, listbox } = await openHandoffComposer(page, "handoff-params");
 
-  await toolbar.getByRole("button", { name: "Laptop" }).click();
-  await toolbar.getByRole("button", { name: "claude-opus-4-6" }).click();
-  await toolbar.getByRole("button", { name: "high" }).click();
-  await toolbar.getByRole("button", { name: "Back to handoff targets" }).click();
-
-  await expect(toolbar.getByRole("button", { name: "Remove machine:Laptop" })).toBeVisible();
-  await expect(toolbar.getByRole("button", { name: "Remove model:claude-opus-4-6" })).toBeVisible();
-  await expect(toolbar.getByRole("button", { name: "Remove effort:high" })).toBeVisible();
-  // Only compatible successors remain under the chosen parameters.
-  await expect(toolbar.getByRole("button", { name: /^Hand off codex:1 to/ })).toHaveText([/^Auto/, "@claude"]);
-
-  await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).click();
-  await toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" }).click();
-  await expect.poll(async () => (await fixtureRequestBodies(page, "handoff-params")).map((body) => body.body))
-    .toEqual(["@Codex:1:handoff:@claude machine:Laptop model:claude-opus-4-6 effort:high"]);
+  await listbox.getByRole("option", { name: /@machine:Laptop/ }).click();
+  await expect(composer).toHaveText("@Codex:1:handoff:@machine:Laptop ");
+  await listbox.getByRole("option", { name: /model:claude-opus-4-6/ }).click();
+  await expect(composer).toHaveText("@Codex:1:handoff:@machine:Laptop model:claude-opus-4-6 ");
+  await composer.press("Enter");
+  await expect.poll(async () => (await fixtureRequestBodies(page, "handoff-params")).map((body) => body.body.trim()))
+    .toEqual(["@Codex:1:handoff:@machine:Laptop model:claude-opus-4-6"]);
 });
 
 test("right-side Agent navigation is limited to a flat avatar button", async ({ page }) => {
@@ -451,19 +448,20 @@ test.describe("mobile agent controls", () => {
     await avatar.tap();
     await expect(toolbar).toBeVisible();
 
-    // Handoff focuses the first successor row; tapping @claude blurs it before click.
+    // Tapping Handoff closes the trace, fills the composer, and opens the completion menu.
     await toolbar.getByRole("button", { name: "Hand off codex:1" }).tap();
-    await expect(toolbar.getByText("Hand off codex:1 to")).toBeVisible();
-    await toolbar.getByRole("button", { name: "Hand off codex:1 to a new @claude" }).tap();
-    const confirmHandoff = toolbar.getByRole("button", { name: "Confirm hand off codex:1 to a new @claude" });
-    await expect(confirmHandoff).toHaveText("Confirm");
+    const composer = page.locator(".composer-textarea").first();
+    await expect(composer).toHaveText("@Codex:1:handoff:@");
     expect(await fixtureRequestBodies(page, "mobile-confirm-send")).toEqual([]);
-    await confirmHandoff.tap();
-    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body))
+    const listbox = page.getByRole("listbox");
+    await expect(listbox).toBeVisible();
+    await listbox.getByRole("option", { name: /^claude\b/ }).tap();
+    await expect(composer).toHaveText("@Codex:1:handoff:@claude ");
+    await page.getByRole("button", { name: "Send" }).tap();
+    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body.trim()))
       .toEqual(["@Codex:1:handoff:@claude"]);
 
-    // Close trace and long-press avatar: Stop opens armed & focused, and tapping Confirm still sends.
-    await page.locator(".composer-textarea").first().tap();
+    // Long-press avatar: Stop opens armed & focused, and tapping Confirm still sends.
     await expect(page.getByRole("dialog")).toHaveCount(0);
     const box = (await avatar.boundingBox())!;
     const cdp = await page.context().newCDPSession(page);
@@ -476,7 +474,7 @@ test.describe("mobile agent controls", () => {
     const confirmStop = toolbar.getByRole("button", { name: "Confirm stop codex:1" });
     await expect(confirmStop).toBeVisible();
     await confirmStop.tap();
-    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body))
+    await expect.poll(async () => (await fixtureRequestBodies(page, "mobile-confirm-send")).map((body) => body.body.trim()))
       .toEqual(["@Codex:1:handoff:@claude", expect.stringMatching(/^@codex:1:stop$/iu)]);
   });
 

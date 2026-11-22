@@ -551,7 +551,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
   const [stoppingAgentInstanceIds, setStoppingAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
 
   const [reborningAgentInstanceIds, setReborningAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
-  const [handingOffAgentInstanceIds, setHandingOffAgentInstanceIds] = useState<ReadonlySet<string>>(NO_BUSY_INSTANCES);
 
   const [renamingChannelId, setRenamingChannelId] = useState<string | null>(null);
 
@@ -3225,8 +3224,6 @@ export function useWorkspaceShellState({ children }: { children?: React.ReactNod
     setStoppingAgentInstanceIds,
     reborningAgentInstanceIds,
     setReborningAgentInstanceIds,
-    handingOffAgentInstanceIds,
-    setHandingOffAgentInstanceIds,
     renamingChannelId,
     setRenamingChannelId,
     updatingChannelVisibilityId,

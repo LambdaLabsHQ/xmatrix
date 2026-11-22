@@ -3603,49 +3603,6 @@ html[data-app-theme="wood"] .xmatrix-app .app-agent-work-dock > div {
   color: var(--muted-foreground);
 }
 
-.xmatrix-app .app-agent-work-action-menu[data-mode="handoff"] {
-  flex-direction: column;
-  align-items: stretch;
-  min-width: 13rem;
-}
-
-.xmatrix-app .app-agent-work-picker-header {
-  display: flex;
-  align-items: center;
-  padding-bottom: 0.125rem;
-}
-
-.xmatrix-app .app-agent-work-picker-label {
-  overflow: hidden;
-  padding-inline: 0.25rem 0.5rem;
-  color: var(--foreground);
-  font-size: 0.6875rem;
-  font-weight: 750;
-  line-height: 2rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.xmatrix-app .app-agent-work-picker-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.125rem;
-  max-height: 13rem;
-  overflow-y: auto;
-  padding-top: 0.125rem;
-  overscroll-behavior: contain;
-}
-
-.xmatrix-app .app-agent-work-picker-list > .app-agent-work-action {
-  justify-content: space-between;
-  flex-shrink: 0;
-}
-
-.xmatrix-app .app-agent-work-picker-hint {
-  color: var(--muted-foreground);
-  font-weight: 600;
-}
-
 .xmatrix-app .app-agent-work-item:is(:hover, :focus-within, [data-trace-open], [data-controls-open]) > .app-agent-work-actions {
   opacity: 1;
   pointer-events: auto;

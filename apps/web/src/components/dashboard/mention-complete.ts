@@ -558,19 +558,21 @@ export function resolveMentionCompletion(
     const addressedInstance = ordinal ? findAgentInstanceTarget(channel, agents,
       `${targetToken}:${ordinal}`, instanceTargetScope) : undefined;
     const agent = addressedInstance?.agent ?? findMentionAgent(agents, targetToken, localContext);
+    const handoffSuccessor = handoffSuccessorQuery(active.query);
+    if (handoffSuccessor) {
+      const fallbackSource = `${active.query.split(":handoff:")[0] ?? `${targetToken}:${handoffSuccessor.channelInstanceId}`}`;
+      return resolveHandoffSuccessorCompletion(
+        active,
+        agent ?? null,
+        fallbackSource,
+        channel,
+        successorHarnesses,
+        handoffSuccessor.channelInstanceId,
+        handoffSuccessor.successorQuery,
+        instanceTargetScope,
+      );
+    }
     if (agent) {
-      const handoffSuccessor = handoffSuccessorQuery(active.query);
-      if (handoffSuccessor) {
-        return resolveHandoffSuccessorCompletion(
-          active,
-          agent,
-          channel,
-          successorHarnesses,
-          handoffSuccessor.channelInstanceId,
-          handoffSuccessor.successorQuery,
-          instanceTargetScope,
-        );
-      }
       const candidates = agentReferenceCandidates(channel, agent, agents, localContext, instanceTargetScope,
         agent.name);
       return {
@@ -618,29 +620,35 @@ function handoffSuccessorQuery(
  */
 function resolveHandoffSuccessorCompletion(
   active: ActiveMention,
-  sourceAgent: SerializedAgent,
+  sourceAgent: SerializedAgent | null,
+  fallbackSource: string,
   channel: LiveChannel,
   successorHarnesses: readonly string[],
   channelInstanceId: string,
   successorQuery: string,
   instanceTargetScope: MentionInstanceTargetScope = "channel",
 ): MentionCompletionResult {
-  const sourceInstance = channelAgentInstances(channel, sourceAgent, instanceTargetScope)
-    .find((instance) => instance.channelInstanceId?.trim() === channelInstanceId);
-  const sourceMention = sourceInstance
-    ? agentInstanceMentionLabel(sourceAgent.name, sourceInstance)
-    : `${sourceAgent.name}:${channelInstanceId}`;
+  const sourceInstance = sourceAgent
+    ? channelAgentInstances(channel, sourceAgent, instanceTargetScope)
+        .find((instance) => instance.channelInstanceId?.trim() === channelInstanceId)
+    : undefined;
+  const sourceMention = sourceAgent
+    ? sourceInstance
+      ? agentInstanceMentionLabel(sourceAgent.name, sourceInstance)
+      : `${sourceAgent.name}:${channelInstanceId}`
+    : fallbackSource;
   const harnesses = [...new Set(successorHarnesses.map(mentionToken))]
     .filter((harness) => harness && isHandoffSuccessorName(harness));
+  const idPrefix = sourceAgent?.id ?? sourceMention;
   const candidates = harnesses.map<MentionCandidate>((harness) => ({
-    id: `${sourceAgent.id}:${channelInstanceId}:handoff:${harness}`,
+    id: `${idPrefix}:${channelInstanceId}:handoff:${harness}`,
     name: harness,
     kind: "agent",
     status: AGENT_IDENTITY_NEUTRAL_STATUS,
     face: { kind: "agent", name: harness, harness },
     mention: `${sourceMention}:handoff:@${harness}`,
     action: "handoff-instance",
-    description: `Hand off @${sourceMention} to a new @${harness}`,
+    description: `New @${harness}`,
     completionSuffix: " ",
     schemaNodeId: "handoff-successor-profiles",
   }));
@@ -1201,9 +1209,17 @@ export function findActiveMention(draft: string, cursor: number): ActiveMention 
   // immediately reopen the same panel after Escape.
   if (cursor < 0) return null;
   const beforeCursor = draft.slice(0, cursor);
-  const at = beforeCursor.lastIndexOf("@");
+  let at = beforeCursor.lastIndexOf("@");
+  while (at > 0 && !/\s/.test(beforeCursor.charAt(at - 1))) {
+    // `@<agent>:<n>:handoff:@<successor>` carries a second `@` inside one
+    // mention token; step back to the outer `@` that opened the handoff.
+    if (beforeCursor.slice(0, at).endsWith(":handoff:")) {
+      at = beforeCursor.lastIndexOf("@", at - 1);
+      continue;
+    }
+    return null;
+  }
   if (at < 0) return null;
-  if (at > 0 && !/\s/.test(beforeCursor.charAt(at - 1))) return null;
 
   const query = beforeCursor.slice(at + 1);
   if (/\s/.test(query) && !AGENT_COMMAND_QUERY_RE.test(query)) return null;

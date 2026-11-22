@@ -234,7 +234,12 @@ export function handoffSuccessorConditionCandidates(
   autoDescription?: string,
 ): MentionCandidate[] {
   const all = autoLaunchCandidates(undefined, {}, registrations, autoDescription);
-  return summonConditionCandidates(all, query)
+  const matched = query
+    ? summonConditionCandidates(all, query)
+    : all
+        .filter(candidate => candidate.launchField && candidate.launchField !== "harness")
+        .map(candidate => ({ ...candidate, name: `@${candidate.name}` }));
+  return matched
     .filter(candidate => candidate.launchTags && Object.keys(candidate.launchTags).length > 0)
     .map(candidate => ({
       ...candidate,
@@ -305,4 +310,33 @@ export function summonAtCompletion(body: string, tokenStart: number): Completion
     return summon.error || /\S/u.test(body.slice(summon.end, tokenStart)) ? undefined : summon;
   }
   return undefined;
+}
+
+/**
+ * Inserts `@<source>:handoff:@` at the start of the composer draft so the
+ * completion panel opens immediately for targets and launch parameters while
+ * preserving any message text the author already typed.
+ */
+export function insertHandoffIntoDraft(
+  draft: string,
+  source: string,
+): { value: string; cursor: number } {
+  const target = source.trim().replace(/^[@＠]/u, "");
+  if (!target) return { value: draft, cursor: draft.length };
+  const token = `@${target}:handoff:@`;
+  const trimmed = draft.trimStart();
+  let remainder = trimmed;
+  const parsed = parseHandoffInstanceMentions(trimmed);
+  if (parsed[0] && parsed[0].start === 0) {
+    remainder = trimmed.slice(parsed[0].end).trimStart();
+  } else {
+    const partial = /^[@＠][^\s:]+:[1-9]\d*:handoff:(?:[@＠][^\s]*)?/u.exec(trimmed);
+    if (partial) {
+      remainder = trimmed.slice(partial[0].length).trimStart();
+    }
+  }
+  if (!remainder) {
+    return { value: token, cursor: token.length };
+  }
+  return { value: `${token} ${remainder}`, cursor: token.length };
 }

@@ -77,7 +77,7 @@ import {
   spaceAppPath,
 } from "@/components/dashboard/channel-links";
 import { APP_CONNECTORS } from "@/lib/app-connectors";
-import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness, formatHandoffMention, isAutoHandoffSuccessor, parseHandoffInstanceMentions, type AgentRegistrationDetails, type AutoLaunchTags } from "@xmatrix/protocol";
+import { AGENT_PRESETS, WEB_PROXY_ROUTES, agentLaunchExecutable, canonicalRegistrationHarness, type AgentRegistrationDetails } from "@xmatrix/protocol";
 import type {
   AgentInvocationSelection,
   ChannelMessage,
@@ -2283,10 +2283,9 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
     }
   }
 
-  /** Whether this Instance already has a stop, reborn or handoff being sent. */
+  /** Whether this Instance already has a stop or reborn being sent. */
   function lifecycleRequestInFlight(instanceId: string): boolean {
-    return s.stoppingAgentInstanceIds.has(instanceId) || s.reborningAgentInstanceIds.has(instanceId) ||
-      s.handingOffAgentInstanceIds.has(instanceId);
+    return s.stoppingAgentInstanceIds.has(instanceId) || s.reborningAgentInstanceIds.has(instanceId);
   }
 
   function lifecycleControlBlocked(instanceId: string): boolean {
@@ -2322,35 +2321,30 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
       setReborningAgentInstanceIds);
   }
 
-  /** Posts the same `@<name>:<n>:handoff:@<successor> [conditions]` mention a person would type. */
-  async function handoffAgentInstance(
+  /** Fills `@<name>:<n>:handoff:@` into the composer so the person can pick a
+   *  successor, parameters, and optional instructions before sending. */
+  function handoffAgentInstance(
     agentId: string,
     instance: SerializedAgentInstance,
     agentLabel: string,
-    successor: string,
-    tags?: AutoLaunchTags,
   ) {
-    if (lifecycleControlBlocked(instance.id)) return;
+    if (!s.canUseSelectedChannel) return;
 
     const channelInstanceId = instance.channelInstanceId?.trim();
     const mentionName = lifecycleMentionName(agentId, agentLabel);
-    const successorName = successor.trim().replace(/^[@＠]/, "");
-    const handoffTags: AutoLaunchTags = {
-      ...tags,
-      ...(!isAutoHandoffSuccessor(successorName) && successorName ? { harness: successorName } : {}),
-    };
-    const body = channelInstanceId && /^[1-9]\d*$/.test(channelInstanceId) && mentionName && successorName
-      ? formatHandoffMention(`${mentionName}:${channelInstanceId}`, handoffTags)
-      : "";
-    const parsed = body ? parseHandoffInstanceMentions(body) : [];
-    if (!body || mentionName.toLowerCase() === "xmatrix" || parsed.length !== 1 || parsed[0]!.error) {
+    if (!channelInstanceId || !/^[1-9]\d*$/.test(channelInstanceId) || !mentionName || mentionName.toLowerCase() === "xmatrix") {
       const message = "This instance cannot be handed off from the work controls.";
       setAgentsError(message);
       setHistoryError(message);
       return;
     }
 
-    await sendLifecycleMention(body, instance.id, s.setHandingOffAgentInstanceIds);
+    s.setAgentTraceTarget(null);
+    setMentionInsertRequest((current) => ({
+      id: (current?.id || 0) + 1,
+      kind: "handoff",
+      source: `${mentionName}:${channelInstanceId}`,
+    }));
   }
 
   async function rebornMessageSender(message: TimelineItem) {

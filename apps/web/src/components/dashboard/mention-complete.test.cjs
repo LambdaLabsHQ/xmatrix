@@ -495,14 +495,15 @@ test("handoff successor stage offers the Space's registered harnesses as a new i
     },
   });
 
-  const draft = "@codex:1:handoff:";
-  const result = resolveMentionCompletion(draft, draft.length, channel, null, [], null, {}, "channel",
-    ["codex", "grok", "codex", "xmatrix"]);
-  assert.equal(result.stage, "handoff-successor");
-  assert.deepEqual(
-    result.candidates.map((candidate) => candidate.mention),
-    ["codex:1:handoff:@codex", "codex:1:handoff:@grok"],
-  );
+  for (const draft of ["@codex:1:handoff:", "@codex:1:handoff:@", "@codex:1:handoff:@gr"]) {
+    const result = resolveMentionCompletion(draft, draft.length, channel, null, [], null, {}, "channel",
+      ["codex", "grok", "codex", "xmatrix"]);
+    assert.equal(result.stage, "handoff-successor");
+    assert.deepEqual(
+      result.candidates.map((candidate) => candidate.mention),
+      draft.endsWith("@gr") ? ["codex:1:handoff:@grok"] : ["codex:1:handoff:@codex", "codex:1:handoff:@grok"],
+    );
+  }
 });
 
 test("agent references never offer retired start actions", () => {
