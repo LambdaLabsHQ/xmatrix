@@ -5,6 +5,7 @@ import { isNornStream, nornStep, type NornStream } from "./norn-host";
 import { createPostgresAuthorityFleet } from "./postgres-authority-fleet";
 import { postgresMessageRoute } from "./postgres-message-authority";
 import type { Env } from "./types";
+import type { CloudEventInput } from "./vendor/norn/runtime/ledger";
 
 /**
  * An outside event reaches the Norn programs that wait for it
@@ -14,6 +15,7 @@ import type { Env } from "./types";
  * programs heard it.
  */
 export async function occurNornEvent(env: Env, input: { id: string; spaceId?: string; what: string;
+  cloudEvent?: CloudEventInput;
   matches: (stream: NornStream) => boolean;
   allowed?: (program: { spaceId: string; authorityUserId: string }) => Promise<boolean> }): Promise<number> {
   let heard = 0;
@@ -29,7 +31,7 @@ export async function occurNornEvent(env: Env, input: { id: string; spaceId?: st
       const repository = new PostgresNornProgramRepository(shard.database,
         await postgresMessageRoute(env, program.channelId, requestId, { database: shard.database }));
       await repository.advance({ requestId, channelId: program.channelId, programId: program.programId },
-        nornStep(undefined, { id, streams, what: input.what }));
+        nornStep(undefined, { id, streams, what: input.what, ...(input.cloudEvent ? { cloudEvent: input.cloudEvent } : {}) }));
       await wakeAgentLaunchCoordinator(env, program.channelId, ["norn"]);
       heard++;
     }

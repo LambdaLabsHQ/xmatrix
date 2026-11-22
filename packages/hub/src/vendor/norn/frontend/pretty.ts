@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * A readable outline of a syntax tree, as printed by `norn parse`: one node
  * per line with its scalar fields and span, children indented below it.
@@ -34,7 +34,7 @@ export function* treeLines(root: AstNode): Generator<string> {
     const fields = node as unknown as { [field: string]: unknown };
     for (const field of NODE_FIELDS[node.kind] as readonly string[]) {
       const value = fields[field];
-      if (value === null || (Array.isArray(value) && value.length === 0)) continue;
+      if (value === undefined || value === null || (Array.isArray(value) && value.length === 0)) continue;
       if (isNode(value)) {
         children.push({ node: value, indent: `${indent}  `, label: `${field}: ` });
       } else if (Array.isArray(value) && value.every(isNode)) {

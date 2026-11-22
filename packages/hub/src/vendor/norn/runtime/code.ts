@@ -1,8 +1,8 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import { NODE_FIELDS, type AstNode, type Program } from "../frontend/ast.js";
 import { astToJson, astFromJson } from "../frontend/json.js";
 import { sha256 } from "./sha256.js";
-import { linkStd, requireLinked } from "./std.js";
+import { linkLibraries, requireLinked } from "./std.js";
 
 /** A program ready to evaluate: its frozen AST, with stable node IDs and a content identity. */
 export interface Code {
@@ -19,8 +19,8 @@ export type Sources = Readonly<Record<string, "fact" | "stream">>;
 /** The reference host's sources (hosts/reference.norn): what a program compiled for no named host may wait on. */
 export const REFERENCE_SOURCES: Sources = Object.freeze({ merged: "fact", released: "fact", machineUpdated: "fact", replied: "fact",
   runEnded: "fact", ciFailed: "stream", prActivity: "stream", docChanged: "stream", message: "stream" });
-export function compile(program: Program, options: {std?: Program; sources?: Sources} = {}): Code {
-  return compileAstJson(astToJson(linkStd(program, options.std)), options.sources);
+export function compile(program: Program, options: { std?: Program; libraries?: Readonly<Record<string, Program>>; sources?: Sources } = {}): Code {
+  return compileAstJson(astToJson(linkLibraries(program, { std: options.std, libraries: options.libraries })), options.sources);
 }
 
 /** Load an existing definition without recoding the bytes that name it. */

@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Checking from source text: host interfaces, the standard library and
  * programs. Nothing here reads a file, so a browser can run it on text it
@@ -9,7 +9,7 @@ import type * as A from "../ast.js";
 import { STACK_EXHAUSTED } from "../diagnostics.js";
 import { parse } from "../parser.js";
 import type { CheckDiagnostic } from "./diagnostics.js";
-import { checkProgram, loadLibrary, type CheckOptions, type CheckResult, type Library } from "./infer.js";
+import { checkProgram, loadLibrary, type CheckOptions, type CheckResult, type Library, type LoadLibraryOptions } from "./infer.js";
 import { builtinInterface, loadInterface, type HostInterface } from "./interface.js";
 
 /** A host interface from source text. A syntax error makes an interface of the built-ins alone, with the error. */
@@ -19,14 +19,24 @@ export function readInterface(source: string, file: string): HostInterface {
   return loadInterface(parsed.program, file);
 }
 
-/** The standard library from source text, checked against a host. */
-export function readLibrary(source: string, file: string, host: HostInterface): Library {
+/** A library (`Std`, application library, or Space library) from source text, checked against a host. */
+export function readLibrary(source: string, file: string, host: HostInterface, options?: LoadLibraryOptions): Library {
   const parsed = parse(source);
   if (!parsed.ok) {
     const program: A.Program = { kind: "Program", body: [], span: { start: { line: 1, column: 1, offset: 0 }, end: { line: 1, column: 1, offset: 0 } } };
-    return { file, program, exports: [], types: [], resolutions: new Map(), diagnostics: parsed.diagnostics.map(syntax), ok: false };
+    return {
+      file,
+      ...(options?.name ? { name: options.name } : {}),
+      program,
+      exports: [],
+      types: [],
+      needs: [],
+      resolutions: new Map(),
+      diagnostics: parsed.diagnostics.map(syntax),
+      ok: false,
+    };
   }
-  return loadLibrary(parsed.program, file, host);
+  return loadLibrary(parsed.program, file, host, options);
 }
 
 export interface SourceCheck extends CheckResult {

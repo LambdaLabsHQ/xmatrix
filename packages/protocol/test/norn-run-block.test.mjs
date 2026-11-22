@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { nornRunBlock } from "../dist/index.js";
+import { nornLibBlock, nornRunBlock } from "../dist/index.js";
 
 test("a norn run block names its program, and any other block names none", () => {
   assert.deepEqual(["norn run", "norn run review", " norn  run  审计-2 ", "norn", "ts", "", null].map(nornRunBlock),
@@ -31,4 +31,14 @@ test("versioned norn 1 run blocks map to the same program identity, and unsuppor
     assert.equal(unsupported?.edition, edition);
     assert.match(unsupported?.problem ?? "", /does not support yet/u, edition);
   }
+});
+
+test("norn 1 lib blocks recognize Space library modules cleanly without colliding with nornRunBlock", () => {
+  assert.deepEqual(
+    ["norn 1 lib Review", "norn lib Ops_2", "norn 1 run review", "norn", ""].map(nornLibBlock),
+    [{ name: "Review", edition: "1" }, { name: "Ops_2" }, null, null, null],
+  );
+  assert.match(nornLibBlock("norn 1 lib lowercase")?.problem ?? "", /names no library/u);
+  assert.match(nornLibBlock("norn 1 lib")?.problem ?? "", /names no library/u);
+  assert.match(nornLibBlock("norn 2 lib Review")?.problem ?? "", /does not support yet/u);
 });

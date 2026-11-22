@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * Host interfaces (docs/types.md §7). A host tells the checker what its
  * programs can see in a Norn file of `type` and `external` declarations. Only
@@ -23,6 +23,10 @@ export interface ValueBinding {
   readonly family: Family | null;
   /** Where the name is bound. */
   readonly node: A.AstNode | null;
+  /** Defining library name when exported from a library (e.g. `"Review"`, `"GitHub"`). */
+  readonly library?: string;
+  /** Visibility when declared inside a library. */
+  readonly visibility?: "pub" | "private";
   /** For a parameter of a function: which one, by position or label. */
   readonly parameter: { readonly lambda: A.Lambda; readonly index: number } | { readonly lambda: A.Lambda; readonly label: string } | null;
   /** Whether any identifier refers to this binding. */
@@ -122,7 +126,9 @@ function where(node: A.AstNode | null): string {
 function describeItem(item: A.TopLevelItem): string {
   switch (item.kind) {
     case "Open":
-      return "'open Std'";
+      return `'open ${item.module}'`;
+    case "Needs":
+      return `'needs ${item.module}'`;
     case "Let":
     case "LetRec":
       return "a let binding";

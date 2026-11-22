@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 import type { Pattern } from "../frontend/ast.js";
 import { equal, number, unit, type Value } from "./value.js";
 

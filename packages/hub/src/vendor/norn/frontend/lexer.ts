@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The Norn lexer: source text to tokens.
  *
@@ -47,6 +47,8 @@ export interface LexResult {
   /** Always ends with an `EOF` token. */
   tokens: Token[];
   diagnostics: Diagnostic[];
+  /** Leading `/** ... *\/` doc comments keyed by the following token's index. */
+  docs?: ReadonlyMap<number, string>;
 }
 
 export function lex(source: string): LexResult {
@@ -81,6 +83,8 @@ class Lexer {
   private readonly tokens: Token[] = [];
   private readonly diagnostics: Diagnostic[] = [];
   private readonly braces: Brace[] = [];
+  private readonly docs = new Map<number, string>();
+  private pendingDoc: string | null = null;
 
   constructor(source: string) {
     this.source = source;
@@ -92,6 +96,9 @@ class Lexer {
       try {
         this.skipTrivia();
         if (this.offset >= this.source.length) break;
+        const doc = this.pendingDoc;
+        this.pendingDoc = null;
+        if (doc !== null) this.docs.set(this.tokens.length, doc);
         this.token();
       } catch (error) {
         if (!(error instanceof LexError)) throw error;
@@ -102,7 +109,9 @@ class Lexer {
     if (open?.template) this.report("unterminated template string", open.start);
     const end = this.here();
     this.tokens.push({ kind: "EOF", text: "", span: { start: end, end } });
-    return { tokens: this.tokens, diagnostics: this.diagnostics };
+    return this.docs.size > 0
+      ? { tokens: this.tokens, diagnostics: this.diagnostics, docs: this.docs }
+      : { tokens: this.tokens, diagnostics: this.diagnostics };
   }
 
   // Positions --------------------------------------------------------------
@@ -169,8 +178,14 @@ class Lexer {
         while (this.offset < this.source.length && this.peekChar() !== "\n") this.advance();
       } else if (character === "/" && this.peekChar(1) === "*") {
         const start = this.here();
+        const isDoc = this.peekChar(2) === "*" && this.peekChar(3) !== "/";
         const close = this.source.indexOf("*/", this.offset + 2);
         const stop = close === -1 ? this.source.length : close + 2;
+        if (isDoc && close !== -1) {
+          const raw = this.source.slice(this.offset + 3, close);
+          const cleaned = raw.split(/\r?\n/u).map((line) => line.replace(/^\s*\* ?/u, "").trimEnd()).join("\n").trim();
+          if (cleaned) this.pendingDoc = cleaned;
+        }
         while (this.offset < stop) this.advance();
         if (close === -1) this.fail("unterminated comment: '/*' has no matching '*/'", start, start);
       } else {

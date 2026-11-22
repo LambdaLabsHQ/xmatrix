@@ -39,6 +39,25 @@ fn render(listing: &Value) -> String {
                 action["description"].as_str().unwrap_or_default()
             ));
         }
+        for event in connector["events"].as_array().into_iter().flatten() {
+            let kind = event["kind"].as_str().unwrap_or_default();
+            let fields: Vec<String> = event["fields"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|field| {
+                    let name = field["name"].as_str().unwrap_or_default();
+                    let ty = field["type"].as_str().unwrap_or_default();
+                    let opt = if field["required"].as_bool().unwrap_or(true) {
+                        ""
+                    } else {
+                        "?"
+                    };
+                    format!("{name}{opt}: {ty}")
+                })
+                .collect();
+            out.push_str(&format!("  event  {}  {{{}}}\n", kind, fields.join(", ")));
+        }
     }
     out.push_str(
         "\nSend one with `xmatrix send <channel-id> \"<command>\"`; its result replies to your message.\n",
@@ -90,6 +109,22 @@ mod tests {
         assert!(text.contains("  send   @github:subscribe:<target> <text>\n"));
         assert!(text.contains("  write  @github:comment:<target> <text>\n"));
         assert!(!text.contains("read"));
+    }
+
+    #[test]
+    fn lists_connector_event_kinds_and_fields() {
+        let text = render(&json!({ "connectors": [{
+            "provider": "gmail", "name": "Gmail",
+            "actions": [{ "command": "@gmail:read:<id>", "effect": "read", "description": "Read mail." }],
+            "events": [{
+                "kind": "message.received",
+                "fields": [
+                    { "name": "messageId", "type": "string", "required": true },
+                    { "name": "from", "type": "string", "required": false }
+                ]
+            }]
+        }] }));
+        assert!(text.contains("  event  message.received  {messageId: string, from?: string}\n"));
     }
 
     #[test]

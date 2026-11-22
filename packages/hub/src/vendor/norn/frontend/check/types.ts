@@ -1,4 +1,4 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 /**
  * The checker's types and their unification (docs/types.md §1–§3).
  *
@@ -46,6 +46,10 @@ export interface TVar {
   dropped: Span | null;
   /** The type is what `ignore` takes: it must not be a request (§6a). */
   ignored: boolean;
+  /** Row presence constraints `'r: {f: 'a, ..}` accumulated from field reads and record updates. */
+  fields?: Map<string, Type>;
+  /** The variable must have a valid `form` (e.g. a polymorphic `run` report type). */
+  form?: boolean;
 }
 
 /** A nominal type: `int`, `list<'a>`, `reply<'a>`, `release`, `#source<#fact, pr>`. */
@@ -151,6 +155,8 @@ export interface EqualityRule {
 /** What unification needs to know about nominal types. */
 export interface TypeFacts {
   equalityRule(name: string): EqualityRule;
+  /** Looks up field `field` on nominal record type `name` instantiated with `args`; returns null if missing or `"opaque"` if sealed. */
+  recordField?(name: string, field: string, args: readonly Type[], level: number): Type | null | "opaque";
 }
 
 /** Why two types do not unify. `left` and `right` are the parts that clash, not the whole types. */
@@ -163,7 +169,8 @@ export type Clash =
    * dropped.
    */
   | { readonly kind: "class"; readonly cls: ClassName; readonly type: Type; readonly inner: Type; readonly dropped?: Span }
-  | { readonly kind: "classes"; readonly first: FiniteClass; readonly second: FiniteClass };
+  | { readonly kind: "classes"; readonly first: FiniteClass; readonly second: FiniteClass }
+  | { readonly kind: "missing-field"; readonly field: string; readonly type: Type; readonly opaque?: boolean };
 
 export class UnifyError extends Error {
   readonly clash: Clash;
@@ -234,8 +241,19 @@ function bind(variable: TVar, type: Type, facts: TypeFacts): void {
     type.equality ||= variable.equality;
     type.dropped ??= variable.dropped;
     type.ignored ||= variable.ignored;
+    if (variable.form) type.form = true;
     type.level = Math.min(type.level, variable.level);
+    const pendingFields: [Type, Type][] = [];
+    if (variable.fields && variable.fields.size > 0) {
+      type.fields ??= new Map();
+      for (const [name, fieldType] of variable.fields) {
+        const existing = type.fields.get(name);
+        if (existing !== undefined) pendingFields.push([existing, fieldType]);
+        else type.fields.set(name, fieldType);
+      }
+    }
     variable.link = type;
+    for (const [a, b] of pendingFields) unify(a, b, facts);
     return;
   }
   occursAndLevels(variable, type);
@@ -249,7 +267,27 @@ function bind(variable: TVar, type: Type, facts: TypeFacts): void {
     throw new UnifyError({ kind: "class", cls: "ignorable", type, inner: type });
   }
   if (variable.equality) requireEquality(type, facts);
+  const rowFields = variable.fields;
   variable.link = type;
+  if (rowFields && rowFields.size > 0) {
+    if (type.tag !== "con" || !facts.recordField) {
+      const firstField = rowFields.keys().next().value as string;
+      variable.link = null;
+      throw new UnifyError({ kind: "missing-field", field: firstField, type });
+    }
+    for (const [fieldName, expectedFieldType] of rowFields) {
+      const actual = facts.recordField(type.name, fieldName, type.args, variable.level);
+      if (actual === "opaque") {
+        variable.link = null;
+        throw new UnifyError({ kind: "missing-field", field: fieldName, type, opaque: true });
+      }
+      if (actual === null) {
+        variable.link = null;
+        throw new UnifyError({ kind: "missing-field", field: fieldName, type });
+      }
+      unify(expectedFieldType, actual, facts);
+    }
+  }
 }
 
 /** The intersection of two finite classes: `deadline` lies inside `ordered`, and the others are disjoint. */
@@ -265,6 +303,7 @@ export function inFiniteClass(cls: FiniteClass, type: Type): boolean {
   const resolved = resolve(type);
   if (resolved.tag !== "con") return false;
   if (cls === "handled") return resolved.name === "reply" || resolved.name === "unit";
+  if (cls === "addressee" && isRequest(resolved)) return true;
   return resolved.args.length === 0 && MEMBERS[cls].includes(resolved.name);
 }
 
@@ -331,6 +370,7 @@ function occursAndLevels(variable: TVar, type: Type): void {
     if (resolved.tag === "var") {
       if (resolved === variable) throw new UnifyError({ kind: "occurs", variable, inside: type });
       if (resolved.level > variable.level) resolved.level = variable.level;
+      if (resolved.fields) for (const fieldType of resolved.fields.values()) stack.push(fieldType);
       unbound = true;
       continue;
     }
@@ -372,6 +412,7 @@ export function generalize(type: Type, level: number): void {
     seen.add(resolved);
     if (resolved.tag === "var") {
       if (resolved.level > level) resolved.level = GENERIC;
+      if (resolved.fields) for (const fieldType of resolved.fields.values()) stack.push(fieldType);
     } else {
       pushChildren(resolved, stack);
     }
@@ -381,15 +422,23 @@ export function generalize(type: Type, level: number): void {
 /** A copy of a type in which each generalized variable is a fresh variable at `level`, with the same constraints. */
 export function instantiate(type: Type, level: number): Type {
   const copies = new Map<TVar, TVar>();
-  return rebuild(type, (leaf) => {
+  const copyLeaf = (leaf: TVar | TParam): Type => {
     if (leaf.tag !== "var" || leaf.level !== GENERIC) return leaf;
     let copy = copies.get(leaf);
     if (copy === undefined) {
       copy = newVar(level, leaf.cls, leaf.equality, leaf.dropped, leaf.ignored);
+      if (leaf.form) copy.form = true;
       copies.set(leaf, copy);
+      if (leaf.fields && leaf.fields.size > 0) {
+        copy.fields = new Map();
+        for (const [name, ft] of leaf.fields) {
+          copy.fields.set(name, rebuild(ft, copyLeaf));
+        }
+      }
     }
     return copy;
-  });
+  };
+  return rebuild(type, copyLeaf);
 }
 
 /** A type declaration's part with its parameters replaced by arguments; an unreadable part (index -1) becomes a fresh variable. */
@@ -661,6 +710,10 @@ export function printScheme(type: Type): string {
       ...(variable.equality && (variable.cls === null || variable.cls === "handled") ? ["equality"] : []),
       ...(variable.dropped === null ? [] : ["discardable"]),
       ...(variable.ignored && variable.dropped === null ? ["ignorable"] : []),
+      ...(variable.form ? ["form"] : []),
+      ...(variable.fields && variable.fields.size > 0
+        ? [`{${[...variable.fields.entries()].map(([k, v]) => `${k}: ${printType(v, namer)}`).join(", ")}, ..}`]
+        : []),
     ];
     return classes.length === 0 ? [] : [`${namer.name(variable)}: ${classes.join(", ")}`];
   });

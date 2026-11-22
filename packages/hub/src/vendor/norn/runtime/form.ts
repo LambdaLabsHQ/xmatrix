@@ -1,7 +1,86 @@
-// Vendored from norn-lang/norn@38245c85e0afacad4ce937b6b84fa1d72442af9a; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
+// Vendored from norn-lang/norn@9882eceec0c609c362a64144ad5bef227268bac4; Apache-2.0. Regenerate with scripts/vendor-norn-core.mjs.
 // Whether a reported value has the form its request asked for (docs/types.md §5a).
 import type { Form, ReportForm } from "../frontend/check/forms.js";
-import type { Value } from "./value.js";
+import { show, type Value } from "./value.js";
+
+/** Structured path error for form/payload validation: reports every mismatch at once. */
+export interface FormPathError {
+  path: string;
+  expected: string;
+  found: string;
+}
+
+/** Collects ALL path mismatches `(path, expected, found)` in one pass. */
+export function mismatchAll(
+  value: Value,
+  report: ReportForm,
+  options: { ignoreExtraFields?: boolean } = {},
+): FormPathError[] {
+  const errors: FormPathError[] = [];
+  const pending: [Value, Form, string][] = [[value, report.form, "$"]];
+  while (pending.length > 0) {
+    const [found, form, path] = pending.pop()!;
+    if (form.kind === "any") continue;
+    if (form.kind === "base") {
+      if (form.name === "json") continue;
+      if (found.type !== form.name) errors.push({ path, expected: form.name, found: found.type });
+    } else if (form.kind === "list") {
+      if (found.type !== "list") {
+        errors.push({ path, expected: "a list", found: found.type });
+      } else {
+        for (let i = found.values.length - 1; i >= 0; i--) {
+          pending.push([found.values[i]!, form.element, `${path}[${i}]`]);
+        }
+      }
+    } else if (form.kind === "tuple") {
+      if (found.type !== "tuple" || found.values.length !== form.elements.length) {
+        errors.push({ path, expected: `a tuple of ${form.elements.length}`, found: found.type === "tuple" ? `tuple of ${found.values.length}` : found.type });
+      } else {
+        for (let i = found.values.length - 1; i >= 0; i--) {
+          pending.push([found.values[i]!, form.elements[i]!, `${path}[${i}]`]);
+        }
+      }
+    } else {
+      const definition = report.definitions[form.name];
+      if (!definition || definition.kind === "host") continue;
+      if (definition.kind === "record") {
+        if (found.type !== "record") {
+          errors.push({ path, expected: form.name, found: found.type });
+          continue;
+        }
+        const names = Object.keys(found.fields);
+        if (!options.ignoreExtraFields) {
+          for (const extra of names) {
+            if (!definition.fields.some((f) => f.name === extra)) {
+              errors.push({ path: `${path}.${extra}`, expected: `one of ${definition.fields.map((f) => f.name).join(", ")}`, found: `unexpected field ${extra}` });
+            }
+          }
+        }
+        for (let i = definition.fields.length - 1; i >= 0; i--) {
+          const field = definition.fields[i]!;
+          const item = found.fields[field.name];
+          if (item === undefined) {
+            errors.push({ path: `${path}.${field.name}`, expected: `${form.name} field ${field.name}`, found: "missing" });
+          } else {
+            pending.push([item, field.form, `${path}.${field.name}`]);
+          }
+        }
+      } else {
+        const constructor = found.type === "variant" ? definition.constructors.find((ctor) => ctor.name === found.name) : undefined;
+        if (found.type !== "variant" || constructor === undefined) {
+          errors.push({ path, expected: `one of ${definition.constructors.map((ctor) => ctor.name).join(", ")}`, found: found.type === "variant" ? found.name : found.type });
+        } else if (found.args.length !== constructor.args.length) {
+          errors.push({ path, expected: `${constructor.name} with ${constructor.args.length} value${constructor.args.length === 1 ? "" : "s"}`, found: `${found.args.length} (${show(found)})` });
+        } else {
+          for (let i = found.args.length - 1; i >= 0; i--) {
+            pending.push([found.args[i]!, constructor.args[i]!, `${path}.${constructor.name}[${i}]`]);
+          }
+        }
+      }
+    }
+  }
+  return errors;
+}
 
 /** Null when the value fits; otherwise what does not, in words for whoever answered. */
 export function mismatch(value: Value, report: ReportForm): string | null {
@@ -10,6 +89,7 @@ export function mismatch(value: Value, report: ReportForm): string | null {
     const [found, form] = pair;
     if (form.kind === "any") continue;
     if (form.kind === "base") {
+      if (form.name === "json") continue;
       if (found.type !== form.name) return `expected ${form.name}, found ${found.type}`;
     } else if (form.kind === "list") {
       if (found.type !== "list") return `expected a list, found ${found.type}`;

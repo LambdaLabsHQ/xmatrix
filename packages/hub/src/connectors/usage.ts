@@ -1,5 +1,6 @@
 import { APP_CONNECTOR_PROVIDER_MANIFESTS } from "@xmatrix/protocol";
 import { listAppConnections } from "../apps";
+import { nornConnectorEventSpecs } from "../norn-libraries";
 import { getChannel } from "../spaces";
 import type { Env } from "../types";
 import { record } from "./command-support";
@@ -24,6 +25,11 @@ export interface ConnectorUsage {
     /** How an Agent runs it: `xmatrix call` for a read the Hub can answer its caller, `xmatrix send` for every other command. */
     via: "call" | "send";
     description: string;
+  }>;
+  /** Norn `Events` capability kinds and typed fields emitted by this connector (for `Events.kind(provider, kind)`). */
+  events?: Array<{
+    kind: string;
+    fields: Array<{ name: string; type: string; required: boolean }>;
   }>;
 }
 
@@ -58,6 +64,10 @@ export function usageOf(connected: ReadonlySet<string>): ConnectorUsage[] {
           : action.effect === "read" ? " It runs only as a Channel message: send it with xmatrix send; xmatrix call cannot run it." : ""),
       }];
     });
-    return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions }] : [];
+    const events = nornConnectorEventSpecs(manifest.id).map((spec) => ({
+      kind: spec.kind,
+      fields: spec.fields.map((field) => ({ name: field.name, type: field.type, required: field.required ?? true })),
+    }));
+    return actions.length > 0 ? [{ provider: manifest.id, name: manifest.name, actions, ...(events.length ? { events } : {}) }] : [];
   });
 }

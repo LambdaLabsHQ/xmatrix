@@ -506,6 +506,37 @@ with none whoever saved it, says which request stopped it and why, and
 declares a wait on them: it shows where what needs them shows. Nothing goes on
 by itself from there; the Agent that stayed takes what they say next.
 
+## Events capability and libraries
+
+Edition 1 programs receive outside events through the standard `Events`
+capability interface (`Events.kind(app, kind)`, `Events.events(kind, ~source=?,
+~subject=?)`, backed by CloudEvents 1.0.2 with idempotent `(app, kind, source,
+id)` deduplication and manifest-driven field checking in `norn-libraries.ts`).
+Legacy `ciFailed`, `prMerged`, and `appEvent` streams remain supported for
+existing edition-0 programs and ledgers without mutating them.
+
+Domain-specific streams live in pure Norn application libraries rather than
+host externals:
+
+- **`GitHub`**: `GitHub.issueOpened(repo)`, `GitHub.ciFailed(repo)`,
+  `GitHub.prMerged(repo)`.
+- **`Gmail`**: `Gmail.receivedAt(address, ~subjectContains=?)` filters mail
+  inside the mailbox owner's authorized scope and projects only
+  `Gmail.mailRef = { messageId }`, so email addresses, subjects, and bodies
+  never leak into public Channel `~about` blocks.
+
+A Page may also declare Space libraries with `` ```norn 1 lib <ModuleName> ``
+(`nornLibBlock` in protocol). When a program on that Page starts or is revised,
+its Space libraries are pinned on its ledger (`pinnedLibraries`) so later
+library edits never silently alter running programs; `pinNornProgram` and
+`diffNornProgramUpgrade` compute SHA-256 pins and 3-way upgrade diffs, while
+`previewNornEdit` and `verifyNornLedgerMigration` provide read-only edit
+previews and fail-closed v1-to-v2 ledger migration verification.
+
+`xmatrix connector list` prints each connected app's declared `Events` kinds
+and typed fields alongside its actions. See [norn-host-index.md](norn-host-index.md)
+for the compact always-on reference.
+
 ## Not in this version
 
 - Requests to an existing Instance by its address, other than one its holder
