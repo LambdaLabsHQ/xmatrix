@@ -6,11 +6,13 @@
 //! ACP `plan`) is not reported: newer models keep track of multi-step work
 //! without a written checklist, so a plan is no fact every Run has.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde_json::Value;
 use xmatrix_cli_core::agent_instance_connection::AgentInstanceConnectionClient;
 use xmatrix_cli_core::protocol::{AgentInstanceClientMessage, ChannelActivity};
+
+const MAX_TRACKED_ACP_PR_COMMANDS: usize = 256;
 
 #[derive(Debug, Default)]
 pub(crate) struct ChannelActivityReporter {
@@ -140,9 +142,133 @@ pub(crate) fn observe_codex_activity(
     }
 }
 
+/// Collects text fragments from an ACP tool update's output payloads (`rawOutput`,
+/// `content` blocks, `output`, `result`, `stdout`, `aggregatedOutput`), bounded
+/// in depth so nested vendor objects cannot recurse arbitrarily.
+fn collect_acp_output_text(value: &Value, out: &mut String, depth: usize) {
+    if depth == 0 {
+        return;
+    }
+    match value {
+        Value::String(text) if !text.is_empty() => {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(text);
+        }
+        Value::Array(items) => {
+            for item in items {
+                collect_acp_output_text(item, out, depth - 1);
+            }
+        }
+        Value::Object(map) => {
+            for key in [
+                "text",
+                "output",
+                "stdout",
+                "stderr",
+                "aggregatedOutput",
+                "result",
+                "content",
+                "rawOutput",
+            ] {
+                if let Some(child) = map.get(key) {
+                    collect_acp_output_text(child, out, depth - 1);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn acp_tool_output_text(update: &Value) -> String {
+    let mut out = String::new();
+    for key in [
+        "rawOutput",
+        "content",
+        "output",
+        "result",
+        "stdout",
+        "aggregatedOutput",
+    ] {
+        if let Some(value) = update.get(key) {
+            collect_acp_output_text(value, &mut out, 4);
+        }
+    }
+    out
+}
+
+/// Tracks ACP `tool_call` / `tool_call_update` pairs and feeds shell commands
+/// that create pull requests into the shared `ChannelActivityReporter`.
+#[derive(Debug, Default)]
+pub(crate) struct AcpActivityObserver {
+    reporter: ChannelActivityReporter,
+    pull_request_commands: HashMap<String, String>,
+}
+
+impl AcpActivityObserver {
+    pub(crate) fn observe_update(&mut self, update: &Value) -> Vec<ChannelActivity> {
+        let tool_call_id = update
+            .get("toolCallId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| !id.is_empty());
+        let status = update.get("status").and_then(Value::as_str);
+        let inline_command = update
+            .get("rawInput")
+            .or_else(|| update.get("args"))
+            .and_then(crate::runtime_waiting::acp_command_text)
+            .filter(|command| creates_pull_request(command));
+
+        if let (Some(id), Some(command)) = (tool_call_id, inline_command.as_ref()) {
+            if self.pull_request_commands.len() >= MAX_TRACKED_ACP_PR_COMMANDS
+                && !self.pull_request_commands.contains_key(id)
+            {
+                self.pull_request_commands.clear();
+            }
+            self.pull_request_commands
+                .insert(id.to_string(), command.clone());
+        }
+
+        let command = tool_call_id
+            .and_then(|id| self.pull_request_commands.get(id).cloned())
+            .or(inline_command);
+        let activities = match command {
+            Some(command) if status != Some("cancelled") => {
+                let output = acp_tool_output_text(update);
+                if output.is_empty() {
+                    Vec::new()
+                } else {
+                    self.reporter.observe_command_output(&command, &output)
+                }
+            }
+            _ => Vec::new(),
+        };
+
+        if crate::runtime_waiting::acp_tool_is_terminal(status)
+            && let Some(id) = tool_call_id
+        {
+            self.pull_request_commands.remove(id);
+        }
+        activities
+    }
+}
+
+pub(crate) fn observe_acp_activity(
+    observer: &mut AcpActivityObserver,
+    relay: &AgentInstanceConnectionClient,
+    channel_id: &str,
+    update: &Value,
+) {
+    for activity in observer.observe_update(update) {
+        publish_channel_activity(relay, channel_id, activity);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn only_a_pull_request_creation_reports_its_url_once() {
@@ -175,6 +301,99 @@ mod tests {
                 "see https://github.com/a/b/pull/7. and https://github.com/a/b/issues/8"
             ),
             vec!["https://github.com/a/b/pull/7"]
+        );
+    }
+
+    #[test]
+    fn acp_observer_reports_pr_from_tool_call_and_update_once_across_vendor_shapes() {
+        let mut observer = AcpActivityObserver::default();
+        // Antigravity shape: CommandLine in tool_call, string/object rawOutput on completed update.
+        assert!(
+            observer
+                .observe_update(&json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call-1",
+                    "status": "in_progress",
+                    "rawInput": { "CommandLine": "cd /repo && gh pr create --fill" }
+                }))
+                .is_empty()
+        );
+        assert_eq!(
+            observer.observe_update(&json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call-1",
+                "status": "completed",
+                "rawOutput": { "output": "https://github.com/LambdaLabsHQ/xmatrix/pull/1965\n" }
+            })),
+            vec![ChannelActivity::PullRequest {
+                url: "https://github.com/LambdaLabsHQ/xmatrix/pull/1965".into(),
+                repository: None,
+                number: None,
+            }]
+        );
+        assert!(
+            observer.pull_request_commands.is_empty(),
+            "terminal tool_call_update must release the tracked command"
+        );
+
+        // Grok shape: command in tool_call, nested content blocks in streaming in_progress update.
+        assert!(
+            observer
+                .observe_update(&json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call-2",
+                    "status": "in_progress",
+                    "rawInput": { "command": "gh pr create --title test" }
+                }))
+                .is_empty()
+        );
+        assert_eq!(
+            observer.observe_update(&json!({
+                "sessionUpdate": "tool_call_update",
+                "toolCallId": "call-2",
+                "status": "in_progress",
+                "content": [{ "content": { "text": "Opened https://github.com/LambdaLabsHQ/xmatrix/pull/1966" } }]
+            })),
+            vec![ChannelActivity::PullRequest {
+                url: "https://github.com/LambdaLabsHQ/xmatrix/pull/1966".into(),
+                repository: None,
+                number: None,
+            }]
+        );
+        // Repeating the same URL on completion does not duplicate the activity.
+        assert!(
+            observer
+                .observe_update(&json!({
+                    "sessionUpdate": "tool_call_update",
+                    "toolCallId": "call-2",
+                    "status": "completed",
+                    "rawOutput": "https://github.com/LambdaLabsHQ/xmatrix/pull/1966"
+                }))
+                .is_empty()
+        );
+
+        // Non-PR commands and cancelled PR commands report nothing.
+        assert!(
+            observer
+                .observe_update(&json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call-3",
+                    "status": "completed",
+                    "rawInput": { "command": "gh pr view 1966" },
+                    "rawOutput": "https://github.com/LambdaLabsHQ/xmatrix/pull/1967"
+                }))
+                .is_empty()
+        );
+        assert!(
+            observer
+                .observe_update(&json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "call-4",
+                    "status": "cancelled",
+                    "rawInput": { "command": "gh pr create --fill" },
+                    "rawOutput": "https://github.com/LambdaLabsHQ/xmatrix/pull/1968"
+                }))
+                .is_empty()
         );
     }
 }

@@ -367,7 +367,9 @@ fn grok_runtime_detection_and_spawn_args() {
 #[test]
 fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     let _process_env = test_process_env_lock();
+    let previous_hub_prompts = std::env::var_os(xmatrix_cli_core::bootstrap_prompts::ENV);
     unsafe {
+        std::env::remove_var(xmatrix_cli_core::bootstrap_prompts::ENV);
         std::env::set_var(
             "XMATRIX_AGENT_ROLE_INITIAL_PROMPT",
             "registered instructions",
@@ -379,15 +381,30 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
         );
     }
     let rules = acp_trusted_rules(Some("channel-1")).expect("trusted rules");
+    let antigravity_rules =
+        acp_trusted_rules_for(Some("channel-1"), AcpTrustedRules::AntigravitySystemPrompt)
+            .expect("antigravity trusted rules");
+    let shared_contract = xmatrix_cli_core::bootstrap::channel_collaboration_policy("channel-1");
     unsafe {
+        if let Some(value) = previous_hub_prompts {
+            std::env::set_var(xmatrix_cli_core::bootstrap_prompts::ENV, value);
+        }
         std::env::remove_var("XMATRIX_AGENT_ROLE_INITIAL_PROMPT");
         std::env::remove_var("XMATRIX_INITIAL_MESSAGE");
         std::env::remove_var("XMATRIX_BOOTSTRAP_PROMPT");
     }
     assert!(rules.contains("registered instructions"));
     assert!(rules.contains("xmatrix send channel-1"));
+    assert!(rules.contains("xmatrix channel edit-message channel-1"));
+    assert!(!rules.contains("Antigravity note:"));
     assert!(!rules.contains("ordinary"));
     assert!(!rules.contains("ignore rules"));
+    assert!(antigravity_rules.contains("Antigravity note:"));
+    assert!(antigravity_rules.contains("xmatrix channel edit-message channel-1"));
+    assert!(
+        !shared_contract.contains("Antigravity note:"),
+        "Antigravity batching note must not enter the shared Channel contract"
+    );
     let params = acp_session_new_params("/workspace", Some(&rules), Some(AcpTrustedRules::MetaRules));
     assert_eq!(params["cwd"], "/workspace");
     assert_eq!(params["mcpServers"], serde_json::json!([]));
@@ -395,16 +412,24 @@ fn grok_trusted_rules_use_native_session_metadata_not_user_input() {
     assert!(native_rules.contains("registered instructions"));
     assert!(params.get("prompt").is_none());
     assert!(params.get("message").is_none());
-    // Antigravity CLI appends them to its own system prompt.
+    // Antigravity CLI appends them to its own system prompt on both new and load.
     let antigravity = acp_session_new_params(
         "/workspace",
-        Some(&rules),
+        Some(&antigravity_rules),
         Some(AcpTrustedRules::AntigravitySystemPrompt),
     );
     assert_eq!(
         antigravity["_meta"],
-        serde_json::json!({ "antigravity": { "systemPrompt": { "append": rules.trim() } } })
+        serde_json::json!({ "antigravity": { "systemPrompt": { "append": antigravity_rules.trim() } } })
     );
+    let antigravity_load = acp_session_load_params(
+        "sess-1",
+        "/workspace",
+        Some(&antigravity_rules),
+        Some(AcpTrustedRules::AntigravitySystemPrompt),
+    );
+    assert_eq!(antigravity_load["sessionId"], "sess-1");
+    assert_eq!(antigravity_load["_meta"], antigravity["_meta"]);
 
     let base = acp_session_new_params("/workspace", None, Some(AcpTrustedRules::MetaRules));
     assert!(base.get("_meta").is_none());

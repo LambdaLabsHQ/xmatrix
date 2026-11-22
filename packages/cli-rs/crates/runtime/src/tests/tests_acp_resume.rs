@@ -233,3 +233,60 @@ fn acp_trace_retains_upstream_message_ids_and_receipt_order() {
         .expect("ACP trace fixture completes");
     });
 }
+
+#[test]
+fn acp_resume_and_fallback_new_session_keep_trusted_rules() {
+    run_acp_resume_fixture_test(async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let cwd = env!("CARGO_MANIFEST_DIR");
+            let rules = acp_trusted_rules_for(
+                Some("channel-1"),
+                AcpTrustedRules::AntigravitySystemPrompt,
+            )
+            .expect("antigravity trusted rules");
+            for (mode, expect_new) in [("rules-echo", false), ("load-error-rules", true)] {
+                let key = format!("acp-resume-rules-{}", uuid::Uuid::new_v4());
+                super::save_acp_resume_session_id(
+                    "acp-resume-antigravity",
+                    Some(&key),
+                    Some("loaded-session"),
+                )
+                .expect("save resume pointer");
+                let mut session = AcpSession::spawn_stdio_with_prefix_args(
+                    "node",
+                    &[acp_resume_fixture_path(), mode.into()],
+                    &[],
+                    Some(cwd),
+                    AcpVendorConfig::generic("antigravity"),
+                )
+                .await
+                .expect("spawn antigravity resume fixture");
+                session
+                    .initialize(Some(cwd), Some(&key), true, Some(&rules))
+                    .await
+                    .expect("initialize resumed antigravity session");
+                let _ = super::save_acp_resume_session_id("acp-resume-antigravity", Some(&key), None);
+                let turn = submit_acp_resume_new_work(&mut session).await;
+                let echoed: serde_json::Value =
+                    serde_json::from_str(&turn.local_output).expect("echoed meta JSON");
+                assert_eq!(
+                    echoed["loadMeta"]["antigravity"]["systemPrompt"]["append"].as_str(),
+                    Some(rules.trim()),
+                    "{mode}: session/load must carry Antigravity trusted rules"
+                );
+                if expect_new {
+                    assert_eq!(
+                        echoed["newMeta"]["antigravity"]["systemPrompt"]["append"].as_str(),
+                        Some(rules.trim()),
+                        "fallback session/new after failed session/load must carry trusted rules"
+                    );
+                } else {
+                    assert!(echoed["newMeta"].is_null());
+                }
+                session.shutdown().await;
+            }
+        })
+        .await
+        .expect("resume rules fixture must not hang");
+    });
+}

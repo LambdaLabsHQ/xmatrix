@@ -2048,14 +2048,13 @@ async fn run_acp_app_external(config: AcpVendorConfig, run: ExternalRun<'_>) -> 
     );
 
     let role_active = trusted_role_is_active();
-    // Only vendors with a native trusted-instruction channel (session/new
-    // `_meta.rules`) consume trusted rules here; other vendors keep the
-    // bootstrap and deliver it as a prefix on the first user prompt.
-    let trusted_rules = if config.trusted_rules.is_some() && (!resume_requested || role_active) {
-        acp_trusted_rules(auto_join_channel_id.as_deref())
-    } else {
-        None
-    };
+    // Always compute trusted rules for vendors with a native system-rules
+    // channel (Grok `_meta.rules`, Antigravity `systemPrompt.append`), even
+    // when resuming: `session/load`, any fallback to `session/new`, and later
+    // restarts all need the same trusted rules.
+    let trusted_rules = config
+        .trusted_rules
+        .and_then(|channel| acp_trusted_rules_for(auto_join_channel_id.as_deref(), channel));
     // Seed monthly credit quota from the vendor billing hook so the channel
     // Agents panel can show remaining allowance (1mo). Turn token usage alone
     // rarely includes subscription windows. It is read beside the session's
@@ -2950,6 +2949,8 @@ impl AcpRun<'_> {
         let session_update = update.get("sessionUpdate").and_then(Value::as_str);
         match session_update {
             Some("tool_call") | Some("tool_call_update") => {
+                self.app
+                    .observe_activity(update, Some(self.relay), self.last_channel_id.as_deref());
                 let status = update.get("status").and_then(Value::as_str);
                 let terminal = crate::runtime_waiting::acp_tool_is_terminal(status);
                 let completed_bg = if self.reactive_wakeup.is_none() {
@@ -3701,6 +3702,8 @@ struct AcpSession {
     questions: crate::runtime_harness_questions::PendingQuestions<(Value, Value)>,
     /// Non-daemon tool calls still running after their turn ended (Antigravity).
     background_tasks: crate::runtime_waiting::AcpBackgroundTasks,
+    /// Pull request creation activity observed from ACP shell tool calls.
+    activity: crate::runtime_channel_activity::AcpActivityObserver,
     /// Active Antigravity subagents detected from local session files.
     active_subagents: u32,
     /// Number of subagent report messages already marked read for this session.
@@ -3719,13 +3722,15 @@ struct AcpSession {
 }
 
 /// Where a vendor takes a session's trusted rules (the registration's
-/// instructions and the Channel contract) as system text when it opens one.
+/// instructions and the Channel contract) as system text when it opens or
+/// loads a session.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum AcpTrustedRules {
+pub(crate) enum AcpTrustedRules {
     /// Grok: `_meta.rules`.
     MetaRules,
     /// Antigravity CLI: `_meta.antigravity.systemPrompt.append`, which it
-    /// appends to its own system prompt (`agy acp`'s NewSessionParams).
+    /// appends to its own system prompt (`agy acp`'s NewSessionParams /
+    /// LoadSessionParams).
     AntigravitySystemPrompt,
 }
 
@@ -3740,6 +3745,19 @@ impl AcpTrustedRules {
     }
 }
 
+fn acp_attach_trusted_rules(
+    params: &mut Value,
+    trusted_rules: Option<&str>,
+    channel: Option<AcpTrustedRules>,
+) {
+    if let (Some(rules), Some(channel)) = (
+        trusted_rules.map(str::trim).filter(|value| !value.is_empty()),
+        channel,
+    ) {
+        params["_meta"] = channel.meta(rules);
+    }
+}
+
 fn acp_session_new_params(
     workspace_path: &str,
     trusted_rules: Option<&str>,
@@ -3749,12 +3767,22 @@ fn acp_session_new_params(
         "cwd": workspace_path,
         "mcpServers": [],
     });
-    if let (Some(rules), Some(channel)) = (
-        trusted_rules.map(str::trim).filter(|value| !value.is_empty()),
-        channel,
-    ) {
-        params["_meta"] = channel.meta(rules);
-    }
+    acp_attach_trusted_rules(&mut params, trusted_rules, channel);
+    params
+}
+
+fn acp_session_load_params(
+    session_id: &str,
+    workspace_path: &str,
+    trusted_rules: Option<&str>,
+    channel: Option<AcpTrustedRules>,
+) -> Value {
+    let mut params = serde_json::json!({
+        "sessionId": session_id,
+        "cwd": workspace_path,
+        "mcpServers": [],
+    });
+    acp_attach_trusted_rules(&mut params, trusted_rules, channel);
     params
 }
 

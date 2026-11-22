@@ -1,5 +1,7 @@
 // Domain-oriented include sections (same module scope via include!).
 use super::LocalImageFiles;
+use super::acp_session_load_params;
+use super::acp_trusted_rules_for;
 use super::attachment_cache;
 use super::codex_turn_with_bootstrap;
 use super::materialize_local_image_files;
