@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import v8 from "node:v8";
 
 import * as bounds from "../src/runtime-transport/hibernation-bounds.ts";
 import * as hibernation from "../src/runtime-transport/machine-daemon-hibernation.ts";
@@ -165,4 +166,28 @@ test("a production-sized Machine Daemon session refreshes its attachment, and on
   assert.throws(() => hibernation.serializeMachineDaemonHibernationAttachment({ ...sized,
     machineMetadata: { ...sized.machineMetadata, padding: "x".repeat(bounds.RUNTIME_HIBERNATION_MAX_ATTACHMENT_BYTES) } }),
   /cannot be serialized as a bounded hibernation attachment/u);
+});
+
+test("hibernation byte bound upper-bounds V8 structured clone size for two-byte strings and mixed values", () => {
+  const twoByteOverLimit = { text: "—".padEnd(8_195, "a") };
+  assert.ok(
+    Buffer.byteLength(JSON.stringify(twoByteOverLimit), "utf8") < bounds.RUNTIME_HIBERNATION_MAX_ATTACHMENT_BYTES,
+    "UTF-8 JSON fits well inside 16 KiB",
+  );
+  assert.ok(
+    v8.serialize(twoByteOverLimit).byteLength > bounds.RUNTIME_HIBERNATION_MAX_ATTACHMENT_BYTES,
+    "V8 structured clone exceeds Cloudflare's 16 KiB serializeAttachment limit",
+  );
+  assert.equal(bounds.hibernationBoundedJson(twoByteOverLimit), false);
+
+  for (const sample of [
+    { s: "a".repeat(16_370) },
+    { a: Array.from({ length: 200 }, (_, i) => ({ k: `key_${i}`, v: i % 2 === 0 ? `ascii-${i}` : `mix—${i}` })) },
+    { nums: [0, 1, -1, 64, 1e9, 1e12, 1.5, -0], flags: [true, false, null, undefined], extra: { u: undefined } },
+    { nested: { label: "中文—abc", items: ["a", "—", "😀", { "键": "值" }] } },
+  ]) {
+    const actual = v8.serialize(sample).byteLength;
+    const bound = bounds.hibernationStructuredCloneMaxBytes(sample);
+    assert.ok(bound >= actual, `bound ${bound} must be >= actual V8 size ${actual}`);
+  }
 });
