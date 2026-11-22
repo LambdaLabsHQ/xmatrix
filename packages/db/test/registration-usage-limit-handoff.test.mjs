@@ -54,8 +54,12 @@ test("a usage limit only holds the pool until the reset; it hands nothing off it
   assert.deepEqual(await repo.holdUsageLimit(input), {
     limitedUntil: "2026-10-01T13:00:00.000Z", quotaPoolId: "registration:m1:claude", usedUp: "account",
   });
-  assert.deepEqual(calls.limits, [["owner", "m1", "claude"],
-    ["owner", "registration:m1:claude", "2026-10-01T13:00:00.000Z"]]);
+  assert.deepEqual(calls.limits, [
+    ["owner", "m1", "claude"],
+    [JSON.stringify([{ owner: "owner", pool: "registration:m1:claude" }])],
+    ["owner", "registration:m1:claude", "2026-10-01T13:00:00.000Z"],
+    ["owner", "registration:m1:claude"],
+  ]);
   assert.deepEqual(calls.handoffs, []);
   const unheld = repository({ held: null });
   assert.equal(await unheld.repo.holdUsageLimit(input), undefined);
@@ -164,8 +168,10 @@ test("a billing refusal usage limit records a long-lived billing hold, or scopes
   const { repo, calls } = repository();
   const res = await repo.holdUsageLimit({ ...input, resetsAt: undefined, billingRefusal: true });
   assert.equal(res.usedUp, "account");
-  assert.equal(calls.limits.length, 2);
-  assert.deepEqual(calls.limits[1], ["owner", "registration:m1:claude"]);
+  assert.equal(calls.limits.length, 4);
+  assert.deepEqual(calls.limits[1], [JSON.stringify([{ owner: "owner", pool: "registration:m1:claude" }])]);
+  assert.deepEqual(calls.limits[2], ["owner", "registration:m1:claude"]);
+  assert.deepEqual(calls.limits[3], ["owner", "registration:m1:claude"]);
 
   const scoped = repository({ located: {
     key: { spaceId: "space", ownerUserId: "owner", machineId: "m1", harness: "cursor" },
@@ -177,7 +183,7 @@ test("a billing refusal usage limit records a long-lived billing hold, or scopes
   } });
   const scopedRes = await scoped.repo.holdUsageLimit({ ...input, resetsAt: undefined, billingRefusal: true, scopedBillingRefusal: true });
   assert.deepEqual([scopedRes.usedUp, scopedRes.scope], ["scope", "API"]);
-  assert.deepEqual(scoped.calls.limits[1], ["owner", "registration:m1:claude", "API"]);
+  assert.deepEqual(scoped.calls.limits[2], ["owner", "registration:m1:claude", "API"]);
 });
 
 function calls({ calls: recorded }) { return recorded.handoffs; }

@@ -13,7 +13,8 @@ import { postgresMessageRoute } from "./postgres-message-authority";
 import { dispatchProductMessageAppend } from "./product-message-append";
 import { openConversation } from "./system-conversation";
 import type { Env } from "./types";
-import type { Ledger, LedgerRequest } from "./vendor/norn/runtime/ledger";
+import type { Ledger, LedgerRequest, MigrationStep, Reply } from "./vendor/norn/runtime/ledger";
+import { text, variant } from "./vendor/norn/runtime/value";
 
 /**
  * Programs that live on a Page (docs/architecture/norn-host.md): each
@@ -184,11 +185,64 @@ export async function pageProgramStatus(env: Env, input: { spaceId: string; page
     libraries));
 }
 
+function sampleReplyFor(request: LedgerRequest): Reply {
+  if (request.verb === "confirm") return { tag: "Answered", value: variant("Yes") };
+  if (request.verb === "choose" && request.options?.length) return { tag: "Answered", value: request.options[0]! };
+  if (request.verb === "judge") return { tag: "Answered", value: { type: "bool", value: true } };
+  if (request.verb === "ask") return { tag: "Answered", value: text("preview-sample") };
+  if (request.form === null) return { tag: "Answered", value: { type: "record", fields: { text: text("preview-sample") } } };
+  return { tag: "Refused", reason: "preview-sample" };
+}
+
+function summarizePreview(preview: ReturnType<typeof previewNornEdit>) {
+  if ("refusal" in preview) return preview;
+  return {
+    empty: preview.empty,
+    openedCount: preview.opened.length,
+    keptCount: preview.kept.length,
+    unreachedCount: preview.unreached.length,
+    answeredUnusedCount: preview.answeredUnused.length,
+    rescheduledCount: preview.rescheduled.length,
+    formChangedCount: preview.formChanged.length,
+    incompatibleAnswersCount: preview.incompatibleAnswers.length,
+    nextDue: preview.nextDue,
+    loops: preview.loops.map(l => ({ key: l.key, status: l.status, sealedRounds: l.sealedRounds, beforeNextDue: l.beforeNextDue, afterNextDue: l.afterNextDue })),
+  };
+}
+
+function summarizeUpgrade(upgrade: ReturnType<typeof diffNornProgramUpgrade>) {
+  if ("refusal" in upgrade) return upgrade;
+  return {
+    beforeOk: upgrade.beforeOk,
+    afterOk: upgrade.afterOk,
+    definitionChanged: upgrade.definitionChanged,
+    requiresExplicitAdoption: upgrade.requiresExplicitAdoption,
+    effects: upgrade.effects,
+    interfaces: upgrade.interfaces.map(i => ({ library: i.library, change: i.change, definitionChanged: i.definitionChanged })),
+  };
+}
+
+function summarizeMigration(result: ReturnType<typeof verifyNornLedgerMigration>) {
+  if ("refusal" in result) return result;
+  const { migration, report } = result;
+  // Never return the raw migrated ledger copy (which contains private replies/occurrences) to a Page reader.
+  return {
+    ok: Boolean(migration.ok && report?.ok),
+    verified: Boolean(report?.verified),
+    keepLegacy: migration.keepLegacy,
+    ...(migration.ok ? { migratedRequests: migration.migratedRequests, migratedLoops: migration.migratedLoops } : { reason: migration.reason }),
+    stepsExecuted: report?.stepsExecuted ?? 0,
+    legacyDispatchedCount: report?.legacyDispatched.length ?? 0,
+    migratedDispatchedCount: report?.migratedDispatched.length ?? 0,
+    differences: report?.differences ?? (migration.ok ? [] : [migration.reason]),
+  };
+}
+
 /**
  * Read-only preview of a proposed Page edit (or live migration readiness of the
- * current Page): computes SHA-256 definition pins, two-text ledger edit
- * preview, 3-way library upgrade diff, and fail-closed v1-to-v2 migration
- * verification without mutating any ledger or program row.
+ * current Page): returns redacted counts, SHA-256 definition pins, 3-way
+ * upgrade categories, and forward-advancing v1-to-v2 migration verification
+ * without mutating any ledger or exposing raw ledger contents.
  */
 export async function pageProgramPreview(
   env: Env,
@@ -206,19 +260,35 @@ export async function pageProgramPreview(
     const ledger = (current?.ledger ?? nornStartLedger(now)) as Ledger & { pinnedLibraries?: Record<string, string> };
     const beforeSource = current?.source ?? block.source;
     const beforeLibraries = ledger.pinnedLibraries ?? beforePageLibraries;
+    const preview = previewNornEdit(beforeSource, block.source, ledger, now, { beforeLibraries, afterLibraries });
+    const upgrade = diffNornProgramUpgrade(
+      { source: beforeSource, libraries: beforeLibraries },
+      { source: block.source, libraries: afterLibraries },
+      ledger,
+      now,
+    );
+    let migrationSummary: unknown = undefined;
+    if ((ledger.identityScheme ?? 1) === 1) {
+      const steps: MigrationStep[] = [{ kind: "restart", at: now + 1 }];
+      const openRequests = Object.values(ledger.requests).filter(r => r.reply === null && !r.detached && r.verb !== "spawn");
+      let t = now + 2;
+      for (const req of openRequests) {
+        steps.push({ kind: "reply", requestId: req.id, holder: req.candidates?.[0] ?? req.holder, epoch: req.epoch, reply: sampleReplyFor(req), at: t++ });
+      }
+      steps.push({ kind: "restart", at: t++ });
+      if (!("refusal" in preview) && preview.nextDue.before !== null) {
+        steps.push({ kind: "advance", at: Math.max(t, preview.nextDue.before) });
+      }
+      migrationSummary = summarizeMigration(
+        verifyNornLedgerMigration(beforeSource, ledger, now, steps, { libraries: beforeLibraries }),
+      );
+    }
     return {
       name: block.name,
       pin: pinNornProgram(block.source, afterLibraries),
-      preview: previewNornEdit(beforeSource, block.source, ledger, now, { beforeLibraries, afterLibraries }),
-      upgrade: diffNornProgramUpgrade(
-        { source: beforeSource, libraries: beforeLibraries },
-        { source: block.source, libraries: afterLibraries },
-        ledger,
-        now,
-      ),
-      ...((ledger.identityScheme ?? 1) === 1
-        ? { migration: verifyNornLedgerMigration(beforeSource, ledger, now, [], { libraries: beforeLibraries }) }
-        : {}),
+      preview: summarizePreview(preview),
+      upgrade: summarizeUpgrade(upgrade),
+      ...(migrationSummary !== undefined ? { migration: migrationSummary } : {}),
     };
   });
 }

@@ -322,6 +322,216 @@ function registrationQuotaProbeDigest(input: { ownerUserId: string; machineId: s
 
 export { ACCOUNT_QUOTA_SCOPE, UNRESOLVED_QUOTA_SCOPE } from "@xmatrix/protocol";
 
+export interface RegistrationQuotaPoolKey {
+  ownerUserId: string;
+  quotaPoolId: string;
+}
+
+/** Maximum unready waiters one bounded pool reconciliation page marks ready. */
+export const QUOTA_WAITER_RECONCILE_PAGE_SIZE = 128;
+
+/**
+ * Serialize observation transitions, holds, wait registrations and waiter
+ * reconciliation on the same pool using a single deterministic lock order
+ * `(ownerUserId, quotaPoolId)` without blocking unrelated pools or requiring
+ * an observation row to exist yet.
+ */
+export async function lockRegistrationQuotaPools(
+  tx: DatabaseTransaction,
+  pools: readonly RegistrationQuotaPoolKey[],
+): Promise<RegistrationQuotaPoolKey[]> {
+  const unique = [...new Map(
+    pools.map(pool => [`${pool.ownerUserId.length}:${pool.ownerUserId}:${pool.quotaPoolId}`, pool]),
+  ).values()].sort((left, right) =>
+    left.ownerUserId < right.ownerUserId ? -1
+      : left.ownerUserId > right.ownerUserId ? 1
+      : left.quotaPoolId < right.quotaPoolId ? -1
+      : left.quotaPoolId > right.quotaPoolId ? 1 : 0,
+  );
+  if (!unique.length) return [];
+  await tx.query({
+    name: "registration_quota_pools_lock_v1",
+    text: `WITH ordered AS MATERIALIZED (
+        SELECT p.owner, p.pool
+        FROM jsonb_to_recordset($1::jsonb) AS p(owner text, pool text)
+        ORDER BY p.owner, p.pool
+      )
+      SELECT pg_advisory_xact_lock(
+        hashtextextended('registration_quota_pool:' || length(owner)::text || ':' || owner || ':' || pool, 0)
+      ) FROM ordered`,
+    values: [JSON.stringify(unique.map(pool => ({ owner: pool.ownerUserId, pool: pool.quotaPoolId })))],
+    maxRows: unique.length,
+  });
+  return unique;
+}
+
+/** Read a pool's current observation row (caller holds the pool lock when serializing transitions). */
+export async function readCurrentRegistrationQuotaPoolObservation(
+  tx: DatabaseTransaction,
+  ownerUserId: string,
+  quotaPoolId: string,
+): Promise<QueryResultRow | undefined> {
+  const [obs] = await tx.query<QueryResultRow>({
+    name: "registration_quota_pool_obs_read_v1",
+    text: `SELECT ${registrationQuotaColumns("q")}
+      FROM control.registration_quota_observations q
+      WHERE q.owner_user_id=$1 AND q.quota_pool_id=$2 AND ${currentRegistrationQuotaSql("q")}`,
+    values: [ownerUserId, quotaPoolId],
+    maxRows: 1,
+  });
+  return obs;
+}
+
+/**
+ * Atomically advance a pool's observation revision and either arm a fresh
+ * durable reconciliation obligation (when the pool has headroom) or clear any
+ * stale pending obligation (when an exhausted reading or hold replaces it).
+ */
+export async function recordPoolReconciliationTransition(
+  tx: DatabaseTransaction,
+  ownerUserId: string,
+  quotaPoolId: string,
+  open: boolean,
+): Promise<void> {
+  if (open) {
+    await tx.query({
+      name: "registration_quota_pool_reconcile_arm_v1",
+      text: `INSERT INTO control.registration_quota_pool_reconciliations
+          (owner_user_id,quota_pool_id,observation_revision,reconcile_needed_revision,reconciled_revision,
+            reconcile_cursor_channel_id,updated_at)
+        VALUES ($1,$2,1,1,0,NULL,clock_timestamp())
+        ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
+          observation_revision=registration_quota_pool_reconciliations.observation_revision + 1,
+          reconcile_needed_revision=registration_quota_pool_reconciliations.observation_revision + 1,
+          reconcile_cursor_channel_id=NULL,
+          updated_at=clock_timestamp()`,
+      values: [ownerUserId, quotaPoolId],
+      maxRows: 0,
+    });
+    return;
+  }
+  await tx.query({
+    name: "registration_quota_pool_reconcile_clear_v1",
+    text: `INSERT INTO control.registration_quota_pool_reconciliations
+        (owner_user_id,quota_pool_id,observation_revision,reconcile_needed_revision,reconciled_revision,
+          reconcile_cursor_channel_id,updated_at)
+      VALUES ($1,$2,1,0,0,NULL,clock_timestamp())
+      ON CONFLICT (owner_user_id,quota_pool_id) DO UPDATE SET
+        observation_revision=registration_quota_pool_reconciliations.observation_revision + 1,
+        reconciled_revision=registration_quota_pool_reconciliations.reconcile_needed_revision,
+        reconcile_cursor_channel_id=NULL,
+        updated_at=clock_timestamp()`,
+    values: [ownerUserId, quotaPoolId],
+    maxRows: 0,
+  });
+}
+
+/**
+ * Reconcile one bounded page of unready waiters belonging solely to
+ * `(ownerUserId, quotaPoolId)`. Advances the durable channel cursor when more
+ * rows remain, and acknowledges `reconciled_revision` only when the pool is
+ * completely drained at its current observation revision.
+ */
+export async function reconcileRegistrationQuotaPoolPage(
+  tx: DatabaseTransaction,
+  input: { ownerUserId: string; quotaPoolId: string; pageSize?: number; observation?: QueryResultRow },
+): Promise<{ readied: number; hasReady: boolean; more: boolean }> {
+  const pageSize = Math.min(Math.max(Math.trunc(input.pageSize ?? QUOTA_WAITER_RECONCILE_PAGE_SIZE), 1), 256);
+  const obs = input.observation ?? await readCurrentRegistrationQuotaPoolObservation(tx, input.ownerUserId, input.quotaPoolId);
+  const [state] = await tx.query<QueryResultRow>({
+    name: "registration_quota_pool_reconcile_read_v1",
+    text: `SELECT reconcile_needed_revision,reconciled_revision,reconcile_cursor_channel_id
+      FROM control.registration_quota_pool_reconciliations
+      WHERE owner_user_id=$1 AND quota_pool_id=$2 FOR UPDATE`,
+    values: [input.ownerUserId, input.quotaPoolId],
+    maxRows: 1,
+  });
+  const open = obs !== undefined && registrationQuotaVerdict(obs).state !== "usedUp";
+  if (!open) {
+    if (state && (Number(state.reconcile_needed_revision) > Number(state.reconciled_revision)
+        || state.reconcile_cursor_channel_id !== null)) {
+      await tx.query({
+        name: "registration_quota_pool_reconcile_ack_v1",
+        text: `UPDATE control.registration_quota_pool_reconciliations
+          SET reconciled_revision=reconcile_needed_revision,reconcile_cursor_channel_id=NULL,updated_at=clock_timestamp()
+          WHERE owner_user_id=$1 AND quota_pool_id=$2`,
+        values: [input.ownerUserId, input.quotaPoolId],
+        maxRows: 0,
+      });
+    }
+    return { readied: 0, hasReady: false, more: false };
+  }
+
+  const cursor = typeof state?.reconcile_cursor_channel_id === "string" ? state.reconcile_cursor_channel_id : null;
+  const candidates = await tx.query<QueryResultRow>({
+    name: "registration_quota_pool_waiters_page_v1",
+    text: `SELECT channel_id
+      FROM control.registration_quota_waiters
+      WHERE owner_user_id=$1 AND quota_pool_id=$2
+        AND ready_at IS NULL AND expires_at>statement_timestamp()
+        AND refused_through<$3::timestamptz
+        AND ($4::text IS NULL OR channel_id>$4)
+      ORDER BY channel_id ASC
+      LIMIT $5`,
+    values: [input.ownerUserId, input.quotaPoolId, obs.observed_at, cursor, pageSize],
+    maxRows: pageSize,
+  });
+
+  let readied = 0;
+  if (candidates.length) {
+    const channelIds = candidates.map(row => String(row.channel_id));
+    const updated = await tx.query<QueryResultRow>({
+      name: "registration_quota_pool_waiters_ready_v1",
+      text: `UPDATE control.registration_quota_waiters
+        SET ready_at=clock_timestamp(),ready_token=gen_random_uuid()
+        WHERE owner_user_id=$1 AND quota_pool_id=$2
+          AND channel_id=ANY($3::text[]) AND ready_at IS NULL
+        RETURNING channel_id`,
+      values: [input.ownerUserId, input.quotaPoolId, channelIds],
+      maxRows: channelIds.length,
+    });
+    readied = updated.length;
+  }
+
+  const more = candidates.length >= pageSize;
+  if (state) {
+    if (more) {
+      const nextCursor = String(candidates[candidates.length - 1]!.channel_id);
+      await tx.query({
+        name: "registration_quota_pool_reconcile_cursor_v1",
+        text: `UPDATE control.registration_quota_pool_reconciliations
+          SET reconcile_cursor_channel_id=$3,updated_at=clock_timestamp()
+          WHERE owner_user_id=$1 AND quota_pool_id=$2`,
+        values: [input.ownerUserId, input.quotaPoolId, nextCursor],
+        maxRows: 0,
+      });
+    } else if (Number(state.reconcile_needed_revision) > Number(state.reconciled_revision) || cursor !== null) {
+      await tx.query({
+        name: "registration_quota_pool_reconcile_ack_v1",
+        text: `UPDATE control.registration_quota_pool_reconciliations
+          SET reconciled_revision=reconcile_needed_revision,reconcile_cursor_channel_id=NULL,updated_at=clock_timestamp()
+          WHERE owner_user_id=$1 AND quota_pool_id=$2`,
+        values: [input.ownerUserId, input.quotaPoolId],
+        maxRows: 0,
+      });
+    }
+  }
+
+  let hasReady = readied > 0;
+  if (!hasReady) {
+    const existingReady = await tx.query<QueryResultRow>({
+      name: "registration_quota_pool_has_ready_v1",
+      text: `SELECT 1 FROM control.registration_quota_waiters
+        WHERE owner_user_id=$1 AND quota_pool_id=$2 AND ready_at IS NOT NULL AND expires_at>statement_timestamp()
+        LIMIT 1`,
+      values: [input.ownerUserId, input.quotaPoolId],
+      maxRows: 1,
+    });
+    hasReady = existingReady.length > 0;
+  }
+  return { readied, hasReady, more };
+}
+
 /** Persist one owner's provider reading, each part fenced on its own read
  * time: every reading renews the account part, a complete one the scoped part
  * too. A reading never replaces a newer one, and one already expired is not
@@ -333,6 +543,7 @@ export { ACCOUNT_QUOTA_SCOPE, UNRESOLVED_QUOTA_SCOPE } from "@xmatrix/protocol";
 export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction, input: {
   ownerUserId: string; quotaPoolId: string; record: RoutingQuotaRecord;
 }): Promise<boolean> {
+  await lockRegistrationQuotaPools(tx, [{ ownerUserId: input.ownerUserId, quotaPoolId: input.quotaPoolId }]);
   const incoming = input.record;
   const incomingAccountExpiry = routingQuotaAccountPartExpiry(incoming);
   const incomingScopedExpiry = incoming.scoped?.expiresAt ?? null;
@@ -463,44 +674,20 @@ export async function upsertRegistrationQuotaObservation(tx: DatabaseTransaction
     break;
   }
 
-  // A reading may end a refused summon's wait. Marking it here, in the
-  // reading's own transaction, means the event cannot be lost. True when one
-  // of the owner's waits is ready to deliver. A used-up account rings nobody;
-  // the waits read the stored reading, kept windows included.
-  return effectiveAccountRemaining > 0 && await markRegistrationQuotaWaitersReady(tx, input.ownerUserId);
-}
-
-
-/** How many of one owner's waits one reading looks at. */
-const QUOTA_WAITERS_PER_OWNER = 128;
-
-/**
- * Inside a transaction that recorded a reading of `ownerUserId`'s quota or a
- * wait: every wait of the owner's whose pool now has a current reading newer
- * than the one that refused it, whose account is not used up, becomes ready.
- * A wait is a doorbell: the retry it rings reads the headroom of its own
- * model. True when any wait of the owner is ready.
- */
-export async function markRegistrationQuotaWaitersReady(tx: DatabaseTransaction, ownerUserId: string): Promise<boolean> {
-  const waits = await tx.query<QueryResultRow>({ name: "registration_quota_waiters_pending_v2", text: `SELECT
-      w.quota_pool_id,w.channel_id,w.ready_at IS NOT NULL AS ready,${registrationQuotaColumns("q")}
-    FROM control.registration_quota_waiters w
-    LEFT JOIN control.registration_quota_observations q ON q.owner_user_id=w.owner_user_id
-      AND q.quota_pool_id=w.quota_pool_id AND q.observed_at>w.refused_through AND ${currentRegistrationQuotaSql("q")}
-    WHERE w.owner_user_id=$1 AND w.expires_at>statement_timestamp()
-    ORDER BY w.quota_pool_id,w.channel_id LIMIT ${QUOTA_WAITERS_PER_OWNER}`,
-  values: [ownerUserId], maxRows: QUOTA_WAITERS_PER_OWNER });
-  const ready = waits.filter(row => row.ready !== true && row.observed_at != null
-    && registrationQuotaVerdict(row).state !== "usedUp");
-  if (ready.length) {
-    await tx.query({ name: "registration_quota_waiters_ready_v1", text: `UPDATE control.registration_quota_waiters w
-        SET ready_at=clock_timestamp(),ready_token=gen_random_uuid()
-        FROM jsonb_to_recordset($2::jsonb) AS woken(pool text,channel text)
-      WHERE w.owner_user_id=$1 AND w.quota_pool_id=woken.pool AND w.channel_id=woken.channel AND w.ready_at IS NULL`,
-    values: [ownerUserId, JSON.stringify(ready.map(row => ({ pool: String(row.quota_pool_id),
-      channel: String(row.channel_id) })))], maxRows: 0 });
-  }
-  return ready.length > 0 || waits.some(row => row.ready === true);
+  // Persist the pool's observation revision and reconciliation obligation
+  // atomically under the per-pool lock, then drain one bounded page of this
+  // pool's unready waiters. Any remainder stays durably pending via the cursor.
+  const current = await readCurrentRegistrationQuotaPoolObservation(tx, input.ownerUserId, input.quotaPoolId);
+  if (!current) return false;
+  const poolOpen = effectiveAccountRemaining > 0 && registrationQuotaVerdict(current).state !== "usedUp";
+  await recordPoolReconciliationTransition(tx, input.ownerUserId, input.quotaPoolId, poolOpen);
+  if (!poolOpen) return false;
+  const page = await reconcileRegistrationQuotaPoolPage(tx, {
+    ownerUserId: input.ownerUserId,
+    quotaPoolId: input.quotaPoolId,
+    observation: current,
+  });
+  return page.readied > 0 || page.hasReady || page.more;
 }
 
 /** The daemon's completed quota probe is where its readings become facts, in
@@ -576,6 +763,7 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
   values: [input.ownerUserId, input.machineId, input.harness], maxRows: 1 });
   if (!pool) return undefined;
   const quotaPoolId = String(pool.quota_pool_id);
+  await lockRegistrationQuotaPools(tx, [{ ownerUserId: input.ownerUserId, quotaPoolId }]);
   if (input.billingRefusal) {
     const scope = input.quotaScope?.trim();
     if (scope && scope !== ACCOUNT_QUOTA_SCOPE && scope !== UNRESOLVED_QUOTA_SCOPE) {
@@ -621,6 +809,7 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
       RETURNING to_json(expires_at)#>>'{}' AS expires_at`,
     values: [input.ownerUserId, quotaPoolId], maxRows: 1 });
     const limitedUntil = rows[0] ? new Date(String(rows[0].expires_at)).toISOString() : undefined;
+    if (rows[0]) await recordPoolReconciliationTransition(tx, input.ownerUserId, quotaPoolId, false);
     return { quotaPoolId, ...(limitedUntil ? { limitedUntil } : {}), usedUp: "account" };
   }
   const record = input.usage === undefined ? undefined : routingQuotaRecord(input.usage, now);
@@ -650,6 +839,7 @@ export async function recordRegistrationUsageLimit(tx: DatabaseTransaction, inpu
     RETURNING to_json(expires_at)#>>'{}' AS expires_at`,
   values: [input.ownerUserId, quotaPoolId, Number.isFinite(reset) ? new Date(reset).toISOString() : null], maxRows: 1 });
   const limitedUntil = rows[0] ? new Date(String(rows[0].expires_at)).toISOString() : undefined;
+  if (rows[0]) await recordPoolReconciliationTransition(tx, input.ownerUserId, quotaPoolId, false);
   // A daemon that predates scopes sends neither a scope, a reason, nor a
   // complete reading, which means the whole account is used up.
   const scopeAware = Boolean(scope || scopeReason || record?.scoped);
@@ -664,6 +854,13 @@ export async function clearRegistrationAccountHold(directory: AuthorityDatabase,
 }): Promise<boolean> {
   const scopes = [...new Set((input.scopes ?? []).map(scope => scope.trim().toLowerCase()).filter(Boolean))];
   return directory.transaction({ requestId: input.requestId, operation: "registration.account-hold.clear" }, async tx => {
+    const [pool] = await tx.query<QueryResultRow>({ name: "registration_account_hold_pool_v1", text: `SELECT
+        ${REGISTRATION_QUOTA_POOL_SQL} AS quota_pool_id FROM control.agent_registration_environments e
+      WHERE e.owner_user_id=$1 AND e.machine_id=$2 AND e.harness=$3`,
+    values: [input.ownerUserId, input.machineId, input.harness], maxRows: 1 });
+    if (pool) {
+      await lockRegistrationQuotaPools(tx, [{ ownerUserId: input.ownerUserId, quotaPoolId: String(pool.quota_pool_id) }]);
+    }
     const rows = await tx.query<QueryResultRow>({ name: "registration_account_hold_clear_v1", text: `DELETE FROM
         control.registration_quota_observations o
       USING control.agent_registration_environments e

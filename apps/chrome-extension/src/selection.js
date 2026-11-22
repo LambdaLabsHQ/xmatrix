@@ -20,6 +20,10 @@
   // A page open while the extension updated still runs the old script, cut off from the extension (it can no
   // longer hand over a passage). The extension injects this one into such pages: the old one steps aside.
   globalThis.__xmatrixAsk?.stop?.();
+  // After a reload Chrome may give the new script a fresh world, where the old one is not seen: its frame still is.
+  for (const old of document.querySelectorAll('iframe[title="Ask xMatrix"]')) {
+    if (old.src.startsWith(chrome.runtime.getURL(""))) old.remove();
+  }
   const listeners = [];
   const listen = (target, type, handler, options) => {
     target.addEventListener(type, handler, options);

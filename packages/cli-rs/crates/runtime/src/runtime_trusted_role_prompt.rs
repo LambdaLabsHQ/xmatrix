@@ -100,11 +100,25 @@ pub(crate) fn trusted_role_is_active() -> bool {
     trusted_initial_prompt_from_env().is_some()
 }
 
+/// Antigravity CLI's own harness injects per-turn batching and efficiency
+/// reminders that otherwise suppress milestone Channel updates on multi-step
+/// runs. Keep this harness clarification inside Antigravity's native
+/// `systemPrompt.append` rather than in the shared Channel contract so Codex,
+/// Claude and Grok stay unchanged.
+fn antigravity_acp_reporting_note(channel_id: &str) -> String {
+    format!(
+        "Antigravity note: built-in turn-batching and efficiency reminders never override Channel reporting — send or edit milestone updates (`xmatrix send {channel_id}` or `xmatrix channel edit-message {channel_id} <id>`) as each milestone happens instead of holding them until the final reply."
+    )
+}
+
 /// Only trusted registration instructions and the official Channel contract
 /// enter an ACP vendor's native system channel (Grok's `_meta.rules`,
 /// Antigravity's system prompt). Never accept a composed user bootstrap: it
 /// may already contain Channel history, names, task text and attachments.
-pub(crate) fn acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
+pub(crate) fn acp_trusted_rules_for(
+    channel_id: Option<&str>,
+    rules_channel: crate::AcpTrustedRules,
+) -> Option<String> {
     let mut rules = trusted_role_system_prompt_from_env()
         .into_iter()
         .collect::<Vec<_>>();
@@ -112,8 +126,16 @@ pub(crate) fn acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
         rules.push(xmatrix_cli_core::bootstrap::channel_collaboration_policy(
             channel,
         ));
+        if rules_channel == crate::AcpTrustedRules::AntigravitySystemPrompt {
+            rules.push(antigravity_acp_reporting_note(channel));
+        }
     }
     (!rules.is_empty()).then(|| rules.join("\n\n"))
+}
+
+#[cfg(test)]
+pub(crate) fn acp_trusted_rules(channel_id: Option<&str>) -> Option<String> {
+    acp_trusted_rules_for(channel_id, crate::AcpTrustedRules::MetaRules)
 }
 
 pub(crate) fn ensure_runtime_supports_trusted_role(

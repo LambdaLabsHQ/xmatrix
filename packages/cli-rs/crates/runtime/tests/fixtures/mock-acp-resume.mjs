@@ -3,6 +3,8 @@ import readline from "node:readline";
 const mode = process.argv[2] ?? "resume";
 const sessionId = "loaded-session";
 let loadRequest;
+let seenLoadMeta = null;
+let seenNewMeta = null;
 
 const send = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const reply = (request, result) => send({ jsonrpc: "2.0", id: request.id, result });
@@ -19,6 +21,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       reply(message, {});
       break;
     case "session/new":
+      seenNewMeta = message.params?._meta ?? null;
       if (mode === "new-overflow") {
         for (let i = 0; i < 1200; i++) {
           update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "old" } });
@@ -28,6 +31,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
       break;
     case "session/load":
       loadRequest = message;
+      seenLoadMeta = message.params?._meta ?? null;
       if (message.params.sessionId !== sessionId) throw new Error("wrong resume pointer");
       // Preserve unrelated notifications and responses in their original order.
       send({ jsonrpc: "2.0", method: "vendor/notice", params: { value: "keep" } });
@@ -54,6 +58,20 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         reply(message, { stopReason: "end_turn" });
         break;
       }
+      if (mode === "rules-echo" || mode === "load-error-rules") {
+        update(
+          {
+            sessionUpdate: "agent_message_chunk",
+            content: {
+              type: "text",
+              text: JSON.stringify({ loadMeta: seenLoadMeta, newMeta: seenNewMeta }),
+            },
+          },
+          message.params.sessionId,
+        );
+        reply(message, { stopReason: "end_turn" });
+        break;
+      }
       update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: "live reply" } }, message.params.sessionId);
       reply(message, { stopReason: "end_turn" });
       break;
@@ -71,7 +89,7 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
         send({ jsonrpc: "2.0", id: "unsupported", method: "fs/read_text_file", params: { path: "/unavailable" } });
       } else if (message.id === "unsupported") {
         if (message.error?.code !== -32601) throw new Error("unsupported capability accepted");
-        if (mode === "load-error") {
+        if (mode === "load-error" || mode === "load-error-rules") {
           send({ jsonrpc: "2.0", id: loadRequest.id, error: { code: -32602, message: "Session unavailable" } });
         } else {
           reply(loadRequest, { sessionId });

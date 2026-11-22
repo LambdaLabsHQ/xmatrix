@@ -33,7 +33,7 @@ async fn trace_fixture_hub(
             AgentInstanceServerMessage::AgentInstanceConnected {
                 agent,
                 peers: Vec::new(),
-                hub_capabilities: None,
+                hub_capabilities: Some(vec!["channel_activity".into()]),
             },
         )
         .await;

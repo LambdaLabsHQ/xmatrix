@@ -7,6 +7,7 @@ import { gmailIncomingChanges } from "../src/connectors/gmail-notification-api.t
 import { parseMailboxes } from "../src/connectors/gmail-mailboxes.ts";
 import { ProviderRequestError } from "../src/connectors/http.ts";
 import { extractGmailEventData } from "../src/norn-libraries.ts";
+import { appStream, eventsStream } from "../src/norn-host.ts";
 
 const load=await compileCommonJsSourceModule(new URL("../src/connectors/gmail-notification-drain.ts",import.meta.url));
 const env={CONNECTOR_GOOGLE_CLIENT_ID:"fixture-google",CONNECTOR_GOOGLE_CLIENT_SECRET:"fixture-secret",
@@ -22,7 +23,7 @@ async function drainer() {
   // The owner's subscription to this mailbox; tests add others.
   const routes={"gmail:me@example.com":[{channelId:"channel-1",authorityRootUserId:"owner",features:["message.received"]}],"gmail:*":[]};
   let pending=[];
-  const state={current:true};
+  const state={current:true,nornListening:false};
   const repository={cleanup:async()=>{},claim:async()=>[job],current:async()=>state.current,
     heartbeat:async(_job)=>{calls.heartbeat.push(_job.id);calls.order.push("heartbeat");},polled:async()=>{},
     pending:async()=>pending,stage:async(_job,ids,historyId,pageToken)=>{calls.stage.push({ids,historyId,pageToken});pending=[...ids];},
@@ -44,6 +45,8 @@ async function drainer() {
       for(const route of targets)await append(_env,route.channelId,{channelId:route.channelId,body:event.body,
         messageId:`app:${provider}:${event.eventId}:${route.channelId}`,appMetadata,stored:calls.stored.length});}},
     "../product-message-append":{dispatchProductMessageAppend:async(_env,_channel,message)=>{calls.append.push(message);return new Response();}},
+    "../norn-events":{hasWaitingNornProgram:async()=>state.nornListening},
+    "../norn-host":{appStream,eventsStream},
     "../norn-libraries":{extractGmailEventData},
     "../outside-events":{connectorEventArrived:async(_env,event)=>{calls.automation.push(event);}}};
   const {drainGmailNotifications}=load(name=>imports[name]);
@@ -62,6 +65,36 @@ test("unchanged counts reuse the cached grant and avoid Composio until the indep
   assert.equal(due.calls.searched,1);assert.equal(due.calls.append.length,1);assert.equal(due.calls.automation.length,1);
   assert.deepEqual(due.calls.stage,[{ids:["abcdef1234567890"],historyId:"200",pageToken:undefined}]);
   assert.doesNotMatch(JSON.stringify(due.calls.append),/private-refresh|private-access/);
+});
+
+test("Norn-only Gmail listener reads structured headers without ordinary Channel subscriptions and retries on read failure", async () => {
+  const onlyNorn = await drainer();
+  onlyNorn.routes["gmail:me@example.com"] = [];
+  onlyNorn.state.nornListening = true;
+  onlyNorn.autoRead.result = { detail: "From: user@corp.io\nTo: feedback@xmatrix.sh\nSubject: Re: Pro invitation\n\nLove it" };
+  onlyNorn.job.nextSearchAt = new Date(Date.now() - 1).toISOString();
+  await fetched([{ body: counts }, { body: { status: 200, data: { historyId: "200", history: [{ messagesAdded: [{ message: { id: "fedcba0987654321", labelIds: ["INBOX"] } }] }] } } }], onlyNorn.run);
+  // Zero Channel messages posted, yet autoRead ran and connectorEventArrived received structured `to` & `subject`!
+  assert.equal(onlyNorn.calls.append.length, 0);
+  assert.equal(onlyNorn.calls.stored.length, 0);
+  assert.equal(onlyNorn.calls.read.length, 1);
+  assert.equal(onlyNorn.calls.automation.length, 1);
+  assert.deepEqual(onlyNorn.calls.automation[0].event.data, {
+    messageId: "fedcba0987654321",
+    to: ["feedback@xmatrix.sh"],
+    subject: "Re: Pro invitation",
+    from: "user@corp.io",
+  });
+
+  // When metadata read fails for a Norn listener, drain retries (never marks delivered or emits empty subject).
+  const retryNorn = await drainer();
+  retryNorn.routes["gmail:me@example.com"] = [];
+  retryNorn.state.nornListening = true;
+  retryNorn.autoRead.result = { unread: "It could not be read automatically." };
+  retryNorn.job.nextSearchAt = new Date(Date.now() - 1).toISOString();
+  await fetched([{ body: counts }, { body: { status: 200, data: { historyId: "200", history: [{ messagesAdded: [{ message: { id: "abcdef0000000001", labelIds: ["INBOX"] } }] }] } } }], retryNorn.run);
+  assert.equal(retryNorn.calls.automation.length, 0);
+  assert.equal(retryNorn.calls.finish[0], "retry");
 });
 
 test("a notification reaches only the Channels its owner subscribed to the mailbox or to every own mailbox",async()=>{
