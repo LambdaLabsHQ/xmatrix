@@ -31,15 +31,22 @@
     <button id="update" type="button" class="pill wood">Update the extension</button>
   </section>
 
+  <section id="view-quick-select" class="view center" hidden>
+    <div class="demo" aria-hidden="true">
+      <p class="demo-text">Postgres keeps one <mark>connection per backend process, so a pool of 20 runs out</mark> under load.</p>
+      <span class="demo-pill"><svg viewBox="0 0 14 14"><rect x="6" y="1" width="3.6" height="3.6" rx=".8"/><rect x="9.6" y="1" width="3.4" height="3.6" rx=".8"/><rect x="9.6" y="4.6" width="3.4" height="3.6" rx=".8"/><rect x="1" y="8.8" width="3.6" height="3.6" rx=".8"/></svg>Ask about this…</span>
+    </div>
+    <h1 class="display">Ask about anything you select</h1>
+    <p class="lede">Select text on any page and a small box appears beside it. Type your question: it starts a conversation here, and an Agent picks it up.</p>
+    <button id="quick-select-on" type="button" class="pill wood">Turn on</button>
+    <button id="quick-select-skip" type="button" class="pill white">Not now</button>
+    <p class="fine">Chrome will ask to let xMatrix see web pages. It reads only the text you select, and only when you click Ask. Without it, right-click a selection and choose <b>Ask about…</b></p>
+  </section>
+
   <section id="view-app" class="app" hidden>
     <div id="context" class="context">
       <span id="context-title" class="context-title"></span>
-      <button id="context-quote" type="button" class="chip">Quote</button>
-      <button id="context-new" type="button" class="chip">New chat</button>
-    </div>
-    <div id="quick-select" class="hint" hidden>
-      <span>Select text on any page to discuss it here.</span>
-      <button id="quick-select-on" type="button" class="text-button">Turn on</button>
+      <button id="context-ask" type="button" class="chip">Ask about this page</button>
     </div>
     <iframe id="app" title="xMatrix" allow="clipboard-write"></iframe>
   </section>

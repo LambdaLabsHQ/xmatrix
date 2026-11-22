@@ -78,6 +78,27 @@ the avatar (`panel` / `trace-panel`) so every button stays unobstructed and
 within the viewport. Web only. Recovery is a CI-validated beta reverting this
 change.
 
+## Unreleased: the Chrome extension has one action, ask, and asks in the Space you are looking at
+
+A question asked on a page went to the Space last used by the extension, or the
+person's first Space when none was recorded, not the one open in the side
+panel; a Space without Agents then answered "No Agent was asked". The panel's
+app now tells the extension which Space it shows (`{ type: "space" }` in
+`extension-embed.ts`), and questions go there; the box names that Space before
+it is sent. The message mentions nobody, so the Space's routing picks the Agent.
+
+The selection bar's *Ask* / *Quote* pair, the context menu's *Discuss* /
+*Quote* pair and the panel bar's *Quote* / *New chat* become one action: a
+field beside the selection, *Ask about this…*, that opens into the question
+box; *Ask about “…”* and *Ask about this page* in the context menu, which open
+the same box on the page through activeTab; and *Ask about this page* in the
+panel bar. The panel asks once, right after sign-in, whether to turn on the
+field beside selections, instead of a strip above the app. Source labels drop
+the unread counts sites put before their titles. Web (the Space announcement
+and the privacy policy wording) and the extension, which ships outside the
+release train; an extension built before it keeps its old Space choice.
+Recovery is reverting this change.
+
 ## Unreleased: the Chrome extension packages the app instead of framing the Web
 
 The extension's side panel showed the Web (`/app`) in a frame, so every open

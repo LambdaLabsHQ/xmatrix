@@ -8,14 +8,14 @@
 // only to that origin. Passages picked on a page (the context menu, the
 // selection button, this bar) are handed to the app once it says it is ready.
 
-import { capturableUrl, pagePassage } from "./passage.js";
+import { capturableUrl, pagePassage, pageTitle } from "./passage.js";
 
 const PROTOCOL = "xmatrix-embed/1";
 const APP_ORIGIN = window.location.origin;
 const APP_PAGE = "/app/index.html";
 const WEB_ORIGINS = ["https://*/*", "http://*/*"];
 const $ = (id) => document.getElementById(id);
-const views = ["view-signed-out", "view-signing-in", "view-update", "view-app"];
+const views = ["view-signed-out", "view-signing-in", "view-update", "view-quick-select", "view-app"];
 
 function show(view) {
   for (const id of views) $(id).hidden = id !== view;
@@ -84,6 +84,8 @@ window.addEventListener("message", async (event) => {
       ? { type: "session", id: data.id, token: session.token, ...(session.user ? { user: session.user } : {}) }
       : { type: "signed-out", id: data.id });
     if (!session) await render();
+  } else if (data.type === "space" && data.space && typeof data.space === "object") {
+    await ask("rememberSpace", { space: data.space }).catch(() => undefined);
   } else if (data.type === "account") {
     await ask("rememberAccount", { user: data.user }).catch(() => undefined);
   } else if (data.type === "upgrade-required") {
@@ -118,10 +120,9 @@ async function renderContext() {
   const url = capturableUrl(tab?.url ?? "");
   $("context").hidden = !url;
   if (url) {
-    $("context-title").textContent = tab.title || new URL(url).host;
+    $("context-title").textContent = pageTitle(tab.title) || new URL(url).host;
     $("context-title").title = url;
   }
-  $("quick-select").hidden = await chrome.permissions.contains({ origins: WEB_ORIGINS });
 }
 
 /** The page's selected text, where this extension may read the page; empty otherwise. */
@@ -146,13 +147,17 @@ async function sendPage(target) {
   else await ask("queuePassage", { passage });
 }
 
-$("context-quote").addEventListener("click", () => sendPage("current"));
-$("context-new").addEventListener("click", () => sendPage("new"));
+$("context-ask").addEventListener("click", () => sendPage("new"));
 
 // Asked from this click: Chrome shows its permission prompt only in a user gesture.
 $("quick-select-on").addEventListener("click", async () => {
   await chrome.permissions.request({ origins: WEB_ORIGINS }).catch(() => false);
-  await renderContext();
+  await ask("quickSelectAsked");
+  await render();
+});
+$("quick-select-skip").addEventListener("click", async () => {
+  await ask("quickSelectAsked");
+  await render();
 });
 
 chrome.tabs.onActivated.addListener(() => renderContext().catch(() => undefined));
@@ -172,6 +177,13 @@ async function render() {
   }
   const state = await ask("state");
   if (state.signedIn) {
+    // Once, right after signing in: the one choice the panel needs, before the app.
+    const quickSelect = await ask("quickSelectState");
+    if (!quickSelect.granted && !quickSelect.asked) {
+      closeApp();
+      show("view-quick-select");
+      return;
+    }
     show("view-app");
     await openApp();
     await renderContext();

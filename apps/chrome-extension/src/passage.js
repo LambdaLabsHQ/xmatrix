@@ -27,7 +27,17 @@ function clip(value, max) {
 export function pagePassage({ text, title, url, target }) {
   const href = capturableUrl(url);
   if (!href || (target !== "current" && target !== "new")) return null;
-  return { text: clip(text, MAX_TEXT), label: clip(String(title ?? "").replace(/\s+/gu, " "), MAX_LABEL), href, target };
+  return { text: clip(text, MAX_TEXT), label: clip(pageTitle(title), MAX_LABEL), href, target };
+}
+
+/**
+ * A page's title as a source label: one line, without the unread counts sites
+ * put in front of it ("(3) Inbox", "(99+ 封私信 / 1 条消息) 首页 - 知乎").
+ */
+export function pageTitle(title) {
+  const line = String(title ?? "").replace(/\s+/gu, " ").trim();
+  const bare = line.replace(/^(?:\(\s*\d[^()]{0,40}\)\s*)+/u, "");
+  return bare || line;
 }
 
 /** A discussion is named by its passage until its first message names it (apps/web selection-discussion.ts). */
@@ -49,4 +59,10 @@ export function discussionHead(quote, source) {
   const quoted = quote.split(/\r?\n/u).map((line) => (line.trim() ? `> ${line.trimEnd()}` : ">")).join("\n");
   const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
   return `${quoted}\n\n— [${label}](${linkDestination(source.href)})\n\n`;
+}
+
+/** Where a question about a whole page came from, as the first line of its message. */
+export function sourceLink(source) {
+  const label = source.label.trim().replace(/\s+/gu, " ").replace(/[[\]\\]/gu, "\\$&") || "source";
+  return `[${label}](${linkDestination(source.href)})\n\n`;
 }

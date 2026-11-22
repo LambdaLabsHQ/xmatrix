@@ -8,7 +8,7 @@ import { invocationSelectionsEnvelope } from "./composer-invocation-bindings";
 import { useDesktopFullScreen } from "@/lib/desktop/use-desktop-full-screen";
 import { reportDesktopDaemonFailure } from "@/lib/desktop-daemon-failure-report";
 import { discussionQuote, discussionTitle, type DiscussionQuote } from "./selection-discussion";
-import { subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
+import { announceEmbedSpace, subscribeEmbedOpen, subscribeEmbedPassages, type EmbedPassage } from "@/lib/extension-embed";
 import { appAddressHref, appAddressOrigin } from "@/lib/app-address";
 import { pageApi } from "@/lib/pages/page-client";
 import { createConversation, plannedConversation, type ConversationRequest } from "./start-conversation";
@@ -1629,6 +1629,13 @@ export function useWorkspaceShellActions(s: WorkspaceShellState) {
   });
 
   useEffect(() => subscribeEmbedPassages((passage) => void handleWebPassage(passage)), [handleWebPassage]);
+
+  // The side panel asks its on-page questions in the Space shown here.
+  const shownSpaceId = s.currentSpace?.id;
+  const shownSpaceName = s.currentSpace?.name;
+  useEffect(() => {
+    if (shownSpaceId && shownSpaceName) announceEmbedSpace({ id: shownSpaceId, name: shownSpaceName });
+  }, [shownSpaceId, shownSpaceName]);
 
   const handleEmbedOpen = useStableCallback((path: string) =>
     openInternalAppLink(new URL(path, appAddressOrigin()).toString()));
