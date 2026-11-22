@@ -2,11 +2,14 @@
  * The extension's question box on a web page (apps/chrome-extension
  * src/selection.js frames this page beside the reader's selection).
  *
- * It is the App's own surfaces for the same moment on a Page, not a copy:
- * beside a selection, the selection toolbar (PaperPopover, as page-editor.tsx
- * draws it) with one item, Ask; clicked, the margin's comment box
- * (PageCommentBox), the conversation composer on its slip of paper, with its
- * own Agent completion, Enter to send, and Escape or a click away to close.
+ * It is the App's own components, not copies: beside a selection, the
+ * selection toolbar a Page shows (PaperPopover, as page-editor.tsx draws it)
+ * with one item, Ask; clicked, the conversation composer as a new
+ * conversation has it (Composer, as new-conversation.tsx uses it), its draft
+ * opening with the passage quoted, as the App opens a discussion of a passage
+ * (handleWebPassage in use-workspace-shell-actions.ts). It writes
+ * the first message itself, the quote and the question with the Agents picked
+ * in it, as it does in the App; Escape closes it.
  *
  * This page talks only to the extension: its session, the passage and the
  * Space come from the service worker over chrome.runtime, never from the page
@@ -16,10 +19,12 @@
 import { createRoot } from "react-dom/client";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { MessageSquare } from "lucide-react";
-import { discussionHead, type AgentInvocationSelection, type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
+import { discussionHead, type AuthUser, type SerializedSpace } from "@xmatrix/protocol";
 import { API_ROUTES } from "xmatrix-extension:api-routes";
-import { invocationSelectionsEnvelope } from "@/components/dashboard/composer-invocation-bindings";
-import { PageCommentBox, type PageCommentText } from "@/components/pages/page-comment-box";
+import { Composer } from "@/components/dashboard/workspace-composer-dialogs";
+import type { ComposerSendSnapshot } from "@/components/dashboard/workspace-shell-message-model";
+import { LiquidGlassFilter } from "@/components/ui/liquid-glass-filter";
+import { LiquidGlassLensDefs } from "@/components/ui/liquid-glass-lens";
 import { PaperPopover } from "@/components/ui/material-surfaces";
 import { GrantedAuthProvider } from "@/lib/auth-context";
 import { markExtensionAskSurface } from "@/lib/extension-embed";
@@ -54,11 +59,42 @@ function tellFrame(message: { type: "size"; width: number; height: number; box: 
   window.parent.postMessage({ xmatrixAsk: true, ...message }, "*");
 }
 
+/**
+ * Where the composer sits: in a conversation it floats on the bottom edge of
+ * the message list (absolutely placed), so its box here is as tall as it is.
+ */
+function ComposerStage({ children }: { children: React.ReactNode }) {
+  const stage = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const element = stage.current;
+    if (!element) return;
+    const measure = () => {
+      const composer = element.querySelector<HTMLElement>(".app-composer");
+      if (composer) setHeight(composer.offsetHeight);
+    };
+    measure();
+    const resize = new ResizeObserver(measure);
+    const watch = () => {
+      const composer = element.querySelector(".app-composer");
+      if (composer) resize.observe(composer);
+      measure();
+    };
+    watch();
+    const mutations = new MutationObserver(watch);
+    mutations.observe(element, { childList: true, subtree: true });
+    return () => {
+      resize.disconnect();
+      mutations.disconnect();
+    };
+  }, []);
+  return <div ref={stage} className="relative" style={{ height }}>{children}</div>;
+}
+
 function Surface() {
   const [mode, setMode] = useState<"toolbar" | "box">(new URLSearchParams(location.search).get("box") ? "box" : "toolbar");
   const [context, setContext] = useState<AskContext | null>(null);
   const [space, setSpace] = useState<SerializedSpace | null>(null);
-  const [text, setText] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const sending = useRef(false);
   const frame = useRef<HTMLDivElement>(null);
@@ -75,7 +111,6 @@ function Surface() {
       setMode("toolbar");
       setContext(null);
       setSpace(null);
-      setText("");
       setProblem(null);
     };
     window.addEventListener("message", onMessage);
@@ -87,16 +122,30 @@ function Surface() {
     const element = frame.current;
     if (!element) return;
     const report = () => {
-      const rect = element.getBoundingClientRect();
-      // What overflows the surface (a field's descenders, an open list) is part of it too.
-      const height = Math.max(rect.height, element.scrollHeight);
-      tellFrame({ type: "size", width: Math.ceil(Math.max(rect.width, element.scrollWidth)), height: Math.ceil(height), box: mode === "box" });
+      // Everything it draws counts, wherever the App positions it (the composer sits on its window's bottom edge).
+      let top = Infinity, bottom = 0, right = 0;
+      for (const node of [element, ...element.querySelectorAll("*")]) {
+        const rect = node.getBoundingClientRect();
+        if (!rect.width && !rect.height) continue;
+        top = Math.min(top, rect.top);
+        bottom = Math.max(bottom, rect.bottom);
+        right = Math.max(right, rect.right);
+      }
+      if (top === Infinity) return;
+      tellFrame({ type: "size", width: Math.ceil(right - Math.min(0, element.getBoundingClientRect().left)),
+        height: Math.ceil(bottom - Math.min(top, 0)), box: mode === "box" });
     };
     report();
     const observer = new ResizeObserver(report);
     observer.observe(element);
     for (const child of element.querySelectorAll("*")) observer.observe(child);
-    return () => observer.disconnect();
+    // The composer mounts its parts after the first frame.
+    const mutations = new MutationObserver(report);
+    mutations.observe(element, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      mutations.disconnect();
+    };
   }, [mode, context]);
 
   useEffect(() => {
@@ -124,26 +173,17 @@ function Surface() {
     return () => { live = false; };
   }, [context]);
 
-  const send = async ({ body, selections }: PageCommentText) => {
+  // The composer has written the message: the quote, the question, the Agents picked in it.
+  const send = async ({ body, invocationSelections }: ComposerSendSnapshot) => {
     if (!context || sending.current) return;
     sending.current = true;
-    // The panel opens on the new conversation; Chrome lets it open only from this keystroke or click.
+    // The panel opens on the new conversation; Chrome lets it open only shortly after this keystroke or click.
     if (context.windowId !== null) void extension.sidePanel?.open({ windowId: context.windowId }).catch(() => undefined);
-    const { passage } = context;
-    const head = passage.text
-      ? discussionHead(passage.text, { label: passage.label, href: passage.href })
-      : `[${passage.label.replace(/[[\]\\]/gu, "\\$&")}](<${passage.href}>)\n\n`;
-    const full = head + body;
-    const shifted: AgentInvocationSelection[] = selections.map((selection) =>
-      ({ ...selection, start: selection.start + head.length, end: selection.end + head.length }));
     try {
-      const invocationSelections = context.spaceId
-        ? await invocationSelectionsEnvelope(full, shifted, context.spaceId) : undefined;
-      await ask("askSend", { body: full, question: body, invocationSelections });
+      await ask("askSend", { body, invocationSelections });
       tellFrame({ type: "close" });
-    } catch (error) {
+    } finally {
       sending.current = false;
-      setProblem(error instanceof Error ? error.message : String(error));
     }
   };
 
@@ -159,19 +199,57 @@ function Surface() {
       </div>
     );
   }
+  const passage = context?.passage;
   return (
-    <div ref={frame} className="xmatrix-app w-[26rem]">
-      {context ? (
+    <div ref={frame} className="xmatrix-app w-[30rem]">
+      {context && passage ? (
         <GrantedAuthProvider token={context.token} user={context.user}>
-          <PageCommentBox text={text} onText={setText} onSend={(comment) => void send(comment)}
-            onClose={() => tellFrame({ type: "close" })} action="Ask"
+          {/* On the App's floating paper, as the margin's comment box holds the same composer (page-comment-box.tsx):
+              the composer's glass takes its colour from what is behind it, and a frame cannot see the page. */}
+          <PaperPopover>
+          <ComposerStage>
+          <Composer
+            channel={null}
+            draftIdentity="extension-ask"
+            instanceTargetScope="none"
+            startsConversation
+            attachmentsEnabled={false}
+            space={space}
+            token={context.token}
+            workspaces={[]}
+            localContext={null}
+            isJoined
+            draft={discussionHead(passage.text || passage.label, { label: passage.label, href: passage.href })}
+            draftSeedRevision={0}
+            selectedWorkspaceId={null}
+            replyTarget={null}
+            attachments={[]}
+            mentionInsertRequest={null}
+            autoFocusRequest={1}
+            error={problem}
             placeholder={space ? `Ask ${space.name} about this` : "Ask about this"}
-            context={{ space, token: context.token, workspaces: [], localContext: null }} />
+            ariaLabel="Ask about this"
+            sendTitle="Ask"
+            onDraftChange={() => undefined}
+            onWorkspaceSelect={() => undefined}
+            onCancelReply={() => undefined}
+            onAttachmentsChange={() => undefined}
+            onOpenAppsForSpace={() => undefined}
+            onEscape={() => tellFrame({ type: "close" })}
+            onSend={send}
+          />
+          </ComposerStage>
+          </PaperPopover>
         </GrantedAuthProvider>
-      ) : !problem && <PaperPopover className="h-12" />}
-      {problem && <PaperPopover role="alert" className="mt-1 px-3 py-2 text-sm text-destructive">{problem}</PaperPopover>}
+      ) : problem && <p role="alert" className="text-sm font-medium text-destructive">{problem}</p>}
     </div>
   );
 }
 
-createRoot(document.body).render(<Surface />);
+createRoot(document.body).render(
+  <>
+    <LiquidGlassFilter />
+    <LiquidGlassLensDefs />
+    <Surface />
+  </>,
+);
