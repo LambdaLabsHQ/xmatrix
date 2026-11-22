@@ -15,8 +15,8 @@ import { eventKey, show, text, type Value } from "./vendor/norn/runtime/value";
  * database layer runs `nornStep` while it holds the program's row.
  */
 
-/** A `norn run` block of a text, and why it does not run when it cannot: its name, or a name another block has too. */
-export interface NornBlock { name: string; source: string; problem?: string }
+/** A `norn run` (or `norn <edition> run`) block of a text, and why it does not run when it cannot. */
+export interface NornBlock { name: string; source: string; edition?: string; problem?: string }
 
 /**
  * The programs a text carries: its top-level fenced blocks tagged `norn run`
@@ -583,12 +583,13 @@ export function nornStep(act?: NornAct,
 export function nornProgramProblems(body: string): { source: string; problem: string }[] {
   return nornBlocks(body).flatMap(block => {
     const problem = nornBlockProblem(block);
-    return problem === undefined ? [] : [{ source: nornBlockSource(block.name), problem }];
+    return problem === undefined ? [] : [{ source: nornBlockSource(block.name, block.edition), problem }];
   });
 }
 
 /** How a block's opening line reads, to say which block a problem is about. */
-export const nornBlockSource = (name: string): string => `\`\`\`norn run ${name}`;
+export const nornBlockSource = (name: string, edition?: string): string =>
+  edition === undefined ? `\`\`\`norn run ${name}` : `\`\`\`norn ${edition} run ${name}`;
 
 /** The ledger a program starts from. */
 export const nornStartLedger = (nowMs: number): Ledger => emptyLedger(nowMs);
