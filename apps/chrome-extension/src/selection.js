@@ -16,8 +16,15 @@
 // syncSelectionScript). The context menu's "Ask about…" injects it into the
 // one tab it was used on (activeTab) and opens the box at once.
 (() => {
-  if (window.top !== window || globalThis.__xmatrixAsk) return;
-  globalThis.__xmatrixAsk = true;
+  if (window.top !== window) return;
+  // A page open while the extension updated still runs the old script, cut off from the extension (it can no
+  // longer hand over a passage). The extension injects this one into such pages: the old one steps aside.
+  globalThis.__xmatrixAsk?.stop?.();
+  const listeners = [];
+  const listen = (target, type, handler, options) => {
+    target.addEventListener(type, handler, options);
+    listeners.push(() => target.removeEventListener(type, handler, options));
+  };
 
   const ASK_PAGE = chrome.runtime.getURL("app/ask.html");
   const ORIGIN = new URL(ASK_PAGE).origin;
@@ -74,7 +81,7 @@
   async function open(text, rect) {
     anchor = rect;
     shown = text;
-    await chrome.runtime.sendMessage({ type: "askPrepare", text });
+    await chrome.runtime.sendMessage({ type: "askPrepare", text, title: document.title, url: location.href });
     if (shown !== text) return;
     if (!frame) makeFrame();
     else frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
@@ -89,7 +96,7 @@
     open(text, rect).catch(() => hide());
   }
 
-  window.addEventListener("message", (event) => {
+  listen(window, "message", (event) => {
     // Only the frame this script made, from the extension.
     if (!frame || event.source !== frame.contentWindow || event.origin !== ORIGIN || !event.data?.xmatrixAsk) return;
     if (event.data.type === "size") {
@@ -104,28 +111,43 @@
 
   // A click on the page, away from the box, closes it, as a click away closes the App's popovers;
   // the selection that click may make opens it again.
-  document.addEventListener("mousedown", (event) => {
+  listen(document, "mousedown", (event) => {
     if (shown && event.target !== frame) hide();
   }, true);
-  document.addEventListener("mouseup", (event) => {
+  listen(document, "mouseup", (event) => {
     if (event.target === frame) return;
     setTimeout(onSelection, 0);
   });
-  document.addEventListener("keyup", (event) => {
+  listen(document, "keyup", (event) => {
     if (event.key === "Escape") hide();
     else if (event.shiftKey) setTimeout(onSelection, 0);
   });
   // Scrolling moves the passage away from a box no one is writing in.
-  document.addEventListener("scroll", () => {
+  listen(document, "scroll", () => {
     if (shown && document.activeElement !== frame) hide();
   }, { capture: true, passive: true });
 
   // The context menu's "Ask about…": the extension has the passage already; the box opens on it.
-  chrome.runtime.onMessage.addListener((message) => {
+  const onOpenAsk = (message) => {
     if (message?.type !== "open-ask") return;
     anchor = (!message.page && selectionRect()) || { top: 16, bottom: 16, left: innerWidth };
     shown = String(message.text ?? "");
     if (!frame) makeFrame();
     else frame.contentWindow?.postMessage({ xmatrixAsk: "prepared" }, ORIGIN);
-  });
+  };
+  chrome.runtime.onMessage.addListener(onOpenAsk);
+
+  globalThis.__xmatrixAsk = {
+    stop() {
+      for (const remove of listeners) remove();
+      try {
+        chrome.runtime.onMessage.removeListener(onOpenAsk);
+      } catch {
+        // Cut off from the extension: nothing more reaches it anyway.
+      }
+      frame?.remove();
+      frame = null;
+      shown = "";
+    },
+  };
 })();

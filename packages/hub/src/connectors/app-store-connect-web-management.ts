@@ -3,7 +3,7 @@ import { appleResource, relation, type AppleResource } from "./app-store-connect
 import { appWebAction, webSession, type WebSession } from "./app-store-connect-web";
 import { appVersion, EDITABLE_STATES, jsonFields, namedVersion, versionRef, versionState } from "./actions/app-store-connect";
 import { cell } from "./actions/google-report";
-import { record, text } from "./event-format";
+import { text } from "./event-format";
 import { ConnectorRemedy, ProviderRequestError } from "./http";
 import type { ConnectorAction } from "./provider";
 
@@ -46,30 +46,20 @@ function sandboxProfile(value: string | undefined, email: string): SandboxProfil
 
 /** Absence is proven across a bounded complete list; an incomplete or malformed list cannot authorize account creation. */
 async function existingTester(session: WebSession, email: string): Promise<AppleResource | undefined> {
-  let path = TESTERS;
-  const visited = new Set<string>();
-  for (let page = 0; page < 5; page++) {
-    if (visited.has(path)) throw new ProviderRequestError(502, "Apple repeated a sandbox tester page");
-    visited.add(path);
-    const result = await session.read(path, page ? {} : { limit: "200" });
-    if (!Array.isArray(result.data) || result.data.length > 200) throw new ProviderRequestError(502, "Apple returned a malformed sandbox tester list");
-    const rows = result.data.map(appleResource);
-    if (rows.some(row => !row || row.type !== "sandboxTesters" || !ID.test(row.id) || !EMAIL.test(text(row.attributes.email)))) {
-      throw new ProviderRequestError(502, "Apple omitted sandbox tester identity data");
-    }
-    const matches = rows.filter(row => text(row!.attributes.email).toLowerCase() === email);
-    if (matches.length > 1) throw new ProviderRequestError(409, "Apple returned multiple sandbox testers for this email");
-    if (matches.length) return matches[0]!;
-    const next = record(result.links).next;
-    if (next === undefined || next === null) return undefined;
-    if (typeof next !== "string" || !URL.canParse(next, "https://appstoreconnect.apple.com")) throw new ProviderRequestError(502, "Apple returned an invalid sandbox tester page");
-    const url = new URL(next, "https://appstoreconnect.apple.com");
-    if (url.origin !== "https://appstoreconnect.apple.com" || url.pathname !== TESTERS || url.username || url.password || url.hash) {
-      throw new ProviderRequestError(502, "Apple returned a sandbox tester page outside its collection");
-    }
-    path = url.href;
-  }
-  throw new ProviderRequestError(502, "Sandbox tester history exceeds five pages; no account was created");
+  const { rows } = await session.listComplete(TESTERS, { limit: "200" }, {
+    maxPageSize: 200,
+    pageLabel: "sandbox tester page",
+    incompleteStatus: 502,
+    incompleteMessage: "Sandbox tester history exceeds five pages; no account was created",
+    validateRow: (_raw, row) => {
+      if (!row || row.type !== "sandboxTesters" || !ID.test(row.id) || !EMAIL.test(text(row.attributes.email))) {
+        throw new ProviderRequestError(502, "Apple omitted sandbox tester identity data");
+      }
+    },
+  });
+  const matches = rows.filter(row => text(row.attributes.email).toLowerCase() === email);
+  if (matches.length > 1) throw new ProviderRequestError(409, "Apple returned multiple sandbox testers for this email");
+  return matches[0];
 }
 
 export const APP_STORE_CONNECT_WEB_MANAGEMENT_ACTIONS: Record<string, ConnectorAction> = {
