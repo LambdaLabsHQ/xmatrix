@@ -30,31 +30,20 @@ function ids(statement: ConnectorActionStatement, minimum: number, maximum = min
 }
 
 /** Follow only this relationship, with a hard page bound. A truncated ownership search cannot authorize writes. */
-async function list(session: WebSession, path: string, query: Record<string, string> = {}) {
-  const rows: AppleResource[] = [], included: AppleResource[] = [];
-  let next = path;
-  const visited = new Set<string>();
-  for (let page = 0; page < 5; page++) {
-    if (visited.has(next)) throw new ProviderRequestError(502, "App Store Connect repeated a review page");
-    visited.add(next);
-    const payload = await session.read(next, page ? {} : { limit: "50", ...query });
-    if (!Array.isArray(payload.data) || payload.data.length > 50) throw new ProviderRequestError(502, "App Store Connect returned malformed review data");
-    const found = resources(payload.data);
-    if (found.length !== payload.data.length || found.some(row => row.type !== path.split("/").at(-1) || !ID.test(row.id))) {
-      throw new ProviderRequestError(502, "App Store Connect returned unexpected review resources");
-    }
-    rows.push(...found); included.push(...resources(payload.included));
-    const link = record(payload.links).next;
-    if (link !== undefined && link !== null && typeof link !== "string") throw new ProviderRequestError(502, "App Store Connect returned an invalid review page link");
-    next = text(link);
-    if (!next) return { rows, included };
-    const target = new URL(next, "https://appstoreconnect.apple.com");
-    if (target.origin !== "https://appstoreconnect.apple.com" || target.pathname !== path ||
-      Object.entries(query).some(([key, value]) => key.startsWith("filter[") && target.searchParams.get(key) !== value)) {
-      throw new ProviderRequestError(502, "App Store Connect returned a review page outside this relationship");
-    }
-  }
-  throw new ProviderRequestError(502, "App Review data exceeds five pages; use App Store Connect to inspect the full history");
+function list(session: WebSession, path: string, query: Record<string, string> = {}) {
+  const expectedType = path.split("/").at(-1);
+  return session.listComplete(path, { limit: "50", ...query }, {
+    maxPageSize: 50,
+    preserveFilters: true,
+    pageLabel: "review page",
+    incompleteStatus: 502,
+    incompleteMessage: "App Review data exceeds five pages; use App Store Connect to inspect the full history",
+    validateRow: (_raw, row) => {
+      if (!row || row.type !== expectedType || !ID.test(row.id)) {
+        throw new ProviderRequestError(502, "App Store Connect returned unexpected review resources");
+      }
+    },
+  });
 }
 
 async function selectedThread(session: WebSession, app: AppleResource, input: Record<string, string>) {

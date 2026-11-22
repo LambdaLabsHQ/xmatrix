@@ -1,8 +1,14 @@
 # Release Updates
 
+<<<<<<< HEAD
 ## Unreleased: quota window holds and refusal attribution live once in protocol
 
 `packages/db/src/agent-registration-quota-probe.ts` previously re-derived the 31-day exhausted window hold, remaining headroom, and 2-second reset-time matching in SQL (`keptExpiry`, `KEPT_REMAINING`, `QUOTA_RESET_MATCH_MS`), while the Rust runtime duplicated refusal-to-scope attribution and the 2-second tolerance (`quota_scope_by_reset`, `RESET_MATCH_TOLERANCE`) with a different tie-break when two scoped windows were both used up. Window merging (`mergeRoutingQuotaWindows`) and refusal attribution (`attributeRoutingQuotaRefusal`) now live once in `@xmatrix/protocol`: PostgreSQL persistence locks and merges through the protocol helpers with no SQL quota derivation, and the Rust runtime forwards the raw refusal reset time and fresh provider reading so Hub attributes the scope (while continuing to accept `quotaScope` from older daemons during the compatibility window). Protocol, DB, Hub, and CLI / daemon. Recovery is a CI-validated beta reverting this change.
+=======
+## Unreleased: App Store Connect collections support resumable cursors, frozen submission approvals, and unified web pagination
+
+App Store Connect read listings (`list_apps`, `in_app_purchases`, `subscriptions`) now emit an opaque query-only continuation `cursor:<token>` when a collection exceeds five pages and accept that cursor to resume later pages without caller-supplied URLs. `submit_in_app_purchases` and `submit_subscriptions` now implement a read-only `prepare` step that freezes exact app, product, group, and existing version identities plus a SHA-256 digest into approval cards so post-approval catalog additions cannot widen the submission and partial-write replays finish idempotently. `WebSession` now exposes `listComplete` and `listPreview` backed by the same shared `paginateAppleCollection` implementation as `AppStoreConnectApi`, replacing the separate pagination loops in `app-store-connect-review.ts` and `app-store-connect-web-management.ts`. Hub only. Recovery is a CI-validated beta reverting this change.
+>>>>>>> origin/main
 
 ## Unreleased: direct root `/<competitor>-alternatives` landing pages with live product preview
 
