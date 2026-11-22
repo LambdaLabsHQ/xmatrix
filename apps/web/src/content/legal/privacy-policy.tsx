@@ -364,9 +364,10 @@ export function PrivacyPolicyContent() {
         <p>
           The xMatrix Chrome extension opens xMatrix in Chrome&apos;s side panel. It reads a web page
           only when you act on it: its menu item or its panel button. If you turn on its optional
-          question box beside selected text, which asks for access to web pages first, it reads the
-          text you selected only when you click that box. It then passes the page title, address, and
-          selected text to xMatrix with your question; nothing is posted until you send it. It does not read pages in the background, record your browsing history, or contact
+          question box, which asks for access to web pages first, it reads the text you select on a
+          page to show it in the box under the selection; that text stays in your browser. Only when
+          you send a question does it pass the page title, address, and selected text to xMatrix with
+          it. It does not read pages in the background, record your browsing history, or contact
           any server other than xMatrix. It keeps your sign-in session, and text you picked until the
           panel takes it, in the browser&apos;s extension storage on that device; signing out ends the
           session and removes it. The xMatrix app in the panel keeps the same local copies there as
