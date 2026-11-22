@@ -5,6 +5,8 @@ import { Check, ChevronDown, Globe, Smartphone } from "lucide-react";
 
 import { MachineGlyph } from "@/components/dashboard/machine-glyph";
 import { PaperPopover } from "@/components/ui/material-surfaces";
+import type { SiteLocale } from "@/lib/site-locales";
+import { sitePagesCopy, type DownloadPageCopy } from "@/lib/site-pages-copy";
 
 import { DownloadRecommendation, webApp, type Channel } from "./download-recommendation";
 
@@ -14,48 +16,56 @@ type PlatformRow = { name: string; icon: ReactNode; note: string; builds: Build[
 const desktop = (channel: Channel, file: string) => `/api/desktop/releases/${channel}/latest-${file}`;
 const notes = (component: "desktop" | "android", channel: Channel) => `/releases?component=${component}&channel=${channel}`;
 
-/** The two release channels. The whole page, the main download and every row, is the selected one. */
-const channels: { id: Channel; label: string; detail: string }[] = [
-  { id: "stable", label: "Stable", detail: "Tested releases. The right choice for most people." },
-  { id: "dev", label: "Preview", detail: "The newest build, ahead of Stable. Can have rough edges." },
-];
+function channelOptions(copy: DownloadPageCopy): { id: Channel; label: string; detail: string }[] {
+  return [
+    { id: "stable", label: copy.stableLabel, detail: copy.stableDetail },
+    { id: "dev", label: copy.previewLabel, detail: copy.previewDetail },
+  ];
+}
 
-const platforms = (channel: Channel): PlatformRow[] => [
-  {
-    name: "macOS", icon: <MachineGlyph os="macos" />, note: "Desktop app",
-    builds: [{ label: "Apple Silicon", href: desktop(channel, "arm64.dmg") }, { label: "Intel", href: desktop(channel, "x64.dmg") }],
-  },
-  {
-    name: "Windows", icon: <MachineGlyph os="windows" className="size-[18px]" />, note: "Desktop app, x64",
-    builds: [{ label: "Installer", href: desktop(channel, "x64.exe") }],
-  },
-  {
-    name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: "Phone app",
-    builds: [{ label: "APK", href: `/api/android/releases/${channel}/latest.apk` }],
-  },
-  {
-    name: "Web", icon: <Globe className="size-5" strokeWidth={1.75} aria-hidden />, note: "iPhone, iPad, Linux and any browser",
-    builds: [{ label: "Open", href: webApp(channel) }],
-  },
-];
+function platforms(channel: Channel, copy: DownloadPageCopy): PlatformRow[] {
+  return [
+    {
+      name: "macOS", icon: <MachineGlyph os="macos" />, note: copy.macNote,
+      builds: [{ label: "Apple Silicon", href: desktop(channel, "arm64.dmg") }, { label: "Intel", href: desktop(channel, "x64.dmg") }],
+    },
+    {
+      name: "Windows", icon: <MachineGlyph os="windows" className="size-[18px]" />, note: copy.windowsNote,
+      builds: [{ label: copy.windowsBuild, href: desktop(channel, "x64.exe") }],
+    },
+    {
+      name: "Android", icon: <Smartphone className="size-5" strokeWidth={1.75} aria-hidden />, note: copy.androidNote,
+      builds: [{ label: "APK", href: `/api/android/releases/${channel}/latest.apk` }],
+    },
+    {
+      name: "Web", icon: <Globe className="size-5" strokeWidth={1.75} aria-hidden />, note: copy.webNote,
+      builds: [{ label: copy.webBuild, href: webApp(channel) }],
+    },
+  ];
+}
 
-/** The small print under the list: release notes and the macOS ZIPs, one quiet line. */
-const more = (channel: Channel): Build[] => [
-  { label: "Desktop release notes", href: notes("desktop", channel) },
-  { label: "Android release notes", href: notes("android", channel) },
-  { label: "macOS ZIP, Apple Silicon", href: desktop(channel, "arm64.zip") },
-  { label: "macOS ZIP, Intel", href: desktop(channel, "x64.zip") },
-];
+function more(channel: Channel, copy: DownloadPageCopy): Build[] {
+  return [
+    { label: copy.desktopNotes, href: notes("desktop", channel) },
+    { label: copy.androidNotes, href: notes("android", channel) },
+    { label: copy.macZipArm, href: desktop(channel, "arm64.zip") },
+    { label: copy.macZipIntel, href: desktop(channel, "x64.zip") },
+  ];
+}
 
-/**
- * The channel as quiet text beside the main download. It opens a paper slip
- * that says what each channel is, in place of the system picker, whose blue
- * list and focus ring were the loudest thing on the page.
- */
-function ChannelMenu({ channel, onChoose }: { channel: Channel; onChoose: (next: Channel) => void }) {
+function ChannelMenu({
+  channel,
+  onChoose,
+  copy,
+}: {
+  channel: Channel;
+  onChoose: (next: Channel) => void;
+  copy: DownloadPageCopy;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
+  const channels = channelOptions(copy);
   useEffect(() => {
     if (!open) return;
     root.current?.querySelector<HTMLElement>('[aria-checked="true"]')?.focus();
@@ -81,12 +91,12 @@ function ChannelMenu({ channel, onChoose }: { channel: Channel; onChoose: (next:
         onClick={() => setOpen(!open)}
         className="inline-flex h-11 items-center gap-1 rounded-md px-1 text-sm font-[550] text-[var(--site-ink-muted)] transition-colors hover:text-[var(--site-ink)] focus-visible:outline-2 focus-visible:outline-[var(--site-wood-deep)] aria-expanded:text-[var(--site-ink)]"
       >
-        <span className="sr-only">Release channel: </span>
+        <span className="sr-only">{copy.releaseChannelSr}</span>
         {channels.find(({ id }) => id === channel)!.label}
         <ChevronDown className="size-4" strokeWidth={2} aria-hidden />
       </button>
       {open && (
-        <PaperPopover role="menu" aria-label="Release channel" onKeyDown={keys}
+        <PaperPopover role="menu" aria-label={copy.releaseChannelMenu} onKeyDown={keys}
           className="absolute left-1/2 top-full z-20 mt-1 flex w-64 -translate-x-1/2 flex-col text-left sm:left-0 sm:translate-x-0">
           {channels.map(({ id, label, detail }) => (
             <button key={id} type="button" role="menuitemradio" aria-checked={id === channel}
@@ -105,8 +115,9 @@ function ChannelMenu({ channel, onChoose }: { channel: Channel; onChoose: (next:
   );
 }
 
-export function DesktopDownload() {
+export function DesktopDownload({ locale = "en" }: { locale?: SiteLocale }) {
   const [channel, setChannel] = useState<Channel>("stable");
+  const copy = sitePagesCopy[locale].download;
   // `/download?channel=preview` opens the list on Preview, so the choice can be linked.
   useEffect(() => {
     if (new URLSearchParams(location.search).get("channel") === "preview") setChannel("dev");
@@ -118,19 +129,20 @@ export function DesktopDownload() {
     else url.searchParams.delete("channel");
     history.replaceState(history.state, "", url);
   };
+  const channels = channelOptions(copy);
   const current = channels.find(({ id }) => id === channel)!;
-  const suffix = channel === "dev" ? " preview" : "";
-  const channelSwitch = <ChannelMenu channel={channel} onChoose={choose} />;
+  const suffix = channel === "dev" ? copy.previewSuffix : "";
+  const channelSwitch = <ChannelMenu channel={channel} onChoose={choose} copy={copy} />;
 
   return (
     <section id="download" className="x-section download-page">
       <div className="x-container">
-        <DownloadRecommendation channel={channel} channelSwitch={channelSwitch} />
+        <DownloadRecommendation channel={channel} channelSwitch={channelSwitch} locale={locale} />
 
         <div id="all-downloads" className="mx-auto mt-16 max-w-2xl scroll-mt-24 sm:mt-20">
-          <h2 className="download-list-heading">All platforms · {current.label}</h2>
+          <h2 className="download-list-heading">{copy.allPlatforms(current.label)}</h2>
           <ul className="download-list" data-channel={channel}>
-            {platforms(channel).map(({ name, icon, note, builds }) => (
+            {platforms(channel, copy).map(({ name, icon, note, builds }) => (
               <li key={name} className="download-row">
                 <span className="download-row-icon">{icon}</span>
                 <div className="min-w-0 flex-1">
@@ -147,7 +159,7 @@ export function DesktopDownload() {
           </ul>
 
           <p className="mt-5 flex flex-wrap gap-x-4 gap-y-1 text-[13px]">
-            {more(channel).map((link) => (
+            {more(channel, copy).map((link) => (
               <a key={link.href} href={link.href} className="download-quiet-link" aria-label={`${link.label}${suffix}`}>{link.label}</a>
             ))}
           </p>

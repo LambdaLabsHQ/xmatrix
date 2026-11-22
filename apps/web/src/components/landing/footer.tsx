@@ -3,20 +3,22 @@ import { WoodPanel } from "@/components/ui/material-surfaces";
 import { agentDocFiles, aiAskLinks } from "@/lib/agent-docs";
 import { alternativePages } from "@/lib/alternatives";
 import { landingCopy, type LandingCopy, type Locale } from "@/lib/landing-copy";
+import { SITE_LOCALE_IDS, SITE_LOCALES, localizedPath } from "@/lib/site-locales";
+import { sitePagesCopy } from "@/lib/site-pages-copy";
 import { REPOSITORY_URL } from "@/lib/star-prompt";
 
 // X verifies the organization by this link back to its account.
 export const X_ACCOUNT_URL = "https://x.com/xMatrix_hq";
 
-function footerLinks(copy: LandingCopy) {
+function footerLinks(copy: LandingCopy, locale: Locale) {
   const { links, legalLinks } = copy.footer;
   return {
     [copy.footer.product]: [
       { label: links.app, href: "/app" },
-      { label: links.download, href: "/download" },
+      { label: links.download, href: localizedPath(locale, "/download") },
       { label: links.pricing, href: `${copy.home}#pricing` },
-      { label: links.docs, href: "/docs" },
-      { label: links.support, href: "/support" },
+      { label: links.docs, href: localizedPath(locale, "/docs") },
+      { label: links.support, href: localizedPath(locale, "/support") },
       { label: "GitHub", href: REPOSITORY_URL },
       { label: "X", href: X_ACCOUNT_URL },
       { label: links.console, href: "/console" },
@@ -31,8 +33,9 @@ function footerLinks(copy: LandingCopy) {
   };
 }
 
-export function Footer({ locale = "en" }: { locale?: Locale }) {
+export function Footer({ locale = "en", basePath = "/" }: { locale?: Locale; basePath?: string }) {
   const copy = landingCopy[locale];
+  const altChrome = sitePagesCopy[locale].alternatives;
   return (
     <WoodPanel as="footer" className="site-footer pt-16 pb-8">
 
@@ -46,7 +49,7 @@ export function Footer({ locale = "en" }: { locale?: Locale }) {
           </div>
 
           <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">
-            {Object.entries(footerLinks(copy)).map(([category, items]) => (
+            {Object.entries(footerLinks(copy, locale)).map(([category, items]) => (
               <div key={category} className="space-y-4">
                 <h4 className="text-sm font-bold text-foreground">{category}</h4>
                 <ul className="space-y-3">
@@ -72,10 +75,10 @@ export function Footer({ locale = "en" }: { locale?: Locale }) {
             {alternativePages.map((page) => (
               <li key={page.slug}>
                 <a
-                  href={page.href}
+                  href={localizedPath(locale, page.basePath)}
                   className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  {page.name} Alternatives
+                  {altChrome.linkLabel(page.name)}
                 </a>
               </li>
             ))}
@@ -121,11 +124,24 @@ export function Footer({ locale = "en" }: { locale?: Locale }) {
           <p className="text-xs text-muted-foreground/60">
             &copy; {new Date().getFullYear()} MadeByRobot, LLC. {copy.footer.rights}
           </p>
-          <div className="flex items-center gap-4">
-            <a href={copy.otherLanguage.href} hrefLang={copy.otherLanguage.hrefLang}
-              className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-              {copy.otherLanguage.label}
-            </a>
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2">
+            <nav aria-label={copy.footer.language} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              {SITE_LOCALE_IDS.map((id) => {
+                const meta = SITE_LOCALES[id];
+                const isCurrent = id === locale;
+                return (
+                  <a
+                    key={id}
+                    href={localizedPath(id, basePath)}
+                    hrefLang={meta.hrefLang}
+                    aria-current={isCurrent ? "page" : undefined}
+                    className={`text-xs transition-colors hover:text-foreground ${isCurrent ? "underline underline-offset-4" : "text-muted-foreground"}`}
+                  >
+                    {meta.nativeLabel}
+                  </a>
+                );
+              })}
+            </nav>
             <div className="size-1.5 rounded-full bg-primary/50 shadow-[0_0_18px_rgba(255,255,255,0.35)]" />
             <span className="text-xs font-medium text-muted-foreground/40">{copy.footer.motto}</span>
           </div>
