@@ -1,5 +1,6 @@
 import { channelPresenceInstances, decodeChannelSnapshot } from "@xmatrix/protocol";
 import assert from "node:assert/strict";
+import v8 from "node:v8";
 
 import { test } from "node:test";
 
@@ -272,6 +273,31 @@ test("runtime catalogs keep every entry and stay out of the hibernation attachme
   assert.equal(restored.commands, undefined);
   assert.equal(restored.capabilities, undefined);
   assert.equal(restored.gitBranch, "fix/restore-agent-migration-labels");
+});
+
+test("non-Latin1 runtime catalogs compact before V8 structured clone exceeds Cloudflare's 16 KiB attachment limit", () => {
+  const commands = Array.from({ length: 42 }, (_, index) => ({
+    token: `/skill-${index}`,
+    label: `skill-${index}`,
+    description: `Run workflow — ${"a".repeat(160)} #${index}`,
+    mode: "passthrough",
+    freeform: true,
+  }));
+  const presentation = mergeAgentInstancePresentation(fullPresentation(), { type: "presence_update", commands });
+  const session = runtimeSession(presentation);
+  const rawAttachment = {
+    version: 1,
+    domain: "agent_instance",
+    expiresAt: new Date(Date.now() + 60_000).toISOString(),
+    session,
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(rawAttachment), "utf8") < 16_384, "raw JSON stays under 16 KiB");
+  assert.ok(v8.serialize(rawAttachment).byteLength > 16_384, "raw V8 structured clone exceeds 16 KiB");
+
+  const serialized = serializeAgentInstanceHibernationAttachment(session);
+  assert.ok(v8.serialize(serialized).byteLength <= 16_384, "compacted attachment fits inside Cloudflare's 16 KiB limit");
+  assert.equal(serialized.session.presentation.commands, undefined);
+  assert.equal(serialized.session.presentation.gitBranch, "fix/restore-agent-migration-labels");
 });
 
 test("Agent presentation survives bounded hibernation with its required authority route", () => {

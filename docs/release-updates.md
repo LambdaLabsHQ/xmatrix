@@ -1,5 +1,9 @@
 # Release Updates
 
+## Unreleased: bound WebSocket hibernation attachments by V8 structured-clone size
+
+`hibernationBoundedJson` checked only UTF-8 JSON byte length against Cloudflare Durable Objects' 16 KiB `WebSocket.serializeAttachment` limit. Because V8's `ValueSerializer` encodes any string containing a UTF-16 code unit above `0xFF` (such as an em-dash or CJK character) as two-byte UTF-16 for the entire string plus alignment padding, an Agent Instance session whose JSON fit under 16 KiB could exceed 16 KiB in V8 structured clone (e.g. 16,449 bytes in Sentry `XMATRIX-HUB-E8`), bypassing hibernation compaction and throwing inside `serializeAttachment`. `hibernationBoundedJson` now enforces both UTF-8 JSON length and a sound upper bound on V8 structured-clone size on both input and normalized attachments so oversized Agent Instance presentations compact before serialization. Hub only. Recovery is a CI-validated beta reverting this change.
+
 ## Unreleased: competitor alternative landing pages at `/alternatives`
 
 Added `/alternatives` and 19 competitor comparison landing pages (`/alternatives/<slug>` for Raft, Lody, Multica, Paradev/Superset, Conductor, Orca, LobeHub, Cumora, T3 Code, herdr, Seedmux, Claude Code Desktop, Linear Agents, Notion Custom Agents, Slack Code, Nowledge Mem, EverOS, YouMind, and Google Jules), rendered per request on the Web Worker with canonical URLs, OpenGraph/Twitter cards, `FAQPage` + `BreadcrumbList` structured data, sitemap entries, `site-host.mjs` site-origin routing, and a footer link. Web only. Recovery is a CI-validated beta reverting this change.
