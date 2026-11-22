@@ -195,6 +195,9 @@ export interface CommandResultNote {
   stopOutcome?: "stopped" | "not_stopped";
   /** The Run the note is about, so the chip of the summon that started it shows it. */
   runId?: string;
+  /** The stable reason code of a refusal, so a client words it in the reader's language
+   * and keeps the code in Details instead of reading it out of `text`. */
+  code?: string;
 }
 
 /**
@@ -255,7 +258,8 @@ export function mergeCommandResult(result: CommandResult | undefined, annotation
     const stopOutcome: CommandResultNote["stopOutcome"] =
       note.stopOutcome === "stopped" || note.stopOutcome === "not_stopped" ? note.stopOutcome : undefined;
     next.notes = [{ id: annotationId, text: note.text, at: note.at, ...(stopOutcome ? { stopOutcome } : {}),
-      ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}) }];
+      ...(typeof note.runId === "string" && note.runId && note.runId.length <= 200 ? { runId: note.runId } : {}),
+      ...(typeof note.code === "string" && /^[a-z][a-z0-9_]{0,79}$/u.test(note.code) ? { code: note.code } : {}) }];
   }
   return mergeCommandResults(result, next);
 }

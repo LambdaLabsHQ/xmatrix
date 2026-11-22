@@ -104,7 +104,7 @@ test("a handoff of a directory without a repository stops the source and gives i
     assert.doesNotMatch(successor.prompt, /Grandmas/, "the conversation is not the launch's text");
 
     const history = await channelHistory(worker, MOCK_TOKEN, channel.id);
-    assert.equal(history.messages.filter(message => /could not hand off/u.test(message.body ?? "")).length, 0,
+    assert.equal(history.messages.filter(message => / \[(?:registration|handoff|invalid)_[a-z0-9_]+\]$/u.test(message.body ?? "")).length, 0,
       JSON.stringify(history.messages.map(message => message.body)));
     await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
       message => (message.body ?? "").endsWith(":handoff:@codex"), "handoff message", 5_000);

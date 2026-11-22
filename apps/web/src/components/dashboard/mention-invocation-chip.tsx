@@ -9,7 +9,7 @@ import { Check, CircleHelp, Clock3, LoaderCircle, TriangleAlert, X, Zap } from "
 import { preparationFailureSummary, rejectionCause, type FaceOf } from "@xmatrix/protocol";
 import { noteJevReading } from "./jev-filled-tags";
 import type { AgentControlInvocation, AgentControlOutcomeRecord, AgentStopInvocation, LaunchParameterEvidence, SerializedAgentMessageExecution, SerializedAgentStop, AgentLaunchActivity, SerializedAgentContinuation, SerializedAgentInvocationRejection, SerializedAgentLaunch } from "@xmatrix/protocol";
-import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, type InvocationView, type InvocationStep } from "./mention-invocation-state";
+import { summonView, instanceCallView, invocationChipStatus, addressedAgentFace, continuationFaces, launchFace, operationFailureStageLabel, continuationView, handoffView, stopView, STOP_RECEIPT_PENDING_MS, controlView, controlNextStep, CONTROL_RECEIPT_PENDING_MS, lifecycleRefusalView, handoffRefusalCode, handoffRefusalKey, type InvocationView, type InvocationStep } from "./mention-invocation-state";
 import type { CommandNotice } from "./command-notices";
 import { MentionChipFace } from "./mention-chip-face";
 import { formatZonedDateTime } from "./time-display";
@@ -19,6 +19,8 @@ import { parsePresentedRoutingDecision, RoutingDecisionBoard, routingSelectionNo
 import { HandoffArrowLabel } from "./handoff-arrow";
 import { useAppPortalContainer } from "./app-portal-container";
 import { useNow } from "./agent-work-intent";
+import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
+import { PROBLEM_COPY } from "@/lib/problem-copy";
 
 const InvocationPopoverContext = createContext<{
   openId: string | null; setOpenId: Dispatch<SetStateAction<string | null>>;
@@ -317,15 +319,43 @@ export function MentionControlChip({ invocation, outcome, notice, sentAt, onRunC
 }
 
 /** A reborn or handoff the Hub refused before any Run existed. The refusal
- * is drawn on the address that asked for it instead of as a message. */
-export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, notices }: {
-  kind: "reborn" | "handoff"; text: string; agentName: string; ordinal: number; notices: readonly CommandNotice[];
+ * is drawn on the address that asked for it instead of as a message. A
+ * handoff's refusal is worded from its code in the reader's language: what
+ * happened, what it left behind, and what to write next; the code and the
+ * Hub's own text stay in Details. */
+export function MentionRefusedLifecycleChip({ kind, text, agentName, ordinal, successor, notices }: {
+  kind: "reborn" | "handoff"; text: string; agentName: string; ordinal: number; successor?: string;
+  notices: readonly CommandNotice[];
 }) {
+  const copy = PROBLEM_COPY[useBrowserOnboardingLocale()].handoff;
+  const source = `@${agentName}:${ordinal}`;
+  const code = kind === "handoff" ? handoffRefusalCode(notices[0]) : undefined;
+  const key = handoffRefusalKey(code);
+  const problem = kind === "handoff" && successor ? key ? copy[key] : copy.failed : undefined;
+  let view = lifecycleRefusalView(notices, kind);
+  let lead: ReactNode;
+  let details: ReactNode;
+  if (problem && successor) {
+    const other = /^@auto$/iu.test(successor.trim()) ? `${source}:handoff:@<agent>` : `${source}:handoff:@auto`;
+    // An unworded code keeps the Hub's own sentence as its explanation rather than a guessed cause.
+    const explanation = key ? problem.explanation(source, successor) : notices.map(notice => notice.body).join("\n\n");
+    const steps = problem.steps(source, successor, other);
+    view = { ...view, detail: problem.title(source, successor) };
+    lead = <>
+      {explanation && <p className="app-invocation-description">{explanation}</p>}
+      {steps.length > 0 && <>
+        <p className="app-invocation-description"><strong>{copy.stepsLabel}</strong></p>
+        <ol className="app-invocation-fix-steps">{steps.map(step => <li key={step}>{step}</li>)}</ol>
+      </>}
+    </>;
+    if (key) details = <><p className="app-invocation-description">{copy.rawLabel}</p>
+      {notices.map(notice => <p key={notice.messageId} className="app-invocation-code">{notice.body}</p>)}</>;
+  }
   return <InvocationChip label={text.replace(/^[@＠]/u, "")} labelContent={text}
     name={agentName} instanceOrdinal={String(ordinal)}
     face={addressedAgentFace({ name: agentName, address: `@${agentName}` })}
     sourceAddress={text} subtitle={kind === "reborn" ? "Reborn" : "Handoff"}
-    view={lifecycleRefusalView(notices, kind)} />;
+    view={view} lead={lead} details={details} errorCode={code} />;
 }
 
 const LAUNCH_HINT_TITLES: Record<string, string> = {

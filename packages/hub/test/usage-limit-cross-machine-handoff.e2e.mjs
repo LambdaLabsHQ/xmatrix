@@ -242,7 +242,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
     if (pinned) {
       await waitForChannelHistoryMessage(worker, MOCK_TOKEN, channel.id,
         message => message.messageId === handoff.messageId && (message.commandResult?.notes ?? []).some(note =>
-          /could not hand off.*registration_machine_unavailable/u.test(note.text)),
+          note.code === "registration_machine_unavailable"),
         "explicit source machine prevents cross-machine handoff", 30_000);
       const launches = await inTestTransaction(tx => tx.query({
         text: "SELECT launch_id FROM data.agent_launches WHERE channel_id=$1", values: [channel.id] }));
@@ -341,7 +341,7 @@ async function usageLimitedOnMachineA(answerStop, { sleeping = false, waitForQuo
 
     // A handoff that went through says nothing more.
     const history = await channelHistory(worker, MOCK_TOKEN, channel.id);
-    assert.equal(history.messages.filter(message => /could not hand off/u.test(message.body ?? "")).length, 0);
+    assert.equal(history.messages.filter(message => / \[(?:registration|handoff|invalid)_[a-z0-9_]+\]$/u.test(message.body ?? "")).length, 0);
     assert.equal(history.messages.filter(message => /:handoff:@auto/u.test(message.body ?? "")).length, 1);
     return { branch: stop.handoffExport.branch, successor };
   } finally {

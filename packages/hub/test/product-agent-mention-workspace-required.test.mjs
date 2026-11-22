@@ -89,12 +89,14 @@ test("agent new local-path syntax requires an absolute path", () => {
 
 function basePort(overrides = {}) {
   const notices = [];
+  const codes = [];
   const reborns = [];
   const handoffs = [];
   const port = {
     reborns,
     handoffs,
     notices,
+    codes,
     async prepareRegisteredReborn(input) {
       reborns.push(input);
       return { intentId: `intent:${input.sourceInstanceId}`, state: "waiting" };
@@ -109,8 +111,9 @@ function basePort(overrides = {}) {
     async getRebornTarget() {
       return null;
     },
-    async recordResult(_channelId, body) {
+    async recordResult(_channelId, body, _key, code) {
       notices.push(body);
+      codes.push(code);
     },
     ...overrides,
   };
@@ -378,7 +381,10 @@ test("a handoff that cannot start says why, once", async () => {
       actorUserId: "user-1", port });
     assert.equal(result.spawned, 0, body);
     assert.equal(port.notices.length, 1);
-    assert.match(port.notices[0], new RegExp(`could not hand off @claude:2 to @\\w+ \\(${code}\\)`, "u"));
+    assert.equal(port.codes[0], code);
+    assert.match(port.notices[0], new RegExp(`@claude:2.*@codex.* \\[${code}\\]$`, "u"));
+    if (code === "registration_quota_exhausted") assert.match(port.notices[0],
+      /^@claude:2 stopped and its work is kept, but @codex did not start: every @codex .* used up its provider quota\. .*@claude:2:handoff:@auto/u);
   }
 });
 
