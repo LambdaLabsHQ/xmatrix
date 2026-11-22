@@ -4,8 +4,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Download } from "lucide-react";
 import Image from "next/image";
 import { WoodPanel } from "@/components/ui/material-surfaces";
-import { ONBOARDING_COPY, type OnboardingCopy } from "@/lib/onboarding-copy";
-import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
+import { type SiteLocale } from "@/lib/site-locales";
+import { sitePagesCopy, type DownloadPageCopy } from "@/lib/site-pages-copy";
 
 export type Channel = "stable" | "dev";
 export type Platform = "macOS" | "Windows" | "Android" | "iOS" | "Linux" | "unknown";
@@ -33,12 +33,19 @@ export async function detectIntelMac() {
   return architecture === "x86";
 }
 
-export const macDownloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+type DownloadLinksCopy = Pick<
+  DownloadPageCopy,
+  "appleSiliconDetail" | "intelDetail" | "windowsDetail" | "androidDetail"
+> & {
+  downloadFor: (platform: "macOS" | "Windows" | "Android") => string;
+};
+
+export const macDownloads = (copy: DownloadLinksCopy, channel: Channel = "stable") => ({
   arm64: { name: "Apple Silicon", href: `/api/desktop/releases/${channel}/latest-arm64.dmg`, label: copy.downloadFor("macOS"), detail: copy.appleSiliconDetail },
   x64: { name: "Intel", href: `/api/desktop/releases/${channel}/latest-x64.dmg`, label: copy.downloadFor("macOS"), detail: copy.intelDetail },
 });
 
-export const downloads = (copy: OnboardingCopy, channel: Channel = "stable") => ({
+export const downloads = (copy: DownloadLinksCopy, channel: Channel = "stable") => ({
   Windows: { href: `/api/desktop/releases/${channel}/latest-x64.exe`, label: copy.downloadFor("Windows"), detail: copy.windowsDetail },
   Android: { href: `/api/android/releases/${channel}/latest.apk`, label: copy.downloadFor("Android"), detail: copy.androidDetail },
 });
@@ -47,10 +54,18 @@ export const downloads = (copy: OnboardingCopy, channel: Channel = "stable") => 
 export const webApp = (channel: Channel) => channel === "stable" ? "/app" : "https://beta.xmatrix.sh/app";
 
 /** The page's one action. `channelSwitch` sits beside the button it decides. */
-export function DownloadRecommendation({ channel = "stable", channelSwitch }: { channel?: Channel; channelSwitch?: ReactNode }) {
+export function DownloadRecommendation({
+  channel = "stable",
+  channelSwitch,
+  locale = "en",
+}: {
+  channel?: Channel;
+  channelSwitch?: ReactNode;
+  locale?: SiteLocale;
+}) {
   const [platform, setPlatform] = useState<Platform>("unknown");
   const [intelMac, setIntelMac] = useState(false);
-  const copy = ONBOARDING_COPY[useBrowserOnboardingLocale()];
+  const copy = sitePagesCopy[locale].download;
   useEffect(() => {
     const detected = detectPlatform();
     setPlatform(detected);

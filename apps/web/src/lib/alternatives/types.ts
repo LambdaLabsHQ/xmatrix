@@ -1,3 +1,27 @@
+export const ALTERNATIVE_SLUGS = [
+  "raft",
+  "lody",
+  "multica",
+  "paradev",
+  "conductor",
+  "orca",
+  "lobehub",
+  "cumora",
+  "t3-code",
+  "herdr",
+  "seedmux",
+  "claude-code",
+  "linear",
+  "notion",
+  "slack-code",
+  "nowledge-mem",
+  "everos",
+  "youmind",
+  "jules",
+] as const;
+
+export type AlternativeSlug = (typeof ALTERNATIVE_SLUGS)[number];
+
 interface AlternativePainPoint {
   title: string;
   problem: string;
@@ -15,9 +39,7 @@ interface AlternativeFaq {
   answer: string;
 }
 
-export interface AlternativeEntry {
-  slug: string;
-  name: string;
+export interface AlternativeLocaleCopy {
   alsoKnownAs?: string;
   verifiedDate: string;
   statusNote?: string;
@@ -33,10 +55,16 @@ export interface AlternativeEntry {
   switchWhen: readonly string[];
   migrationSteps: readonly { title: string; detail: string }[];
   faqs: readonly AlternativeFaq[];
-  relatedSlugs: readonly string[];
+}
+
+export interface AlternativeEntry extends AlternativeLocaleCopy {
+  slug: AlternativeSlug;
+  name: string;
+  relatedSlugs: readonly AlternativeSlug[];
 }
 
 export interface AlternativePage extends AlternativeEntry {
   routeSlug: string;
+  basePath: string;
   href: string;
 }

@@ -8,10 +8,14 @@
 
 /** Exact paths of the site's pages and files. */
 const SITE_PATHS = new Set([
-  "/", "/zh", "/download", "/support", "/terms", "/privacy", "/subprocessors", "/cookies",
+  "/", "/zh", "/zh-tw", "/ja", "/ko", "/es",
+  "/download", "/support", "/terms", "/privacy", "/subprocessors", "/cookies",
   "/robots.txt", "/sitemap.xml", "/llms.txt", "/llms-full.txt", "/site.webmanifest",
   "/favicon.ico", "/apple-touch-icon.png", "/install.sh", "/install.ps1",
 ]);
+
+/** Non-default public site locale prefixes. */
+const LOCALE_PREFIX = /^\/(?:zh|zh-tw|ja|ko|es)(?=\/|$)/u;
 
 /** Path prefixes of the site's pages, its assets and the public API its pages read. */
 const SITE_PREFIXES = [
@@ -22,9 +26,17 @@ const SITE_PREFIXES = [
 /** Top-level files and flat competitor alternative pages (`/raft-alternatives`, …). */
 const SITE_FILE = /^\/(?:[a-z0-9-]+\.md|(?:icon|android-chrome)-[0-9x]+\.png|[0-9a-f]{32}\.txt|[a-z0-9]+(?:-[a-z0-9]+)*-alternatives)$/u;
 
+/** Localized public subpaths under `/<locale>/...` (excluding English-only legal pages). */
+const LOCALIZED_SITE_SUBPATH = /^\/(?:download|support|docs(?:\/[a-z0-9-]+)?|[a-z0-9]+(?:-[a-z0-9]+)*-alternatives)$/u;
+
 export function isSitePath(pathname) {
   if (SITE_PATHS.has(pathname) || pathname === "/docs" || pathname === "/releases") return true;
-  return SITE_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || SITE_FILE.test(pathname);
+  if (SITE_PREFIXES.some((prefix) => pathname.startsWith(prefix)) || SITE_FILE.test(pathname)) return true;
+  if (LOCALE_PREFIX.test(pathname)) {
+    const rest = pathname.replace(LOCALE_PREFIX, "");
+    return LOCALIZED_SITE_SUBPATH.test(rest);
+  }
+  return false;
 }
 
 /**
