@@ -116,59 +116,11 @@ const en = {
     continueLabel: "To continue",
     continued: (agent: string) => `${agent} continued afterward`,
   },
-  /* A handoff that started no successor (mention-invocation-chip.tsx MentionRefusedLifecycleChip).
-     `other` is the handoff to write instead, already filled with the source. */
-  handoff: {
+  /* A refused reborn or handoff (mention-invocation-chip.tsx MentionRefusedLifecycleChip);
+     its words come from the protocol catalog (problem-catalog.ts), keyed by code. */
+  lifecycle: {
     stepsLabel: "What you can do",
     rawLabel: "What xMatrix recorded",
-    registration_quota_exhausted: {
-      title: (source: string, successor: string) => `${successor} couldn't take over ${source}: out of quota`,
-      explanation: (source: string, successor: string) => `${source} has stopped and its work is kept, but every ${successor} that could continue it has used up its provider quota, so no new Agent started.`,
-      steps: (_source: string, successor: string, other: string) => [`Hand it to another Agent: send ${other}. xMatrix picks one that still has quota.`,
-        `Or wait until ${successor}'s quota resets, then send the same handoff again.`],
-    },
-    no_machine: {
-      title: (_source: string, successor: string) => `No machine here can run ${successor}`,
-      explanation: (source: string, successor: string) => `${source} has stopped and its work is kept, but none of the machines this conversation can use runs ${successor}, so no new Agent started.`,
-      steps: (_source: string, successor: string, other: string) => [`Hand it to another Agent: send ${other}.`,
-        `Or connect a machine that runs ${successor}, then send the same handoff again.`],
-    },
-    registration_daemon_offline: {
-      title: (_source: string, successor: string) => `The computer that runs ${successor} is offline`,
-      explanation: (source: string, successor: string) => `${source} has stopped and its work is kept, but xMatrix can't reach the computer ${successor} runs on, so no new Agent started.`,
-      steps: (_source: string, _successor: string, other: string) => ["Turn that computer on and open xMatrix there, then send the same handoff again.",
-        `Or hand it to another Agent: send ${other}.`],
-    },
-    handoff_source_stop_pending: {
-      title: (source: string) => `${source} is still stopping`,
-      explanation: (source: string, successor: string) => `A handoff stops ${source} before ${successor} starts. Its computer hasn't confirmed the stop yet, so ${successor} hasn't started.`,
-      steps: (source: string) => [`Wait until ${source} shows Stopped, then send the same handoff again.`],
-    },
-    handoff_source_stop_unavailable: {
-      title: (source: string) => `${source} couldn't be stopped for the handoff`,
-      explanation: (source: string, successor: string) => `A handoff stops ${source} before ${successor} starts, and that stop didn't go through. ${source} keeps its work; nothing new started.`,
-      steps: (source: string) => [`Check that the computer ${source} runs on is online, then send the same handoff again.`],
-    },
-    handoff_location_conflict: {
-      title: (source: string, successor: string) => `${successor} has to continue where ${source} worked`,
-      explanation: (source: string) => `A handoff keeps ${source}'s repository or directory. This one asked for a different repo: or pwd:, so nothing was stopped or started.`,
-      steps: () => ["Remove the repo: or pwd: condition and send the handoff again."],
-    },
-    handoff_source_not_transferable: {
-      title: (source: string) => `${source} can't be handed off`,
-      explanation: (source: string) => `${source} works for this Space's management or a direct conversation, and stays where it is. Nothing was stopped or started.`,
-      steps: (_source: string, successor: string) => [`Start ${successor} on its own instead.`],
-    },
-    invalid_registration_launch: {
-      title: () => "This handoff couldn't be read",
-      explanation: () => "Nothing was stopped or started.",
-      steps: (source: string) => [`Write it as ${source}:handoff:@<agent>, for example ${source}:handoff:@auto.`],
-    },
-    failed: {
-      title: (source: string, successor: string) => `${source} wasn't handed off to ${successor}`,
-      explanation: () => "",
-      steps: (source: string, _successor: string, other: string) => [`Check whether ${source} is still running, then send the handoff again, or send ${other}.`],
-    },
   },
   relativeTime: (at: string | undefined, now: number) => relativeTime("en", at, now),
 };
@@ -270,57 +222,9 @@ const zh: ProblemCopy = {
     continueLabel: "接着做",
     continued: (agent) => `${agent} 后来继续了`,
   },
-  handoff: {
+  lifecycle: {
     stepsLabel: "接下来可以",
     rawLabel: "xMatrix 的原始记录",
-    registration_quota_exhausted: {
-      title: (source, successor) => `${successor} 额度用完了，没能接手 ${source}`,
-      explanation: (source, successor) => `${source} 已经停下，工作都保留着；但所有能接手的 ${successor} 都用完了服务商额度，所以没有新的 Agent 启动。`,
-      steps: (_source, successor, other) => [`换一个 Agent 接手：发送 ${other}，xMatrix 会挑一个还有额度的。`,
-        `或者等 ${successor} 的额度重置后，再发一次同样的交接。`],
-    },
-    no_machine: {
-      title: (_source, successor) => `这里没有能运行 ${successor} 的电脑`,
-      explanation: (source, successor) => `${source} 已经停下，工作都保留着；但这个对话能用的电脑上都没有 ${successor}，所以没有新的 Agent 启动。`,
-      steps: (_source, successor, other) => [`换一个 Agent 接手：发送 ${other}。`,
-        `或者接入一台装了 ${successor} 的电脑，再发一次同样的交接。`],
-    },
-    registration_daemon_offline: {
-      title: (_source, successor) => `运行 ${successor} 的电脑离线了`,
-      explanation: (source, successor) => `${source} 已经停下，工作都保留着；但 xMatrix 连不上运行 ${successor} 的电脑，所以没有新的 Agent 启动。`,
-      steps: (_source, _successor, other) => ["打开那台电脑并启动 xMatrix，再发一次同样的交接。",
-        `或者换一个 Agent 接手：发送 ${other}。`],
-    },
-    handoff_source_stop_pending: {
-      title: (source) => `${source} 还在停止中`,
-      explanation: (source, successor) => `交接会先停下 ${source} 再启动 ${successor}。它的电脑还没确认已经停下，所以 ${successor} 还没启动。`,
-      steps: (source) => [`等 ${source} 显示 Stopped 后，再发一次同样的交接。`],
-    },
-    handoff_source_stop_unavailable: {
-      title: (source) => `没能停下 ${source} 来交接`,
-      explanation: (source, successor) => `交接会先停下 ${source} 再启动 ${successor}，这一步没有成功。${source} 的工作都还在，没有启动新的 Agent。`,
-      steps: (source) => [`确认运行 ${source} 的电脑在线，再发一次同样的交接。`],
-    },
-    handoff_location_conflict: {
-      title: (source, successor) => `${successor} 只能在 ${source} 原来的位置接着做`,
-      explanation: (source) => `交接会沿用 ${source} 的仓库或目录，这次却指定了别的 repo: 或 pwd:，所以什么都没停、什么都没启动。`,
-      steps: () => ["去掉 repo: 或 pwd: 条件，再发一次交接。"],
-    },
-    handoff_source_not_transferable: {
-      title: (source) => `${source} 不能交接`,
-      explanation: (source) => `${source} 负责这个 Space 的管理或私聊对话，会一直留在原处。什么都没停、什么都没启动。`,
-      steps: (_source, successor) => [`需要的话，直接单独启动 ${successor}。`],
-    },
-    invalid_registration_launch: {
-      title: () => "这条交接没法识别",
-      explanation: () => "什么都没停、什么都没启动。",
-      steps: (source) => [`写成 ${source}:handoff:@<agent>，比如 ${source}:handoff:@auto。`],
-    },
-    failed: {
-      title: (source, successor) => `${source} 没有交接给 ${successor}`,
-      explanation: () => "",
-      steps: (source, _successor, other) => [`先看看 ${source} 是否还在运行，再发一次交接，或者发送 ${other}。`],
-    },
   },
   relativeTime: (at, now) => relativeTime("zh", at, now),
 };

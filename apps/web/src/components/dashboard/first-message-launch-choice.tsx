@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { preparationFailureSummary, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
+import { useBrowserOnboardingLocale } from "@/lib/onboarding-locale";
+import { launchRejectionCause, type ProblemLocale, type InteractionDecisionWindow, type InteractionLaunchOption } from "@xmatrix/protocol";
 import { useFace } from "./face";
 import { avatarImageSrc } from "./identity-avatar";
 import { launchChoiceRead, launchChoiceView, type LaunchChoiceView } from "./first-message-launch-choice-state";
@@ -28,7 +29,8 @@ function useNow(active: boolean) {
 }
 
 /** Why nothing could start, in words; an unknown code is shown as it is. */
-const failureNote = (code: string) => code === "message_ask_stopped" ? "Stopped before the Agent started" : preparationFailureSummary(code) ?? code;
+const failureNote = (code: string, locale: ProblemLocale) => code === "message_ask_stopped"
+  ? (locale === "zh" ? "Agent 启动前就停下了" : "Stopped before the Agent started") : launchRejectionCause(code, locale) ?? code;
 
 /**
  * After a new conversation's first message, once its words and pictures are
@@ -131,13 +133,14 @@ export function FirstMessageLaunchChoice({ messageId, window, offeredAt, own, op
 }
 
 function DecidedLaunchChoice({ view, own }: { view: Extract<LaunchChoiceView, { kind: "chosen" | "none" }>; own: boolean }) {
+  const locale = useBrowserOnboardingLocale();
   const by = view.by === "jev" ? "xMatrix's pick" : own ? "Your pick" : "Author's pick";
   if (view.kind === "none") {
     return (
       <div className="launch-choice launch-choice-settled" data-state="none" role="status">
         <span className="launch-choice-label">No Agent started</span>
         <span className="launch-choice-note">
-          {view.failureCode ? failureNote(view.failureCode) : view.by === "jev" ? "xMatrix read this as conversation" : by}
+          {view.failureCode ? failureNote(view.failureCode, locale) : view.by === "jev" ? "xMatrix read this as conversation" : by}
         </span>
       </div>
     );

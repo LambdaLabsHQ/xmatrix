@@ -435,32 +435,6 @@ export function lifecycleRefusalView(notices: readonly CommandNotice[], kind: "r
   ] };
 }
 
-/** Which wording a refused handoff gets (problem-copy.ts `handoff`). */
-type HandoffRefusalKey = "registration_quota_exhausted" | "no_machine" | "registration_daemon_offline" |
-  "handoff_source_stop_pending" | "handoff_source_stop_unavailable" | "handoff_location_conflict" |
-  "handoff_source_not_transferable" | "invalid_registration_launch" | "failed";
-
-/** The refusal's code: recorded beside the note, or, for a note written
- * before codes were, the one its fixed `(code).` sentence carried. */
-export function handoffRefusalCode(notice: CommandNotice | undefined): string | undefined {
-  if (notice?.code) return notice.code;
-  return notice?.body.match(/^xMatrix could not hand off \S+ to .+ \(([a-z][a-z0-9_]{0,79})\)\./u)?.[1];
-}
-
-/** A code xMatrix has words for; any other keeps its recorded text as the explanation. */
-export function handoffRefusalKey(code: string | undefined): HandoffRefusalKey | undefined {
-  switch (code) {
-    case "registration_not_found": case "registration_harness_unavailable": case "registration_machine_unavailable":
-      return "no_machine";
-    case "registration_quota_exhausted": case "registration_daemon_offline": case "handoff_source_stop_pending":
-    case "handoff_source_stop_unavailable": case "handoff_location_conflict": case "handoff_source_not_transferable":
-    case "invalid_registration_launch":
-      return code;
-    case "registration_handoff_failed": return "failed";
-    default: return undefined;
-  }
-}
-
 /** Match only the exact, server-recorded address within a normal Markdown text run. */
 export function splitMentionRejections(text: string, rejections: readonly SerializedAgentInvocationRejection[], allowed?: (start: number) => boolean) {
   const tokens = mentionAddressTokens(rejections.map((rejection) => rejection.targetRef));

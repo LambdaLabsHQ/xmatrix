@@ -222,6 +222,12 @@ export type {
   DecisionAnswerFailure, DecisionAnswerIssue, HarnessSignedOut, LaunchMachineBlock, LaunchRefusal, OfflineMachine,
 } from "./invocation-failure.js";
 export {
+  HANDOFF_REFUSALS, REBORN_REFUSALS, LAUNCH_REJECTION_CAUSES_ZH,
+  fillProblemTemplate, lifecycleRefusalRow, lifecycleRefusalWords, lifecycleRefusalText, lifecycleRefusalCode,
+  launchRejectionCause, otherHandoff,
+  type ProblemLocale, type ProblemWords, type ProblemRow, type LifecycleKind,
+} from "./problem-catalog.js";
+export {
   boundedRoutingLabel, clampRoutingQuotaObservedTime, HOST_OBSERVED_CAPABILITIES, hostObservedRequirements, machineResourceObservation, parseAgentRoutingDeclaration, parseAgentRoutingRequirements, parsePresentedRoutingDecision, parseRoutingFailureCode, ROUTING_DECISION_SOURCES, ROUTING_EXCLUSIONS, ROUTING_QUOTA_MAX_AGE_MS, ROUTING_QUOTA_MAX_CLOCK_SKEW_MS, routingChoiceIdentity, routingDecisionCopy, routingExclusionText, routingFailureText, routingHarnessLabel, routingModelCatalogObservation, routingModelEffortOptions, routingModelOptionNamed, routingModelOptions, routingModelWrittenName, routingQuotaObservation, routingQuotaResetTime, routingQuotaScopeConstrains, routingQuotaText, routingQuotaVerdict, routingScopedQuotaExpiry, visibleRoutingChoiceRows,
 } from "./agent-routing.js";
 export type {
