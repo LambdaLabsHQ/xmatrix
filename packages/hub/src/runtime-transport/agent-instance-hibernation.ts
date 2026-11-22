@@ -135,7 +135,7 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
     ? undefined
     : sanitizeAgentInstancePresentation(session.presentation);
   if (session.presentation !== undefined && !presentation) return undefined;
-  return {
+  const parsed: AgentInstanceHibernationAttachment = {
     version: 1,
     domain: "agent_instance",
     expiresAt: value.expiresAt,
@@ -152,4 +152,5 @@ export function parseAgentInstanceHibernationAttachment(value: unknown): AgentIn
       ...(presentation ? { presentation } : {}),
     },
   };
+  return hibernationBoundedJson(parsed) ? parsed : undefined;
 }
