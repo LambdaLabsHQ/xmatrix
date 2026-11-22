@@ -37,33 +37,32 @@ jobs:
           XMATRIX_RELEASE_BASE_REF: ${{ github.event.before || '' }}
         run: node scripts/check-release-version.mjs
 
-      - name: Select Xcode 26
+      # Apple ITMS-90725: from April 2027 App Store uploads must be built with
+      # the iOS 27 SDK. Pick the newest release Xcode 27+ installed side by side.
+      - name: Select Xcode 27
         run: |
           set -euo pipefail
 
-          XCODE_APP="/Applications/Xcode.app"
-          if [[ ! -d "$XCODE_APP" ]]; then
-            XCODE_APP="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -v beta | sort -r | head -n 1 || true)"
-          fi
+          XCODE_APP="$(
+            for candidate in /Applications/Xcode*.app; do
+              [[ -d "$candidate" && "$candidate" != *[Bb]eta* ]] || continue
+              version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$candidate/Contents/Info.plist" 2>/dev/null || true)"
+              if [[ "${version%%.*}" =~ ^[0-9]+$ ]] && (( ${version%%.*} >= 27 )); then
+                printf '%s\t%s\n' "$version" "$candidate"
+              fi
+            done | sort -V | tail -n 1 | cut -f2
+          )"
 
-          if [[ -z "$XCODE_APP" || ! -d "$XCODE_APP" ]]; then
-            echo "Xcode 26 is required for App Store upload." >&2
+          if [[ -z "$XCODE_APP" ]]; then
+            echo "Xcode 27 or newer (iOS 27 SDK) is required for App Store upload." >&2
             ls -1 /Applications | grep '^Xcode' || true
             exit 1
           fi
 
           export DEVELOPER_DIR="$XCODE_APP/Contents/Developer"
           echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
-
-          XCODE_VERSION="$(xcodebuild -version)"
-          XCODE_FIRST_LINE="${XCODE_VERSION%%$'\n'*}"
-
-          if [[ "$XCODE_FIRST_LINE" != Xcode\ 26.* ]]; then
-            echo "Xcode 26 is required for App Store upload, found: $XCODE_FIRST_LINE" >&2
-            exit 1
-          fi
-
           xcodebuild -version
+          xcodebuild -showsdks | grep -E 'iphoneos[0-9]'
 
       - name: Prepare App Store Connect key
         env:
