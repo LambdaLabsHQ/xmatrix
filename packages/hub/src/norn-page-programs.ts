@@ -113,7 +113,7 @@ export async function syncPagePrograms(env: Env, input: { spaceId: string; pageI
   if (failures.length) throw new Error(failures.join("; "));
   // What only the sync can know, for whoever saved: the blocks whose conversation was deleted.
   return blocks.filter(block => !block.problem && deleted.has(block.name))
-    .map(block => ({ source: nornBlockSource(block.name), problem: DELETED_PROBLEM }));
+    .map(block => ({ source: nornBlockSource(block.name, block.edition), problem: DELETED_PROBLEM }));
 }
 
 const OUTCOMES = { Answered: "answered", Refused: "refused", Broke: "broke", NoReply: "no_reply", Cancelled: "cancelled",

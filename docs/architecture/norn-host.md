@@ -23,18 +23,23 @@ person who wrote it, or the owner of the Agent Run that did.
 ## Programs on a Page
 
 A Page is where a program lives; a message is the ad-hoc way to run one. Each
-top-level `norn run` block of a Page is a program. The word after the tag
-names it (`norn run review`); without one it is `main`. A name is one word:
+top-level `norn run` or `norn 1 run` block of a Page is a program. The word
+after `run` names it (`norn run review` and `norn 1 run review` are the same
+program identity); without one it is `main`. A name is one word:
 a letter, then letters, digits, `_` or `-`, at most 40 characters. The Page
-and the name are the program's identity, so editing the block's text changes
-the same program. Two blocks with one name run nothing until one is renamed,
-and nor does a block whose name is not a name. What a block's info string
-makes of it is one function, `nornRunBlock` in protocol, which the Hub and
-the Page editor both read, so no block is drawn as a program the Hub passes
-over: every block tagged `norn run` is listed, and one that runs nothing
-carries why. Typing the fence keeps that whole string. A space opens an
-ordinary one-word language (`` ```ts ``). Enter opens a fence whose info has a
-space in it (`` ```norn run review ``, `` ```norn run 物业费 ``).
+and the name are the program's identity, so editing the block's text or moving
+between `norn run <name>` and `norn 1 run <name>` keeps the same running
+program and open requests. A block written with an unsupported edition (such as
+`norn 2 run review`) is still recognized under that name with a problem message
+so syncing never stops a running program. Two blocks with one name run nothing
+until one is renamed, and nor does a block whose name is not a name. What a
+block's info string makes of it is one function, `nornRunBlock` in protocol,
+which the Hub and the Page editor both read, so no block is drawn as a program
+the Hub passes over: every block tagged `norn run` or `norn <edition> run` is
+listed, and one that runs nothing carries why. Typing the fence keeps that
+whole string. A space opens an ordinary one-word language (`` ```ts ``). Enter
+opens a fence whose info has a space in it (`` ```norn run review ``,
+`` ```norn 1 run review ``, `` ```norn run 物业费 ``).
 
 A saved revision is synced (`syncPagePrograms`, from the Page session's
 commit, a new Page, and a restored revision), as whoever wrote it:

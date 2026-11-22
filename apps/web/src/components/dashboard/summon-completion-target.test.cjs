@@ -1,8 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 require("./typescript-require.cjs").installTypeScriptRequire();
-const { summonAtCompletion, findLaunchFieldCompletion, filterLaunchCandidates, autoLaunchCandidates, completeLaunchFragment, handoffSuccessorConditionCandidates, summonConditionCandidates, summonStartCandidates } = require("./auto-launch-completion.ts");
-const { compatibleHandoffSuccessors, handoffPickerHasOptions, handoffPickerParameters, handoffTagChips, toggleHandoffPickerTag } = require("./handoff-picker-options.ts");
+const { summonAtCompletion, findLaunchFieldCompletion, filterLaunchCandidates, autoLaunchCandidates, completeLaunchFragment, handoffSuccessorConditionCandidates, insertHandoffIntoDraft, summonConditionCandidates, summonStartCandidates } = require("./auto-launch-completion.ts");
 
 test("runtime picks are top-level addresses and their conditions continue at the caret", () => {
   assert.equal(completeLaunchFragment("@cod", { start: 0, tokenEnd: 4 }, { harness: "codex" }).value, "@codex ");
@@ -385,32 +384,37 @@ test("handoff completion continues launch conditions and preserves the handoff p
     "@claude:1:handoff:@codex machine:Mac ");
 });
 
-test("handoff picker derives machines, models, efforts and parameters and filters compatible successors", () => {
+test("handoff completion lists parameters on empty query and insertHandoffIntoDraft preserves message text", () => {
   const catalog = [
     { key: { ownerUserId: "o", machineId: "mac", harness: "claude" }, machineName: "Laptop",
-      models: ["claude-opus-4-6", "claude-sonnet-4-6"], state: "enabled", routingReady: true,
-      modelCatalog: [
-        { model: "claude-opus-4-6", efforts: [{ value: "high" }, { value: "max" }] },
-        { model: "claude-sonnet-4-6", efforts: [{ value: "medium" }] },
-      ],
+      models: ["claude-opus-4-6"], state: "enabled", routingReady: true,
+      modelCatalog: [{ model: "claude-opus-4-6", efforts: [{ value: "high" }] }],
       parameters: [{ id: "fast", label: "Fast mode", options: ["on", "off"] }], parameterModel: "claude-opus-4-6" },
-    { key: { ownerUserId: "o", machineId: "srv", harness: "codex" }, machineName: "Server",
-      models: ["gpt-5.4"], state: "enabled", routingReady: true,
-      modelCatalog: [{ model: "gpt-5.4", efforts: [{ value: "high" }] }] },
   ];
-  assert.equal(handoffPickerHasOptions(catalog), true);
-  assert.deepEqual(compatibleHandoffSuccessors(catalog, ["claude", "codex"], {}), ["auto", "claude", "codex"]);
+  const emptyQuery = handoffSuccessorConditionCandidates("codex:1", catalog, "");
+  assert.deepEqual(emptyQuery.map(c => c.name), ["@machine:Laptop", "@param.fast:on", "@model:claude-opus-4-6", "@effort:high", "@param.fast:off"]);
+  assert.deepEqual(emptyQuery.map(c => c.mention), [
+    "codex:1:handoff:@machine:Laptop",
+    "codex:1:handoff:@param.fast:on",
+    "codex:1:handoff:@model:claude-opus-4-6",
+    "codex:1:handoff:@effort:high",
+    "codex:1:handoff:@param.fast:off",
+  ]);
 
-  let selected = toggleHandoffPickerTag({}, catalog, { field: "model", value: "claude-opus-4-6" });
-  assert.deepEqual(compatibleHandoffSuccessors(catalog, ["claude", "codex"], selected), ["auto", "claude"]);
-  assert.deepEqual(handoffPickerParameters(catalog, selected).efforts.map(e => e.value), ["high", "max"]);
-
-  selected = toggleHandoffPickerTag(selected, catalog, { field: "effort", value: "max" });
-  selected = toggleHandoffPickerTag(selected, catalog, { field: "parameter", parameterId: "fast", value: "on" });
-  assert.deepEqual(handoffTagChips(selected).map(c => c.label), ["model:claude-opus-4-6", "effort:max", "fast:on"]);
-
-  // Switching to a model that does not offer `max` or `fast` prunes stale dependent tags.
-  selected = toggleHandoffPickerTag(selected, catalog, { field: "model", value: "gpt-5.4" });
-  assert.deepEqual(selected, { model: "gpt-5.4" });
-  assert.deepEqual(compatibleHandoffSuccessors(catalog, ["claude", "codex"], selected), ["auto", "codex"]);
+  assert.deepEqual(insertHandoffIntoDraft("", "Codex:1"), {
+    value: "@Codex:1:handoff:@",
+    cursor: "@Codex:1:handoff:@".length,
+  });
+  assert.deepEqual(insertHandoffIntoDraft("continue fixing tests", "Codex:1"), {
+    value: "@Codex:1:handoff:@ continue fixing tests",
+    cursor: "@Codex:1:handoff:@".length,
+  });
+  assert.deepEqual(insertHandoffIntoDraft("@Codex:1:handoff:@claude model:opus continue fixing tests", "Codex:1"), {
+    value: "@Codex:1:handoff:@ continue fixing tests",
+    cursor: "@Codex:1:handoff:@".length,
+  });
+  assert.deepEqual(insertHandoffIntoDraft("@Codex:1:handoff:@cl continue fixing tests", "Codex:1"), {
+    value: "@Codex:1:handoff:@ continue fixing tests",
+    cursor: "@Codex:1:handoff:@".length,
+  });
 });

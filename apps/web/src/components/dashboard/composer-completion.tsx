@@ -24,6 +24,7 @@ import {
   HANDOFF_INSTANCE_MENTION_AT_CARET_RE,
   WEB_PROXY_ROUTES,
   faceInitials,
+  harnessProfileSummary,
   pageBlocks,
   type AgentInvocationSelection,
   type AppConnectorCompletionResponse,
@@ -151,6 +152,7 @@ export type ComposerCompletionApi = {
   /** Returns true when the key event was handled by completion navigation/accept. */
   handleCompletionKeyDown: (event: ComposerKeyEvent) => boolean;
   dismissCompletion: () => void;
+  reopenCompletion: () => void;
   renderOverlays: () => React.ReactNode;
 };
 
@@ -339,6 +341,12 @@ export function useComposerCompletion({
       const sourceMention = registrationMentionCompletion.active.query.split(":handoff:")[0] ?? "";
       const query = parsed?.[2] ?? "";
       const registrations = registrationCatalog.data?.registrations ?? [];
+      const capabilitiesByHarness = new Map(
+        (registrationCatalog.data?.capabilities ?? []).map((capability) => [
+          capability.harness.toLowerCase(),
+          harnessProfileSummary(capability.locations.find((location) => location.profile?.description)?.profile?.description ?? ""),
+        ]),
+      );
       const hasAuto = autoLaunchCandidates(undefined, {}, registrations, profileCopy.auto)
         .some(candidate => candidate.id === "launch:auto");
       const autoRow: MentionCandidate[] = hasAuto && (!query || "auto".startsWith(query.toLowerCase())) ? [{
@@ -352,12 +360,15 @@ export function useComposerCompletion({
         completionSuffix: " ",
         schemaNodeId: "handoff-successor-profiles",
       }] : [];
-      const conditions = query
-        ? handoffSuccessorConditionCandidates(sourceMention, registrations, query, profileCopy.auto)
-        : [];
+      const harnesses = registrationMentionCompletion.candidates.map((candidate) => {
+        const summary = capabilitiesByHarness.get(candidate.name.toLowerCase());
+        return summary ? { ...candidate, description: summary } : candidate;
+      });
+      const conditions = handoffSuccessorConditionCandidates(sourceMention, registrations, query, profileCopy.auto);
       return {
         ...registrationMentionCompletion,
-        candidates: [...autoRow, ...registrationMentionCompletion.candidates, ...conditions],
+        stageLabel: `${registrationMentionCompletion.stageLabel} · pick an agent or parameter`,
+        candidates: [...autoRow, ...harnesses, ...conditions],
       };
     }
     if (!fieldCompletion && registrationMentionCompletion.stage !== "target" ||
@@ -401,7 +412,12 @@ export function useComposerCompletion({
   /* Folding is a browsing affordance for the bare `@` listing only. Once the
      human types, the query is already the filter, so a folded section would
      hide the very row they are describing. */
-  const mentionListingFolds = mentionCompletion.stage === "target" && !activeMention?.query;
+  const handoffQuery = mentionCompletion.stage === "handoff-successor" && activeMention
+    ? HANDOFF_INSTANCE_MENTION_AT_CARET_RE.exec(`@${activeMention.query}`)?.[2] ?? ""
+    : "";
+  const mentionListingFolds =
+    mentionCompletion.stage === "target" && !activeMention?.query ||
+    mentionCompletion.stage === "handoff-successor" && !handoffQuery;
   const mentionSuggestionSections = useMemo(
     () =>
       groupedMentionCandidates(mentionSuggestions, {
@@ -668,7 +684,10 @@ export function useComposerCompletion({
     }
     const next = completeMention(draft, cursor, candidate);
     if (candidate.action === "handoff-instance" && (candidate.completionSuffix ?? " ") === " ") {
-      pickedLaunch(next.value, next.cursor, () => onDraftChange(next.value));
+      const nextCursor = next.cursor < next.value.length && /\s/u.test(next.value[next.cursor]!)
+        ? next.cursor + 1
+        : next.cursor;
+      pickedLaunch(next.value, nextCursor, () => onDraftChange(next.value));
       return;
     }
     setDismissedCompletionDraft(null);
@@ -765,6 +784,10 @@ export function useComposerCompletion({
   function dismissCompletion() {
     setDismissedCompletionDraft(draft);
     setCursor(-1);
+  }
+
+  function reopenCompletion() {
+    setDismissedCompletionDraft(null);
   }
 
   function handleCompletionKeyDown(event: ComposerKeyEvent): boolean {
@@ -932,6 +955,10 @@ export function useComposerCompletion({
                 <div className="border-b border-border/60 px-2 py-1.5 text-xs font-bold text-foreground/75">
                   {mentionCompletion.stageLabel}
                 </div>
+              ) : continuingLaunch && bodySummon?.handoffPrefix ? (
+                <div className="border-b border-border/60 px-2 py-1.5 text-xs font-medium text-foreground/65">
+                  Handoff parameters · pick more, type a note, or press Enter to send
+                </div>
               ) : null}
               {showLaunchTargetStatus ? (
                 launchTargetLoadState?.status === "loading" ? (
@@ -1005,7 +1032,8 @@ export function useComposerCompletion({
                 <div key={section.kind} className="app-mention-category" role="group" aria-label={section.label}>
                   {/* A folded section carries its label on the fold row itself,
                       so it costs one line rather than a header plus a row. */}
-                  {mentionCompletion.stage === "target" && section.candidates.length > 0 ? (
+                  {(mentionCompletion.stage === "target" || mentionCompletion.stage === "handoff-successor") &&
+                    section.candidates.length > 0 ? (
                     <div className="app-mention-category-heading">
                       <MentionCategoryLabel section={section} />
                     </div>
@@ -1029,8 +1057,9 @@ export function useComposerCompletion({
                     // row's existence already communicates summonability.
                     const isSummonableAgent =
                       candidate.kind === "agent" &&
-                      !candidate.action &&
-                      (candidate.completionSuffix === ":" || Boolean(candidate.invocationTarget || candidate.launchTags));
+                      (candidate.action === "handoff-instance" ||
+                        (!candidate.action &&
+                          (candidate.completionSuffix === ":" || Boolean(candidate.invocationTarget || candidate.launchTags))));
                     const detail = candidate.description ||
                       (candidate.mention && candidate.mention !== candidate.name ? `@${candidate.mention}` : "");
                     // Only a harness nobody has described, shown to someone who may describe it.
@@ -1187,6 +1216,7 @@ export function useComposerCompletion({
     appMentions,
     handleCompletionKeyDown,
     dismissCompletion,
+    reopenCompletion,
     renderOverlays,
   };
 }

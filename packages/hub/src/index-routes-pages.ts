@@ -20,6 +20,7 @@ import { pageConversation, pageTreeDiscussions, workingBySection } from "./page-
 import { createPostgresAuthorityDatabase } from "./postgres-authority-fleet";
 import { POSTGRES_MESSAGE_CONNECT_TIMEOUT_MS } from "./postgres-message-database-policy";
 import { requireMachineDaemonAuth } from "./index-shared";
+import { nornBlocks } from "./norn-host";
 import { syncPagePrograms } from "./norn-page-programs";
 import { tellPageCoWriter } from "./page-co-write-instruction";
 import { readGitHubFile, type GitHubFileContent } from "./app-connectors";
@@ -346,7 +347,7 @@ export function registerPageRoutes(app: Hono<{ Bindings: Env }>): void {
       ...(body.afterPageId !== undefined ? { afterPageId: body.afterPageId as string | null } : {}),
       ...(body.accessMode !== undefined ? { accessMode: body.accessMode as "open" | "restricted" } : {}),
     });
-    if (!started && typeof body.body === "string" && body.body.includes("norn run")) {
+    if (!started && typeof body.body === "string" && nornBlocks(body.body).length > 0) {
       await syncPagePrograms(c.env, { spaceId, pageId: created.page.pageId, userId: authUser.agentRun?.ownerUserId ?? authUser.id });
     }
     if (!started) return created;

@@ -53,6 +53,16 @@ test("a block tagged norn run that runs nothing says why, wherever it is read", 
   assert.match(nornProgramProblems(page)[2].problem, /Two blocks are named twice/u);
   // A message's block is refused with the same words, not ignored.
   assert.match(nornProgramIn(fenced(review, "norn run 2nd")).refusal, /^The program was not started: `norn run 2nd` names no program/u);
+  // Dual-header compatibility: `norn run review` and `norn 1 run review` share one identity,
+  // and an unsupported edition keeps its name with a clear problem under its own opening line.
+  assert.deepEqual(nornProgramIn(fenced(review, "norn 1 run")), { source: review });
+  const mixed = [fenced(review, "norn run review"), fenced(review, "norn 1 run review")].join("\n");
+  assert.deepEqual(nornProgramProblems(mixed).map(problem => problem.source), ["```norn run review", "```norn 1 run review"]);
+  assert.match(nornProgramProblems(mixed)[0].problem, /Two blocks are named review/u);
+  const future = nornProgramProblems(fenced(review, "norn 2 run review"));
+  assert.equal(future.length, 1);
+  assert.equal(future[0].source, "```norn 2 run review");
+  assert.match(future[0].problem, /does not support yet/u);
 });
 
 test("two Agents review a design through typed requests, and the program reads each answer at once", () => {
