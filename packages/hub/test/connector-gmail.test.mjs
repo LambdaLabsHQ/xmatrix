@@ -324,7 +324,7 @@ test("send posts one plain-text message to messages/send, the only write endpoin
 
 test("reply answers the sender in the original thread", async () => {
   const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
-    { name: "From", value: "Acme <noreply@acme.test>" }, { name: "Reply-To", value: "Support <help@acme.test>" },
+    { name: "From", value: "Acme <noreply@acme.test>" }, { name: "Reply-To", value: "Support <help@acme.test>" }, { name: "To", value: "me@example.com" },
     { name: "Subject", value: "Your ticket" }, { name: "Message-ID", value: "<m1@acme.test>" }, { name: "References", value: "<m0@acme.test>" }] } });
   const replied = await fetched([original, gmail({ id: "19a0b1c2d3e4f5a7" })],
     () => ACTIONS.reply.execute(ctx, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }));
@@ -434,7 +434,7 @@ test("Connect adds a mailbox: a repeat replaces its account and keeps its owner,
 // fetch must not silently redirect an approved email. The provider tests above do not freeze it.
 test("approval freezes reply headers before any send and revalidates the mailbox before writing", async () => {
   const original = gmail({ id: "18f2a9c0d1e2b3a4", threadId: "18f2a9c0d1e2b300", payload: { headers: [
-    { name: "From", value: "Sender <sender@example.test>" }, { name: "Reply-To", value: "Approved <approved@example.test>" },
+    { name: "From", value: "Sender <sender@example.test>" }, { name: "Reply-To", value: "Approved <approved@example.test>" }, { name: "To", value: "Me <ME@example.com>" },
     { name: "Subject", value: "Frozen subject" }, { name: "Message-ID", value: "<frozen@example.test>" }] } });
   const staged = await fetched([original], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Approved body" }));
   assert.equal(staged.calls.length, 1);
@@ -526,6 +526,18 @@ test("reply answers from the send-as alias the original was addressed to", async
   const direct = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [{ name: "From", value: "a@b.test" }, { name: "To", value: "me@example.com" }] } });
   const plain = await fetched([direct], () => ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "x" }));
   assert.deepEqual([plain.calls.length, plain.result.from, plain.result.via], [1, "me@example.com", undefined], "mail to the mailbox itself reads no send-as list");
+});
+
+test("reply refuses to answer from an address the original was not sent to", async () => {
+  // Forwarded into this mailbox: sent to hello@company.test, which is not a verified send-as alias here.
+  const forwarded = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [
+    { name: "From", value: "Customer <c@customer.test>" }, { name: "To", value: "hello@company.test" }, { name: "Subject", value: "Feedback" }] } });
+  await fetched([forwarded, sendAsList()], () => assert.rejects(ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }),
+    /sent to hello@company\.test, not to me@example\.com/u));
+  // Bcc'd into this mailbox: no listed recipient matches.
+  const bcc = gmail({ id: "18f2a9c0d1e2b3a4", payload: { headers: [{ name: "From", value: "c@customer.test" }, { name: "To", value: "x@other.test" }] } });
+  await fetched([bcc, sendAsList()], () => assert.rejects(ACTIONS.reply.prepare(ctx, { id: "18f2a9c0d1e2b3a4", body: "Thanks" }),
+    /sent to x@other\.test, not to me@example\.com/u));
 });
 
 test("statement HTML entities such as &yen; read as their characters; unknown names stay as written", () => {

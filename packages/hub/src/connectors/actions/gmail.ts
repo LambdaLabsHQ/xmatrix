@@ -22,7 +22,8 @@ import type { MailSnapshotLinks } from "../mail-snapshot-link";
  * alias Gmail lists as verified on one of those mailboxes (users.settings.sendAs,
  * read under the same grant); the mail goes out through that mailbox with the
  * alias in its From header, and `reply` answers from the alias the original was
- * addressed to. `send` and `reply` carry the files attached to the command message itself
+ * addressed to, or refuses when the original was sent to neither the mailbox nor
+ * one of its aliases (forwarded or Bcc'd mail). `send` and `reply` carry the files attached to the command message itself
  * (`gmail-attachments.ts`): the approval card names each one, and the send rereads them unchanged. `read` lists every link in the message so an
  * Agent can open one itself (a sign-up verification link, for example); the
  * Hub never fetches a link found in mail.
@@ -514,10 +515,16 @@ async function prepareReply(context: Context, input: Record<string, string>): Pr
   const payload = record(original.payload);
   const to = address(header(payload, "reply-to")) ?? address(header(payload, "from"));
   if (!to) throw new ProviderRequestError(422, "the message has no address to reply to");
-  /* Mail addressed to one of the mailbox's verified send-as aliases is answered from that alias. */
+  /* A reply goes out only from an address the original was sent to: the mailbox itself, or one of its verified send-as
+     aliases. Mail that reached this mailbox through forwarding or Bcc is refused rather than answered from the mailbox's
+     own address, which would show the person an address they never wrote to. */
   const recipients = [...headerAddresses(header(payload, "to")), ...headerAddresses(header(payload, "cc"))];
   const alias = recipients.some(recipient => recipient !== mailbox.address)
     ? (await sendAsAliases(context, mailbox)).find(candidate => recipients.includes(candidate.address)) : undefined;
+  if (!alias && !recipients.includes(mailbox.address)) {
+    throw new ProviderRequestError(409, `this message was sent to ${recipients.join(", ") || "no listed address"}, not to ${mailbox.address}; `
+      + `add the address it was sent to as a verified send-as address of ${mailbox.address} in Gmail, or reply from the mailbox it was sent to`);
+  }
   const threadId = typeof original.threadId === "string" && MESSAGE_ID.test(original.threadId) ? original.threadId : "";
   const originalSubject = header(payload, "subject");
   const subject = /^re:/iu.test(originalSubject) ? originalSubject : `Re: ${originalSubject}`;
