@@ -17,14 +17,14 @@ The text and answers to paste into the Chrome Web Store developer dashboard for 
 ```
 Your xMatrix Space beside every page. xMatrix is where your team and coding agents such as Claude Code, Codex, Cursor and Gemini work together in shared conversations; this extension opens it in Chrome's side panel, next to whatever you are reading.
 
-• Select text and ask about it right there: a small box opens beside the selection. Your question starts a conversation in the side panel, with the passage and a link back to the page, and an Agent in your Space picks it up.
+• Select text and ask about it right there: the question box opens under the selection. Your question starts a conversation in the side panel, with the passage and a link back to the page, and an Agent in your Space picks it up.
 • Or ask about the whole page, from the right-click menu or the side panel.
 • Mention an Agent, for example @claude, to hand the work to that one: a bug report, an incident page, a doc to update.
 • Your conversations, Agents, approvals and Pages stay live in the panel while you browse. The badge shows how many conversations are waiting on you.
 
 How it works
 • Sign in once on xmatrix.page. The extension shows a code to compare, and no password is typed into it.
-• By default the extension reads a page only when you use its menu item or its side panel button. The optional box beside selected text asks for access to web pages first, and even then reads only the text you selected, when you ask.
+• By default the extension reads a page only when you use its menu item or its side panel button. The optional question box under selected text asks for access to web pages first, and even then reads only the text you select, and sends it only with a question you send.
 • Selected text is sent as a quote. Agents treat it as page content, not as instructions.
 
 An xMatrix account is required: https://xmatrix.page
@@ -49,7 +49,7 @@ Open the user's xMatrix workspace in the side panel, beside the page they are re
 | `storage` | Keeps the user's xMatrix sign-in on this device, and text they picked until the panel takes it. |
 | `alarms` | Refreshes the badge count once a minute, and keeps checking for the sign-in approval while the user approves it in a tab. |
 | Host `https://xmatrix-hub.xmatrix.sh/*` | The xMatrix server. The extension signs in to it and reads the badge count from it, and the workspace in the side panel reads and sends the user's conversations through it. |
-| Optional hosts `https://*/*`, `http://*/*` | Requested only when the user turns it on, right after signing in: shows a small "Ask about this…" box beside text they select on a page. It reads only the selected text, and only when the user asks. |
+| Optional hosts `https://*/*`, `http://*/*` | Requested only when the user turns it on, right after signing in: shows the question box under text they select on a page, holding that text. It reads only the selected text, and sends it only with a question the user sends. |
 
 **Remote code:** No. All code ships in the package, the workspace shown in the side panel included: it is built into the package, not loaded from a website. The package's content security policy allows scripts from the package only.
 

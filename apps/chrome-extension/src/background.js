@@ -357,7 +357,7 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   try {
     await setPendingAsk({ ...tab, url: info.pageUrl ?? tab.url }, info.menuItemId === MENU_ASK ? info.selectionText ?? "" : "");
     await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ["src/selection.js"] });
-    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE });
+    await chrome.tabs.sendMessage(tab.id, { type: "open-ask", page: info.menuItemId === MENU_PAGE, text: info.selectionText ?? "" });
   } catch {
     // A page no extension may enter (the Web Store, a PDF): the panel starts the conversation instead.
     openPanel(tab);
